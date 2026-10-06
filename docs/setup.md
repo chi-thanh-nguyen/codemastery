@@ -11,9 +11,11 @@ setup and validation commands. It will expand as Docker Compose and E2E
 configuration are implemented.
 
 The frontend build and minimal React/Material UI bootstrap are implemented.
-Frontend features and API integration remain pending. E2E package/Playwright
-configuration, Dockerfiles, Compose configuration, CI workflow, and deployment
-script are currently empty scaffolds; they provide no executable integration.
+The backend integration-test foundation and initial CI workflow are implemented;
+feature tests, frontend features, and API integration remain pending. E2E
+package/Playwright configuration, Dockerfiles, Compose configuration, and the
+deployment script are currently empty scaffolds; they provide no executable
+service startup, E2E, or deployment integration.
 
 ## Prerequisites
 
@@ -24,8 +26,9 @@ script are currently empty scaffolds; they provide no executable integration.
 - PostgreSQL for backend datasource/persistence work and MinIO through its
   S3-compatible API for object-storage work. Repository-supported service startup
   and provisioning steps are pending.
-- Docker for PostgreSQL integration tests using the Testcontainers dependencies
-  and Maven Failsafe configuration in `pom.xml`. No Docker version is specified.
+- Docker becomes necessary when concrete PostgreSQL Testcontainers integration
+  tests execute. The abstract harness alone does not start a container during
+  Maven validation. No Docker version is specified.
 - Node.js satisfying `^22.12.0 || ^24.0.0` for the frontend, as declared in
   `frontend/package.json`, with npm as the package manager. No npm engine
   requirement is declared.
@@ -199,17 +202,48 @@ cd backend
 ```
 
 `pom.xml` configures Maven Surefire to exclude the `integration` package from
-this phase. For broader verification, the configured Maven Failsafe integration
-phase is available through:
+this phase. Unit-test sources belong outside that path. For broader verification,
+including packaging and Maven Failsafe integration-test execution, use:
 
 ```bash
 cd backend
 ./mvnw verify
 ```
 
-The build declares Testcontainers PostgreSQL dependencies and Failsafe test
-selection. Executing tests that use Testcontainers requires Docker. These
-commands are supported by the current build configuration; they do not establish
-that test implementations or a complete application runtime are available or
-validated. E2E, Compose, CI, and deployment commands will be documented
-when their configuration is implemented.
+To retain compilation, unit tests, and packaging while skipping Failsafe
+integration-test execution, run from `backend/`:
+
+```bash
+./mvnw verify -DskipITs
+```
+
+Integration-test sources are still compiled by this command. Concrete integration
+tests must be under `com/codemastery/integration/` in the test source tree and end
+in `IntegrationTest.java`, matching the current Failsafe selection.
+
+The reusable `AbstractIntegrationTest` loads `CodeMasteryApplication` in a mock
+web environment with the `test` profile. When initialized by a concrete test,
+it starts a singleton `postgres:17.11-bookworm` container and supplies datasource
+properties dynamically. This image is for integration testing only; it does
+not select the deployed PostgreSQL version. No local database credentials are
+required by this wiring. The profile only disables the scheduling setting;
+Flyway and Hibernate validation retain the normal application configuration.
+
+Backend feature test files are still empty, so these commands currently compile
+the abstract harness without executing PostgreSQL or proving Spring/database
+integration at runtime. Docker and access to the test image become necessary
+when concrete Testcontainers tests run; Compose is not required for those tests.
+See [the testing contract](testing.md) for lifecycle and isolation details.
+
+## Initial CI
+
+[The GitHub Actions workflow](../.github/workflows/ci.yml) now defines separate
+Backend and Frontend jobs on `ubuntu-24.04`, triggered by pull requests targeting
+`main`, pushes to `main`, and manual dispatch. Backend uses Temurin 25 and runs
+`./mvnw verify` from `backend/`; frontend uses Node 22 and runs `npm ci` followed
+by `npm run build` from `frontend/`. Build already includes frontend typechecking.
+Both jobs cache package-manager downloads using the committed build inputs.
+
+This workflow configuration does not establish successful remote CI execution or
+backend feature-test coverage. E2E, Compose, and deployment commands remain
+pending until their configuration is implemented.

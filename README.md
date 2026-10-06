@@ -24,9 +24,9 @@ features are still to be implemented.
 | Environment/setup | [.env.example](.env.example) and [docs/setup.md](docs/setup.md) document approved variable scopes, current defaults, backend loading, and optional public frontend configuration. |
 | Frontend | The React/TypeScript/Vite build foundation, manifest/lockfile, minimal Material UI bootstrap, React Flow dependency, and type-check/build commands are implemented. Routing, authentication UI, API client/integration, feature pages, and Mastery Map remain pending. |
 | E2E | Package files, Playwright configuration, fixtures, and test files remain empty scaffolds. |
-| CI and infrastructure | The GitHub Actions workflow, Dockerfiles, Compose file, and deployment script are empty; they provide no executable CI, service startup, or deployment integration. |
-| Tests, API, and sample data | Backend test files, the OpenAPI specification, and sample-data files are empty. Build test configuration exists, but test implementations, REST contracts, and populated evaluation data are pending. |
-| Testing/deployment documentation | `docs/testing.md` and `docs/deployment.md` are empty placeholders. Current backend validation commands are documented in `docs/setup.md`. |
+| CI and infrastructure | The initial GitHub Actions workflow defines Backend and Frontend validation jobs. Remote CI success is not established by configuration alone. Dockerfiles, Compose, and deployment remain empty scaffolds. |
+| Tests, API, and sample data | The backend integration-test base class and test profile exist. Feature tests remain empty; the abstract harness alone does not prove runtime database integration. OpenAPI and sample-data files remain empty. |
+| Testing/deployment documentation | [docs/testing.md](docs/testing.md) documents the current lifecycle, foundation, CI, and planned suites. `docs/deployment.md` remains empty; setup commands are documented in `docs/setup.md`. |
 
 Empty filenames reserve approved locations and responsibilities; they do not
 define functionality or implementation contracts. This foundation is not yet a
@@ -92,10 +92,10 @@ Configured libraries do not establish completed feature integrations.
 | Security | Spring Security, JWT via JJWT **0.13.0**, and BCrypt; application authentication/authorization is pending. |
 | Object storage | MinIO/S3-compatible storage through AWS SDK **2.44.7**; storage adapter implementation is pending. |
 | API documentation | REST/JSON, OpenAPI, springdoc **3.1.1**; public API contracts are pending. |
-| Backend testing | Approved JUnit Jupiter **6**, managed by Spring Boot **4.1.1** (currently **6.0.3**), + Mockito; Surefire/Failsafe and JaCoCo **0.8.15** are configured, with empty test scaffolds and feature test suites still unimplemented. |
+| Backend testing | Approved JUnit Jupiter **6**, managed by Spring Boot **4.1.1** (currently **6.0.3**), + Mockito; Surefire/Failsafe and JaCoCo **0.8.15** are configured. The integration-test foundation exists; feature suites remain unimplemented and meaningful coverage is not established. |
 | Observability | Actuator and logging configuration, including ECS JSON console logging under `prod`; this profile is not complete production configuration. |
 | Frontend | React **19.3.0**, TypeScript **7.0.2**, Vite **8.3.3**, Material UI **9.4.0**, and React Flow **12.12.0** are pinned in [package.json](frontend/package.json) and its npm lockfile. Minimal Material UI bootstrap is implemented; feature and React Flow usage remain pending. |
-| Infrastructure/E2E | Approved Docker Compose, GitHub Actions, cloud VM deployment, and Playwright; executable configuration is pending. |
+| Infrastructure/E2E | Initial GitHub Actions validation uses Temurin 25 and Node 22 on `ubuntu-24.04`. Docker Compose, cloud VM deployment, and Playwright executable configuration remain pending. |
 
 Use the actual build/configuration files for dependency versions and executable
 commands. Current defaults do not establish final security, deployment, or
@@ -128,9 +128,12 @@ cd backend
 ./mvnw test
 ```
 
-Backend tests are currently empty scaffolds. A successful build alone would not
-demonstrate tested feature behavior. Broader backend validation and its
-infrastructure prerequisites are described in `docs/setup.md`.
+The backend integration-test foundation exists, but feature test files remain
+empty. A successful build alone does not demonstrate tested feature behavior or
+exercise PostgreSQL through the abstract harness. `./mvnw verify` provides the
+broader lifecycle; `./mvnw verify -DskipITs` skips Failsafe execution while still
+compiling integration-test sources. See [testing](docs/testing.md) and
+[setup](docs/setup.md) for conventions and Docker prerequisites.
 
 For the frontend, use Node.js satisfying `^22.12.0 || ^24.0.0` and npm:
 
@@ -145,8 +148,11 @@ npm run build
 existing production build. `VITE_API_BASE_URL` has optional public build-time
 typing and root environment-file loading, with no URL fallback or API consumer.
 The bootstrap builds without an API URL and uses default Material UI styling.
-Frontend features and tests, E2E, container serving, CI integration, and
-deployment remain pending.
+`npm run build` already includes typechecking. Initial CI runs backend
+`./mvnw verify` and frontend `npm ci` / `npm run build` in separate jobs for
+pull requests targeting `main`, pushes to `main`, and manual dispatch. Frontend
+features and automated tests, E2E, container serving, Compose, and deployment
+remain pending. Remote CI results must come from actual workflow runs.
 
 ## Documentation Index
 
@@ -162,7 +168,7 @@ these documents for their specific responsibilities:
 | [Data model](docs/data-model.md) | Conceptual model; physical details deferred. |
 | [Adaptive Learning](docs/adaptive-learning.md) | Approved design, planned evaluation, and deferred decisions. |
 | [Setup](docs/setup.md) / [environment template](.env.example) | Current development configuration contract. |
-| [Testing](docs/testing.md) / [deployment](docs/deployment.md) | Empty placeholders for future procedures and evidence. |
+| [Testing](docs/testing.md) / [deployment](docs/deployment.md) | Current testing contract and planned suites / empty deployment placeholder. |
 | [OpenAPI](docs/api/openapi.yaml) | Empty placeholder for the future public API specification. |
 | [Contributing](CONTRIBUTING.md) | Branch, commit, PR, testing, and documentation workflow. |
 
@@ -192,8 +198,9 @@ all user-facing interface text must also be in English.
 
 The course requires disclosure of AI use, AI-assisted development, and
 third-party services with their actual purposes. **OpenAI Codex has assisted with
-repository documentation, environment-contract synchronization, and the frontend
-build/bootstrap foundation during development.** This disclosure describes
+repository documentation, environment-contract synchronization, the frontend
+build/bootstrap foundation, and the backend integration-test/CI foundations
+during development.** This disclosure describes
 development assistance; CodeMastery's approved adaptive engine is rule-based
 and uses no AI/ML service.
 
