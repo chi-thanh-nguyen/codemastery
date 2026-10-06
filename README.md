@@ -24,7 +24,7 @@ features are still to be implemented.
 | Environment/setup | [.env.example](.env.example) and [docs/setup.md](docs/setup.md) document approved variable scopes, current defaults, backend loading, and optional public frontend configuration. |
 | Frontend | The React/TypeScript/Vite build foundation, manifest/lockfile, minimal Material UI bootstrap, React Flow dependency, and type-check/build commands are implemented. Routing, authentication UI, API client/integration, feature pages, and Mastery Map remain pending. |
 | E2E | Package files, Playwright configuration, fixtures, and test files remain empty scaffolds. |
-| CI and infrastructure | The initial GitHub Actions workflow defines Backend and Frontend validation jobs. Remote CI success is not established by configuration alone. Dockerfiles, Compose, and deployment remain empty scaffolds. |
+| CI and infrastructure | The initial GitHub Actions workflow defines Backend and Frontend validation jobs. Backend/frontend Dockerfiles implement standalone multi-stage builds with non-root runtimes and frontend Nginx static serving configuration. Compose, PostgreSQL/MinIO runtime integration, Compose environment mappings, and deployment remain pending. Configuration alone does not establish remote CI success or backend runtime integration. |
 | Tests, API, and sample data | The backend integration-test base class and test profile exist. Feature tests remain empty; the abstract harness alone does not prove runtime database integration. OpenAPI and sample-data files remain empty. |
 | Testing/deployment documentation | [docs/testing.md](docs/testing.md) documents the current lifecycle, foundation, CI, and planned suites. `docs/deployment.md` remains empty; setup commands are documented in `docs/setup.md`. |
 
@@ -151,8 +151,12 @@ The bootstrap builds without an API URL and uses default Material UI styling.
 `npm run build` already includes typechecking. Initial CI runs backend
 `./mvnw verify` and frontend `npm ci` / `npm run build` in separate jobs for
 pull requests targeting `main`, pushes to `main`, and manual dispatch. Frontend
-features and automated tests, E2E, container serving, Compose, and deployment
-remain pending. Remote CI results must come from actual workflow runs.
+features and automated tests, E2E, Compose, runtime PostgreSQL/MinIO integration,
+and production deployment remain pending. Standalone container build commands
+and frontend Nginx serving are documented in
+[setup](docs/setup.md#standalone-container-builds). These images do not yet form
+a working full application stack or prove backend integration with real
+PostgreSQL/MinIO. Remote CI results must come from actual workflow runs.
 
 ## Documentation Index
 
@@ -199,7 +203,8 @@ all user-facing interface text must also be in English.
 The course requires disclosure of AI use, AI-assisted development, and
 third-party services with their actual purposes. **OpenAI Codex has assisted with
 repository documentation, environment-contract synchronization, the frontend
-build/bootstrap foundation, and the backend integration-test/CI foundations
+build/bootstrap foundation, the backend integration-test/CI foundations, and
+the standalone container-build/Nginx foundation
 during development.** This disclosure describes
 development assistance; CodeMastery's approved adaptive engine is rule-based
 and uses no AI/ML service.

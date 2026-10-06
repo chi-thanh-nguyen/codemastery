@@ -12,10 +12,11 @@ configuration are implemented.
 
 The frontend build and minimal React/Material UI bootstrap are implemented.
 The backend integration-test foundation and initial CI workflow are implemented;
-feature tests, frontend features, and API integration remain pending. E2E
-package/Playwright configuration, Dockerfiles, Compose configuration, and the
-deployment script are currently empty scaffolds; they provide no executable
-service startup, E2E, or deployment integration.
+feature tests, frontend features, and API integration remain pending. Standalone
+multi-stage Docker image builds and frontend Nginx static serving configuration
+are implemented, with non-root runtimes. E2E package/Playwright configuration,
+Compose configuration, and the deployment script remain empty scaffolds; there
+is no complete application-stack startup, E2E, or deployment integration.
 
 ## Prerequisites
 
@@ -26,9 +27,10 @@ service startup, E2E, or deployment integration.
 - PostgreSQL for backend datasource/persistence work and MinIO through its
   S3-compatible API for object-storage work. Repository-supported service startup
   and provisioning steps are pending.
-- Docker becomes necessary when concrete PostgreSQL Testcontainers integration
-  tests execute. The abstract harness alone does not start a container during
-  Maven validation. No Docker version is specified.
+- Docker is required for standalone image builds and container smoke checks,
+  and when concrete PostgreSQL Testcontainers integration tests execute. The
+  abstract harness alone does not start a container during Maven validation.
+  No Docker version is specified.
 - Node.js satisfying `^22.12.0 || ^24.0.0` for the frontend, as declared in
   `frontend/package.json`, with npm as the package manager. No npm engine
   requirement is declared.
@@ -234,6 +236,85 @@ the abstract harness without executing PostgreSQL or proving Spring/database
 integration at runtime. Docker and access to the test image become necessary
 when concrete Testcontainers tests run; Compose is not required for those tests.
 See [the testing contract](testing.md) for lifecycle and isolation details.
+
+## Standalone Container Builds
+
+Build both images from the repository root:
+
+```bash
+docker build -t codemastery-backend:batch6 ./backend
+docker build -t codemastery-frontend:batch6 ./frontend
+```
+
+These are local validation tags, not a registry or deployment policy. Docker
+must be running, and the base images, Maven distribution/dependencies, and npm
+packages must be available or downloadable. Host Java, Maven, Node, and npm are
+not required for these image builds.
+
+### Backend Image
+
+The build context is `backend/`. The builder uses
+`eclipse-temurin:25.0.4.1_1-jdk-noble` and the checked-in Maven Wrapper to run
+`./mvnw package -DskipTests`. Tests are not executed, but their sources are still
+compiled. The image does not consume a host-built `target/` directory; normal
+CI continues to run `./mvnw verify` separately.
+
+The runtime uses `eclipse-temurin:25.0.4.1_1-jre-noble` and contains only the
+application artifact copied from the builder:
+`/app/codemastery-backend.jar`. Java runs as the dedicated non-root
+`codemastery:codemastery` account. The JAR is root-owned and read-only to the
+application user. The entrypoint is `java -jar /app/codemastery-backend.jar`.
+
+`EXPOSE 8080` documents the current application default. It neither publishes a
+host port nor sets Spring's listening port; external `SERVER_PORT` configuration
+can change that port. No profile, datasource URL, credential, or production
+setting is embedded in the image.
+
+### Frontend Image
+
+The build context is `frontend/`. The builder uses
+`node:22.23.3-bookworm-slim`, installs the committed lockfile with `npm ci`,
+including development dependencies, and runs `npm run build`. Build already
+includes typechecking. The manifest/lockfile are copied before application
+sources so Docker can reuse the dependency-installation layer.
+
+The runtime uses `nginxinc/nginx-unprivileged:1.30.5-alpine-slim`, preserving its
+non-root user and global Nginx PID/temp/cache configuration. Only generated
+`dist/` content and the server-block configuration are copied into this stage;
+Node, npm, source files, and `node_modules/` are not included.
+
+Nginx listens internally on port `8080` and serves `/usr/share/nginx/html` with
+`index.html` as the index and SPA fallback. Missing files under `/assets/`
+return HTTP 404 instead of the HTML fallback. No API proxy, TLS, authentication,
+custom caching, or project-specific security-header policy is configured. The
+internal port is distinct from a host-published port and Vite's development port.
+
+### Optional Frontend Build Configuration
+
+`VITE_API_BASE_URL` is an optional public Docker build argument, made available
+to Vite during `npm run build` when supplied. There is no default URL, and the
+foundation builds without the argument. The root `.env` is outside both service
+build contexts; `.dockerignore` also excludes local environment files, generated
+output, host dependencies, and Git/IDE/OS metadata where applicable.
+
+Only public configuration may be passed through this argument. Never pass
+backend secrets through build arguments or `VITE_*` variables. Changing an
+environment variable on the final Nginx container does not rewrite the prebuilt
+bundle; rebuild the frontend image to change an embedded Vite value. No runtime
+environment substitution is implemented.
+
+### Runtime Validation Limits
+
+Image build success proves packaging and image assembly, not application
+integration or feature behavior. Frontend Nginx serving can be smoke-tested
+independently; backend packaging can be checked without starting Spring Boot.
+
+Compose remains unimplemented, and PostgreSQL/MinIO runtime services, environment
+mappings, published ports, volumes, startup/health dependencies, and database/
+storage provisioning are not established. Backend runtime integration cannot yet
+be demonstrated without approved dependency configuration. These images do not
+form a complete local application stack or establish production deployment.
+Dockerfile health checks remain deferred to Batch 7.
 
 ## Initial CI
 
