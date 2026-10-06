@@ -1,4 +1,4 @@
-# CodeMastery Conceptual Data Model
+# CodeMastery Data Model
 
 ## 1. Purpose and Scope
 
@@ -12,15 +12,11 @@ The approved concepts describe the information the system must represent. The
 implementation constraints describe how persistence and storage must be governed.
 Neither establishes that a physical schema or persistence behavior is implemented.
 
-This document does not by itself define exact SQL DDL, additional column names,
-SQL data types, UUID versus numeric identifiers, indexes, foreign-key names,
-cascade/delete behavior, database-generated defaults, detailed normalization,
-or migration contents. Nullability and other physical constraints remain
-undefined unless explicitly approved. Entity names and conceptual cardinalities
-do not automatically establish table names, columns, keys, or SQL constraints.
-
-Deferred physical choices require approval before their dependent schema,
-mapping, or persistence implementation begins.
+Sections 2–9 preserve the approved conceptual model. Section 11 records the
+separately approved Batch 7A.1 physical baseline implemented in Batch 7A.2,
+including the leader's `admin` role-literal amendment. Conceptual cardinalities
+alone do not supply physical constraints; the explicit physical section does.
+Feature-specific behavior still deferred is identified in section 12.
 
 ## 2. Data Storage Responsibilities
 
@@ -31,8 +27,9 @@ mapping, or persistence implementation begins.
 | External video hosts | Video learning material accessed through external embed links. Project-hosted video and transcoding are outside scope. |
 
 PostgreSQL represents the metadata/references needed to associate stored files
-with domain records. File content belongs in object storage. Bucket layouts,
-object-key formats, storage tables, and metadata columns are not defined here.
+with domain records. File content belongs in object storage. Object-key generation
+and bucket layouts remain application/storage contracts.
+The initial object reference and filename columns are specified in section 11.
 Protected file operations must use the approved storage abstraction and enforce
 authorization, as required by the
 [contribution storage rules](../CONTRIBUTING.md#object-storage-guidelines).
@@ -69,12 +66,12 @@ model. Their responsibilities are conceptual, not field or table definitions.
 Learner, Instructor, and Administrator are the approved roles of `User`.
 The architecture treats role as an account attribute; it does not establish
 separate persistent role or actor entities. Account states are conceptually
-active/locked; their persistence representation remains deferred.
+active/locked; section 11 defines their initial persistence representation.
 
 The architecture explicitly describes the course's `adaptive_settings` as JSON
 configuration for mastery thresholds. That conceptual configuration choice is
-already approved. Its keys, threshold values, SQL storage type, defaults, and
-validation details are not defined by this document.
+already approved. Its keys, threshold values, and application validation remain
+deferred; section 11 selects JSONB without a database default.
 
 ## 4. Approved Relationships
 
@@ -97,8 +94,8 @@ participation, physical uniqueness, nullability, or foreign-key behavior.
   relationship. An `Attempt` relates to a user and quiz and has associated
   `AttemptAnswer` information; each answer relates to a question.
 - The architecture lists the assignment parent relationship as `N:1`
-  `Course/Lesson`. This document preserves that description without choosing
-  whether or how both associations are physically represented. A `Submission`
+  `Course/Lesson`. The conceptual description is preserved; section 11 implements
+  required Course and optional Lesson references. A `Submission`
   relates to an assignment and a user.
 - `LearnerSkillMastery` relates a user and skill. `PathRecommendation` relates
   an enrollment and a target lesson.
@@ -161,8 +158,8 @@ instructor grading, and feedback. Manually graded file-submission assignments ar
 tracked for course assessment/completion grades but do not directly trigger
 real-time adaptive mastery updates.
 
-Scoring columns, grading scales, attempt limits, answer schemas, and question
-payload representations are not defined here.
+Section 11 defines the initial assessment representation and grading baseline.
+Attempt limits and detailed application execution remain feature contracts.
 
 ## 8. Interaction, Notification, Reporting, and Audit Data
 
@@ -182,8 +179,8 @@ Admin/Reporting consumes learning information for metrics such as enrolment,
 completion, quiz outcomes, and mastery distribution. It does not own adaptive
 decisions. A reporting view or metric is not thereby a new persistent entity.
 
-This document does not define moderation-status sets, notification payloads,
-audit-action enums, or physical audit/timestamp conventions.
+Section 11 defines the initial moderation, notification, and audit representation.
+Concrete audit action codes and module execution contracts remain feature work.
 
 ## 9. Conceptual Relationship Summary
 
@@ -232,46 +229,236 @@ The approved implementation constraints are:
   `sample-data/seed/`; sample learning materials belong under
   `sample-data/materials/`.
 
-These policies do not supply physical-schema details. This document specifies no
-SQL, migration contents, or migration versions. Follow the
+The initial physical schema and migration ownership are recorded below. Follow the
 [database and migration guidelines](../CONTRIBUTING.md#database-and-migration-guidelines)
 and the [approved repository structure](repository-structure.md).
 
-## 11. Deferred Physical-Schema Decisions
+## 11. Approved Initial PostgreSQL Physical Baseline
 
-The following decisions are **DEFERRED** until approved for their dependent
-implementation:
+The project leader approved Batch 7A.1 decisions A1–G3 and its complete table
+specifications for implementation in Batch 7A.2. Before population, the leader
+confirmed that V001–V006 had never been applied to a persistent project database.
+This approval resolves the initial physical choices without adding conceptual
+entities or changing module ownership. The administrative role's stored literal
+is amended to `admin`; `administrator` is not an accepted stored value.
 
-- Identifier strategy, including UUID versus numeric identifiers and generation.
-- Exact physical table/column names where not already approved; conceptual
-  entity and association names do not settle these choices.
-- SQL data types, lengths, precision, and the storage type for approved JSON
-  configuration.
-- Nullability, required participation, unique constraints, and indexes.
-- Foreign-key names and enforcement, cascade/delete policies, and how the
-  conceptual Course/Lesson assignment association is represented.
-- Timestamp/audit column conventions and database-generated defaults.
-- Persistence representations for roles, statuses, recommendation types, and
-  other conceptual classifications.
-- JSON versus normalized representation where the architecture has not already
-  selected a representation; the course's `adaptive_settings` JSON configuration
-  remains an approved conceptual fact.
-- Physical representations of associations and other detailed normalization
-  choices.
-- Object-storage metadata/reference representation and associated columns.
-- Exact migration contents implementing the approved physical decisions.
+### Conventions
 
-Approved cardinalities, course-scoped acyclic skills, storage responsibilities,
-and atomic mastery/progress updates remain binding while these physical choices
-are deferred. Concrete JSON keys, mastery thresholds, scoring rules, API DTOs,
-and integration payloads also require their appropriate approved contracts;
-this conceptual document does not define them.
+- PostgreSQL `public` schema; lowercase unquoted snake_case identifiers.
+- Every entity and association row has application-generated UUID v4 `id`,
+  stored as native `uuid` and mapped to Java `UUID`.
+- Descriptive text and codes use `text`; finite sets use named CHECK constraints,
+  without PostgreSQL ENUMs or lookup tables.
+- Instants use `timestamptz`, Java `Instant`, and UTC handling. Only lifecycle
+  timestamps are stored; no blanket creation/change timestamp pair exists.
+- No database defaults for identifiers, timestamps, states, or booleans.
+- Every FK explicitly uses `ON DELETE NO ACTION ON UPDATE NO ACTION` and is
+  not deferrable. Referenced history is not implicitly deleted.
+- PKs are named `pk_<table>` and FKs `fk_<table>_<fk_column>`; composite
+  prerequisite FKs use the skill endpoint column as their naming suffix.
+- Chapter, Lesson, and QuizQuestion parent/position uniqueness is
+  `DEFERRABLE INITIALLY IMMEDIATE`; all other UQs are not deferrable.
+- PK/UQ supporting indexes and the exact additional B-tree indexes below are
+  the initial index baseline. No JSON, array, search, or reporting index exists.
+- No schema seed data, UUID/timestamp generators, business triggers/functions,
+  views, or module schemas are introduced.
 
-If a dependent task requires an undefined choice, follow the
-[AGENTS.md Blocker Protocol](../AGENTS.md#blocker-protocol) before implementation.
-Existing scaffold filenames do not supply the missing specification.
+### Migration Ownership and Complete Column Inventory
 
-## 12. References
+`NN` means NOT NULL; `NULL` means nullable. Each table's `id` is its named PK.
+The six SQL files under `backend/src/main/resources/db/migration/` are the exact
+DDL reference. The 23 tables implement 21 entities and two associations;
+`lesson_skills` and `quiz_questions` do not add conceptual entities.
+
+| Migration | Module | Table | Columns (PostgreSQL type, nullability) |
+| --- | --- | --- | --- |
+| V001 | auth | `users` | `id` uuid NN; `email` text NN; `password_hash` text NN; `display_name` text NN; `role` text NN; `account_status` text NN |
+| V002 | course | `courses` | `id` uuid NN; `instructor_id` uuid NN; `title` text NN; `description` text NN; `prerequisite_description` text NULL; `publication_status` text NN; `adaptive_enabled` boolean NN; `adaptive_settings` jsonb NULL |
+| V002 | course | `chapters` | `id` uuid NN; `course_id` uuid NN; `title` text NN; `position` integer NN |
+| V002 | course | `lessons` | `id` uuid NN; `chapter_id` uuid NN; `title` text NN; `content_markdown` text NULL; `position` integer NN; `publication_status` text NN |
+| V002 | course | `learning_materials` | `id` uuid NN; `lesson_id` uuid NN; `title` text NN; `material_type` text NN; `publication_status` text NN; `text_content` text NULL; `object_key` text NULL; `original_filename` text NULL; `external_video_url` text NULL |
+| V002 | course | `enrollments` | `id` uuid NN; `user_id` uuid NN; `course_id` uuid NN; `status` text NN; `resume_lesson_id` uuid NULL |
+| V002 | course | `lesson_progress` | `id` uuid NN; `enrollment_id` uuid NN; `lesson_id` uuid NN; `completed` boolean NN; `mastery_skipped` boolean NN |
+| V003 | adaptive | `skills` | `id` uuid NN; `course_id` uuid NN; `name` text NN; `description` text NULL |
+| V003 | adaptive | `skill_prerequisites` | `id` uuid NN; `course_id` uuid NN; `skill_id` uuid NN; `prerequisite_skill_id` uuid NN |
+| V003 | adaptive | `lesson_skills` | `id` uuid NN; `lesson_id` uuid NN; `skill_id` uuid NN |
+| V004 | assessment | `quizzes` | `id` uuid NN; `course_id` uuid NN; `title` text NN; `kind` text NN; `time_limit_seconds` integer NN; `publication_status` text NN |
+| V004 | assessment | `questions` | `id` uuid NN; `skill_id` uuid NN; `prompt` text NN; `kind` text NN; `difficulty` text NN; `options` text[] NN; `correct_options` boolean[] NN |
+| V004 | assessment | `quiz_questions` | `id` uuid NN; `quiz_id` uuid NN; `question_id` uuid NN; `position` integer NN |
+| V004 | assessment | `attempts` | `id` uuid NN; `user_id` uuid NN; `quiz_id` uuid NN; `attempt_number` integer NN; `started_at` timestamptz NN; `expires_at` timestamptz NN; `submitted_at` timestamptz NULL; `score_percentage` numeric(5,2) NULL |
+| V004 | assessment | `attempt_answers` | `id` uuid NN; `attempt_id` uuid NN; `question_id` uuid NN; `position` integer NN; `selected_options` boolean[] NN; `is_correct` boolean NULL |
+| V004 | assessment | `assignments` | `id` uuid NN; `course_id` uuid NN; `lesson_id` uuid NULL; `title` text NN; `instructions` text NN; `deadline_at` timestamptz NN; `publication_status` text NN |
+| V004 | assessment | `submissions` | `id` uuid NN; `assignment_id` uuid NN; `user_id` uuid NN; `object_key` text NN; `original_filename` text NN; `submitted_at` timestamptz NN; `grade_percentage` numeric(5,2) NULL; `feedback` text NULL; `graded_at` timestamptz NULL |
+| V005 | adaptive | `learner_skill_masteries` | `id` uuid NN; `user_id` uuid NN; `skill_id` uuid NN; `state` text NN |
+| V005 | adaptive | `path_recommendations` | `id` uuid NN; `enrollment_id` uuid NN; `lesson_id` uuid NN; `recommendation_type` text NN; `reason` text NN; `recommended_at` timestamptz NN |
+| V006 | interaction | `discussion_posts` | `id` uuid NN; `lesson_id` uuid NN; `author_id` uuid NN; `parent_post_id` uuid NULL; `content` text NN; `created_at` timestamptz NN; `is_hidden` boolean NN |
+| V006 | interaction | `notifications` | `id` uuid NN; `user_id` uuid NN; `message` text NN; `is_read` boolean NN; `created_at` timestamptz NN |
+| V006 | interaction | `content_reports` | `id` uuid NN; `reporter_id` uuid NN; `discussion_post_id` uuid NULL; `lesson_id` uuid NULL; `reason` text NN; `status` text NN; `created_at` timestamptz NN; `resolved_at` timestamptz NULL |
+| V006 | admin | `audit_logs` | `id` uuid NN; `actor_id` uuid NN; `action` text NN; `target_type` text NN; `target_reference` text NN; `occurred_at` timestamptz NN |
+
+### State Catalogues
+
+| Catalogue | Stored values |
+| --- | --- |
+| User role | `learner`, `instructor`, `admin` |
+| Account status | `active`, `locked` |
+| Publication | `hidden`, `published` |
+| Enrollment | `active`, `completed`, `left` |
+| Material | `text`, `file`, `external_video` |
+| Quiz kind | `diagnostic`, `practice`, `test` |
+| Question kind | `single_choice`, `multiple_choice`, `true_false` |
+| Difficulty | `easy`, `medium`, `hard` |
+| Mastery | `unknown`, `learning`, `mastered`, `weak` |
+| Recommendation | `continue`, `skip`, `remedial` |
+| Content report | `open`, `resolved`, `dismissed` |
+
+Codes require explicit value mapping in future JPA enums; ordinal persistence
+is not the contract. Audit action/target codes remain open nonblank text.
+
+### Lifecycle and Payload Contracts
+
+- Email identity is ASCII, trimmed and lowercased by the application using
+  locale-independent handling. Only canonical lowercase, whitespace-free ASCII
+  is stored, with email uniqueness. Full email syntax validation is application
+  work; provider-specific dot/plus rewriting is not performed. `display_name`
+  supplies the minimum profile. Passwords are encoded hashes only.
+- Required descriptive text is nonblank. Optional descriptive text is absent
+  or nonblank. Nullability follows lifecycle semantics, not convenience.
+- Course/lesson/material/assessment visibility is `hidden` or `published`.
+  Chapters are structural groups without independent publication state.
+- One Enrollment exists per learner/course. Leaving retains progress and history;
+  re-enrollment reuses the row and recomputes active/completed status. A resume
+  Lesson is absent before the first visit. Progress uses completion and mastery
+  skip flags; mastery skip must imply completion. Missing progress means neither.
+- Persisted Chapter, Lesson, QuizQuestion, and captured AttemptAnswer positions
+  are positive, 1-based integers. Sibling positions are unique; gaps are allowed.
+- Material payloads are exclusive: text has only `text_content`; file has only
+  `object_key` plus `original_filename`; external video has only its URL.
+  Lesson Markdown is optional because material records can supply all content.
+- Each file material/submission stores one opaque object key and original
+  filename. Bucket stays configuration. No bytes, signed URLs, media type, size,
+  or checksum are stored. Object-key generation and protected access are not DDL.
+- Questions have ordered text options and a parallel boolean answer-key mask,
+  with at least two entries, one dimension, lower bound 1, equal lengths, and
+  no NULL elements. Single-choice/true-false has exactly one correct option;
+  multiple-choice has at least one. True/false options are exactly `True`, `False`.
+  Predict-output questions use these choice formats, without executing code.
+- The application rejects blank option labels and ensures each selected mask
+  matches its Question. All-false means unanswered. At attempt start it captures
+  question membership/order in AttemptAnswer rows. Used Question definitions are
+  immutable; edits create replacement Questions. Submitted attempts/answers are
+  immutable in application behavior. No revision entity or snapshot engine exists.
+- Quiz time limits are positive seconds. Attempt numbering is positive within
+  learner/quiz. Expiry is captured at start; submission time and score are both
+  absent while active and both present when submitted. Submission cannot predate
+  start, and expiry follows start. Correctness is absent until submission.
+- Initial quiz scoring is equal-weight exact selection-mask match, with incorrect
+  or unanswered questions receiving zero and no partial credit. Percentage scores
+  are 0–100, rounded half-up to two decimals. This is not a mastery threshold.
+- Assignments require Course and may reference Lesson. One current Submission
+  per assignment/user permits replacement before deadline while ungraded; graded
+  records cannot be replaced initially. Latest submission time identifies the
+  accepted file. Grade, nonblank feedback, and grading time are all absent before
+  grading and all present afterward; grade is 0–100, and grading cannot predate
+  submission. This does not implement deadline enforcement or grading.
+- Current mastery is categorical only, unique per user/skill. A missing row means
+  Unknown; explicit Unknown is allowed. No numeric mastery field is selected.
+- Adaptive settings are SQL NULL or a JSON object; enabling adaptation requires
+  a non-NULL object. Approved keys, thresholds, coverage, and graph validity must
+  be validated by the application. No configuration default or JSON index exists.
+- Recommendations retain enrollment, target Lesson, type, reason, and time without
+  history-collapsing uniqueness. Their creation is application behavior.
+- Discussion original posts have no parent; replies reference a root post in the
+  same Lesson. Direct self-reference is rejected by the DB; one-level reply shape
+  and visibility propagation are application rules. Notifications contain message,
+  read flag, and creation time without a route/event framework.
+- Reports target exactly one DiscussionPost or Lesson. Open reports have no
+  resolution time; resolved/dismissed reports require one not preceding creation.
+  Resolved means addressed by hiding content; dismissed closes without that action.
+- Audit actor is mandatory; action, target type/reference, and occurrence time
+  form the minimal durable record. Opaque audit targets deliberately have no FK.
+
+### Exact Uniqueness and Additional Indexes
+
+| Table | Unique constraints (columns) |
+| --- | --- |
+| `users` | `uq_users_email` (email) |
+| `chapters` | `uq_chapters_course_position` (course_id, position) |
+| `lessons` | `uq_lessons_chapter_position` (chapter_id, position) |
+| `enrollments` | `uq_enrollments_user_course` (user_id, course_id) |
+| `lesson_progress` | `uq_lesson_progress_enrollment_lesson` (enrollment_id, lesson_id) |
+| `skills` | `uq_skills_course_id` (course_id, id) |
+| `skill_prerequisites` | `uq_skill_prerequisites_edge` (course_id, skill_id, prerequisite_skill_id) |
+| `lesson_skills` | `uq_lesson_skills_pair` (lesson_id, skill_id) |
+| `quiz_questions` | `uq_quiz_questions_pair` (quiz_id, question_id); `uq_quiz_questions_position` (quiz_id, position) |
+| `attempts` | `uq_attempts_user_quiz_number` (user_id, quiz_id, attempt_number) |
+| `attempt_answers` | `uq_attempt_answers_question` (attempt_id, question_id); `uq_attempt_answers_position` (attempt_id, position) |
+| `submissions` | `uq_submissions_assignment_user` (assignment_id, user_id) |
+| `learner_skill_masteries` | `uq_learner_skill_masteries_user_skill` (user_id, skill_id) |
+
+| Additional B-tree index | Columns |
+| --- | --- |
+| `ix_courses_instructor_id` | courses (instructor_id) |
+| `ix_learning_materials_lesson_id` | learning_materials (lesson_id) |
+| `ix_enrollments_course_id` | enrollments (course_id) |
+| `ix_enrollments_resume_lesson_id` | enrollments (resume_lesson_id) |
+| `ix_lesson_progress_lesson_id` | lesson_progress (lesson_id) |
+| `ix_skill_prerequisites_prerequisite` | skill_prerequisites (course_id, prerequisite_skill_id) |
+| `ix_lesson_skills_skill_id` | lesson_skills (skill_id) |
+| `ix_quizzes_course_id` | quizzes (course_id) |
+| `ix_questions_skill_id` | questions (skill_id) |
+| `ix_quiz_questions_question_id` | quiz_questions (question_id) |
+| `ix_attempts_quiz_id` | attempts (quiz_id) |
+| `ix_attempt_answers_question_id` | attempt_answers (question_id) |
+| `ix_assignments_course_id` | assignments (course_id) |
+| `ix_assignments_lesson_id` | assignments (lesson_id) |
+| `ix_submissions_user_id` | submissions (user_id) |
+| `ix_learner_skill_masteries_skill_id` | learner_skill_masteries (skill_id) |
+| `ix_path_recommendations_enrollment_id` | path_recommendations (enrollment_id) |
+| `ix_path_recommendations_lesson_id` | path_recommendations (lesson_id) |
+| `ix_discussion_posts_lesson_id` | discussion_posts (lesson_id) |
+| `ix_discussion_posts_author_id` | discussion_posts (author_id) |
+| `ix_discussion_posts_parent_post_id` | discussion_posts (parent_post_id) |
+| `ix_notifications_user_id` | notifications (user_id) |
+| `ix_content_reports_reporter_id` | content_reports (reporter_id) |
+| `ix_content_reports_discussion_post_id` | content_reports (discussion_post_id) |
+| `ix_content_reports_lesson_id` | content_reports (lesson_id) |
+| `ix_audit_logs_actor_id` | audit_logs (actor_id) |
+
+### Database Versus Application Integrity
+
+The database enforces approved PK/FK existence, uniqueness, nonblank scalar text,
+state values, positive ordering/time limits, array shape/key cardinality, material
+variants, score ranges, and row-local lifecycle checks. Skill prerequisites have
+course-qualified composite FKs, duplicate-edge prevention, and self-edge rejection.
+
+The application must enforce full DAG acyclicity with concurrency protection;
+LessonSkill/QuizQuestion/assignment/progress/resume/recommendation course consistency;
+enrollment/role eligibility; same-Lesson root replies; quiz membership and selected
+mask compatibility; deadline/expiry behavior; grading calculations; used-definition
+and history immutability; configuration validation; and authorization/storage use.
+Independent FKs do not establish all of those cross-aggregate rules.
+
+Mastery and related LessonProgress updates remain one application database
+transaction through approved module contracts. No linking FK or business trigger
+replaces that orchestration. Initial Java entities/repositories and feature tests
+remain unimplemented; DDL does not prove their behavior.
+
+## 12. Deferred Feature and Future Schema Work
+
+The approved initial physical decisions above are no longer deferred. Later
+changes require new Flyway migrations after this baseline; an applied or possibly
+applied migration must never be edited.
+
+Still deferred: public APIs/DTOs, password-reset persistence/security workflow,
+additional profiles/storage metadata/submission history, numeric mastery if an
+approved algorithm needs it, adaptive configuration keys/thresholds/routing and
+evidence aggregation, module interfaces/events/transaction execution, and proven
+future indexes. These require their feature contracts before implementation.
+Seed/demo content remains separate under `sample-data/`; no versioned migration
+in this foundation supplies application records.
+
+## 13. References
 
 - [Canonical approved architecture](references/originals/approved-architecture.docx)
   and [architecture Markdown](architecture.md), especially sections 6–9:
@@ -290,5 +477,6 @@ Existing scaffold filenames do not supply the missing specification.
 - [AGENTS.md](../AGENTS.md): source precedence, architectural invariants, and
   handling of undefined decisions.
 
-This document records the approved conceptual model under that source hierarchy.
-It does not amend governance or immutable reference artifacts.
+This document preserves the conceptual model and records the separately approved
+initial physical baseline under that source hierarchy. It does not amend
+governance or immutable reference artifacts.

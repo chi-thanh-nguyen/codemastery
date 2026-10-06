@@ -436,8 +436,15 @@ Các module là các package có ranh giới rõ trong một ứng dụng, deplo
 | **Database** | PostgreSQL + Flyway migrations | Dữ liệu quan hệ chặt (user, enrolment, attempt, skill graph); migration có version. |
 | **Storage** | MinIO (S3-compatible) cho slides/attachments/submissions; video qua embed link ngoài | Cùng một API cho dev và deploy; không phải tự làm hosting/transcoding video. |
 | **Infrastructure** | Docker Compose; GitHub Actions (build + test); một cloud VM chạy Docker Compose | Cài lại được từ tài liệu, không phụ thuộc tài khoản cá nhân; CI/CD đúng yêu cầu Quality. |
-| **Testing** | JUnit 5 + Mockito (business logic, mastery engine); Playwright (một E2E flow chính) | Đáp ứng yêu cầu test logic và E2E. |
+| **Testing** | JUnit Jupiter 6 + Mockito (business logic, mastery engine); Playwright (một E2E flow chính) | Đáp ứng yêu cầu test logic và E2E. |
 | **Observability** | Spring Boot Actuator + structured logging | Đủ cho logging/metrics vận hành cơ bản. |
+
+**Approved testing-baseline supersession:** The original
+[approved architecture](references/originals/approved-architecture.docx) named
+JUnit 5. The project leader has approved JUnit Jupiter 6, with its exact version
+managed by Spring Boot 4.1.1 (currently 6.0.3), while retaining Mockito. This
+decision supersedes only that testing-tool version reference; the application
+architecture, test strategy, and all other stack choices remain unchanged.
 
 **Technology Selection Rationale:**
 

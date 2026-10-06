@@ -19,13 +19,14 @@ features are still to be implemented.
 | Governance | [AGENTS.md](AGENTS.md), [requirements](docs/requirements.md), [architecture](docs/architecture.md), [repository structure](docs/repository-structure.md), and the [module-boundary ADR](docs/decisions/001-modular-monolith-module-boundaries.md) exist. |
 | Backend foundation | The Maven build, Maven Wrapper, dependencies/plugins, and Spring Boot application entry point exist. Feature-module, common, and storage implementation files remain empty scaffolds. |
 | Runtime configuration | [application.yml](backend/src/main/resources/application.yml) defines backend configuration and optional local environment-file imports. Configuration does not establish implemented authentication, storage, scheduling, or business behavior. |
-| Data model | [docs/data-model.md](docs/data-model.md) records conceptual entities and relationships. Physical-schema decisions are deferred, and migration files are empty. |
+| Data model | [docs/data-model.md](docs/data-model.md) records conceptual entities and relationships. The approved initial 23-table PostgreSQL schema is implemented in V001–V006; JPA mappings and feature persistence remain pending. |
 | Adaptive design | [docs/adaptive-learning.md](docs/adaptive-learning.md) records approved behavior, invariants, evaluation expectations, and deferred contracts. The adaptive engine is not implemented. |
-| Environment/setup | [.env.example](.env.example) and [docs/setup.md](docs/setup.md) document approved variable scopes, current defaults, and backend loading behavior. |
-| Frontend and E2E | Files under `frontend/` and `e2e/`, including package and executable configuration files, are empty scaffolds. |
-| CI and infrastructure | The GitHub Actions workflow, Dockerfiles, Compose file, and deployment script are empty; they provide no executable CI, service startup, or deployment integration. |
-| Tests, API, and sample data | Backend test files, the OpenAPI specification, and sample-data files are empty. Build test configuration exists, but test implementations, REST contracts, and populated evaluation data are pending. |
-| Testing/deployment documentation | `docs/testing.md` and `docs/deployment.md` are empty placeholders. Current backend validation commands are documented in `docs/setup.md`. |
+| Environment/setup | [.env.example](.env.example) and [docs/setup.md](docs/setup.md) document the local Compose workflow, approved variable scopes, current defaults, backend loading, and public frontend build configuration. |
+| Frontend | The React/TypeScript/Vite build foundation, manifest/lockfile, minimal Material UI bootstrap, React Flow dependency, and type-check/build commands are implemented. Routing, authentication UI, API client/integration, feature pages, and Mastery Map remain pending. |
+| E2E | Package files, Playwright configuration, fixtures, and test files remain empty scaffolds. |
+| CI and infrastructure | The initial GitHub Actions workflow defines Backend and Frontend validation jobs. Backend/frontend Dockerfiles implement standalone multi-stage builds with non-root runtimes and frontend Nginx static serving configuration. The local Compose foundation was validated with PostgreSQL, MinIO, separate application storage provisioning, backend startup, frontend serving, and named-volume persistence. Deployment remains unimplemented. Configuration alone does not establish remote CI success or feature integration. |
+| Tests, API, and sample data | The backend integration-test base class and test profile exist. Feature tests remain empty; the abstract harness alone does not prove runtime database integration. OpenAPI and sample-data files remain empty. |
+| Testing/deployment documentation | [docs/testing.md](docs/testing.md) documents the current lifecycle, foundation, CI, and planned suites. `docs/deployment.md` remains empty; setup commands are documented in `docs/setup.md`. |
 
 Empty filenames reserve approved locations and responsibilities; they do not
 define functionality or implementation contracts. This foundation is not yet a
@@ -74,8 +75,9 @@ Layering, encapsulation, approved interactions, and atomic mastery/progress
 updates are defined in [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md).
 PostgreSQL owns relational data; MinIO is selected for slides, attachments, and
 submissions. Videos use external embed links. Concrete public interfaces, event
-payloads, physical schema, and REST contracts require approval before dependent
-implementation.
+payloads, and REST contracts require approval before dependent implementation.
+The approved initial physical schema is recorded in the data model; future
+schema evolution requires new Flyway migrations.
 
 ## Technology Stack
 
@@ -87,14 +89,14 @@ Configured libraries do not establish completed feature integrations.
 | --- | --- |
 | Backend | Java **25 LTS**, Spring Boot **4.1.1**; Spring Framework **7**, Spring Security **7**, Hibernate **7**, Jackson **3**; Spring Data JPA and Bean Validation. |
 | Build | Maven Wrapper **3.3.4**, configured Maven distribution **3.9.16**; no global Maven installation required. |
-| Persistence | PostgreSQL and Flyway; migration implementation is pending. |
+| Persistence | PostgreSQL and Flyway; initial V001–V006 schema migrations are implemented. |
 | Security | Spring Security, JWT via JJWT **0.13.0**, and BCrypt; application authentication/authorization is pending. |
 | Object storage | MinIO/S3-compatible storage through AWS SDK **2.44.7**; storage adapter implementation is pending. |
 | API documentation | REST/JSON, OpenAPI, springdoc **3.1.1**; public API contracts are pending. |
-| Backend testing | Approved JUnit 5 + Mockito; Surefire/Failsafe and JaCoCo **0.8.15** are configured, with empty test scaffolds. |
+| Backend testing | Approved JUnit Jupiter **6**, managed by Spring Boot **4.1.1** (currently **6.0.3**), + Mockito; Surefire/Failsafe and JaCoCo **0.8.15** are configured. The integration-test foundation exists; feature suites remain unimplemented and meaningful coverage is not established. |
 | Observability | Actuator and logging configuration, including ECS JSON console logging under `prod`; this profile is not complete production configuration. |
-| Frontend | Approved TypeScript, React, Vite, Material UI, and React Flow; implementation/configuration is pending. |
-| Infrastructure/E2E | Approved Docker Compose, GitHub Actions, cloud VM deployment, and Playwright; executable configuration is pending. |
+| Frontend | React **19.3.0**, TypeScript **7.0.2**, Vite **8.3.3**, Material UI **9.4.0**, and React Flow **12.12.0** are pinned in [package.json](frontend/package.json) and its npm lockfile. Minimal Material UI bootstrap is implemented; feature and React Flow usage remain pending. |
+| Infrastructure/E2E | Initial GitHub Actions validation uses Temurin 25 and Node 22 on `ubuntu-24.04`. Local Docker Compose configuration exists; cloud VM deployment and Playwright executable configuration remain pending. |
 
 Use the actual build/configuration files for dependency versions and executable
 commands. Current defaults do not establish final security, deployment, or
@@ -107,9 +109,9 @@ Follow the fixed [approved repository structure](docs/repository-structure.md).
 | Location | Responsibility |
 | --- | --- |
 | `backend/` | Modular Monolith, configuration, migrations, and backend tests. |
-| `frontend/` | Approved feature-oriented frontend scaffold. |
+| `frontend/` | Implemented build/bootstrap foundation with approved feature-oriented scaffolds. |
 | `e2e/` | Playwright test/configuration scaffold. |
-| `infrastructure/` | Compose and VM deployment scaffolds. |
+| `infrastructure/` | Local Compose runtime configuration and a VM deployment scaffold. |
 | `.github/` | Collaboration templates and the workflow scaffold. |
 | `sample-data/` | Reserved seed SQL and learning-material locations. |
 | `docs/` | Approved design, setup documentation, references, and pending specifications. |
@@ -127,10 +129,37 @@ cd backend
 ./mvnw test
 ```
 
-Backend tests are currently empty scaffolds. A successful build alone would not
-demonstrate tested feature behavior. Broader backend validation and its
-infrastructure prerequisites are described in `docs/setup.md`; frontend, E2E,
-Compose, and deployment commands remain pending.
+The backend integration-test foundation exists, but feature test files remain
+empty. A successful build alone does not demonstrate tested feature behavior or
+exercise PostgreSQL through the abstract harness. `./mvnw verify` provides the
+broader lifecycle; `./mvnw verify -DskipITs` skips Failsafe execution while still
+compiling integration-test sources. See [testing](docs/testing.md) and
+[setup](docs/setup.md) for conventions and Docker prerequisites.
+
+For the frontend, use Node.js satisfying `^22.12.0 || ^24.0.0` and npm:
+
+```bash
+cd frontend
+npm ci
+npm run typecheck
+npm run build
+```
+
+`npm run dev` starts the minimal bootstrap; `npm run preview` previews an
+existing production build. `VITE_API_BASE_URL` has optional public build-time
+typing and root environment-file loading, with no URL fallback or API consumer.
+The bootstrap builds without an API URL and uses default Material UI styling.
+`npm run build` already includes typechecking. Initial CI runs backend
+`./mvnw verify` and frontend `npm ci` / `npm run build` in separate jobs for
+pull requests targeting `main`, pushes to `main`, and manual dispatch. Frontend
+features and automated tests, E2E, backend storage adapter/browser API integration,
+and production deployment remain pending. Standalone container builds and the
+[local Compose workflow](docs/setup.md#local-docker-compose-runtime) are documented
+in setup. The local runtime foundation was validated through startup, Flyway
+checksums, application-credential object operations, frontend HTTP checks, and
+persistence across container recreation. Feature APIs, authentication, JPA
+mappings, and a functional learning platform remain unimplemented. Remote CI
+results must come from actual workflow runs.
 
 ## Documentation Index
 
@@ -143,10 +172,10 @@ these documents for their specific responsibilities:
 | [Approved architecture DOCX](docs/references/originals/approved-architecture.docx) / [architecture Markdown](docs/architecture.md) | Approved design and stack. |
 | [Repository structure](docs/repository-structure.md) | Approved file/module locations. |
 | [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md) | Approved module boundaries and interactions. |
-| [Data model](docs/data-model.md) | Conceptual model; physical details deferred. |
+| [Data model](docs/data-model.md) | Conceptual model and approved initial PostgreSQL physical baseline. |
 | [Adaptive Learning](docs/adaptive-learning.md) | Approved design, planned evaluation, and deferred decisions. |
 | [Setup](docs/setup.md) / [environment template](.env.example) | Current development configuration contract. |
-| [Testing](docs/testing.md) / [deployment](docs/deployment.md) | Empty placeholders for future procedures and evidence. |
+| [Testing](docs/testing.md) / [deployment](docs/deployment.md) | Current testing contract and planned suites / empty deployment placeholder. |
 | [OpenAPI](docs/api/openapi.yaml) | Empty placeholder for the future public API specification. |
 | [Contributing](CONTRIBUTING.md) | Branch, commit, PR, testing, and documentation workflow. |
 
@@ -176,13 +205,20 @@ all user-facing interface text must also be in English.
 
 The course requires disclosure of AI use, AI-assisted development, and
 third-party services with their actual purposes. **OpenAI Codex has assisted with
-repository documentation and environment-contract synchronization during
-development.** This disclosure describes development assistance; CodeMastery's
-approved adaptive engine is rule-based and uses no AI/ML service.
+repository documentation, environment-contract synchronization, the frontend
+build/bootstrap foundation, the backend integration-test/CI foundations,
+the standalone container-build/Nginx foundation, the initial PostgreSQL
+schema/Flyway foundation, and the local Compose/provisioning foundation during
+development.** This disclosure describes
+development assistance; CodeMastery's approved adaptive engine is rule-based
+and uses no AI/ML service.
 
 Backend third-party libraries and their configured purposes are recorded in
-`pom.xml`; frontend and infrastructure selections are listed above as pending
-implementation. No hosted provider, deployed service, or external video host is
-identified as already in use. Contributors must record further actual tools,
+`pom.xml`; frontend dependencies are recorded in `frontend/package.json` and its
+lockfile. Local PostgreSQL/MinIO infrastructure uses the images identified in
+[setup](docs/setup.md#services-and-local-urls), including the approved third-party
+Golithus builds for local MinIO server/client use. No production hosting provider,
+public deployment, or external video host is identified as already in use.
+Contributors must record further actual tools,
 services, uses, and content sources in the final project documentation without
 inventing or concealing details.

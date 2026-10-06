@@ -16,8 +16,9 @@ developed for CO3103 – Programming Integration Project, Semester 261.
 3. Inspect target files, current configuration, and existing staged/unstaged
    changes. Preserve work that is unrelated to the task.
 4. Follow [docs/setup.md](docs/setup.md) for Java 25 LTS, the Maven Wrapper, and
-   local environment configuration. Frontend, Compose, E2E, and deployment setup
-   is pending.
+   local environment configuration, plus frontend Node/npm setup and commands.
+   Local Compose runtime instructions are available; E2E and deployment remain
+   pending.
 5. Confirm the authorized file scope and required contracts before editing.
    Establish a test baseline when relevant implemented tests are available.
 
@@ -126,14 +127,18 @@ an existing user flow.
 
 ## CI Expectations
 
-GitHub Actions is approved, but `.github/workflows/ci.yml` is currently empty.
-No executable CI jobs or automated CI results are established by this scaffold.
+[The CI workflow](.github/workflows/ci.yml) defines independent Backend and
+Frontend validation jobs on `ubuntu-24.04`. It runs for pull requests targeting
+`main`, pushes to `main`, and manual dispatch. Backend uses Temurin 25 with
+`./mvnw verify`; frontend uses Node 22 with `npm ci` and `npm run build`, which
+already includes typechecking.
 
-Run the relevant supported local checks and report their results. Mark CI
-validation unavailable while workflows are empty; never mark it as passed.
-When implemented, actual workflow files define the checks to run and failures to
-resolve. Do not invent job names or require nonexistent frontend/E2E/deployment
-automation.
+Run relevant supported local checks and report their results. Resolve failures
+from the actual workflow, and report remote CI success only when a run has
+completed successfully. There are no executable backend feature tests yet, so
+CI build success does not prove business behavior or PostgreSQL integration.
+Do not invent required branch-protection status checks. E2E CI and deployment
+automation remain unimplemented.
 
 ## Backend Guidelines
 
@@ -185,7 +190,31 @@ details remain deferred. Update the adaptive design when approved behavior chang
 ## Frontend Guidelines
 
 React + TypeScript + Vite + Material UI and React Flow are approved. Frontend
-files, package configuration, routes, and guards currently remain empty scaffolds.
+build/package configuration and the minimal Material UI bootstrap are
+implemented. React Flow is installed but unused. Routes, guards, authentication
+UI, API clients/integration, feature pages, and Mastery Map remain unimplemented.
+
+Use Node.js satisfying `^22.12.0 || ^24.0.0` and npm. Install and validate from
+`frontend/`:
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
+`npm run build` runs typechecking before Vite build. Use `npm run typecheck`
+alone for a narrower check when a production build is unnecessary.
+
+Run `npm run dev` from that directory for local development, or
+`npm run preview` after building to inspect the production bundle. Keep
+`package-lock.json` tracked with the manifest; dependencies and build output
+remain ignored. No lint or frontend test script is configured, and frontend
+automated tests remain pending. Initial CI validates installation and build.
+
+`VITE_API_BASE_URL` is optional public build-time configuration. Vite loads
+environment files from the repository root; the bootstrap makes no API requests
+and supplies no fallback URL.
 
 Follow the approved feature-oriented structure; place only genuinely shared code
 under `shared/`. Reuse implemented components and routing mechanisms when they
@@ -194,11 +223,56 @@ and keep all user-facing text in English. Frontend guards never replace backend
 authorization. Never expose secrets in frontend source or `VITE_*` variables.
 Use commands from implemented package configuration when available.
 
+## Local Runtime Contributions
+
+Use [the local Compose workflow](docs/setup.md#local-docker-compose-runtime)
+from the repository root. Copy `.env.example` to ignored `.env` and replace all
+required placeholders. Independently populate matching `POSTGRES_*`/`DB_*`
+values for disposable local development; keep MinIO root and application
+identities separate. Never include secrets or fully rendered Compose configuration
+in PR evidence.
+
+```bash
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml config --quiet
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml build
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml up -d
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml ps -a
+```
+
+Report actual startup, Flyway, storage-provisioning, and frontend-serving checks
+when changing local runtime configuration. `minio-init` must complete successfully
+before backend startup. Rebuild the frontend after changing the public
+`VITE_API_BASE_URL` build input. Startup and MC object checks do not demonstrate
+feature APIs, authorization, backend S3 integration, or browser API integration.
+
+After validation, remove containers while preserving named volumes:
+
+```bash
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml down
+```
+
+`down -v` is destructive and deletes local PostgreSQL and MinIO data;
+do not use it as normal validation cleanup. This local foundation does not
+replace the approved API/schema/security/module contracts required before
+implementing a feature. Applied V001–V006 remain immutable; later schema changes
+require NEW migrations.
+
 ## Database and Migration Guidelines
 
-[docs/data-model.md](docs/data-model.md) is conceptual. Physical identifiers,
-columns, types, constraints, indexes, and other deferred choices require approval
-before schema or mapping implementation. Current migrations are empty scaffolds.
+[docs/data-model.md](docs/data-model.md) preserves the conceptual model and records
+the approved initial physical PostgreSQL baseline. V001–V006 implement that
+baseline and are no longer empty scaffolds. Future entity mappings must match
+its columns, types, nullability, constraints, and indexes; feature contracts remain
+required before dependent implementation.
+
+Schema evolution after this baseline requires NEW Flyway migrations. Never edit
+an applied or possibly applied migration, including V001–V006; obtain approval
+for future physical changes and synchronize the data model.
 
 Flyway owns schema evolution under `backend/src/main/resources/db/migration/`.
 Use new versioned migrations; never edit a migration that may have been applied.
@@ -216,23 +290,43 @@ remains scaffolded.
 Use the approved storage abstraction in its approved location and enforce
 authorization/ownership before protected file operations. Backend application
 credentials use `STORAGE_ACCESS_KEY` and `STORAGE_SECRET_KEY`; MinIO root/admin
-credentials are conceptually separate. User provisioning, buckets/policies, and
-object-key rules require their approved contracts. Video uses external embed
+credentials are separate. Local Compose provisions the approved bucket-scoped
+application policy; production storage policy and feature object-key/lifecycle
+rules still require their approved contracts. Video uses external embed
 links; hosting/transcoding is outside scope.
 
 ## Testing Guidelines
 
 Every behavior change needs relevant automated tests unless testing is genuinely
-unnecessary. Use the approved JUnit 5 + Mockito backend stack and integration
-tests for persistence, transactions, module integration, configuration, or
-infrastructure behavior. Adaptive tests must be deterministic. Playwright is
-approved for main E2E flows when E2E configuration is implemented.
+unnecessary. Use the approved JUnit Jupiter 6 + Mockito backend stack. The exact
+JUnit Jupiter version follows Spring Boot 4.1.1 dependency management (currently
+6.0.3). Use integration tests for persistence, transactions, module integration,
+configuration, or infrastructure behavior. Adaptive tests must be deterministic.
+Playwright is approved for main E2E flows when E2E configuration is implemented.
 
-The Maven build supports `./mvnw test` and broader `./mvnw verify` from
-`backend/`, with Surefire/Failsafe configuration and Testcontainers PostgreSQL
-dependencies. See [docs/setup.md](docs/setup.md) for commands and prerequisites.
-Backend test files and E2E configuration are currently empty. `docs/testing.md`
-is also empty; it provides no test procedure or results yet.
+Use the Maven Wrapper for backend validation:
+
+```bash
+cd backend
+./mvnw test
+./mvnw verify
+```
+
+Unit tests belong in the approved module test locations outside the integration
+package; Surefire excludes `**/integration/**`. Integration tests belong under
+`backend/src/test/java/com/codemastery/integration/`, including approved
+subdirectories, and end in `IntegrationTest.java` to match Failsafe selection.
+Future integration tests should extend/use `AbstractIntegrationTest` when
+applicable, preserving its shared container lifecycle instead of introducing
+incompatible per-class container management or persistent reuse.
+
+Docker is required once concrete Testcontainers tests execute. The abstract
+foundation and test profile exist, but feature test files and E2E configuration
+remain empty. Current verification compiles the harness without exercising
+PostgreSQL. See [docs/testing.md](docs/testing.md) for lifecycle, isolation,
+coverage limitations, and planned suites, and [docs/setup.md](docs/setup.md) for
+prerequisites. `./mvnw verify -DskipITs` skips Failsafe execution while still
+compiling integration-test sources; CI uses full `verify`.
 
 Run the narrowest relevant validation first. Report executed checks accurately,
 and distinguish a successful build from feature-test coverage. For documentation
