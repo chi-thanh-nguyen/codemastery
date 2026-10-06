@@ -211,10 +211,20 @@ If the interaction is not defined by approved sources, stop and ask.
 - Migrations: Flyway
 - Object Storage: MinIO via S3-compatible interface
 - Infrastructure: Docker Compose + GitHub Actions
-- Testing: JUnit 5 + Mockito + Playwright
+- Testing: JUnit Jupiter 6 (Spring Boot-managed version) + Mockito + Playwright
 - Observability: Spring Boot Actuator + structured logging
 
 Use actual build/configuration files for exact dependency/plugin versions.
+
+Approved testing-baseline supersession by the project leader: Spring Boot 4.1.1
+remains the approved backend baseline. JUnit Jupiter 6 is the approved current
+backend testing baseline; its exact version follows Spring Boot dependency
+management and currently resolves to 6.0.3. This explicitly supersedes only the
+earlier JUnit 5 testing-tool version reference in the approved architecture,
+including its canonical original. Mockito remains approved. Architecture,
+module boundaries, business logic, test strategy, API contracts, database schema,
+and production runtime behavior are unchanged. Do not override the Boot-managed
+JUnit version without a separately approved dependency decision.
 
 Do not upgrade, downgrade, replace, or add a parallel technology stack during an unrelated task.
 
@@ -353,7 +363,7 @@ Do not fabricate, infer, or conceal disclosure details.
 
 Every behavior change should include relevant automated tests unless testing is genuinely unnecessary.
 
-Backend: JUnit 5 + Mockito; add integration tests for persistence, transactions, module integration, configuration, or infrastructure behavior.
+Backend: JUnit Jupiter 6 (Spring Boot-managed version) + Mockito; add integration tests for persistence, transactions, module integration, configuration, or infrastructure behavior.
 
 End-to-end: Playwright.
 

@@ -92,7 +92,7 @@ Configured libraries do not establish completed feature integrations.
 | Security | Spring Security, JWT via JJWT **0.13.0**, and BCrypt; application authentication/authorization is pending. |
 | Object storage | MinIO/S3-compatible storage through AWS SDK **2.44.7**; storage adapter implementation is pending. |
 | API documentation | REST/JSON, OpenAPI, springdoc **3.1.1**; public API contracts are pending. |
-| Backend testing | Approved JUnit 5 + Mockito; Surefire/Failsafe and JaCoCo **0.8.15** are configured, with empty test scaffolds. |
+| Backend testing | Approved JUnit Jupiter **6**, managed by Spring Boot **4.1.1** (currently **6.0.3**), + Mockito; Surefire/Failsafe and JaCoCo **0.8.15** are configured, with empty test scaffolds and feature test suites still unimplemented. |
 | Observability | Actuator and logging configuration, including ECS JSON console logging under `prod`; this profile is not complete production configuration. |
 | Frontend | React **19.3.0**, TypeScript **7.0.2**, Vite **8.3.3**, Material UI **9.4.0**, and React Flow **12.12.0** are pinned in [package.json](frontend/package.json) and its npm lockfile. Minimal Material UI bootstrap is implemented; feature and React Flow usage remain pending. |
 | Infrastructure/E2E | Approved Docker Compose, GitHub Actions, cloud VM deployment, and Playwright; executable configuration is pending. |

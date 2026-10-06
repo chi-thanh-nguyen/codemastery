@@ -245,10 +245,11 @@ links; hosting/transcoding is outside scope.
 ## Testing Guidelines
 
 Every behavior change needs relevant automated tests unless testing is genuinely
-unnecessary. Use the approved JUnit 5 + Mockito backend stack and integration
-tests for persistence, transactions, module integration, configuration, or
-infrastructure behavior. Adaptive tests must be deterministic. Playwright is
-approved for main E2E flows when E2E configuration is implemented.
+unnecessary. Use the approved JUnit Jupiter 6 + Mockito backend stack. The exact
+JUnit Jupiter version follows Spring Boot 4.1.1 dependency management (currently
+6.0.3). Use integration tests for persistence, transactions, module integration,
+configuration, or infrastructure behavior. Adaptive tests must be deterministic.
+Playwright is approved for main E2E flows when E2E configuration is implemented.
 
 The Maven build supports `./mvnw test` and broader `./mvnw verify` from
 `backend/`, with Surefire/Failsafe configuration and Testcontainers PostgreSQL
