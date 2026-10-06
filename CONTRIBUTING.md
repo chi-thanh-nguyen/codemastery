@@ -224,9 +224,15 @@ Use commands from implemented package configuration when available.
 
 ## Database and Migration Guidelines
 
-[docs/data-model.md](docs/data-model.md) is conceptual. Physical identifiers,
-columns, types, constraints, indexes, and other deferred choices require approval
-before schema or mapping implementation. Current migrations are empty scaffolds.
+[docs/data-model.md](docs/data-model.md) preserves the conceptual model and records
+the approved initial physical PostgreSQL baseline. V001–V006 implement that
+baseline and are no longer empty scaffolds. Future entity mappings must match
+its columns, types, nullability, constraints, and indexes; feature contracts remain
+required before dependent implementation.
+
+Schema evolution after this baseline requires NEW Flyway migrations. Never edit
+an applied or possibly applied migration, including V001–V006; obtain approval
+for future physical changes and synchronize the data model.
 
 Flyway owns schema evolution under `backend/src/main/resources/db/migration/`.
 Use new versioned migrations; never edit a migration that may have been applied.

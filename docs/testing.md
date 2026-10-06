@@ -69,8 +69,11 @@ implemented, so the profile supplies no fake secrets or storage services.
 
 The normal application Flyway settings remain enabled against this datasource,
 using `classpath:db/migration`. Hibernate retains `ddl-auto: validate`, and
-does not generate a test schema. Current migration and entity files are empty,
-so they provide no domain schema or meaningful mapping-validation evidence.
+does not generate a test schema. V001–V006 now implement the approved initial
+23-table PostgreSQL schema. Migration execution, checksum/restart validation, and
+constraint checks are part of persistence/integration validation on disposable
+databases. Java entity mappings and executable feature tests remain unimplemented,
+so successful schema migration alone does not prove mappings or feature behavior.
 
 Concrete integration tests belong under
 `backend/src/test/java/com/codemastery/integration/`, including its approved

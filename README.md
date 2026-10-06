@@ -19,7 +19,7 @@ features are still to be implemented.
 | Governance | [AGENTS.md](AGENTS.md), [requirements](docs/requirements.md), [architecture](docs/architecture.md), [repository structure](docs/repository-structure.md), and the [module-boundary ADR](docs/decisions/001-modular-monolith-module-boundaries.md) exist. |
 | Backend foundation | The Maven build, Maven Wrapper, dependencies/plugins, and Spring Boot application entry point exist. Feature-module, common, and storage implementation files remain empty scaffolds. |
 | Runtime configuration | [application.yml](backend/src/main/resources/application.yml) defines backend configuration and optional local environment-file imports. Configuration does not establish implemented authentication, storage, scheduling, or business behavior. |
-| Data model | [docs/data-model.md](docs/data-model.md) records conceptual entities and relationships. Physical-schema decisions are deferred, and migration files are empty. |
+| Data model | [docs/data-model.md](docs/data-model.md) records conceptual entities and relationships. The approved initial 23-table PostgreSQL schema is implemented in V001–V006; JPA mappings and feature persistence remain pending. |
 | Adaptive design | [docs/adaptive-learning.md](docs/adaptive-learning.md) records approved behavior, invariants, evaluation expectations, and deferred contracts. The adaptive engine is not implemented. |
 | Environment/setup | [.env.example](.env.example) and [docs/setup.md](docs/setup.md) document approved variable scopes, current defaults, backend loading, and optional public frontend configuration. |
 | Frontend | The React/TypeScript/Vite build foundation, manifest/lockfile, minimal Material UI bootstrap, React Flow dependency, and type-check/build commands are implemented. Routing, authentication UI, API client/integration, feature pages, and Mastery Map remain pending. |
@@ -75,8 +75,9 @@ Layering, encapsulation, approved interactions, and atomic mastery/progress
 updates are defined in [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md).
 PostgreSQL owns relational data; MinIO is selected for slides, attachments, and
 submissions. Videos use external embed links. Concrete public interfaces, event
-payloads, physical schema, and REST contracts require approval before dependent
-implementation.
+payloads, and REST contracts require approval before dependent implementation.
+The approved initial physical schema is recorded in the data model; future
+schema evolution requires new Flyway migrations.
 
 ## Technology Stack
 
@@ -88,7 +89,7 @@ Configured libraries do not establish completed feature integrations.
 | --- | --- |
 | Backend | Java **25 LTS**, Spring Boot **4.1.1**; Spring Framework **7**, Spring Security **7**, Hibernate **7**, Jackson **3**; Spring Data JPA and Bean Validation. |
 | Build | Maven Wrapper **3.3.4**, configured Maven distribution **3.9.16**; no global Maven installation required. |
-| Persistence | PostgreSQL and Flyway; migration implementation is pending. |
+| Persistence | PostgreSQL and Flyway; initial V001–V006 schema migrations are implemented. |
 | Security | Spring Security, JWT via JJWT **0.13.0**, and BCrypt; application authentication/authorization is pending. |
 | Object storage | MinIO/S3-compatible storage through AWS SDK **2.44.7**; storage adapter implementation is pending. |
 | API documentation | REST/JSON, OpenAPI, springdoc **3.1.1**; public API contracts are pending. |
@@ -169,7 +170,7 @@ these documents for their specific responsibilities:
 | [Approved architecture DOCX](docs/references/originals/approved-architecture.docx) / [architecture Markdown](docs/architecture.md) | Approved design and stack. |
 | [Repository structure](docs/repository-structure.md) | Approved file/module locations. |
 | [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md) | Approved module boundaries and interactions. |
-| [Data model](docs/data-model.md) | Conceptual model; physical details deferred. |
+| [Data model](docs/data-model.md) | Conceptual model and approved initial PostgreSQL physical baseline. |
 | [Adaptive Learning](docs/adaptive-learning.md) | Approved design, planned evaluation, and deferred decisions. |
 | [Setup](docs/setup.md) / [environment template](.env.example) | Current development configuration contract. |
 | [Testing](docs/testing.md) / [deployment](docs/deployment.md) | Current testing contract and planned suites / empty deployment placeholder. |
@@ -203,9 +204,9 @@ all user-facing interface text must also be in English.
 The course requires disclosure of AI use, AI-assisted development, and
 third-party services with their actual purposes. **OpenAI Codex has assisted with
 repository documentation, environment-contract synchronization, the frontend
-build/bootstrap foundation, the backend integration-test/CI foundations, and
-the standalone container-build/Nginx foundation
-during development.** This disclosure describes
+build/bootstrap foundation, the backend integration-test/CI foundations,
+the standalone container-build/Nginx foundation, and the initial PostgreSQL
+schema/Flyway foundation during development.** This disclosure describes
 development assistance; CodeMastery's approved adaptive engine is rule-based
 and uses no AI/ML service.
 
