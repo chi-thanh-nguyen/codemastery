@@ -21,10 +21,10 @@ features are still to be implemented.
 | Runtime configuration | [application.yml](backend/src/main/resources/application.yml) defines backend configuration and optional local environment-file imports. Configuration does not establish implemented authentication, storage, scheduling, or business behavior. |
 | Data model | [docs/data-model.md](docs/data-model.md) records conceptual entities and relationships. The approved initial 23-table PostgreSQL schema is implemented in V001–V006; JPA mappings and feature persistence remain pending. |
 | Adaptive design | [docs/adaptive-learning.md](docs/adaptive-learning.md) records approved behavior, invariants, evaluation expectations, and deferred contracts. The adaptive engine is not implemented. |
-| Environment/setup | [.env.example](.env.example) and [docs/setup.md](docs/setup.md) document approved variable scopes, current defaults, backend loading, and optional public frontend configuration. |
+| Environment/setup | [.env.example](.env.example) and [docs/setup.md](docs/setup.md) document the local Compose workflow, approved variable scopes, current defaults, backend loading, and public frontend build configuration. |
 | Frontend | The React/TypeScript/Vite build foundation, manifest/lockfile, minimal Material UI bootstrap, React Flow dependency, and type-check/build commands are implemented. Routing, authentication UI, API client/integration, feature pages, and Mastery Map remain pending. |
 | E2E | Package files, Playwright configuration, fixtures, and test files remain empty scaffolds. |
-| CI and infrastructure | The initial GitHub Actions workflow defines Backend and Frontend validation jobs. Backend/frontend Dockerfiles implement standalone multi-stage builds with non-root runtimes and frontend Nginx static serving configuration. Compose, PostgreSQL/MinIO runtime integration, Compose environment mappings, and deployment remain pending. Configuration alone does not establish remote CI success or backend runtime integration. |
+| CI and infrastructure | The initial GitHub Actions workflow defines Backend and Frontend validation jobs. Backend/frontend Dockerfiles implement standalone multi-stage builds with non-root runtimes and frontend Nginx static serving configuration. The local Compose foundation was validated with PostgreSQL, MinIO, separate application storage provisioning, backend startup, frontend serving, and named-volume persistence. Deployment remains unimplemented. Configuration alone does not establish remote CI success or feature integration. |
 | Tests, API, and sample data | The backend integration-test base class and test profile exist. Feature tests remain empty; the abstract harness alone does not prove runtime database integration. OpenAPI and sample-data files remain empty. |
 | Testing/deployment documentation | [docs/testing.md](docs/testing.md) documents the current lifecycle, foundation, CI, and planned suites. `docs/deployment.md` remains empty; setup commands are documented in `docs/setup.md`. |
 
@@ -96,7 +96,7 @@ Configured libraries do not establish completed feature integrations.
 | Backend testing | Approved JUnit Jupiter **6**, managed by Spring Boot **4.1.1** (currently **6.0.3**), + Mockito; Surefire/Failsafe and JaCoCo **0.8.15** are configured. The integration-test foundation exists; feature suites remain unimplemented and meaningful coverage is not established. |
 | Observability | Actuator and logging configuration, including ECS JSON console logging under `prod`; this profile is not complete production configuration. |
 | Frontend | React **19.3.0**, TypeScript **7.0.2**, Vite **8.3.3**, Material UI **9.4.0**, and React Flow **12.12.0** are pinned in [package.json](frontend/package.json) and its npm lockfile. Minimal Material UI bootstrap is implemented; feature and React Flow usage remain pending. |
-| Infrastructure/E2E | Initial GitHub Actions validation uses Temurin 25 and Node 22 on `ubuntu-24.04`. Docker Compose, cloud VM deployment, and Playwright executable configuration remain pending. |
+| Infrastructure/E2E | Initial GitHub Actions validation uses Temurin 25 and Node 22 on `ubuntu-24.04`. Local Docker Compose configuration exists; cloud VM deployment and Playwright executable configuration remain pending. |
 
 Use the actual build/configuration files for dependency versions and executable
 commands. Current defaults do not establish final security, deployment, or
@@ -111,7 +111,7 @@ Follow the fixed [approved repository structure](docs/repository-structure.md).
 | `backend/` | Modular Monolith, configuration, migrations, and backend tests. |
 | `frontend/` | Implemented build/bootstrap foundation with approved feature-oriented scaffolds. |
 | `e2e/` | Playwright test/configuration scaffold. |
-| `infrastructure/` | Compose and VM deployment scaffolds. |
+| `infrastructure/` | Local Compose runtime configuration and a VM deployment scaffold. |
 | `.github/` | Collaboration templates and the workflow scaffold. |
 | `sample-data/` | Reserved seed SQL and learning-material locations. |
 | `docs/` | Approved design, setup documentation, references, and pending specifications. |
@@ -152,12 +152,14 @@ The bootstrap builds without an API URL and uses default Material UI styling.
 `npm run build` already includes typechecking. Initial CI runs backend
 `./mvnw verify` and frontend `npm ci` / `npm run build` in separate jobs for
 pull requests targeting `main`, pushes to `main`, and manual dispatch. Frontend
-features and automated tests, E2E, Compose, runtime PostgreSQL/MinIO integration,
-and production deployment remain pending. Standalone container build commands
-and frontend Nginx serving are documented in
-[setup](docs/setup.md#standalone-container-builds). These images do not yet form
-a working full application stack or prove backend integration with real
-PostgreSQL/MinIO. Remote CI results must come from actual workflow runs.
+features and automated tests, E2E, backend storage adapter/browser API integration,
+and production deployment remain pending. Standalone container builds and the
+[local Compose workflow](docs/setup.md#local-docker-compose-runtime) are documented
+in setup. The local runtime foundation was validated through startup, Flyway
+checksums, application-credential object operations, frontend HTTP checks, and
+persistence across container recreation. Feature APIs, authentication, JPA
+mappings, and a functional learning platform remain unimplemented. Remote CI
+results must come from actual workflow runs.
 
 ## Documentation Index
 
@@ -205,15 +207,18 @@ The course requires disclosure of AI use, AI-assisted development, and
 third-party services with their actual purposes. **OpenAI Codex has assisted with
 repository documentation, environment-contract synchronization, the frontend
 build/bootstrap foundation, the backend integration-test/CI foundations,
-the standalone container-build/Nginx foundation, and the initial PostgreSQL
-schema/Flyway foundation during development.** This disclosure describes
+the standalone container-build/Nginx foundation, the initial PostgreSQL
+schema/Flyway foundation, and the local Compose/provisioning foundation during
+development.** This disclosure describes
 development assistance; CodeMastery's approved adaptive engine is rule-based
 and uses no AI/ML service.
 
 Backend third-party libraries and their configured purposes are recorded in
 `pom.xml`; frontend dependencies are recorded in `frontend/package.json` and its
-lockfile. Infrastructure integration remains pending. No hosted provider,
-deployed service, or external video host is identified as already in use.
+lockfile. Local PostgreSQL/MinIO infrastructure uses the images identified in
+[setup](docs/setup.md#services-and-local-urls), including the approved third-party
+Golithus builds for local MinIO server/client use. No production hosting provider,
+public deployment, or external video host is identified as already in use.
 Contributors must record further actual tools,
 services, uses, and content sources in the final project documentation without
 inventing or concealing details.

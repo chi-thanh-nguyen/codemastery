@@ -17,7 +17,8 @@ developed for CO3103 – Programming Integration Project, Semester 261.
    changes. Preserve work that is unrelated to the task.
 4. Follow [docs/setup.md](docs/setup.md) for Java 25 LTS, the Maven Wrapper, and
    local environment configuration, plus frontend Node/npm setup and commands.
-   Compose, E2E, and deployment setup is pending.
+   Local Compose runtime instructions are available; E2E and deployment remain
+   pending.
 5. Confirm the authorized file scope and required contracts before editing.
    Establish a test baseline when relevant implemented tests are available.
 
@@ -222,6 +223,45 @@ and keep all user-facing text in English. Frontend guards never replace backend
 authorization. Never expose secrets in frontend source or `VITE_*` variables.
 Use commands from implemented package configuration when available.
 
+## Local Runtime Contributions
+
+Use [the local Compose workflow](docs/setup.md#local-docker-compose-runtime)
+from the repository root. Copy `.env.example` to ignored `.env` and replace all
+required placeholders. Independently populate matching `POSTGRES_*`/`DB_*`
+values for disposable local development; keep MinIO root and application
+identities separate. Never include secrets or fully rendered Compose configuration
+in PR evidence.
+
+```bash
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml config --quiet
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml build
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml up -d
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml ps -a
+```
+
+Report actual startup, Flyway, storage-provisioning, and frontend-serving checks
+when changing local runtime configuration. `minio-init` must complete successfully
+before backend startup. Rebuild the frontend after changing the public
+`VITE_API_BASE_URL` build input. Startup and MC object checks do not demonstrate
+feature APIs, authorization, backend S3 integration, or browser API integration.
+
+After validation, remove containers while preserving named volumes:
+
+```bash
+docker compose --env-file .env \
+  -f infrastructure/docker-compose.yml down
+```
+
+`down -v` is destructive and deletes local PostgreSQL and MinIO data;
+do not use it as normal validation cleanup. This local foundation does not
+replace the approved API/schema/security/module contracts required before
+implementing a feature. Applied V001–V006 remain immutable; later schema changes
+require NEW migrations.
+
 ## Database and Migration Guidelines
 
 [docs/data-model.md](docs/data-model.md) preserves the conceptual model and records
@@ -250,8 +290,9 @@ remains scaffolded.
 Use the approved storage abstraction in its approved location and enforce
 authorization/ownership before protected file operations. Backend application
 credentials use `STORAGE_ACCESS_KEY` and `STORAGE_SECRET_KEY`; MinIO root/admin
-credentials are conceptually separate. User provisioning, buckets/policies, and
-object-key rules require their approved contracts. Video uses external embed
+credentials are separate. Local Compose provisions the approved bucket-scoped
+application policy; production storage policy and feature object-key/lifecycle
+rules still require their approved contracts. Video uses external embed
 links; hosting/transcoding is outside scope.
 
 ## Testing Guidelines
