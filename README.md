@@ -21,8 +21,9 @@ features are still to be implemented.
 | Runtime configuration | [application.yml](backend/src/main/resources/application.yml) defines backend configuration and optional local environment-file imports. Configuration does not establish implemented authentication, storage, scheduling, or business behavior. |
 | Data model | [docs/data-model.md](docs/data-model.md) records conceptual entities and relationships. Physical-schema decisions are deferred, and migration files are empty. |
 | Adaptive design | [docs/adaptive-learning.md](docs/adaptive-learning.md) records approved behavior, invariants, evaluation expectations, and deferred contracts. The adaptive engine is not implemented. |
-| Environment/setup | [.env.example](.env.example) and [docs/setup.md](docs/setup.md) document approved variable scopes, current defaults, and backend loading behavior. |
-| Frontend and E2E | Files under `frontend/` and `e2e/`, including package and executable configuration files, are empty scaffolds. |
+| Environment/setup | [.env.example](.env.example) and [docs/setup.md](docs/setup.md) document approved variable scopes, current defaults, backend loading, and optional public frontend configuration. |
+| Frontend | The React/TypeScript/Vite build foundation, manifest/lockfile, minimal Material UI bootstrap, React Flow dependency, and type-check/build commands are implemented. Routing, authentication UI, API client/integration, feature pages, and Mastery Map remain pending. |
+| E2E | Package files, Playwright configuration, fixtures, and test files remain empty scaffolds. |
 | CI and infrastructure | The GitHub Actions workflow, Dockerfiles, Compose file, and deployment script are empty; they provide no executable CI, service startup, or deployment integration. |
 | Tests, API, and sample data | Backend test files, the OpenAPI specification, and sample-data files are empty. Build test configuration exists, but test implementations, REST contracts, and populated evaluation data are pending. |
 | Testing/deployment documentation | `docs/testing.md` and `docs/deployment.md` are empty placeholders. Current backend validation commands are documented in `docs/setup.md`. |
@@ -93,7 +94,7 @@ Configured libraries do not establish completed feature integrations.
 | API documentation | REST/JSON, OpenAPI, springdoc **3.1.1**; public API contracts are pending. |
 | Backend testing | Approved JUnit 5 + Mockito; Surefire/Failsafe and JaCoCo **0.8.15** are configured, with empty test scaffolds. |
 | Observability | Actuator and logging configuration, including ECS JSON console logging under `prod`; this profile is not complete production configuration. |
-| Frontend | Approved TypeScript, React, Vite, Material UI, and React Flow; implementation/configuration is pending. |
+| Frontend | React **19.3.0**, TypeScript **7.0.2**, Vite **8.3.3**, Material UI **9.4.0**, and React Flow **12.12.0** are pinned in [package.json](frontend/package.json) and its npm lockfile. Minimal Material UI bootstrap is implemented; feature and React Flow usage remain pending. |
 | Infrastructure/E2E | Approved Docker Compose, GitHub Actions, cloud VM deployment, and Playwright; executable configuration is pending. |
 
 Use the actual build/configuration files for dependency versions and executable
@@ -107,7 +108,7 @@ Follow the fixed [approved repository structure](docs/repository-structure.md).
 | Location | Responsibility |
 | --- | --- |
 | `backend/` | Modular Monolith, configuration, migrations, and backend tests. |
-| `frontend/` | Approved feature-oriented frontend scaffold. |
+| `frontend/` | Implemented build/bootstrap foundation with approved feature-oriented scaffolds. |
 | `e2e/` | Playwright test/configuration scaffold. |
 | `infrastructure/` | Compose and VM deployment scaffolds. |
 | `.github/` | Collaboration templates and the workflow scaffold. |
@@ -129,8 +130,23 @@ cd backend
 
 Backend tests are currently empty scaffolds. A successful build alone would not
 demonstrate tested feature behavior. Broader backend validation and its
-infrastructure prerequisites are described in `docs/setup.md`; frontend, E2E,
-Compose, and deployment commands remain pending.
+infrastructure prerequisites are described in `docs/setup.md`.
+
+For the frontend, use Node.js satisfying `^22.12.0 || ^24.0.0` and npm:
+
+```bash
+cd frontend
+npm ci
+npm run typecheck
+npm run build
+```
+
+`npm run dev` starts the minimal bootstrap; `npm run preview` previews an
+existing production build. `VITE_API_BASE_URL` has optional public build-time
+typing and root environment-file loading, with no URL fallback or API consumer.
+The bootstrap builds without an API URL and uses default Material UI styling.
+Frontend features and tests, E2E, container serving, CI integration, and
+deployment remain pending.
 
 ## Documentation Index
 
@@ -176,13 +192,15 @@ all user-facing interface text must also be in English.
 
 The course requires disclosure of AI use, AI-assisted development, and
 third-party services with their actual purposes. **OpenAI Codex has assisted with
-repository documentation and environment-contract synchronization during
-development.** This disclosure describes development assistance; CodeMastery's
-approved adaptive engine is rule-based and uses no AI/ML service.
+repository documentation, environment-contract synchronization, and the frontend
+build/bootstrap foundation during development.** This disclosure describes
+development assistance; CodeMastery's approved adaptive engine is rule-based
+and uses no AI/ML service.
 
 Backend third-party libraries and their configured purposes are recorded in
-`pom.xml`; frontend and infrastructure selections are listed above as pending
-implementation. No hosted provider, deployed service, or external video host is
-identified as already in use. Contributors must record further actual tools,
+`pom.xml`; frontend dependencies are recorded in `frontend/package.json` and its
+lockfile. Infrastructure integration remains pending. No hosted provider,
+deployed service, or external video host is identified as already in use.
+Contributors must record further actual tools,
 services, uses, and content sources in the final project documentation without
 inventing or concealing details.

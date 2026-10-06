@@ -16,8 +16,8 @@ developed for CO3103 – Programming Integration Project, Semester 261.
 3. Inspect target files, current configuration, and existing staged/unstaged
    changes. Preserve work that is unrelated to the task.
 4. Follow [docs/setup.md](docs/setup.md) for Java 25 LTS, the Maven Wrapper, and
-   local environment configuration. Frontend, Compose, E2E, and deployment setup
-   is pending.
+   local environment configuration, plus frontend Node/npm setup and commands.
+   Compose, E2E, and deployment setup is pending.
 5. Confirm the authorized file scope and required contracts before editing.
    Establish a test baseline when relevant implemented tests are available.
 
@@ -185,7 +185,29 @@ details remain deferred. Update the adaptive design when approved behavior chang
 ## Frontend Guidelines
 
 React + TypeScript + Vite + Material UI and React Flow are approved. Frontend
-files, package configuration, routes, and guards currently remain empty scaffolds.
+build/package configuration and the minimal Material UI bootstrap are
+implemented. React Flow is installed but unused. Routes, guards, authentication
+UI, API clients/integration, feature pages, and Mastery Map remain unimplemented.
+
+Use Node.js satisfying `^22.12.0 || ^24.0.0` and npm. Install and validate from
+`frontend/`:
+
+```bash
+cd frontend
+npm ci
+npm run typecheck
+npm run build
+```
+
+Run `npm run dev` from that directory for local development, or
+`npm run preview` after building to inspect the production bundle. Keep
+`package-lock.json` tracked with the manifest; dependencies and build output
+remain ignored. No lint or frontend test script is configured, and frontend
+automated tests and CI integration remain pending.
+
+`VITE_API_BASE_URL` is optional public build-time configuration. Vite loads
+environment files from the repository root; the bootstrap makes no API requests
+and supplies no fallback URL.
 
 Follow the approved feature-oriented structure; place only genuinely shared code
 under `shared/`. Reuse implemented components and routing mechanisms when they

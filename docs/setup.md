@@ -4,14 +4,16 @@
 
 This document describes the current development setup contract, based on
 [`application.yml`](../backend/src/main/resources/application.yml),
-[`pom.xml`](../backend/pom.xml), and the Maven Wrapper. It covers environment
-variable names, scopes, backend configuration loading, and backend validation
-commands. It will expand as frontend, Docker Compose, and E2E configuration are
-implemented.
+[`pom.xml`](../backend/pom.xml), the Maven Wrapper, and
+[`frontend/package.json`](../frontend/package.json). It covers environment
+variable names, scopes, backend/frontend configuration loading, and foundation
+setup and validation commands. It will expand as Docker Compose and E2E
+configuration are implemented.
 
-The frontend package/Vite configuration, E2E package/Playwright configuration,
-Dockerfiles, Compose configuration, CI workflow, and deployment script are
-currently empty scaffolds. They do not provide executable setup or integration.
+The frontend build and minimal React/Material UI bootstrap are implemented.
+Frontend features and API integration remain pending. E2E package/Playwright
+configuration, Dockerfiles, Compose configuration, CI workflow, and deployment
+script are currently empty scaffolds; they provide no executable integration.
 
 ## Prerequisites
 
@@ -24,16 +26,21 @@ currently empty scaffolds. They do not provide executable setup or integration.
   and provisioning steps are pending.
 - Docker for PostgreSQL integration tests using the Testcontainers dependencies
   and Maven Failsafe configuration in `pom.xml`. No Docker version is specified.
+- Node.js satisfying `^22.12.0 || ^24.0.0` for the frontend, as declared in
+  `frontend/package.json`, with npm as the package manager. No npm engine
+  requirement is declared.
 
-React, TypeScript, Vite, Material UI, React Flow, Docker Compose, and Playwright
-are approved technologies whose executable setup is pending. The empty frontend
-and E2E package files define no Node/npm version requirements or commands.
+React, TypeScript, Vite, Material UI, and React Flow dependencies are pinned in
+the frontend manifest and tracked `frontend/package-lock.json`. React Flow
+feature usage remains pending. Docker Compose and Playwright setup is pending;
+the empty E2E package files define no executable commands.
 
 ## Environment File
 
 The root [`.env.example`](../.env.example) is a catalogue of backend configuration
-variables and infrastructure/frontend/E2E names reserved for future integration.
-Infrastructure variables and backend-consumer variables have distinct scopes.
+variables, optional frontend configuration, and infrastructure/E2E names reserved
+for future integration. Infrastructure variables and backend-consumer variables
+have distinct scopes.
 
 When creating a local configuration file, copy the template from the repository
 root:
@@ -44,7 +51,8 @@ cp .env.example .env
 
 Replace the required backend secret placeholders with local values before use.
 Uncomment optional settings only when an override is needed. Infrastructure
-placeholders do not start or provision services, and reserved frontend/E2E
+placeholders do not start or provision services. `VITE_API_BASE_URL` remains
+optional and commented because no frontend API consumer is implemented; E2E
 entries remain commented until their configuration is implemented.
 
 Real `.env` files must remain untracked. The current `.gitignore` excludes `.env`
@@ -74,6 +82,24 @@ input rather than a shell script. Process environment variables take precedence
 over file values. Optional imports do not provide defaults for required secrets.
 There is currently no implemented Compose variable injection.
 
+### Current Frontend Loading Behavior
+
+`frontend/vite.config.ts` sets `envDir: '..'`, so Vite reads environment files
+from the repository root while keeping `frontend/` as the application root.
+Process environment values take precedence over environment-file values.
+Only variables with Vite's default `VITE_` prefix are exposed to browser code.
+
+`VITE_API_BASE_URL` is an optional public string available through
+`import.meta.env.VITE_API_BASE_URL`, with typing in `src/vite-env.d.ts`.
+Production values are embedded at build time; changing an environment variable
+after building does not reconfigure the static bundle. Restart the development
+server after changing environment files.
+
+The foundation runs and builds without this variable or an environment file.
+There is no fallback URL, API client, or network request in the bootstrap. Its
+exact API URL remains pending. Never put backend secrets or other sensitive
+values in `VITE_*` variables.
+
 ## Variable Scopes
 
 The approved Option A contract uses these names:
@@ -87,7 +113,7 @@ The approved Option A contract uses these names:
 | Backend security/CORS | `JWT_SECRET`, `JWT_EXPIRATION`, `PASSWORD_RESET_TOKEN_TTL`, `CORS_ALLOWED_ORIGINS` | Referenced by backend security configuration. |
 | Backend runtime/operations | `SERVER_PORT`, `MAX_UPLOAD_SIZE`, `LOG_LEVEL_ROOT`, `LOG_LEVEL_APP`, `SCHEDULING_ENABLED`, `ATTEMPT_AUTO_SUBMIT_DELAY`, `DEADLINE_REMINDER_DELAY`, `DEADLINE_REMINDER_LEAD_TIME` | Referenced by backend runtime configuration. |
 | Spring profile selection | `SPRING_PROFILES_ACTIVE` | Supported through Spring profile selection, rather than a `${...}` placeholder in `application.yml`. |
-| Frontend | `VITE_API_BASE_URL` | Reserved for the approved frontend stack; no implemented configuration consumer or exact URL yet. |
+| Frontend | `VITE_API_BASE_URL` | Optional public build-time configuration with root environment loading and Vite typing; no API consumer or exact URL yet. |
 | E2E | `E2E_BASE_URL`, `E2E_USERNAME`, `E2E_PASSWORD` | Pending Playwright/E2E configuration; accounts and authentication flow are undefined. |
 
 PostgreSQL initialization credentials and backend datasource credentials are
@@ -138,6 +164,31 @@ PostgreSQL/MinIO application-user provisioning, bucket policy, and production
 settings remain pending. Frontend deployment strategy and E2E account lifecycle
 also remain pending.
 
+## Frontend Setup and Validation
+
+Install the pinned frontend dependencies from the tracked npm lockfile:
+
+```bash
+cd frontend
+npm ci
+```
+
+Run the following commands from `frontend/`:
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the Vite development server. |
+| `npm run typecheck` | Check application source and Vite configuration without emitting files. |
+| `npm run build` | Run type-checking and build production assets in `frontend/dist/`. |
+| `npm run preview` | Preview an existing production build locally; run after building. |
+
+Keep `frontend/package-lock.json` tracked with the manifest. `node_modules/`
+and `frontend/dist/` are generated, ignored local state. The package declares
+no lint or frontend test script. The minimal bootstrap uses default Material UI
+styling; routing, authentication UI, API integration, feature pages, and the
+React Flow Mastery Map remain unimplemented. Build success does not establish
+feature-test coverage or deployment readiness.
+
 ## Backend Validation
 
 Use the Maven Wrapper from `backend/`:
@@ -160,5 +211,5 @@ The build declares Testcontainers PostgreSQL dependencies and Failsafe test
 selection. Executing tests that use Testcontainers requires Docker. These
 commands are supported by the current build configuration; they do not establish
 that test implementations or a complete application runtime are available or
-validated. Frontend, E2E, Compose, CI, and deployment commands will be documented
+validated. E2E, Compose, CI, and deployment commands will be documented
 when their configuration is implemented.
