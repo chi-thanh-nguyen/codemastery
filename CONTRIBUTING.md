@@ -1,0 +1,301 @@
+# Contributing to CodeMastery
+
+This guide defines the contribution workflow for CodeMastery, the
+Mastery-Based Programming Learning Platform for Beginner University Students
+developed for CO3103 – Programming Integration Project, Semester 261.
+
+## Before You Start
+
+1. Read [AGENTS.md](AGENTS.md) for source precedence, scope restrictions, and the
+   Blocker Protocol, then use [README.md](README.md) for navigation/current status.
+2. Read the relevant [requirements](docs/requirements.md),
+   [architecture](docs/architecture.md), [repository structure](docs/repository-structure.md),
+   [module-boundary ADR](docs/decisions/001-modular-monolith-module-boundaries.md),
+   [data model](docs/data-model.md), and [adaptive design](docs/adaptive-learning.md).
+   Canonical originals have the authority defined in AGENTS.md.
+3. Inspect target files, current configuration, and existing staged/unstaged
+   changes. Preserve work that is unrelated to the task.
+4. Follow [docs/setup.md](docs/setup.md) for Java 25 LTS, the Maven Wrapper, and
+   local environment configuration. Frontend, Compose, E2E, and deployment setup
+   is pending.
+5. Confirm the authorized file scope and required contracts before editing.
+   Establish a test baseline when relevant implemented tests are available.
+
+Approved design, implemented foundation, and planned work must be distinguished.
+Module, test, API, migration, frontend, and infrastructure filenames currently
+include empty scaffolds; a filename supplies no missing contract.
+
+If required behavior, schema, API, cross-module communication, configuration,
+security, deployment, or business policy is missing or conflicting, **stop before
+editing affected files**, report `BLOCKED`, identify the missing information and
+why it is needed, and request the smallest clarification. Follow the
+[Blocker Protocol](AGENTS.md#blocker-protocol). Do not invent a project-specific
+value or select a framework default to resolve the missing decision.
+
+Governance edits require explicit authorization. Original reference artifacts
+are immutable unless their modification is explicitly requested.
+
+## Repository Structure and Code Organization
+
+Use [docs/repository-structure.md](docs/repository-structure.md) for exact
+locations. Preserve the approved directories, packages, module boundaries, and
+filenames.
+
+| Change | Approved location |
+| --- | --- |
+| Backend features | Owning module under `backend/src/main/java/com/codemastery/modules/`. |
+| Schema migrations / backend tests | `backend/src/main/resources/db/migration/` / `backend/src/test/`. |
+| Frontend / E2E | Approved feature structure under `frontend/` / tests and fixtures under `e2e/`. |
+| Compose / deployment | `infrastructure/`; service Dockerfiles stay in `backend/` or `frontend/`. |
+| Repository collaboration / workflows | `.github/`. |
+| Seed data / materials | `sample-data/seed/` / `sample-data/materials/`. |
+| Documentation / API specification | `docs/` / `docs/api/openapi.yaml`. |
+
+These locations describe responsibility, not completed functionality. Do not add
+parallel structures or relocate files for stylistic preference.
+
+## Development Workflow
+
+Use a documented issue/task or approved requirement, a focused branch,
+implementation, relevant local validation, a pull request, code review, and
+merge into `main`. CI is part of this workflow once executable workflows exist.
+
+- Create a dedicated branch from `main` for each logical change; avoid direct
+  commits to `main` in the normal workflow.
+- Keep the branch current when `main` advances before review.
+- Keep changes focused and preserve attributable contribution history.
+- Coding agents must follow AGENTS.md and task-specific authorization for Git
+  operations. A branch/commit/PR convention does not authorize staging, committing,
+  pushing, merging, or rewriting history.
+
+## Branch Naming
+
+Use lowercase `type/short-description` names with hyphen-separated descriptions.
+
+| Prefix | Purpose |
+| --- | --- |
+| `feature/` | New functionality. |
+| `fix/` | Bug fix. |
+| `docs/` | Documentation. |
+| `refactor/` | Behavior-preserving restructuring. |
+| `test/` | Automated tests. |
+| `chore/` | Build, CI, dependencies, tooling, or maintenance. |
+
+Examples: `feature/course-enrolment`, `fix/enrol-hidden-course`,
+`docs/update-setup`, `test/mastery-routing`.
+
+## Commit Messages
+
+Use Conventional Commits: `type(scope): description`. Supported types are
+`feat`, `fix`, `docs`, `refactor`, `test`, and `chore`; the branch
+prefix `feature/` corresponds to commit type `feat`.
+
+Use concise English, an affected module/technical scope where appropriate, and
+the contributor's own Git identity. Keep each commit focused. Examples:
+`feat(auth): add password reset flow` and
+`docs(readme): clarify foundation status`.
+
+## Pull Requests
+
+Complete [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md).
+Explain the final behavior/change and its purpose, link the issue or requirement,
+and identify affected modules/files and any unresolved limitation.
+
+- Report exact validation commands, working directories, and actual results.
+  State when a test was not run, unavailable, or unnecessary.
+- Explain configuration, dependency, migration, API, security, and cross-module
+  changes where applicable, including the approved contracts they follow.
+- Update affected documentation in the same logical change.
+- Include appropriate evidence for visible UI changes when implemented.
+- Record actual AI assistance and third-party service use when disclosure is
+  affected; do not fabricate tools, services, or results.
+
+Before review, inspect the diff, run applicable checks, verify scope/secret
+handling, and account for relevant changes in `main`. Address review feedback
+within the PR. Mark inapplicable template items `N/A` with a reason rather than
+claiming a check passed.
+
+## Issue Templates
+
+Use the [feature/task template](.github/ISSUE_TEMPLATE/feature.md) for new work and
+the [bug-report template](.github/ISSUE_TEMPLATE/bug-report.md) for defects.
+Reference the relevant approved user story/acceptance criterion or requirement
+when one exists. Describe current behavior, requested behavior, authorized scope,
+dependencies, and missing contracts. Do not treat an unimplemented scaffold as
+an existing user flow.
+
+## CI Expectations
+
+GitHub Actions is approved, but `.github/workflows/ci.yml` is currently empty.
+No executable CI jobs or automated CI results are established by this scaffold.
+
+Run the relevant supported local checks and report their results. Mark CI
+validation unavailable while workflows are empty; never mark it as passed.
+When implemented, actual workflow files define the checks to run and failures to
+resolve. Do not invent job names or require nonexistent frontend/E2E/deployment
+automation.
+
+## Backend Guidelines
+
+The approved backend is one Spring Boot 4.1.1 application on Java 25 LTS.
+The six modules are `auth`, `course`, `assessment`, `adaptive`,
+`interaction`, and `admin`. Their implementation remains scaffolded.
+Follow [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md) for
+ownership, encapsulation, approved interactions, and layering:
+
+| Layer | Responsibility |
+| --- | --- |
+| `api` | Controllers, request/response DTOs, and API input validation. |
+| `application` | Use cases, orchestration, transactions, and approved ports/events. |
+| `domain` | Domain models and business rules/invariants. |
+| `infrastructure` | Persistence adapters and technical integrations. |
+
+Keep business logic out of controllers and persistence entities out of REST
+responses. Enforce backend authorization independently of frontend guards and
+use centralized error handling where applicable. Cross-module communication
+requires an approved public application interface, port, or event; do not access
+internals or invent a new interface to avoid a blocker.
+
+REST contracts must be approved before dependent implementation. The current
+OpenAPI file is empty. When public API behavior changes, synchronize controllers,
+DTOs, frontend clients/types, and OpenAPI.
+
+Before a dependency change, inspect `pom.xml`, check existing capability,
+confirm the approved need and compatibility, prefer current BOM management,
+avoid overlapping libraries, and explain any new production dependency.
+A new technology/architectural choice requires approval.
+
+## Adaptive Learning Development Rules
+
+[docs/adaptive-learning.md](docs/adaptive-learning.md) records the approved
+rule-based design and deferred implementation contracts; it does not establish
+an implemented engine.
+
+Future implementation must preserve course-scoped acyclic skills, the exact four
+mastery states, configurable approved thresholds, explainable recommendations,
+canonical course order, and the prerequisite no-hard-block rule. Quiz results
+drive real-time mastery updates; manual file-submission grading does not.
+Mastery and related `LessonProgress` changes must be atomic. Interaction owns
+in-app notifications, and reporting does not own adaptive decisions.
+
+Use approved event/public contracts and deterministic tests. Concrete thresholds,
+scoring/routing formulas, difficulty mappings, event payloads, and execution
+details remain deferred. Update the adaptive design when approved behavior changes.
+
+## Frontend Guidelines
+
+React + TypeScript + Vite + Material UI and React Flow are approved. Frontend
+files, package configuration, routes, and guards currently remain empty scaffolds.
+
+Follow the approved feature-oriented structure; place only genuinely shared code
+under `shared/`. Reuse implemented components and routing mechanisms when they
+exist. Synchronize clients/types with approved APIs, preserve responsive behavior,
+and keep all user-facing text in English. Frontend guards never replace backend
+authorization. Never expose secrets in frontend source or `VITE_*` variables.
+Use commands from implemented package configuration when available.
+
+## Database and Migration Guidelines
+
+[docs/data-model.md](docs/data-model.md) is conceptual. Physical identifiers,
+columns, types, constraints, indexes, and other deferred choices require approval
+before schema or mapping implementation. Current migrations are empty scaffolds.
+
+Flyway owns schema evolution under `backend/src/main/resources/db/migration/`.
+Use new versioned migrations; never edit a migration that may have been applied.
+Keep migrations, JPA mappings/entities, repositories, and constraints consistent
+and test relied-upon persistence behavior. Update the data model with approved
+changes. Keep seed/demo SQL under `sample-data/seed/` and materials under
+`sample-data/materials/`, separate from schema migrations.
+
+## Object Storage Guidelines
+
+MinIO/S3-compatible storage is approved for slides, attachments, and submissions.
+Domain data and file references belong in PostgreSQL. Storage implementation
+remains scaffolded.
+
+Use the approved storage abstraction in its approved location and enforce
+authorization/ownership before protected file operations. Backend application
+credentials use `STORAGE_ACCESS_KEY` and `STORAGE_SECRET_KEY`; MinIO root/admin
+credentials are conceptually separate. User provisioning, buckets/policies, and
+object-key rules require their approved contracts. Video uses external embed
+links; hosting/transcoding is outside scope.
+
+## Testing Guidelines
+
+Every behavior change needs relevant automated tests unless testing is genuinely
+unnecessary. Use the approved JUnit 5 + Mockito backend stack and integration
+tests for persistence, transactions, module integration, configuration, or
+infrastructure behavior. Adaptive tests must be deterministic. Playwright is
+approved for main E2E flows when E2E configuration is implemented.
+
+The Maven build supports `./mvnw test` and broader `./mvnw verify` from
+`backend/`, with Surefire/Failsafe configuration and Testcontainers PostgreSQL
+dependencies. See [docs/setup.md](docs/setup.md) for commands and prerequisites.
+Backend test files and E2E configuration are currently empty. `docs/testing.md`
+is also empty; it provides no test procedure or results yet.
+
+Run the narrowest relevant validation first. Report executed checks accurately,
+and distinguish a successful build from feature-test coverage. For documentation
+changes, appropriate link/content/diff checks can be sufficient; explain why
+automated behavior tests were unnecessary. Required checks that cannot run must
+be reported with their limitation, not claimed successful.
+
+## Secrets and Sensitive Data
+
+Real environment files, passwords, tokens, keys, storage credentials, and real
+demo/lecturer credentials must never be committed or included in issues, logs,
+or screenshots. Redact sensitive evidence and personal/academic records.
+Use [.env.example](.env.example) as the safe template and keep local `.env`
+files untracked.
+
+Follow [the environment contract](docs/setup.md): PostgreSQL `POSTGRES_*`
+initialization and backend `DB_*` credentials are distinct, as are MinIO
+`MINIO_ROOT_*` administration and backend `STORAGE_*` credentials. They are
+not implicitly interchangeable. Existing defaults are not approved production
+or business policy.
+
+Update the template and setup documentation when supported variables change.
+If a secret is exposed, notify the team, coordinate rotation/revocation and
+authorized remediation, and remember that deletion or ignore rules do not remove
+committed history. Do not perform unauthorized history rewriting.
+
+Respect privacy and content copyright. Use original or properly licensed
+materials, and share actual demo credentials only through the approved submission
+or communication channel.
+
+## Documentation Changes
+
+Keep documentation synchronized with the same logical change and describe only
+actual implementation, approved design, and explicitly pending work.
+
+| Change | Relevant documentation |
+| --- | --- |
+| Setup/environment | `docs/setup.md`, `.env.example`; README when entry-point/status information changes. |
+| Approved architecture/module boundaries | `docs/architecture.md`, `docs/decisions/`; governance changes require explicit authorization. |
+| Data/schema | `docs/data-model.md`. |
+| Adaptive behavior/evaluation | `docs/adaptive-learning.md`. |
+| Testing / deployment | `docs/testing.md` / `docs/deployment.md` when implemented. |
+| Public APIs | `docs/api/openapi.yaml` and affected clients/types. |
+| Product overview/current status/stack | `README.md`. |
+
+Grading documentation, reports, slides, presentation, demo, and Q&A must be in
+English. Preserve the course-required disclosure of actual AI-assisted
+development and third-party services, including purpose and use. See
+[the known disclosure](README.md#ai-and-third-party-service-disclosure).
+Do not imply the adaptive engine uses AI/ML.
+
+## Definition of Done
+
+Apply the following to the change; identify inapplicable or unavailable items and
+their reasons instead of checking them as passed.
+
+- [ ] Requested behavior/documentation is complete within the authorized scope.
+- [ ] Mandatory requirements, approved design/structure, and contracts are respected.
+- [ ] Relevant tests/checks were added or updated where needed and actually passed.
+- [ ] Required implemented CI checks passed, or current CI unavailability is reported.
+- [ ] Affected API, data-model, environment, and other documentation is synchronized.
+- [ ] No secrets, sensitive local files, or unrelated changes were introduced.
+- [ ] No unsupported project-specific decision or unapproved dependency/technology was introduced.
+- [ ] AI/third-party disclosure is accurate where affected.
+- [ ] Review feedback and unresolved limitations/blockers are accounted for.
+- [ ] The change is focused, reviewable, and ready for the normal team review/merge workflow.
