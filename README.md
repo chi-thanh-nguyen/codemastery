@@ -112,7 +112,7 @@ Follow the fixed [approved repository structure](docs/repository-structure.md).
 | `frontend/` | Implemented build/bootstrap foundation with approved feature-oriented scaffolds. |
 | `e2e/` | Playwright test/configuration scaffold. |
 | `infrastructure/` | Local Compose runtime configuration and a VM deployment scaffold. |
-| `.github/` | Collaboration templates and the workflow scaffold. |
+| `.github/` | Collaboration templates and the implemented initial backend/frontend CI workflow. |
 | `sample-data/` | Reserved seed SQL and learning-material locations. |
 | `docs/` | Approved design, setup documentation, references, and pending specifications. |
 

@@ -98,7 +98,7 @@ If there is an impact, check what applies:
 
 ## Testing Plan
 
-- [ ] Unit / business-logic tests (JUnit 5 + Mockito)
+- [ ] Unit / business-logic tests (JUnit Jupiter 6 + Mockito; JUnit version managed by Spring Boot)
 - [ ] Integration tests (persistence, transactions, module integration, configuration)
 - [ ] End-to-end test update (Playwright)
 - [ ] Deterministic Adaptive Learning scenarios (e.g. cycle rejection, mastery transitions, Test-out, Remedial routing, recommendation reasons, prerequisite warnings, no-hard-block)

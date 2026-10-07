@@ -11,8 +11,9 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
  * {@code com.codemastery.modules} and are deployed as a single Spring Boot application.
  * Component, entity and repository scanning starts from this package.
  *
- * <p>{@code @ConfigurationPropertiesScan} registers the typed configuration classes bound to the
- * {@code codemastery.*} properties defined in {@code application.yml}.
+ * <p>{@code @ConfigurationPropertiesScan} enables discovery of typed configuration classes
+ * as they are implemented, including bindings for {@code codemastery.*} properties in
+ * {@code application.yml}.
  */
 @SpringBootApplication
 @ConfigurationPropertiesScan

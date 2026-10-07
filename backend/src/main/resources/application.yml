@@ -1,8 +1,10 @@
 # CodeMastery backend configuration.
 #
 # Rules:
-#  - Secrets (DB password, JWT secret, storage keys) have NO default value on purpose:
-#    the application fails fast when they are missing. Never commit real values.
+#  - Secrets (DB password, JWT secret, storage keys) have NO committed default value.
+#    Active Spring datasource infrastructure consumes DB_PASSWORD. JWT/storage/custom
+#    consumers and typed binding remain future feature work; declaring placeholders
+#    alone does not enforce missing-secret validation at startup. Never commit real values.
 #  - Every variable used here must be listed with a placeholder in the root .env.example.
 #  - Environment variables always take precedence over this file.
 
@@ -12,7 +14,7 @@ spring:
 
   config:
     # Local development convenience: load the (untracked) root .env file when it exists.
-    # Use plain KEY=value lines without quotes. Ignored when the file is absent (Docker, CI, VM).
+    # Follow the shared Spring/Compose value format in docs/setup.md. Absent files are ignored.
     import: "optional:file:./.env[.properties],optional:file:../.env[.properties]"
 
   datasource:
@@ -45,7 +47,7 @@ server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
   error:
-    include-message: never         # API errors are produced by GlobalExceptionHandler
+    include-message: never         # centralized feature API error handling awaits GlobalExceptionHandler implementation
     include-binding-errors: never
     include-stacktrace: never
 
