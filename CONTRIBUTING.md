@@ -59,7 +59,9 @@ parallel structures or relocate files for stylistic preference.
 
 Use a documented issue/task or approved requirement, a focused branch,
 implementation, relevant local validation, a pull request, code review, and
-merge into `main`. CI is part of this workflow once executable workflows exist.
+merge into `main`. Initial CI is implemented: backend runs `./mvnw verify` from
+`backend/`, and frontend runs `npm ci` then `npm run build` from `frontend/`.
+Feature-specific automated test coverage remains future work.
 
 - Create a dedicated branch from `main` for each logical change; avoid direct
   commits to `main` in the normal workflow.

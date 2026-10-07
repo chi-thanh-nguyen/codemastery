@@ -80,8 +80,10 @@
             <scope>runtime</scope>
         </dependency>
         <!--
-            JJWT does not support Jackson 3 (the default in Spring Boot 4), so its JSON
-            serializer is Gson to avoid a second Jackson stack on the classpath.
+            Spring Boot 4 uses Jackson 3 as its primary application stack. JJWT uses
+            Gson here rather than introducing Jackson 2 specifically for JJWT.
+            Other dependencies, such as springdoc/Swagger, may still bring Jackson 2
+            compatibility libraries onto the resolved classpath.
         -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

@@ -72,6 +72,28 @@ and `.env.*` while retaining `.env.example`. Never commit secrets, actual storag
 keys, or real user/demo/lecturer credentials. Never expose secrets through
 `VITE_*` variables.
 
+### Shared Spring / Compose Value Format
+
+The root `.env` is consumed by two parsers: Spring imports it as Java
+`.properties`, while Docker Compose reads it as an env/dotenv file. For values
+intended for both host Spring execution and Compose, use conservative unquoted
+ASCII `KEY=value` lines. Unquoted syntax alone does not ensure that both parsers
+interpret every value identically.
+
+For secrets, use only ASCII letters, digits, `_`, `-`, and `.` while retaining
+the required random strength. A simple recommended generation command is:
+
+```bash
+openssl rand -hex 32
+```
+
+This produces 256 bits of random data encoded as hexadecimal, avoiding
+cross-parser escaping and interpolation differences. Do not place backslashes,
+`$` interpolation sequences, whitespace, quotes, or inline-comment-like syntax
+directly into shared values without understanding both parsers. Their escaping,
+interpolation, quoting, whitespace, and comment rules differ. Do not use shell
+`export` statements or source `.env` as a shell script.
+
 ### Current Backend Loading Behavior
 
 `application.yml` declares this Spring config import:
@@ -88,10 +110,9 @@ started from `backend/` can load it through `../.env`. Both imports are optional
 so an absent file is allowed. If both files exist, the later `../.env` import
 takes precedence for overlapping file properties.
 
-Spring reads these extensionless files as Java properties. Use unquoted
-`KEY=value` lines, without shell `export` statements. The file is configuration
-input rather than a shell script. Process environment variables take precedence
-over file values. Optional imports do not provide defaults for required secrets.
+Spring reads these extensionless files as Java properties. Follow the shared
+value format above. Process environment variables take precedence over file
+values. Optional imports do not provide defaults for required secrets.
 Compose supplies the backend allowlist as process environment values, overriding
 host-oriented file values; the local `.env` is not mounted into either image.
 

@@ -51,10 +51,12 @@ can be enabled only when all published lessons are mapped and each skill has the
 required minimum question coverage. The numeric minimum and detailed coverage
 policy remain deferred.
 
-The conceptual relationships are recorded in [the data model](data-model.md).
-This document establishes no traversal order, graph algorithm, SQL representation,
-cycle-detection implementation, separate graph database, or prerequisite
-depth/weighting rule.
+The conceptual relationships and approved initial PostgreSQL schema are recorded
+in [the data model](data-model.md#11-approved-initial-postgresql-physical-baseline).
+V001–V006 implement that physical baseline, including skills, prerequisites, and
+lesson/question mappings. Traversal order, graph and cycle-detection algorithms,
+and prerequisite depth/weighting rules remain deferred. The design does not
+select a separate graph database.
 
 ## 4. Mastery Model
 
@@ -65,6 +67,10 @@ The mastery states are exactly:
 - `Mastered`
 - `Weak`
 
+The approved physical baseline stores categorical mastery in
+`learner_skill_masteries.state` as `unknown`, `learning`, `mastered`, and `weak`.
+It selects no numeric mastery field.
+
 Assessment evidence is mapped to these states using configurable thresholds.
 The resulting mastery state is an input to adaptive decisions. Threshold values
 are configuration/implementation details requiring approval before dependent
@@ -72,8 +78,11 @@ implementation. They must be applied consistently across assessment processing,
 mastery evaluation, adaptive decisions, and evaluation scenarios.
 
 The architecture describes course `adaptive_settings` as JSON configuration for
-mastery thresholds. As explained in the data model, that conceptual choice does
-not define JSON keys, physical storage, or numeric values.
+mastery thresholds. The approved physical baseline persists it as PostgreSQL
+`jsonb`, with no database default. The database constraint permits SQL NULL while
+adaptation is disabled and requires a non-NULL JSON object when it is enabled.
+Adaptive-settings JSON keys, numeric values, and application validation remain
+deferred; the physical representation does not supply them.
 
 No score ranges, percentages, weighting formulas, decay functions, confidence
 scores, attempt aggregation, historical weighting, or state-transition formulas
@@ -131,9 +140,11 @@ The approved architecture establishes that current mastery influences the
 selected difficulty of a practice quiz. Questions have difficulty tags that
 support this assessment context.
 
-The exact difficulty catalogue, state-to-difficulty mapping, question-selection
-algorithm, probability distributions, and minimum/maximum quiz question counts
-are **DEFERRED**. No specific levels or mapping are implied by this document.
+The approved persisted difficulty catalogue is `easy`, `medium`, and `hard`, as
+recorded in the physical data model. State-to-difficulty mapping,
+question-selection algorithms, probability distributions, and minimum/maximum
+quiz question counts remain **DEFERRED**. The catalogue does not establish a
+mapping from mastery states to difficulty levels.
 
 ## 8. Assessment Inputs and Mastery Updates
 
@@ -147,8 +158,9 @@ completion grades, but do not directly trigger real-time mastery updates in
 Adaptive. This preserves the approved distinction between quiz evidence and
 manual grading.
 
-Scoring and aggregation across questions or attempts remain undefined. Neither
-the conceptual entities nor the input flow supply those formulas.
+Mastery scoring and evidence aggregation across questions or attempts remain
+undefined. The approved initial quiz-grading baseline in the data model does not
+supply those mastery formulas.
 
 ## 9. Integration and Transactional Consistency
 
@@ -191,9 +203,11 @@ history information comprises:
 - Timestamp.
 
 `PathRecommendation` represents this history in the conceptual data model.
-Instructor access to learner recommendation history supports inspection of the
-adaptive decisions. No additional persisted fields or physical schema are
-established here.
+The approved physical baseline implements it in `path_recommendations`, retaining
+enrollment, target lesson, recommendation type, reason, and timestamp. Instructor
+access to learner recommendation history supports inspection of adaptive
+decisions. Recommendation creation and its application/API contracts remain
+deferred.
 
 ## 11. Course and Progress Semantics
 
@@ -208,7 +222,7 @@ The approved learning acceptance criteria count lessons skipped through proven
 mastery as completed and label them as mastered. Test-out and remedial guidance
 can therefore change learner-specific progression while the instructor-defined
 structure remains intact. Course-scoped recommendations, mastery, and progress
-must remain consistent with [the conceptual data model](data-model.md).
+must remain consistent with [the data model](data-model.md).
 
 ## 12. Evaluation Plan
 
@@ -278,6 +292,11 @@ learning is outside the approved scope.
 
 ## 15. Deferred Adaptive Decisions
 
+The difficulty catalogue, initial physical schema, PostgreSQL JSONB settings
+representation, categorical mastery persistence, and recommendation-history table
+are approved and resolved in the data model. They do not resolve the adaptive
+behavior below.
+
 The following remain **DEFERRED** until approved before dependent implementation:
 
 | Area | Undefined details |
@@ -285,10 +304,10 @@ The following remain **DEFERRED** until approved before dependent implementation
 | Mastery classification | Concrete threshold values, scoring formula, and state-transition mechanics beyond the four approved conceptual states. |
 | Evidence handling | Aggregation across questions/attempts, weighting, historical evidence handling, and any additional calculation rules. |
 | Skill graph implementation | Traversal and cycle-detection implementation; no prerequisite depth/weighting policy is established. |
-| Practice/coverage | Difficulty levels and state-to-difficulty mapping, question-selection rules, quiz counts, and numeric minimum question/coverage requirements. |
+| Practice/coverage | State-to-difficulty mapping, question-selection rules, quiz counts, and numeric minimum question/coverage requirements. |
 | Routing/Test-out | Complete skip eligibility formula, remedial-selection algorithm, multiple-prerequisite precedence, tie-breaking, and recommendation prioritization. |
 | Integration | Concrete public signatures and event payload schemas, listener/execution timing, retry/idempotency behavior, and detailed transaction propagation. |
-| Persistence/configuration | Exact persisted representation beyond the conceptual data model, concrete adaptive-settings keys, and physical schema details. |
+| Adaptive configuration | Concrete adaptive-settings JSON keys, numeric values, and application validation beyond the approved JSONB database constraint. |
 | API contracts | Public operations and request/response contracts, to be recorded in the approved OpenAPI specification before use. |
 
 Deferral preserves the already-approved behavioral intents and invariants; it
@@ -327,8 +346,9 @@ implemented. This document supplies no speculative classes or algorithms.
 - [Canonical approved architecture](references/originals/approved-architecture.docx)
   and [architecture Markdown](architecture.md), especially sections 4.7, 5–7,
   and 9: approved acceptance criteria, flow, integration, evaluation, and concepts.
-- [Conceptual data model](data-model.md): skills, progress, mastery,
-  recommendations, assessment evidence, and deferred physical representations.
+- [Data model](data-model.md), especially sections 11–12: skills, progress,
+  mastery, recommendations, assessment evidence, the approved initial physical
+  baseline, and still-deferred feature contracts.
 - [Module-boundary ADR](decisions/001-modular-monolith-module-boundaries.md):
   encapsulation, ownership, approved interactions, and transactional consistency.
 - [Repository structure](repository-structure.md): approved component,
