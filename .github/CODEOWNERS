@@ -1,0 +1,173 @@
+# =============================================================================
+# CodeMastery CODEOWNERS
+# =============================================================================
+# GitHub applies the last matching rule. Specific overrides follow broader rules.
+# Unlisted paths retain their existing unassigned ownership.
+
+# -----------------------------------------------------------------------------
+# Repository Governance / Root Files
+# -----------------------------------------------------------------------------
+/AGENTS.md                                                                                           @chi-thanh-nguyen
+/README.md                                                                                           @chi-thanh-nguyen
+/CONTRIBUTING.md                                                                                     @chi-thanh-nguyen
+/.gitignore                                                                                          @chi-thanh-nguyen
+/.env.example                                                                                        @chi-thanh-nguyen
+
+# -----------------------------------------------------------------------------
+# GitHub / CI / Collaboration
+# -----------------------------------------------------------------------------
+/.github/CODEOWNERS                                                                                  @chi-thanh-nguyen
+/.github/ISSUE_TEMPLATE/                                                                             @chi-thanh-nguyen
+/.github/PULL_REQUEST_TEMPLATE.md                                                                    @chi-thanh-nguyen
+/.github/workflows/                                                                                  @chi-thanh-nguyen
+
+# -----------------------------------------------------------------------------
+# Backend
+# -----------------------------------------------------------------------------
+
+# Backend — Build / Bootstrap
+/backend/pom.xml                                                                                     @chi-thanh-nguyen
+/backend/mvnw                                                                                        @chi-thanh-nguyen
+/backend/mvnw.cmd                                                                                    @chi-thanh-nguyen
+/backend/.mvn/wrapper/                                                                               @chi-thanh-nguyen
+/backend/src/main/java/com/codemastery/CodeMasteryApplication.java                                   @chi-thanh-nguyen
+
+# Backend — Auth
+/backend/src/main/java/com/codemastery/modules/auth/                                                 @duyduyit
+
+# Backend — Course / Learning
+/backend/src/main/java/com/codemastery/modules/course/                                               @TamiaoNguyen
+
+# Backend — Assessment
+/backend/src/main/java/com/codemastery/modules/assessment/                                           @minhtan29042006
+
+# Backend — Adaptive
+/backend/src/main/java/com/codemastery/modules/adaptive/                                             @thanhtran0311
+
+# Backend — Interaction / Notification
+/backend/src/main/java/com/codemastery/modules/interaction/                                          @tihh647-ui
+
+# Backend — Admin / Reporting
+/backend/src/main/java/com/codemastery/modules/admin/                                                @tihh647-ui
+
+# Backend — Common / Shared Infrastructure
+/backend/src/main/java/com/codemastery/common/                                                       @chi-thanh-nguyen
+/backend/src/main/java/com/codemastery/common/validation/StrongPassword.java                         @duyduyit
+/backend/src/main/java/com/codemastery/infrastructure/storage/                                       @chi-thanh-nguyen
+
+# Backend — Configuration / Database Migrations
+/backend/src/main/resources/application.yml                                                          @chi-thanh-nguyen
+/backend/src/main/resources/db/migration/                                                            @chi-thanh-nguyen
+
+# Backend — Module Tests
+/backend/src/test/java/com/codemastery/modules/auth/                                                 @duyduyit
+/backend/src/test/java/com/codemastery/modules/course/                                               @TamiaoNguyen
+/backend/src/test/java/com/codemastery/modules/assessment/                                           @minhtan29042006
+/backend/src/test/java/com/codemastery/modules/adaptive/                                             @thanhtran0311
+/backend/src/test/java/com/codemastery/modules/interaction/                                          @tihh647-ui
+/backend/src/test/java/com/codemastery/modules/admin/                                                @tihh647-ui
+
+# Backend — Integration Tests
+/backend/src/test/java/com/codemastery/integration/AuthorizationIntegrationTest.java                 @duyduyit
+/backend/src/test/java/com/codemastery/integration/AdaptiveLearningFlowIntegrationTest.java          @thanhtran0311
+/backend/src/test/java/com/codemastery/integration/MasteryProgressTransactionIntegrationTest.java    @thanhtran0311
+/backend/src/test/java/com/codemastery/integration/repository/CourseRepositoryIntegrationTest.java   @TamiaoNguyen
+
+# Backend — Shared Test Infrastructure
+/backend/src/test/java/com/codemastery/integration/AbstractIntegrationTest.java                      @chi-thanh-nguyen
+/backend/src/test/resources/application-test.yml                                                     @chi-thanh-nguyen
+
+# Backend — Test Support / Adaptive Scenarios
+/backend/src/test/java/com/codemastery/support/TestClockConfig.java                                  @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/support/ScenarioLoader.java                                   @thanhtran0311
+/backend/src/test/java/com/codemastery/support/fixtures/CourseFixtures.java                          @TamiaoNguyen
+/backend/src/test/java/com/codemastery/support/fixtures/SkillGraphFixtures.java                      @thanhtran0311
+/backend/src/test/resources/adaptive-scenarios/                                                      @thanhtran0311
+
+# -----------------------------------------------------------------------------
+# Frontend
+# -----------------------------------------------------------------------------
+
+# Frontend — Build / Bootstrap
+/frontend/index.html                                                                                 @heizseung
+/frontend/package.json                                                                               @heizseung
+/frontend/package-lock.json                                                                          @heizseung
+/frontend/tsconfig.json                                                                              @heizseung
+/frontend/vite.config.ts                                                                             @heizseung
+/frontend/src/main.tsx                                                                               @heizseung
+/frontend/src/vite-env.d.ts                                                                          @heizseung
+
+# Frontend — Application Shell / Shared
+/frontend/public/favicon.svg                                                                         @heizseung
+/frontend/src/app/                                                                                   @heizseung
+/frontend/src/routes/                                                                                @heizseung
+/frontend/src/layouts/                                                                               @heizseung
+/frontend/src/shared/                                                                                @heizseung
+
+# Frontend — Authentication
+/frontend/src/features/auth/                                                                         @heizseung
+
+# Frontend — Catalogue / Learning
+/frontend/src/features/catalogue/                                                                    @heizseung
+/frontend/src/features/learning/                                                                     @heizseung
+
+# Frontend — Assessment
+/frontend/src/features/assessment/                                                                   @heizseung
+
+# Frontend — Mastery / Adaptive
+/frontend/src/features/mastery/                                                                      @heizseung
+
+# Frontend — Interaction
+/frontend/src/features/interaction/                                                                  @heizseung
+
+# Frontend — Instructor
+/frontend/src/features/instructor/                                                                   @heizseung
+
+# Frontend — Administration
+/frontend/src/features/admin/                                                                        @heizseung
+
+# -----------------------------------------------------------------------------
+# End-to-End Tests
+# -----------------------------------------------------------------------------
+/e2e/                                                                                                @heizseung
+
+# -----------------------------------------------------------------------------
+# Infrastructure
+# -----------------------------------------------------------------------------
+/infrastructure/                                                                                     @tihh647-ui
+
+# Service Packaging / Runtime
+/backend/Dockerfile                                                                                  @tihh647-ui
+/backend/.dockerignore                                                                               @tihh647-ui
+/frontend/Dockerfile                                                                                 @tihh647-ui
+/frontend/.dockerignore                                                                              @tihh647-ui
+/frontend/nginx.conf                                                                                 @tihh647-ui
+
+# -----------------------------------------------------------------------------
+# Sample Data
+# -----------------------------------------------------------------------------
+/sample-data/README.md                                                                               @chi-thanh-nguyen
+/sample-data/materials/                                                                              @TamiaoNguyen
+/sample-data/seed/01-users.sql                                                                       @duyduyit
+/sample-data/seed/02-course-python-fundamentals.sql                                                  @TamiaoNguyen
+/sample-data/seed/03-skill-graph-and-lesson-mapping.sql                                              @thanhtran0311
+/sample-data/seed/04-questions-quizzes-assignments.sql                                               @minhtan29042006
+/sample-data/seed/05-learner-profiles.sql                                                            @thanhtran0311
+
+# -----------------------------------------------------------------------------
+# Documentation
+# -----------------------------------------------------------------------------
+
+# Governance / Design / Development
+/docs/requirements.md                                                                                @chi-thanh-nguyen
+/docs/architecture.md                                                                                @chi-thanh-nguyen
+/docs/repository-structure.md                                                                        @chi-thanh-nguyen
+/docs/decisions/                                                                                     @chi-thanh-nguyen
+/docs/data-model.md                                                                                  @chi-thanh-nguyen
+/docs/adaptive-learning.md                                                                           @chi-thanh-nguyen
+/docs/setup.md                                                                                       @chi-thanh-nguyen
+/docs/testing.md                                                                                     @chi-thanh-nguyen
+
+# API / Deployment
+/docs/api/openapi.yaml                                                                               @chi-thanh-nguyen
+/docs/deployment.md                                                                                  @chi-thanh-nguyen
