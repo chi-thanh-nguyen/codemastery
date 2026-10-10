@@ -488,3 +488,7 @@ Both jobs cache package-manager downloads using the committed build inputs.
 This workflow configuration does not establish successful remote CI execution or
 backend feature-test coverage. CI does not run Compose. E2E and deployment
 commands remain pending until their configuration is implemented.
+
+## Authorized Interim configuration targets (implementation pending)
+
+See [ADR002](decisions/002-interim-delegated-contracts.md) for CT38.core/CT01.core. The current application.yml and .env.example remain unchanged. The approved future Auth consumer validates64-hex-character runtime JWT_SECRET, fixed issuer/audience and PT15M lifetime; the current PT1H fallback is existing configuration rather than approved security policy. Keep local host/Compose addresses as currently documented; only VITE_API_BASE_URL is public frontend configuration. Consumed secrets have no defaults and fail validation if absent/placeholder. Optional unused integrations are not made prerequisites for a pure local calculator. Generate test secrets ephemerally. Production origins/credentials require separate authority.

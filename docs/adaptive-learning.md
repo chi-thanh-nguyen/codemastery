@@ -84,9 +84,10 @@ adaptation is disabled and requires a non-NULL JSON object when it is enabled.
 Adaptive-settings JSON keys, numeric values, and application validation remain
 deferred; the physical representation does not supply them.
 
-No score ranges, percentages, weighting formulas, decay functions, confidence
-scores, attempt aggregation, historical weighting, or state-transition formulas
-are selected here.
+No production score ranges, weighting formulas, decay functions, confidence
+scores, attempt aggregation, historical weighting or state-transition formulas
+are selected here. The isolated Interim local prototype exception is defined
+in section14 and ADR002; it does not define persisted or Final mastery policy.
 
 ## 5. Adaptive Learning Flow
 
@@ -301,7 +302,7 @@ The following remain **DEFERRED** until approved before dependent implementation
 
 | Area | Undefined details |
 |---|---|
-| Mastery classification | Concrete threshold values, scoring formula, and state-transition mechanics beyond the four approved conceptual states. |
+| Mastery classification | Production/Final thresholds, scoring and transitions remain deferred. The isolated Interim-only count-ratio prototype is specified in section14; it does not select production settings. |
 | Evidence handling | Aggregation across questions/attempts, weighting, historical evidence handling, and any additional calculation rules. |
 | Skill graph implementation | Traversal and cycle-detection implementation; no prerequisite depth/weighting policy is established. |
 | Practice/coverage | State-to-difficulty mapping, question-selection rules, quiz counts, and numeric minimum question/coverage requirements. |
@@ -360,3 +361,9 @@ implemented. This document supplies no speculative classes or algorithms.
 The project source-of-truth hierarchy remains unchanged. This document records
 the approved adaptive design and its unresolved details without changing
 governance or immutable reference artifacts.
+
+## 14. Interim-only local calculation approval
+
+[ADR002](decisions/002-interim-delegated-contracts.md) records CT06.prototype and CT24.calculation as INTERIM_ONLY_DELEGATED_APPROVAL. One synthetic already-classified skill snapshot uses exact correctCount/answeredCount: absent evidence→Unknown; rate<1/2→Weak;1/2<=rate<3/4→Learning;rate>=3/4→Mastered. Thresholds are explicitly passed validated rational values, configurable for the local prototype. These demonstration choices are not empirically validated production policies or derived from the routing evaluation target.
+
+Use the existing calculator/classifier files with immutable nested types and existing categorical enum. No database, grading, event, clock, history, progress, routing or cross-module effect is approved. Settings JSON and Final algorithm remain deferred. Independently reviewed expected outcomes and actual reproducible execution are required before reporting accepted results. Implementation has not been performed by this documentation change.

@@ -186,3 +186,9 @@ The following remain planned, with no test-count or coverage-percentage claim:
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
+
+## Authorized Interim verification contracts
+
+[ADR002](decisions/002-interim-delegated-contracts.md) defines CT14.interim, CT36.I-results and the selected evidence mode. Use existing AuthServiceTest/JwtTokenProviderTest, AuthorizationIntegrationTest and MasteryCalculatorTest/MasteryStateClassifierTest locations and the approved PostgreSQL harness. The B5 placement decision selects CourseServiceTest.java in the existing modules/course test subtree and CourseCatalogueIntegrationTest.java in the existing integration subtree for a later authorized implementation task; no tests are created now. Do not repurpose enrolment tests for unrelated catalogue behavior. No new test framework or coverage percentage is selected.
+
+Run backend automated tests for newly implemented behavior and independently execute browser → REST → real PostgreSQL catalogue/Auth checks. Record exact revision, command, environment, input, expected/observed outputs, tester identity/time and failures. Pure mastery oracle cases include0/0 Unknown,49/100 Weak,50/100 Learning,74/100 Learning,75/100 Mastered and invalid/overflow-boundary cases in ADR002. These are self-authored expected outcomes until a different reviewer checks and reproduces them. No prototype feature tests or external browser workflow have been executed by this documentation task. Health/CI/unit success does not prove deployed acceptance.
