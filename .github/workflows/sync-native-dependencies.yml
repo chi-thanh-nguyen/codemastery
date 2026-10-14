@@ -1,0 +1,57 @@
+name: Native dependency projection
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Write the two derived fields (requires separate Leader activation)'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codemastery-project-3-native-dependencies
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    # Schedule is off by default. A separately authorized manual dry-run can
+    # validate a future credential before enabling scheduled writes. No PR event.
+    if: >-
+      github.repository == 'chi-thanh-nguyen/codemastery' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       vars.CODEMASTERY_DEPENDENCY_SYNC_ENABLED == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Offline reconciliation tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest discover -s .github/workflows -p 'test_sync_native_dependencies.py' -v
+      - name: Reconcile approved dependency fields
+        env:
+          GH_TOKEN: ${{ secrets.CODEMASTERY_PROJECT_SYNC_TOKEN }}
+          CODEMASTERY_DEPENDENCY_SYNC_ENABLED: ${{ vars.CODEMASTERY_DEPENDENCY_SYNC_ENABLED }}
+          APPLY_REQUESTED: ${{ github.event_name == 'schedule' || inputs.apply == true }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo 'Missing approved Project credential; no reconciliation attempted.'
+            exit 1
+          fi
+          args=(--output-dir "$RUNNER_TEMP/dependency-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")
+          if [[ "$APPLY_REQUESTED" == 'true' ]]; then
+            args+=(--apply)
+          fi
+          python3 .github/workflows/sync_native_dependencies.py "${args[@]}"
