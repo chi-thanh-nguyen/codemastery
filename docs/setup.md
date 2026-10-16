@@ -491,4 +491,44 @@ commands remain pending until their configuration is implemented.
 
 ## Authorized Interim configuration targets (implementation pending)
 
-See [ADR002](decisions/002-interim-delegated-contracts.md) for CT38.core/CT01.core. The current application.yml and .env.example remain unchanged. The approved future Auth consumer validates64-hex-character runtime JWT_SECRET, fixed issuer/audience and PT15M lifetime; the current PT1H fallback is existing configuration rather than approved security policy. Keep local host/Compose addresses as currently documented; only VITE_API_BASE_URL is public frontend configuration. Consumed secrets have no defaults and fail validation if absent/placeholder. Optional unused integrations are not made prerequisites for a pure local calculator. Generate test secrets ephemerally. Production origins/credentials require separate authority.
+See [ADR002](decisions/002-interim-delegated-contracts.md) for CT38.core/CT01.core. SH01 now defaults JWT_EXPIRATION to PT15M. AppConfig validates active datasource settings and exposes lazy, typed JWT/CORS/scheduler settings. Consuming JwtSettings requires a runtime64-hex-character JWT_SECRET, the fixed issuer/audience and exactly15-minute lifetime; an eager consumer fails initialization for invalid settings. Keep local host/Compose addresses as currently documented; only VITE_API_BASE_URL is public frontend configuration. Consumed secrets have no defaults and fail validation if absent/placeholder. Optional unused integrations are not made prerequisites for a pure local calculator. Generate test secrets ephemerally. Production origins/credentials require separate authority.
+
+## SH01 shared REST infrastructure handoff
+
+SH01 consumes the existing CT18.minimum and CT38.core decisions without changing
+ADR002. The current Leader implementation instruction separately delegates the
+SH01-local correlation and test-organization choices documented here; these are
+new delegated implementation decisions, not historical Leader ADR approvals.
+
+- AppConfig validates Boot DataSourceProperties and effective Hikari overrides
+  before initialization. Existing
+  spring.datasource overrides, including Testcontainers values, remain supported;
+  placeholder credentials, malformed PostgreSQL URLs and empty inputs fail. No
+  connection is opened by this validation and no datasource credentials are logged.
+- JwtSettings, CorsSettings and SchedulingSettings validate only when consumed
+  through dependency injection. Their presence does not activate Auth, CORS
+  enforcement or scheduling. JWT_SECRET has no fallback, is decoded from64 hex
+  characters and is redacted from the settings string representation. Storage,
+  reset and business-scheduler integrations remain outside this implementation.
+  VITE_API_BASE_URL remains a frontend consumer responsibility.
+- GlobalExceptionHandler applies CT18.minimum to MVC failures. The existing
+  OpenAPI response schemas remain unchanged; no API operation is implemented here.
+  Security filter-chain
+  responses remain an Auth handoff. Feature owners must translate only established
+  application conflicts; arbitrary database failures are not treated as duplicates.
+- PageResponse uses the five approved fields, defaults0/20, size1..100 and
+  overflow-safe total-page calculation. Consumers perform queries and pass the
+  actual totals/content; the envelope does not implement feature pagination.
+- Correlation uses a new server-generated UUID for each request. Inbound correlation
+  headers are ignored, including valid UUIDs; no HTTP response header or outbound
+  propagation contract is introduced. A private request attribute retains the ID
+  across servlet ASYNC/ERROR dispatches. Explicit filter registration covers
+  REQUEST, ASYNC and ERROR dispatches. Each dispatch restores its prior MDC
+  correlationId in finally. Arbitrary executor tasks are not automatically covered.
+  This avoids trusting client-controlled log values or selecting a new public API.
+
+Shared primitives are locally implemented. Real Auth, Course, browser, PostgreSQL
+feature and container integration still require the appropriate QA01/QA02/QA07/DP02
+verification. No production origin, deployment, secret value or academic submission
+is authorized or established by this handoff. Codex assisted this scoped SH01
+implementation and validation.
