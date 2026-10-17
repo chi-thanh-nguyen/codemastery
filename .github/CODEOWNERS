@@ -33,26 +33,26 @@
 /backend/src/main/java/com/codemastery/CodeMasteryApplication.java                                   @chi-thanh-nguyen
 
 # Backend — Auth
-/backend/src/main/java/com/codemastery/modules/auth/                                                 @duyduyit
+/backend/src/main/java/com/codemastery/modules/auth/                                                 @duyduyit @chi-thanh-nguyen
 
 # Backend — Course / Learning
-/backend/src/main/java/com/codemastery/modules/course/                                               @TamiaoNguyen
+/backend/src/main/java/com/codemastery/modules/course/                                               @TamiaoNguyen @chi-thanh-nguyen
 
 # Backend — Assessment
-/backend/src/main/java/com/codemastery/modules/assessment/                                           @minhtan29042006
+/backend/src/main/java/com/codemastery/modules/assessment/                                           @minhtan29042006 @chi-thanh-nguyen
 
 # Backend — Adaptive
-/backend/src/main/java/com/codemastery/modules/adaptive/                                             @thanhtran0311
+/backend/src/main/java/com/codemastery/modules/adaptive/                                             @thanhtran0311 @chi-thanh-nguyen
 
 # Backend — Interaction / Notification
-/backend/src/main/java/com/codemastery/modules/interaction/                                          @tihh647-ui
+/backend/src/main/java/com/codemastery/modules/interaction/                                          @tihh647-ui @chi-thanh-nguyen
 
 # Backend — Admin / Reporting
-/backend/src/main/java/com/codemastery/modules/admin/                                                @tihh647-ui
+/backend/src/main/java/com/codemastery/modules/admin/                                                @tihh647-ui @chi-thanh-nguyen
 
 # Backend — Common / Shared Infrastructure
 /backend/src/main/java/com/codemastery/common/                                                       @chi-thanh-nguyen
-/backend/src/main/java/com/codemastery/common/validation/StrongPassword.java                         @duyduyit
+/backend/src/main/java/com/codemastery/common/validation/StrongPassword.java                         @duyduyit @chi-thanh-nguyen
 /backend/src/main/java/com/codemastery/infrastructure/storage/                                       @chi-thanh-nguyen
 
 # Backend — Configuration / Database Migrations
@@ -60,18 +60,18 @@
 /backend/src/main/resources/db/migration/                                                            @chi-thanh-nguyen
 
 # Backend — Module Tests
-/backend/src/test/java/com/codemastery/modules/auth/                                                 @duyduyit
-/backend/src/test/java/com/codemastery/modules/course/                                               @TamiaoNguyen
-/backend/src/test/java/com/codemastery/modules/assessment/                                           @minhtan29042006
-/backend/src/test/java/com/codemastery/modules/adaptive/                                             @thanhtran0311
-/backend/src/test/java/com/codemastery/modules/interaction/                                          @tihh647-ui
-/backend/src/test/java/com/codemastery/modules/admin/                                                @tihh647-ui
+/backend/src/test/java/com/codemastery/modules/auth/                                                 @duyduyit @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/modules/course/                                               @TamiaoNguyen @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/modules/assessment/                                           @minhtan29042006 @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/modules/adaptive/                                             @thanhtran0311 @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/modules/interaction/                                          @tihh647-ui @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/modules/admin/                                                @tihh647-ui @chi-thanh-nguyen
 
 # Backend — Integration Tests
-/backend/src/test/java/com/codemastery/integration/AuthorizationIntegrationTest.java                 @duyduyit
-/backend/src/test/java/com/codemastery/integration/AdaptiveLearningFlowIntegrationTest.java          @thanhtran0311
-/backend/src/test/java/com/codemastery/integration/MasteryProgressTransactionIntegrationTest.java    @thanhtran0311
-/backend/src/test/java/com/codemastery/integration/repository/CourseRepositoryIntegrationTest.java   @TamiaoNguyen
+/backend/src/test/java/com/codemastery/integration/AuthorizationIntegrationTest.java                 @duyduyit @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/integration/AdaptiveLearningFlowIntegrationTest.java          @thanhtran0311 @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/integration/MasteryProgressTransactionIntegrationTest.java    @thanhtran0311 @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/integration/repository/CourseRepositoryIntegrationTest.java   @TamiaoNguyen @chi-thanh-nguyen
 
 # Backend — Shared Test Infrastructure
 /backend/src/test/java/com/codemastery/integration/AbstractIntegrationTest.java                      @chi-thanh-nguyen
@@ -79,80 +79,80 @@
 
 # Backend — Test Support / Adaptive Scenarios
 /backend/src/test/java/com/codemastery/support/TestClockConfig.java                                  @chi-thanh-nguyen
-/backend/src/test/java/com/codemastery/support/ScenarioLoader.java                                   @thanhtran0311
-/backend/src/test/java/com/codemastery/support/fixtures/CourseFixtures.java                          @TamiaoNguyen
-/backend/src/test/java/com/codemastery/support/fixtures/SkillGraphFixtures.java                      @thanhtran0311
-/backend/src/test/resources/adaptive-scenarios/                                                      @thanhtran0311
+/backend/src/test/java/com/codemastery/support/ScenarioLoader.java                                   @thanhtran0311 @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/support/fixtures/CourseFixtures.java                          @TamiaoNguyen @chi-thanh-nguyen
+/backend/src/test/java/com/codemastery/support/fixtures/SkillGraphFixtures.java                      @thanhtran0311 @chi-thanh-nguyen
+/backend/src/test/resources/adaptive-scenarios/                                                      @thanhtran0311 @chi-thanh-nguyen
 
 # -----------------------------------------------------------------------------
 # Frontend
 # -----------------------------------------------------------------------------
 
 # Frontend — Build / Bootstrap
-/frontend/index.html                                                                                 @heizseung
-/frontend/package.json                                                                               @heizseung
-/frontend/package-lock.json                                                                          @heizseung
-/frontend/tsconfig.json                                                                              @heizseung
-/frontend/vite.config.ts                                                                             @heizseung
-/frontend/src/main.tsx                                                                               @heizseung
-/frontend/src/vite-env.d.ts                                                                          @heizseung
+/frontend/index.html                                                                                 @heizseung @chi-thanh-nguyen
+/frontend/package.json                                                                               @heizseung @chi-thanh-nguyen
+/frontend/package-lock.json                                                                          @heizseung @chi-thanh-nguyen
+/frontend/tsconfig.json                                                                              @heizseung @chi-thanh-nguyen
+/frontend/vite.config.ts                                                                             @heizseung @chi-thanh-nguyen
+/frontend/src/main.tsx                                                                               @heizseung @chi-thanh-nguyen
+/frontend/src/vite-env.d.ts                                                                          @heizseung @chi-thanh-nguyen
 
 # Frontend — Application Shell / Shared
-/frontend/public/favicon.svg                                                                         @heizseung
-/frontend/src/app/                                                                                   @heizseung
-/frontend/src/routes/                                                                                @heizseung
-/frontend/src/layouts/                                                                               @heizseung
-/frontend/src/shared/                                                                                @heizseung
+/frontend/public/favicon.svg                                                                         @heizseung @chi-thanh-nguyen
+/frontend/src/app/                                                                                   @heizseung @chi-thanh-nguyen
+/frontend/src/routes/                                                                                @heizseung @chi-thanh-nguyen
+/frontend/src/layouts/                                                                               @heizseung @chi-thanh-nguyen
+/frontend/src/shared/                                                                                @heizseung @chi-thanh-nguyen
 
 # Frontend — Authentication
-/frontend/src/features/auth/                                                                         @heizseung
+/frontend/src/features/auth/                                                                         @heizseung @chi-thanh-nguyen
 
 # Frontend — Catalogue / Learning
-/frontend/src/features/catalogue/                                                                    @heizseung
-/frontend/src/features/learning/                                                                     @heizseung
+/frontend/src/features/catalogue/                                                                    @heizseung @chi-thanh-nguyen
+/frontend/src/features/learning/                                                                     @heizseung @chi-thanh-nguyen
 
 # Frontend — Assessment
-/frontend/src/features/assessment/                                                                   @heizseung
+/frontend/src/features/assessment/                                                                   @heizseung @chi-thanh-nguyen
 
 # Frontend — Mastery / Adaptive
-/frontend/src/features/mastery/                                                                      @heizseung
+/frontend/src/features/mastery/                                                                      @heizseung @chi-thanh-nguyen
 
 # Frontend — Interaction
-/frontend/src/features/interaction/                                                                  @heizseung
+/frontend/src/features/interaction/                                                                  @heizseung @chi-thanh-nguyen
 
 # Frontend — Instructor
-/frontend/src/features/instructor/                                                                   @heizseung
+/frontend/src/features/instructor/                                                                   @heizseung @chi-thanh-nguyen
 
 # Frontend — Administration
-/frontend/src/features/admin/                                                                        @heizseung
+/frontend/src/features/admin/                                                                        @heizseung @chi-thanh-nguyen
 
 # -----------------------------------------------------------------------------
 # End-to-End Tests
 # -----------------------------------------------------------------------------
-/e2e/                                                                                                @heizseung
+/e2e/                                                                                                @heizseung @chi-thanh-nguyen
 
 # -----------------------------------------------------------------------------
 # Infrastructure
 # -----------------------------------------------------------------------------
-/infrastructure/                                                                                     @tihh647-ui
+/infrastructure/                                                                                     @tihh647-ui @chi-thanh-nguyen
 
 # Service Packaging / Runtime
-/backend/Dockerfile                                                                                  @tihh647-ui
-/backend/.dockerignore                                                                               @tihh647-ui
-/frontend/Dockerfile                                                                                 @tihh647-ui
-/frontend/.dockerignore                                                                              @tihh647-ui
-/frontend/nginx.conf                                                                                 @tihh647-ui
+/backend/Dockerfile                                                                                  @tihh647-ui @chi-thanh-nguyen
+/backend/.dockerignore                                                                               @tihh647-ui @chi-thanh-nguyen
+/frontend/Dockerfile                                                                                 @tihh647-ui @chi-thanh-nguyen
+/frontend/.dockerignore                                                                              @tihh647-ui @chi-thanh-nguyen
+/frontend/nginx.conf                                                                                 @tihh647-ui @chi-thanh-nguyen
 
 # -----------------------------------------------------------------------------
 # Sample Data
 # -----------------------------------------------------------------------------
 /sample-data/README.md                                                                               @chi-thanh-nguyen
-/sample-data/materials/                                                                              @TamiaoNguyen
-/sample-data/seed/01-users.sql                                                                       @duyduyit
-/sample-data/seed/02-course-python-fundamentals.sql                                                  @TamiaoNguyen
-/sample-data/seed/03-skill-graph-and-lesson-mapping.sql                                              @thanhtran0311
-/sample-data/seed/04-questions-quizzes-assignments.sql                                               @minhtan29042006
-/sample-data/seed/05-learner-profiles.sql                                                            @thanhtran0311
+/sample-data/materials/                                                                              @TamiaoNguyen @chi-thanh-nguyen
+/sample-data/seed/01-users.sql                                                                       @duyduyit @chi-thanh-nguyen
+/sample-data/seed/02-course-python-fundamentals.sql                                                  @TamiaoNguyen @chi-thanh-nguyen
+/sample-data/seed/03-skill-graph-and-lesson-mapping.sql                                              @thanhtran0311 @chi-thanh-nguyen
+/sample-data/seed/04-questions-quizzes-assignments.sql                                               @minhtan29042006 @chi-thanh-nguyen
+/sample-data/seed/05-learner-profiles.sql                                                            @thanhtran0311 @chi-thanh-nguyen
 
 # -----------------------------------------------------------------------------
 # Documentation
