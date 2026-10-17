@@ -458,6 +458,34 @@ future indexes. These require their feature contracts before implementation.
 Seed/demo content remains separate under `sample-data/`; no versioned migration
 in this foundation supplies application records.
 
+### CT01 account/identity contract supplement — pending integration
+
+The [CT01 completion proposal](decisions/001-modular-monolith-module-boundaries.md#11-ct01-completion-proposal--pending-authoritative-integration)
+records delegated technical selection dated 2026-10-17, not effective approval
+before required review, explicit Leader sign-off and protected merge. Preserve
+ADR002 `CT01.core` and the immutable V001 schema without change: Auth owns
+`users.id/email/password_hash/display_name/role/account_status`; role literals
+remain `learner/instructor/admin`, account states `active/locked`. Self-registration
+supplies role Learner/status active; neither is client-controlled.
+
+The proposed Auth application facade exposes only current self UUID/current role
+and a bounded Course-consumed UUID-to-public-displayName lookup. Nested boundary
+types in existing `UserAccountService.java` replace no domain/entity type.
+Other modules do not query/join `users`, import Auth repositories/entities/security
+principals, receive password hashes/email/account state, or use a JWT role claim
+as current authorization. Auth checks committed current account state on each
+protected request; fail closed on missing/locked accounts or state-read failure.
+This is request-time validation, not a promise to cancel already admitted work.
+
+No token/session/revocation/version column or table is introduced. The selected
+client-local logout cannot revoke a copied JWT: it can remain usable until its
+15-minute expiry while the account is active; unlock before expiry can restore
+usability. Explicit Leader acceptance of that residual risk is outstanding.
+Recovery/reset persistence (CT02), Admin mutations (CT12), instructor display REST
+composition (CT21), physical changes and actual verification remain separately
+gated. Current instructorId-only catalogue DTOs do not claim full human-readable
+instructor acceptance.
+
 ## 13. References
 
 - [Canonical approved architecture](references/originals/approved-architecture.docx)
