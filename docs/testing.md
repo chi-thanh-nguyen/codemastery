@@ -8,7 +8,8 @@ and [the CI workflow](../.github/workflows/ci.yml).
 
 The reusable backend integration-test foundation and initial CI configuration
 are implemented. Backend feature test files and scenario/fixture scaffolds
-remain empty: there are no executable backend tests yet. Frontend typechecking
+remain empty. SH01 now has executable shared-infrastructure unit and Spring MVC
+integration tests. Frontend typechecking
 and build validation exist; frontend automated tests and E2E remain planned.
 Successful compilation or builds do not establish tested business behavior.
 
@@ -45,8 +46,8 @@ The command compiles application and test sources and executes eligible Surefire
 tests. Surefire uses its standard `Test*`, `*Test`, `*Tests`, and `*TestCase`
 naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
-There are currently no executable unit tests. The integration base class is
-compiled but is not initialized by this unit-test lifecycle.
+SH01 unit tests execute from the existing shared support test package. The
+integration base class is compiled but is not initialized by this unit-test lifecycle.
 
 ## Integration-Test Lifecycle
 
@@ -103,8 +104,9 @@ This still compiles integration-test sources and runs eligible unit tests, but
 skips Failsafe execution. It is not the CI validation command.
 
 The abstract harness contains no executable tests, and its concrete feature
-test scaffolds remain empty. Consequently, current Maven verification does not
-start PostgreSQL or prove Spring-context/database integration at runtime.
+test scaffolds remain empty. The SH01 MVC integration test executes a real Spring
+web context and dispatcher, but does not initialize this PostgreSQL harness or
+prove database integration.
 Runtime validation requires an actual concrete test that initializes the base.
 
 ## Test Isolation
@@ -126,9 +128,9 @@ truncation, fixture factory, or schema reset infrastructure is implemented.
 
 JaCoCo 0.8.15 is configured to attach its agent during Maven initialization and
 generate a report at `verify` when execution data is available. No coverage
-threshold or coverage enforcement goal is configured. With no executable
-backend tests, meaningful project coverage is not established. A successful
-build or report goal alone is not evidence of feature coverage.
+threshold or coverage enforcement goal is configured. SH01 coverage reports
+concern shared infrastructure; meaningful feature coverage is not established.
+A successful build or report goal alone is not evidence of feature coverage.
 
 ## Frontend Validation
 
@@ -192,3 +194,30 @@ requires an approved decision.
 [ADR002](decisions/002-interim-delegated-contracts.md) defines CT14.interim, CT36.I-results and the selected evidence mode. Use existing AuthServiceTest/JwtTokenProviderTest, AuthorizationIntegrationTest and MasteryCalculatorTest/MasteryStateClassifierTest locations and the approved PostgreSQL harness. The B5 placement decision selects CourseServiceTest.java in the existing modules/course test subtree and CourseCatalogueIntegrationTest.java in the existing integration subtree for a later authorized implementation task; no tests are created now. Do not repurpose enrolment tests for unrelated catalogue behavior. No new test framework or coverage percentage is selected.
 
 Run backend automated tests for newly implemented behavior and independently execute browser → REST → real PostgreSQL catalogue/Auth checks. Record exact revision, command, environment, input, expected/observed outputs, tester identity/time and failures. Pure mastery oracle cases include0/0 Unknown,49/100 Weak,50/100 Learning,74/100 Learning,75/100 Mastered and invalid/overflow-boundary cases in ADR002. These are self-authored expected outcomes until a different reviewer checks and reproduces them. No prototype feature tests or external browser workflow have been executed by this documentation task. Health/CI/unit success does not prove deployed acceptance.
+
+## SH01 delegated verification organization
+
+The current SH01 implementation instruction delegates this local test placement
+within existing directories. It does not amend CT14 for other contributors or add
+a framework, dependency, test runner, coverage threshold or production endpoint.
+
+| Existing directory | New SH01 test | Verification boundary |
+| --- | --- | --- |
+| support | PageResponseTest | Defaults, invalid bounds, immutable content and total-page arithmetic |
+| support | AppConfigTest | Consumed settings, lazy optional bindings, YAML defaults and Boot datasource initialization validation |
+| support | CorrelationIdFilterTest | Untrusted headers, server IDs, dispatch propagation, failure cleanup and MDC restoration |
+| integration | SharedRestInfrastructureIntegrationTest | MVC dispatch, validation, ProblemDetail JSON, statuses/headers and test-only page endpoints |
+
+Run `./mvnw test` and `./mvnw verify` from `backend/`. Surefire executes the three
+shared tests; Failsafe executes the MVC integration test. These tests need no
+Docker, real database or runtime credentials. Test JWT keys are generated
+ephemerally. The MVC fixture creates no feature APIs and intentionally includes
+no Auth SecurityFilterChain. Its security-exception check only establishes that
+MVC advice leaves Auth ownership intact; it does not verify authentication.
+
+Configuration tests include both accepted and deliberately rejected contexts.
+Expected context-initialization warnings are negative-test evidence, not successful
+application startup. Check Surefire/Failsafe XML for exact counts and outcomes.
+No PostgreSQL feature integration, browser flow, container feature runtime,
+production deployment or remote CI result is implied. Focused review and the
+applicable downstream QA checkpoints remain necessary.

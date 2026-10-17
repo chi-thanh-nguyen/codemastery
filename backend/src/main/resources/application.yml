@@ -2,9 +2,9 @@
 #
 # Rules:
 #  - Secrets (DB password, JWT secret, storage keys) have NO committed default value.
-#    Active Spring datasource infrastructure consumes DB_PASSWORD. JWT/storage/custom
-#    consumers and typed binding remain future feature work; declaring placeholders
-#    alone does not enforce missing-secret validation at startup. Never commit real values.
+#    AppConfig validates active datasource inputs before initialization. Its lazy
+#    JWT/CORS/scheduler settings validate when injected by a consumer; unused optional
+#    integrations do not become startup requirements. Never commit real values.
 #  - Every variable used here must be listed with a placeholder in the root .env.example.
 #  - Environment variables always take precedence over this file.
 
@@ -47,7 +47,7 @@ server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
   error:
-    include-message: never         # centralized feature API error handling awaits GlobalExceptionHandler implementation
+    include-message: never         # fallback errors must not expose exception diagnostics
     include-binding-errors: never
     include-stacktrace: never
 
@@ -82,9 +82,9 @@ codemastery:
 
   security:
     jwt:
-      secret: ${JWT_SECRET}                        # required; must be at least 256 bits
+      secret: ${JWT_SECRET}                        # consumed JWT: exactly 64 hexadecimal characters
       issuer: codemastery
-      expiration: ${JWT_EXPIRATION:PT1H}           # ISO-8601 duration
+      expiration: ${JWT_EXPIRATION:PT15M}          # CT38.core: consumed JWT lifetime must equal PT15M
     password-reset:
       token-ttl: ${PASSWORD_RESET_TOKEN_TTL:PT30M}
     cors:
