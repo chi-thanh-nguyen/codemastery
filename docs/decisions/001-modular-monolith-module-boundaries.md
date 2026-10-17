@@ -233,6 +233,8 @@ Logout immediately clears that browser provider's token, user and private cached
 data and invalidates its outstanding session generation. No HTTP call is needed;
 logout works offline. Reload also loses the credential. Independently logged-in
 tabs/devices are separate sessions; no cross-tab/global logout guarantee is made.
+Already-admitted server requests can finish after logout; clearing browser state
+does not roll back committed work or cancel server-side effects.
 
 **Material residual risk / Leader-reserved acceptance:** a copied access JWT
 remains usable after client logout for its remaining lifetime (at most 15 minutes
