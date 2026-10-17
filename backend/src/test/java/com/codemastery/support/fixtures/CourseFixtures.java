@@ -12,7 +12,18 @@ import com.codemastery.modules.course.domain.model.PublishStatus;
 import java.util.Map;
 import java.util.UUID;
 
-// Course domain structural fixtures for test preparation.
+/**
+ * Unchecked structural construction over the accepted CO01 records and enums
+ * (Issue #30, PR #77): Course, Chapter, Lesson, LearningMaterial, Enrollment and
+ * LessonProgress. Callers supply identifiers, references and valid required values;
+ * optional prerequisite descriptions, settings, Markdown and resume references
+ * remain nullable. Material payload nullability follows the selected variant.
+ *
+ * <p>Named shortcuts select only their documented codes and flags. Construction
+ * does not validate V002 constraints, verify business outcomes or decide adaptive
+ * behavior. Dataset-dependent or behavioral consumers require their own approved
+ * checkpoints and execution evidence; no persistence or Spring context is needed.
+ */
 public final class CourseFixtures {
 
     // Prevent instantiation.
@@ -89,9 +100,9 @@ public final class CourseFixtures {
         return course(id, instructorId, title, description, null, publicationStatus, true, adaptiveSettings);
     }
 
-    // Returns a builder for Course representations.
-    public static CourseBuilder courseBuilder() {
-        return new CourseBuilder();
+    // Returns a builder with the caller's explicit adaptive flag.
+    public static CourseBuilder courseBuilder(boolean adaptiveEnabled) {
+        return new CourseBuilder(adaptiveEnabled);
     }
 
     // Builder for Course representations.
@@ -104,6 +115,10 @@ public final class CourseFixtures {
         private PublishStatus publicationStatus;
         private boolean adaptiveEnabled;
         private Map<String, Object> adaptiveSettings;
+
+        private CourseBuilder(boolean adaptiveEnabled) {
+            this.adaptiveEnabled = adaptiveEnabled;
+        }
 
         public CourseBuilder id(UUID id) {
             this.id = id;
@@ -167,9 +182,9 @@ public final class CourseFixtures {
         return new Chapter(id, courseId, title, position);
     }
 
-    // Returns a builder for Chapter representations.
-    public static ChapterBuilder chapterBuilder() {
-        return new ChapterBuilder();
+    // Returns a builder with the caller's explicit position.
+    public static ChapterBuilder chapterBuilder(int position) {
+        return new ChapterBuilder(position);
     }
 
     // Builder for Chapter representations.
@@ -178,6 +193,10 @@ public final class CourseFixtures {
         private UUID courseId;
         private String title;
         private int position;
+
+        private ChapterBuilder(int position) {
+            this.position = position;
+        }
 
         public ChapterBuilder id(UUID id) {
             this.id = id;
@@ -243,9 +262,9 @@ public final class CourseFixtures {
         return lesson(id, chapterId, title, null, position, PublishStatus.HIDDEN);
     }
 
-    // Returns a builder for Lesson representations.
-    public static LessonBuilder lessonBuilder() {
-        return new LessonBuilder();
+    // Returns a builder with the caller's explicit position.
+    public static LessonBuilder lessonBuilder(int position) {
+        return new LessonBuilder(position);
     }
 
     // Builder for Lesson representations.
@@ -256,6 +275,10 @@ public final class CourseFixtures {
         private String contentMarkdown;
         private int position;
         private PublishStatus publicationStatus;
+
+        private LessonBuilder(int position) {
+            this.position = position;
+        }
 
         public LessonBuilder id(UUID id) {
             this.id = id;
@@ -534,9 +557,9 @@ public final class CourseFixtures {
         return lessonProgress(id, enrollmentId, lessonId, false, false);
     }
 
-    // Returns a builder for LessonProgress representations.
-    public static LessonProgressBuilder lessonProgressBuilder() {
-        return new LessonProgressBuilder();
+    // Returns a builder with the caller's explicit completion and skip flags.
+    public static LessonProgressBuilder lessonProgressBuilder(boolean completed, boolean masterySkipped) {
+        return new LessonProgressBuilder(completed, masterySkipped);
     }
 
     // Builder for LessonProgress representations.
@@ -546,6 +569,11 @@ public final class CourseFixtures {
         private UUID lessonId;
         private boolean completed;
         private boolean masterySkipped;
+
+        private LessonProgressBuilder(boolean completed, boolean masterySkipped) {
+            this.completed = completed;
+            this.masterySkipped = masterySkipped;
+        }
 
         public LessonProgressBuilder id(UUID id) {
             this.id = id;
