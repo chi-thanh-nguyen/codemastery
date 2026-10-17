@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Delegated contract target; NOT_IMPLEMENTED. Protected documentation review/merge remains separate. No logout, instructor identity lookup or Final algorithm selected."
+    "description": "Existing delegated Interim target; NOT_IMPLEMENTED. CT01 completion selections in ADR001 section 11 are pending owner/consumer review, explicit Leader sign-off and protected merge. Client-local logout additionally requires explicit residual-token risk acceptance. ADR002 CT01.core is unchanged."
   },
   "x-implementation-status": "NOT_IMPLEMENTED",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -31,6 +31,11 @@
                   "$ref": "#/components/schemas/PublicUser"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
             }
           },
           "400": {
@@ -40,6 +45,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
               }
             }
           },
@@ -51,6 +61,11 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
             }
           },
           "500": {
@@ -61,9 +76,15 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
             }
           }
-        }
+        },
+        "description": "Public operation; no bearer credential required or consumed. Canonical ASCII email; approved unmodified password/displayName predicates; Learner only, no role/status input and no auto-login."
       }
     },
     "/api/auth/login": {
@@ -89,6 +110,11 @@
                   "$ref": "#/components/schemas/LoginResponse"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
             }
           },
           "400": {
@@ -98,6 +124,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
               }
             }
           },
@@ -109,6 +140,14 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "WWW-Authenticate": {
+                "$ref": "#/components/headers/BearerChallenge"
+              }
             }
           },
           "500": {
@@ -119,9 +158,15 @@
                   "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
             }
           }
-        }
+        },
+        "description": "Public operation; no bearer credential required or consumed. Use canonical email and exact password. Malformed/missing/typed-invalid fields or invalid email syntax: 400. Missing account, incorrect password or locked account: identical generic 401; never truncate over-72-byte candidates."
       }
     },
     "/api/courses": {
@@ -250,7 +295,8 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "JWT"
+        "bearerFormat": "JWT",
+        "description": "Authorization: Bearer <accessToken> only. No URL/cookie token transport. ADR002 CT01.core fixes cryptography/current-account checks; ADR001 section 11 contains pending completion selections. This scheme alone is not an operation authorization policy."
       }
     },
     "schemas": {
@@ -286,16 +332,19 @@
         "properties": {
           "email": {
             "type": "string",
-            "format": "email"
+            "format": "email",
+            "description": "Trim outer whitespace, ASCII lowercase, then validate ASCII email with no remaining whitespace; no provider dot/plus rewriting."
           },
           "password": {
             "type": "string",
             "writeOnly": true,
-            "description": "Minimum15 Unicode code points, maximum72 UTF-8 bytes; never trim/normalize."
+            "description": "Minimum15 Unicode code points, maximum72 UTF-8 bytes; never trim/normalize.",
+            "minLength": 15,
+            "x-max-utf8-bytes": 72
           },
           "displayName": {
             "type": "string",
-            "description": "Trimmed, nonblank, maximum100 Unicode code points, no control characters."
+            "description": "Trim first; resulting value nonblank, at most 100 Unicode code points and no control characters. Raw input length is not the trimmed-length predicate."
           }
         },
         "required": [
@@ -310,11 +359,13 @@
         "properties": {
           "email": {
             "type": "string",
-            "format": "email"
+            "format": "email",
+            "description": "Trim outer whitespace, ASCII lowercase, then validate ASCII email with no remaining whitespace; no provider dot/plus rewriting."
           },
           "password": {
             "type": "string",
-            "writeOnly": true
+            "writeOnly": true,
+            "description": "Exact untrimmed, unnormalized credential. Incorrect/over-72-byte candidates follow generic 401 with costly verification, never BCrypt truncation. Registration complexity rules are not a separate login error."
           }
         },
         "required": [
@@ -555,6 +606,106 @@
         ],
         "additionalProperties": true
       }
+    },
+    "responses": {
+      "ProtectedUnauthorized": {
+        "description": "Protected operation: missing/invalid/expired bearer token or missing/locked current account. Authentication failed.; no business effects. Operation binding remains feature-contract owned.",
+        "headers": {
+          "WWW-Authenticate": {
+            "$ref": "#/components/headers/BearerChallenge"
+          },
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "ProtectedForbidden": {
+        "description": "Protected operation: active authenticated account denied by its selected role/resource rule. Access is denied.; preserve session and produce no business effects. No implicit role inheritance.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      }
+    },
+    "headers": {
+      "AuthenticationNoStore": {
+        "description": "Do not store authentication/registration responses.",
+        "schema": {
+          "type": "string",
+          "const": "no-store"
+        }
+      },
+      "BearerChallenge": {
+        "description": "Generic authentication challenge; never includes account or token details.",
+        "schema": {
+          "type": "string",
+          "const": "Bearer"
+        }
+      }
     }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "x-ct01-completion-proposal": {
+    "status": "PENDING_AUTHORITATIVE_INTEGRATION",
+    "decisionReference": "../decisions/001-modular-monolith-module-boundaries.md#11-ct01-completion-proposal--pending-authoritative-integration",
+    "selectionAuthority": "Project Leader instruction 2026-10-17 Asia/Ho_Chi_Minh delegates Codex technical selection; no separate manual review claimed.",
+    "unchangedBaseline": "ADR002 CT01.core, CT16.minimum, CT18.minimum and CT38.core",
+    "approvalGates": [
+      "Auth/Frontend/Course and affected-owner review",
+      "Explicit Leader sign-off including residual-token risk acceptance",
+      "Protected merge into main"
+    ],
+    "jwt": {
+      "algorithm": "HS256",
+      "type": "JWT",
+      "issuer": "codemastery",
+      "audience": "codemastery-api",
+      "requiredClaims": [
+        "sub",
+        "iat",
+        "exp",
+        "iss",
+        "aud"
+      ],
+      "subject": "UUID",
+      "lifetimeSeconds": 900,
+      "expiryClockSkewSeconds": 0,
+      "expiry": "exp = iat + 900; reject now >= exp or iat > now",
+      "key": "JWT_SECRET: exactly 64 hexadecimal characters decoded to 32 bytes; no token-directed key lookup",
+      "claimsPrivacy": "No password/email/displayName/status/role claims required; current role/status read from Auth-owned data on every protected request."
+    },
+    "logout": {
+      "mode": "CLIENT_LOCAL_ONLY",
+      "serverEndpoint": null,
+      "serverRevocation": false,
+      "refreshToken": false,
+      "slidingExpiration": false,
+      "persistentBrowserStorage": false,
+      "scope": "Current browser provider only; no global/cross-tab/device logout. Reload requires login. Later logins do not revoke earlier JWTs.",
+      "residualRisk": "A copied token remains usable after logout until exp while account active and signing key unchanged. Unlock before exp can restore old-token usability. Explicit Leader risk acceptance is required; not supplied by this proposal."
+    },
+    "authorization": "Default deny except explicitly public operations below; validate Auth current account first, then explicit owning-module role and resource policy. No implicit Administrator inheritance. Protected operation URLs/payloads require their own approved contracts.",
+    "identity": "Read-only Auth application facade at existing UserAccountService.java; signatures/types and U01 disposition in ADR001 section 11.4. No public REST identity directory or new endpoint.",
+    "client": "Memory-only token; no credentials on public operations; authenticated redirect rejected; current-session 401 clears session, 403 does not; generation guards reject stale login/401/private responses; expiry checked on sends/resume; no automatic mutation retries.",
+    "verification": "Contract examples only; actual Auth/security/browser execution and implementation authorization remain separate."
   }
 }
