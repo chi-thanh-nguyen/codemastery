@@ -333,8 +333,14 @@ do not prevent review of this read-only identity contract.
 
 Authentication runs before protected business effects. Missing/malformed/expired
 bearer credentials or missing/locked accounts yield identical safe 401 errors;
-an authenticated active account failing its selected role/resource policy gets
-403 and no business effects. Ownership predicates do not follow from role alone.
+after authentication, an unsupported role gets 403 before resource lookup.
+The owning contract then distinguishes unavailable/concealed resources (404)
+from authorization denial on a disclosed resource (403). For the proposed Course
+predicates, §12.4 defines the exact order and concealment rules; there is no
+blanket 403 override for those 404s. All denials prevent protected effects.
+Ownership predicates do not follow from role alone. This clarification of pending
+authorization selections changes neither effective CT01.core/identity approval
+nor CT18's error representation.
 Auth's filter-chain `RestSecurityErrorHandler` owns authentication/authorization
 errors, including method-security failures; it uses CT18 ProblemDetail just like
 MVC, without relying only on `GlobalExceptionHandler` (which rethrows security
@@ -437,6 +443,10 @@ Existing effective decisions below retain their own authority; no supersession
 is proposed. [CT03 #22](https://github.com/chi-thanh-nguyen/codemastery/issues/22)
 remains partially approved through ADR002 `CT03.catalogue`.
 
+Sections 12.4–12.6 are the single detailed record of the proposed internal CT03
+access contract. OpenAPI retains the separately approved REST contracts; its CT03
+extension and the data-model note reference this record rather than duplicate it.
+
 Baseline: `main` at `35abfdb45667aca650df5f7fae8a2c218e98e2d1`. Inspected canonical
 requirements §4.2–4.5/§6, architecture US-02/04/09–13 and no-hard-block rule,
 canonical tree, AGENTS/CONTRIBUTING/current CODEOWNERS, ADR001/002, OpenAPI,
@@ -458,7 +468,7 @@ empty. There is no current Course query or access implementation to ratify.
 | CO01 / PR #77 `9007494`; Issue #30, 17 October Leader acceptance | Accepted Course records/enums/scalar entities, including explicit two-file scope extension. No authorization, repository queries, JPA cross-module associations or PostgreSQL access evidence follows. | APPROVED_AND_CONSISTENT | REUSE representations |
 | SH01 / PR #78 `166484e`; Issue #50, 17 October ratification | Bounded error/page/config/correlation findings ratified; historical bypass is non-retroactive. Independent human review remains outstanding; local MVC tests are not real Course/Auth integration. | APPROVED_BUT_INCOMPLETE | REUSE contracts; DEFER implementation acceptance to SH01 |
 | PR #81 `35abfdb`, CourseFixtures | Reviewed structural helpers over CO01 types; construction is unchecked and supplies no access oracle or business policy. | APPROVED_AND_CONSISTENT | REUSE fixtures only with explicit case inputs |
-| ADR002 CT01.core / PR #73 | Current Auth-owned status/role validation is approved; no implicit Administrator inheritance. Auth implementation remains empty. | APPROVED_AND_CONSISTENT | REUSE |
+| ADR002 CT01.core / PR #73 | Current Auth-owned status/role validation is approved. This slice does not select a role-inheritance policy; the explicit CT03 role restrictions below are new proposals. Auth implementation remains empty. | APPROVED_AND_CONSISTENT | REUSE current-account validation only |
 | CT01.identity / PR #82 `39748f6`; §11.4; explicit Leader instruction 2026-10-18 | Shape integrated; Course review exists. Leader explicitly approves read-only identity/U01 only in this session. No Auth/Frontend PR review, logout-risk acceptance or implementation/verification is inferred. | APPROVED_AND_CONSISTENT | REUSE; record new sign-off, preserve remaining gates |
 | CT22 #43; V002 lifecycle facts | Row reuse/history preservation are approved; mutation, repeat-request, progress/resume and atomic execution policies remain unresolved. A read predicate must not supply them. | APPROVED_BUT_INCOMPLETE | CLARIFY separation; DEFER CT22 choices |
 | CT40 #46 | Structural Course/lesson lookup, skill tagging and question coverage signatures/placement remain unresolved; CT03 cannot approve them indirectly. | UNRESOLVED | DEFER structural interface; provide CT03 authorization prerequisite |
@@ -488,7 +498,7 @@ payload field, search/filter option or instructor lookup is needed for this slic
 | Public discovery | Retain anonymous published projection and 404 concealment; satisfies approved discovery without Auth coupling. | Mandatory login adds no required protection to public metadata; 403 for hidden public detail discloses existence. |
 | Learner membership | Current enrolment ACTIVE or COMPLETED permits learning; LEFT/absent does not. Completion must not revoke study access. | ACTIVE-only denies completed-course learning; any historical row would let departed learners read. |
 | Hidden content | Learner requires published Course and selected Lesson/material; owning Instructor may preview drafts. | Enrolment alone would expose hidden content contrary to US-10; published-only Instructor access prevents draft preparation. |
-| Callable shape | Named void assertions in existing CourseAccessService; derive actor inside Course from CT01 facade. | Boolean mode flags obscure purpose; caller-supplied actor UUID/role is impersonation-prone; entity-returning or new interface files add coupling/scope. |
+| Callable shape | Named void assertions in existing CourseAccessService; five public methods for identified external consumers, two package-private Course-only methods; derive actor inside Course from CT01 facade. | Boolean mode flags obscure purpose; caller-supplied actor UUID/role is impersonation-prone; exporting Course-only helpers, entity-returning or new interface files adds unnecessary coupling/scope. |
 | Consumer data | Course asserts its access/ancestry; consumer owns assessment/post/graph-specific rules. | One universal gate would implicitly approve CT04/CT10/CT12/CT22/CT40 behavior or require their whole completion. |
 
 ### 12.4 Learning-access predicates and failure order
@@ -501,6 +511,8 @@ active-account check must precede protected work. The identity approval does not
 approve the new CT03 predicates: they retain their own review/sign-off/integration
 gates. Logout risk acceptance remains outstanding; unrelated logout deferral does
 not itself gate catalogue or the independently approved identity slice.
+The explicit capability/role restrictions below, including Administrator exclusion,
+are CT03 selections awaiting approval, not policies attributed to CT01.core.
 
 | Predicate | Permitted actor and Course-owned conditions |
 |---|---|
@@ -512,17 +524,31 @@ not itself gate catalogue or the independently approved identity slice.
 | General Lesson read | Learner Lesson access OR owning Instructor preview. No other role/capability is granted. |
 | Material read | General Lesson read plus actual material → requested Lesson ancestry; Learner also requires published material. Owner preview may include hidden material. Storage delivery remains CT09. |
 
-Use this order: (1) trusted current authentication, (2) required role, (3) Course
-existence/visibility/ownership or self-membership, (4) scoped descendant lookup and
-its publication rule. Missing/locked/invalid authentication → generic 401 under
-CT01/CT18. Unsupported role → 403 before identifier lookup. Missing Course, hidden
-Course for Learner/non-owner, missing/foreign descendant, or hidden descendant for
-Learner → identical safe 404. On a published Course, missing/LEFT self-membership
-or non-owner Instructor → 403. Owner draft preview remains allowed. Do not look up
-a foreign descendant independently and reveal its real Course. Invalid HTTP UUID
-syntax is CT18 400; identifiers in these Java signatures are nonnull UUIDs, with
-null an internal caller-contract error (IllegalArgumentException, safe 500 at the
-HTTP boundary). Data-access failures fail closed with safe 500, never false allow.
+For valid nonnull identifiers, apply the following precedence to each assertion.
+The first failing stage determines the result; stop the assertion at that result
+and issue no further resource queries after denial. Evaluate applicable conditions
+against the coherent snapshot described below; this order defines observable
+failure precedence, not a requirement for one database round trip per stage.
+
+| Stage | Required decision and failure |
+|---|---|
+| 1. Authentication | Missing/invalid credentials or missing/locked current account → generic 401 under CT01/CT18, regardless of role or resource state. |
+| 2. Role | Require the predicate's role from the table above. General Lesson/material reads accept Learner or Instructor; the other predicates have one required role. Unsupported role → 403 before Course/descendant lookup, including when the requested resource is missing or hidden. |
+| 3. Course availability/concealment | Missing Course → 404. Hidden Course → 404 for Learners and non-owning Instructors; an owning Instructor admitted by stage 2 may continue. Visibility concealment precedes membership denial. |
+| 4. Course authorization | On a published Course, Learner learning-access/read predicates require self membership ACTIVE or COMPLETED; LEFT/absent → 403. Enrolment eligibility does not require membership. An Instructor admitted by stage 2 must own the Course; non-owner on a published Course → 403. |
+| 5. Scoped descendants | For predicates accepting Lesson/material IDs, prove actual ancestry within the admitted Course and requested Lesson. Missing/foreign descendant → 404. Learner requires published Lesson and, when selected, material; hidden descendant → 404. Owning Instructor preview/ownership permits hidden descendants. Course-level predicates have no descendant stage. |
+
+All stage-3/5 unavailable outcomes use the same safe 404 representation. Never
+look up a foreign descendant independently and reveal its real Course. Required
+identity/data-provider failures fail closed with safe 500; they are not missing
+resources, authentication denials or permission to continue. An earlier denial
+does not require a later provider call.
+
+HTTP malformed UUID syntax is CT18 400 after protected authentication admission;
+these Java signatures accept only nonnull UUIDs. Null is an internal caller-contract
+error (IllegalArgumentException, safe 500 at the HTTP boundary), not a resource
+lookup or a new client validation policy. Anonymous catalogue/detail bypass these
+protected stages and retain §12.3's existing published-only contract.
 
 Throw existing `ResourceNotFoundException` for unavailable/scoped-mismatch 404,
 Spring Security `AccessDeniedException` for 403 and propagate authentication
@@ -547,19 +573,37 @@ or previous-lesson completion as a hard access gate. Canonical order is guidance
 
 ### 12.5 Exact Course-side application surface
 
-All seven proposed public methods belong to the existing file
+All seven proposed methods belong to the existing file
 `backend/src/main/java/com/codemastery/modules/course/application/service/CourseAccessService.java`,
 class `com.codemastery.modules.course.application.service.CourseAccessService`:
 
 ```java
-public void requireEnrolmentEligibility(UUID courseId);
 public void requireLearnerCourseAccess(UUID courseId);
 public void requireLearnerLessonAccess(UUID courseId, UUID lessonId);
 public void requireCourseOwnership(UUID courseId);
 public void requireLessonOwnership(UUID courseId, UUID lessonId);
 public void requireLessonReadAccess(UUID courseId, UUID lessonId);
-public void requireMaterialReadAccess(UUID courseId, UUID lessonId, UUID materialId);
 ```
+
+These five public methods are the cross-module surface for the consumers in
+§12.6. Retain two Course-only assertions with package-private visibility:
+
+```java
+void requireEnrolmentEligibility(UUID courseId);
+void requireMaterialReadAccess(UUID courseId, UUID lessonId, UUID materialId);
+```
+
+Their identified callers, EnrollmentService and LearningMaterialService, already
+share `com.codemastery.modules.course.application.service` with CourseAccessService.
+No external consumer is selected for either helper; widening visibility would
+require a separate concrete consumer contract. All seven purposes remain distinct:
+eligibility omits membership, learning access requires it, ownership permits draft
+authoring, and general reads also admit owner preview. Eligibility is only a
+role/publication prerequisite, not complete CT22 enrolment-operation eligibility.
+A stronger Lesson assertion already includes its Course assertion; callers select
+one appropriate assertion, not both. These checks address existing resources;
+Course creation and exact chapter/material write scoping remain with CT21/CT09
+rather than inventing another public assertion here.
 
 Normal void return means only that the named predicate passed for the current
 actor/snapshot; denial throws as above and consumers must not swallow it. Only
@@ -574,9 +618,9 @@ no method overload permits arbitrary-user or unauthenticated background access.
 
 | Consumer / existing location | Selected Course call and responsibility | Approval/remaining gate |
 |---|---|---|
-| U03 Assessment QuizService/AttemptService; AssignmentService/SubmissionService in `modules/assessment/application/service/` | Learner quiz/course-level action calls requireLearnerCourseAccess with Assessment's stored quiz/assignment Course ID. Lesson-bound assignment additionally calls requireLearnerLessonAccess with its stored Lesson ID. Assessment owns publication, deadlines, attempt/submission lifecycle, actor ownership and scoring; UUIDs from an untrusted request alone do not select another assessment resource. | CT03 predicate proposal; CT04/CT10/CT23 retain Assessment operation approval and real binding/execution. No new Quiz→Lesson field. |
-| U03 Assessment authoring at QuestionBankService/QuizService/AssignmentService | Call requireCourseOwnership for owned-Course authoring; requireLessonOwnership when a Lesson is referenced. Assessment/CT40 still validate skill/tagging/question Course consistency. | No implicit CT23/CT40 approval or cross-module query. |
-| U04 Interaction DiscussionService/ContentReportService in `modules/interaction/application/service/` | Call requireLessonReadAccess before selected Lesson Q&A/report intake. Interaction resolves its own post/report target to the actual Lesson and enforces parent/reply/post visibility, authorship and moderation rules; it cannot trust a mismatched supplied lesson ID. | CT03 Course-side gate proposed. Post/report REST/signatures and CT12 Admin moderation remain separate; this is not an Admin report-queue authorization rule. |
+| U03 Assessment QuizService/AttemptService; AssignmentService/SubmissionService in `modules/assessment/application/service/` | Select exactly one gate: requireLearnerCourseAccess with Assessment's stored Course ID for course-level actions, or requireLearnerLessonAccess with its stored Course/Lesson IDs for a lesson-bound assignment. The latter includes Course access; do not precede it with a redundant Course assertion. Assessment owns publication, deadlines, attempt/submission lifecycle, actor ownership and scoring; UUIDs from an untrusted request alone do not select another assessment resource. | CT03 predicate proposal; CT04/CT10/CT23 retain Assessment operation approval and real binding/execution. No new Quiz→Lesson field. |
+| U03 Assessment authoring at QuestionBankService/QuizService/AssignmentService | Select requireCourseOwnership for Course-only authoring, or requireLessonOwnership when a Lesson is referenced; the latter includes Course ownership. Assessment/CT40 still validate skill/tagging/question Course consistency. | No implicit CT23/CT40 approval or cross-module query. |
+| U04 Interaction DiscussionService/ContentReportService in `modules/interaction/application/service/` | Proposed Course gate: requireLessonReadAccess(courseId, lessonId) before selected Lesson Q&A/report intake. Interaction resolves its own post/report target to the actual Lesson and enforces parent/reply/post visibility, authorship and moderation rules; it cannot trust a mismatched supplied lesson ID. | Course-side predicate proposed; full U04 binding remains unresolved until its Course-context input is separately approved below. Post/report REST/signatures and CT12 Admin moderation remain separate; this is not an Admin report-queue authorization rule. |
 | U07 Adaptive SkillGraphService in `modules/adaptive/application/skillgraph/` | Graph authoring calls requireCourseOwnership; a lesson mapping calls requireLessonOwnership before consuming a separately approved CT40 structural read. Course owns ancestry; Adaptive owns skills, graph and mapping rules. | Access half proposed only. Full U07 remains unresolved until CT40.lesson-read selects its exact structural signature/output/location. No structural interface is approved here. |
 | Course own services/CT21 authoring | CourseManagementService/CourseStructureService use ownership assertions; LearningMaterialService uses appropriate owner/read assertions. | Payloads, endpoints and writes remain CT21/CT09-owned; no new REST operation selected. |
 | CT22 EnrollmentService/LessonProgressService | Use eligibility/current-membership/Lesson predicates only where the selected operation consumes them. CT22 defines repeat enrol/leave/re-enrol, progress/resume and atomic participation. | No mutation, status transition, progress formula or propagation approved by CT03. |
@@ -588,6 +632,20 @@ private. No reverse call to a consumer is needed. In-process gates create no HTT
 endpoint. The supplied Course UUID is asserted operation scope that Course proves,
 not trusted identity or a new persisted field in Assessment/Interaction records;
 the consumer's own operation contract must define its context before binding.
+
+**U04 Course-context prerequisite:** V006 DiscussionPost supplies lesson_id, and
+a report targets either its own DiscussionPost or a Lesson; neither record stores
+a Course ID. Resolving Interaction's own target therefore does not establish the
+courseId required by the proposed gate. A separately approved Interaction operation
+must either supply an asserted Course scope that Course verifies against the
+actual Lesson, or consume a separately approved Course-owned lookup that supplies
+that context. Neither alternative is selected here. No new endpoint, structural
+lookup/signature, database field or access to Course repositories/entities is
+approved. Interaction must not fabricate context or treat a successful check on
+a different Lesson as authorization. Until the context binding is approved,
+U04 remains unavailable for dependent implementation/integration; the Course
+predicate itself can be independently reviewed and approved.
+
 No background/scheduler/event actor context is selected; CT04/CT08 and
 the relevant lifecycle contract must define it before such callers use an access
 gate. Current Course learning admission does not silently determine retention or
@@ -601,6 +659,12 @@ historical attempt/submission/result access after leaving/hiding a course.
 | Anonymous absent versus hidden detail | Same safe 404; hidden course excluded from count/list. |
 | Published Course with hidden lesson / chapter with no published lessons | Public syllabus omits that heading / chapter. |
 | Protected call without effective current authentication | 401, no protected work; public catalogue unaffected. |
+| Missing/locked authentication plus unsupported role and hidden/missing Course | 401 at stage 1; no Course/descendant lookup. |
+| Active Learner calls ownership predicate for a hidden/missing Course | 403 at stage 2; no Course/descendant lookup. |
+| Active Administrator calls any proposed predicate for a missing resource | 403 at stage 2, not 404; no implicit inheritance. |
+| Learner Lesson access: LEFT/absent membership, hidden Course and missing/foreign Lesson | 404 at stage 3; membership/descendant denial does not replace concealment. |
+| Learner Lesson access: LEFT/absent membership, published Course and hidden/missing/foreign Lesson | 403 at stage 4; no descendant lookup. With ACTIVE/COMPLETED membership the same descendant produces 404 at stage 5. |
+| Non-owner Instructor calls general read/ownership for a hidden versus published Course, both with missing Lesson | Hidden → 404 at stage 3; published → 403 at stage 4; neither probes the Lesson. |
 | Learner ACTIVE or COMPLETED, published Course/Lesson | Learner Course/Lesson access passes; advanced lesson with unknown mastery also passes. |
 | Learner LEFT/absent on published Course | Learning read denied 403; eligibility may pass but creates no enrolment. |
 | Learner with membership, Course or Lesson hidden | Learning read denied 404, no hidden content; history is not deleted. |
@@ -608,6 +672,7 @@ historical attempt/submission/result access after leaving/hiding a course.
 | Administrator invokes these learner/owner/read methods | 403; CT12 must separately define any administrative capability. |
 | Valid accessible Course ID, Lesson belonging to another Course | 404; material under another Lesson likewise 404; no foreign identifier exposed. |
 | Interaction post target differs from supplied Lesson | Interaction rejects its mismatch; Course approval cannot authorize cross-Lesson posts/reports. |
+| Interaction has only its post's Lesson ID and no approved Course-context binding | U04 binding remains unresolved; no direct Course query or fabricated Course ID. |
 | U07 authorization passes | No structural data returned and no CT40 interface approved; mapping still needs CT40 and valid same-Course skill rules. |
 | Provider/query failure | Safe 500 and no allow/effects; callers do not reinterpret failure as missing membership or success. |
 
@@ -618,13 +683,11 @@ browser behavior. Doubles/structural fixtures and CI compilation do not prove
 authorization, publication filtering, database consistency or concurrency behavior.
 Do not create extra test files or routes under this documentation authority.
 
-Findings: **high, approval provenance gap, resolved for technical sign-off** —
-initial inspection could not establish CT01.identity sign-off from merge alone;
-the Leader supplied it explicitly on 2026-10-18 (§11.4). Retain unfulfilled review
-and execution gates. **medium, remaining boundary** — full U07 structural
-binding belongs to CT40; retain its gate and reuse these access predicates rather
-than duplicate a structural interface. **low, stale status prose** — report
-CONTRIBUTING's empty-OpenAPI statement and clarify the relevant data-model status.
+Remaining consumer decisions are U04's Course-context binding and U07's CT40
+structural binding (§12.6); neither blocks independent predicate review/approval
+or the existing anonymous catalogue. CT01.identity's bounded sign-off and retained
+gates are recorded in §11.4. CONTRIBUTING's stale empty-OpenAPI statement is
+reported outside this file scope; the relevant data-model status is clarified.
 No evidenced defect requires superseding approved CT03.catalogue, ADR002, CT21,
 CT22 or CT40. No actual unauthorized content disclosure is asserted.
 

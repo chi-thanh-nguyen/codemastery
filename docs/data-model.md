@@ -497,17 +497,13 @@ instructor acceptance.
 ### CT03 read predicates — proposal, not schema or mutation approval
 
 [ADR001 §12](decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation)
-reaffirms effective ADR002 catalogue visibility and proposes the remaining Course
-access predicates, pending their own review/sign-off/integration. It reads existing
-ACTIVE/COMPLETED membership as learning access eligibility and LEFT/absent as
-denial; no new enrolment state, row, default, transition, write, progress formula,
-resume target or transaction propagation is approved. CT22 retains those operations
-and V002 history/row-reuse invariants. Course must prove actual Course → Chapter →
-Lesson → Material ancestry; independent FK existence is insufficient when a caller
-supplies a requested Course/Lesson. Owner preview is separated from Learner
-publication checks; no Administrator inheritance or mastery hard-block is
-introduced. New gates export no domain/entity objects; CT40 retains structural
-projection/skill/question lookup contracts.
+is the detailed internal access proposal, pending its own review/sign-off/integration.
+It consumes V002's existing membership states and Course/Chapter/Lesson/Material
+references without changing schema, state catalogues or lifecycle invariants in
+§11. Application-level ancestry consistency remains necessary beyond independent
+FK existence. No field, constraint, mutation or transaction propagation is added;
+CT22 retains enrolment/progress/resume operations and CT40 retains structural
+lookup contracts. Access rules and Java signatures are defined only in ADR001.
 
 ## 13. References
 
