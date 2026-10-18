@@ -7,8 +7,10 @@ This document describes CodeMastery's current testing contract, based on
 and [the CI workflow](../.github/workflows/ci.yml).
 
 The reusable backend integration-test foundation and initial CI configuration
-are implemented. Backend feature test files and scenario/fixture scaffolds
-remain empty. SH01 now has executable shared-infrastructure unit and Spring MVC
+are implemented. CourseFixtures provides representation-only Course construction,
+with CourseFixturesTest as its pure structural consumer. Course business/service
+and PostgreSQL integration test scaffolds remain empty. SH01 has executable
+shared-infrastructure unit and Spring MVC
 integration tests. Frontend typechecking
 and build validation exist; frontend automated tests and E2E remain planned.
 Successful compilation or builds do not establish tested business behavior.
@@ -48,6 +50,23 @@ naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
 SH01 unit tests execute from the existing shared support test package. The
 integration base class is compiled but is not initialized by this unit-test lifecycle.
+
+[CourseFixturesTest](../backend/src/test/java/com/codemastery/modules/course/CourseFixturesTest.java)
+is the authorized FT01 structural consumer of the accepted CO01 records and enums.
+It checks caller-value and UUID-reference preservation across all six records,
+full factories and builders, populated/nullable optional fields, explicit builder
+primitive inputs and retained setters, material payload variants, and progress
+flag combinations including `skippedProgress()` producing `(true, true)`.
+Settings assertions preserve caller JSON content without specifying policy keys
+or map-copying guarantees. Fixture construction remains unchecked.
+
+Run the focused consumer from `backend/` with
+`./mvnw -Dtest=CourseFixturesTest test`; use the Surefire XML to establish actual
+execution and counts. Compilation alone does not prove fixture use. These local
+construction assertions do not verify US-02/04/10 business acceptance, enrollment
+or progress decisions, adaptive behavior, Spring contexts or PostgreSQL. Later
+dataset-dependent, behavioral and integration consumers retain separate approval
+and execution checkpoints.
 
 ## Integration-Test Lifecycle
 
@@ -122,7 +141,8 @@ not impose a transaction on every test. Suitable future persistence tests can
 use Spring test transactions with automatic rollback. Tests that commit, use
 independent transactions, perform HTTP work, or execute work in other threads
 must explicitly clean up changes that rollback does not cover. No generic
-truncation, fixture factory, or schema reset infrastructure is implemented.
+truncation or schema reset infrastructure is implemented. CourseFixtures only
+constructs in-memory representations; it does not load or reset a database.
 
 ## JaCoCo
 
