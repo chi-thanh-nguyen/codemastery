@@ -441,8 +441,10 @@ Independent FKs do not establish all of those cross-aggregate rules.
 
 Mastery and related LessonProgress updates remain one application database
 transaction through approved module contracts. No linking FK or business trigger
-replaces that orchestration. Initial Java entities/repositories and feature tests
-remain unimplemented; DDL does not prove their behavior.
+replaces that orchestration. Course representations/scalar JPA entities are
+accepted under CO01 (PR #77 and Issue #30); Course queries/access services remain
+unimplemented. Shared MVC tests and structural fixtures are not feature-level
+Course/Auth/PostgreSQL integration evidence. DDL does not prove access behavior.
 
 ## 12. Deferred Feature and Future Schema Work
 
@@ -468,8 +470,14 @@ ADR002 `CT01.core` and the immutable V001 schema without change: Auth owns
 remain `learner/instructor/admin`, account states `active/locked`. Self-registration
 supplies role Learner/status active; neither is client-controlled.
 
-The proposed Auth application facade exposes only current self UUID/current role
-and a bounded Course-consumed UUID-to-public-displayName lookup. Nested boundary
+**2026-10-18 bounded approval update:** the Leader explicitly signed off only
+CT01.identity and its limited U01 current-identity binding in this Codex session,
+referring to ADR001 §11.4's shape already integrated through PR #82. This is
+technical approval, not a manual GitHub PR review or a waiver of remaining review,
+logout-risk, implementation/deployment or actual-verification gates.
+
+The approved read-only Auth application facade exposes only current self UUID/current
+role and a bounded Course-consumed UUID-to-public-displayName lookup. Nested boundary
 types in existing `UserAccountService.java` replace no domain/entity type.
 Other modules do not query/join `users`, import Auth repositories/entities/security
 principals, receive password hashes/email/account state, or use a JWT role claim
@@ -485,6 +493,17 @@ Recovery/reset persistence (CT02), Admin mutations (CT12), instructor display RE
 composition (CT21), physical changes and actual verification remain separately
 gated. Current instructorId-only catalogue DTOs do not claim full human-readable
 instructor acceptance.
+
+### CT03 read predicates — proposal, not schema or mutation approval
+
+[ADR001 §12](decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation)
+is the detailed internal access proposal, pending its own review/sign-off/integration.
+It consumes V002's existing membership states and Course/Chapter/Lesson/Material
+references without changing schema, state catalogues or lifecycle invariants in
+§11. Application-level ancestry consistency remains necessary beyond independent
+FK existence. No field, constraint, mutation or transaction propagation is added;
+CT22 retains enrolment/progress/resume operations and CT40 retains structural
+lookup contracts. Access rules and Java signatures are defined only in ADR001.
 
 ## 13. References
 

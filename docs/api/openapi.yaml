@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Existing delegated Interim target; NOT_IMPLEMENTED. CT01 completion selections in ADR001 section 11 are pending owner/consumer review, explicit Leader sign-off and protected merge. Client-local logout additionally requires explicit residual-token risk acceptance. ADR002 CT01.core is unchanged."
+    "description": "Existing delegated Interim target; NOT_IMPLEMENTED. CT01.identity has explicit Leader technical sign-off dated 2026-10-18 for the ADR001 section 11.4 shape integrated through PR #82. Remaining CT01 and new CT03 completion selections retain their recorded approval/review gates. Client-local logout still requires explicit residual-token risk acceptance; ADR002 approved slices are unchanged."
   },
   "x-implementation-status": "NOT_IMPLEMENTED",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -226,7 +226,8 @@
               }
             }
           }
-        }
+        },
+        "x-ct03-reconciliation-reference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation"
       }
     },
     "/api/courses/{courseId}": {
@@ -286,7 +287,8 @@
               }
             }
           }
-        }
+        },
+        "x-ct03-reconciliation-reference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation"
       }
     }
   },
@@ -706,6 +708,29 @@
     "authorization": "Default deny except explicitly public operations below; validate Auth current account first, then explicit owning-module role and resource policy. No implicit Administrator inheritance. Protected operation URLs/payloads require their own approved contracts.",
     "identity": "Read-only Auth application facade at existing UserAccountService.java; signatures/types and U01 disposition in ADR001 section 11.4. No public REST identity directory or new endpoint.",
     "client": "Memory-only token; no credentials on public operations; authenticated redirect rejected; current-session 401 clears session, 403 does not; generation guards reject stale login/401/private responses; expiry checked on sends/resume; no automatic mutation retries.",
-    "verification": "Contract examples only; actual Auth/security/browser execution and implementation authorization remain separate."
+    "verification": "Contract examples only; actual Auth/security/browser execution and implementation authorization remain separate.",
+    "identityApproval": {
+      "status": "LEADER_TECHNICAL_SIGNOFF_RECORDED",
+      "date": "2026-10-18",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "authority": "Project Leader @chi-thanh-nguyen explicit instruction in this Codex session, replying to the CT03 identity-provenance question; not a separate manual GitHub PR review.",
+      "integratedShape": "PR #82, 39748f62223fcb90bb198366a377ab9b26e9c05b, ADR001 section 11.4",
+      "scope": [
+        "Existing UserAccountService.java location",
+        "requireCurrentIdentity() and instructorDisplayNames(Set<UUID>) with documented types/semantics",
+        "Course to Auth application reads and bounded U01 current-identity binding"
+      ],
+      "excludes": [
+        "Logout residual-risk acceptance",
+        "Other unresolved CT01 checkpoints",
+        "Review or governance waivers",
+        "Implementation/deployment authorization",
+        "Integration/security verification"
+      ]
+    }
+  },
+  "x-ct03-access-proposal": {
+    "status": "PROPOSED_NOT_EFFECTIVE",
+    "decisionReference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation"
   }
 }
