@@ -181,6 +181,12 @@ Required owner/consumer review, explicit Leader sign-off and protected merge int
 `main` remain necessary. Logout additionally requires the explicit risk acceptance
 in §11.3; merging without that evidence must not be described as logout approval.
 
+**Bounded update, 2026-10-18:** PR #82 is integrated as `39748f6`. The Leader
+separately signed off CT01.identity and its limited U01 binding by explicit
+instruction in this Codex session; §11.4 records that approval. Remaining CT01
+conditions, logout risk acceptance and required review/implementation/verification
+gates are not approved or waived by that instruction.
+
 Baseline inspected: `main` at `43e399927b4cb36587184fcf4f4474bc88095852`, current
 CT01/CT16/CT18/CT38 and AU05/AU06/FE03/CO04/CO05/QA01/QA02/QA07 Issues,
 canonical requirements §4.1/§6, approved architecture §4.1/US-01/US-02,
@@ -249,7 +255,20 @@ approved revocation design. Codex has not supplied that human risk acceptance.
 
 ### 11.4 CT01.identity: exact public boundary and U01 disposition
 
-Proposed public application facade:
+**CT01.identity — explicit Leader technical approval, 2026-10-18
+(Asia/Ho_Chi_Minh).** @chi-thanh-nguyen approved this read-only facade's existing
+location, both methods, documented boundary types/semantics, Course → Auth
+direction and limited U01 current-identity binding, referring to the shape already
+integrated through PR #82 (`39748f62223fcb90bb198366a377ab9b26e9c05b`). Provenance:
+the Leader's explicit response to the CT03 reconciliation question in this Codex
+session; Codex records that instruction, not a separate manual GitHub PR review.
+The approval expressly excludes logout residual risk, unresolved CT01 checkpoints,
+implementation/deployment authorization and integration/security verification.
+PR #82 has a Course APPROVED review from @TamiaoNguyen; no Auth/Frontend review
+was found there. This instruction does not fabricate those reviews or waive
+applicable protected review requirements for this reconciliation PR.
+
+Approved read-only public application facade:
 `com.codemastery.modules.auth.application.service.UserAccountService`, at
 `backend/src/main/java/com/codemastery/modules/auth/application/service/UserAccountService.java`.
 Its only cross-module read methods/types selected here are:
@@ -292,10 +311,11 @@ ownership/enrolment using the trusted UUID; the identity record is not permissio
 to read another module's data.
 
 The historical planning candidate **U01 (A04 → C03)** identifies infrastructure
-identity leakage. This proposal binds its current-actor consumption to the
-facade above, reviewed by Auth @duyduyit, Course @TamiaoNguyen and Leader
-@chi-thanh-nguyen. U01 remains pending authoritative integration; no graph/native
-relationship is changed. Public catalogue/detail need no current actor.
+identity leakage. The Leader's 2026-10-18 sign-off approves its current-identity
+binding to this facade with the documented consumer-specific limitations. Auth
+@duyduyit, Course @TamiaoNguyen and Leader @chi-thanh-nguyen remain the affected
+owners; no unobserved review is asserted. No graph/native relationship is changed.
+Public catalogue/detail need no current actor.
 Protected Course method signatures/resource rules (CT03/CT21/CT22), instructor
 display REST composition, other feature bindings, recovery (CT02), and Admin
 mutation/audit boundaries (CT12/CT31) remain separately gated. Those exclusions
@@ -390,7 +410,9 @@ explicit execution gap, not proof that anonymous catalogue tests satisfy US-01.
 Issue #18's registration checkbox can reflect effective ADR002 CT01.core after
 authoritative provenance confirmation. The combined login/logout, identity/API,
 cross-contract reconciliation, CT01.identity and U01 checkboxes stay pending until
-their entire stated conditions have effective approval. No Issue closure, Project
+their entire stated conditions have effective approval. The Leader's separate
+2026-10-18 CT01.identity/U01 sign-off now supplies those two technical approval
+records (§11.4); it does not satisfy the remaining combined conditions. No Issue closure, Project
 status/readiness/dependency change, implementation, deployment or real security
 verification is authorized by this contract proposal.
 
@@ -400,3 +422,229 @@ Technical references: [JWT BCP RFC8725](https://www.rfc-editor.org/rfc/rfc8725.h
 They inform the analysis; project policy and approval come from the sources and
 explicit authority above. Codex analyzed and authored this documentation; no AI
 service is added to the application.
+
+## 12. CT03 access and consumer contract reconciliation
+
+### 12.1 Status, authority and inspected baseline
+
+**New selections: PROPOSED_NOT_EFFECTIVE — pending review, Leader sign-off and
+protected integration.** The Leader's 2026-10-18 instruction delegates Codex's
+CT03 analysis, technical selection and this three-file proposal. It is not a
+manual review, an approval of another contract family, or implementation authority.
+The separate CT01.identity instruction recorded in §11.4 supplies that slice's
+Leader sign-off; it is distinct from this CT03 delegation.
+Existing effective decisions below retain their own authority; no supersession
+is proposed. [CT03 #22](https://github.com/chi-thanh-nguyen/codemastery/issues/22)
+remains partially approved through ADR002 `CT03.catalogue`.
+
+Baseline: `main` at `35abfdb45667aca650df5f7fae8a2c218e98e2d1`. Inspected canonical
+requirements §4.2–4.5/§6, architecture US-02/04/09–13 and no-hard-block rule,
+canonical tree, AGENTS/CONTRIBUTING/current CODEOWNERS, ADR001/002, OpenAPI,
+V001–V004/V006 reference constraints, actual Course/Auth/consumer inventories,
+PR patches/reviews and Issue records. PR #4's V002 bytes match current V002.
+Course application services, repositories, controllers and DTO files, Auth's
+identity service, and the relevant Assessment/Interaction/Adaptive services remain
+empty. There is no current Course query or access implementation to ratify.
+
+### 12.2 Historical approval and contract reconciliation
+
+| Decision and source | Approved scope; current implementation/consumer evidence and gap | Classification | Disposition |
+|---|---|---|---|
+| Foundation: PR #2 `418b8eb`, PR #4 V002, PR #5 `f85628e`; ADR001 §§3–9; current CODEOWNERS/PR #80 | Six modules, Course ownership, existing service locations and scalar references. Foundation/schema and file presence approve no feature query or cross-module callable. | APPROVED_AND_CONSISTENT | REUSE |
+| V002; data model §11 | Publication hidden/published; enrolment active/completed/left; one row per learner/course; chapters have no publication state. These are representation facts, not access/mutation policy. | APPROVED_AND_CONSISTENT | REUSE |
+| ADR002 CT03.catalogue / PR #73 `729ba60` | Anonymous published metadata; uniform missing/hidden 404; only published lesson headings in public syllabus. Current OpenAPI agrees; CO03/04/05 and FE07/QA02 lack running queries. No defect warrants replacement. | APPROVED_AND_CONSISTENT | REAFFIRM |
+| ADR002 CT21.catalogue / PR #73 | Four-field summary and bounded detail, fixed pagination/order; instructorId-only is intentionally partial US-02. Search/filter, display-name REST composition and authoring remain outside approval. | APPROVED_BUT_INCOMPLETE | REUSE bounded DTOs; DEFER extensions to CT21 |
+| ADR002 CT18.minimum / PR #73 | Safe ProblemDetail and 400/401/403/404 conventions. PR #78 supplies shared MVC primitives, not Course decisions or security-chain integration. | APPROVED_AND_CONSISTENT | REUSE |
+| CO01 / PR #77 `9007494`; Issue #30, 17 October Leader acceptance | Accepted Course records/enums/scalar entities, including explicit two-file scope extension. No authorization, repository queries, JPA cross-module associations or PostgreSQL access evidence follows. | APPROVED_AND_CONSISTENT | REUSE representations |
+| SH01 / PR #78 `166484e`; Issue #50, 17 October ratification | Bounded error/page/config/correlation findings ratified; historical bypass is non-retroactive. Independent human review remains outstanding; local MVC tests are not real Course/Auth integration. | APPROVED_BUT_INCOMPLETE | REUSE contracts; DEFER implementation acceptance to SH01 |
+| PR #81 `35abfdb`, CourseFixtures | Reviewed structural helpers over CO01 types; construction is unchecked and supplies no access oracle or business policy. | APPROVED_AND_CONSISTENT | REUSE fixtures only with explicit case inputs |
+| ADR002 CT01.core / PR #73 | Current Auth-owned status/role validation is approved; no implicit Administrator inheritance. Auth implementation remains empty. | APPROVED_AND_CONSISTENT | REUSE |
+| CT01.identity / PR #82 `39748f6`; §11.4; explicit Leader instruction 2026-10-18 | Shape integrated; Course review exists. Leader explicitly approves read-only identity/U01 only in this session. No Auth/Frontend PR review, logout-risk acceptance or implementation/verification is inferred. | APPROVED_AND_CONSISTENT | REUSE; record new sign-off, preserve remaining gates |
+| CT22 #43; V002 lifecycle facts | Row reuse/history preservation are approved; mutation, repeat-request, progress/resume and atomic execution policies remain unresolved. A read predicate must not supply them. | APPROVED_BUT_INCOMPLETE | CLARIFY separation; DEFER CT22 choices |
+| CT40 #46 | Structural Course/lesson lookup, skill tagging and question coverage signatures/placement remain unresolved; CT03 cannot approve them indirectly. | UNRESOLVED | DEFER structural interface; provide CT03 authorization prerequisite |
+| CT03.learning-access and U03/U04 Course checks / Issue #22 | Architecture supplies required outcomes, but exact predicates/signatures had no effective record. §§12.4–12.6 make technical selections for review. | PROPOSED_NOT_EFFECTIVE | EXTEND |
+| Stale status prose: CONTRIBUTING says OpenAPI empty; data-model §11 says initial representations unimplemented | Actual OpenAPI and accepted CO01 supersede those implementation-status observations, not architecture. Report stale CONTRIBUTING wording; this task does not edit it. | CONFLICTING_OR_OUTDATED | CLARIFY relevant data-model status; DEFER unrelated prose repair |
+
+No CT03 access implementation was found to classify IMPLEMENTED_NOT_APPROVED.
+Missing approval/verification is not a demonstrated access-control defect. PR
+numbers above refer to `https://github.com/chi-thanh-nguyen/codemastery/pull/<number>`;
+Issue #30/#50 contain the bounded current ratifications and retained historical
+exceptions, not authority for future review/check bypasses.
+
+### 12.3 Catalogue reaffirmation and alternatives
+
+Reaffirm ADR002 `CT03.catalogue` unchanged. Anonymous list/detail remain independent
+of Auth identity and membership. Apply publication filtering before pagination,
+counting and DTO mapping; totalElements must not count hidden courses. Missing
+and unpublished detail share the same CT18 404 representation. Public syllabus
+contains published lesson headings only, omits chapters without them and preserves
+chapter/lesson positions. No chapter publication flag exists. No hidden title,
+lesson body/material/storage URL, enrolment/progress or adaptive settings escapes.
+Reuse CT21's existing fields, query validation and ordering; no new REST route,
+payload field, search/filter option or instructor lookup is needed for this slice.
+
+| Question | Selected solution and reason | Alternatives rejected or left separate |
+|---|---|---|
+| Public discovery | Retain anonymous published projection and 404 concealment; satisfies approved discovery without Auth coupling. | Mandatory login adds no required protection to public metadata; 403 for hidden public detail discloses existence. |
+| Learner membership | Current enrolment ACTIVE or COMPLETED permits learning; LEFT/absent does not. Completion must not revoke study access. | ACTIVE-only denies completed-course learning; any historical row would let departed learners read. |
+| Hidden content | Learner requires published Course and selected Lesson/material; owning Instructor may preview drafts. | Enrolment alone would expose hidden content contrary to US-10; published-only Instructor access prevents draft preparation. |
+| Callable shape | Named void assertions in existing CourseAccessService; derive actor inside Course from CT01 facade. | Boolean mode flags obscure purpose; caller-supplied actor UUID/role is impersonation-prone; entity-returning or new interface files add coupling/scope. |
+| Consumer data | Course asserts its access/ancestry; consumer owns assessment/post/graph-specific rules. | One universal gate would implicitly approve CT04/CT10/CT12/CT22/CT40 behavior or require their whole completion. |
+
+### 12.4 Learning-access predicates and failure order
+
+All new protected predicates consume the CT01 §11.4
+`UserAccountService.requireCurrentIdentity()` boundary, explicitly signed off by the
+Leader on 2026-10-18 as recorded above. No caller-provided actor,
+role, enrollment row, request DTO or token claim proves identity. Its approved
+active-account check must precede protected work. The identity approval does not
+approve the new CT03 predicates: they retain their own review/sign-off/integration
+gates. Logout risk acceptance remains outstanding; unrelated logout deferral does
+not itself gate catalogue or the independently approved identity slice.
+
+| Predicate | Permitted actor and Course-owned conditions |
+|---|---|
+| Enrolment eligibility | Learner; published Course. No enrolment is created and no existing ACTIVE/COMPLETED/LEFT row is rejected merely to choose repeat/re-enrolment semantics; CT22 owns the operation. |
+| Learner Course access | Learner; published Course; self enrolment ACTIVE or COMPLETED. LEFT/absent denies. |
+| Learner Lesson access | Learner Course access plus actual Lesson → Chapter → requested Course ancestry and published Lesson. |
+| Course ownership | Instructor with Course.instructorId equal to trusted self UUID; hidden or published Course allowed. No Administrator inheritance. |
+| Lesson ownership | Course ownership plus actual Lesson/Chapter ancestry; hidden or published Lesson allowed. |
+| General Lesson read | Learner Lesson access OR owning Instructor preview. No other role/capability is granted. |
+| Material read | General Lesson read plus actual material → requested Lesson ancestry; Learner also requires published material. Owner preview may include hidden material. Storage delivery remains CT09. |
+
+Use this order: (1) trusted current authentication, (2) required role, (3) Course
+existence/visibility/ownership or self-membership, (4) scoped descendant lookup and
+its publication rule. Missing/locked/invalid authentication → generic 401 under
+CT01/CT18. Unsupported role → 403 before identifier lookup. Missing Course, hidden
+Course for Learner/non-owner, missing/foreign descendant, or hidden descendant for
+Learner → identical safe 404. On a published Course, missing/LEFT self-membership
+or non-owner Instructor → 403. Owner draft preview remains allowed. Do not look up
+a foreign descendant independently and reveal its real Course. Invalid HTTP UUID
+syntax is CT18 400; identifiers in these Java signatures are nonnull UUIDs, with
+null an internal caller-contract error (IllegalArgumentException, safe 500 at the
+HTTP boundary). Data-access failures fail closed with safe 500, never false allow.
+
+Throw existing `ResourceNotFoundException` for unavailable/scoped-mismatch 404,
+Spring Security `AccessDeniedException` for 403 and propagate authentication
+failure to Auth's security handler. Do not use BusinessRuleException for 403: its
+implemented contract allows only 400/409. Do not invent error subclasses/files.
+CT18 ProblemDetail uses the same safe detail for indistinguishable 404s, no
+resource/owner identifiers or rejected values. Keep 403 separate from 401 so FE03
+does not erase a valid session on resource denial.
+
+These are read/admission predicates, not durable capabilities or write locks.
+Resolve ancestry and relevant publication/membership conditions from Course-owned
+data as one coherent query snapshot per assertion, without a second-module table
+join or cross-request allow cache. Protected content reads must also constrain
+their actual output query to the same scope/visibility, not use a detached boolean
+as permission to fetch arbitrary content. Concurrent hide/leave/lock applies to
+the next fresh check; already-admitted work is not promised cancellation. Perform
+checks before effects in the caller's approved unit of work. No transaction
+propagation, lock protocol, progress mutation or new persistence semantics is
+selected; CT21/CT22/CT08 retain those operation-level decisions where consumed.
+Never consult mastery, prerequisite completion, adaptive_enabled, lesson position
+or previous-lesson completion as a hard access gate. Canonical order is guidance.
+
+### 12.5 Exact Course-side application surface
+
+All seven proposed public methods belong to the existing file
+`backend/src/main/java/com/codemastery/modules/course/application/service/CourseAccessService.java`,
+class `com.codemastery.modules.course.application.service.CourseAccessService`:
+
+```java
+public void requireEnrolmentEligibility(UUID courseId);
+public void requireLearnerCourseAccess(UUID courseId);
+public void requireLearnerLessonAccess(UUID courseId, UUID lessonId);
+public void requireCourseOwnership(UUID courseId);
+public void requireLessonOwnership(UUID courseId, UUID lessonId);
+public void requireLessonReadAccess(UUID courseId, UUID lessonId);
+public void requireMaterialReadAccess(UUID courseId, UUID lessonId, UUID materialId);
+```
+
+Normal void return means only that the named predicate passed for the current
+actor/snapshot; denial throws as above and consumers must not swallow it. Only
+java.util.UUID crosses this surface; no Course entity/domain record, repository,
+Auth principal, membership record, structural projection or new boundary type/file
+is exported. Course uses its existing internal repository inventory; this contract
+defines capability requirements, not repository signatures or implementation.
+Trusted identity/current role is obtained inside Course through Auth's facade;
+no method overload permits arbitrary-user or unauthenticated background access.
+
+### 12.6 Consumer bindings, ownership and unresolved prerequisites
+
+| Consumer / existing location | Selected Course call and responsibility | Approval/remaining gate |
+|---|---|---|
+| U03 Assessment QuizService/AttemptService; AssignmentService/SubmissionService in `modules/assessment/application/service/` | Learner quiz/course-level action calls requireLearnerCourseAccess with Assessment's stored quiz/assignment Course ID. Lesson-bound assignment additionally calls requireLearnerLessonAccess with its stored Lesson ID. Assessment owns publication, deadlines, attempt/submission lifecycle, actor ownership and scoring; UUIDs from an untrusted request alone do not select another assessment resource. | CT03 predicate proposal; CT04/CT10/CT23 retain Assessment operation approval and real binding/execution. No new Quiz→Lesson field. |
+| U03 Assessment authoring at QuestionBankService/QuizService/AssignmentService | Call requireCourseOwnership for owned-Course authoring; requireLessonOwnership when a Lesson is referenced. Assessment/CT40 still validate skill/tagging/question Course consistency. | No implicit CT23/CT40 approval or cross-module query. |
+| U04 Interaction DiscussionService/ContentReportService in `modules/interaction/application/service/` | Call requireLessonReadAccess before selected Lesson Q&A/report intake. Interaction resolves its own post/report target to the actual Lesson and enforces parent/reply/post visibility, authorship and moderation rules; it cannot trust a mismatched supplied lesson ID. | CT03 Course-side gate proposed. Post/report REST/signatures and CT12 Admin moderation remain separate; this is not an Admin report-queue authorization rule. |
+| U07 Adaptive SkillGraphService in `modules/adaptive/application/skillgraph/` | Graph authoring calls requireCourseOwnership; a lesson mapping calls requireLessonOwnership before consuming a separately approved CT40 structural read. Course owns ancestry; Adaptive owns skills, graph and mapping rules. | Access half proposed only. Full U07 remains unresolved until CT40.lesson-read selects its exact structural signature/output/location. No structural interface is approved here. |
+| Course own services/CT21 authoring | CourseManagementService/CourseStructureService use ownership assertions; LearningMaterialService uses appropriate owner/read assertions. | Payloads, endpoints and writes remain CT21/CT09-owned; no new REST operation selected. |
+| CT22 EnrollmentService/LessonProgressService | Use eligibility/current-membership/Lesson predicates only where the selected operation consumes them. CT22 defines repeat enrol/leave/re-enrol, progress/resume and atomic participation. | No mutation, status transition, progress formula or propagation approved by CT03. |
+| Frontend/QA | FE07/FE08 consume approved REST only, never Java gates. CO03/CO04 implement selected provider capability; QA01/QA02/QA07 verify real security/PG/browser scope later. | Current anonymous catalogue stays independently usable; no Final-only consumer blocks its bounded approval. |
+
+Dependency directions are Assessment/Interaction/Adaptive application → Course
+application → Auth public application identity, with all repositories remaining
+private. No reverse call to a consumer is needed. In-process gates create no HTTP
+endpoint. The supplied Course UUID is asserted operation scope that Course proves,
+not trusted identity or a new persisted field in Assessment/Interaction records;
+the consumer's own operation contract must define its context before binding.
+No background/scheduler/event actor context is selected; CT04/CT08 and
+the relevant lifecycle contract must define it before such callers use an access
+gate. Current Course learning admission does not silently determine retention or
+historical attempt/submission/result access after leaving/hiding a course.
+
+### 12.7 Contract examples, findings and integration gates
+
+| Case | Expected contract result |
+|---|---|
+| Anonymous published catalogue/detail | Existing 200 and unchanged DTOs; no identity dependency. |
+| Anonymous absent versus hidden detail | Same safe 404; hidden course excluded from count/list. |
+| Published Course with hidden lesson / chapter with no published lessons | Public syllabus omits that heading / chapter. |
+| Protected call without effective current authentication | 401, no protected work; public catalogue unaffected. |
+| Learner ACTIVE or COMPLETED, published Course/Lesson | Learner Course/Lesson access passes; advanced lesson with unknown mastery also passes. |
+| Learner LEFT/absent on published Course | Learning read denied 403; eligibility may pass but creates no enrolment. |
+| Learner with membership, Course or Lesson hidden | Learning read denied 404, no hidden content; history is not deleted. |
+| Owning Instructor / different Instructor | Owner may preview own hidden Course/Lesson; other Instructor gets 403 for published Course, 404 for hidden Course. Learner-only methods still deny either Instructor with 403. |
+| Administrator invokes these learner/owner/read methods | 403; CT12 must separately define any administrative capability. |
+| Valid accessible Course ID, Lesson belonging to another Course | 404; material under another Lesson likewise 404; no foreign identifier exposed. |
+| Interaction post target differs from supplied Lesson | Interaction rejects its mismatch; Course approval cannot authorize cross-Lesson posts/reports. |
+| U07 authorization passes | No structural data returned and no CT40 interface approved; mapping still needs CT40 and valid same-Course skill rules. |
+| Provider/query failure | Safe 500 and no allow/effects; callers do not reinterpret failure as missing membership or success. |
+
+These are review oracles, not executed access tests. Use approved Course service
+and integration test locations from ADR002 CT14.interim; QA01 covers the real
+security chain, QA02 real PostgreSQL predicates/ancestry/hidden filtering and QA07
+browser behavior. Doubles/structural fixtures and CI compilation do not prove
+authorization, publication filtering, database consistency or concurrency behavior.
+Do not create extra test files or routes under this documentation authority.
+
+Findings: **high, approval provenance gap, resolved for technical sign-off** —
+initial inspection could not establish CT01.identity sign-off from merge alone;
+the Leader supplied it explicitly on 2026-10-18 (§11.4). Retain unfulfilled review
+and execution gates. **medium, remaining boundary** — full U07 structural
+binding belongs to CT40; retain its gate and reuse these access predicates rather
+than duplicate a structural interface. **low, stale status prose** — report
+CONTRIBUTING's empty-OpenAPI statement and clarify the relevant data-model status.
+No evidenced defect requires superseding approved CT03.catalogue, ADR002, CT21,
+CT22 or CT40. No actual unauthorized content disclosure is asserted.
+
+Required technical reviews: Course @TamiaoNguyen; Auth @duyduyit; Assessment
+@minhtan29042006; Adaptive @thanhtran0311; Interaction @tihh647-ui; Frontend
+@heizseung; Leader @chi-thanh-nguyen. These are requested reviews, not completed
+reviews. The three documentation paths have the Leader as sole CODEOWNER. A
+Leader-authored PR cannot satisfy its own CODEOWNER approval; obtain an independent
+contributor-authored/pushed replacement through the normal workflow if required,
+without impersonation, ownership/rules changes or bypass. Required Backend,
+Frontend, CodeQL, last-push approval and thread resolution remain in force.
+
+On Issue #22, the catalogue criterion is satisfied by effective ADR002. The
+ownership-separation criterion can reflect the existing allocation to CT21/CT22;
+new learning-access, combined consumers/signatures and identity-dependent criteria
+remain unchecked pending complete effective approval, including CT40's retained
+structural gate. Reaffirmation is not reapproval or implementation authorization.
+No Issue closure, Project/workflow/native dependency update, application change or
+deployment follows. Codex authored this scoped reconciliation under delegated
+selection authority; actual review/Leader sign-off and merged revision must supply
+approval provenance. HTTP concealment is compatible with
+[RFC9110 §15.5.4](https://www.rfc-editor.org/rfc/rfc9110.html#name-403-forbidden);
+the standard does not supply project policy or approval.
