@@ -567,6 +567,11 @@ not new REST operations, backend authorization or feature specifications.
 
 No CT01, CT18, CT21, CT22, CT38 or CT40 policy is superseded here. The sole
 supersession proposal above concerns a mistaken CT16 filename, not behavior.
+Creating `courseApi.ts` or renaming the canonical `catalogueApi.ts` is rejected:
+either duplicates or changes the approved inventory. Correcting only ADR002's
+reference preserves REST payloads, client responsibility and module boundaries.
+Frontend/Course review, explicit Leader approval and ADR002 file-scope authority,
+followed by protected integration, are required before that correction is effective.
 
 ### CT16.http — addressing and request boundary
 
