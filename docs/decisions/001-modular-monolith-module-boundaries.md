@@ -563,11 +563,15 @@ Resolve ancestry and relevant publication/membership conditions from Course-owne
 data as one coherent query snapshot per assertion, without a second-module table
 join or cross-request allow cache. Protected content reads must also constrain
 their actual output query to the same scope/visibility, not use a detached boolean
-as permission to fetch arbitrary content. Concurrent hide/leave/lock applies to
-the next fresh check; already-admitted work is not promised cancellation. Perform
-checks before effects in the caller's approved unit of work. No transaction
-propagation, lock protocol, progress mutation or new persistence semantics is
-selected; CT21/CT22/CT08 retain those operation-level decisions where consumed.
+as permission to fetch arbitrary content. Each fresh Course assertion evaluates
+Course visibility/membership against its coherent query snapshot, observing
+hide/leave changes visible there. CT01 validates account state/role per new
+protected request (§11.3); assertions within that admitted request use its trusted
+identity without requiring redundant Auth revalidation. Subsequent protected
+requests observe committed account locks; already-admitted work is not promised
+cancellation. Perform checks before effects in the caller's approved unit of work.
+No transaction propagation, lock protocol, progress mutation or new persistence
+semantics is selected; CT21/CT22/CT08 retain those operation-level decisions where consumed.
 Never consult mastery, prerequisite completion, adaptive_enabled, lesson position
 or previous-lesson completion as a hard access gate. Canonical order is guidance.
 
@@ -668,6 +672,9 @@ historical attempt/submission/result access after leaving/hiding a course.
 | Learner ACTIVE or COMPLETED, published Course/Lesson | Learner Course/Lesson access passes; advanced lesson with unknown mastery also passes. |
 | Learner LEFT/absent on published Course | Learning read denied 403; eligibility may pass but creates no enrolment. |
 | Learner with membership, Course or Lesson hidden | Learning read denied 404, no hidden content; history is not deleted. |
+| Material read: active Learner, ACTIVE/COMPLETED membership, published Course/Lesson and hidden material with valid ancestry | 404 at stage 5; enrolment does not expose hidden material. |
+| Material read: active owning Instructor previews that same hidden material under the published Course/Lesson, with valid ancestry | Assertion passes; owner preview permits hidden material. Storage delivery remains CT09-owned. |
+| Material read: active Learner, ACTIVE/COMPLETED membership, published Course and published material under a hidden Lesson, with valid ancestry | 404 at stage 5; material publication does not bypass hidden-Lesson denial. |
 | Owning Instructor / different Instructor | Owner may preview own hidden Course/Lesson; other Instructor gets 403 for published Course, 404 for hidden Course. Learner-only methods still deny either Instructor with 403. |
 | Administrator invokes these learner/owner/read methods | 403; CT12 must separately define any administrative capability. |
 | Valid accessible Course ID, Lesson belonging to another Course | 404; material under another Lesson likewise 404; no foreign identifier exposed. |
