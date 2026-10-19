@@ -392,11 +392,15 @@ not select the deployed PostgreSQL version. No local database credentials are
 required by this wiring. The profile only disables the scheduling setting;
 Flyway and Hibernate validation retain the normal application configuration.
 
-Backend feature test files are still empty, so these commands currently compile
-the abstract harness without executing PostgreSQL or proving Spring/database
-integration at runtime. Docker and access to the test image become necessary
-when concrete Testcontainers tests run; Compose is not required for those tests.
-See [the testing contract](testing.md) for lifecycle and isolation details.
+Auth, catalogue and local mastery test scaffolds are empty on this baseline.
+Concrete SH01 local/MVC tests and CourseFixturesTest exist, but do not initialize
+the PostgreSQL harness. These commands alone therefore do not establish real
+feature/PostgreSQL integration. Docker and access to the test image are required
+when a concrete test initializes the harness; Compose is not required for it.
+See [the CT14 placement and isolation proposal](testing.md#ct14-coverage-and-isolation-reconciliation--proposal)
+for exact approved paths, feature-specific configuration gates and separate
+execution/independent-verification prerequisites. No harness/profile or runtime
+configuration is changed by that proposal.
 
 ## Standalone Container Builds
 
