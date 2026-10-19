@@ -718,3 +718,26 @@ selection authority; actual review/Leader sign-off and merged revision must supp
 approval provenance. HTTP concealment is compatible with
 [RFC9110 §15.5.4](https://www.rfc-editor.org/rfc/rfc9110.html#name-403-forbidden);
 the standard does not supply project policy or approval.
+
+
+## 13. CT06 settings and coverage boundary reconciliation — proposal
+
+The detailed [CT06 reconciliation and proposal](../adaptive-learning.md#19-ct06-reconciliation-and-completion-proposal)
+records Codex's scoped technical selection, prepared/revalidated 2026-10-19
+under Leader delegation;
+new clauses remain pending owner review, explicit Leader sign-off and protected
+integration. Effective ADR002 CT06.prototype/CT24.calculation remain unchanged.
+
+Course owns `adaptive_enabled`, `adaptive_settings`, content publication and
+Instructor ownership; Adaptive owns skills, mappings, graph/mastery validation;
+Assessment owns questions, tagged evidence and the coverage population. U08
+Course-settings read/write and U09 CT40.coverage remain unresolved concrete
+bindings. Existing `AdaptiveSettingsService.java` supplies location/responsibility,
+not permission to call Course/Assessment repositories, entities or internal
+adapters. CT06 selects no new Java interface/signature, structural lookup, event,
+transaction propagation or persistence field. CT40 retains its structural/skill/
+coverage boundaries, CT24 callable shapes, CT08 execution and CT22 Course progress
+participation. Consumed CT01 identity and CT03 ownership assertions do not approve
+these missing data or mutation boundaries. Independently approved pure local
+calculation requires none of them; integrated execution must preserve atomic
+mastery/progress and the no-hard-block invariant.
