@@ -527,3 +527,16 @@ lookup contracts. Access rules and Java signatures are defined only in ADR001.
 This document preserves the conceptual model and records the separately approved
 initial physical baseline under that source hierarchy. It does not amend
 governance or immutable reference artifacts.
+
+
+## CT06 production and enablement proposal — no physical change
+
+The [CT06 reconciliation and proposal](adaptive-learning.md#19-ct06-reconciliation-and-completion-proposal)
+is the detailed pending policy record. It preserves V002 Course-owned JSONB settings,
+V003 skill/mapping ownership, V004 Assessment evidence and V005 categorical mastery;
+V006 introduces no mastery settings. No numeric mastery, event/policy ledger, JSON
+key/default, timestamp or migration is added. Independent foreign keys do not prove
+same-Course membership, complete immutable evidence or coverage readiness. U08/U09
+callables, production policy values, settings-change/replay consistency and actual
+verification remain explicit approval gates; a non-NULL JSON object does not satisfy
+them. This reference neither approves the proposal nor expands persistence scope.
