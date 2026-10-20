@@ -71,6 +71,27 @@ Use for approved directories, packages, filenames, module locations, frontend fe
 
 Treat the approved structure as fixed unless the user explicitly approves a structural change.
 
+### Approved Technical Decisions — BINDING CONTRACTS
+
+`docs/decisions/` contains Architecture Decision Records (ADRs) and technical decisions. Before implementing affected behavior, discover and read all materially relevant decisions there, including module boundaries, public interfaces, API contracts, data ownership, security, integration, testing, deployment, and other explicitly governed choices. Keep discovery task-relevant; unrelated ADRs need not be read.
+
+Interpret ADRs together with mandatory requirements, approved architecture, repository structure, and applicable governance instructions. An effective, properly authorized decision binds only its explicitly approved scope.
+
+Verify approval provenance, accepted revision, effective scope, exclusions, and unresolved gates at the relevant section, decision, or contract-slice level. Identify the authorizing instruction/record and approver or valid delegation, including its limits and conditions. Distinguish approved architecture, explicit Leader authorization, valid delegated approval, bounded or Interim-only approval, proposals/pending decisions, deferred/blocked/unresolved decisions, and explicitly superseded decisions. Preserve existing project-specific dispositions; do not invent statuses or reinterpret them to imply approval.
+
+A filename, title, top-level status, or presence in `main` is insufficient approval evidence. Code, scaffolding, documentation, and historical planning reports do not independently establish technical approval. Evaluate historical merge/review statements against actual current evidence; a merge does not approve every decision in the document.
+
+- Technical selection is not necessarily technical approval; technical approval is not implementation authorization.
+- Approval of a slice does not approve its entire contract family or prove implementation completion, testing success, or deployment readiness.
+- Deferred or explicitly excluded behavior remains unauthorized unless subsequently approved. Implement only behavior covered by task authorization and effective contracts.
+
+ADRs cannot waive mandatory course requirements or silently change approved architecture or repository structure. A later validly authorized decision may refine or supersede an earlier technical decision only within its explicit scope and authority, with identifiable authorization and supersession evidence. Unaffected decisions and architectural invariants remain effective. ADR numbering, timestamps, merge order, or status alone do not establish precedence. Required decisions that are missing, conflicting, or not verifiably authorized must follow the existing Blocker Protocol before affected files are modified; do not resolve conflicts by rewriting immutable canonical references.
+
+Interpretation examples, not new approval determinations:
+
+- ADR001 sections 1–10 establish approved modular-monolith/module-boundary obligations. Section 11 separately qualifies CT01 selections with pending authoritative integration and additional approval requirements; it does not inherit approval from the document's top-level status. Verify any subsequent scoped authorization separately.
+- ADR002's exact authorized slices and disposition inventory distinguish approved, proposed, deferred, and blocked entries. `CT01.core` approval does not itself approve `CT01.identity` or `CT01.remaining`; historical pending-merge/review wording must be checked against current evidence.
+
 ### Current Build/Configuration — CURRENT STATE
 
 Use implemented repository files for exact dependency/plugin versions, scripts, environment-variable names, profiles, ports, service names, CI jobs, and test commands.
@@ -110,6 +131,7 @@ Governance files:
 - `docs/requirements.md`
 - `docs/architecture.md`
 - `docs/repository-structure.md`
+- `docs/decisions/`
 
 Do not modify them merely to make implementation appear compliant.
 
@@ -127,6 +149,14 @@ Files under `docs/references/originals/` are immutable reference artifacts.
 Do not edit, rename, replace, regenerate, or delete them unless explicitly requested.
 
 If a Markdown derivative conflicts with its canonical original, report the discrepancy and stop.
+
+### ADR Lifecycle and Change Control
+
+Preserve approved decisions and their historical rationale. Never create, revise, delete, supersede, expand, or mark an ADR decision as approved without the appropriate authorization. Do not silently change an approved contract to accommodate an implementation discrepancy. Authorization to draft a proposal does not approve its outcome.
+
+For authorized ADR changes, follow `CONTRIBUTING.md`, existing Leader-reserved authority, valid delegation limits, CODEOWNERS review, protected PR requirements, and other applicable approval gates. Preserve traceability of the affected scope, rationale, decision provenance, and relevant predecessor decisions when amending or superseding a decision. Retain pending and deferred decisions until explicitly resolved through an authorized process; never fabricate reviewer approval, acceptance evidence, implementation completion, or verification results.
+
+These rules introduce no new approval ceremony and require no new ADR for ordinary implementation details already covered by an approved contract and authorized task.
 
 ## Blocker Protocol
 
@@ -437,7 +467,7 @@ For every task:
 1. Read this file.
 2. Identify the exact requested scope.
 3. Inspect target files and only necessary dependencies/callers/consumers.
-4. Read relevant source-of-truth documents.
+4. Read relevant source-of-truth documents, including ADRs under the Source-of-Truth Map, and verify applicable approval scope, unresolved gates, and implementation consistency.
 5. Check for missing context/conflicts.
 6. If blocked, stop before editing.
 7. Implement the smallest complete change.
