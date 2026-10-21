@@ -730,7 +730,20 @@
     }
   },
   "x-ct03-access-proposal": {
-    "status": "PROPOSED_NOT_EFFECTIVE",
-    "decisionReference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation"
+    "status": "DELEGATED_APPROVED",
+    "decisionReference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation",
+    "approvalDisposition": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "contractRevision": "CT03-2026-10-21-r1",
+    "approvalDate": "2026-10-21",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "effectiveOnMain": false,
+    "authority": "Project Leader @chi-thanh-nguyen instruction CodeMastery — Complete CT01/CT03 Technical Approval Under Explicit Leader Delegation; Codex approves CT03-owned scope only.",
+    "scope": "ADR001 section 12: learning/ownership/visibility/ancestry predicates, seven assertions, U03/U04 Course-side bindings and U07 authorization. Public catalogue and REST DTOs unchanged.",
+    "u04Resolution": "Existing CourseAccessService.requireLessonReadAccess(UUID lessonId), void; Course privately derives ancestry. No new structural lookup or schema field. Exact concealment/error behavior in ADR001 section 12.4.",
+    "retainedPrerequisites": [
+      "Protected CODEOWNERS/owner review, required checks/security scanning, last-push approval, resolved conversations and integration into main",
+      "Full U07 requires an effective CT40.lesson-read structural contract or explicit no-extra-read disposition; no CT40 approval here",
+      "Owning-Issue operation/REST/mutation approvals, implementation authorization and actual runtime verification remain separate"
+    ]
   }
 }
