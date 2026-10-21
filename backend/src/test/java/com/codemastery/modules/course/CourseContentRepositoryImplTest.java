@@ -1,13 +1,17 @@
 package com.codemastery.modules.course;
 
 import com.codemastery.modules.course.domain.model.Chapter;
+import com.codemastery.modules.course.domain.model.LearningMaterial;
 import com.codemastery.modules.course.domain.model.Lesson;
+import com.codemastery.modules.course.domain.model.MaterialType;
 import com.codemastery.modules.course.domain.model.PublishStatus;
 import com.codemastery.modules.course.infrastructure.persistence.entity.ChapterEntity;
+import com.codemastery.modules.course.infrastructure.persistence.entity.LearningMaterialEntity;
 import com.codemastery.modules.course.infrastructure.persistence.entity.LessonEntity;
 import com.codemastery.modules.course.infrastructure.persistence.mapper.CourseContentMapper;
 import com.codemastery.modules.course.infrastructure.persistence.repository.ChapterJpaRepository;
 import com.codemastery.modules.course.infrastructure.persistence.repository.CourseContentRepositoryImpl;
+import com.codemastery.modules.course.infrastructure.persistence.repository.LearningMaterialJpaRepository;
 import com.codemastery.modules.course.infrastructure.persistence.repository.LessonJpaRepository;
 import com.codemastery.support.fixtures.CourseFixtures;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +31,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -42,6 +45,9 @@ class CourseContentRepositoryImplTest {
     @Mock
     private LessonJpaRepository lessonJpaRepository;
 
+    @Mock
+    private LearningMaterialJpaRepository learningMaterialJpaRepository;
+
     private CourseContentMapper mapper;
     private CourseContentRepositoryImpl repository;
 
@@ -50,11 +56,12 @@ class CourseContentRepositoryImplTest {
     private static final UUID CHAPTER_2_ID = UUID.fromString("00000000-0000-4000-8000-000000000012");
     private static final UUID LESSON_1_ID = UUID.fromString("00000000-0000-4000-8000-000000000021");
     private static final UUID LESSON_2_ID = UUID.fromString("00000000-0000-4000-8000-000000000022");
+    private static final UUID MATERIAL_ID = UUID.fromString("00000000-0000-4000-8000-000000000031");
 
     @BeforeEach
     void setUp() {
         mapper = new CourseContentMapper();
-        repository = new CourseContentRepositoryImpl(chapterJpaRepository, lessonJpaRepository, mapper);
+        repository = new CourseContentRepositoryImpl(chapterJpaRepository, lessonJpaRepository, learningMaterialJpaRepository, mapper);
     }
 
     @Test
@@ -150,16 +157,10 @@ class CourseContentRepositoryImplTest {
     void findPublishedLessonsByCourseId() {
         assertTrue(repository.findPublishedLessonsByCourseId(null).isEmpty());
 
-        ChapterEntity ch1 = new ChapterEntity(CHAPTER_1_ID, COURSE_ID, "Ch1", 1);
-        ChapterEntity ch2 = new ChapterEntity(CHAPTER_2_ID, COURSE_ID, "Ch2", 2);
-        when(chapterJpaRepository.findByCourseIdOrderByPositionAsc(COURSE_ID)).thenReturn(List.of(ch1, ch2));
-
         LessonEntity l1 = new LessonEntity(LESSON_1_ID, CHAPTER_1_ID, "L1", null, 1, "published");
         LessonEntity l2 = new LessonEntity(LESSON_2_ID, CHAPTER_2_ID, "L2", null, 1, "published");
-        when(lessonJpaRepository.findByChapterIdAndPublicationStatusOrderByPositionAsc(CHAPTER_1_ID, "published"))
-                .thenReturn(List.of(l1));
-        when(lessonJpaRepository.findByChapterIdAndPublicationStatusOrderByPositionAsc(CHAPTER_2_ID, "published"))
-                .thenReturn(List.of(l2));
+        when(lessonJpaRepository.findPublishedByCourseIdInCanonicalOrder(COURSE_ID))
+                .thenReturn(List.of(l1, l2));
 
         List<Lesson> lessons = repository.findPublishedLessonsByCourseId(COURSE_ID);
         assertEquals(2, lessons.size());
@@ -168,10 +169,77 @@ class CourseContentRepositoryImplTest {
     }
 
     @Test
-    @DisplayName("saveChapter and saveLesson map and delegate to JPA repositories")
+    @DisplayName("findLessonInCourse verifies ancestry and delegates safely")
+    void findLessonInCourse() {
+        assertTrue(repository.findLessonInCourse(null, LESSON_1_ID).isEmpty());
+        assertTrue(repository.findLessonInCourse(COURSE_ID, null).isEmpty());
+
+        LessonEntity entity = new LessonEntity(LESSON_1_ID, CHAPTER_1_ID, "L1", null, 1, "published");
+        when(lessonJpaRepository.findByIdWithinCourse(COURSE_ID, LESSON_1_ID)).thenReturn(Optional.of(entity));
+
+        Optional<Lesson> result = repository.findLessonInCourse(COURSE_ID, LESSON_1_ID);
+        assertTrue(result.isPresent());
+        assertEquals("L1", result.get().title());
+    }
+
+    @Test
+    @DisplayName("findCourseIdByLessonId resolves course privately")
+    void findCourseIdByLessonId() {
+        assertTrue(repository.findCourseIdByLessonId(null).isEmpty());
+
+        when(lessonJpaRepository.findCourseIdByLessonId(LESSON_1_ID)).thenReturn(Optional.of(COURSE_ID));
+        Optional<UUID> result = repository.findCourseIdByLessonId(LESSON_1_ID);
+        assertTrue(result.isPresent());
+        assertEquals(COURSE_ID, result.get());
+    }
+
+    @Test
+    @DisplayName("findMaterialsByLessonId and findPublishedMaterialsByLessonId return mapped domain")
+    void materialQueries() {
+        assertTrue(repository.findMaterialsByLessonId(null).isEmpty());
+        assertTrue(repository.findPublishedMaterialsByLessonId(null).isEmpty());
+
+        LearningMaterialEntity mat = new LearningMaterialEntity(
+                MATERIAL_ID, LESSON_1_ID, "Slide Deck", "file", "published", null, "s3/key", "slides.pdf", null
+        );
+        when(learningMaterialJpaRepository.findByLessonId(LESSON_1_ID)).thenReturn(List.of(mat));
+        when(learningMaterialJpaRepository.findByLessonIdAndPublicationStatus(LESSON_1_ID, "published"))
+                .thenReturn(List.of(mat));
+
+        List<LearningMaterial> all = repository.findMaterialsByLessonId(LESSON_1_ID);
+        assertEquals(1, all.size());
+        assertEquals("Slide Deck", all.get(0).title());
+        assertEquals(MaterialType.FILE, all.get(0).materialType());
+
+        List<LearningMaterial> published = repository.findPublishedMaterialsByLessonId(LESSON_1_ID);
+        assertEquals(1, published.size());
+        assertEquals(PublishStatus.PUBLISHED, published.get(0).publicationStatus());
+    }
+
+    @Test
+    @DisplayName("findMaterialInLesson verifies full ancestry")
+    void findMaterialInLesson() {
+        assertTrue(repository.findMaterialInLesson(null, LESSON_1_ID, MATERIAL_ID).isEmpty());
+        assertTrue(repository.findMaterialInLesson(COURSE_ID, null, MATERIAL_ID).isEmpty());
+        assertTrue(repository.findMaterialInLesson(COURSE_ID, LESSON_1_ID, null).isEmpty());
+
+        LearningMaterialEntity mat = new LearningMaterialEntity(
+                MATERIAL_ID, LESSON_1_ID, "Text Note", "text", "published", "Hello", null, null, null
+        );
+        when(learningMaterialJpaRepository.findByIdWithinLesson(COURSE_ID, LESSON_1_ID, MATERIAL_ID))
+                .thenReturn(Optional.of(mat));
+
+        Optional<LearningMaterial> result = repository.findMaterialInLesson(COURSE_ID, LESSON_1_ID, MATERIAL_ID);
+        assertTrue(result.isPresent());
+        assertEquals("Text Note", result.get().title());
+    }
+
+    @Test
+    @DisplayName("saveChapter, saveLesson and saveMaterial map and delegate to JPA repositories")
     void saveOperations() {
         assertNull(repository.saveChapter(null));
         assertNull(repository.saveLesson(null));
+        assertNull(repository.saveMaterial(null));
 
         Chapter chapterDomain = CourseFixtures.chapter(CHAPTER_1_ID, COURSE_ID, "Title", 1);
         ChapterEntity chapterEntity = new ChapterEntity(CHAPTER_1_ID, COURSE_ID, "Title", 1);
@@ -188,5 +256,18 @@ class CourseContentRepositoryImplTest {
         Lesson savedLesson = repository.saveLesson(lessonDomain);
         assertNotNull(savedLesson);
         assertEquals(LESSON_1_ID, savedLesson.id());
+
+        LearningMaterial materialDomain = new LearningMaterial(
+                MATERIAL_ID, LESSON_1_ID, "Video", MaterialType.EXTERNAL_VIDEO, PublishStatus.PUBLISHED,
+                null, null, null, "https://example.com/v"
+        );
+        LearningMaterialEntity materialEntity = new LearningMaterialEntity(
+                MATERIAL_ID, LESSON_1_ID, "Video", "external_video", "published", null, null, null, "https://example.com/v"
+        );
+        when(learningMaterialJpaRepository.save(any(LearningMaterialEntity.class))).thenReturn(materialEntity);
+
+        LearningMaterial savedMat = repository.saveMaterial(materialDomain);
+        assertNotNull(savedMat);
+        assertEquals(MATERIAL_ID, savedMat.id());
     }
 }

@@ -5,7 +5,6 @@ import com.codemastery.modules.course.domain.model.PublishStatus;
 import com.codemastery.modules.course.infrastructure.persistence.entity.CourseEntity;
 import org.springframework.stereotype.Component;
 
-import java.util.Locale;
 
 @Component
 public class CourseMapper {
@@ -14,45 +13,46 @@ public class CourseMapper {
         if (domain == null) {
             return null;
         }
-        String publicationStatus = domain.publicationStatus() != null ? domain.publicationStatus().getStatus() : null;
         return new CourseEntity(
                 domain.id(),
                 domain.instructorId(),
                 domain.title(),
                 domain.description(),
                 domain.prerequisiteDescription(),
-                publicationStatus,
+                toCode(domain.publicationStatus()),
                 domain.adaptiveEnabled(),
-                domain.adaptiveSettings()
-        );
+                domain.adaptiveSettings());
     }
 
     public Course toDomain(CourseEntity entity) {
         if (entity == null) {
             return null;
         }
-        PublishStatus publicationStatus = toPublishStatus(entity.getPublicationStatus());
         return new Course(
                 entity.getId(),
                 entity.getInstructorId(),
                 entity.getTitle(),
                 entity.getDescription(),
                 entity.getPrerequisiteDescription(),
-                publicationStatus,
+                toPublishStatus(entity.getPublicationStatus()),
                 entity.isAdaptiveEnabled(),
-                entity.getAdaptiveSettings()
-        );
+                entity.getAdaptiveSettings());
     }
 
-    private PublishStatus toPublishStatus(String status) {
-        if (status == null) {
+    static String toCode(PublishStatus status) {
+        return status == null ? null : status.getStatus();
+    }
+
+    /** Converts string code to PublishStatus, case-insensitively. */
+    static PublishStatus toPublishStatus(String code) {
+        if (code == null) {
             return null;
         }
-        for (PublishStatus ps : PublishStatus.values()) {
-            if (ps.getStatus().equalsIgnoreCase(status) || ps.name().equalsIgnoreCase(status)) {
-                return ps;
+        for (PublishStatus status : PublishStatus.values()) {
+            if (status.getStatus().equalsIgnoreCase(code) || status.name().equalsIgnoreCase(code)) {
+                return status;
             }
         }
-        throw new IllegalArgumentException("Unknown publication status: " + status);
+        throw new IllegalArgumentException("Unknown publication status code: " + code);
     }
 }
