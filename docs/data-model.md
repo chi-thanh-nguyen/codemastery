@@ -460,11 +460,13 @@ future indexes. These require their feature contracts before implementation.
 Seed/demo content remains separate under `sample-data/`; no versioned migration
 in this foundation supplies application records.
 
-### CT01 account/identity contract supplement — pending integration
+### CT01 account/identity contract supplement — approved, integration pending
 
-The [CT01 completion proposal](decisions/001-modular-monolith-module-boundaries.md#11-ct01-completion-proposal--pending-authoritative-integration)
-records delegated technical selection dated 2026-10-17, not effective approval
-before required review, explicit Leader sign-off and protected merge. Preserve
+The [CT01 technical contract](decisions/001-modular-monolith-module-boundaries.md#11-ct01-completion-proposal--pending-authoritative-integration)
+records **CT01-2026-10-21-r1**, technically approved on 2026-10-21 under the
+Project Leader's explicit CT01/CT03 delegation. New detail is
+APPROVED_PENDING_PROTECTED_INTEGRATION; existing effective approvals retain
+their own provenance. Protected review and merge remain required. Preserve
 ADR002 `CT01.core` and the immutable V001 schema without change: Auth owns
 `users.id/email/password_hash/display_name/role/account_status`; role literals
 remain `learner/instructor/admin`, account states `active/locked`. Self-registration
@@ -474,7 +476,8 @@ supplies role Learner/status active; neither is client-controlled.
 CT01.identity and its limited U01 current-identity binding in this Codex session,
 referring to ADR001 §11.4's shape already integrated through PR #82. This is
 technical approval, not a manual GitHub PR review or a waiver of remaining review,
-logout-risk, implementation/deployment or actual-verification gates.
+implementation/deployment or actual-verification gates. The distinct 2026-10-21
+approval and personal risk acceptance below do not alter that historical scope.
 
 The approved read-only Auth application facade exposes only current self UUID/current
 role and a bounded Course-consumed UUID-to-public-displayName lookup. Nested boundary
@@ -488,7 +491,9 @@ This is request-time validation, not a promise to cancel already admitted work.
 No token/session/revocation/version column or table is introduced. The selected
 client-local logout cannot revoke a copied JWT: it can remain usable until its
 15-minute expiry while the account is active; unlock before expiry can restore
-usability. Explicit Leader acceptance of that residual risk is outstanding.
+usability. On 2026-10-21 the Leader personally accepted these specific residual
+risks, including unaffected other tabs/devices and already-admitted requests
+(ADR001 §11.3); delegated technical authority is not substituted for that acceptance.
 Recovery/reset persistence (CT02), Admin mutations (CT12), instructor display REST
 composition (CT21), physical changes and actual verification remain separately
 gated. Current instructorId-only catalogue DTOs do not claim full human-readable
