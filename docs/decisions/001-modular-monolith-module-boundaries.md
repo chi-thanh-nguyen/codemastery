@@ -167,27 +167,39 @@ The source-of-truth hierarchy remains the one defined in AGENTS.md. This ADR
 records the existing approved boundary decision without changing governance
 documents or immutable reference artifacts.
 
-## 11. CT01 completion proposal — pending authoritative integration
+<a id="11-ct01-completion-proposal--pending-authoritative-integration"></a>
+
+## 11. CT01 approved technical contract — protected integration pending
 
 ### 11.1 Authority and unchanged baseline
 
-**Status: TECHNICAL_SELECTION_RECORDED; PENDING_AUTHORITATIVE_INTEGRATION.**
-Sections 1–10 retain their existing approval. This section records Codex's scoped
-technical selection under the Project Leader's instruction of 2026-10-17
-(Asia/Ho_Chi_Minh), for [CT01 #18](https://github.com/chi-thanh-nguyen/codemastery/issues/18).
-That instruction delegates analysis/selection and the three CT01 documentation
-paths; it is not a separate manual Leader review or implementation authorization.
-Required owner/consumer review, explicit Leader sign-off and protected merge into
-`main` remain necessary. Logout additionally requires the explicit risk acceptance
-in §11.3; merging without that evidence must not be described as logout approval.
+**CT01-2026-10-21-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** On 2026-10-21 (Asia/Ho_Chi_Minh),
+the Project Leader @chi-thanh-nguyen explicitly delegated actual technical
+approval, reaffirmation and justified refinement of CT01/CT03 in the instruction
+“CodeMastery — Complete CT01/CT03 Technical Approval Under Explicit Leader
+Delegation”. After the independent reconciliation below, Codex, acting as
+delegated technical approval authority, **approves the CT01-owned contracts in
+§§11.2–11.5**, with the exclusions and implementation gates recorded here.
+This revision is selected and technically approved, not another proposal.
+Its new approvals become effective on `main` only through protected integration;
+no GitHub APPROVE review, CODEOWNER approval or implementation is asserted.
+Sections 1–10 and all unaffected decisions retain their existing authority.
+
+The 2026-10-17 analysis/selection instruction produced the proposal integrated in
+PR #82; that merge did not approve all embedded selections. The present delegation
+resolves their technical-approval gate, not the independent review/protection
+gates. The Leader's separate, personal 2026-10-21 acceptance in §11.3 resolves
+the retained logout-risk gate; it is not inferred from delegated authority.
 
 **Bounded update, 2026-10-18:** PR #82 is integrated as `39748f6`. The Leader
 separately signed off CT01.identity and its limited U01 binding by explicit
 instruction in this Codex session; §11.4 records that approval. Remaining CT01
-conditions, logout risk acceptance and required review/implementation/verification
-gates are not approved or waived by that instruction.
+conditions and logout risk were not approved by that earlier instruction.
+Required review/implementation/verification gates were not waived.
 
-Baseline inspected: `main` at `43e399927b4cb36587184fcf4f4474bc88095852`, current
+Baseline independently rechecked on 2026-10-21: `main` at
+`5e62c32703932e1e869467e6a94ede0a3b75ff66`, current
 CT01/CT16/CT18/CT38 and AU05/AU06/FE03/CO04/CO05/QA01/QA02/QA07 Issues,
 canonical requirements §4.1/§6, approved architecture §4.1/US-01/US-02,
 V001 and [ADR002](002-interim-delegated-contracts.md). Auth/security and Auth
@@ -195,12 +207,21 @@ frontend files are empty scaffolds at this revision. Shared REST/configuration
 code exists; it does not implement authentication. ADR002's `CT01.core`,
 `CT16.minimum`, `CT18.minimum` and `CT38.core` remain unchanged. Its historical
 deferrals identify the gaps addressed here, not approval of these new selections.
+PR #73 (`729ba60`) supplies the bounded Interim approvals; #82 (`39748f6`)
+integrates the earlier CT01 proposal, #83 (`8906c59`) records the separately
+approved identity slice, #84 (`754b651`) integrates CT16 proposals without
+approving them all, and #89 (`5e62c32`) strengthens provenance/change control.
+Open PR #90, head `586714e358691ba7684a8fc0fdd72834c4b86f45`, changes Course
+repository binding and tests, not Auth identity or access authorization.
+Actual shared MVC handling rethrows security exceptions; Auth services/security,
+AuthProvider and Auth clients remain unimplemented. No merge or scaffold is
+treated as authentication/security verification.
 
 ### 11.2 Alternatives and selected contracts
 
 | Decision | Selected solution and rationale | Rejected/deferred alternatives |
 |---|---|---|
-| Logout/revocation | Client-local logout, fixed non-sliding 15-minute access JWT; explicit residual-risk acceptance required. Fits existing bearer/memory policy without new state/schema. | Database token versions/session tables need schema approval; external revocation storage adds infrastructure; an in-memory denylist can resurrect revoked tokens on restart. A fail-closed allowlist avoids resurrection but adds session state, restart logouts and capacity/concurrency obligations without a requirement for immediate revocation. |
+| Logout/revocation | APPROVE client-local logout with fixed non-sliding 15-minute access JWT and the Leader's specific risk acceptance in §11.3. Fits existing bearer/memory policy without new state/schema; it offers bounded exposure, not immediate revocation. | Durable token versions/session tables need schema and lifecycle approval; external revocation storage adds infrastructure; an in-memory denylist can resurrect revoked tokens on restart and is not durable across instances. A fail-closed allowlist avoids resurrection but adds session state, restart logouts and capacity/concurrency obligations. Shorter expiry increases reauthentication without eliminating replay. No mandatory source requires immediate server revocation. |
 | Identity | Minimal read-only Auth application facade in existing `UserAccountService.java`, with immutable nested public boundary types. | Importing `AuthenticatedUser`, Auth entities/repositories or joining Auth tables leaks internals; a new top-level interface/file needs structural approval; JWT claims alone cannot enforce current account state. |
 | Instructor identity | Bulk UUID-to-displayName lookup for Course-owned IDs; no email or account objects. | Per-row lookups encourage N+1 queries; extending REST DTOs here would reopen CT21's selected shape; a public user-directory endpoint is unnecessary. |
 | Authorization | Auth validates identity/current status; owning module enforces explicit role and resource rules, default deny. | Frontend guards or token role claims alone permit bypass/stale privileges; implicit Administrator superuser inheritance is not approved. |
@@ -242,16 +263,21 @@ tabs/devices are separate sessions; no cross-tab/global logout guarantee is made
 Already-admitted server requests can finish after logout; clearing browser state
 does not roll back committed work or cancel server-side effects.
 
-**Material residual risk / Leader-reserved acceptance:** a copied access JWT
+**Material residual risk / personal Leader acceptance recorded 2026-10-21:** a copied access JWT
 remains usable after client logout for its remaining lifetime (at most 15 minutes
 from issuance), while the account is active and the signing key unchanged. An
 attacker can act during that window; this design is not server-side revocation.
 Account locking blocks subsequent protected requests but is a CT12-owned action,
 not a logout implementation; unlocking before expiry can make an old token usable
 again. Key replacement invalidates all old signatures and is an operational
-incident action, not routine per-user logout. Explicit Leader sign-off must state
-acceptance of these facts for this bounded policy, or require a separately
-approved revocation design. Codex has not supplied that human risk acceptance.
+incident action, not routine per-user logout. Asked specifically about copied-token
+validity after logout until expiry while active, possible reuse after unlock before
+expiry, and unaffected other tabs/devices/already-admitted requests, the Leader
+@chi-thanh-nguyen replied **“Accept these specific residual risks”** on 2026-10-21.
+This is the Leader's personal acceptance of precisely those facts, separately from
+Codex's technical approval. It accepts no broader vulnerability, production
+exposure or future session design. Immediate invalidation would require a separately
+approved revocation contract; it must never be claimed for this policy.
 
 ### 11.4 CT01.identity: exact public boundary and U01 disposition
 
@@ -335,11 +361,11 @@ Authentication runs before protected business effects. Missing/malformed/expired
 bearer credentials or missing/locked accounts yield identical safe 401 errors;
 after authentication, an unsupported role gets 403 before resource lookup.
 The owning contract then distinguishes unavailable/concealed resources (404)
-from authorization denial on a disclosed resource (403). For the proposed Course
+from authorization denial on a disclosed resource (403). For the Course
 predicates, §12.4 defines the exact order and concealment rules; there is no
 blanket 403 override for those 404s. All denials prevent protected effects.
-Ownership predicates do not follow from role alone. This clarification of pending
-authorization selections changes neither effective CT01.core/identity approval
+Ownership predicates do not follow from role alone. This approved clarification
+of authorization selections changes neither effective CT01.core/identity approval
 nor CT18's error representation.
 Auth's filter-chain `RestSecurityErrorHandler` owns authentication/authorization
 errors, including method-security failures; it uses CT18 ProblemDetail just like
@@ -347,18 +373,21 @@ MVC, without relying only on `GlobalExceptionHandler` (which rethrows security
 exceptions). Use `WWW-Authenticate: Bearer` on 401, without account/token detail.
 Do not mislabel role denial as token failure or erase a valid session on 403.
 
-CT16/FE03: tokens stay solely in AuthProvider memory; send Authorization only to
+CT16/FE03 Auth-side handoff: tokens stay solely in AuthProvider memory; send Authorization only to
 the configured API origin, never URL/cookies/storage/logs. Recheck the origin on
 redirects: reject redirected authenticated requests rather than forward a bearer
 credential to another origin. Clear on current-session 401/expiry/logout, ignore
 late responses from superseded generations, never restore a logged-out session
-from an in-flight login, and discard private results after logout. A late 401
+from an in-flight login, and discard private results after logout. A failed public
+login does not clear an unrelated current session. A late 401
 from an old session must not clear a newer login. 403 preserves the session;
 network/5xx failures are not authentication failures. The UI timer uses receipt
 time plus expiresIn as an upper bound, also stops at the JWT exp (decoded only for
 UI scheduling), and checks expiry before sends/on resume; server validation is
 authoritative. No retry of mutations or silent renewal. Browser-controlled state
-and role guards never authorize backend access.
+and role guards never authorize backend access. These are approved CT01 session
+requirements on consumers; the delegation does not approve CT16's remaining
+router/shell, HTTP implementation choices, dependency or path corrections.
 
 CT18: preserve application/problem+json, about:blank, standard title, status,
 safe detail, path-only instance and sorted validation errors without rejected
@@ -398,13 +427,14 @@ These are contract examples, **not executed security verification**:
 | Wrong alg/signature/issuer/audience/type; missing claims; future iat; now=exp | Protected authentication fails with generic 401, no side effect. AU05, QA01. |
 | Valid token, then committed account lock | Next protected request → 401; database failure → safe 500 and no business work. AU05, QA01. |
 | Learner invokes selected Instructor/Admin capability | 403, unchanged state; instructor with wrong resource ownership also denied under owning contract. QA01 requires an approved real operation binding. |
-| Logout / copied token / delayed login or 401 response | Browser clears immediately; copied token can still authenticate until expiry while account active; delayed responses cannot revive/erase a newer session. FE03/QA07, AU05/QA01; residual-risk gate retained. |
+| Logout / copied token / delayed login or 401 response | Browser clears immediately; copied token can still authenticate until expiry while account active; delayed responses cannot revive/erase a newer session. FE03/QA07, AU05/QA01; personal residual-risk acceptance recorded in §11.3. |
 | Course consumes identity / renders current selected public DTO | UUID/current role or requested public names only; no Auth internal imports; instructorId-only payload unchanged. AU06/CO04/CO05, Auth/Course review. |
 
 Review must include Auth, Frontend @heizseung, Course and affected protected-operation
 owners. The three documentation paths are Leader-owned. Evidence of technical
-selection is this record and its PR; evidence of approval must identify actual
-review/sign-off and merged revision, including explicit §11.3 risk acceptance.
+approval is this exact revision, the explicit 2026-10-21 delegation and separate
+§11.3 personal acceptance. Required owner/consumer review and the protected merged
+revision remain integration evidence to obtain, not fabricated completed reviews.
 No self-authored examples or CI build claim actual security verification. QA01
 must later execute the real configured security chain and PostgreSQL account
 state, selected approved role/resource operations, and contract JWT boundary cases
@@ -413,14 +443,40 @@ checks browser session behavior. No fake security probe endpoint is authorized t
 make a role-denial test pass. Missing protected operation bindings remain an
 explicit execution gap, not proof that anonymous catalogue tests satisfy US-01.
 
-Issue #18's registration checkbox can reflect effective ADR002 CT01.core after
-authoritative provenance confirmation. The combined login/logout, identity/API,
-cross-contract reconciliation, CT01.identity and U01 checkboxes stay pending until
-their entire stated conditions have effective approval. The Leader's separate
-2026-10-18 CT01.identity/U01 sign-off now supplies those two technical approval
-records (§11.4); it does not satisfy the remaining combined conditions. No Issue closure, Project
-status/readiness/dependency change, implementation, deployment or real security
-verification is authorized by this contract proposal.
+Issue #18 retains its effective registration, CT01.identity and limited U01
+checkmarks. Its combined login/logout, complete CT01 identity/API and cross-contract
+criteria are technically satisfied within CT01 by this revision, but their proposed
+checkmarks must wait for effective protected integration. Separate CT16/CT18/CT38
+unapproved extensions are excluded, not silently approved to satisfy those criteria.
+No Issue closure, Project status/readiness/dependency change, implementation,
+deployment or real security verification is authorized by this contract approval.
+
+### 11.7 Approval disposition and retained gates
+
+All new approvals below use **CT01-2026-10-21-r1**, dated **2026-10-21**,
+under the explicit Leader instruction named in §11.1. The PR commit identifies
+the exact selected bytes. Labels in this table report disposition; they do not
+rewrite ADR002's historical project-specific statuses.
+
+| Decision / consumers | Determination and rationale | Approval disposition / exclusions |
+|---|---|---|
+| CT01.core / AU04, AU05, AU06, FE03, QA01 | REAFFIRM ADR002's 11 October approval: canonical validation, BCrypt, HS256/claims/lifetime, locked-account exclusion, DTOs and generic failures. Correct, compatible with V001 and no replacement needed. | PREVIOUSLY_APPROVED; EFFECTIVE_APPROVAL via PR #73. No implementation or host-capacity proof. |
+| CT01.identity, limited U01 / Auth and protected consumers, Course public names | REAFFIRM the Leader's 18 October approval and exact §11.4 facade. Minimal trusted read surface; public catalogue still has no identity dependency. | PREVIOUSLY_APPROVED; EFFECTIVE_APPROVAL recorded through PR #83. CT21 display-name REST extension, CT02 recovery and CT12 mutations excluded. |
+| Login/registration edge semantics and JWT lifecycle / AU05/AU06 | CLARIFY and APPROVE §11.3: malformed requests versus generic credential failure, no BCrypt truncation, fixed JWT validation and current-account reads. Extends pending detail without changing effective CT01.core payloads/policy. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. |
+| Logout/session / AU05, FE03, QA01/QA07 | APPROVE client-local logout after evaluating durable and ephemeral revocation alternatives (§11.2); no new state, dependency or endpoint. §11.3 separately records actual Leader risk acceptance. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. No server revocation, global logout or production readiness claim. |
+| Role/resource/default-deny and exception handoff / all selected protected consumers | APPROVE §11.5: Auth establishes current identity; owning module checks permission/ancestry; CT18 exceptions propagate through security handling. No duplicate policy, role inheritance or fabricated protected route. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. CT03's exact predicates retain their own approval; other operations remain owner-controlled. |
+| CT16/CT18/CT38 interoperability / Auth, shared infrastructure, FE03 | REUSE effective minimum/core slices; APPROVE CT01-side generation/expiry/401/403, error and runtime obligations in §11.5. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION for new CT01 detail only. Full other-Issue contracts DEFERRED. |
+
+**CT01 verdict: FULLY TECHNICALLY APPROVED; new approvals pending protected
+integration.** No previously approved contract is superseded. The pending-selection
+dispositions of PR #82/§11 are resolved prospectively by this authority, not
+backdated into those historical merges. Protected review, last-push approval,
+conversation resolution, required checks and security scanning remain mandatory.
+Current CODEOWNERS names the Leader alone for these files; a Leader-authored PR
+cannot self-satisfy that review. A compliant independent author/reviewer workflow
+is required, without impersonation or protection changes. AU04–AU06/FE03 execution
+authorization, real configured security/database/browser verification by QA01/QA07,
+capacity/abuse controls and production exposure remain separate gates.
 
 Technical references: [JWT BCP RFC8725](https://www.rfc-editor.org/rfc/rfc8725.html),
 [Bearer transport RFC6750](https://www.rfc-editor.org/rfc/rfc6750.html),
