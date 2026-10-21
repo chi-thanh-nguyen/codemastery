@@ -499,16 +499,22 @@ composition (CT21), physical changes and actual verification remain separately
 gated. Current instructorId-only catalogue DTOs do not claim full human-readable
 instructor acceptance.
 
-### CT03 read predicates — proposal, not schema or mutation approval
+### CT03 read predicates — approved, integration pending; no schema/mutation approval
 
 [ADR001 §12](decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation)
-is the detailed internal access proposal, pending its own review/sign-off/integration.
+records **CT03-2026-10-21-r1**, technically approved on 2026-10-21 under the
+Project Leader's explicit CT01/CT03 delegation; new CT03-owned decisions are
+APPROVED_PENDING_PROTECTED_INTEGRATION. Effective catalogue/identity approvals
+retain their existing scope. Full U07 remains unresolved for CT40.lesson-read.
 It consumes V002's existing membership states and Course/Chapter/Lesson/Material
 references without changing schema, state catalogues or lifecycle invariants in
 §11. Application-level ancestry consistency remains necessary beyond independent
 FK existence. No field, constraint, mutation or transaction propagation is added;
 CT22 retains enrolment/progress/resume operations and CT40 retains structural
-lookup contracts. Access rules and Java signatures are defined only in ADR001.
+lookup contracts. Interaction's existing lesson_id suffices for the approved
+lesson-only read assertion: Course derives ancestry privately; no Course field,
+structural projection or repository access is added to Interaction. Access rules,
+failure precedence and all seven Java signatures are defined only in ADR001.
 
 ## 13. References
 
