@@ -4,15 +4,23 @@ import com.codemastery.modules.course.infrastructure.persistence.entity.CourseEn
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
 import java.util.UUID;
 
-@Repository
 public interface CourseJpaRepository extends JpaRepository<CourseEntity, UUID> {
+
+
+    @Query(value = "SELECT * FROM public.courses WHERE publication_status = 'published' "
+            + "ORDER BY title COLLATE \"C\" ASC, id ASC",
+            countQuery = "SELECT count(*) FROM public.courses WHERE publication_status = 'published'",
+            nativeQuery = true)
+    Page<CourseEntity> findPublishedCatalogue(Pageable pageable);
 
     Page<CourseEntity> findByPublicationStatus(String publicationStatus, Pageable pageable);
 
-    Optional<CourseEntity> findByIdAndPublicationStatus(UUID id, String publicationStatus);
+    Optional<CourseEntity> findByIdAndPublicationStatus(@Param("id") UUID id,
+                                                        @Param("publicationStatus") String publicationStatus);
 }
