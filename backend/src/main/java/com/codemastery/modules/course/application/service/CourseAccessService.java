@@ -3,7 +3,6 @@ package com.codemastery.modules.course.application.service;
 import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.course.domain.model.Course;
 import com.codemastery.modules.course.domain.model.EnrollmentStatus;
-import com.codemastery.modules.course.domain.model.LearningMaterial;
 import com.codemastery.modules.course.domain.model.Lesson;
 import com.codemastery.modules.course.domain.model.PublishStatus;
 import com.codemastery.modules.course.domain.repository.CourseContentRepository;
@@ -21,7 +20,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
-
 
 @Service
 public class CourseAccessService {
@@ -52,7 +50,8 @@ public class CourseAccessService {
             CourseRepository courseRepository,
             CourseContentRepository courseContentRepository,
             @Autowired(required = false) EnrollmentRepository enrollmentRepository) {
-        this(courseRepository, courseContentRepository, enrollmentRepository, CourseAccessService::unresolvedIdentityBinding);
+        this(courseRepository, courseContentRepository, enrollmentRepository,
+                CourseAccessService::unresolvedIdentityBinding);
     }
 
     /**
@@ -65,7 +64,8 @@ public class CourseAccessService {
             EnrollmentRepository enrollmentRepository,
             Supplier<CurrentActor> identitySupplier) {
         this.courseRepository = Objects.requireNonNull(courseRepository, "courseRepository must not be null");
-        this.courseContentRepository = Objects.requireNonNull(courseContentRepository, "courseContentRepository must not be null");
+        this.courseContentRepository = Objects.requireNonNull(
+                courseContentRepository, "courseContentRepository must not be null");
         this.enrollmentRepository = enrollmentRepository;
         this.identitySupplier = Objects.requireNonNull(identitySupplier, "identitySupplier must not be null");
     }
@@ -76,214 +76,162 @@ public class CourseAccessService {
 
     /**
      * Checks whether a course is publicly visible (published).
-     * Null, missing, or hidden courses return {@code false}.
+     * Null, missing, or hidden courses return false.
      */
     public boolean isPublishedCourseVisible(UUID courseId) {
-        if (courseId == null) {
-            return false;
-        }
-        return courseRepository.findPublishedById(courseId)
-                .filter(course -> course.publicationStatus() == PublishStatus.PUBLISHED)
-                .isPresent();
+        return findPublishedCourse(courseId).isPresent();
     }
 
     /**
      * Asserts that a course is published and visible in the public catalogue/detail.
-     * Missing and hidden courses throw the same {@link ResourceNotFoundException} (404 concealment).
+     * Missing and hidden courses throw the same ResourceNotFoundException (404 concealment).
      */
     public void requirePublishedCourseVisible(UUID courseId) {
         requirePublishedCourse(courseId);
     }
 
     /**
-     * Package-private Course helper returning the published {@link Course}
-     * for internal catalogue/detail assembly, or throwing uniform {@link ResourceNotFoundException} (404)
-     * if missing or hidden.
+     * Package-private helper returning the published Course for catalogue/detail assembly,
+     * or throwing the uniform ResourceNotFoundException (404) if missing or hidden.
      */
     Course requirePublishedCourse(UUID courseId) {
         requireNonNullId(courseId, "courseId");
-        return courseRepository.findPublishedById(courseId)
-                .filter(course -> course.publicationStatus() == PublishStatus.PUBLISHED)
+        return findPublishedCourse(courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Course not found or not published"));
     }
 
     /**
      * Checks whether a lesson is published and belongs to a published course.
-     * Null, missing, foreign, or hidden course/lesson returns {@code false}.
+     * Null, missing, foreign, or hidden course/lesson returns false.
      */
     public boolean isPublishedLessonInCourseVisible(UUID courseId, UUID lessonId) {
         if (courseId == null || lessonId == null) {
             return false;
         }
-        if (!isPublishedCourseVisible(courseId)) {
-            return false;
-        }
-        return courseContentRepository.findLessonInCourse(courseId, lessonId)
-                .filter(lesson -> lesson.publicationStatus() == PublishStatus.PUBLISHED)
+        return findPublishedCourse(courseId)
+                .flatMap(course -> findPublishedLesson(course.id(), lessonId))
                 .isPresent();
     }
 
     /**
-     * Asserts that both the course and the scoped lesson (via Lesson -> Chapter -> Course
-     * ancestry) are published and publicly visible, throwing uniform {@link ResourceNotFoundException} (404) otherwise.
+     * Asserts that both the course and the scoped lesson (Lesson to Chapter to Course ancestry)
+     * are published and publicly visible, throwing uniform ResourceNotFoundException (404) otherwise.
      */
     public void requirePublishedLessonInCourse(UUID courseId, UUID lessonId) {
         requireNonNullId(courseId, "courseId");
         requireNonNullId(lessonId, "lessonId");
-        requirePublishedCourse(courseId);
-        Lesson lesson = courseContentRepository.findLessonInCourse(courseId, lessonId)
-                .orElseThrow(() -> new ResourceNotFoundException("Lesson not found in course"));
-        if (lesson.publicationStatus() != PublishStatus.PUBLISHED) {
-            throw new ResourceNotFoundException("Lesson is not published");
-        }
+        Course course = requirePublishedCourse(courseId);
+        requirePublishedLesson(course.id(), lessonId);
     }
 
     // =========================================================================
-    // Identity-Dependent & Approved Cross-Module Checks
+    //  Identity-Dependent Checks
     // =========================================================================
 
     /**
      * Asserts Learner access to a published course with ACTIVE or COMPLETED enrollment.
      *
-     * <p>Stage order:
-     * 1. Authentication (401)
-     * 2. Role == LEARNER (403)
-     * 3. Course published & present (404)
-     * 4. Enrollment ACTIVE or COMPLETED (403)
+     * Stage order: 1. Authentication (401); 2. Role == LEARNER (403);
+     * 3. Course published and present (404); 4. Enrollment ACTIVE or COMPLETED (403).
      */
     public void requireLearnerCourseAccess(UUID courseId) {
         requireNonNullId(courseId, "courseId");
         CurrentActor actor = requireAuthenticatedActor();
         requireRole(actor, ActorRole.LEARNER);
-        Course course = requirePublishedCourseStage3(courseId);
+        Course course = requirePublishedCourse(courseId);
         requireActiveOrCompletedMembership(actor.userId(), course.id());
     }
 
     /**
      * Asserts Learner access to a published lesson within a published course.
-     * Does not consult skill mastery, prerequisite completion, or adaptive state (no hard-block rule).
+     * Does not consult skill mastery, prerequisite completion, or adaptive state.
      *
-     * <p>Stage order:
-     * 1. Authentication (401)
-     * 2. Role == LEARNER (403)
-     * 3. Course published & present (404)
-     * 4. Enrollment ACTIVE or COMPLETED (403)
-     * 5. Scoped Lesson -> Chapter -> Course ancestry & Lesson published (404)
+     * Stage order: 1. Authentication (401); 2. Role == LEARNER (403);
+     * 3. Course published and present (404); 4. Enrollment ACTIVE or COMPLETED (403);
+     * 5. Scoped Lesson to Chapter to Course ancestry and Lesson published (404).
      */
     public void requireLearnerLessonAccess(UUID courseId, UUID lessonId) {
         requireNonNullId(courseId, "courseId");
         requireNonNullId(lessonId, "lessonId");
         CurrentActor actor = requireAuthenticatedActor();
         requireRole(actor, ActorRole.LEARNER);
-        Course course = requirePublishedCourseStage3(courseId);
+        Course course = requirePublishedCourse(courseId);
         requireActiveOrCompletedMembership(actor.userId(), course.id());
-        Lesson lesson = courseContentRepository.findLessonInCourse(course.id(), lessonId)
-                .orElseThrow(() -> new ResourceNotFoundException("Lesson not found in course"));
-        if (lesson.publicationStatus() != PublishStatus.PUBLISHED) {
-            throw new ResourceNotFoundException("Lesson is not published");
-        }
+        requirePublishedLesson(course.id(), lessonId);
     }
 
     /**
-     * Asserts Instructor ownership of a course (hidden or published).
+     * Asserts Instructor ownership of a course.
      * Administrator role does not inherit course ownership (403 at Stage 2).
      *
-     * <p>Stage order:
-     * 1. Authentication (401)
-     * 2. Role == INSTRUCTOR (403)
-     * 3. Course existence & hidden concealment for non-owner (404)
-     * 4. Instructor ownership on published course (403)
+     * Stage order: 1. Authentication (401); 2. Role == INSTRUCTOR (403);
+     * 3. Course visible through the published-course port, otherwise concealed (404);
+     * 4. Instructor owns the published course (403).
+     *
+     * Unresolved binding: owner preview of a non-published course requires a CO03 course-by-id port that
+     * does not exist yet; such courses are concealed with 404 (fail closed).
      */
     public void requireCourseOwnership(UUID courseId) {
         requireNonNullId(courseId, "courseId");
         CurrentActor actor = requireAuthenticatedActor();
         requireRole(actor, ActorRole.INSTRUCTOR);
-        requireOwnedCourse(actor.userId(), courseId);
+        requireOwnedPublishedCourse(actor.userId(), courseId);
     }
 
     /**
-     * Asserts Instructor ownership of a course and valid Lesson -> Chapter -> Course
-     * ancestry for the specified lesson (hidden or published allowed).
+     * Asserts Instructor ownership of a course and valid Lesson to Chapter to Course ancestry
+     * for the specified lesson.
      *
-     * <p>Stage order:
-     * 1. Authentication (401)
-     * 2. Role == INSTRUCTOR (403)
-     * 3. Course existence & hidden concealment for non-owner (404)
-     * 4. Instructor ownership on published course (403)
-     * 5. Scoped Lesson -> Chapter -> Course ancestry (404)
+     * Stage order: 1. Authentication (401); 2. Role == INSTRUCTOR (403);
+     * 3. Course visible, otherwise concealed (404); 4. Instructor owns the course (403);
+     * 5. Scoped lesson ancestry (404).
+     *
+     * Unresolved binding: hidden lessons/courses need CO03 scoped lookups that do not exist yet; they are
+     * concealed with 404 (fail closed).
      */
     public void requireLessonOwnership(UUID courseId, UUID lessonId) {
         requireNonNullId(courseId, "courseId");
         requireNonNullId(lessonId, "lessonId");
         CurrentActor actor = requireAuthenticatedActor();
         requireRole(actor, ActorRole.INSTRUCTOR);
-        Course course = requireOwnedCourse(actor.userId(), courseId);
-        if (courseContentRepository.findLessonInCourse(course.id(), lessonId).isEmpty()) {
-            throw new ResourceNotFoundException("Lesson not found in course");
-        }
+        Course course = requireOwnedPublishedCourse(actor.userId(), courseId);
+        requirePublishedLesson(course.id(), lessonId);
     }
 
     /**
-     * Lesson-only general read assertion for cross-module consumers (e.g. Interaction)
-     * that hold only a lesson ID.
+     * Lesson-only general read assertion for cross-module consumers that hold only a lesson ID.
      *
-     * <p>Applies Stages 1-2 first (401 for unauthenticated, 403 for unsupported role such as ADMINISTRATOR
-     * before any Course data lookup). Then privately resolves Lesson -> Chapter -> Course ancestry and
-     * evaluates general read access (active/completed Learner on published Course + published Lesson,
-     * OR owning Instructor previewing either publication state). Any resource-dependent denial (missing lesson,
-     * broken ancestry, hidden course/lesson for learner, absent/LEFT membership, or non-owning instructor)
-     * yields the same safe {@link ResourceNotFoundException} (404).
+     * Applies Stages 1-2 (401 unauthenticated, 403 unsupported role such as ADMINISTRATOR) before any
+     * Course data lookup. Resolving Lesson to Chapter to Course from a lesson ID has no CO03 port yet, so the
+     * check then fails with an explicit unresolved-binding IllegalStateException instead of guessing.
      */
     public void requireLessonReadAccess(UUID lessonId) {
         requireNonNullId(lessonId, "lessonId");
         CurrentActor actor = requireAuthenticatedActor();
         requireLearnerOrInstructorRole(actor);
-
-        UUID courseId = courseContentRepository.findCourseIdByLessonId(lessonId)
-                .orElseThrow(() -> new ResourceNotFoundException("Lesson not found"));
-        Course course = courseRepository.findById(courseId)
-                .orElseThrow(() -> new ResourceNotFoundException("Course not found"));
-        Lesson lesson = courseContentRepository.findLessonInCourse(course.id(), lessonId)
-                .orElseThrow(() -> new ResourceNotFoundException("Lesson not found in course"));
-
-        if (actor.role() == ActorRole.INSTRUCTOR) {
-            if (!actor.userId().equals(course.instructorId())) {
-                throw new ResourceNotFoundException("Lesson not accessible");
-            }
-            return;
-        }
-
-        // Learner path: conceal hidden course/lesson and missing/LEFT membership with uniform 404
-        if (course.publicationStatus() != PublishStatus.PUBLISHED
-                || lesson.publicationStatus() != PublishStatus.PUBLISHED) {
-            throw new ResourceNotFoundException("Lesson not found or not published");
-        }
-        if (!hasActiveOrCompletedMembership(actor.userId(), course.id())) {
-            throw new ResourceNotFoundException("Lesson not accessible");
-        }
+        throw unresolvedCo03Binding("Lesson-to-Course ancestry lookup by lessonId");
     }
 
     // =========================================================================
-    // Package-Private Course-Only Assertions (CT03 §12.5)
+    //  Package-Private Course-Only Assertions
     // =========================================================================
 
     /**
-     * Package-private assertion for {@link EnrollmentService}.
+     * Package-private assertion for {@code EnrollmentService}.
      * Requires Learner role and a published Course. Does not create an enrollment or reject
-     * existing ACTIVE/COMPLETED/LEFT rows (CT22 owns enrollment lifecycle rules).
+     * existing ACTIVE/COMPLETED/LEFT rows.
      */
     void requireEnrolmentEligibility(UUID courseId) {
         requireNonNullId(courseId, "courseId");
         CurrentActor actor = requireAuthenticatedActor();
         requireRole(actor, ActorRole.LEARNER);
-        requirePublishedCourseStage3(courseId);
+        requirePublishedCourse(courseId);
     }
 
     /**
-     * Package-private assertion for {@link LearningMaterialService}.
-     * Requires general lesson read access (Learner with ACTIVE/COMPLETED membership on published Course/Lesson,
-     * OR owning Instructor preview) plus actual Material -> Lesson -> Chapter -> Course ancestry.
-     * Learners additionally require the material to be published; owning Instructor preview permits hidden materials.
+     * Package-private assertion for LearningMaterialService.
+     * Stages 1-2 are applied first. Material to Lesson ancestry has no CO03 port yet, so the check fails
+     * with an explicit unresolved-binding IllegalStateException instead of guessing.
      */
     void requireMaterialReadAccess(UUID courseId, UUID lessonId, UUID materialId) {
         requireNonNullId(courseId, "courseId");
@@ -291,36 +239,41 @@ public class CourseAccessService {
         requireNonNullId(materialId, "materialId");
         CurrentActor actor = requireAuthenticatedActor();
         requireLearnerOrInstructorRole(actor);
-
-        if (actor.role() == ActorRole.INSTRUCTOR) {
-            Course course = requireOwnedCourse(actor.userId(), courseId);
-            if (courseContentRepository.findLessonInCourse(course.id(), lessonId).isEmpty()) {
-                throw new ResourceNotFoundException("Lesson not found in course");
-            }
-            if (courseContentRepository.findMaterialInLesson(course.id(), lessonId, materialId).isEmpty()) {
-                throw new ResourceNotFoundException("Learning material not found in lesson");
-            }
-            return;
-        }
-
-        // Learner path: Stages 3 -> 4 -> 5
-        Course course = requirePublishedCourseStage3(courseId);
-        requireActiveOrCompletedMembership(actor.userId(), course.id());
-        Lesson lesson = courseContentRepository.findLessonInCourse(course.id(), lessonId)
-                .orElseThrow(() -> new ResourceNotFoundException("Lesson not found in course"));
-        if (lesson.publicationStatus() != PublishStatus.PUBLISHED) {
-            throw new ResourceNotFoundException("Lesson is not published");
-        }
-        LearningMaterial material = courseContentRepository.findMaterialInLesson(course.id(), lessonId, materialId)
-                .orElseThrow(() -> new ResourceNotFoundException("Learning material not found in lesson"));
-        if (material.publicationStatus() != PublishStatus.PUBLISHED) {
-            throw new ResourceNotFoundException("Learning material is not published");
-        }
+        throw unresolvedCo03Binding("Learning material ancestry lookup");
     }
 
     // =========================================================================
-    // Internal Stage Helpers & Explicit Identity Boundary Binding
+    //  Internal Helpers & Explicit Identity Boundary Binding
     // =========================================================================
+
+    private Optional<Course> findPublishedCourse(UUID courseId) {
+        if (courseId == null) {
+            return Optional.empty();
+        }
+        return courseRepository.findPublishedById(courseId)
+                .filter(course -> course.publicationStatus() == PublishStatus.PUBLISHED);
+    }
+
+    private Optional<Lesson> findPublishedLesson(UUID courseId, UUID lessonId) {
+        return courseContentRepository.findPublishedLessonsByCourseId(courseId).stream()
+                .filter(lesson -> lessonId.equals(lesson.id()))
+                .filter(lesson -> lesson.publicationStatus() == PublishStatus.PUBLISHED)
+                .findFirst();
+    }
+
+    private void requirePublishedLesson(UUID courseId, UUID lessonId) {
+        if (findPublishedLesson(courseId, lessonId).isEmpty()) {
+            throw new ResourceNotFoundException("Lesson not found or not published in course");
+        }
+    }
+
+    private Course requireOwnedPublishedCourse(UUID instructorId, UUID courseId) {
+        Course course = requirePublishedCourse(courseId);
+        if (!instructorId.equals(course.instructorId())) {
+            throw new AccessDeniedException("Instructor does not own this course");
+        }
+        return course;
+    }
 
     private static void requireNonNullId(UUID id, String parameterName) {
         if (id == null) {
@@ -348,56 +301,30 @@ public class CourseAccessService {
         }
     }
 
-    private Course requirePublishedCourseStage3(UUID courseId) {
-        return courseRepository.findPublishedById(courseId)
-                .filter(course -> course.publicationStatus() == PublishStatus.PUBLISHED)
-                .orElseThrow(() -> new ResourceNotFoundException("Course not found or not published"));
-    }
-
-    private Course requireOwnedCourse(UUID instructorId, UUID courseId) {
-        Course course = courseRepository.findById(courseId)
-                .orElseThrow(() -> new ResourceNotFoundException("Course not found"));
-        boolean isOwner = instructorId.equals(course.instructorId());
-        if (!isOwner) {
-            if (course.publicationStatus() != PublishStatus.PUBLISHED) {
-                // Stage 3: conceal hidden course from non-owning instructor with 404
-                throw new ResourceNotFoundException("Course not found");
-            }
-            // Stage 4: non-owner instructor on a published course receives 403
-            throw new AccessDeniedException("Instructor does not own this course");
-        }
-        return course;
-    }
-
     private void requireActiveOrCompletedMembership(UUID learnerId, UUID courseId) {
-        if (!hasActiveOrCompletedMembership(learnerId, courseId)) {
+        if (enrollmentRepository == null) {
+            throw unresolvedCo03Binding("EnrollmentRepository membership check");
+        }
+        if (!enrollmentRepository.existsByUserIdAndCourseIdAndStatusIn(
+                learnerId, courseId, PERMITTED_LEARNING_STATUSES)) {
             throw new AccessDeniedException("Learner does not have active or completed enrollment in course");
         }
     }
 
-    private boolean hasActiveOrCompletedMembership(UUID learnerId, UUID courseId) {
-        if (enrollmentRepository == null) {
-            throw new IllegalStateException(
-                    "Unresolved EnrollmentRepository binding for identity-dependent membership check");
-        }
-        Optional<Boolean> exists = Optional.of(
-                enrollmentRepository.existsByUserIdAndCourseIdAndStatusIn(
-                        learnerId, courseId, PERMITTED_LEARNING_STATUSES));
-        return exists.orElse(false);
+    private static IllegalStateException unresolvedCo03Binding(String capability) {
+        return new IllegalStateException("Unresolved CO03 binding: " + capability);
     }
 
     /**
-     * Explicit unresolved identity binding when Auth's UserAccountService
-     * producer is not yet wired. Fails closed without fabricating identity or reading security internals.
+     * Explicit unresolved identity binding when Auth's current-identity producer is not yet wired.
+     * Fails closed without fabricating identity or reading security internals.
      */
     private static CurrentActor unresolvedIdentityBinding() throws AuthenticationException {
         throw new AuthenticationCredentialsNotFoundException(
                 "CT01.identity (U01) current-identity producer is not bound");
     }
 
-    /**
-     * Internal representation of the authenticated actor.
-     */
+    /** Internal representation of the authenticated actor. */
     enum ActorRole {
         LEARNER,
         INSTRUCTOR,
