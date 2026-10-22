@@ -245,6 +245,77 @@ No PostgreSQL feature integration, browser flow, container feature runtime,
 production deployment or remote CI result is implied. Focused review and the
 applicable downstream QA checkpoints remain necessary.
 
+## Approved AU03 persistence regression-test placement
+
+**Leader technical approval, 2026-10-22 (Asia/Ho_Chi_Minh); protected integration
+pending.** In the instruction “CodeMastery — AU03 B2: Approve and Record Bounded
+Test Placement”, Project Leader and repository Owner @chi-thanh-nguyen explicitly
+approved exactly one additional test filename, subject to consistency verification,
+and delegated that verification and this two-document record to Codex. Verification
+against `main` at `37c33a4056975f42c65a6704ec69c272d4a1f6e1` found the placement
+consistent with the approved architecture, Auth ownership, existing test stack and
+Maven lifecycle. This records the Leader's approval, not an independent GitHub
+Approve review or completed protected integration.
+
+The exact approved addition is
+`backend/src/test/java/com/codemastery/modules/auth/UserPersistenceTest.java`.
+It is a bounded exception to the finalized file inventory, recorded in
+[the repository structure](repository-structure.md#bounded-auth-test-inventory-addition).
+The initial placement-only record did not implement the file. Its only
+responsibilities are unit tests of `UserMapper` and mocked-adapter tests of
+`UserRepositoryImpl` for the effective `AU03.mapping` and `AU03.operations` checkpoints in
+[AU03 #40](https://github.com/chi-thanh-nguyen/codemastery/issues/40), addressing
+the B2 regression-coverage finding for
+[PR #94](https://github.com/chi-thanh-nguyen/codemastery/pull/94).
+
+Permitted regression cases are:
+
+- Bidirectional preservation of all six User fields: UUID, canonical email,
+  encoded password hash, display name, role and account status; valid round trips.
+- Explicit stored-code conversion for roles `learner`, `instructor`, `admin`
+  and statuses `active`, `locked`, including invalid and null stored-code rejection.
+- Present and absent `findById`/`findByEmail` results, exact lookup delegation,
+  `save` delegation and mapping of the entity returned by persistence.
+- Relevant failure propagation without invented normalization, hashing,
+  account-state policy or repository-level HTTP error translation.
+
+Use the existing Boot-managed JUnit Jupiter 6 and Mockito infrastructure in the
+existing Auth test package. The `*Test.java` filename follows the current Surefire
+selection outside `integration`; no new framework, dependency, directory,
+configuration, production change, coverage threshold or unrelated testing policy
+is approved. The decision adds a local regression location to ADR002's effective
+`CT14.interim` baseline. It resolves only this bounded placement under
+[CT14 #27](https://github.com/chi-thanh-nguyen/codemastery/issues/27), not the
+remaining `CT14.coverage` proposals below. PR #87's merge does not activate
+clauses still marked `PROPOSED_NOT_EFFECTIVE`. Existing valid decisions,
+historical evidence and unrelated pending gates retain their dispositions.
+
+Unit conversion and mocked persistence assertions do not verify Spring Data
+query execution, transactions, PostgreSQL round trips or physical constraints,
+authentication, authorization or browser integration. `AU03.database-verification`
+remains an outstanding integration gate under AU03's Definition of Done; this
+placement neither executes nor waives it and adds no standalone integration-test
+filename. The initial placement-only approval required separate explicit
+implementation/file-scope authorization before authoring this test, followed by
+actual validation and review. The placement approval alone does not resolve B2,
+complete AU03, establish PR #94 approval
+readiness or retrospectively authorize earlier AU03 implementation.
+
+**Prospective B2 implementation authorization, 2026-10-22 (Asia/Ho_Chi_Minh).**
+In “CodeMastery — PR #94: Implement Approved B2 Remediation Directly”, Leader/Owner
+@chi-thanh-nguyen reaffirmed this single-file placement and expressly authorized
+its focused tests, these two documentation records, and the PR #94 description
+update directly on the existing PR branch. This supplies the separate authorization
+required by the initial placement-only record above. Auth ownership remains
+@duyduyit and @chi-thanh-nguyen under the existing CODEOWNERS rule; documentation
+ownership remains @chi-thanh-nguyen. The test uses a real `UserMapper` and mocked
+`UserJpaRepository`, with separate mapper and adapter groups and no Spring context
+or PostgreSQL. Record actual commands, results and coverage evidence in the PR
+handoff. Protected review/integration and fresh independent assessment remain
+required; this prospective grant does not establish the original implementation's
+authorization provenance. All unrelated pending CT14 proposals and the outstanding
+`AU03.database-verification` gate remain unchanged.
+
 ## CT14 coverage and isolation reconciliation — proposal
 
 ### Authority and historical reconciliation
