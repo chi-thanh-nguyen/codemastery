@@ -1,9 +1,12 @@
 package com.codemastery.modules.course;
 
 import com.codemastery.modules.course.domain.model.Chapter;
+import com.codemastery.modules.course.domain.model.LearningMaterial;
+import com.codemastery.modules.course.domain.model.MaterialType;
 import com.codemastery.modules.course.domain.model.Lesson;
 import com.codemastery.modules.course.domain.model.PublishStatus;
 import com.codemastery.modules.course.infrastructure.persistence.entity.ChapterEntity;
+import com.codemastery.modules.course.infrastructure.persistence.entity.LearningMaterialEntity;
 import com.codemastery.modules.course.infrastructure.persistence.entity.LessonEntity;
 import com.codemastery.modules.course.infrastructure.persistence.mapper.CourseContentMapper;
 import com.codemastery.support.fixtures.CourseFixtures;
@@ -42,6 +45,8 @@ class CourseContentMapperTest {
         assertNull(mapper.toDomain((ChapterEntity) null));
         assertNull(mapper.toEntity((Lesson) null));
         assertNull(mapper.toDomain((LessonEntity) null));
+        assertNull(mapper.toEntity((LearningMaterial) null));
+        assertNull(mapper.toDomain((LearningMaterialEntity) null));
     }
 
     @Test
@@ -136,5 +141,38 @@ class CourseContentMapperTest {
                 "DRAFT"
         );
         assertThrows(IllegalArgumentException.class, () -> mapper.toDomain(invalidEntity));
+    }
+
+    @ParameterizedTest
+    @EnumSource(MaterialType.class)
+    void materialRoundTripPreservesExclusivePayloadAndParent(MaterialType type) {
+        LearningMaterial original = new LearningMaterial(
+                UUID.fromString("00000000-0000-4000-8000-000000000004"), LESSON_ID,
+                "Material", type, PublishStatus.PUBLISHED,
+                type == MaterialType.TEXT ? "Text content" : null,
+                type == MaterialType.FILE ? "course/material.pdf" : null,
+                type == MaterialType.FILE ? "material.pdf" : null,
+                type == MaterialType.EXTERNAL_VIDEO ? "https://example.org/embed/video" : null);
+
+        LearningMaterialEntity entity = mapper.toEntity(original);
+
+        assertAll(
+                () -> assertEquals(original.id(), entity.getId()),
+                () -> assertEquals(LESSON_ID, entity.getLesson_id()),
+                () -> assertEquals("Material", entity.getTitle()),
+                () -> assertEquals(type.getType(), entity.getMaterialType()),
+                () -> assertEquals("published", entity.getPublicationStatus()),
+                () -> assertEquals(original.textContent(), entity.getTextContent()),
+                () -> assertEquals(original.objectKey(), entity.getObjectKey()),
+                () -> assertEquals(original.originalFileName(), entity.getOriginalFileName()),
+                () -> assertEquals(original.externalVideoUrl(), entity.getExternalVideoUrl()));
+        assertEquals(original, mapper.toDomain(entity));
+    }
+
+    @Test
+    void unknownMaterialTypeDoesNotBecomeASilentDefault() {
+        var entity = new LearningMaterialEntity(LESSON_ID, LESSON_ID, "Material", "unknown",
+                "hidden", null, null, null, null);
+        assertThrows(IllegalArgumentException.class, () -> mapper.toDomain(entity));
     }
 }
