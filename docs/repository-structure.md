@@ -7,6 +7,22 @@ This document defines the approved repository structure for CodeMastery.
 Agents and contributors must preserve this structure unless an explicit
 architectural change is approved.
 
+## Bounded Auth test inventory addition
+
+On 2026-10-22 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen explicitly approved exactly one file-inventory exception in the
+instruction “CodeMastery — AU03 B2: Approve and Record Bounded Test Placement”:
+`backend/src/test/java/com/codemastery/modules/auth/UserPersistenceTest.java`.
+Its sole purpose is `UserMapper` unit and `UserRepositoryImpl` mocked-adapter
+regression coverage for effective `AU03.mapping` and `AU03.operations` behavior.
+[The bounded testing decision](testing.md#approved-au03-persistence-regression-test-placement)
+records permitted cases and retained gates. This approved addition is shown in
+the Auth test inventory below; its implementation is not authorized or delivered
+by this documentation change, and protected integration of this record is pending.
+No other file or directory is added to the approved inventory. The immutable
+canonical `final-repository-tree.docx` is unchanged; this explicit exception does
+not reinterpret its original contents or approve broader structural changes.
+
 ```text
 codemastery/
 
@@ -780,7 +796,9 @@ codemastery/
 
 │           │           │   │   ├── AuthServiceTest.java
 
-│           │           │   │   └── JwtTokenProviderTest.java
+│           │           │   │   ├── JwtTokenProviderTest.java
+
+│           │           │   │   └── UserPersistenceTest.java
 
 │           │           │   ├── course/
 
