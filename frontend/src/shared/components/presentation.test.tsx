@@ -78,4 +78,15 @@ describe('FE01 presentation contracts', () => {
         await click([...dialog.querySelectorAll('button')].find((button) => button.textContent === 'Cancel')!);
         expect(confirm).toHaveBeenCalledTimes(1); expect(cancel).toHaveBeenCalledTimes(1);
     });
+    it('names/describes the dialog and focuses cancel after destructive-dialog entry', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+            await render(<ConfirmDialog open title="Discard preview?" message="Only local inputs change" isDestructive onConfirm={vi.fn()} onCancel={vi.fn()} />);
+            await act(async () => vi.advanceTimersByTime(300));
+            const dialog = document.querySelector('[role="dialog"]')!;
+            expect(document.getElementById(dialog.getAttribute('aria-labelledby')!)?.textContent).toBe('Discard preview?');
+            expect(document.getElementById(dialog.getAttribute('aria-describedby')!)?.textContent).toBe('Only local inputs change');
+            expect(document.activeElement?.textContent).toBe('Cancel');
+        } finally { vi.useRealTimers(); }
+    });
 });
