@@ -34,7 +34,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     width = 240,
 }) => {
     const navContent = (
-        <Box sx={{ width, height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Box component="nav" aria-label="Main navigation" sx={{ width, height: '100%', display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ p: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
                     Navigation
@@ -48,6 +48,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                         <ListItem key={item.id} disablePadding sx={{ mb: 0.5 }}>
                             <ListItemButton
                                 selected={isSelected}
+                                aria-current={isSelected ? 'true' : undefined}
                                 onClick={() => {
                                     onSelect(item.id);
                                     onMobileClose();
@@ -55,16 +56,17 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                                 sx={{
                                     borderRadius: 1,
                                     '&.Mui-selected': {
-                                        bgcolor: 'primary.light',
-                                        color: 'primary.contrastText',
+                                        bgcolor: 'grey.100',
+                                        color: 'text.primary',
+                                        '&.Mui-focusVisible': { bgcolor: 'grey.200', outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2 },
                                         '&:hover': {
-                                            bgcolor: 'primary.main',
+                                            bgcolor: 'grey.200',
                                         },
                                     },
                                 }}
                             >
                                 <ListItemText primary={item.label} />
-                                {item.badge && (
+                                {item.badge !== undefined && item.badge !== '' && (
                                     <Box
                                         sx={{
                                             ml: 1,
@@ -72,8 +74,8 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                                             py: 0.25,
                                             borderRadius: 1,
                                             fontSize: '0.75rem',
-                                            bgcolor: isSelected ? 'rgba(255,255,255,0.2)' : 'grey.200',
-                                            color: isSelected ? '#fff' : 'text.primary',
+                                            bgcolor: 'grey.200',
+                                            color: 'text.primary',
                                         }}
                                     >
                                         {item.badge}

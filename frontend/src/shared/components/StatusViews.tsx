@@ -7,7 +7,10 @@ export interface LoadingViewProps {
 
 export const LoadingView: React.FC<LoadingViewProps> = ({
     message = 'Loading...',
-}) => (
+}) => {
+    const messageId = React.useId();
+    const label = message.trim() ? message : 'Loading...';
+    return (
     <Box
         sx={{
             display: 'flex',
@@ -18,12 +21,13 @@ export const LoadingView: React.FC<LoadingViewProps> = ({
             p: 3,
         }}
     >
-        <CircularProgress size={40} />
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            {message}
+        <CircularProgress size={40} aria-labelledby={messageId} />
+        <Typography id={messageId} role="status" variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            {label}
         </Typography>
     </Box>
 );
+};
 
 export interface EmptyViewProps {
     title?: string;

@@ -35,12 +35,12 @@ export default function App() {
   // Formatting utilities demonstration with caller-supplied configs
   const currentDateFormatted = formatDate(new Date(), {
     locale: 'en-US',
-    options: { dateStyle: 'full' },
+    options: { dateStyle: 'full', timeZone: 'UTC' },
   });
 
   const formattedScore = formatNumber(0.885, {
     locale: 'en-US',
-    options: { style: 'percent', minimumFractionDigits: 1 },
+    options: { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1, roundingMode: 'halfExpand' },
   });
 
   const duration = formatDurationSeconds(3725); // 1h 2m 5s
