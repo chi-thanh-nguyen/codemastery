@@ -32,6 +32,27 @@ verification, unrelated CT14 proposals and protected review/integration remain
 separate gates; original AU03 implementation authorization is not established by
 this grant.
 
+## Bounded AU04 test inventory addition
+
+On 2026-10-22 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen explicitly approved one additional file-inventory exception in
+“CodeMastery — PR #95: Direct B2 Regression-Test Remediation”:
+`backend/src/test/java/com/codemastery/modules/auth/StrongPasswordTest.java`.
+The same instruction prospectively authorizes this test and the two documentation
+updates on PR #95's existing branch. Its sole responsibility is AU04 password
+predicate and Jakarta Bean Validation regression coverage, including Unicode/byte
+bounds, whitespace, null/requiredness composition and supported `CharSequence`
+inputs. Existing Auth CODEOWNERS remain @duyduyit and @chi-thanh-nguyen.
+[The bounded testing decision](testing.md#approved-au04-password-validation-regression-test-placement)
+records the exact scope and retained AU06/QA01 consumer/integration gates.
+
+This single approved addition is shown in the Auth test inventory below, alongside
+the separate AU03 exception. The immutable canonical `final-repository-tree.docx`
+is unchanged; its original contents are not reinterpreted or rewritten. No other
+filename, directory, ownership or structural change is approved. Unrelated pending
+CT14 proposals retain their dispositions; original AU04 implementation authorization
+and protected review/integration are not established by this prospective grant.
+
 ```text
 codemastery/
 
@@ -806,6 +827,8 @@ codemastery/
 │           │           │   │   ├── AuthServiceTest.java
 
 │           │           │   │   ├── JwtTokenProviderTest.java
+
+│           │           │   │   ├── StrongPasswordTest.java
 
 │           │           │   │   └── UserPersistenceTest.java
 

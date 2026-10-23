@@ -316,6 +316,51 @@ required; this prospective grant does not establish the original implementation'
 authorization provenance. All unrelated pending CT14 proposals and the outstanding
 `AU03.database-verification` gate remain unchanged.
 
+## Approved AU04 password-validation regression-test placement
+
+**Explicit Leader technical approval and prospective implementation authorization,
+2026-10-22 (Asia/Ho_Chi_Minh).** In “CodeMastery — PR #95: Direct B2
+Regression-Test Remediation”, Project Leader and repository Owner
+@chi-thanh-nguyen approved exactly
+`backend/src/test/java/com/codemastery/modules/auth/StrongPasswordTest.java`
+and authorized its implementation and these two documentation updates directly
+on PR #95's existing `feature/password-validation` branch. This instruction is
+the approval provenance; it does not retrospectively establish authorization for
+the original AU04 production implementation or waive protected review/integration.
+Auth test ownership remains @duyduyit and @chi-thanh-nguyen under CODEOWNERS;
+these documentation files remain Leader-owned.
+
+This is a bounded AU04 extension of ADR002's effective `CT14.interim` placement
+for [AU04 #51](https://github.com/chi-thanh-nguyen/codemastery/issues/51), recorded
+as [one structural exception](repository-structure.md#bounded-au04-test-inventory-addition).
+`AuthServiceTest.java` retains application-orchestration responsibilities;
+the independently executable constraint needs regression protection before AU06
+is implemented. The new file covers only:
+
+- The effective `CT01.core` predicate: minimum 15 Unicode code points, maximum
+  72 UTF-8 bytes, without trimming, normalization or character-class rules.
+- Independent Unicode/byte boundary oracles, whitespace, null and compatible
+  `CharSequence` inputs; malformed/unpaired surrogate policy remains unspecified.
+- Actual Jakarta Bean Validation discovery and `@NotNull @StrongPassword`
+  composition, including null acceptance by the standalone constraint and safe
+  default violation messages, using fixtures local to this test file.
+
+Use existing Boot-managed JUnit Jupiter 6 parameterized tests and the existing
+Bean Validation provider, without a Spring context, PostgreSQL, new dependency
+or configuration. Surefire selects this `*Test.java` outside `integration`.
+Run `./mvnw test` and `./mvnw verify` from `backend/`; report actual Surefire,
+Failsafe and JaCoCo evidence separately from downstream integration.
+
+This approval resolves only AU04's dedicated placement and prospective B2 work.
+It does not approve unrelated `CT14.coverage` or `PROPOSED_NOT_EFFECTIVE` clauses,
+change ADR001/ADR002, or authorize other files or production functionality.
+Existing AU03 decisions and all other pending proposals retain their dispositions.
+AU06 #53 retains registration DTO requiredness, service/API validation and
+consumer handoff verification; QA01 #61 retains real BCrypt/security/repository
+integration acceptance. These local tests neither execute nor waive those gates,
+complete AU04 acceptance, nor establish PR approval readiness. The PR description
+remains Leader-maintained and is not changed by this remediation.
+
 ## CT14 coverage and isolation reconciliation — proposal
 
 ### Authority and historical reconciliation
