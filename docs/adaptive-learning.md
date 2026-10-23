@@ -87,7 +87,7 @@ deferred; the physical representation does not supply them.
 No production score ranges, weighting formulas, decay functions, confidence
 scores, attempt aggregation, historical weighting or state-transition formulas
 are selected here. The isolated Interim local prototype exception is defined
-in section14 and ADR002; it does not define persisted or Final mastery policy.
+in section 18 and ADR002; it does not define persisted or Final mastery policy.
 
 ## 5. Adaptive Learning Flow
 
@@ -302,7 +302,7 @@ The following remain **DEFERRED** until approved before dependent implementation
 
 | Area | Undefined details |
 |---|---|
-| Mastery classification | Production/Final thresholds, scoring and transitions remain deferred. The isolated Interim-only count-ratio prototype is specified in section14; it does not select production settings. |
+| Mastery classification | Production/Final thresholds, scoring and transitions remain deferred. The isolated Interim-only count-ratio prototype is specified in section 18; it does not select production settings. |
 | Evidence handling | Aggregation across questions/attempts, weighting, historical evidence handling, and any additional calculation rules. |
 | Skill graph implementation | Traversal and cycle-detection implementation; no prerequisite depth/weighting policy is established. |
 | Practice/coverage | State-to-difficulty mapping, question-selection rules, quiz counts, and numeric minimum question/coverage requirements. |
@@ -362,8 +362,202 @@ The project source-of-truth hierarchy remains unchanged. This document records
 the approved adaptive design and its unresolved details without changing
 governance or immutable reference artifacts.
 
-## 14. Interim-only local calculation approval
+## 18. Interim-only local calculation approval
 
 [ADR002](decisions/002-interim-delegated-contracts.md) records CT06.prototype and CT24.calculation as INTERIM_ONLY_DELEGATED_APPROVAL. One synthetic already-classified skill snapshot uses exact correctCount/answeredCount: absent evidence→Unknown; rate<1/2→Weak;1/2<=rate<3/4→Learning;rate>=3/4→Mastered. Thresholds are explicitly passed validated rational values, configurable for the local prototype. These demonstration choices are not empirically validated production policies or derived from the routing evaluation target.
 
 Use the existing calculator/classifier files with immutable nested types and existing categorical enum. No database, grading, event, clock, history, progress, routing or cross-module effect is approved. Settings JSON and Final algorithm remain deferred. Independently reviewed expected outcomes and actual reproducible execution are required before reporting accepted results. Implementation has not been performed by this documentation change.
+
+
+## 19. CT06 reconciliation and completion proposal
+
+### 19.1 Authority and historical reconciliation
+
+**PROPOSED_NOT_EFFECTIVE — prepared/revalidated 2026-10-19, Asia/Ho_Chi_Minh.**
+The Project Leader
+explicitly delegated CT06 investigation, technical selection and preparation of
+an approval proposal to Codex. This is selection authority, not a separate human
+review, production educational-policy acceptance or implementation authorization.
+The new selections below require affected-owner review, explicit Leader sign-off
+and protected integration. No existing ADR002 clause is superseded.
+
+Baseline: `main` at `754b6511e85bc8a70ef6a4b8fb7b1210c6cbd6b4`; canonical
+requirements and approved architecture US-03/06/07/11 and §§6/7/9; foundation
+PRs [#2](https://github.com/chi-thanh-nguyen/codemastery/pull/2),
+[#4](https://github.com/chi-thanh-nguyen/codemastery/pull/4) and
+[#5](https://github.com/chi-thanh-nguyen/codemastery/pull/5); actual V002–V006,
+Adaptive/Course representations and relevant contract/implementation Issues.
+PR [#78](https://github.com/chi-thanh-nguyen/codemastery/pull/78), merge
+`166484e`, implements shared REST/configuration infrastructure, not Adaptive skill
+representations or mastery functionality. The physical settings constraint is in **V002**; V005 owns categorical mastery
+and recommendation history; V006 owns Interaction/audit, not an Adaptive policy.
+
+| Decision and provenance | Current classification and scope | Disposition |
+| --- | --- | --- |
+| ADR002 `CT06.prototype`, `CT24.calculation`, `CT36.I-results`; PR [#73](https://github.com/chi-thanh-nguyen/codemastery/pull/73), merge `729ba60` (2026-10-11 local date), Leader-authorized bounded delegation | APPROVED_AND_CONSISTENT: isolated synthetic count calculation, exact callable shapes and arithmetic oracle protocol; no production aggregation/settings or accepted results | REAFFIRM unchanged; section 18 refers to the effective source |
+| ADR002 `CT14.interim`, `CT20.I`, `CT15.I-data` and `NC-EVIDENCE-MODE`, same provenance | APPROVED_AND_CONSISTENT: existing test locations, independently reproducible local mastery evidence, separate browser/deployment evidence; selected database samples have adaptation disabled | REUSE only the consumed slices; local calculation does not require settings persistence or full integrated Adaptive delivery |
+| AD03 categorical representations, PR [#79](https://github.com/chi-thanh-nguyen/codemastery/pull/79), merge `1e43194`, Leader review and explicit 2026-10-17 [Issue #34](https://github.com/chi-thanh-nguyen/codemastery/issues/34) acceptance | APPROVED_BUT_INCOMPLETE for CT06 consumers: AD03 fields/codes and scalar mappings exist; no calculation, repository execution, settings service, graph validation or numeric mastery | REUSE representations; do not infer producer functionality from classes |
+| AD01 [Issue #33](https://github.com/chi-thanh-nguyen/codemastery/issues/33), V003 scalar skill/mapping inventory | UNRESOLVED implementation: physical fields are approved but current Skill/SkillEntity and graph/service scaffolds are empty | DEFER actual graph/coverage readiness until compatible authorized artifacts exist; physical DDL is not a callable producer |
+| CT01.identity, ADR001 §11.4 and PR [#82](https://github.com/chi-thanh-nguyen/codemastery/pull/82), merge `39748f6`, separate explicit Leader identity-only sign-off | APPROVED_AND_CONSISTENT within its read-only identity scope; no automatic CT06 settings boundary | REUSE identity only where the protected owning-Course operation consumes it |
+| CT03, PR [#83](https://github.com/chi-thanh-nguyen/codemastery/pull/83), merge `8906c59`; CT16/CT17, PRs [#84](https://github.com/chi-thanh-nguyen/codemastery/pull/84)/[#85](https://github.com/chi-thanh-nguyen/codemastery/pull/85), merges `754b651`/`35cf5ae` | APPROVED_BUT_INCOMPLETE as consumed records: documents are merged, but retained explicit sign-off, dependency, security and verification gates still apply; none selects production mastery or U08/U09 | REUSE existing ownership/no-hard-block boundaries; do not infer complete approval from merge/review |
+| AD09 PR [#86](https://github.com/chi-thanh-nguyen/codemastery/pull/86), OPEN at the 2026-10-19 recheck, head `d51930ba76718100cc3332d47afa6ea901bba421`; no submitted reviews and all six reported checks successful | CONFLICTING_OR_OUTDATED against the effective callable/validation contract; unpublished implementation proposal, not effective authority | Correct implementation separately; §19.2 records discrepancies without changing the approved contract |
+| `CT06.production`, `CT06.enablement`, U08 and U09; CT06 [#24](https://github.com/chi-thanh-nguyen/codemastery/issues/24), CT40 [#46](https://github.com/chi-thanh-nguyen/codemastery/issues/46) | UNRESOLVED baseline; the scoped selections below are PROPOSED_NOT_EFFECTIVE and remaining named prerequisites are not approved here | EXTEND with explicit limitations; DEFER missing educational values and cross-module callables |
+
+### 19.2 Prototype implementation reconciliation
+
+The effective CT24 contract remains
+`MasteryCalculator.calculate(SkillEvidence) -> MasteryEvidenceRate`, including
+validated immutable records and `isUnknown()`, and
+`MasteryStateClassifier.classify(MasteryEvidenceRate, ClassificationThresholds)`
+with `RationalThreshold(int numerator, int denominator)`. All these types remain
+nested in the existing approved files in `modules/adaptive/application/mastery/`.
+Invalid/null inputs raise `IllegalArgumentException`; validated bounded `int`
+operands make exact `long` cross products safe. No new interface is needed.
+
+Read-only inspection of PR #86's four changed files found:
+
+- `MasteryCalculator.java` declares `Snapshot`/`Calculation`, not the approved
+  record names, and has no `isUnknown()`. `Snapshot` checks IDs only, while the
+  public `Calculation` record validates neither IDs nor counts. Constructing it
+  directly bypasses calculation validation and permits invalid classifier input.
+- `MasteryStateClassifier.java` declares `Thresholds`/`Rational(long,long)`,
+  changing the approved signature/domain. Its checked multiplication can reject
+  mathematically valid ratios whose products overflow; the approved bounded-int
+  contract already avoids that problem. `Objects.requireNonNull` throws
+  `NullPointerException` instead of the approved `IllegalArgumentException`.
+- `MasteryCalculatorTest.java` and `MasteryStateClassifierTest.java` exercise
+  basic valid boundaries, but assert the incompatible null exception and omit
+  several CT36 cases, including the alternate policy and maximum-int case.
+  Their existence, PR text and CI cannot establish complete oracle coverage or
+  the independent arithmetic review/reproduction required by CT36.
+
+These are implementation corrections for AD09, not reasons to supersede sound
+CT06/CT24 decisions. Main's calculator/classifier and their test scaffolds are
+empty at the baseline. A separate read-only checkout of PR #86 head `d51930b`
+was executed with `./mvnw -Dtest=MasteryCalculatorTest,MasteryStateClassifierTest test`
+from `backend/`: 21 tests, zero failures/errors/skips. This executes the current
+incompatible tests; it does not establish approved-contract conformance, independent
+oracle acceptance, persistence or integrated mastery verification. QA14/CT36 must retain
+actual revision, command, environment, outputs, adverse cases and independent
+reviewer identity/time when results are collected.
+
+### 19.3 Production evidence and classification selections
+
+The following are **approval proposals**, not a promotion of the prototype.
+No concrete production thresholds, empirically validated learning claims or new
+persistence fields are selected.
+
+| Decision | Selected proposal and justification | Alternatives / retained approval gates |
+| --- | --- | --- |
+| Evidence authority | Only server-accepted, submitted and fully graded quiz/diagnostic attempt evidence from Assessment. Require learner, Course, attempt and question/skill identities, complete captured question membership and non-null authoritative correctness; all references must agree on one Course. Ignore client-supplied rates, states and grades. | Raw client counts and rounded `score_percentage` lose provenance or skill detail. CT04/CT08 still approve the actual qualifying submission, completeness proof, event payload and producer binding; CT06 creates none. |
+| Per-skill calculation | Consume Assessment's exact boolean correctness for the selected eligible question set of one skill. Count correct items over all captured eligible items, including an explicitly captured unanswered item only as graded by Assessment. A missing answer row or null correctness is incomplete evidence, never silently an incorrect answer or Unknown. | CT06 does not regrade answers, infer missing rows, select quiz composition or redefine approved exact-mask grading. Multi-skill questions/new fractional grades need separate schema/policy approval. |
+| Repeated attempts and history | Recommend replacement by the latest eligible submitted attempt **for each assessed skill**, with equal weight for its eligible questions and no decay. Skills not assessed retain their previous state. Diagnostic initializes only assessed skills; absent evidence remains Unknown. | Cumulative history weights repeated practice and old evidence; best-score-only prevents later evidence showing weakness; weighting/decay adds unsupported parameters/time behavior. Latest-evidence replacement is a new educational assumption requiring explicit Leader acceptance. Assessment/CT08 must define authoritative total ordering and equal-time handling; no UUID/time default or new sequence field is invented. |
+| Classification | For an accepted nonempty skill snapshot, use exact rational comparison under explicit validated Course thresholds: below weak → Weak; weak inclusive to mastered exclusive → Learning; mastered inclusive → Mastered. Missing evidence → Unknown, distinct from zero correct responses. Transitions can move between all three evidence-backed states; no implicit hysteresis or irreversible Mastered state. | Rounded quiz percentages or numeric mastery persistence are unnecessary. Actual production weak/mastered values and the selected evidence/transition educational assumptions require Leader acceptance; prototype values are not defaults. No event can reset an unassessed skill to Unknown. |
+| Configuration validation | Require explicit rational thresholds with positive integer numerator/denominator, each numerator no greater than denominator, and `0 < weak < mastered <= 1`. Require an explicit positive integer minimum-question parameter `n` for enablement. Reject malformed, absent or unordered consumed policy; no silent fallback to prototype constants. | Exact JSON keys, serialized bounds and settings read/write callables remain pending coordinated U08/AD08/CT24 decisions; no public payload, framework binding or production dependency is added. No arbitrary `n`, coverage percentage or empirical justification is invented. |
+| Invalid/conflicting evidence | Reject incomplete, cross-Course, malformed or conflicting evidence before any Adaptive state/progress mutation. Repeated identical evidence must not change the recomputed result. Do not hide integrity failures as Unknown or overwrite valid state with a partial result. | Deduplication transport, failure response, transaction isolation, retries and replay mechanism belong to CT08/CT22; no ledger, event identifier, delivery guarantee or new HTTP status is approved here. |
+| Replay | Recommend deterministic recomputation from authoritative immutable submitted answers and the approved selected policy, instead of incrementally adding counts to categorical state. Reordered/duplicate delivery must not regress a skill to older evidence or double-count it. | Categorical state cannot reconstruct earlier counts; V005 supplies no processed-event/policy-version ledger. Actual historical order, immutable skill provenance and consistent read/write execution must be established by Assessment/CT08 before this can be implemented or claimed idempotent. |
+| Settings changes | Recommend retaining evidence and recomputing affected skills under one newly approved policy, with related progress handled atomically; reject exposure of mixed-policy mastery results. Never infer numeric rates from existing categorical rows or silently reclassify only the next learner who takes a quiz. | Retroactive educational effects, recomputation scope/trigger and policy provenance need explicit Leader acceptance and coordinated CT08/CT22/AD08 design. Current schema has no per-mastery policy revision. A selected recomputation/compatibility mechanism is a production gate, not an implied migration. |
+
+Manual file-submission grading remains excluded from real-time mastery.
+`LearnerSkillMastery` continues to persist only categorical state, unique per
+learner/skill; missing rows mean Unknown and explicit Unknown remains allowed.
+No row creation on read, numeric accumulator, history ledger or timestamp is
+introduced. Current question/answer foreign keys alone do not prove immutable
+skill tagging, complete attempt capture or cross-Course consistency. Preserve the
+approved rule that used Question definitions and submitted answers are immutable;
+Assessment must demonstrate its enforcement before historical replay can rely on
+it. Reclassification does not by itself authorize routing, progress mutation or
+removal of earned completion: those effects require CT07/CT22 decisions.
+
+### 19.4 Enablement proposal and consumer boundaries
+
+**Selected proposal:** treat `adaptive_enabled` as Course-owned intent, with
+Adaptive readiness evaluated from approved settings and authoritative Course,
+Adaptive and Assessment data. A stored `true` and any JSON object are necessary
+physical conditions, not proof of business readiness. Validate coverage/settings
+before accepting enablement and before routing/Test-out effects; classification
+requires its own valid consumed policy and evidence. Require a consistent view
+of the consumed inputs. Snapshot/concurrency participation remains subject to
+CT08/CT40 approval and actual implementation verification.
+
+- Every published Lesson must have at least one valid same-Course skill mapping;
+  hidden Lessons do not expand this published-Lesson enablement predicate. Every
+  Course skill, including skills without a published Lesson, must meet `n`.
+- Recommend counting **distinct valid Question IDs per skill** in its owning
+  Course's question bank, each with the approved skill/difficulty tag. Reusing a
+  Question in multiple quizzes does not multiply coverage. Questions have no
+  publication-status column; do not invent one or silently equate question-bank
+  coverage with a published, executable quiz. CT40.coverage must explicitly
+  approve the eligible population, completeness and provider semantics; CT07/CT23
+  retain practice-selection/composition requirements, including difficulty needs.
+- Missing/insufficient coverage, invalid settings, cross-Course mappings or an
+  invalid prerequisite graph prevent enablement. Incomplete/unavailable lookup
+  data is a failure, never a zero-count success. Require at least one published
+  Lesson and one Course skill before enabling, so an empty population cannot pass
+  by vacuous truth. This is a proposed readiness precondition, not a claim that
+  the original architecture specified a minimum Course size.
+- If required coverage/settings become invalid after enabling, recommend
+  suspending routing/Test-out effects until repaired/revalidated, preserving stored
+  mastery/history and Course-owned flags. Do not silently mutate another module's
+  settings, erase evidence or manufacture a default policy. Course content/settings
+  mutation rules and any automatic flag change require their own owner approval.
+- When disabled or not ready, select no new Adaptive routing or mastery-based
+  Test-out progress effects; retain ordinary authorized Course learning, canonical
+  order and Assessment grading. Disabling never erases mastery/history or reverses
+  progress. This does **not** authorize freezing categorical mastery: US-06 requires
+  updates after skill-tagged quizzes. Prefer continuing valid-policy mastery
+  updates independently of routing rather than silently waiving that requirement.
+  The exact disabled-mode interpretation and failure behavior when no valid
+  classification policy exists require explicit Leader/owner reconciliation under
+  U08/CT08/CT22 before integrated execution. Freezing all updates is an alternative
+  requiring an architecture-compatible explicit decision, not an approved default;
+  neither fallback prototype constants nor falsely accepted updates are permitted.
+  The isolated pure prototype remains callable with explicit policy, without this flag.
+- Re-enabling requires current settings/coverage validation and an explicitly
+  approved decision on any catch-up/reclassification needed from retained eligible
+  Assessment history. Recommend deterministic recomputation under the current
+  approved policy where needed before resuming routing/Test-out effects; do not
+  assume categorical updates stopped while disabled, discard submissions implicitly
+  or increment counts automatically. Historical eligibility and educational effects
+  remain pending Leader acceptance; U08/CT08/CT22 own the exact trigger, consistent
+  replay and atomic progress coordination.
+
+These selected operational proposals require Course/Assessment/Adaptive review and
+Leader sign-off. They never permit hard-blocking an advanced Lesson solely because
+mastery or prerequisites are missing. Access remains governed by CT01/CT03;
+this section creates no new REST endpoint, error mapping, database constraint,
+interface or cross-module repository access.
+
+| Boundary / consumer | Producer and permitted responsibility | Approval status / exact handoff |
+| --- | --- | --- |
+| U08 Course settings ↔ Adaptive settings validation, existing `modules/adaptive/application/mastery/AdaptiveSettingsService.java` | Course owns `courses.adaptive_enabled`/`adaptive_settings` and Instructor ownership checks; Adaptive owns mastery-policy/graph validation. Any Course operation uses only the effective CT01 identity/CT03 ownership slice it consumes. | UNRESOLVED callable and transaction binding: name the Course producer, exact existing location, immutable request/result, read/write ownership, errors and consistency obligations in a separate coordinated approval. An empty Adaptive service or Course `Map<String,Object>` is not permission to access Course repositories or write its entity. |
+| U09 CT40.coverage, Assessment → Adaptive | Assessment owns Question validity/tagging and distinct eligible-question population; Adaptive consumes coverage for every same-Course skill and applies `n`. | UNRESOLVED CT40 signature/output/placement and actual provider; this proposal selects no lookup. A local approved double can support later authorized consumer tests, never real coverage evidence. |
+| CT40.lesson-read / skill-tag | Course owns Lesson ancestry/publication; Adaptive owns skills/mappings/acyclic graph; Assessment owns questions. | Existing CT03 authorization does not return structural data. CT40 must approve the exact structural/skill lookup and Course consistency checks consumed; no new U07/U05 interface is approved by CT06. |
+
+### 19.5 Approval and verification handoffs
+
+| Relationship | Independently usable slice / remaining gate |
+| --- | --- |
+| CT06 ↔ CT14 / QA14 | Reaffirmed pure prototype and existing two unit-test locations remain usable independently of production/enablement. CT14 owns placement/isolation; CT36 owns independently reviewed arithmetic oracles. Neither changes thresholds or certifies results through test success alone. |
+| CT06 ↔ CT24 / AD09 | Keep effective prototype signatures and exceptions. Repair PR #86 incompatibilities under separately authorized AD09 work; production callable shapes are not selected here. |
+| CT06 ↔ CT36 / CT20.I | Local executed and independently reproduced prototype evidence supports the selected Interim slice only; P1/P2/P3 integrated evaluation, changed maps/flows and all Final requirements remain. |
+| CT06 ↔ CT07 / CT08 / CT22 | Classification/evidence intent is separate from routing/difficulty, event payload/execution and atomic Course progress participation. Do not implement partial mastery/progress writes, select a listener phase or imply exactly-once delivery. |
+| CT06 ↔ AD08 / CT40 | Numeric policy is separate from settings persistence/lookup, structural reads and Assessment coverage callables; only the specifically consumed approved checkpoint is a prerequisite. |
+
+Required reviews: Adaptive @thanhtran0311; Assessment @minhtan29042006; Course
+@TamiaoNguyen; QA/oracle reviewers for consumed test evidence; Leader
+@chi-thanh-nguyen. The Leader is the sole documentation CODEOWNER. A
+Leader-authored PR cannot self-satisfy CODEOWNER approval; use an independently
+contributor-authored PR when necessary, preserving required checks, last-push
+approval and thread resolution. No bypass or merge is authorized.
+
+**Remaining Leader decisions:** accept or revise the recommended latest-per-skill,
+equal-question/no-decay production evidence assumptions and classification effects;
+select justified production thresholds and `n`; accept or revise the proposed
+enablement readiness and settings-change/reclassification implications. Separately
+approve U08/U09 and consumed CT04/CT08/CT24/CT40 bindings with their owners before
+production readiness.
+The absence of these decisions does not reopen CT06.prototype or block independent
+CT14 preparation. No implementation change, approved-oracle verification, integrated
+verification, deployment or accepted academic result is claimed by this proposal. The limited
+PR #86 test execution above remains implementation evidence only.

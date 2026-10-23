@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Existing delegated Interim target; NOT_IMPLEMENTED. CT01.identity has explicit Leader technical sign-off dated 2026-10-18 for the ADR001 section 11.4 shape integrated through PR #82. Remaining CT01 and new CT03 completion selections retain their recorded approval/review gates. Client-local logout still requires explicit residual-token risk acceptance; ADR002 approved slices are unchanged."
+    "description": "Bounded contracts; NOT_IMPLEMENTED. ADR002 effective slices and the separate 2026-10-18 CT01.identity approval remain effective. CT01-2026-10-21-r1 is technically approved under explicit Leader delegation, pending protected integration; the Leader separately accepted the specified logout residual risks on 2026-10-21. CT03 has its own disposition in ADR001 section 12 and its extension below. No implementation, GitHub review or verification is implied."
   },
   "x-implementation-status": "NOT_IMPLEMENTED",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -298,7 +298,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "Authorization: Bearer <accessToken> only. No URL/cookie token transport. ADR002 CT01.core fixes cryptography/current-account checks; ADR001 section 11 contains pending completion selections. This scheme alone is not an operation authorization policy."
+        "description": "Authorization: Bearer <accessToken> only. No URL/cookie token transport. ADR002 CT01.core fixes cryptography/current-account checks; ADR001 section 11 records CT01-2026-10-21-r1 delegated technical approval pending protected integration. This scheme alone is not an operation authorization policy."
       }
     },
     "schemas": {
@@ -667,14 +667,14 @@
     }
   ],
   "x-ct01-completion-proposal": {
-    "status": "PENDING_AUTHORITATIVE_INTEGRATION",
+    "status": "DELEGATED_APPROVED",
     "decisionReference": "../decisions/001-modular-monolith-module-boundaries.md#11-ct01-completion-proposal--pending-authoritative-integration",
-    "selectionAuthority": "Project Leader instruction 2026-10-17 Asia/Ho_Chi_Minh delegates Codex technical selection; no separate manual review claimed.",
+    "selectionAuthority": "Project Leader @chi-thanh-nguyen instruction CodeMastery — Complete CT01/CT03 Technical Approval Under Explicit Leader Delegation, 2026-10-21; Codex independently approves CT01-owned decisions. No manual GitHub review or implementation authority.",
     "unchangedBaseline": "ADR002 CT01.core, CT16.minimum, CT18.minimum and CT38.core",
     "approvalGates": [
-      "Auth/Frontend/Course and affected-owner review",
-      "Explicit Leader sign-off including residual-token risk acceptance",
-      "Protected merge into main"
+      "Applicable owner/consumer and CODEOWNERS review; no self-approval or protection bypass",
+      "Required checks/security scanning, last-push approval and conversation resolution",
+      "Protected merge into main of this approved revision"
     ],
     "jwt": {
       "algorithm": "HS256",
@@ -703,11 +703,18 @@
       "slidingExpiration": false,
       "persistentBrowserStorage": false,
       "scope": "Current browser provider only; no global/cross-tab/device logout. Reload requires login. Later logins do not revoke earlier JWTs.",
-      "residualRisk": "A copied token remains usable after logout until exp while account active and signing key unchanged. Unlock before exp can restore old-token usability. Explicit Leader risk acceptance is required; not supplied by this proposal."
+      "residualRisk": "Copied JWT remains usable after logout until exp while account active and signing key unchanged; unlock before exp can restore usability. Other tabs/devices and already-admitted requests are unaffected.",
+      "leaderRiskAcceptance": {
+        "date": "2026-10-21",
+        "timezone": "Asia/Ho_Chi_Minh",
+        "authority": "Project Leader @chi-thanh-nguyen personal response to the explicit residual-risk question",
+        "response": "Accept these specific residual risks",
+        "scope": "Exactly the residualRisk facts above; separate from delegated technical approval; no broader production or vulnerability acceptance."
+      }
     },
     "authorization": "Default deny except explicitly public operations below; validate Auth current account first, then explicit owning-module role and resource policy. No implicit Administrator inheritance. Protected operation URLs/payloads require their own approved contracts.",
     "identity": "Read-only Auth application facade at existing UserAccountService.java; signatures/types and U01 disposition in ADR001 section 11.4. No public REST identity directory or new endpoint.",
-    "client": "Memory-only token; no credentials on public operations; authenticated redirect rejected; current-session 401 clears session, 403 does not; generation guards reject stale login/401/private responses; expiry checked on sends/resume; no automatic mutation retries.",
+    "client": "Memory-only token; no credentials on public operations; authenticated redirect rejected; current-session 401 clears session, 403 does not; generation guards reject stale login/401/private responses; expiry checked on sends/resume; no automatic mutation retries. A failed public login does not clear an unrelated current session. CT16 remaining implementation/router choices retain their own authority.",
     "verification": "Contract examples only; actual Auth/security/browser execution and implementation authorization remain separate.",
     "identityApproval": {
       "status": "LEADER_TECHNICAL_SIGNOFF_RECORDED",
@@ -727,10 +734,28 @@
         "Implementation/deployment authorization",
         "Integration/security verification"
       ]
-    }
+    },
+    "approvalDisposition": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "contractRevision": "CT01-2026-10-21-r1",
+    "approvalDate": "2026-10-21",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "effectiveOnMain": false
   },
   "x-ct03-access-proposal": {
-    "status": "PROPOSED_NOT_EFFECTIVE",
-    "decisionReference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation"
+    "status": "DELEGATED_APPROVED",
+    "decisionReference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation",
+    "approvalDisposition": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "contractRevision": "CT03-2026-10-21-r1",
+    "approvalDate": "2026-10-21",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "effectiveOnMain": false,
+    "authority": "Project Leader @chi-thanh-nguyen instruction CodeMastery — Complete CT01/CT03 Technical Approval Under Explicit Leader Delegation; Codex approves CT03-owned scope only.",
+    "scope": "ADR001 section 12: learning/ownership/visibility/ancestry predicates, seven assertions, U03/U04 Course-side bindings and U07 authorization. Public catalogue and REST DTOs unchanged.",
+    "u04Resolution": "Existing CourseAccessService.requireLessonReadAccess(UUID lessonId), void; Course privately derives ancestry. No new structural lookup or schema field. Exact concealment/error behavior in ADR001 section 12.4.",
+    "retainedPrerequisites": [
+      "Protected CODEOWNERS/owner review, required checks/security scanning, last-push approval, resolved conversations and integration into main",
+      "Full U07 requires an effective CT40.lesson-read structural contract or explicit no-extra-read disposition; no CT40 approval here",
+      "Owning-Issue operation/REST/mutation approvals, implementation authorization and actual runtime verification remain separate"
+    ]
   }
 }
