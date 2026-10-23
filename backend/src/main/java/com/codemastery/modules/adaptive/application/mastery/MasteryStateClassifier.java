@@ -1,76 +1,101 @@
 package com.codemastery.modules.adaptive.application.mastery;
 
 import com.codemastery.modules.adaptive.domain.model.MasteryState;
-import java.util.Objects;
 
 public final class MasteryStateClassifier {
-    public MasteryState classify(MasteryCalculator.Calculation calculation, Thresholds thresholds) {
-        Objects.requireNonNull(calculation, "calculation must not be null");
-        Objects.requireNonNull(thresholds, "thresholds must not be null");
 
-        if (calculation.answeredCount() == 0) {
+    public MasteryState classify(
+            MasteryCalculator.MasteryEvidenceRate evidenceRate,
+            ClassificationThresholds thresholds) {
+        requireNonNull(evidenceRate, "evidenceRate must not be null");
+        requireNonNull(thresholds, "thresholds must not be null");
+
+        if (evidenceRate.isUnknown()) {
             return MasteryState.UNKNOWN;
         }
 
-        long correctCount = calculation.correctCount();
-        long answeredCount = calculation.answeredCount();
+        long correctCount = evidenceRate.correctCount();
+        long answeredCount = evidenceRate.answeredCount();
 
-        if (isBelow(correctCount, answeredCount, thresholds.weak())) {
+        if (isBelow(
+                correctCount,
+                answeredCount,
+                thresholds.weak())) {
             return MasteryState.WEAK;
-
         }
 
-        if (isBelow(correctCount, answeredCount, thresholds.mastered())) {
+        if (isBelow(
+                correctCount,
+                answeredCount,
+                thresholds.mastered())) {
             return MasteryState.LEARNING;
         }
 
         return MasteryState.MASTERED;
     }
 
-    public record Thresholds(Rational weak, Rational mastered) {
-        public Thresholds {
-            Objects.requireNonNull(weak, "weak threshold must not be null");
-            Objects.requireNonNull(mastered, "mastered threshold must not be null");
+    public record ClassificationThresholds(
+            RationalThreshold weak,
+            RationalThreshold mastered) {
+
+        public ClassificationThresholds {
+            requireNonNull(weak, "weak threshold must not be null");
+            requireNonNull(mastered, "mastered threshold must not be null");
 
             if (weak.compareTo(mastered) >= 0) {
-                throw new IllegalArgumentException("weak threshold must be lower than mastered threshold");
+                throw new IllegalArgumentException(
+                        "weak threshold must be lower than mastered threshold");
             }
         }
     }
 
-    public record Rational(long numerator, long denominator) {
-        public Rational {
+    public record RationalThreshold(
+            int numerator,
+            int denominator) {
+
+        public RationalThreshold {
             if (numerator <= 0) {
-                throw new IllegalArgumentException("threshold numerator must be positive");
+                throw new IllegalArgumentException(
+                        "threshold numerator must be positive");
             }
 
             if (denominator <= 0) {
-                throw new IllegalArgumentException("threshold denominator must be positive");
+                throw new IllegalArgumentException(
+                        "threshold denominator must be positive");
             }
 
             if (numerator > denominator) {
-                throw new IllegalArgumentException("threshold must not exceed one");
+                throw new IllegalArgumentException(
+                        "threshold must not exceed one");
             }
         }
 
-        private int compareTo(Rational other) {
-            try {
-                long left = Math.multiplyExact(numerator, other.denominator);
-                long right = Math.multiplyExact(other.numerator, denominator);
-                return Long.compare(left, right);
-            } catch (ArithmeticException exception) {
-                throw new IllegalArgumentException("threshold comparison overflowed", exception);
-            }
+        private int compareTo(RationalThreshold other) {
+            requireNonNull(other, "threshold must not be null");
+
+            long left = (long) numerator * other.denominator();
+            long right = (long) other.numerator() * denominator;
+
+            return Long.compare(left, right);
         }
     }
 
-    private boolean isBelow(long correctCount, long answeredCount, Rational threshold) {
-        try {
-            long left = Math.multiplyExact(correctCount, threshold.denominator);
-            long right = Math.multiplyExact(answeredCount, threshold.numerator);
-            return left < right;
-        } catch (ArithmeticException exception) {
-            throw new IllegalArgumentException("threshold comparison overflowed", exception);
+    private static boolean isBelow(
+            long correctCount,
+            long answeredCount,
+            RationalThreshold threshold) {
+
+        long left = correctCount * threshold.denominator();
+        long right = answeredCount * threshold.numerator();
+
+        return left < right;
+    }
+
+    private static <T> T requireNonNull(T value, String message) {
+        if (value == null) {
+            throw new IllegalArgumentException(message);
         }
+
+        return value;
     }
 }
