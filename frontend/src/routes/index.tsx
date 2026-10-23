@@ -31,12 +31,17 @@ export const AppRouter: React.FC = () => {
 
     const currentDateFormatted = formatDate(new Date(), {
         locale: 'en-US',
-        options: { dateStyle: 'full' },
+        options: { dateStyle: 'full', timeZone: 'UTC' },
     });
 
     const formattedScore = formatNumber(0.885, {
         locale: 'en-US',
-        options: { style: 'percent', minimumFractionDigits: 1 },
+        options: {
+            style: 'percent',
+            roundingMode: 'halfExpand',
+            minimumFractionDigits: 1,
+            maximumFractionDigits: 1,
+        },
     });
 
     const duration = formatDurationSeconds(3725);
