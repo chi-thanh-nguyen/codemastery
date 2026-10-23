@@ -70,7 +70,8 @@ export const appTheme = createTheme({
         MuiPaper: { defaultProps: { elevation: 0 }, styleOverrides: { root: { border: '1px solid #E5E9EF', backgroundImage: 'none' } } },
         MuiButton: { defaultProps: { disableElevation: true }, styleOverrides: {
             root: { borderRadius: 8, minHeight: 44, paddingInline: 16,
-                '&.MuiButton-contained.MuiButton-colorPrimary': { backgroundColor: '#101418', '&:hover': { backgroundColor: '#29333D' } } },
+                '&.MuiButton-contained.MuiButton-colorPrimary:not(.Mui-disabled)': { backgroundColor: '#101418', '&:hover': { backgroundColor: '#29333D' } },
+                '&.MuiButton-outlined.MuiButton-colorPrimary:not(.Mui-disabled), &.MuiButton-text.MuiButton-colorPrimary:not(.Mui-disabled)': { color: '#1753B5' } },
             outlined: { borderColor: '#87919C' },
         } },
         MuiIconButton: { styleOverrides: { root: { borderRadius: 8, width: 44, height: 44 } } },

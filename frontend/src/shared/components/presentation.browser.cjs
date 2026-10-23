@@ -56,6 +56,18 @@ let browser;
   assert(await dialog.getAttribute('aria-describedby'));await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
  });
  await page.getByRole('button',{name:'Explore components',exact:true}).click();
+ await check('outlined action keeps AA contrast immediately after view change and hover',async()=>{
+  const action=page.getByRole('button',{name:'Reset sample controls',exact:true});
+  async function ratio(){return action.evaluate(e=>{
+   function rgba(s){return s.match(/[\d.]+/g).map(Number)}
+   let rgb=[0,0,0],alpha=0,node=e;
+   while(node&&alpha<1){const c=rgba(getComputedStyle(node).backgroundColor);const a=c[3]??1;rgb=rgb.map((v,i)=>v+c[i]*a*(1-alpha));alpha+=a*(1-alpha);node=node.parentElement}
+   rgb=rgb.map(v=>v+255*(1-alpha));
+   const lum=c=>c.map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4}).reduce((v,x,i)=>v+x*[.2126,.7152,.0722][i],0);
+   const [l,h]=[lum(rgba(getComputedStyle(e).color).slice(0,3)),lum(rgb)].sort((a,b)=>a-b);return(h+.05)/(l+.05);
+  })}
+  assert(await ratio()>=4.5);await action.hover();await page.waitForTimeout(250);assert(await ratio()>=4.5);
+ });
  await page.screenshot({path:`${out}/components-1440.png`,fullPage:true});
  const focused=page.locator('.MuiDrawer-docked [aria-current="true"]');
  await page.keyboard.press('Tab');await focused.focus();await page.waitForTimeout(250);const onFocus=await colors(focused);

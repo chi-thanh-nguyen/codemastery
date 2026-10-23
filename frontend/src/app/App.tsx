@@ -26,7 +26,7 @@ const DEMO_WEEK = [
 ];
 const NAV_ITEMS: NavItem[] = [
     { id: 'overview', label: 'Overview', icon: <PresentationIcon name="grid" /> },
-    { id: 'components', label: 'Component studio', badge: 0, icon: <PresentationIcon name="layers" /> },
+    { id: 'components', label: 'Components', badge: 0, icon: <PresentationIcon name="layers" /> },
     { id: 'auth-preview', label: 'Auth layout preview', icon: <PresentationIcon name="book" /> },
 ];
 
@@ -64,7 +64,7 @@ export default function App() {
 
     const overview = <>
         <PageHeader title="Your learning, in focus." subtitle="A little practice today. A stronger foundation tomorrow."
-            actions={<Button variant="contained" endIcon={<PresentationIcon name="arrow" />} onClick={() => setSelectedNav('components')}>Explore components</Button>} />
+            actions={<Button key="explore" variant="contained" endIcon={<PresentationIcon name="arrow" />} onClick={() => setSelectedNav('components')}>Explore components</Button>} />
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 2 }}>
             <Chip label="Demo workspace" size="small" sx={{ bgcolor: tokens.softBlue, color: 'primary.dark' }} />
             <Typography variant="caption" color="text.secondary">All learning data below is illustrative. Nothing is saved.</Typography>
@@ -137,7 +137,7 @@ export default function App() {
 
     const components = <>
         <PageHeader title="Made for the details." subtitle="Reusable presentation, with working local controls."
-            actions={<Button variant="outlined" onClick={() => setDialog('reset')}>Reset sample controls</Button>} />
+            actions={<Button key="reset" variant="outlined" onClick={() => setDialog('reset')}>Reset sample controls</Button>} />
         <Chip label="Component preview · Demonstration content" size="small" sx={{ mb: 3, bgcolor: tokens.softBlue, color: 'primary.dark' }} />
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 2, mb: 3 }}>
             <Paper sx={{ p: 2.5 }}>
