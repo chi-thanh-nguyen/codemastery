@@ -53,6 +53,29 @@ filename, directory, ownership or structural change is approved. Unrelated pendi
 CT14 proposals retain their dispositions; original AU04 implementation authorization
 and protected review/integration are not established by this prospective grant.
 
+## Bounded FE01 inventory additions
+
+The Leader/Owner's explicit D1–D4 delegation in “CodeMastery — Authorized FE01
+Remediation and Professional Dashboard UI/UX Implementation”, supplied on
+2026-10-23 (Asia/Ho_Chi_Minh), authorized necessary frontend presentation and
+verification additions within the existing subtrees. [PR #99](https://github.com/chi-thanh-nguyen/codemastery/pull/99)
+merged them as `89998c6e0be1764ed5ec8fcf101124a369a984f2` on 2026-10-24.
+The precise additions, now included in the tree below, are:
+
+- `frontend/src/shared/components/PresentationIcon.tsx` — original shared outline SVGs.
+- `frontend/src/shared/components/presentation.browser.cjs` — optional existing-Playwright browser verification and evidence capture.
+- `frontend/src/shared/components/presentation.test.tsx` — presentation/semantics/callback regressions.
+- `frontend/src/shared/hooks/useDebounce.test.tsx` — real React state/timer lifecycle regressions.
+- `frontend/src/shared/utils/format.test.ts` — caller-owned formatting and finite-duration regressions.
+
+[The bounded FE01 record](testing.md#bounded-fe01-decisions-and-regression-coverage)
+preserves authority, rationale, contracts, verification and exclusions without a
+new ADR. The Leader's 2026-10-24 post-merge documentation instruction authorizes
+this synchronization-debt correction; independent review/protected integration
+remain pending. This does not retroactively satisfy pre-merge documentation
+timing, rewrite the immutable canonical tree, change ownership/hierarchy, approve
+unrelated CT14/CT37 scope or establish Issue #37 completion.
+
 ```text
 codemastery/
 
@@ -1410,13 +1433,21 @@ codemastery/
 
 │           │   ├── PageHeader.tsx
 
+│           │   ├── PresentationIcon.tsx
+
 │           │   ├── SidebarNav.tsx
 
-│           │   └── StatusViews.tsx
+│           │   ├── StatusViews.tsx
+
+│           │   ├── presentation.browser.cjs
+
+│           │   └── presentation.test.tsx
 
 │           ├── hooks/
 
-│           │   └── useDebounce.ts
+│           │   ├── useDebounce.ts
+
+│           │   └── useDebounce.test.tsx
 
 │           ├── api/
 
@@ -1428,7 +1459,9 @@ codemastery/
 
 │           └── utils/
 
-│               └── format.ts
+│               ├── format.ts
+
+│               └── format.test.ts
 
 ├── e2e/
 

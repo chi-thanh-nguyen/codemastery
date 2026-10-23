@@ -12,7 +12,8 @@ with CourseFixturesTest as its pure structural consumer. Course business/service
 and PostgreSQL integration test scaffolds remain empty. SH01 has executable
 shared-infrastructure unit and Spring MVC
 integration tests. Frontend typechecking
-and build validation exist; frontend automated tests and E2E remain planned.
+and build validation exist; bounded FE01 automated regressions are implemented,
+while integrated E2E remains planned.
 Successful compilation or builds do not establish tested business behavior.
 
 ## Backend Test Layers
@@ -160,6 +161,7 @@ Use Node.js satisfying `^22.12.0 || ^24.0.0` and npm with the committed lockfile
 ```bash
 cd frontend
 npm ci
+npm test
 npm run typecheck
 npm run build
 ```
@@ -167,9 +169,99 @@ npm run build
 `npm ci` installs the locked dependency graph. `typecheck` checks source and
 Vite configuration without emitting files. The `build` script already runs
 `npm run typecheck` before `vite build`, so CI runs only install and build.
-Build output goes to `frontend/dist/`. No frontend automated test framework,
-test script, or lint script is implemented. Build validation does not test
-feature behavior or establish deployment readiness.
+Build output goes to `frontend/dist/`. Development-only Vitest `5.0.5` and jsdom
+`27.4.0` execute the bounded frontend suite through `npm test` (`vitest run`).
+No lint script is implemented. The required Frontend CI job still runs only
+installation and build; it does not run `npm test` or the browser harness.
+Build success alone does not establish behavioral coverage or deployment readiness.
+
+### Bounded FE01 decisions and regression coverage
+
+**Authority and timing.** Project Leader/Owner @chi-thanh-nguyen explicitly
+delegated D1–D4 in “CodeMastery — Authorized FE01 Remediation and Professional
+Dashboard UI/UX Implementation”, supplied on 2026-10-23 (Asia/Ho_Chi_Minh;
+source SHA-256 `8a24e52a354dfaa333f48f8c614b3a8a3d31661f19a6f627a1a921e079b5ee5b`).
+The implementing agent selected the following bounded decisions under that
+delegation. [PR #99](https://github.com/chi-thanh-nguyen/codemastery/pull/99)
+delivered them at merge `89998c6e0be1764ed5ec8fcf101124a369a984f2` on
+2026-10-24 at 00:06:34 ICT. The Leader's subsequent instruction “CodeMastery —
+Post-Merge FE01 Documentation, Governance and Completion Review”, supplied on
+2026-10-24, authorizes this documentation reconciliation. This is a post-merge
+correction of synchronization debt, not retrospective satisfaction of the
+same-logical-change documentation requirement or retrospective approval of PR #74.
+Independent CODEOWNER review and protected integration of this correction remain
+required. This existing-document record adds no ADR and leaves ADR001/ADR002,
+unrelated CT14 proposals and the remaining CT37 family unchanged.
+
+**D1 — Caller-owned formatting.** [format.ts](../frontend/src/shared/utils/format.ts)
+retains the helper names and configuration objects, with explicit supported locale,
+display timezone and date/time presentation. Dates accept a valid `Date`, epoch
+milliseconds, or a complete four-digit-year ISO timestamp with seconds, optional
+one-to-three fractional digits, and `Z` or a numeric offset. Nullish, invalid,
+date-only and timezone-less inputs return empty output. Valid date inputs require
+valid caller configuration; native Intl validation remains effective. Number
+formatting requires a style, rounding mode and exactly one complete minimum/maximum
+fraction-digit or significant-digit pair, plus currency/unit identifiers where
+applicable. Missing/invalid policy is rejected rather than defaulted; runtime
+support for the requested rounding mode is checked. Nullish/NaN numbers return
+empty output; Infinity retains native Intl display. Locale-derived conventions
+remain caller-selected. This avoids host-timezone interpretation and implicit
+precision without demanding irrelevant Intl options. The showcase alone selects
+`en-US`, `UTC` and its numeric presentation; these are not platform policies.
+
+**D2 — Finite duration parts.** Support nonnegative finite seconds whose floored
+value is a safe integer. Floor fractions, normalize negative zero, and preserve
+the `{ hours, minutes, seconds }` shape. Nullish, NaN, infinite, negative or unsafe
+values return zero parts. This preserves valid behavior and the existing fallback;
+it intentionally does not distinguish invalid input from a valid zero.
+
+**D3 — Bounded verification.** Vitest/jsdom with real React DOM, `act` and controlled
+timers avoids a second renderer and keeps production dependencies unchanged. These
+versions retain the manifest's `^22.12.0 || ^24.0.0` Node range. The exact additions,
+also recorded in [the inventory](repository-structure.md#bounded-fe01-inventory-additions),
+are:
+
+| File under `frontend/` | Coverage |
+| --- | --- |
+| `src/shared/utils/format.test.ts` | Explicit locale/timezone/precision/rounding, invalid dates, duration boundaries and reconstruction. |
+| `src/shared/hooks/useDebounce.test.tsx` | Function identity, Strict Mode, timing/rescheduling, rapid updates and unmount cleanup. |
+| `src/shared/components/presentation.test.tsx` | Controlled navigation/current state, zero badges, named loaders, status content, callbacks and confirmation semantics. |
+| `src/shared/components/presentation.browser.cjs` | Optional Chromium checks, screenshots, accessibility tree, computed contrast, focus, dialogs, drawers, overflow and reduced motion. |
+
+To reproduce host-timezone checks from `frontend/`, run
+`TZ=UTC npm test -- src/shared/utils/format.test.ts` and
+`TZ=America/Los_Angeles npm test -- src/shared/utils/format.test.ts`.
+The browser script requires a separately available compatible Playwright Node
+module and its installed Chromium browser. Neither `npm ci` nor this harness
+installs Playwright or downloads browsers. The empty `e2e/` package/configuration
+defines no installation or execution command. Build and start `npm run preview`
+(or use `npm run dev`); in another terminal, from `frontend/`, substitute actual
+paths and the URL printed by Vite:
+
+```bash
+npm run test:browser -- "<installed-playwright-module>" "<evidence-directory>" "<preview-url>"
+```
+
+Supply the URL explicitly: the harness fallback `http://127.0.0.1:5173/` need not
+match Vite's chosen port. It writes screenshots, `browser-report.json` and
+`studio-accessibility-tree.yml` to the supplied evidence directory. Retain those
+outside tracked source together with the exact revision, environment, commands
+and outcomes. The harness covers desktop 1440×900, tablet 1024×768, mobile
+390×844/320px and relevant breakpoint boundaries. DOM semantics, Chromium
+accessibility output and keyboard checks do not establish actual screen-reader
+announcements, full WCAG certification, backend integration or Final E2E delivery.
+Report unavailable checks explicitly; successful build/CI is not a substitute.
+
+**D4 — Scope and retained gates.** The same delegation authorized all seven FE74
+corrections, necessary frontend test/dependency/file extensions and a separate
+presentation-only dashboard redesign. [Setup](setup.md#frontend-setup-and-validation)
+records its design foundation, attribution and known AI assistance. It authorizes
+no router, role menus, Auth/session behavior, HTTP client, backend/API changes or
+new business workflows. Caller-facing signatures remain local implementation
+artifacts. Focused independent review, applicable consumer compatibility review
+before binding, documentation integration and both FE01 checkpoint/Issue #37
+acceptance remain distinct from implementation merge and test success. Broader
+CT14/CT37 approval and frontend/backend integration are not implied.
 
 ## Initial CI
 
@@ -446,7 +538,9 @@ The remaining approved inventory is preserved, without selecting new behavior:
   `e2e/tests/adaptive-flow.spec.ts`, relative to the repository root. CT34 owns runner/fixtures;
   CT19/CT35 own selected cases, FE24–FE26 their implementation and QA08 actual
   execution. Existing empty package/config files supply no command. Frontend
-  automated unit/component-test placement and framework remain unapproved.
+  automated unit/component-test placement and framework outside the
+  [bounded FE01 grant](#bounded-fe01-decisions-and-regression-coverage) remain
+  unapproved by this proposal.
 
 ### Isolation and feature configuration selections
 
