@@ -32,6 +32,50 @@ verification, unrelated CT14 proposals and protected review/integration remain
 separate gates; original AU03 implementation authorization is not established by
 this grant.
 
+## Bounded AU04 test inventory addition
+
+On 2026-10-22 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen explicitly approved one additional file-inventory exception in
+“CodeMastery — PR #95: Direct B2 Regression-Test Remediation”:
+`backend/src/test/java/com/codemastery/modules/auth/StrongPasswordTest.java`.
+The same instruction prospectively authorizes this test and the two documentation
+updates on PR #95's existing branch. Its sole responsibility is AU04 password
+predicate and Jakarta Bean Validation regression coverage, including Unicode/byte
+bounds, whitespace, null/requiredness composition and supported `CharSequence`
+inputs. Existing Auth CODEOWNERS remain @duyduyit and @chi-thanh-nguyen.
+[The bounded testing decision](testing.md#approved-au04-password-validation-regression-test-placement)
+records the exact scope and retained AU06/QA01 consumer/integration gates.
+
+This single approved addition is shown in the Auth test inventory below, alongside
+the separate AU03 exception. The immutable canonical `final-repository-tree.docx`
+is unchanged; its original contents are not reinterpreted or rewritten. No other
+filename, directory, ownership or structural change is approved. Unrelated pending
+CT14 proposals retain their dispositions; original AU04 implementation authorization
+and protected review/integration are not established by this prospective grant.
+
+## Bounded FE01 inventory additions
+
+The Leader/Owner's explicit D1–D4 delegation in “CodeMastery — Authorized FE01
+Remediation and Professional Dashboard UI/UX Implementation”, supplied on
+2026-10-23 (Asia/Ho_Chi_Minh), authorized necessary frontend presentation and
+verification additions within the existing subtrees. [PR #99](https://github.com/chi-thanh-nguyen/codemastery/pull/99)
+merged them as `89998c6e0be1764ed5ec8fcf101124a369a984f2` on 2026-10-24.
+The precise additions, now included in the tree below, are:
+
+- `frontend/src/shared/components/PresentationIcon.tsx` — original shared outline SVGs.
+- `frontend/src/shared/components/presentation.browser.cjs` — optional existing-Playwright browser verification and evidence capture.
+- `frontend/src/shared/components/presentation.test.tsx` — presentation/semantics/callback regressions.
+- `frontend/src/shared/hooks/useDebounce.test.tsx` — real React state/timer lifecycle regressions.
+- `frontend/src/shared/utils/format.test.ts` — caller-owned formatting and finite-duration regressions.
+
+[The bounded FE01 record](testing.md#bounded-fe01-decisions-and-regression-coverage)
+preserves authority, rationale, contracts, verification and exclusions without a
+new ADR. The Leader's 2026-10-24 post-merge documentation instruction authorizes
+this synchronization-debt correction; independent review/protected integration
+remain pending. This does not retroactively satisfy pre-merge documentation
+timing, rewrite the immutable canonical tree, change ownership/hierarchy, approve
+unrelated CT14/CT37 scope or establish Issue #37 completion.
+
 ```text
 codemastery/
 
@@ -807,6 +851,8 @@ codemastery/
 
 │           │           │   │   ├── JwtTokenProviderTest.java
 
+│           │           │   │   ├── StrongPasswordTest.java
+
 │           │           │   │   └── UserPersistenceTest.java
 
 │           │           │   ├── course/
@@ -1387,13 +1433,21 @@ codemastery/
 
 │           │   ├── PageHeader.tsx
 
+│           │   ├── PresentationIcon.tsx
+
 │           │   ├── SidebarNav.tsx
 
-│           │   └── StatusViews.tsx
+│           │   ├── StatusViews.tsx
+
+│           │   ├── presentation.browser.cjs
+
+│           │   └── presentation.test.tsx
 
 │           ├── hooks/
 
-│           │   └── useDebounce.ts
+│           │   ├── useDebounce.ts
+
+│           │   └── useDebounce.test.tsx
 
 │           ├── api/
 
@@ -1405,7 +1459,9 @@ codemastery/
 
 │           └── utils/
 
-│               └── format.ts
+│               ├── format.ts
+
+│               └── format.test.ts
 
 ├── e2e/
 

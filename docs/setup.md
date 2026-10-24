@@ -10,9 +10,10 @@ This document describes the current development setup contract, based on
 Compose startup/provisioning, variable scopes, configuration loading, and
 foundation validation. Production deployment and E2E remain pending.
 
-The frontend build and minimal React/Material UI bootstrap are implemented.
+The frontend build, custom MUI presentation foundation, demonstration dashboard
+and bounded FE01 unit/component regressions are implemented.
 The backend integration-test foundation and initial CI workflow are implemented;
-feature tests, frontend features, and API integration remain pending. Standalone
+integrated frontend features and browser API integration remain pending. Standalone
 multi-stage Docker image builds and frontend Nginx static serving configuration
 are implemented, with non-root runtimes. The local Compose foundation defines
 PostgreSQL, MinIO, a one-shot storage initializer, backend, and frontend. V001–V006
@@ -42,8 +43,11 @@ adapter, or browser API integration. E2E and deployment remain empty scaffolds.
 
 React, TypeScript, Vite, Material UI, and React Flow dependencies are pinned in
 the frontend manifest and tracked `frontend/package-lock.json`. React Flow
-feature usage remains pending. Playwright setup is pending; the empty E2E package
-files define no executable commands.
+feature usage remains pending. Vitest `5.0.5` and jsdom `27.4.0` are development-only
+FE01 test dependencies. Repository E2E Playwright setup remains pending; the empty
+E2E package files define no executable commands. The optional FE01 browser harness
+instead requires an explicitly supplied existing Playwright module and installed
+Chromium browser; frontend `npm ci` does not provide them.
 
 ## Environment File
 
@@ -240,7 +244,7 @@ All published ports bind only to `127.0.0.1`.
 
 | Service | Local address | Container address / purpose |
 | --- | --- | --- |
-| frontend | http://localhost:5173 | Nginx on 8080; minimal built frontend |
+| frontend | http://localhost:5173 | Nginx on 8080; built presentation-only demo |
 | backend | http://localhost:8080 | Spring Boot on 8080; Actuator health at `/actuator/health` |
 | postgres | localhost:5432 | `postgres:5432`; local relational database |
 | minio | http://localhost:9000 | `minio:9000`; S3-compatible API |
@@ -345,15 +349,43 @@ Run the following commands from `frontend/`:
 | --- | --- |
 | `npm run dev` | Start the Vite development server. |
 | `npm run typecheck` | Check application source and Vite configuration without emitting files. |
+| `npm test` | Run bounded FE01 utility/hook/component regressions with Vitest/jsdom. |
 | `npm run build` | Run type-checking and build production assets in `frontend/dist/`. |
 | `npm run preview` | Preview an existing production build locally; run after building. |
+| `npm run test:browser -- "<installed-playwright-module>" "<evidence-directory>" "<preview-url>"` | Run optional Chromium presentation checks against a running frontend, with actual prerequisite paths and URL substituted. |
 
 Keep `frontend/package-lock.json` tracked with the manifest. `node_modules/`
-and `frontend/dist/` are generated, ignored local state. The package declares
-no lint or frontend test script. The minimal bootstrap uses default Material UI
-styling; routing, authentication UI, API integration, feature pages, and the
-React Flow Mastery Map remain unimplemented. Build success does not establish
-feature-test coverage or deployment readiness.
+and `frontend/dist/` are generated, ignored local state. No lint script is declared.
+For browser prerequisites, outputs, timezone cases and bounded authority, see
+[the FE01 testing record](testing.md#bounded-fe01-decisions-and-regression-coverage).
+Use the actual URL printed by Vite; the harness's fallback port is not a project
+configuration decision. Required Frontend CI still runs install and build only,
+not either regression command. Build success does not establish behavioral
+coverage, frontend/backend integration or deployment readiness.
+
+The custom light MUI theme and `presentationTokens` live in
+`frontend/src/app/theme/theme.ts`: primary `#1F6BE8`, light accent `#52A5F7`, canvas
+`#F9FAFC`, white surfaces, text `#101418`/`#4A5458`, warm `#996F1F` and restrained
+green/orange/pink tints. Muted `#A8A6AF` is decorative only. The foundation uses
+8px spacing, 12px cards, 8px controls, a 224px sidebar and 64px header; primary
+actions are near-black and selected navigation uses light gray with dark text.
+Inter is used only when locally available, with system fallbacks and no font CDN.
+`PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
+
+`App.tsx` is an explicitly labelled, local presentation showcase with overview,
+component and Auth-layout previews. Search, tabs, retry and confirmation controls
+operate only on demonstration state; fixtures are not production metrics or
+learner data. Routing/guards, authentication/session UI, role-driven navigation,
+HTTP/API integration, feature pages and the React Flow Mastery Map remain outside
+this implementation. The Auth-layout preview does not implement sign-in.
+
+**Visual inspiration:** [LMS Admin Dashboard UI/UX Design for EdTech SaaS Platforms —
+Rakibul Ism / Panze UX Design Studio](https://dribbble.com/shots/27183809-LMS-Admin-Dashboard-UI-UX-Design-for-EdTech-SaaS-Platforms).
+CodeMastery's implementation uses general dashboard principles and was independently
+developed; no proprietary assets or complete reference composition are reused,
+and no affiliation is implied. Known AI assistance: OpenAI Codex for FE01
+implementation, test/verification preparation and this documentation reconciliation.
+This disclosure does not describe an AI-powered product feature.
 
 ## Backend Validation
 
