@@ -21,14 +21,16 @@ An independent tester outside the developer LAN verifies the actual approved HTT
 Record actual deployment steps, backups/rollback procedures and responsible operator when separately authorized. Do not reset data or publish credentials. Link verified prototype and local mastery evidence to the English Interim report, contributions and submission documentation. No academic submission is authorized here.
 
 
-## CT17 completion proposal — 18 October 2026
+## CT17 completion proposal — 18 October 2026 historical record
 
 **PROPOSED_NOT_EFFECTIVE.** This section records Codex's technical selections
 under the Project Leader's scoped instruction to investigate CT16 and CT17 in
 parallel. That instruction authorizes this proposal, not separate manual Leader
 review, paid infrastructure, security-risk acceptance, provisioning or deployment.
-New selections require affected-owner review, explicit Leader sign-off and
-protected integration. The approved slices above retain their original authority.
+This was the approval boundary on 18 October. The 24 October delegated decision
+below now approves only its enumerated policy slices, pending protected integration.
+All other selections here remain proposals; concrete inputs and Final operations
+are not approved. Earlier approved slices retain their original authority.
 This section is the detailed CT17 decision record; it is not an executable runbook.
 
 ### Historical reconciliation and checkpoint status
@@ -49,10 +51,10 @@ independently supply technical approval.
 | ADR002 CT17.I-access | APPROVED_AND_CONSISTENT | REAFFIRM external-verification methodology only; no actual provider, hostname, TLS arrangement or access credential was approved. |
 | ADR002 CT17.I-runtime, CT17.remaining | UNRESOLVED | EXTEND with the proposed constraints below; concrete infrastructure and security inputs remain Leader-reserved. |
 | ADR002 CT38.core and [PR #78](https://github.com/chi-thanh-nguyen/codemastery/pull/78), merged [166484e](https://github.com/chi-thanh-nguyen/codemastery/commit/166484ea83aaa570014a04352548de2aeddfd677), 16 October 2026 ICT | APPROVED_BUT_INCOMPLETE | REUSE names and consumed validation; production bindings and actual security behavior are separate. The recorded independent human review remains outstanding. |
-| ADR002 CT01.core; [PR #82](https://github.com/chi-thanh-nguyen/codemastery/pull/82), merged [39748f6](https://github.com/chi-thanh-nguyen/codemastery/commit/39748f62223fcb90bb198366a377ab9b26e9c05b), 17 October 2026 ICT | APPROVED_BUT_INCOMPLETE | REUSE core JWT/account policy. Integration of proposal text is not acceptance of logout residual-token risk. |
+| ADR002 CT01.core; subsequent [PR #91](https://github.com/chi-thanh-nguyen/codemastery/pull/91), merged 21 October; ADR001 §11 | Existing core approval plus actual CT01 technical determinations | REUSE CT01 policy and separately recorded §11.3 personal Leader residual-risk acceptance. Protected-integration provenance and real security/runtime verification remain separate; this CT17 delegation supplies no new risk acceptance. |
 | Leader's 18 October 2026 CT01.identity/U01 sign-off recorded in [Issue #18](https://github.com/chi-thanh-nguyen/codemastery/issues/18) | APPROVED_AND_CONSISTENT | REUSE only the approved read-only Auth boundary; no logout, deployment or verified-security approval follows. |
 | ADR002 CT03.catalogue / CT21.catalogue | APPROVED_AND_CONSISTENT | REUSE anonymous published catalogue/detail and bounded DTOs; no protected-content or full instructor-display claim. |
-| [PR #83](https://github.com/chi-thanh-nguyen/codemastery/pull/83), open at [47af5c9](https://github.com/chi-thanh-nguyen/codemastery/commit/47af5c9a3128333ecfe5cea56590814919beff71) | PROPOSED_NOT_EFFECTIVE | Do not consume proposed protected predicates or CT40 structural reads as effective. Anonymous catalogue does not depend on their approval. |
+| Historical #83; subsequent [PR #92](https://github.com/chi-thanh-nguyen/codemastery/pull/92), merged 21 October; ADR001 §12 | CT03-owned predicates now technically approved; protected-integration provenance retained | CT40 structural/full U07 remains unresolved. Neither protected Course predicates nor CT40 are prerequisites for anonymous catalogue. |
 | [PR #74](https://github.com/chi-thanh-nguyen/codemastery/pull/74), merged presentation showcase; current empty HTTP/Auth/router artifacts | APPROVED_BUT_INCOMPLETE | REUSE presentation evidence only. Merged UI and successful builds do not establish a real browser/API/DB workflow. |
 | Current production deployment and recovery procedure | UNRESOLVED | DEFER execution; `infrastructure/vm/deploy.sh` is empty. No actual external environment or feature verification is established. |
 
@@ -186,9 +188,11 @@ Same-origin browser access avoids a cross-origin deployment requirement; CORS is
 not authentication or protection against non-browser callers. Backend CORS still
 uses only the approved origin and preserves CT38 constraints. No cookie/refresh
 session, wildcard origin, external storage origin or new JWT policy is introduced.
-Client-local logout is not token revocation. CT01's outstanding residual-token
-risk decision remains a distinct security gate before complete Auth acceptance;
-this proposal neither accepts that risk nor demands full unrelated Issue closure.
+Client-local logout is not token revocation. ADR001 §11.3 records the Leader's
+21 October acceptance of its precise residual-token risks; that decision is not
+reopened or expanded here. Real configured Auth/security verification, capacity/
+abuse controls and approved exposure remain separate gates; unrelated Issue
+closure is not required.
 
 **Startup and health.** Preserve PostgreSQL readiness and successful one-shot
 storage initialization before backend startup; Flyway must succeed before the
@@ -248,7 +252,7 @@ continuing. Actual recovery execution remains separately authorized DP01 work.
 | --- | --- | --- |
 | CT16 HTTP ↔ CT17 origin/TLS | ADR002 CT16.minimum permits a same-origin `/api` base | CT16 owns normalization/client semantics; CT17 owns real ingress/TLS. Any parallel CT16 completion PR remains a proposal until effective. Neither entire Issue must close first. |
 | Frontend build ↔ deployment | Vite public build-time value, existing Dockerfile | FE03 supplies the actual client; DP01 builds/deploys its approved `/api` artifact and Nginx proxy after applicable file/implementation approval. |
-| Auth/session ↔ backend/runtime | CT01.core, CT38.core; bounded identity sign-off | Auth/Frontend review consumed behavior; Leader separately resolves logout risk and actual exposure/security gates. |
+| Auth/session ↔ backend/runtime | CT01.core, CT38.core and ADR001 §11 determinations | Existing §11.3 personal logout-risk acceptance is retained. Auth/Frontend review, protected-integration provenance, real security verification and actual exposure gates remain. |
 | Catalogue ↔ CT03/CT21 | Effective anonymous catalogue/detail | CO05/FE07 provide real producers; PR83 protected predicates and CT40 structures are not prerequisites for public catalogue. |
 | Runtime ↔ CT38 / CT09 | Existing variable scopes; approved stack | Production values/artifacts need approval; storage feature/delivery behavior stays CT09-owned. |
 | Scope ↔ CT20.I / QA | Selected Interim capabilities, separate local mastery | QA01/02/07/13 supply applicable executed evidence; QA14 independently verifies local mastery. No fabricated integrated adaptive deployment. |
@@ -292,3 +296,531 @@ Technical references supporting these selections: [Docker startup semantics](htt
 [Vite environment replacement](https://vite.dev/guide/env-and-mode.html) and
 [PostgreSQL logical backups](https://www.postgresql.org/docs/current/backup-dump.html).
 These product references do not supply CodeMastery-specific approval or secrets.
+
+## CT17 delegated technical approval — 24 October 2026
+
+### Authority, baseline and approval boundary
+
+**CT17-2026-10-24-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Project Leader
+@chi-thanh-nguyen's explicit instruction **“CodeMastery — Bounded Technical
+Approval Under Explicit Leader Delegation”**, dated 24 October 2026 (ICT),
+**Codex, as delegated technical decision-maker, approves only P1–P4 below**.
+The authority permits actual bounded technical determinations and this record,
+not personal Leader review/risk acceptance, implementation, public exposure or
+whole-Issue approval. New policy takes effect only through compliant protected
+integration of the exact reviewed revision. The original 18 October proposal and
+its unselected Final/runtime choices remain historical proposals.
+
+Fresh inspected remote `main` is
+[`9d76732bab363a63d2d91b5bddbf0a72b66a6d91`](https://github.com/chi-thanh-nguyen/codemastery/commit/9d76732bab363a63d2d91b5bddbf0a72b66a6d91),
+24 October, unchanged since the preceding assessment. Inspected
+[CT17 #70](https://github.com/chi-thanh-nguyen/codemastery/issues/70),
+[DP01 #71](https://github.com/chi-thanh-nguyen/codemastery/issues/71),
+[DP03 #72](https://github.com/chi-thanh-nguyen/codemastery/issues/72),
+[FE03 #98](https://github.com/chi-thanh-nguyen/codemastery/pull/98) at
+`2f459d47a9c398d55dc75c2b4c16622cdaa2adeb`, and
+[FE07 #101](https://github.com/chi-thanh-nguyen/codemastery/pull/101) at
+`8417205b0c5445a1ebace7b8a5f13847c50eddf5`. No deployment PR is open at inspection;
+deploy.sh remains empty. Existing frontend/nginx.conf serves static files/history
+fallback without an API proxy or TLS; Compose remains local-only. No actual
+host, public origin, operator credentials or external access result was found in
+the inspected authoritative records. Real secret files were not accessed.
+
+Preserve approved one-VM Docker Compose architecture, existing service/module
+responsibilities, ADR002 CT17.I-scope/I-access methodology and CT20.I Minimum.
+Reuse CT01/CT18/CT38 only within their authority. ADR001 §11 already records actual
+CT01 technical determinations and separately sourced personal risk acceptance;
+#91/#92 merges do not independently establish their protected-integration
+compliance. Neither that provenance gap nor a Project value is silently waived.
+
+Publication preflight rechecked remote `main` at
+[`0b2967226fcab946e0145160b1a18e21c30613d8`](https://github.com/chi-thanh-nguyen/codemastery/commit/0b2967226fcab946e0145160b1a18e21c30613d8)
+after AD09 [PR #86](https://github.com/chi-thanh-nguyen/codemastery/pull/86)
+merged on 24 October. The only delta from the initial baseline is its four
+calculator/classifier implementation/test files; none changes these contract
+sources or scopes. This task branch starts from that refreshed main revision.
+
+### Actual approved policy determinations
+
+| Slice | Delegated approval | Interfaces, invariants and exclusions |
+| --- | --- | --- |
+| P1 — single-origin ingress | APPROVE one subsequently Leader-selected external HTTPS browser origin for SPA and REST, using existing frontend Nginx and approved Compose locations | CT16 builds with `/api`; API-root addressing is coordinated with, not dependent on whole-Issue closure of, CT16. No actual hostname, TLS mechanism, certificate path or listener mapping is selected. |
+| P2 — private state and credential separation | APPROVE private PostgreSQL/MinIO/direct-backend connectivity and separation of bootstrap/admin and application credentials | No public DB/storage/console/backend ports; no backend MinIO root identity, anonymous bucket or frontend secret. Actual identities, database grants, policies, custody and provisioning remain unapproved inputs. |
+| P3 — immutable release evidence | APPROVE source revision, reviewed dependency lock, build/public configuration identity and immutable image digest as release identifiers | Build/verify once and deploy the same reviewed artifacts; mutable tags alone are insufficient. No image, registry, transfer mechanism or runtime baseline upgrade is selected. |
+| P4 — startup and readiness boundaries | APPROVE ordered prerequisite checks, successful Flyway and storage initialization, nondetailed health and separate real selected feature evidence | Health/container startup alone never proves Auth, roles or PostgreSQL-backed catalogue. No new probe, numeric timeout, restart policy, recovery mechanism or public health endpoint is approved. |
+
+P1 requires `/api` and `/api/…` matching before SPA history fallback, preserving
+method, body, `/api` prefix, query parameters, backend status, JSON/ProblemDetail
+content types and relevant end-to-end headers, including `WWW-Authenticate` and
+`Cache-Control`. Preserve trusted internal bearer transport without logging it;
+do not cache authenticated/API responses. Hop-by-hop headers are not blindly
+forwarded. API 4xx/5xx must never become index.html or HTML 200; a failed upstream
+must remain an HTTP failure. Client deep links reach the SPA while missing assets
+remain real 404. Unknown API paths do not become browser routes. Backend security
+and owning-module authorization remain authoritative, irrespective of ingress.
+
+HTTPS termination uses the existing frontend ingress responsibility; actual TLS
+acquisition/renewal, key custody, forwarded-header trust and host mapping need
+Leader inputs before implementation/exposure. No public credential/API processing
+over plaintext HTTP is approved. Only separately approved API capabilities may
+be exposed; proxying `/api` is not approval of CT22 or another feature. Nonpublic
+management/docs surfaces stay nonpublic. Nondetailed health may be checked
+privately by the operator; the earlier proposal's public health exception is
+**not** approved by P4. No gateway, additional service or infrastructure technology
+is introduced.
+
+P2 preserves named-volume persistence and migration history. Current automatic
+Flyway uses the backend datasource and therefore consumes migration DDL rights;
+this observation does not approve a production privilege plan or accept its risks.
+Concrete grants or a separately approved migration identity must be reconciled
+before provisioning. New secret/certificate/host/backup locations and broader
+storage capabilities remain outside delegation. Protected files and object-key/
+delivery behavior remain CT09-owned; provisioned storage is not feature evidence.
+
+P4 preserves existing PostgreSQL healthy/storage-init completed prerequisites and
+requires Flyway success before backend readiness. Fail on configuration, migration,
+credential or initialization conflicts. Dependency ordering is not continuous
+resilience; health does not restart an unhealthy running container automatically.
+Exact restart/reboot/recovery choices remain proposals, not implicitly activated.
+Auth acceptance requires the real configured security chain/current PostgreSQL
+account state and approved role/resource cases. Catalogue acceptance requires
+real browser → REST → PostgreSQL list/detail and concealed 404 behavior.
+Independent outside-LAN HTTPS verification and secure lecturer access remain
+execution evidence, while deterministic local mastery is reproduced separately.
+
+### Evidence, alternatives and acceptance
+
+[Existing Nginx configuration](../frontend/nginx.conf),
+[Compose](../infrastructure/docker-compose.yml), service Dockerfiles, application
+configuration, Vite configuration and OpenAPI were inspected read-only. Existing
+locations can express the selected policy without another deployable component;
+they are references, not permission to edit them. Supporting official technical
+sources are [Nginx URI/header/error proxy semantics](https://nginx.org/en/docs/http/ngx_http_proxy_module.html),
+[Compose startup semantics](https://docs.docker.com/compose/how-tos/startup-order/)
+and [Vite build-time environment replacement](https://vite.dev/guide/env-and-mode.html).
+
+Alternatives: separate SPA/API origins add CORS/certificate/public-surface work;
+select one origin for this bounded deployment while retaining CT16's independent
+local absolute-origin mode. An additional proxy/gateway changes service structure
+without demonstrated need; use existing Nginx. Mutable latest/build-on-deploy
+identity is less reproducible than immutable reviewed artifacts. These decisions
+approve policy, not a provider, artifact or procurement choice.
+
+Required later acceptance: `/api/courses` keeps its prefix/query and JSON/status;
+missing/hidden course returns approved 404; malformed/Auth failures preserve
+ProblemDetail/status and 401 headers; a browser deep-link serves the SPA, a missing
+asset stays 404, and an API error never does SPA fallback. Public scans must find
+no PostgreSQL/MinIO/direct backend/management exposure. Migration/init failure
+prevents readiness; health-only results cannot satisfy feature acceptance.
+Record source/image/build identity, actual origin, tester/browser, UTC/ICT time,
+expected/observed results and redacted failures. These are unexecuted acceptance
+criteria, not claims that a deployed environment exists.
+
+### Withheld determinations and Leader-reserved inputs
+
+| Input / decision | Actual evidence and smallest remaining decision |
+| --- | --- |
+| Host, provider, capacity and budget | No selected actual environment evidenced. Compare an authorized existing institutional/team VM with a separately approved IaaS VM, preserving one VM/Compose; Leader chooses ownership, expenditure and measured capacity. |
+| Actual origin and TLS/access | No domain/DNS authority, certificate lifecycle/key custody, operator/lecturer access or forwarded-header trust plan evidenced. Leader supplies the actual arrangements and exact approved locations. |
+| Production artifacts | Local image pins and dependency locks exist, not production selection evidence. Obtain artifact provenance/architecture/license/maintenance/security review and actual digests before selecting; no local MinIO/MC pin is promoted. |
+| Credentials and locations | Existing variable names and role separation are evidence, not real secrets/grants. Leader approves operator/custody/provisioning and exact configuration/certificate/host locations without publishing values. |
+| Security and concrete readiness | Target-host BCrypt capacity, production abuse controls and applicable configured Auth/API checks remain prerequisites. No material risk exception, rate-limit number or exposure is accepted here. |
+| Final operations/recovery | Existing backup/restore/rollback text remains proposal. Destinations, retention/RPO/RTO, key custody, restore targets and execution authority are unselected; no new location or recovery action is approved. |
+
+Only P1–P4 are technically approved; these missing inputs are **WITHHELD / LEADER
+RESERVED**, not defaults to be filled by implementers. U18 retains its unresolved
+actual environment binding; P1–P4 do not mark that combined relation resolved. U33/U34,
+whole Final coverage and CT17.F-runtime remain unresolved. CT16 is approved only
+by its own separate decision; its protected integration is an independent gate.
+CT14 preparation, CT22 membership, CT21 extensions, CT40/full U07 and production
+Adaptive/Assessment contracts are excluded.
+
+### Owners and protected integration
+
+Infrastructure @tihh647-ui prepares the separately authorized configuration;
+Frontend @heizseung and Auth @duyduyit review browser/security consumption, Course
+and data owners review selected feature evidence. Leader remains sole CODEOWNER
+of docs/deployment.md and decides reserved inputs/execution authority. Current
+rules require CODEOWNER/last-push review, resolved threads, strict Backend/Frontend/
+CodeQL checks and security scanning. A Leader-authored Draft PR cannot self-approve;
+use a compliant independent author/pusher and eligible human review without
+impersonation, bypass or protection changes. No completed review is asserted.
+
+This task approves policy documentation only. All infrastructure edits, provisioning,
+public exposure, deployment, recovery, runtime/QA acceptance and submission remain
+separately authorized work. Issue #70 is not wholly approved/completed. Codex
+assisted the investigation and authored this record; no AI application service
+or new infrastructure technology is introduced.
+
+## CT17 Interim technical policy completion — 24 October 2026
+
+### Delegation, predecessor and classification
+
+**CT17-INTERIM-2026-10-24-r2: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** Authority is the Project Leader's
+explicit **“CodeMastery — Complete Interim Technical Contract Approvals
+(CT16, CT17, CT14)”**, supplied 24 October 2026 (ICT). Codex acts as the delegated
+technical decision-maker and **approves P5–P10 below**. Ordinary engineering
+selection is exercised here; no personal Leader risk/financial/access authority
+or implementation/deployment authorization is exercised.
+
+Preserve **CT17-2026-10-24-r1 P1–P4** byte-for-byte and with their original meaning.
+This extension selects previously unapproved engineering detail; it does not
+backdate or activate the 18 October proposal, reopen settled policy, or approve
+remaining CT17.F-runtime. Prior statements withholding these technical choices
+remain authentic history; only the named P5–P10 choices are resolved prospectively.
+
+Fresh main is
+[`0b2967226fcab946e0145160b1a18e21c30613d8`](https://github.com/chi-thanh-nguyen/codemastery/commit/0b2967226fcab946e0145160b1a18e21c30613d8),
+including AD09 #86. This follow-up is safely stacked on [Draft PR #103](https://github.com/chi-thanh-nguyen/codemastery/pull/103),
+exact **a64a94b9e93785ae97fbfaaed6ee6f8da7455267**; #103 remains unmerged with no
+review. No existing PR content/metadata is changed. P1–P4 and this extension require
+sequential compliant protected integration and revalidation; pending Draft content
+is not an effective main contract. CT16 addressing is a separate dependency on
+[Draft PR #102](https://github.com/chi-thanh-nguyen/codemastery/pull/102),
+**802ee19e38f22b35267bb51dfe04c8ee56b64acb**.
+
+### P5 — runtime envelope, locations and fail-fast inputs
+
+Retain one VM/Compose, existing PostgreSQL, MinIO/init, backend and frontend service
+responsibilities, Java 25/Spring Boot 4.1.1, PostgreSQL 17 baseline and current
+React/Vite/Nginx responsibilities. No new service, technology or runtime upgrade.
+The release must match the actual VM's OS/CPU architecture and demonstrate memory,
+CPU/disk/storage headroom, selected concurrent Auth/catalogue workload and BCrypt
+cost-14 capacity. Do not invent VM sizes, numeric load targets, rate limits or
+availability guarantees: record measured results against the Leader-approved
+actual resource/access envelope before exposure. That is a concrete qualification
+gate, not an unresolved choice of deployment architecture.
+
+Select existing configuration responsibilities only: infrastructure/docker-compose.yml,
+infrastructure/vm/deploy.sh, backend/src/main/resources/application.yml, existing
+service Dockerfiles and frontend/nginx.conf; templates/guides must be synchronized
+in a separately authorized implementation. Use existing ignored root .env convention
+or approved process environment, never shell-source it, bake secrets into images,
+forward every host variable, or publish rendered configuration. Actual host checkout,
+file permissions/custody, certificate/key mounts and any additional host/backup
+location remain Leader inputs. No new certificate or secret-manager location is
+selected. Certificate trust/hostname, readable key material and renewal ownership
+are mandatory before ingress start; TLS failures stop exposure, not downgrade it.
+
+Keep DB_*, POSTGRES_*, STORAGE_*, MINIO_ROOT_*, JWT_SECRET/JWT_EXPIRATION,
+CORS_ALLOWED_ORIGINS and public VITE_API_BASE_URL meanings. Build the external SPA
+with `/api`; explicitly bind backend CORS to the actual approved origin and retain
+PT15M/HS256/issuer/audience requirements. No localhost/wildcard/secret defaults are
+accepted in that environment. Enforce consumed required inputs before startup;
+unused scheduling/recovery/upload defaults do not become approved feature policy.
+
+### P6 — bounded database and storage privileges
+
+Select separate **bootstrap administrator**, **schema migrator** and **runtime
+application** identities. Runtime DB_* uses a non-superuser role with only CONNECT,
+USAGE and selected tables/sequences' required DML privileges in the existing
+application database/schema, no ownership/CREATE/DDL/CREATEDB/CREATEROLE, no role
+membership permitting elevation, and no access to other application databases.
+The non-superuser migrator owns/manages only the existing application schema and
+Flyway history; it cannot administer the cluster/create databases or roles.
+Bootstrap credentials are not the application's or migrator's credentials.
+
+Use **Spring Boot's existing native Flyway datasource**, with the explicit
+`spring.flyway.url`, `spring.flyway.user`, `spring.flyway.password` properties.
+For Compose/process-environment binding select exactly **SPRING_FLYWAY_URL**,
+**SPRING_FLYWAY_USER**, **SPRING_FLYWAY_PASSWORD**. These are newly technically
+approved CT17 deployment inputs, not implemented/current template entries or
+approval of all CT38.feature. All three must be supplied and validated together;
+URL targets the same approved database/schema as DB_*, contains no credentials,
+and uses a distinct migrator identity. Reject missing/placeholder/mismatched
+inputs or fallback to runtime/admin credentials. No new dependency, migration
+file, schema name or separate deployable migrator is introduced.
+
+Flyway remains automatic at startup; Hibernate remains validate-only. Apply only
+reviewed versioned migrations and verify history/checksums before readiness.
+Never reset/truncate/clean, edit applied V001–V006, or repair away a mismatch.
+Provision future required application DML grants under the selected role policy
+before feature readiness; do not grant ownership merely to make startup pass.
+Actual role names, credentials/access grants and provisioning authority are
+Leader-reserved. Both credential sets are present in the backend process for
+startup: this is database-connection privilege separation, not process isolation
+or a claim of protection from arbitrary code execution. No broader risk exception
+is accepted. A later separate migration job/process would require its own approval.
+
+MinIO root remains confined to administration/init; backend gets only the separate
+approved bucket-scoped identity. Require private endpoints, no anonymous access,
+idempotent exact-state checking and conflict-stop provisioning. Existing init code
+must be verified for this behavior; creation/update commands are not proof that
+safe re-execution or secret rotation has been implemented. CT09 object delivery
+and Final file-feature behavior remain excluded.
+
+### P7 — ingress and forwarding trust
+
+Keep P1's one-origin existing Nginx ingress, prefix-preserving `/api` proxy and
+API-before-SPA precedence. Bind routing to the actual approved host and reject
+unexpected Host values. Terminate valid HTTPS at that ingress; support TLS 1.2/1.3,
+without selecting a certificate client, DNS provider, key path or real hostname.
+Drop untrusted inbound Forwarded/X-Forwarded-* identity/trust claims; any forwarded
+values emitted by Nginx are regenerated from its validated connection/canonical
+origin, not appended blindly from caller input. Select backend
+`server.forward-headers-strategy=NONE` for this bounded REST application: current
+operations do not need absolute external URL generation or trusted proxy identity.
+Do not rely on spoofable headers for authentication, authorization or access grants.
+
+Direct backend/database/storage/console access stays private. No upstream load
+balancer/CDN or trusted-proxy address range is assumed. If an actual environment
+adds an upstream proxy or requires backend forwarding interpretation, reconcile
+that new consumed boundary explicitly before exposure. Preserve P1 error/status/
+content-type/cache rules, asset 404 and browser deep links. Private operator
+health checks do not create a public Actuator/docs exception.
+
+### P8 — release transfer, persistence and restart behavior
+
+Select build/verify outside the VM using existing Dockerfiles and reviewed locks;
+package the resulting immutable images with Docker's native save/load archive
+format, with a SHA-256 archive checksum and image content IDs/config/platform
+record. For registry-sourced images also record registry manifest digests; a loaded
+archive is not claimed to recreate a missing RepoDigest. Transfer through a
+subsequently approved authenticated encrypted operator channel, verify checksum
+and content identity before use, and never silently rebuild source on the VM.
+This avoids requiring a new registry/account/service. No concrete image archive,
+production base/storage image, transfer account or filesystem destination is
+approved merely by this format decision.
+
+Approve restart **unless-stopped** for long-running existing services and **no**
+automatic restart for the one-shot storage initializer. Preserve named volumes;
+no down -v, data reset or automatic conflict reconciliation. Require healthy
+PostgreSQL, successful init and Flyway, then selected feature checks before readiness.
+Do not hide migration/configuration failure behind container restarts: stop the
+release on such failure. Startup dependency conditions are not runtime supervision;
+process restart does not restart an unhealthy-but-running process. Verify actual
+reboot behavior separately and ensure operator access before relying on it.
+
+Image admission requires provenance, license, architecture, maintenance and
+vulnerability review plus actual immutable identity. Do not promote local-only
+MinIO/MC pins to production or certify future unbuilt Auth/Course artifacts.
+Missing release artifacts are an implementation/evidence gate, not permission to
+invent a production image or require personal Leader approval of every ordinary
+image-engineering selection. Material exceptions remain Leader-reserved.
+
+### P9 — logging and deployment-stop/rollback prerequisites
+
+Use the existing prod structured console logging capability and safe ingress
+status/route diagnostics. Exclude Authorization/password/token/credential values,
+request/response bodies, sensitive query strings, rendered env/config and keys;
+keep exception responses within CT18. Record revision/artifact/correlation/status
+and redacted observed failures. No new logging service, log-retention value or
+host log location is selected. Production debug/raw SQL/body logging is not a
+shortcut to evidence.
+
+Before a state-changing update, require verified schema/image compatibility,
+preserved persistent state and an independently checked, restorable pre-update
+recovery artifact under the operator's approved custody. If that prerequisite or
+authority is missing, stop the update. Do not automatically restore or roll back
+schema/data. An image-only rollback is eligible only with unchanged/compatible
+schema/data and separate authorized operator action. Otherwise stop effects,
+preserve evidence and obtain the required recovery decision. This approves
+preconditions only: Final backup destinations/retention/RPO/RTO/restore execution
+and operational liability are not decided or authorized.
+
+### P10 — Interim acceptance and operational handoff
+
+Infrastructure @tihh647-ui prepares separately authorized packaging/configuration
+and reports init/migration/process outcomes; Auth @duyduyit, Course @TamiaoNguyen
+and Frontend @heizseung supply actual producers and consumed-boundary evidence.
+QA01 checks configured Auth/authorization/current account state; QA02 verifies
+PostgreSQL queries/visibility; QA07 verifies real browser interactions; DP02 local
+container evidence and DP03 independent outside-network HTTPS evidence remain
+distinct. QA14 independently reproduces AD09's exact CT06/CT24/CT36 local oracles;
+DO03 receives truthful selected-Minimum access/results for the report.
+The Leader nominates the actual operator, tester and credential/access custodians;
+CODEOWNERS assignment is not proof of their availability or execution acceptance.
+
+The handoff identifies source/image/configuration identity, actual origin and
+approved access, migrations/data provenance, UTC/ICT timestamps, tester/browser,
+expected/observed results, failures and limitations. Verify real register/login,
+locked/invalid authentication and approved role/resource cases, public list/detail
+through PostgreSQL including hidden 404, secret-free English/responsive UI,
+reload/expiry/logout races and nonpublic infrastructure. Do not invent a protected
+API merely to demonstrate role denial. Health/screenshots/build success are not
+substitutes, and local mastery is not claimed as deployed integrated Adaptive.
+Use the existing independently documented browser protocol for Interim; no new
+Final E2E journey, runner or academic submission is approved.
+
+### Evidence, alternatives and exact unresolved inputs
+
+The inspected source includes current Issues #19/#70/#27 and #18/#22/#20/#17/#23/
+#21, AU05/AU06/CO04/CO05, QA01/QA02/QA07/QA14, DP01–DP03 and actual manifest,
+Dockerfiles, Compose, Nginx and configuration. No actual authorized host/domain/
+access arrangement is evidenced there; no private cloud account or secret file
+was accessed. Available *verified* deployable environments: **none established**.
+An existing authorized institutional/team VM versus a separately funded IaaS VM
+are conditional options, not verified available resources or financial commitments.
+
+Technical evidence: [exact Boot 4.1.1 Flyway properties](https://raw.githubusercontent.com/spring-projects/spring-boot/v4.1.1/module/spring-boot-flyway/src/main/java/org/springframework/boot/flyway/autoconfigure/FlywayProperties.java)
+and [datasource selection](https://raw.githubusercontent.com/spring-projects/spring-boot/v4.1.1/module/spring-boot-flyway/src/main/java/org/springframework/boot/flyway/autoconfigure/FlywayAutoConfiguration.java),
+[PostgreSQL privileges](https://www.postgresql.org/docs/17/ddl-priv.html),
+[Nginx HTTPS](https://nginx.org/en/docs/http/configuring_https_servers.html),
+[Docker restart](https://docs.docker.com/engine/containers/start-containers-automatically/)
+and [archive transfer format](https://docs.docker.com/reference/cli/docker/image/save/).
+All are compatible mechanisms, not executed application verification.
+
+Alternatives: retain one schema-owner runtime credential (simpler but unnecessary
+DDL privilege), add a migration service (extra lifecycle), or use Boot's already
+available separate datasource (selected least-privilege connection boundary).
+A new registry is unnecessary for a single VM; the selected native archive format
+keeps transfer identity reviewable. Manual/restart-free operation lacks reboot
+recovery; the selected container policy retains explicit operator stop controls.
+No actual resource or risk exception follows from these engineering choices.
+
+Classification of the complete P1–P10 policy set:
+
+- **CT17_INTERIM_TECHNICAL_POLICY_COMPLETE**: all independent engineering policy
+  decisions for this bounded one-VM Interim plan are specified; this is technical
+  coverage, still pending protected integration.
+- **CT17_INTERIM_CONCRETE_BINDING: PENDING_LEADER_INPUT**: actual VM/account/budget,
+  domain/DNS authority, certificate/key custody, actual credential/grant/operator
+  arrangements, exact host/certificate/recovery-artifact locations and public
+  exposure authorization remain missing. No concrete-binding completion claim.
+- **CT17_INTERIM_IMPLEMENTATION_AUTHORIZATION_PENDING**.
+- **CT17_INTERIM_RUNTIME_VERIFICATION_PENDING**.
+
+Capacity/security qualification, actual production artifact admission and safe
+re-execution/readiness evidence additionally remain producer/verification gates.
+U18 actual environment binding and U33/U34 are not marked resolved. P1–P4, CT01,
+CT03, CT06/CT24/CT36, CT18/CT20/CT21/CT38 remain unchanged except these explicitly
+named, additive CT17 deployment conventions. No whole family is approved.
+
+All new policy remains APPROVED_PENDING_PROTECTED_INTEGRATION. The sole-Leader
+CODEOWNER/PR-authorship conflict is unchanged: a non-owner review or another
+contributor's push alone cannot satisfy it. Eligible independent human review,
+last-push approval, required checks and compliant exact-revision integration are
+mandatory; no bypass, review submission or personal Leader acceptance is claimed.
+
+## CT17 consolidation and bounded Final approvals — 25 October 2026
+
+### Authority and preserved history
+
+**CT17-FINAL-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Leader's explicit
+**“CodeMastery — Consolidate Contract Approval PRs and Complete Eligible Final
+Technical Approvals”**, supplied 25 October 2026 (ICT), Codex acts as delegated
+technical decision-maker and **approves F1/F2 below only**. No personal financial,
+security, access, recovery-risk or liability acceptance is inferred.
+
+Fresh main is **0b2967226fcab946e0145160b1a18e21c30613d8**. Canonical
+[PR #103](https://github.com/chi-thanh-nguyen/codemastery/pull/103) preserves all
+original **a64a94b9e93785ae97fbfaaed6ee6f8da7455267** content plus all unique
+[PR #105](https://github.com/chi-thanh-nguyen/codemastery/pull/105) content at
+**ee085e05bf0ebf3b7fa75e21e6ac9165f3eef21d**. The earlier stack/integration
+instructions are historical process descriptions; this authorized consolidation
+replaces that path with #103 targeting main. Close #105 without merge only after
+remote preservation verification. Original heads remain recoverable.
+
+CT17-2026-10-24-r1 P1–P4 and CT17-INTERIM-2026-10-24-r2 P5–P10, their restrictions
+and Interim certifications are unchanged. Their earlier Final deferrals are
+resolved prospectively only for the two named engineering mechanisms below.
+Neither the full earlier proposal nor concrete runtime or Final operations are
+approved by consolidation. CT16 #102 remains an explicit consumed dependency,
+not an effective main contract simply because its Draft contains approval text.
+
+### F1 — PostgreSQL backup/restore payload and privilege mechanism
+
+**Checkpoint CT17.final-pg-backup: APPROVE** PostgreSQL-native logical custom
+archive backup, using pg_dump compatible with the deployed PostgreSQL 17 baseline,
+and pg_restore into a separately authorized empty isolated target. Include the
+application schema/data, sequences, constraints and Flyway history; no selective
+business-table omission. Record server/client versions and archive checksum;
+refuse incompatible/downgrade restoration. Do not use a live volume copy as the
+PostgreSQL backup mechanism or introduce another database/service/backup platform.
+
+Restore as the P6 bounded migrator with **--no-owner --no-acl --exit-on-error**;
+provision the P6 runtime grants independently from reviewed provisioning inputs.
+For custom archives no-owner is a restore-time choice, not a claimed pg_dump
+ownership filter. Do not restore cluster-wide role/password dumps or grant
+runtime DDL/administrative rights merely to make recovery pass. Actual target,
+accounts/grants and execution authority remain reserved inputs. Treat archives
+as confidential: domain password hashes/private data may be present. No archive
+may be committed, published, sent to an unapproved destination or created without
+an approved protected custody/encryption arrangement.
+
+The database snapshot is internally consistent, not automatically synchronized
+with MinIO. When claiming a full product recovery point, quiesce and drain all
+application/background/admin writers to both stores, keep that write exclusion
+through capture of the selected complete object/bucket/IAM/configuration state,
+and record proof. If a writer cannot be bounded or the object-state mechanism is
+unqualified, stop the *combined* backup claim. F1 independently approves the
+PostgreSQL mechanism; it does not approve an unknown MinIO mechanism.
+
+Alternatives: plain SQL is less suitable for inspectable selective restore;
+physical PostgreSQL backup adds version/WAL/recovery tooling not currently needed.
+Native custom archives reuse the approved database toolchain. Acceptance requires
+archive readability and an actual isolated restore/constraints/history check;
+a successful dump command alone is insufficient. This is an unexecuted technical
+specification, not a backup, restore or recovery commitment.
+
+Evidence: [PostgreSQL 17 pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html),
+[pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html), current Flyway/
+Hibernate configuration and P6 privilege boundary. Only PostgreSQL mechanics are
+selected; no RPO/RTO/retention/destination or ownership of actual keys is selected.
+
+### F2 — coordinated recovery qualification and release compatibility gate
+
+**Checkpoint CT17.final-recovery-qualification: APPROVE** a fail-closed recovery
+acceptance protocol and evidence interface. A candidate recovery set must identify:
+source/configuration revision; image content identities/platform; database and
+object-state artifact hashes; required bucket/IAM/configuration dependencies;
+Flyway versions/checksums; UTC capture interval and write-quiescence evidence;
+required secret/key custody references without values; isolated validation results
+and operator authorization reference. No new tracked manifest file/path is added.
+
+Rehearse in an isolated, nonpublic instance of the existing stack against copied
+artifacts, not the live database/volumes. Verify hash integrity, schema/history and
+privileges, object/reference integrity under effective owning contracts, private
+storage/access, and the applicable approved Auth/Course/other feature cases.
+Background or business effects must not escape the rehearsal; no event replay,
+new notification delivery or synthetic public security-probe endpoint is invented.
+An unavailable feature test or missing object dependency is recorded as a failure/
+limitation, never as a passed complete-product recovery.
+
+A candidate application image must be compatible with the restored/current schema
+and data. Image rollback cannot undo migrations. On unknown compatibility,
+partial capture, missing keys, failed restoration, unexpected grants or incomplete
+feature verification, stop release/recovery and preserve evidence. Only a
+separately authorized operator can enact an approved compatible image change or
+restore. Never restore over newer state or accept data loss automatically.
+
+Alternatives: independent uncoordinated copies cannot establish a cross-store
+recovery point; a health-only drill cannot establish data/security recovery.
+The selected protocol produces explicit, reproducible acceptance inputs without
+automatic rollback or another operational service. Infrastructure coordinates
+technical execution; data/feature owners validate their artifacts, QA records
+observed results and the Leader retains actual recovery authorization/custody/
+liability choices. No test result or operator nomination is fabricated here.
+
+### Entire retained Final decision inventory
+
+| Subject | Classification | Exact missing prerequisite or disposition |
+| --- | --- | --- |
+| One-VM architecture, configuration/Flyway privileges, ingress/forwarding, releases, restart/logging/evidence boundaries | E — ALREADY APPROVED | Preserve P1–P10; no second approval or new infrastructure technology |
+| PostgreSQL logical mechanism and recovery qualification interface | A — READY FOR DELEGATED TECHNICAL APPROVAL | F1/F2 technically approved above, pending protected integration |
+| Complete MinIO objects/versions/bucket/IAM/configuration backup and restore mechanism | B — REQUIRES ADDITIONAL TECHNICAL EVIDENCE | Need production-qualified server/MC versions and demonstrated complete capture/restore semantics. Vendor IAM/bucket/config exports are separate from object data; a plain mirror is not proof of a full recovery set. Local-only third-party pins and AIStor documentation do not establish compatibility for the actual deployment. |
+| Concrete backup encryption/transport tooling and compatibility | B — REQUIRES ADDITIONAL TECHNICAL EVIDENCE | Need an evidenced supported mechanism, compatibility/security review and isolated round trip; F1/F2 do not silently select a new tool or claim encryption implemented. Key/destination custody is separately C. |
+| Actual production image/resource qualification | B — REQUIRES ADDITIONAL TECHNICAL EVIDENCE | Actual built artifacts, architecture/license/maintenance/vulnerability review and measured workload/capacity; ordinary artifact engineering is not automatically personal Leader authority |
+| Host/provider/account/budget, domain/DNS, TLS/private keys, actual credentials/grants/locations and public exposure | C — LEADER-RESERVED DECISION | Explicit actual selection/custody/access/exposure authority; no defaults or inferred resources |
+| RPO/RTO, retention/frequency, off-VM destination/key custody, recovery authority and accepted data-loss/liability | C — LEADER-RESERVED DECISION | Personal operational/financial decisions and actual resource ownership; no numerical promise is selected |
+| Feature-specific readiness/load/recovery assertions | D — DEFER UNTIL CONSUMER OR INTEGRATION READINESS | CT09 and Course/Assessment/Adaptive/Interaction/Admin feature interfaces, actual producers and approved expected outcomes |
+| Final external/demo coverage and particular E2E suite allocation | D — DEFER UNTIL CONSUMER OR INTEGRATION READINESS | CT20.F and CT19/CT34/CT35/CT36 where consumed; U33/U34 remain unresolved |
+
+Supporting storage evidence: [mc mirror](https://docs.min.io/aistor/reference/cli/mc-mirror/),
+[IAM export](https://docs.min.io/aistor/reference/cli/admin/mc-admin-cluster-iam/mc-admin-cluster-iam-export/)
+and [configuration export limits](https://docs.min.io/aistor/reference/cli/admin/mc-admin-config/).
+These vendor documents identify evidence boundaries, not an approved product/image,
+new service or completed operational validation. No complete MinIO recovery,
+encryption implementation or production artifact selection is certified here.
+
+**CT17_FINAL_TECHNICAL_POLICY_PARTIALLY_APPROVED.** Interim policy completeness
+remains technical coverage only; concrete bindings are PENDING_LEADER_INPUT.
+Implementation authorization and operational verification remain pending. Final
+F1/F2 do not change the Interim Minimum, waive Final integrated-product obligations
+or approve a whole Issue. Existing sole-Leader CODEOWNER/author conflict, eligible
+independent review/last-push approval, exact-head CI/security and protected
+integration remain required. No provisioning, backup, restore, deployment, public
+exposure, runtime verification or protected merge was performed or authorized.
