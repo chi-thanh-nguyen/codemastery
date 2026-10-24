@@ -1005,3 +1005,60 @@ protections. No such human review or effective integration is claimed here.
 Codex investigated and authored this decision documentation; no AI runtime service
 is introduced. Neither Issue #19 nor any implementation/verification is completed
 by this bounded technical approval.
+
+## CT16 Interim technical coverage certification — 24 October 2026
+
+**CT16-INTERIM-COVERAGE-2026-10-24-r1** certifies
+**CT16_INTERIM_TECHNICAL_SCOPE_COMPLETE**, limited to technical decision coverage
+for the selected Interim Minimum. **APPROVED_PENDING_PROTECTED_INTEGRATION**;
+this is neither effective main integration nor whole-Issue, implementation, QA,
+runtime or deployment acceptance.
+
+Authority: the Project Leader's explicit **“CodeMastery — Complete Interim
+Technical Contract Approvals (CT16, CT17, CT14)”**, supplied 24 October 2026 (ICT),
+delegates independent technical investigation, determination and documentation.
+Codex is the delegated technical authority for this coverage certification.
+No new CT16 behavior or dependency approval is needed: preserve
+**CT16-2026-10-24-r1** without reopening, duplicating or broadening it.
+
+Fresh inspected main is
+[`0b2967226fcab946e0145160b1a18e21c30613d8`](https://github.com/chi-thanh-nguyen/codemastery/commit/0b2967226fcab946e0145160b1a18e21c30613d8),
+including merged AD09 #86. This follow-up is stacked on [Draft PR #102](https://github.com/chi-thanh-nguyen/codemastery/pull/102)
+at **802ee19e38f22b35267bb51dfe04c8ee56b64acb**. Its original record and all other
+bytes are preserved. #102 is still unmerged; its technical approval is not an
+effective main contract. Integrate its exact reviewed revision compliantly before
+this follow-up, then revalidate/review the follow-up against main. No #102 PR body,
+head, base, review or Draft state is changed by this task.
+
+| Interim-required decision | Exact existing technical authority | Remaining category, not a missing CT16 decision |
+| --- | --- | --- |
+| Register/login request and response binding | ADR001 §11.3, ADR002 CT01.core, OpenAPI; CT16-r1 transport/decoder contract above | AU05/AU06 and frontend implementation; actual security/PostgreSQL verification |
+| Form validation and safe failures | CT01.core predicates; CT18.minimum; CT16.http safe plain-text field/general errors | UI must use Unicode code-point/UTF-8 limits and preserve exact password; a UTF-16 length shortcut does not amend CT01 |
+| Memory-only JWT and offline logout | CT01 §11.3/§11.5 and CT16-r1 auth | No persistent storage, refresh or server logout; implementation and QA |
+| Attempts, generations, expiry and 401/403 | CT16-r1 auth and ADR001 §11.5 | Current/stale/public distinctions and StrictMode/resume cleanup require actual implementation/tests |
+| API base, namespace, bearer and public mode | CT16-r1 http | Actual approved origin/proxy is CT17 binding; local absolute-origin authoring is independent |
+| Runtime decoding, typed failures/cancellation | CT16-r1 http with CT18.minimum and operation-specific OpenAPI | Exported declarations and code must conform; no decoder library/new endpoint is implied |
+| Public list/detail DTOs and paging | ADR002 CT03.catalogue/CT21.catalogue; CT16-r1 public transport | CO05/FE07 producer artifacts and real data; no membership/display/search extension |
+| Browser routes/history/refresh/deep links | CT16-r1 shell, exactly login/register/courses/detail/root redirect/unknown state | Existing Nginx needs CT17 API-before-SPA binding; no new route is approved |
+| Providers, guards and presentation | CT16-r1 shell; FE01 D1–D4 | One declarative BrowserRouter and AuthProvider; preserve caller-owned formatting; frontend guards never authorize backend effects |
+| Router/runtime compatibility | CT16-r1 exact react-router@7.18.4 decision and its dated official compatibility/security evidence | Dependency installation/resolved lockfile review remain separately authorized implementation |
+| Loading, validation, unavailable and unauthorized UI | CT16.http status table, CT16.shell states and CT21 concealed 404 | Actual English/responsive UI and error/race tests; no fabricated success or role inheritance |
+| Independently usable client artifacts and verification | CT16-r1 consumer handoffs; ADR002 CT14.interim/NC-EVIDENCE-MODE | HTTP/provider artifacts do not require whole FE03 completion; CT14 test inventory and QA07 execution are separate |
+
+Current inspected consumer heads remain FE03 #98
+`2f459d47a9c398d55dc75c2b4c16622cdaa2adeb` and FE07 #101
+`8417205b0c5445a1ebace7b8a5f13847c50eddf5`, with no submitted reviews. #98's global
+401 callback, missing attempt/generation/expiry safeguards, arbitrary fetch
+boundary and state-only routing are implementation discrepancies. Its registration
+form's string.length checks do not enforce CT01 Unicode code-point/UTF-8 predicates.
+#101 adds unapproved CT22 membership calls and carries the shared FE03 code.
+Remediation needs separate task authority; none is retrospectively legitimized.
+
+No missing CT16-owned Interim technical decision was found. CT22 membership,
+CT21 extensions, CT40, recovery/profile APIs, production Adaptive/Assessment and
+Final coverage remain excluded. Consumed CT01 protected-integration provenance,
+#102/#103 and this follow-up's eligible CODEOWNER/last-push reviews, required checks,
+actual producers and independent runtime evidence remain explicit gates. A
+Leader-authored sole-Leader-CODEOWNER PR cannot self-satisfy that review; another
+contributor's non-owner review or push alone does not resolve it. No reviewer,
+protection bypass or personal Leader review is asserted.
