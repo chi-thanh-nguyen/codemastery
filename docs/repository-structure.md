@@ -1559,3 +1559,27 @@ codemastery/
 
 └── CONTRIBUTING.md
 ```
+
+## Bounded Interim FE03/FE07 test inventory
+
+**CT14-INTERIM-FE03-FE07-2026-10-24-r1 —
+APPROVED_PENDING_PROTECTED_INTEGRATION.** The Leader's explicit
+“CodeMastery — Complete Interim Technical Contract Approvals (CT16, CT17, CT14)”,
+24 October 2026, delegates technical approval of the smallest FE03/FE07 test
+inventory. Codex acts as the delegated approval authority for exactly:
+
+- frontend/src/shared/api/httpClient.test.ts
+- frontend/src/app/providers/AuthProvider.test.tsx
+- frontend/src/routes/index.test.tsx
+- frontend/src/features/catalogue/api/catalogueApi.test.ts
+- frontend/src/features/catalogue/pages/CourseCataloguePage.test.tsx
+- frontend/src/features/catalogue/pages/CourseDetailPage.test.tsx
+
+These six planned additions use existing owning directories and current
+@heizseung/@chi-thanh-nguyen CODEOWNERS; no new helper, hierarchy or ownership rule.
+[The exact testing contract](testing.md#approved-interim-fe03fe07-verification-contract--24-october-2026)
+records coverage, isolation, CT16 pending-PR dependency and execution limits.
+No listed file is created or claimed implemented by this documentation change.
+The original canonical tree and existing AU03/AU04/FE01 exceptions are unchanged;
+this explicit bounded exception does not approve unrelated test inventory.
+Separate implementation authority and compliant protected integration are required.
