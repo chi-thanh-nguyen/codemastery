@@ -626,3 +626,268 @@ runner, configuration, test result or academic evaluation evidence.
 
 Framework references: [Spring test-managed transactions](https://docs.spring.io/spring-framework/reference/testing/testcontext-framework/tx.html)
 and [Testcontainers singleton lifecycle](https://java.testcontainers.org/test_framework_integration/manual_lifecycle_control/).
+
+## Approved Interim FE03/FE07 verification contract — 24 October 2026
+
+### Authority, exact revision and pending dependencies
+
+**CT14-INTERIM-FE03-FE07-2026-10-24-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** The Project Leader explicitly delegates
+actual Interim CT14 technical selection/approval in **“CodeMastery — Complete
+Interim Technical Contract Approvals (CT16, CT17, CT14)”**, supplied 24 October 2026
+(ICT). Codex, as the delegated technical decision-maker, **approves the exact six
+paths, ownership, case allocation, tooling reuse and isolation below**, including
+the six-file inventory exception in [repository structure](repository-structure.md#bounded-interim-fe03fe07-test-inventory).
+This is approval of the test contract, not permission to create or execute tests.
+
+Fresh main is
+[`0b2967226fcab946e0145160b1a18e21c30613d8`](https://github.com/chi-thanh-nguyen/codemastery/commit/0b2967226fcab946e0145160b1a18e21c30613d8),
+including AD09 #86. Current frontend has Vitest 5.0.5/jsdom 27.4.0, React/ReactDOM
+19.3.0, the existing npm test script and FE01 act/createRoot examples. No six-file
+implementation exists on inspected main. Preserve FE01 D1–D4, Boot-managed
+JUnit/Mockito, ADR002 CT14.interim/NC-EVIDENCE-MODE and all existing approved paths.
+No whole CT14.coverage/Final approval or activation of the entire #87 proposal.
+
+Behavior depends on **CT16-2026-10-24-r1** in unmerged [Draft PR #102](https://github.com/chi-thanh-nguyen/codemastery/pull/102),
+exact **802ee19e38f22b35267bb51dfe04c8ee56b64acb**, including its canonical catalogue
+path correction. CT16 completeness certification preserves that behavior; no new
+behavioral prerequisite is invented. This CT14 PR is independently based on main,
+with an explicit integration dependency on #102. Do not treat its pending text as
+an effective main contract. Revalidate after that reviewed revision integrates;
+separate explicit implementation authority is still required. Existing consumed
+CT01 protected-integration provenance is retained, not waived by this test contract.
+
+### Exact six-file inventory and nonduplicated case allocation
+
+All paths are repository-relative. Under current CODEOWNERS every path has
+**@heizseung and @chi-thanh-nguyen** ownership; Frontend authors under a separate
+task, Auth @duyduyit and Course @TamiaoNguyen review their consumed behavior.
+QA07 reviews the boundary between DOM and real integration evidence.
+
+| Approved new path | Required observable behavior and boundary |
+| --- | --- |
+| frontend/src/shared/api/httpClient.test.ts | Generic base/path/query normalization and namespace escape rejection; bearer only for current authenticated API requests, none for public calls; credentials omitted/redirects rejected; expected status/media type and required decoder; malformed/HTML/empty bodies; HTTP status retained on invalid ProblemDetail; safe typed HTTP/network/protocol/cancel errors; no retries and no effect from cancelled/superseded work. Mock fetch, not the client under test. |
+| frontend/src/app/providers/AuthProvider.test.tsx | Real provider/useAuth with controllable transport: latest login attempt, failed replacement preserves current session, logout-before-login completion, old/public 401 versus current authenticated 401, 403/network/5xx preservation, exact expiry/resume/pre-send behavior, no persistent token/private state, cancellation and StrictMode cleanup. Mount existing Auth forms/pages within this file for selected registration/login payload/validation/error handoff, no-auto-login and exact password preservation; include supplementary Unicode and UTF-8 boundaries from CT01. No extra Auth form test file is needed. |
+| frontend/src/routes/index.test.tsx | Real selected route composition with BrowserRouter/guard and controlled approved provider state: root redirect, login/register/catalogue/detail, URL/back-forward transitions, invalid return destination rejection, unauthenticated/forbidden reusable guard behavior, unknown-route state, cleanup and FE01 layout compatibility. Test-only guarded child content is a UI fixture, never a new protected API/product route. DOM route tests do not prove Nginx deep-link serving. |
+| frontend/src/features/catalogue/api/catalogueApi.test.ts | Real catalogue client with transport seam: exact public list/detail method/path/query and expected status; defaults/bounds from CT21/CT18; required DTO/page/UUID/type decoding and rejection of invalid shapes; required-nullable prerequisiteDescription; no hidden content/settings/storage/membership or invented display-name fields. Item/DTO decoding belongs here rather than duplicating generic fetch tests. |
+| frontend/src/features/catalogue/pages/CourseCataloguePage.test.tsx | Page plus real useCourseCatalogue/CourseCard, controllable API results: loading/success/empty/error, approved page/size/beyond-last behavior, server totals/order preservation, detail navigation, current-request identity, rapid query replacement, cancellation and unmount cleanup. Exercise hook behavior here instead of adding a redundant useCourseCatalogue.test.tsx. |
+| frontend/src/features/catalogue/pages/CourseDetailPage.test.tsx | Exact approved detail/prerequisite/syllabus rendering, canonical order supplied by server, missing/hidden indistinguishable unavailable state, loading/error/retry of current reads, route-ID changes and stale detail suppression. No enrolment/leave/My Courses or membership button/API is part of this contract. |
+
+All six are justified: generic transport, provider/Auth composition, routing,
+feature DTO client, list page and detail page have different public behavioral
+boundaries. Fewer files would mix those responsibilities; extra hook/form/guard
+files would duplicate the allocated cases without current need. No generic helper,
+fixture/setup file, new directory, additional backend test path or tooling package
+is approved by this inventory exception.
+
+### Tools, deterministic isolation and permitted seams
+
+Reuse existing **Vitest/jsdom**, React **act/createRoot**, existing app theme/layouts,
+native DOM events and existing TypeScript configuration; use per-file jsdom
+annotation when DOM is required. Keep manifest/lockfile/scripts/Node baseline
+unchanged. React Router tests consume the exact dependency already technically
+selected by CT16 only after separate installation/file authority; no data/framework
+router, new renderer, testing-library, request mock server or E2E runner is added.
+
+- Use explicit synthetic CT01/CT21-conforming inputs and deterministic fixture
+  timestamps/UUIDs. A fabricated JWT payload used for UI expiry scheduling cannot
+  prove signature/account validation or authenticate a real backend. Never use
+  production/lecturer credentials, persist real secrets or print tokens/passwords.
+- Use controlled promises and fake system time/timers where relevant; test just
+  before, at and after the approved expiry. Do not wait real time, use random
+  sleeps, change production expiry, or introduce a production Clock/CT39 API.
+- Each test owns fresh provider state, DOM root, request identifiers, promise and
+  AbortController state, fetch spy and history fixture. Restore URL/history,
+  mocks/globals/environment/timers/listeners and module callback subscriptions;
+  unmount inside act and settle or cancel owned work even on failure. No late
+  completion may contaminate another test. Do not run shared-global DOM/history
+  cases concurrently in one environment.
+- Provider-global 401 callbacks must be unset on cleanup; abort alone is not a
+  generation check. Verify public/stale/cancelled requests cannot clear another
+  session or publish private state after logout.
+- Assert observable requests, UI, navigation and denied effects; do not duplicate
+  implementation internals or freeze incidental export signatures/layout snapshots.
+  DOM tests cannot assert real browser navigation/TLS/network guarantees.
+
+Future execution uses existing npm test from frontend/ with the approved file
+filters; no command is executed by this documentation task. CI currently builds/
+typechecks frontend but does not run npm test. No new CI job, coverage percentage,
+pass count, browser installation or success result is invented here.
+
+### Existing Interim backend and independent evidence contracts
+
+No further backend test-file approval is required for this selected Minimum:
+ADR002 CT14.interim already places AuthServiceTest/JwtTokenProviderTest and
+AuthorizationIntegrationTest, the two bounded Course additions and the two local
+mastery tests. Keep actual module ownership and the existing singleton
+AbstractIntegrationTest PostgreSQL lifecycle, test-profile scheduler=false and
+Surefire/Failsafe selection. Dynamic test datasource inputs stay disposable;
+production privilege configuration is not copied into the shared test harness.
+
+For those consumed Interim tests, explicitly approve the narrow isolation detail:
+rollback only work that actually joins the test transaction; force flush/commit
+where a constraint/commit is claimed; record owned fixture IDs for separate
+transactions/HTTP/concurrent work, await completion, then cleanup in fresh
+committed FK-safe transactions even on failure. If deterministic cleanup is not
+available, stop execution; no truncation/FK disabling/Flyway reset/container reuse.
+Generate ephemeral consumed JWT test secrets; retain exact CT01 claims/lifetime
+and current-account checks. No other Final fixture/configuration/clock selection.
+This refines only existing CT14.interim isolation, not the full #87 proposal.
+
+| Evidence layer | Required separate execution; never replaced by these six files |
+| --- | --- |
+| Configured backend security / QA01 | Actual configured security chain and approved operations/roles, account lock/state, password storage and PostgreSQL uniqueness; no fake security-probe endpoint |
+| Persistence / QA02 | Real PostgreSQL/Flyway queries, publication/count/order/hidden cases, mapped data and transactional isolation |
+| Browser integration / QA07 | Actual browser → approved Auth/Course REST → PostgreSQL, English/responsive interaction, session/reload/race behavior; labels manual observations and automation separately |
+| External deployment / DP03 | Approved real HTTPS origin reachable outside developer network, correct proxy/deep links/private infrastructure and usable secure lecturer handoff |
+| Local mastery / CT36, QA14 | Independently checked exact oracles and reproduction of merged AD09; not self-authored expectations, DOM results or cross-module integration claims |
+
+Existing independent manual browser evidence mode remains sufficient for Interim;
+mandatory Final Playwright obligations remain. No empty e2e scaffold supplies a
+runner command. Required tests for a yet-unapproved protected operation await its
+own binding; anonymous catalogue checks alone cannot prove authorization.
+
+### Readiness, exclusions and protection
+
+**CT14_INTERIM_TECHNICAL_SCOPE_COMPLETE** means the existing Interim contract plus
+this exact frontend extension and consumed isolation detail covers the selected
+Minimum's testing decisions. It does not certify executed coverage or approve
+all CT14, CT19/CT34/CT35, Final evaluation or deployment. No source/test/dependency
+is created or executed, and no implementation is authorized.
+
+Current #98/#101 have no corresponding automated behavior suites; that is missing
+implementation/evidence, not a reason to weaken CT01/CT16. Their scope discrepancies
+must be remediated separately; CT22 remains excluded. Every new determination
+stays APPROVED_PENDING_PROTECTED_INTEGRATION, with #102's dependency explicit.
+The sole-Leader-CODEOWNER PR-authorship conflict, eligible independent human
+review, last-push approval, checks and exact-revision integration remain unresolved;
+non-owner review or another contributor's push alone cannot substitute. Issue #27
+checkboxes/whole-Issue completion remain unchanged.
+
+## CT14 consolidation and bounded Final approvals — 25 October 2026
+
+### Authority, predecessor and canonical scope
+
+**CT14-FINAL-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Leader's explicit
+**“CodeMastery — Consolidate Contract Approval PRs and Complete Eligible Final
+Technical Approvals”**, supplied 25 October 2026 (ICT), Codex acts as delegated
+technical decision-maker and **approves F1/F2 below only**. This does not authorize
+test creation/execution, workflow edits or implementation.
+
+Fresh main is **0b2967226fcab946e0145160b1a18e21c30613d8**. Canonical
+[PR #106](https://github.com/chi-thanh-nguyen/codemastery/pull/106) preserves its
+original **39673f162afe5749eb21e1831c183834c9473d0a** testing record and exact
+six-path repository-structure exception. Existing FE01 D1–D4, backend decisions,
+CT14-INTERIM-FE03-FE07-2026-10-24-r1 and CT14_INTERIM_TECHNICAL_SCOPE_COMPLETE
+remain intact. No new path or repository-structure exception is needed for F1/F2.
+The CT16 dependency is canonical #102 after consolidation, retaining original
+802ee19/5bf70b4 provenance; its pending approval is not effective on main.
+
+### F1 — approved Course access regression specification for Final consumers
+
+**Checkpoint CT14.final-course-access-regression: APPROVE** the test allocation
+below, derived from ADR001 §12's approved CT03-owned predicates and failure order.
+It extends coverage beyond the Interim public catalogue without approving a
+Course mutation, Assessment/Interaction operation, CT40 projection or complete U07.
+Existing case/test grants are E, not approved again; F1 newly approves the Final
+regression allocation/evidence boundary only. These are already approved test
+locations, not new inventory or permission to edit them. Current #96 at **9c6238c39b5a96bf41ece29f4716c1901feac22e** demonstrates
+feasible boundaries, not authority or retrospective approval of its implementation.
+
+| Exact repository-relative path | Layer, responsibility, owner and acceptance |
+| --- | --- |
+| backend/src/test/java/com/codemastery/modules/course/CourseServiceTest.java | Unit; Course @TamiaoNguyen and Leader CODEOWNERS. Cover all five public/two package-private approved assertions in their owning package context. Actual tests/Java package declarations may differ from directory names without adding or moving a file. Trusted-identity seams are labelled doubles, never security integration. |
+| backend/src/test/java/com/codemastery/modules/course/CourseRepositoryImplTest.java | Unit adapter; same Course/Leader ownership. Check parameter/fact mapping and failure propagation at the existing private Course boundary; mocks cannot establish SQL, isolation or coherent PostgreSQL behavior. No new public repository interface is authorized. |
+| backend/src/test/java/com/codemastery/integration/CourseCatalogueIntegrationTest.java | Real PostgreSQL/Flyway; the earlier bounded addition already permits repository/access/pagination coverage. Course is responsible and Leader coordinates integration review under ADR002; this exact file currently has **no matching CODEOWNERS rule**, which is not silently changed or reported as an assigned CODEOWNER. Preserve catalogue cases and add only distinct coherent-read/ancestry/publication/membership evidence; no duplicated mock assertions or fictitious REST endpoint. |
+
+Required matrix: Learner ACTIVE/COMPLETED membership versus LEFT/absent;
+Instructor own/other Course including approved hidden owner preview; no implicit
+Administrator inheritance; Lesson/Chapter/Course and Material ancestry; unavailable
+versus disclosed-denied resources with exact CT03 401/403/404 precedence; single-
+Lesson read concealment; trusted-identity infrastructure failure propagated safely;
+no hard block based solely on mastery/prerequisite absence. Enrolment eligibility
+creates no row and does not decide repeat/leave/re-enrolment policy.
+
+For coherence claims, exercise the actual PostgreSQL adapter and demonstrate that
+the returned Course-owned facts correspond to a coherent permitted read context;
+where interleaving is tested use controlled transaction barriers and joined worker
+completion, not sleeps. Do not select a new lock/isolation/propagation policy or
+claim whole-operation linearizability. Keep snapshots internal to Course. Use the
+approved singleton, explicit owned fixture IDs and committed FK-safe cleanup for
+non-rollback work. Test actual database outcomes, not only invocation counts.
+
+No cross-module consumer reaches Course entities/repositories. Actual production
+identity binding still needs the implemented approved Auth facade; #96's fail-closed
+placeholder is not authentication. Full security-chain verification remains in
+AuthorizationIntegrationTest and real selected operations; real consumer E2E/atomic
+work waits for its owning contract. No new data fields, seeds, schema, permissions,
+threshold or result is selected by this test specification.
+
+Alternatives: a new access suite duplicates an already approved service location;
+putting these assertions in enrolment/progress tests would imply unapproved mutation
+semantics. Existing scoped files preserve layering and require no new dependency.
+CT03 owner/consumer and Auth reviews accompany Leader/test review. All test edits,
+actual execution, target-service coverage and QA acceptance remain separate tasks.
+
+### F2 — existing-tool CI regression and exact-head evidence contract
+
+**Checkpoint CT14.final-ci-regression: APPROVE** future execution of the already
+selected backend/frontend local regressions in existing CI jobs after separate
+workflow/file authorization. Backend retains Maven Wrapper **./mvnw verify** from
+backend/ with the current JUnit/Mockito, Surefire/Failsafe and PostgreSQL harness;
+claiming persistence coverage requires Docker and actual database cases, not
+skipITs. Frontend uses existing **npm ci**, **npm test**, **npm run build** from
+frontend/. npm test is the existing Vitest script; this is not selection of CT34's
+Playwright runner, a new script/library or optional browser-harness dependencies.
+
+This approves adding the existing frontend test execution to its existing job;
+current ci.yml still performs install/build only and is unchanged by this task.
+Preserve Backend/Frontend/CodeQL required contexts and security protections. Do
+not make a skipped, empty, failed or wrong-head suite green by ignoring its exit
+status. Record the resolved implementation head and actual checked-out revision;
+PR merge-ref runs must identify both rather than mislabel a different commit.
+
+Evidence includes invoked commands/environment, named cases and failures/skips,
+Surefire/Failsafe XML, relevant target-service JaCoCo reports where applicable,
+frontend Vitest output and run URL. Existing Maven report locations and Action
+logs suffice; no new tracked report file/helper, artifact service, numeric coverage
+threshold or retention commitment. Reports separate mocked unit, DOM, actual PG,
+configured security, browser/E2E and external checks. Unit/build success cannot
+certify an unexercised target. Reruns after changed heads need new evidence.
+
+Alternatives: build-only frontend CI misses the already implemented/approved
+regressions; another runner duplicates the selected toolchain. Select existing
+jobs/tools with honest layer-specific evidence. Test owners maintain their cases;
+workflow implementation remains Leader-owned. No CI job or test is executed locally
+by this documentation task; automatic platform checks are reported separately.
+
+### Entire retained Final decision inventory
+
+| Subject | Classification | Exact remaining prerequisite or disposition |
+| --- | --- | --- |
+| Approved Interim Auth/catalogue/mastery, FE01 and six frontend paths/tools/isolation | E — ALREADY APPROVED | Preserve their exact scopes; no duplicate approval or promotion of prototype oracles into Final Adaptive policy |
+| CT03-owned access regression and existing-tool CI execution/evidence | A — READY FOR DELEGATED TECHNICAL APPROVAL | F1/F2 approved above; no new paths, production operations or runner |
+| Enrolment/progress/resume tests | D — DEFER UNTIL CONSUMER OR INTEGRATION READINESS | CT22 transitions, errors/concurrency and actual interfaces/oracles; existing EnrollmentServiceTest/LessonProgressServiceTest names supply no behavior |
+| Assessment attempts/publication, graph, production mastery/settings/recommendation | D — DEFER UNTIL CONSUMER OR INTEGRATION READINESS | CT04/CT23/CT05/CT06/CT07/CT24/CT40 approved policies, callables and expected results |
+| Submitted-quiz/atomic mastery-progress and failure/replay tests | D — DEFER UNTIL CONSUMER OR INTEGRATION READINESS | CT08/CT22 transaction/event/duplicate semantics and real producers; existing AdaptiveLearningFlowIntegrationTest/MasteryProgressTransactionIntegrationTest are not speculative authority |
+| Other frontend feature test paths and API contract scenarios | D — DEFER UNTIL CONSUMER OR INTEGRATION READINESS | Owning feature request/response/access contracts and exact inventory review; do not duplicate the approved six suites |
+| Storage-specific harness/configuration and recovery testing | B — REQUIRES ADDITIONAL TECHNICAL EVIDENCE | CT09 transport/storage semantics, qualified storage build/configuration and safe fixture isolation; no new MinIO testcontainer approved |
+| Playwright runner/fixtures and particular E2E journeys | D — DEFER UNTIL CONSUMER OR INTEGRATION READINESS | CT34 runner/configuration, CT19/CT35 cases and effective feature interfaces; mandatory Final E2E still required, not waived or auto-assigned to both empty suites |
+| P1/P2/P3 profiles, routing/learning metrics and independent evaluation | D — DEFER UNTIL CONSUMER OR INTEGRATION READINESS | CT36.final, CT06/CT07/CT24 rules and reviewed baseline/oracles; preserve the separately approved evaluation target without turning it into a mastery threshold |
+| Performance/load/reliability numeric acceptance | B — REQUIRES ADDITIONAL TECHNICAL EVIDENCE | Actual workload, deployed capacity, feature timing/consistency obligations and measured baseline before choosing justified limits; no invented percentage/latency/concurrency |
+| Access to real environment/accounts and material risk exception | C — LEADER-RESERVED DECISION | Actual access/custody/exposure grants; ordinary test placement is not personal Leader risk authority |
+
+**CT14_FINAL_TECHNICAL_SCOPE_PARTIALLY_APPROVED.** The current Final test-contract
+scope gains only F1/F2; independent assessment of every remaining subject does not
+turn missing APIs/oracles/runner authority into an approval. Mandatory Final tests,
+security, integrated advanced demonstration, evaluation and reproducibility remain.
+No whole #87 proposal, other testing contract or Issue is approved by this record.
+
+Evidence sources are ADR001 §12, ADR002 CT14, current #96 diff, exact approved test
+inventory, backend pom.xml/AbstractIntegrationTest, frontend package/FE01 examples
+and ci.yml. Actual code/results support feasibility only. No implementation, test
+run, deployment, review submission or merge is authorized. Required eligible
+CODEOWNER/last-push review, exact-head checks, resolved threads and protected
+integration remain mandatory; sole-Leader documentation ownership cannot be
+self-approved or satisfied by an unrelated non-owner review/push alone.
