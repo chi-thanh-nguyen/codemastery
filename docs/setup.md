@@ -569,16 +569,17 @@ verification. No production origin, deployment, secret value or academic submiss
 is authorized or established by this handoff. Codex assisted this scoped SH01
 implementation and validation.
 
-## CT16 frontend contract proposal — pending approval
+## CT16 frontend contract proposal — 18 October 2026 historical record
 
 ### Authority, baseline and reconciliation
 
 Prepared on **18 October 2026 (ICT)** under the Leader's scoped instruction to
 Codex to investigate and select CT16 contracts. This delegates technical
 selection, not a separate manual Leader review, dependency authorization,
-implementation authorization or security-risk acceptance. New selections below
-remain **PROPOSED_NOT_EFFECTIVE** until affected-owner review, explicit Leader
-sign-off and protected integration. Effective ADR002 clauses remain authoritative.
+implementation authorization or security-risk acceptance. Those selections were
+**PROPOSED_NOT_EFFECTIVE** on that date. The bounded 24 October determination
+below now records actual delegated technical approval and its integration gates;
+it does not backdate approval into PR #84. Effective ADR002 clauses remain authoritative.
 
 Baseline: `main` at
 [`35abfdb`](https://github.com/chi-thanh-nguyen/codemastery/commit/35abfdb45667aca650df5f7fae8a2c218e98e2d1).
@@ -597,7 +598,7 @@ not new REST operations, backend authorization or feature specifications.
 | Shared errors/page/config implementation, [PR #78](https://github.com/chi-thanh-nguyen/codemastery/pull/78), merged [`166484e`](https://github.com/chi-thanh-nguyen/codemastery/commit/166484ea83aaa570014a04352548de2aeddfd677), 16 October ICT | APPROVED_BUT_INCOMPLETE: consumes bounded ADR002 contracts; independent human review remains outstanding in its ratification record | REUSE authoritative response/config contracts; implementation alone does not prove Auth, CORS or browser behavior. |
 | CT01.core and registration/login schemas | APPROVED_AND_CONSISTENT within ADR002 scope | REUSE without changing credentials, JWT validation, roles, endpoint payloads or token lifetime. |
 | CT01.identity facade; [PR #82](https://github.com/chi-thanh-nguyen/codemastery/pull/82), merged [`39748f6`](https://github.com/chi-thanh-nguyen/codemastery/commit/39748f62223fcb90bb198366a377ab9b26e9c05b), 17 October; [Issue #18](https://github.com/chi-thanh-nguyen/codemastery/issues/18) Leader sign-off, 18 October | APPROVED_AND_CONSISTENT only for the signed-off read-only Java facade and limited U01 binding | REAFFIRM: a backend Course → Auth boundary, not a frontend identity/profile endpoint or complete CT01 approval. |
-| Other ADR001 §11 completion selections integrated through #82; [PR #83](https://github.com/chi-thanh-nguyen/codemastery/pull/83) remains open at [`47af5c9`](https://github.com/chi-thanh-nguyen/codemastery/commit/47af5c9a3128333ecfe5cea56590814919beff71) | PROPOSED_NOT_EFFECTIVE outside separately verified approvals; merge is not proof of every reserved sign-off | Select compatible client behavior conditionally below; logout residual risk remains Leader-reserved. Do not consume CT03 protected predicates as effective. |
+| Historical #82/#83 proposals; subsequent [CT01 #91](https://github.com/chi-thanh-nguyen/codemastery/pull/91) and [CT03 #92](https://github.com/chi-thanh-nguyen/codemastery/pull/92), merged 21 October | ADR001 §§11–12 record actual scoped technical approvals; §11.3 separately records personal Leader acceptance of the specific copied-token risks | REUSE those determinations without reopening CT01 or treating merge as proof of protected-integration compliance. Full U07/CT40 and actual security verification remain gated. |
 | CT03.catalogue / CT21.catalogue, ADR002 | APPROVED_AND_CONSISTENT: anonymous published-only bounded DTOs and pagination | REUSE for FE07 public reads; display-name REST composition, search/filter and membership remain separately gated. |
 | HTTP, types, AuthProvider, routes, guards and feature API files on baseline | UNRESOLVED implementation: files are empty scaffolds | No executable consumer or runtime verification claimed. No router dependency exists. |
 
@@ -720,8 +721,9 @@ Registration does not auto-login. Reload starts anonymous and requires login.
 Roles from the approved login DTO support navigation only; the backend checks
 current role/account state on every protected request.
 
-The following completion behavior is selected **conditionally**, compatible with
-ADR001 §11's pending proposal. It does not approve CT01 logout security policy:
+The following client conventions implement ADR001 §11's 21 October technical
+determinations. Their CT16 approval is recorded in the 24 October revision below;
+this does not reopen or supply new acceptance of CT01 logout security risks:
 
 - Provider state is anonymous or authenticated with token, public login user,
   expiry and monotonic generation. Each invalidation/session replacement changes
@@ -745,18 +747,20 @@ ADR001 §11's pending proposal. It does not approve CT01 logout security policy:
   cancellation of admitted server work or rollback. Other tabs have independent
   memory sessions. This is not a newly approved backend logout mechanism.
 
-**Leader-reserved gate:** CT01 must explicitly accept copied-token residual
-validity through expiry while the account is active (including possible reuse
-after unlock), or approve another design. Neither #82's merge, CT01.identity's
-18 October sign-off nor this CT16 selection supplies that acceptance. Full
-CT16.auth/logout and FE03 Auth completion remain pending; reusable HTTP/type
-work and public catalogue do not wait for this whole gate.
+**Reconciled 24 October:** ADR001 §11.3 records the Leader's personal 21 October
+acceptance of precisely the copied-token/expiry, unlock, other-session and admitted-
+request residual risks. This is existing evidence, not acceptance inferred from
+this delegation. CT01/CT16 protected integration and real FE03/Auth verification
+remain separate gates. Public catalogue and independent HTTP/type authoring do
+not wait for whole-Issue completion.
 
 ### CT16.shell — router, providers and navigation
 
-Recommend **React Router declarative `BrowserRouter`**, with nested `Routes`,
+The 18 October proposal recommended **React Router declarative `BrowserRouter`**,
+with nested `Routes`,
 `Route` and `Outlet`, using existing routes/index.tsx, routePaths.ts and
-ProtectedRoute.tsx. This is a dependency proposal only: adding the package,
+ProtectedRoute.tsx. Its original status was dependency proposal only: adding
+the package,
 manifest/lockfile edits and implementation require **separate explicit Leader
 authorization** and normal review. No dependency is added by this contract.
 
@@ -812,7 +816,7 @@ backend denial by routing to a fabricated success view.
 | Slice / consumer | Independently usable output after its approval and separate implementation authorization | Exact remaining dependency |
 | --- | --- | --- |
 | FE03 HTTP/types | Existing httpClient.ts/apiTypes.ts; public calls and conforming doubles without Auth UI/router/backend availability | CT16.http review/integration and consumed CT18/OpenAPI contracts; no whole CT17 gate. |
-| FE03 provider/Auth | AuthProvider/useAuth generation discipline; existing authApi.ts and selected forms/pages | CT01 consumed Auth API/security semantics; explicit logout-risk resolution for completion. No profile/recovery contract invented. |
+| FE03 provider/Auth | AuthProvider/useAuth generation discipline; existing authApi.ts and selected forms/pages | Reuse ADR001 §11 technical determinations and existing §11.3 personal risk acceptance; retain protected-integration and actual verification gates. No profile/recovery contract invented. |
 | FE03 shell | Existing App/routes/guard composition and compatible FE01 layouts | Separate pinned-router dependency/file-scope authorization, CT16.shell approval and reviewed presentation compatibility. |
 | FE07 catalogue | Existing catalogueApi.ts proposal, existing catalogue types/hooks/pages, anonymous list/detail and CT21 paging | Resolve ADR002 filename correction explicitly before treating this feature placement reconciliation as effective. Search/filter, membership and display-name REST composition remain separately gated. |
 | QA07 | Reproducible public/auth/error/race/deep-link cases against doubles during preparation | Actual browser → approved backend → PostgreSQL needed for integration evidence; no test runner or fictitious command selected. |
@@ -838,3 +842,166 @@ is asserted completed here. The documentation CODEOWNER is the current PR-author
 account; a compliant independent contributor-authored/pushed PR may be necessary.
 Do not bypass protections. No application, browser, deployment or security
 verification is claimed by this contract selection or documentation validation.
+
+## CT16 delegated technical approval — 24 October 2026
+
+### Authority, revision and effective-scope boundary
+
+**CT16-2026-10-24-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** The Project Leader
+@chi-thanh-nguyen's explicit instruction **“CodeMastery — Bounded Technical
+Approval Under Explicit Leader Delegation”**, dated 24 October 2026 (ICT),
+authorizes Codex to investigate, select, reconcile and technically approve only
+the specified CT16/CT17 slices. **Codex is the delegated technical decision-maker**
+for this revision and approves the determinations below. This is actual technical
+approval, not readiness advice or a personal Leader/GitHub review.
+
+The same instruction expressly authorizes these documentation changes and the
+exact ADR002 path correction. It does not authorize application implementation,
+installation, manifest/lockfile edits, runtime acceptance or Issue closure.
+New determinations take effect only after compliant protected integration of the
+exact reviewed revision. Earlier approvals retain their original authority.
+
+Fresh inspected remote `main`:
+[`9d76732bab363a63d2d91b5bddbf0a72b66a6d91`](https://github.com/chi-thanh-nguyen/codemastery/commit/9d76732bab363a63d2d91b5bddbf0a72b66a6d91),
+24 October; unchanged from the preceding assessment. Inspected consumers:
+[FE03 #98](https://github.com/chi-thanh-nguyen/codemastery/pull/98), head
+`2f459d47a9c398d55dc75c2b4c16622cdaa2adeb`, and
+[FE07 #101](https://github.com/chi-thanh-nguyen/codemastery/pull/101), head
+`8417205b0c5445a1ebace7b8a5f13847c50eddf5`. Both are open with no submitted review
+at inspection. No new approval is inferred from their code or passing checks.
+Main still has empty HTTP/Auth/shell scaffolds and no router dependency.
+
+Preserve ADR002 CT16.minimum/CT18.minimum/CT38.core and CT21.catalogue; ADR001
+§11's existing CT01 technical determinations, including memory sessions and the
+separately recorded personal residual-risk acceptance, are not reopened. PRs
+#91/#92 are merged, but their ADR status and available review/protection evidence
+do not establish compliant protected integration; that provenance gap is retained,
+not silently waived by this CT16 decision. FE01 #99/#100's bounded D1–D4 contracts
+remain authoritative for presentation/formatting, not HTTP/Auth/router selection.
+
+Publication preflight rechecked remote `main` at
+[`0b2967226fcab946e0145160b1a18e21c30613d8`](https://github.com/chi-thanh-nguyen/codemastery/commit/0b2967226fcab946e0145160b1a18e21c30613d8)
+after AD09 [PR #86](https://github.com/chi-thanh-nguyen/codemastery/pull/86)
+merged on 24 October. The only delta from the initial baseline is its four
+calculator/classifier implementation/test files; none changes these contract
+sources or scopes. This task branch starts from that refreshed main revision.
+
+### Approved determinations, interfaces and rationale
+
+The detailed `CT16.http`, `CT16.auth` and `CT16.shell` conventions above are
+approved only as bounded by this revision; historical references to additional
+manual technical sign-off are resolved by this explicit delegation. Consumer
+review, protected integration and separate implementation authority remain.
+
+| Slice | Actual delegated determination | Boundary and rationale |
+| --- | --- | --- |
+| CT16.http | APPROVE native fetch, API-base/path normalization, explicit public/authenticated modes, safe response decoding/errors, caller cancellation and no automatic retries, as specified above | Existing httpClient.ts/apiTypes.ts; feature clients own DTO decoders. No parallel client/schema library or new REST contract. |
+| CT16.auth | APPROVE concrete generation/attempt/expiry discipline implementing ADR001 §11, without changing its JWT/logout decisions | AuthProvider/useAuth remain memory-only and independently consumable; no server logout, refresh, storage persistence or identity/profile API. |
+| CT16.shell | APPROVE declarative BrowserRouter/Routes/Route/Outlet, one router and AuthProvider above route consumers, existing layouts and guards | URL/history/deep-link behavior without a framework/data-router/server stack or extra provider technology. |
+| Router dependency | APPROVE the exact production dependency `react-router` version **7.18.4**, without a semver range, for declarative browser routing only | No react-router-dom compatibility wrapper, router Vite plugin, SSR/RSC, loaders/actions or framework packages. No dependency is installed or edited in this task. |
+| CT16 path correction | APPROVE correction of ADR002's mistaken courseApi.ts reference to `frontend/src/features/catalogue/api/catalogueApi.ts` | Verified canonical original tree, current inventory and existing file. Only that reference and correction provenance change; no rename, duplicate client or REST behavior change. |
+
+The independently usable transport contract accepts an API-root-relative path,
+operation method, explicit authentication mode, expected success status, runtime
+DTO decoder, separate query/body and optional caller AbortSignal. Callers cannot
+supply arbitrary URLs, bearer credentials or cookie/redirect overrides. Transport
+and provider coordinate a captured session generation; feature code additionally
+tracks current operation identity. Exact exported TypeScript declarations must
+express these requirements in the existing files and receive consumer review;
+no new file/public backend interface is approved.
+
+Normalize only an explicit absolute origin or same-origin `/api` input as above;
+reject namespace escape before fetch and after normalization. Authenticated
+requests reject absent/expired sessions locally. All fetches omit credentials and
+reject redirects; public register/login/catalogue/detail never attach bearer.
+Successful payloads require the operation's status, JSON media type and decoder;
+this selected scope has no 204 operation. Typed HTTP errors retain actual status
+even if ProblemDetail decoding fails; network, protocol and cancellation remain
+distinct. Status handling must not depend on trusting arbitrary error-body text.
+
+A failed replacement login preserves an unrelated valid session. Starting an
+attempt supersedes earlier attempts without silently authenticating or logging
+out the current user. Only the latest live attempt in the still-current generation
+may install a validated response; logout, expiry or session replacement invalidates
+pending work. Cancelled/superseded work cannot publish private data or session
+side effects. A public 401 never clears a session; an authenticated 401 clears
+only its still-current captured session. 403/network/5xx preserve it. Conservative
+expiry scheduling, pre-send/resume checks and StrictMode-safe cleanup implement
+CT01; browser decoding never supplies trusted authorization.
+
+Approved browser routes are exactly `/login`, `/register`, `/courses`,
+`/courses/:courseId`, plus `/` replacing to `/courses` and an in-composition unknown-
+route state. Guard conventions are reusable for later separately approved routes,
+not authorization to expose new protected features. Validated internal return
+navigation remains in memory and cannot become an external/API/asset redirect.
+Reuse FE01 layouts and caller-owned formatting parameters; remove showcase/mock
+identity behavior from real application composition during separately authorized
+remediation. No FE01 contract or demo display becomes an Auth guarantee.
+
+### Router compatibility, maintenance and security evidence
+
+Checked official sources on 24 October 2026, without installing packages:
+
+- [Versioned declarative documentation](https://reactrouter.com/7.18.4/start/declarative/installation)
+  supports this browser-only composition. Existing React/Vite/MUI capabilities do
+  not supply URL/history routing; the handwritten state-only #98 selection does
+  not meet direct-link/back-forward requirements.
+- [Official registry metadata](https://registry.npmjs.org/react-router/7.18.4)
+  and version-7 dist-tag identify 7.18.4 as the latest stable v7 release, published
+  15 September 2026, MIT, Node >=20 and React/ReactDOM >=18. This covers the
+  unchanged Node `^22.12.0 || ^24.0.0` and React/ReactDOM 19.3.0 baseline.
+- [Maintainer security policy](https://github.com/remix-run/react-router/blob/main/SECURITY.md)
+  supports security updates for v7 and v8. All 22 published advisories returned by
+  the [upstream advisory endpoint](https://api.github.com/repos/remix-run/react-router/security-advisories?per_page=100)
+  were checked; their react-router affected ranges do not include 7.18.4.
+  In particular, GHSA-qwww-vcr4-c8h2 is fixed in 7.18.2; the July redirect,
+  manifest, hydration and RSC advisories are patched before this selected version.
+- [8.5.0 metadata](https://registry.npmjs.org/react-router/8.5.0) requires
+  Node >=22.22.0, excluding part of the repository's declared range. It is not
+  selected; CI/image versions do not silently raise that range.
+
+Alternatives retained: handwritten History API avoids a package but adds matching,
+subscription and guard maintenance; hash routing avoids server fallback but is
+unnecessary with the approved existing Nginx location; framework/data modes add
+unneeded ownership/runtime conventions. Select declarative 7.18.4 for the smallest
+compatible, maintained capability. This dated advisory review is not a guarantee
+of absent vulnerabilities. Its transitive cookie/set-cookie-parser ranges must
+be resolved into a reviewed lockfile and scanned in a separately authorized
+implementation task; no future lockfile or production artifact is approved here.
+
+### Acceptance, discrepancies and remaining gates
+
+Contract acceptance cases, not executed tests: valid base/path resolves `/api`
+once; malicious URL/path or redirect cannot receive bearer; public requests omit
+bearer; malformed/HTML success is protocol failure; malformed 401 retains status
+but clears only the current authenticated generation; public/stale 401 and 403
+preserve unrelated sessions; delayed login after logout cannot install; expiry
+prevents sends; back/forward/deep-link works; reload loses memory session; hidden
+catalogue detail retains approved 404; FE01 formatting/layout behavior is preserved.
+
+#98's unconditional global-401 callback, absent generation/expiry protection,
+arbitrary fetch URL and state-only navigation require separately authorized
+remediation and review; this decision does not retroactively authorize that code.
+#101 inherits shared Auth/HTTP changes and additionally calls unapproved CT22
+membership APIs. Membership/profile/recovery, CT21 display/search/authoring,
+CT40/U07, production Adaptive/Assessment contracts and Final coverage remain
+excluded. Current OpenAPI still has only the four register/login/list/detail
+operations; it is unchanged.
+
+Frontend @heizseung owns implementation; Auth @duyduyit, Course/API owners and
+Leader review consumed boundaries. CT14 FE03/FE07 test additions are preparation
+only in the accompanying task report, not approved here. Actual AU05/AU06/CO05
+producers, real browser/REST/PostgreSQL checks, CT17 concrete runtime and independent
+QA remain downstream gates; no whole-Issue closure is required merely to author
+an independently usable approved slice after separate authorization.
+
+All three decision files are sole-Leader CODEOWNER paths. Current main rules
+require CODEOWNER/last-push approval, resolved threads, strict Backend/Frontend/
+CodeQL checks and security scanning. A Draft PR published under the Leader's
+account cannot self-satisfy that review. Compliant independent authorship/push
+and eligible human review must be resolved without impersonation or changing
+protections. No such human review or effective integration is claimed here.
+Codex investigated and authored this decision documentation; no AI runtime service
+is introduced. Neither Issue #19 nor any implementation/verification is completed
+by this bounded technical approval.
