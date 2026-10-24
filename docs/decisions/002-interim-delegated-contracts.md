@@ -46,7 +46,7 @@ Deferred: Server logout/revocation and explicit acceptance of residual-token val
 
 ### CT16.minimum — DELEGATED_APPROVED
 
-Use native fetch in existing shared/api/httpClient.ts with explicit VITE_API_BASE_URL (absolute origin or same-origin /api path), JSON request/response normalization matching OpenAPI, typed PageResponse and ProblemDetail in shared/types/apiTypes.ts. Bearer token held in Auth-provider memory only; reload requires login. Send Authorization only to the configured API origin; no browser persistent token storage, URL token or default credentials cookie. On401 clear memory and request login; preserve403 separately; show safe English validation/general/network errors. No automatic retries for POST; GET retries, cancellation and router package selection remain deferred. Feature-specific clients use existing authApi.ts/courseApi.ts paths; no new Axios/client framework dependency.
+Use native fetch in existing shared/api/httpClient.ts with explicit VITE_API_BASE_URL (absolute origin or same-origin /api path), JSON request/response normalization matching OpenAPI, typed PageResponse and ProblemDetail in shared/types/apiTypes.ts. Bearer token held in Auth-provider memory only; reload requires login. Send Authorization only to the configured API origin; no browser persistent token storage, URL token or default credentials cookie. On401 clear memory and request login; preserve403 separately; show safe English validation/general/network errors. No automatic retries for POST; GET retries, cancellation and router package selection remain deferred. Feature-specific clients use existing authApi.ts and frontend/src/features/catalogue/api/catalogueApi.ts paths; no new Axios/client framework dependency.
 
 Rationale: Native fetch satisfies the bounded client need without dependency duplication. Memory-only token handling reduces durable token theft, with explicit re-login usability cost.
 
@@ -55,6 +55,17 @@ Alternatives considered: Multiple clients or cookie/token hybrids create inconsi
 Owner: Frontend @heizseung; Auth and Leader review. Consumers: CT16, FE03, FE07, QA07. Checkpoints: ['CT16.http', 'CT16.shell', 'CT16.auth', 'FE03', 'FE07 consumed client'].
 
 Deferred: Server logout semantics; router dependency selection and full Frontend behavior; no existing executable consumer assumed.
+
+**CT16 path correction provenance — 24 October 2026:** Under the Leader's
+explicit “CodeMastery — Bounded Technical Approval Under Explicit Leader
+Delegation”, Codex technically approves only the mistaken `courseApi.ts`
+reference correction above to the canonical existing
+`frontend/src/features/catalogue/api/catalogueApi.ts`. The immutable original
+repository tree and current approved inventory agree on this location. See
+[CT16-2026-10-24-r1](../setup.md#ct16-delegated-technical-approval--24-october-2026)
+for authority, evidence and protected-integration gates. This correction is
+**APPROVED_PENDING_PROTECTED_INTEGRATION**; no filename, API, unrelated ADR002
+clause or historical disposition is changed, and no implementation is authorized.
 
 ### CT38.core — DELEGATED_APPROVED
 
