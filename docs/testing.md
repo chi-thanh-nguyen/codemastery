@@ -891,3 +891,147 @@ run, deployment, review submission or merge is authorized. Required eligible
 CODEOWNER/last-push review, exact-head checks, resolved threads and protected
 integration remain mandatory; sole-Leader documentation ownership cannot be
 self-approved or satisfied by an unrelated non-owner review/push alone.
+
+## CT14 Profile and Auth UI verification extension — 25 October 2026
+
+### Authority, revision and behavioral dependency
+
+**CT14-PROFILE-AUTH-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Leader's explicit
+**“CodeMastery — Complete Additional CT16, CT17 and CT14 Technical Approvals in
+Existing PRs”**, supplied 25 October 2026 (ICT), Codex acts as delegated technical
+decision-maker and **approves the specification below only**. Test creation/run,
+application/workflow/tooling changes and QA acceptance are not authorized.
+
+Inspected main is
+[e2128919fe0d47c0f24989166343e1d5ecf50483](https://github.com/chi-thanh-nguyen/codemastery/commit/e2128919fe0d47c0f24989166343e1d5ecf50483);
+[PR #106](https://github.com/chi-thanh-nguyen/codemastery/pull/106) starts at
+a35059cd254db7a087b97a069028eefe71479b26. Its @TamiaoNguyen APPROVED review
+covers that old head, not the new extension. Preserve active re-review rules.
+CT14-INTERIM-FE03-FE07-2026-10-24-r1, its six-path inventory exception, existing
+FE01/backend grants and CT14-FINAL-2026-10-25-r1 F1/F2 are unchanged.
+
+The exact producer contract is **CT16-PROFILE-2026-10-25-r1**, checkpoints
+profile-routing/profile-data/profile-lifecycle in canonical
+[PR #102](https://github.com/chi-thanh-nguyen/codemastery/pull/102), plus existing
+CT16 HTTP/Auth/F2 and ADR001 §11/ADR002 CT01/CT18/CT38. These pending decisions
+must validly integrate before dependent implementation. Main's UserResponse and
+OpenAPI PublicUser/LoginResponse agree on id/displayName/role; a real login HTTP
+producer and frontend implementation are still missing. Synthetic provider/HTTP
+results below are labelled doubles, never proof of authentication/security.
+
+### V1 — Profile allocation without new inventory
+
+**Checkpoint CT14.profile-verification: APPROVE** cases in exactly the following
+two already approved suites. The other four suites retain their existing cases.
+
+| Existing approved path | Layer and nonduplicated responsibility |
+| --- | --- |
+| frontend/src/app/providers/AuthProvider.test.tsx | Real provider/useAuth with controlled approved login transport and session observation: atomically install the three-field snapshot; invalid response cannot install partial state; registration never authenticates; failed replacement preserves valid A; successful B removes A; same-UUID replacement still invalidates A callbacks; logout-before-login completion, exact expiry/resume and current/stale/public 401 rules; private-state/storage/log leakage and StrictMode listener cleanup. |
+| frontend/src/routes/index.test.tsx | Mount the real existing ProfilePage with the real declarative route/guard/provider composition. Cover signed-in access for all three roles and navigation visibility; anonymous /profile redirect without even transient personal rendering; no external/query/history-payload return target; one-use memory-only /profile return, cleared on explicit logout without automatic re-arming; root fallback; deep-link entry, reload simulation, back/forward and unknown-route behavior; logout/expiry removes active Profile; session replacement never displays A in B; exact fields/English labels/plain-text hostile displayName; leaving/unmounting Profile cleans owned work but preserves a valid provider session. Assert no Profile lookup/API call, edit controls or invented fields/permissions. |
+
+Observe requests through the existing transport/fetch seam; only explicit approved
+login/register or unrelated approved reads initiated by the scenario are allowed.
+Profile entry/render/resume must issue **zero additional data requests**, including
+/api/profile, /api/users/me or a user-directory request. Never render actual token
+or fixtures' email/secret sentinel values. Test current state and intermediate
+commits/publications, not only the eventual redirect screen after effects settle.
+Use controlled promises/fake time rather than sleeps for stale/race boundaries.
+Reload simulation creates a fresh provider at /profile; it cannot establish real
+HTTP deep-link delivery. Simulated popstate/history transitions cannot establish
+browser bfcache behavior. Those remain V2/QA07 browser obligations.
+
+**No ProfilePage.test.tsx is selected.** Profile is a three-field session projection;
+its meaningful behavior is guard/provider composition, already exercised with the
+real page in routes/index.test.tsx. A third suite would duplicate those boundaries.
+The canonical component location is features/auth/pages/ProfilePage.tsx; this fact
+does not approve a new test sibling. No repository-structure exception, helper,
+fixture/setup file, dependency, runner or directory is needed.
+
+### V2 — Auth UI regression and evidence boundary
+
+**Checkpoint CT14.auth-ui-regression: APPROVE** the following explicit regression
+allocation. Existing password/session cases remain previously approved; this
+extension adds observable UI integration/accessible-state/focus obligations and
+Profile composition without duplicating the earlier generic HTTP matrix.
+
+In **AuthProvider.test.tsx**, mount real LoginForm/RegisterForm and their existing
+pages with the provider; the route suite owns navigation/focus-on-route cases:
+
+- Registration: 14 versus 15 Unicode code points; supplementary-plane characters
+  count once, combining sequences count by code point, not grapheme/UTF-16 length.
+  Independently constructed 71/72/73 UTF-8-byte cases also satisfy the minimum
+  point count, so each boundary has an unambiguous oracle. Display name is trimmed
+  first, nonblank, at most 100 points and has no control characters; cover 100/101
+  after trimming. Do not silently truncate/normalize passwords or reuse JS length
+  or HTML minlength/maxlength as the authoritative Unicode predicate.
+- Exact password preservation: leading/trailing spaces and canonically equivalent
+  but byte-distinct strings reach the request unchanged. Email uses the existing
+  canonical ASCII contract. Login does not apply registration complexity rules:
+  syntactically valid login requests with unsuitable credentials take the approved
+  generic failure path; over-72-byte candidates are not truncated or assigned a
+  fabricated client registration error. Backend costly/dummy BCrypt remains backend
+  evidence, never a DOM assertion.
+- Controlled pending/success/400/401/409/network/5xx results exercise applicable
+  login versus registration outcomes, loading/status/error rendering, safe known
+  field associations/general fallback, no registration auto-login and no hidden
+  automatic mutation retry. A public login failure cannot erase valid Profile A.
+- Assert semantic names, labels, role/status/error associations, focusable controls
+  and intended programmatic invalid-field/error-summary focus. No raw problem HTML,
+  rejected password, token, sensitive diagnostic or unapproved account field may
+  appear in DOM/log/storage. Synthetic keyboard events exercise explicit handlers;
+  jsdom does not simulate actual Tab traversal, default browser actions, assistive
+  announcements or visual focus visibility.
+- Reuse the controlled logout/expiry/replacement/late-login cases from V1/earlier
+  CT14; each responsibility has one owning case rather than duplicated fixtures.
+  In routes/index.test.tsx verify intended heading focus after approved navigation
+  and no focus theft by ordinary delayed updates. DOM focus assertions establish
+  wiring only, not correct focus behavior in a real browser.
+
+Reuse the exact approved Vitest/jsdom/React act/createRoot toolchain, per-file DOM
+environment, current scripts and six-path isolation rules. Each scenario owns
+fresh provider/DOM/history, fetch/promise/abort state, fake time and listeners;
+unmount/settle or cancel owned work and restore spies/globals/storage/history even
+on failure. StrictMode double setup/cleanup leaves no duplicate subscriptions,
+late updates or cross-test state. No concurrent shared-global DOM scenarios.
+A route remount with the same live provider differs from a fresh-document reload.
+
+**QA07 independent browser allocation:** verify actual keyboard Tab/Shift+Tab and
+activation, visible focus, route/error/dialog focus, announced pending/error states,
+English labels and desktop/mobile layout with real viewport/zoom. Record actual
+browser/viewport/zoom and observations; reuse FE01's approved responsive design,
+not a new numerical breakpoint or conformance claim. Check direct /profile load,
+refresh/back/forward/pageshow, no stale personal content, and the absence of Profile
+requests in real browser traffic. Inspect only redacted storage/log/network evidence;
+do not publish credentials/tokens. Nginx/TLS/deep-link serving, browser-to-real-REST/
+PostgreSQL, configured backend authorization and lecturer access require actual
+producers/environment and separate evidence. No jsdom/CI result substitutes for
+them. Preserve existing Interim manual browser mode and Final Playwright obligations;
+no runner configuration, new E2E path or WCAG certification is selected.
+
+### Owners, acceptance and retained gates
+
+Frontend @heizseung and Leader remain the two suites' actual CODEOWNERS; Auth
+@duyduyit reviews DTO/credential/session expectations, QA07 @heizseung conducts
+independent browser verification under its existing responsibility, and Leader
+coordinates evidence review. This is responsibility allocation, not a fabricated
+independent person/result. Test authorship and independent verification must be
+identified separately in actual evidence.
+
+Accept the specification only with traceability from V1/V2 to the exact CT16
+Profile revision, CT01 validation/session and CT16 F2; no contradictory expected
+permissions, private fields, endpoint or refresh/revocation behavior. Record actual
+head/commands/named cases/failures/skips and distinguish mocks/DOM/browser/security/
+PostgreSQL. The six-file inventory is unchanged. Missing implementation/execution
+is not a failing executed test and is not acceptance. CT20.I remains unchanged:
+Profile is additional capability, not a new Interim completion prerequisite.
+
+**Additional bounded Profile/Auth test specification: technically approved;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** Whole CT14/Final remains partially
+approved. CT16/CT01 integration, separately authorized implementation, actual
+producers, current-head checks, eligible independent CODEOWNER/last-push review
+and real QA evidence remain required. No unrelated Final testing contract is
+expanded and no tests are created or run by this decision record.
+
+Tool evidence: [jsdom unimplemented navigation/layout](https://github.com/jsdom/jsdom#unimplemented-parts-of-the-web-platform)
+confirms why DOM results cannot replace independent real-browser evidence.
