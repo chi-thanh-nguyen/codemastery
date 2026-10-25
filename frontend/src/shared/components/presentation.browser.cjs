@@ -1,6 +1,8 @@
 // Optional local-browser verification using an explicitly supplied Playwright installation.
 // No browser package is downloaded by this script. See the PR verification record.
-const {chromium} = require(process.argv[2] || 'playwright');
+const {chromium,webkit} = require(process.argv[2] || 'playwright');
+// Optional engine argument uses an installed browser; never downloads one.
+const engine=process.argv[5] || 'chromium';
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const path=require('node:path');
@@ -9,24 +11,145 @@ fs.mkdirSync(out,{recursive:true});
 const previewUrl=process.argv[4] || 'http://127.0.0.1:5173/';
 let browser;
 (async()=>{
- browser=await chromium.launch({headless:true});
- const context=await browser.newContext({viewport:{width:1440,height:900}});
+ assert(['chromium','webkit'].includes(engine),'Expected chromium or webkit');
+ browser=await ({chromium,webkit}[engine]).launch({headless:true});
+ const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1});
  const page=await context.newPage();
  const errors=[];const origins=new Set();page.on('request',r=>origins.add(new URL(r.url()).origin));page.on('pageerror',e=>errors.push(String(e)));
+ const consoleErrors=[],consoleWarnings=[];
+ function recordConsole(message){if(message.type()==='error')consoleErrors.push(message.text());if(message.type()==='warning')consoleWarnings.push(message.text())}
+ page.on('console',recordConsole);
  const checks=[];
  async function check(name,fn){await fn();checks.push({name,passed:true});console.log('PASS',name)}
  function contrast(a,b){const lum=s=>{const v=s.match(/[\d.]+/g).slice(0,3).map(Number).map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4});return v[0]*.2126+v[1]*.7152+v[2]*.0722};const [l,h]=[lum(a),lum(b)].sort((a,b)=>a-b);return(h+.05)/(l+.05)}
  async function colors(locator){return locator.evaluate(e=>{const s=getComputedStyle(e);return {color:s.color,background:s.backgroundColor,outline:s.outline,outlineWidth:s.outlineWidth,transition:s.transitionDuration}})}
+ const canonicalArtwork=fs.readFileSync(path.resolve(__dirname,'../../../public/favicon.svg'));
+ const branding=[];let brandUrl,brandRatio;
+ async function verifyBrandLogo(locator,height,decorative){
+  assert.equal(await locator.count(),1);await locator.evaluate(image=>image.decode());
+  const rendered=await locator.evaluate(image=>{
+   const s=getComputedStyle(image),b=image.getBoundingClientRect(),p=image.parentElement.getBoundingClientRect();
+   return {src:image.currentSrc,alt:image.alt,hidden:image.getAttribute('aria-hidden'),width:b.width,height:b.height,
+    background:s.backgroundColor,padding:s.padding,filter:s.filter,transform:s.transform,objectFit:s.objectFit,clipPath:s.clipPath,
+    fits:b.left>=p.left&&b.right<=p.right+.1&&b.top>=p.top&&b.bottom<=p.bottom+.1,
+    viewportFits:b.left>=0&&b.right<=innerWidth+.1&&b.top>=0&&b.bottom<=innerHeight+.1};
+  });
+  assert.equal(rendered.src,brandUrl);assert(Math.abs(rendered.height-height)<.1);
+  assert(Math.abs(rendered.width/rendered.height-brandRatio)<.002,'Preserve canonical SVG aspect ratio');
+  assert.equal(rendered.alt,decorative?'':'CodeMastery');assert.equal(rendered.hidden,decorative?'true':null);
+  assert.equal(rendered.background,'rgba(0, 0, 0, 0)');assert.equal(rendered.padding,'0px');assert.equal(rendered.filter,'none');
+  assert.equal(rendered.transform,'none');assert.equal(rendered.objectFit,'contain');assert.equal(rendered.clipPath,'none');assert(rendered.fits,'Logo must fit its container');assert(rendered.viewportFits,'Logo must be visible without viewport clipping');
+  branding.push({route:new URL(page.url()).pathname,viewport:page.viewportSize(),...rendered});
+ }
  await page.goto(previewUrl,{waitUntil:'networkidle'});
  await check('overview is explicitly demo data',async()=>{await page.getByRole('heading',{name:'Your learning, in focus.'}).waitFor();assert(await page.getByText('All learning data below is illustrative. Nothing is saved.').isVisible())});
+ let faviconCaching;
+ await check('favicon resolves to canonical SVG bytes, decodes and revalidates its cache',async()=>{
+  const favicon=page.locator('link[rel="icon"]');assert.equal(await favicon.count(),1);assert.equal(await favicon.getAttribute('type'),'image/svg+xml');
+  brandUrl=await favicon.evaluate(e=>e.href);assert.equal(new URL(brandUrl).pathname,new URL('favicon.svg',previewUrl).pathname);
+  const response=await context.request.get(brandUrl);assert(response.ok());assert.match(response.headers()['content-type'],/image\/svg\+xml/);
+  assert((await response.body()).equals(canonicalArtwork),'Favicon must serve the unmodified canonical asset');
+  brandRatio=await page.evaluate(async({url,source})=>{
+   const image=new Image();image.src=url;await image.decode();
+   const svg=new DOMParser().parseFromString(source,'image/svg+xml').documentElement,viewBox=svg.viewBox.baseVal;
+   if(!image.naturalWidth||!image.naturalHeight)throw new Error('Canonical SVG did not decode');
+   return viewBox.width/viewBox.height;
+  },{url:brandUrl,source:canonicalArtwork.toString('utf8')});
+  const headers=response.headers();faviconCaching={url:brandUrl,cacheControl:headers['cache-control'],etag:headers.etag};
+  if(headers.etag){const conditional=await context.request.get(brandUrl,{headers:{'If-None-Match':headers.etag}});assert.equal(conditional.status(),304);faviconCaching.conditionalStatus=conditional.status();}
+  const outdated=await context.request.get(brandUrl,{headers:{'If-None-Match':'W/"previous-logo"'}});
+  assert.equal(outdated.status(),200);assert((await outdated.body()).equals(canonicalArtwork));faviconCaching.outdatedValidatorStatus=outdated.status();
+ });
+ await check('desktop sidebar uses canonical artwork without a background or duplicate accessible name',async()=>{
+  await verifyBrandLogo(page.locator('.MuiDrawer-docked nav img'),34,true);
+ });
+ const typography=[];
+ await check('self-hosted variable font loads real 400/500/600/700 weights',async()=>{
+  const faces=await page.evaluate(async()=>{
+   await document.fonts.ready;
+   for(const weight of [400,500,600,700]){
+    const loaded=await document.fonts.load(`${weight} 16px "Plus Jakarta Sans"`,'Learning 0123456789');
+    if(!loaded.length||loaded.some(f=>f.status!=='loaded'))throw new Error(`Font weight ${weight} unavailable`);
+   }
+   return [...document.fonts].map(f=>({family:f.family,weight:f.weight,status:f.status}));
+  });
+  assert(faces.some(f=>f.family==='Plus Jakarta Sans'&&f.weight==='200 800'&&f.status==='loaded'));
+  const fontResponses=await page.evaluate(()=>performance.getEntriesByType('resource').filter(e=>e.name.includes('.woff2')).map(e=>({url:e.name,size:e.decodedBodySize})));
+  assert(fontResponses.some(f=>new URL(f.url).origin===new URL(previewUrl).origin&&f.size>0));
+  const license=await context.request.get(new URL('/plus-jakarta-sans-OFL.txt',previewUrl).href);
+  assert(license.ok());const licenseText=await license.text();
+  assert(licenseText.includes('Copyright 2020 The Plus Jakarta Sans Project Authors'));
+  assert(licenseText.includes('SIL OPEN FONT LICENSE Version 1.1'));
+ });
+ await check('representative text uses the loaded font and shared hierarchy',async()=>{
+  const roles=[['page heading','main h1',30,500],['workspace title','header .MuiTypography-h5',22,600],
+   ['selected navigation','.MuiDrawer-docked [aria-current] .MuiTypography-root',15,500],['section heading','#learning-rhythm-title',20,600],
+   ['KPI value','main p:text-is("4h 20m")',32,700],['supporting caption','main :text-is("Illustrative weekly total")',13,400],
+   ['course title','main h3',20,600],['table lesson','tbody .MuiTypography-body2',14,500],
+   ['action','main button:text-is("Explore components")',14,500],['search','input[aria-label="Search sample lessons"]',14,400],
+   ['account navigation','nav[aria-label="Account navigation"] a',14,500]];
+  const cdp=engine==='chromium'?await context.newCDPSession(page):null;
+  if(cdp){await cdp.send('DOM.enable');await cdp.send('CSS.enable');}
+  for(const [role,selector,size,weight]of roles){
+   const loc=page.locator(selector).first();
+   const style=await loc.evaluate(e=>{const s=getComputedStyle(e);return {family:s.fontFamily,size:parseFloat(s.fontSize),weight:Number(s.fontWeight),lineHeight:s.lineHeight,letterSpacing:s.letterSpacing}});
+   // WebKit omits quotes around multiword computed family names; normalize serialization.
+   assert.equal(style.family.split(',')[0].trim().replace(/^["']|["']$/g,''),'Plus Jakarta Sans',role);
+   assert.equal(style.size,size,role);assert.equal(style.weight,weight,role);
+   if(cdp){
+    await loc.evaluate(e=>e.setAttribute('data-font-inspection','current'));
+    const {root}=await cdp.send('DOM.getDocument');const {nodeId}=await cdp.send('DOM.querySelector',{nodeId:root.nodeId,selector:'[data-font-inspection="current"]'});
+    style.renderedFonts=(await cdp.send('CSS.getPlatformFontsForNode',{nodeId})).fonts;
+    assert(style.renderedFonts.some(f=>f.familyName==='Plus Jakarta Sans'&&f.isCustomFont&&f.glyphCount>0),role);
+    assert(style.renderedFonts.every(f=>f.familyName==='Plus Jakarta Sans'),`${role}: unintended fallback`);
+    await loc.evaluate(e=>e.removeAttribute('data-font-inspection'));
+   }
+   typography.push({role,...style});
+  }
+  if(cdp)await cdp.detach();
+ });
+ await check('filled sample search keeps a contrasting boundary and visible keyboard focus',async()=>{
+  const input=page.getByRole('textbox',{name:'Search sample lessons'});
+  const root=input.locator('..');
+  const rest=await root.evaluate(e=>{const s=getComputedStyle(e),line=getComputedStyle(e,'::before');return {background:s.backgroundColor,boundary:line.borderBottomColor,height:e.getBoundingClientRect().height}});
+  assert(rest.height>=44);assert.notEqual(rest.background,'rgb(255, 255, 255)');assert(contrast(rest.boundary,rest.background)>=3);
+  await input.focus();
+  const focus=await colors(root);assert(parseFloat(focus.outlineWidth)>=2);assert(!focus.outline.startsWith('none'));
+  assert(contrast(focus.color,focus.background)>=4.5);
+  await input.evaluate(e=>e.blur());
+ });
  const layouts=[];
- for(const [width,height] of [[1440,900],[1024,768],[390,844],[320,844],[899,900],[900,900],[1199,900],[1200,900]]){
+ for(const [width,height] of [[1440,900],[1024,768],[768,1024],[390,844],[320,844],[899,900],[900,900],[1199,900],[1200,900]]){
   await page.setViewportSize({width,height}); await page.waitForTimeout(150);
   const layout=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth,navs:[...document.querySelectorAll('nav')].filter(n=>n.getBoundingClientRect().width&&getComputedStyle(n).visibility!=='hidden'&&!n.closest('[aria-hidden="true"]')).length}));
   layouts.push({width,height,...layout});
   await check(`no page overflow at ${width}`,async()=>assert(layout.scroll<=layout.client,JSON.stringify(layout)));
-  if(width===320)await check('sample table remains keyboard-scrollable on narrow mobile',async()=>{const table=page.getByRole('region',{name:'Sample lesson table'});await table.focus();await page.keyboard.press('ArrowRight');await page.waitForTimeout(150);assert(await table.evaluate(e=>e.scrollLeft>0));});
-  if([1440,1024,390,320].includes(width))await page.screenshot({path:`${out}/overview-${width}.png`,fullPage:true});
+  if([320,768,1440].includes(width))await check(`KPI grid adapts at ${width}`,async()=>{
+   const positions=[];for(const t of ['Study time','Lessons completed','Practice streak','Course progress'])positions.push((await page.getByText(t,{exact:true}).boundingBox()).y);
+   const rows=new Set(positions.map(y=>Math.round(y)));
+   assert.equal(rows.size,width===320?4:width===768?2:1,JSON.stringify(positions));
+  });
+  if([1200,1440].includes(width))await check(`KPI cards align values and captions across wrapped labels at ${width}`,async()=>{
+   const metrics=[];
+   for(const label of ['Study time','Lessons completed','Practice streak','Course progress'])metrics.push(await page.getByText(label,{exact:true}).evaluate(e=>{
+    const card=e.closest('.MuiPaper-root'),value=card.querySelector('.MuiTypography-h3'),caption=card.querySelector('.MuiTypography-caption');
+    return {height:card.getBoundingClientRect().height,valueY:value.getBoundingClientRect().y,captionY:caption.getBoundingClientRect().y};
+   }));
+   for(const key of ['height','valueY','captionY'])assert(Math.max(...metrics.map(m=>m[key]))-Math.min(...metrics.map(m=>m[key]))<1,JSON.stringify(metrics));
+   if(width===1440)assert(metrics.every(m=>m.height>=140&&m.height<=160),JSON.stringify(metrics));
+  });
+  await check(`navigation and heading text fit their containers at ${width}`,async()=>{
+   for(const loc of await page.locator('header .MuiTypography-root, header a, main h1, main h2, main h3, .MuiDrawer-docked .MuiListItemText-root').all()){
+    if(!await loc.isVisible())continue;
+    const fits=await loc.evaluate(e=>e.scrollWidth<=e.clientWidth+1&&e.scrollHeight<=e.clientHeight+1);
+    assert(fits,await loc.textContent());
+   }
+  });
+  if([1440,1024,768,390,320].includes(width)){
+   await page.evaluate(()=>{document.activeElement?.blur();document.querySelector('[aria-label="Sample lesson table"]').scrollLeft=0;window.scrollTo(0,0)});
+   await page.screenshot({path:`${out}/overview-${width}.png`,fullPage:true});
+  }
+  if(width===320)await check('sample table remains keyboard-scrollable on narrow mobile',async()=>{const table=page.getByRole('region',{name:'Sample lesson table'});await table.focus();assert(await table.evaluate(e=>e===document.activeElement));/* WebKit's first arrow activates the focused scroll view. */await page.keyboard.press('ArrowRight');await page.waitForTimeout(250);await page.keyboard.press('ArrowRight');await page.waitForFunction(()=>document.querySelector('[aria-label="Sample lesson table"]').scrollLeft>0);assert(await table.evaluate(e=>e.scrollLeft>0));});
  }
  await page.setViewportSize({width:1440,height:900});
  const active=page.locator('.MuiDrawer-docked').getByRole('button',{name:'Overview',exact:true});
@@ -36,10 +159,44 @@ let browser;
   const positions=[];for(const t of ['Study time','Lessons completed','Practice streak','Course progress'])positions.push((await page.getByText(t,{exact:true}).boundingBox()).y);
   assert(Math.max(...positions)-Math.min(...positions)<3,JSON.stringify(positions));
  });
- await check('chart outlines and progress indicators meet non-text contrast',async()=>{
-  const bars=page.getByRole('img',{name:/Demo study minutes/}).locator('[aria-hidden="true"] > div');
-  for(const bar of await bars.all()){const border=await bar.evaluate(e=>getComputedStyle(e).borderTopColor);assert(contrast(border,'rgb(255,255,255)')>=3);}
+ await check('chart value boundaries and progress indicators meet non-text contrast',async()=>{
+  const bars=page.getByRole('group',{name:'Sample weekly study minutes'}).locator('[data-study-bar]');
+  assert.equal(await bars.count(),7);
+  for(const bar of await bars.all()){
+   const s=await bar.evaluate(e=>{const s=getComputedStyle(e);return {border:s.borderTopColor,borderWidth:parseFloat(s.borderTopWidth),fill:s.backgroundColor}});
+   assert(s.borderWidth>=2);assert(contrast(s.border,'rgb(255,255,255)')>=3);
+   if(await bar.locator('..').locator('..').getAttribute('aria-pressed')!=='true')assert(contrast(s.border,s.fill)>=3);
+  }
   const progress=page.getByRole('progressbar',{name:'Sample course completion',exact:true});const background=await progress.evaluate(e=>getComputedStyle(e).backgroundColor);const fill=await progress.locator('.MuiLinearProgress-bar').evaluate(e=>getComputedStyle(e).backgroundColor);assert(contrast(fill,background)>=3);
+ });
+ await check('light chart tooltip is readable and selection has a non-color marker',async()=>{
+  const chart=page.getByRole('group',{name:'Sample weekly study minutes'}),tooltip=chart.getByRole('tooltip');
+  const s=await colors(tooltip);assert.equal(s.background,'rgb(255, 255, 255)');assert(contrast(s.color,s.background)>=4.5);
+  const selected=chart.locator('button[aria-pressed="true"]');
+  assert.equal(await selected.count(),1);assert((await selected.locator('.MuiTypography-root').evaluate(e=>getComputedStyle(e).textDecorationLine)).includes('underline'));
+ });
+ await check('chart exposes exact sample values, totals and a proportional scale',async()=>{
+  const chart=page.getByRole('group',{name:'Sample weekly study minutes'});
+  const minutes=[30,45,25,60,40,35,25];const bars=chart.locator('[data-study-bar]');
+  const heights=await bars.evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().height));
+  minutes.forEach((value,i)=>assert(Math.abs(heights[i]/heights[3]-value/60)<.02));
+  assert.equal(minutes.reduce((a,b)=>a+b),260);assert(await page.getByText('4h 20m',{exact:true}).isVisible());
+  for(const [i,day] of ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].entries())assert.equal(await chart.getByRole('button',{name:`${day}: ${minutes[i]} sample study minutes`,exact:true}).count(),1);
+ });
+ await check('chart supports keyboard selection, visible focus and a named tooltip',async()=>{
+  const chart=page.getByRole('group',{name:'Sample weekly study minutes'}),thu=chart.getByRole('button',{name:'Thu: 60 sample study minutes',exact:true});
+  await thu.focus();await page.keyboard.press('ArrowRight');
+  const fri=chart.getByRole('button',{name:'Fri: 40 sample study minutes',exact:true});assert(await fri.evaluate(e=>e===document.activeElement));assert.equal(await fri.getAttribute('aria-pressed'),'true');
+  assert.equal(await chart.getByRole('tooltip').textContent(),'Fri · 40 min');assert(parseFloat((await colors(fri)).outlineWidth)>0);
+  await page.keyboard.press('Escape');assert.equal(await chart.getByRole('tooltip').count(),0);assert.equal(await fri.getAttribute('aria-label'),'Fri: 40 sample study minutes');
+  await page.keyboard.press('Home');assert.equal(await chart.getByRole('button',{name:'Mon: 30 sample study minutes',exact:true}).getAttribute('aria-pressed'),'true');
+  await page.keyboard.press('End');assert.equal(await chart.getByRole('button',{name:'Sun: 25 sample study minutes',exact:true}).getAttribute('aria-pressed'),'true');
+ });
+ await check('chart hover previews a day without replacing keyboard selection',async()=>{
+  const chart=page.getByRole('group',{name:'Sample weekly study minutes'});
+  await chart.getByRole('button',{name:'Tue: 45 sample study minutes',exact:true}).hover();assert.equal(await chart.getByRole('tooltip').textContent(),'Tue · 45 min');
+  assert.equal(await chart.getByRole('button',{name:'Sun: 25 sample study minutes',exact:true}).getAttribute('aria-pressed'),'true');
+  await page.getByRole('heading',{name:'Learning rhythm',exact:true}).hover();assert.equal(await chart.getByRole('tooltip').textContent(),'Sun · 25 min');
  });
  await check('search filters the local sample table after debounce',async()=>{
   await page.getByRole('textbox',{name:'Search sample lessons'}).fill('decisions');await page.waitForTimeout(450);
@@ -47,6 +204,14 @@ let browser;
   assert.equal(await page.getByText('Thinking in variables',{exact:true}).count(),0);
   await page.getByRole('textbox',{name:'Search sample lessons'}).fill('');await page.waitForTimeout(450);
  });
+ await check('header search is single, local, keyboard-clearable and focuses results on Enter',async()=>{
+  const search=page.getByRole('textbox',{name:'Search sample lessons'});assert.equal(await search.count(),1);
+  await search.fill('variables');await search.press('Escape');assert.equal(await search.inputValue(),'');await page.waitForTimeout(450);
+  await search.fill('no such lesson');await page.waitForTimeout(450);assert(await page.getByRole('heading',{name:'No sample lessons match',exact:true}).isVisible());
+  await page.getByRole('button',{name:'Clear filters',exact:true}).click();await page.waitForTimeout(450);assert.equal(await search.inputValue(),'');
+  await search.press('Enter');assert(await page.locator('#sample-learning-path').evaluate(e=>e===document.activeElement));
+ });
+ await check('adaptive explanation is explicitly static sample content',async()=>assert(await page.getByText('Illustration only. No live mastery calculation is performed.',{exact:true}).isVisible()));
  await check('tabs filter sample rows',async()=>{
   await page.getByRole('tab',{name:'Completed',exact:true}).click();assert.equal(await page.getByText('Thinking in variables',{exact:true}).count(),1);assert.equal(await page.getByText('Making decisions',{exact:true}).count(),0);
   await page.getByRole('tab',{name:'All lessons',exact:true}).click();
@@ -94,6 +259,8 @@ let browser;
  await check('mobile navigation opens, exposes current item and restores focus on Escape',async()=>{
   const toggle=page.getByRole('button',{name:'Toggle navigation'});await toggle.click();
   const nav=page.getByRole('navigation',{name:'Main navigation'});await nav.waitFor();assert.equal(await nav.locator('[aria-current="true"]').count(),1);
+  await page.waitForFunction(()=>{const paper=document.querySelector('.MuiDrawer-modal .MuiDrawer-paper');return paper&&Math.abs(paper.getBoundingClientRect().left)<.5});
+  await verifyBrandLogo(nav.locator('img'),34,true);
   await page.screenshot({path:`${out}/drawer-390.png`,fullPage:true});await page.keyboard.press('Escape');await nav.waitFor({state:'hidden'});
   assert(await toggle.evaluate(e=>e===document.activeElement));
  });
@@ -107,15 +274,135 @@ let browser;
  });
  await check('auth layout preview is reachable and returns to overview',async()=>{
   await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Auth layout preview',exact:true}).click();await page.getByRole('heading',{name:'A calm space to start.'}).waitFor();
+  await verifyBrandLogo(page.getByRole('img',{name:'CodeMastery',exact:true}),44,false);
   await page.screenshot({path:`${out}/auth-900.png`,fullPage:true});await page.setViewportSize({width:320,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth));await page.screenshot({path:`${out}/auth-320.png`,fullPage:true});await page.getByRole('button',{name:'Back to demo workspace'}).click();
  });
  await check('reduced motion suppresses long animation/transition',async()=>{
   await page.emulateMedia({reducedMotion:'reduce'});await page.getByRole('button',{name:'Explore components',exact:true}).click();
   const duration=await page.getByRole('progressbar',{name:'Loading sample content...'}).evaluate(e=>getComputedStyle(e).animationDuration);assert(duration.split(',').every(x=>parseFloat(x)<.01),duration);
  });
+ await check('skip link moves keyboard focus to main content',async()=>{
+  await page.goto(previewUrl,{waitUntil:'networkidle'});const skip=page.getByRole('link',{name:'Skip to content',exact:true});
+  await skip.focus();assert(await skip.isVisible());await page.keyboard.press('Enter');assert(await page.locator('#main-content').evaluate(e=>e===document.activeElement));
+ });
+ await check('account navigation preserves real sign-in/register routes and browser history',async()=>{
+  const account=page.getByRole('navigation',{name:'Account navigation'});
+  await account.getByRole('link',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Welcome back',exact:true}).waitFor();assert.equal(new URL(page.url()).pathname,'/login');
+  await page.goBack();await page.getByRole('heading',{name:'Your learning, in focus.',exact:true}).waitFor();
+  await page.getByRole('navigation',{name:'Account navigation'}).getByRole('link',{name:'Register',exact:true}).click();await page.getByRole('heading',{name:'Create account',exact:true}).waitFor();assert.equal(new URL(page.url()).pathname,'/register');
+ });
+ await check('real login and registration share canonical branding at desktop and mobile sizes',async()=>{
+  for(const route of ['/login','/register'])for(const width of [1440,390,320]){
+   await page.setViewportSize({width,height:900});await page.goto(new URL(route,previewUrl).href,{waitUntil:'networkidle'});await page.evaluate(()=>document.fonts.ready);
+   await verifyBrandLogo(page.getByRole('img',{name:'CodeMastery',exact:true}),44,false);
+   assert.equal(await page.locator('link[rel="icon"]').evaluate(e=>e.href),brandUrl);
+   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth));
+   await page.screenshot({path:`${out}/${route.slice(1)}-${width}.png`,fullPage:true});
+  }
+ });
+ await check('direct public deep links and the anonymous Profile guard remain intact',async()=>{
+  await page.goto(new URL('/courses/sample',previewUrl).href,{waitUntil:'networkidle'});await page.getByRole('heading',{name:'Course details',exact:true}).waitFor();
+  await page.reload({waitUntil:'networkidle'});assert(await page.getByRole('heading',{name:'Course details',exact:true}).isVisible());
+  await page.goto(new URL('/profile',previewUrl).href,{waitUntil:'networkidle'});await page.getByRole('heading',{name:'Welcome back',exact:true}).waitFor();assert.equal(new URL(page.url()).pathname,'/login');
+  assert.equal(await page.locator('dl').count(),0);
+ });
+ const motionAudit=[],assetLoading=[];
+ async function twoFrames(){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(null)))))}
+ for(const preference of ['no-preference','reduce'])for(const width of [320,390,768,1024,1440]){
+  await check(`interaction and motion matrix: ${preference} at ${width}`,async()=>{
+   await page.emulateMedia({reducedMotion:preference});await page.setViewportSize({width,height:900});await page.mouse.move(0,0);
+   await page.goto(previewUrl,{waitUntil:'networkidle'});await page.evaluate(()=>document.fonts.ready);
+   if(width<900){
+    const toggle=page.getByRole('button',{name:'Toggle navigation',includeHidden:true});
+    await toggle.focus();await page.keyboard.press('Enter');await page.keyboard.press('Escape');await toggle.press('Enter');
+    await page.waitForFunction(()=>{const paper=document.querySelector('.MuiDrawer-modal .MuiDrawer-paper');return paper&&Math.abs(paper.getBoundingClientRect().left)<.5});
+    assert.equal(await toggle.getAttribute('aria-expanded'),'true');await page.keyboard.press('Escape');
+    if(preference==='reduce'){await twoFrames();assert.equal(await page.locator('.MuiDrawer-modal').isVisible(),false);}
+    await page.locator('.MuiDrawer-modal').waitFor({state:'hidden'});assert(await toggle.evaluate(e=>e===document.activeElement));
+    await toggle.press('Enter');await page.setViewportSize({width:1024,height:900});await twoFrames();
+    assert.equal(await page.locator('.MuiDrawer-modal').count(),0);assert.equal(await page.evaluate(()=>document.body.style.overflow),'');
+    assert(await page.locator('.MuiDrawer-docked [aria-current="true"]').evaluate(e=>e===document.activeElement));
+    await page.setViewportSize({width,height:900});await twoFrames();assert.equal(await toggle.getAttribute('aria-expanded'),'false');
+   }
+   const chart=page.getByRole('group',{name:'Sample weekly study minutes'});
+   const chartHeight=await chart.evaluate(e=>e.closest('.MuiPaper-root').getBoundingClientRect().height);
+   await chart.getByRole('button',{name:'Thu: 60 sample study minutes',exact:true}).focus();await page.keyboard.press('ArrowRight');
+   assert.equal(await chart.getByRole('tooltip').textContent(),'Fri · 40 min');
+   await chart.getByRole('button',{name:'Mon: 30 sample study minutes',exact:true}).hover();assert.equal(await chart.getByRole('tooltip').textContent(),'Mon · 30 min');
+   await page.keyboard.press('Home');assert.equal(await chart.getByRole('button',{name:'Mon: 30 sample study minutes',exact:true}).getAttribute('aria-pressed'),'true');
+   const tooltipFits=await chart.getByRole('tooltip').evaluate(e=>{const t=e.getBoundingClientRect(),p=e.closest('.MuiPaper-root').getBoundingClientRect();return t.left>=p.left&&t.right<=p.right&&t.top>=p.top&&t.bottom<=p.bottom});
+   assert(tooltipFits);assert.equal(await chart.evaluate(e=>e.closest('.MuiPaper-root').getBoundingClientRect().height),chartHeight);
+   await page.keyboard.press('Escape');assert.equal(await chart.getByRole('tooltip').count(),0);await page.mouse.move(0,0);
+   const search=page.getByRole('textbox',{name:'Search sample lessons'});await search.fill('decisions');await page.waitForTimeout(450);
+   assert.equal(await page.locator('tbody tr').count(),1);assert(await search.evaluate(e=>e===document.activeElement));
+   await search.press('Escape');await page.waitForTimeout(450);assert.equal(await page.locator('tbody tr').count(),3);
+   await page.getByRole('tab',{name:'All lessons',exact:true}).focus();await page.keyboard.press('End');await page.keyboard.press('Enter');await twoFrames();
+   const earlyScroll=await page.locator('.MuiTabs-scroller').evaluate(e=>e.scrollLeft);await page.waitForTimeout(330);
+   const settledScroll=await page.locator('.MuiTabs-scroller').evaluate(e=>e.scrollLeft);
+   if(preference==='reduce')assert(Math.abs(earlyScroll-settledScroll)<1,'Reduced motion must not run JavaScript tab scrolling');
+   for(const label of ['All lessons','Completed','To explore','All lessons'])await page.getByRole('tab',{name:label,exact:true}).evaluate(e=>e.click());
+   await page.waitForTimeout(330);assert.equal(await page.getByRole('tab',{name:'All lessons',exact:true}).getAttribute('aria-selected'),'true');assert.equal(await page.locator('tbody tr').count(),3);
+   const indicator=await page.locator('.MuiTabs-indicator').boundingBox(),selectedTab=await page.getByRole('tab',{name:'All lessons',exact:true}).boundingBox();
+   assert(Math.abs(indicator.x-selectedTab.x)<1.5&&Math.abs(indicator.width-selectedTab.width)<1.5,'Tab indicator must settle on the final selection');
+   await page.getByRole('button',{name:'Explore components',exact:true}).focus();await page.keyboard.press('Enter');
+   assert(await page.locator('main h1').evaluate(e=>e===document.activeElement));
+   const trigger=page.getByRole('button',{name:'Open confirmation',exact:true});await trigger.click();
+   const dialog=page.getByRole('dialog',{name:'Reset sample controls?',exact:true});await dialog.waitFor();
+   assert(await dialog.getByRole('button',{name:'Keep editing',exact:true}).evaluate(e=>e===document.activeElement));
+   await page.keyboard.press('Tab');const confirm=dialog.getByRole('button',{name:'Reset preview',exact:true});assert(await confirm.evaluate(e=>e===document.activeElement));
+   await page.waitForTimeout(260);assert(await confirm.evaluate(e=>e===document.activeElement),'Entry completion must not move user-selected focus');
+   await page.keyboard.press('Tab');assert(await dialog.evaluate(e=>e.contains(document.activeElement)));await page.keyboard.press('Escape');
+   if(preference==='reduce'){await twoFrames();assert.equal(await page.locator('.MuiDialog-root').count(),0);assert.equal(await page.evaluate(()=>document.body.style.overflow),'');}
+   await dialog.waitFor({state:'hidden'});assert(await trigger.evaluate(e=>e===document.activeElement));
+   await trigger.press('Enter');await page.keyboard.press('Escape');await trigger.press('Enter');await dialog.waitFor();
+   await dialog.getByRole('button',{name:'Keep editing',exact:true}).click();await dialog.waitFor({state:'hidden'});
+   const loader=page.getByRole('progressbar',{name:'Loading sample content...'});
+   const animations=await loader.evaluate(e=>e.getAnimations({subtree:true}).filter(a=>a.playState==='running').length);
+   if(preference==='reduce')assert.equal(animations,0);else assert(animations>0);
+   if(width<900){await page.getByRole('button',{name:'Toggle navigation'}).click();await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Auth layout preview',exact:true}).click();}
+   else await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Auth layout preview',exact:true}).click();
+   assert(await page.locator('main h1').evaluate(e=>e===document.activeElement));await page.getByRole('button',{name:'Back to demo workspace'}).click();
+   assert(await page.locator('main h1').evaluate(e=>e===document.activeElement));
+   for(const route of ['/login','/register']){
+    await page.goto(new URL(route,previewUrl).href,{waitUntil:'networkidle'});await page.locator('button[type="submit"]').click();
+    assert(await page.locator('[aria-invalid="true"]').count()>0);assert(await page.locator('[aria-invalid="true"]').evaluateAll(inputs=>inputs.some(e=>e===document.activeElement)));
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth));
+   }
+   assert.equal(await page.evaluate(()=>document.body.style.overflow),'');
+   motionAudit.push({preference,width,earlyTabScroll:earlyScroll,settledTabScroll:settledScroll,loadingAnimations:animations,passed:true});
+  });
+ }
+ await check('canonical SVG reserves its aspect ratio before loading in dashboard and auth layouts',async()=>{
+  for(const route of ['/courses','/login']){
+   const cold=await context.newPage();cold.on('pageerror',e=>errors.push(String(e)));cold.on('console',recordConsole);await cold.setViewportSize({width:1440,height:900});
+   let release;const gate=new Promise(resolve=>{release=resolve});await cold.route('**/favicon.svg',async request=>{await gate;await request.continue()});
+   try{
+    await cold.goto(new URL(route,previewUrl).href,{waitUntil:'domcontentloaded'});
+    const logo=route==='/courses'?cold.locator('.MuiDrawer-docked nav img'):cold.getByRole('img',{name:'CodeMastery',exact:true});await logo.waitFor({state:'attached'});await cold.evaluate(()=>document.fonts.ready);
+    const measure=()=>logo.evaluate(e=>{const r=e.getBoundingClientRect(),wordmark=e.parentElement.querySelector('p');return {width:r.width,height:r.height,wordmarkX:wordmark?.getBoundingClientRect().x??null}});
+    assert.equal(await logo.evaluate(e=>e.complete),false,'Exercise an SVG that has not loaded yet');
+    const pending=await measure();assert(Math.abs(pending.width/pending.height-brandRatio)<.002);release();await logo.evaluate(e=>e.decode());const loaded=await measure();
+    assert(Math.abs(pending.width-loaded.width)<.1);assert.equal(pending.height,loaded.height);assert.equal(pending.wordmarkX,loaded.wordmarkX);assetLoading.push({route,pending,loaded});
+   }finally{release();await cold.close()}
+  }
+ });
+ await check('cold font loading preserves focus and avoids page overflow',async()=>{
+  const cold=await context.newPage();cold.on('pageerror',e=>errors.push(String(e)));cold.on('console',recordConsole);await cold.setViewportSize({width:320,height:900});
+  let release;const gate=new Promise(resolve=>{release=resolve});await cold.route('**/*.woff2',async request=>{await gate;await request.continue()});
+  try{
+   await cold.goto(previewUrl,{waitUntil:'domcontentloaded'});await cold.locator('main h1').waitFor();await cold.waitForFunction(()=>document.fonts.status==='loading');
+   const read=()=>cold.evaluate(()=>({overflow:document.documentElement.scrollWidth>innerWidth,focusOnHeading:document.activeElement===document.querySelector('main h1'),fontStatus:document.fonts.status}));
+   const pending=await read();release();await cold.evaluate(()=>document.fonts.ready);const loaded=await read();
+   assert.equal(pending.overflow,false);assert.equal(loaded.overflow,false);assert(pending.focusOnHeading&&loaded.focusOnHeading);assetLoading.push({fontSwap:{pending,loaded}});
+  }finally{release();await cold.close()}
+ });
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ await page.goto(previewUrl,{waitUntil:'networkidle'});
+ await page.getByRole('button',{name:'Explore components',exact:true}).click();
  await check('no uncaught browser exceptions',async()=>assert.deepEqual(errors,[]));
+ await check('no browser console errors',async()=>assert.deepEqual(consoleErrors,[]));
  fs.writeFileSync(`${out}/studio-accessibility-tree.yml`,await page.locator('main').ariaSnapshot());
- const report={browser:browser.version(),viewports:layouts,checks,networkOrigins:[...origins],contrast:{onFocus:{...onFocus,ratio:contrast(onFocus.color,onFocus.background)},atRest:{...atRest,ratio:contrast(atRest.color,atRest.background)},onHover:{...onHover,ratio:contrast(onHover.color,onHover.background)},badge:{...badgeColors,ratio:contrast(badgeColors.color,badgeColors.background)}},errors,screenReader:'Not executed'};
+ const report={engine,browser:browser.version(),motionAudit,assetLoading,branding,faviconCaching,typography,viewports:layouts,checks,networkOrigins:[...origins],contrast:{onFocus:{...onFocus,ratio:contrast(onFocus.color,onFocus.background)},atRest:{...atRest,ratio:contrast(atRest.color,atRest.background)},onHover:{...onHover,ratio:contrast(onHover.color,onHover.background)},badge:{...badgeColors,ratio:contrast(badgeColors.color,badgeColors.background)}},errors,consoleErrors,consoleWarnings,screenReader:'Not executed'};
  fs.writeFileSync(`${out}/browser-report.json`,JSON.stringify(report,null,2));await browser.close();
  console.log(JSON.stringify({passed:checks.length,browser:report.browser,report:`${out}/browser-report.json`}));
 })().catch(async e=>{console.error(e);if(browser)await browser.close();process.exitCode=1});

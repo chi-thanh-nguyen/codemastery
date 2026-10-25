@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { BrowserRouter } from 'react-router';
 import { AuthProvider } from './providers/AuthProvider';
 import { AppRouter, SessionNavigation } from '../routes/index';
 import { ThemeProvider, CssBaseline, Box, Button, TextField, Paper, Typography, Chip, LinearProgress,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, Tab, InputAdornment } from '@mui/material';
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, Tab, InputAdornment, IconButton } from '@mui/material';
 import { appTheme, presentationTokens as tokens } from './theme/theme';
 import { DashboardLayout } from '../layouts/DashboardLayout';
 import { AuthLayout } from '../layouts/AuthLayout';
@@ -28,26 +28,109 @@ const DEMO_WEEK = [
     { day: 'Fri', minutes: 40, height: 67 }, { day: 'Sat', minutes: 35, height: 58 }, { day: 'Sun', minutes: 25, height: 42 },
 ];
 const NAV_ITEMS: NavItem[] = [
-    { id: 'overview', label: 'Overview', icon: <PresentationIcon name="grid" /> },
-    { id: 'components', label: 'Components', badge: 0, icon: <PresentationIcon name="layers" /> },
+    { id: 'overview', label: 'Overview', group: 'Learning preview', icon: <PresentationIcon name="grid" /> },
+    { id: 'components', label: 'Components', group: 'Presentation lab', badge: 0, icon: <PresentationIcon name="layers" /> },
     { id: 'auth-preview', label: 'Auth layout preview', icon: <PresentationIcon name="book" /> },
 ];
 
-function DemoMetric({ label, value, note, icon, tint }: { label: string; value: string; note: string; icon: PresentationIconName; tint: string }) {
-    return <Paper sx={{ p: 2.5, minWidth: 0 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 2 }}>
-            <Typography variant="body2" color="text.secondary">{label}</Typography>
-            <Box sx={{ width: 32, height: 32, display: 'grid', placeItems: 'center', borderRadius: '8px', bgcolor: tint, color: 'text.primary' }}>
-                <PresentationIcon name={icon} sx={{ fontSize: 18 }} />
+const weekMinutes = DEMO_WEEK.reduce((total, day) => total + day.minutes, 0);
+const weekDuration = formatDurationSeconds(weekMinutes * 60);
+
+function DemoMetric({ label, value, note, icon, tint, accent }: { label: string; value: string; note: string; icon: PresentationIconName; tint: string; accent: string }) {
+    // Shared row tracks align labels, values and captions even when one card wraps.
+    return <Paper sx={{ p: 2, minWidth: 0, display: 'grid', gridTemplateRows: 'subgrid', gridRow: 'span 3', rowGap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box sx={{ width: 40, height: 40, flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: '10px', bgcolor: tint, color: accent }}>
+                <PresentationIcon name={icon} sx={{ fontSize: 23 }} />
+            </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>{label}</Typography>
+        </Box>
+        <Typography variant="h3" component="p" sx={{ fontVariantNumeric: 'tabular-nums' }}>{value}</Typography>
+        <Typography variant="caption" color="text.secondary">{note}</Typography>
+    </Paper>;
+}
+
+function LearningRhythm() {
+    const [selected, setSelected] = useState(3);
+    const [hovered, setHovered] = useState<number | null>(null);
+    const [tooltipOpen, setTooltipOpen] = useState(true);
+    const buttons = useRef<Array<HTMLButtonElement | null>>([]);
+    const tooltipId = useId();
+    const active = hovered ?? selected;
+    const maximum = Math.max(...DEMO_WEEK.map((day) => day.minutes));
+    return <Paper component="section" aria-labelledby="learning-rhythm-title" sx={{ p: 2.5, minWidth: 0 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
+            <Box><Typography id="learning-rhythm-title" variant="h6" component="h2">Learning rhythm</Typography>
+                <Typography variant="caption" color="text.secondary">A little time, a stronger foundation.</Typography></Box>
+            <Chip label="Sample week" size="small" variant="outlined" />
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 1.5 }}>
+            <Typography variant="h3" component="p">{weekMinutes}</Typography>
+            <Typography variant="body2" color="text.secondary">sample minutes this week</Typography>
+        </Box>
+        <Box role="group" aria-label="Sample weekly study minutes" aria-describedby={`${tooltipId}-summary`}
+            sx={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr)', columnGap: 1, pt: 5 }}>
+            <Box aria-hidden="true" sx={{ position: 'relative', height: 168 }}>
+                {[60, 45, 30, 15, 0].map((tick) => <Typography key={tick} variant="caption" color="text.secondary"
+                    sx={{ position: 'absolute', right: 0, top: `${(1 - tick / maximum) * 100}%`, transform: 'translateY(-50%)', fontVariantNumeric: 'tabular-nums' }}>{tick}</Typography>)}
+            </Box>
+            <Box sx={{ position: 'relative', minWidth: 0 }}>
+                <Box aria-hidden="true" sx={{ position: 'absolute', inset: '0 0 24px', pointerEvents: 'none' }}>
+                    {[0, 25, 50, 75, 100].map((position) => <Box key={position} sx={{ position: 'absolute', top: `${position}%`, width: '100%', borderTop: `1px solid ${tokens.chartGrid}` }} />)}
+                </Box>
+                <Box sx={{ display: 'flex', gap: { xs: .75, sm: 1.5 }, position: 'relative' }}>
+                    {DEMO_WEEK.map((day, index) => <Box component="button" key={day.day} type="button"
+                        ref={(node: HTMLButtonElement | null) => { buttons.current[index] = node; }}
+                        aria-label={`${day.day}: ${day.minutes} sample study minutes`} aria-pressed={selected === index}
+                        aria-describedby={tooltipOpen && active === index ? tooltipId : undefined}
+                        onClick={() => { setSelected(index); setTooltipOpen(true); }} onFocus={() => { setSelected(index); setHovered(null); setTooltipOpen(true); }}
+                        onMouseEnter={() => { setHovered(index); setTooltipOpen(true); }} onMouseLeave={() => setHovered(null)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Escape') { event.preventDefault(); setTooltipOpen(false); return; }
+                            let next: number;
+                            if (event.key === 'ArrowRight') next = (index + 1) % DEMO_WEEK.length;
+                            else if (event.key === 'ArrowLeft') next = (index + DEMO_WEEK.length - 1) % DEMO_WEEK.length;
+                            else if (event.key === 'Home') next = 0;
+                            else if (event.key === 'End') next = DEMO_WEEK.length - 1;
+                            else return;
+                            event.preventDefault(); buttons.current[next]?.focus();
+                        }}
+                        sx={{ flex: 1, minWidth: 0, p: 0, m: 0, border: 0, bgcolor: 'transparent', color: 'text.secondary', cursor: 'pointer',
+                            borderRadius: '6px', font: 'inherit', '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 } }}>
+                        <Box sx={{ height: 168, position: 'relative', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+                            {tooltipOpen && active === index && <Box id={tooltipId} role="tooltip" sx={{ position: 'absolute', bottom: `calc(${day.minutes / maximum * 100}% + 8px)`,
+                                left: index === 0 ? 0 : index === DEMO_WEEK.length - 1 ? 'auto' : '50%', right: index === DEMO_WEEK.length - 1 ? 0 : 'auto',
+                                transform: index > 0 && index < DEMO_WEEK.length - 1 ? 'translateX(-50%)' : 'none', zIndex: 1, px: 1.5, py: .5,
+                                borderRadius: '8px', border: 1, borderColor: 'divider', bgcolor: 'background.paper', color: 'text.primary',
+                                whiteSpace: 'nowrap', typography: 'caption', fontWeight: 500, boxShadow: '0 4px 12px rgba(16, 20, 24, .10)' }}>{day.day} · {day.minutes} min</Box>}
+                            <Box data-study-bar aria-hidden="true" sx={{ width: '100%', maxWidth: 36, height: `${day.minutes / maximum * 100}%`,
+                                // A contrasting cap preserves the value boundary without a full column outline.
+                                borderRadius: '7px 7px 3px 3px', border: 0, borderTop: '2px solid',
+                                borderColor: active === index ? 'primary.dark' : tokens.chartBarEdge,
+                                bgcolor: active === index ? tokens.chartBarActive : tokens.chartBarFill }} />
+                        </Box>
+                        <Typography component="span" variant="caption" sx={{ height: 24, display: 'grid', placeItems: 'end center', color: selected === index ? 'primary.dark' : 'text.secondary', fontWeight: selected === index ? 600 : 400,
+                            textDecoration: selected === index ? 'underline' : 'none', textUnderlineOffset: '3px', textDecorationThickness: '2px' }}>{day.day}</Typography>
+                    </Box>)}
+                </Box>
             </Box>
         </Box>
-        <Typography variant="h4" component="p" sx={{ fontVariantNumeric: 'tabular-nums', mb: .75 }}>{value}</Typography>
-        <Typography variant="caption" color="text.secondary">{note}</Typography>
+        <Typography id={`${tooltipId}-summary`} variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+            Seven illustrative days · 0–{maximum} minutes. Select a day, or use arrow keys to explore.
+        </Typography>
     </Paper>;
 }
 
 export function PresentationPreview() {
     const [selectedNav, setSelectedNav] = useState('overview');
+    const previousNav = useRef(selectedNav);
+    useEffect(() => {
+        if (previousNav.current === selectedNav) return;
+        previousNav.current = selectedNav;
+        // Local preview switches can remove the initiating control without changing the URL.
+        const heading = document.querySelector<HTMLElement>('#main-content h1');
+        if (heading) { heading.tabIndex = -1; heading.focus(); }
+    }, [selectedNav]);
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState('all');
     const [utilityInput, setUtilityInput] = useState('');
@@ -63,69 +146,70 @@ export function PresentationPreview() {
         style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1, roundingMode: 'halfExpand',
     } });
     const duration = formatDurationSeconds(3725);
+    const sampleSearch = <Box component="form" role="search" aria-label="Search local sample lessons"
+        onSubmit={(event) => {
+            event.preventDefault();
+            const section = document.getElementById('sample-learning-path');
+            section?.focus(); section?.scrollIntoView({ block: 'nearest' });
+        }}>
+        <TextField fullWidth size="small" variant="filled" hiddenLabel placeholder="Find a sample lesson…" value={query} onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}
+            slotProps={{ htmlInput: { 'aria-label': 'Search sample lessons', 'aria-description': 'Filters local sample lessons only. Enter jumps to results. Escape clears search.' }, input: {
+                startAdornment: <InputAdornment position="start"><PresentationIcon name="search" sx={{ fontSize: 19, color: 'text.secondary' }} /></InputAdornment>,
+                endAdornment: query ? <InputAdornment position="end"><IconButton size="small" aria-label="Clear sample lesson search" onClick={() => setQuery('')} sx={{ width: 28, height: 28, fontSize: 20 }}>×</IconButton></InputAdornment> : undefined,
+            } }} />
+    </Box>;
     function resetPreview() { setQuery(''); setFilter('all'); setUtilityInput(''); setNotice('Sample controls reset.'); setDialog(null); }
 
     const overview = <>
         <PageHeader title="Your learning, in focus." subtitle="A little practice today. A stronger foundation tomorrow."
             actions={<Button key="explore" variant="contained" endIcon={<PresentationIcon name="arrow" />} onClick={() => setSelectedNav('components')}>Explore components</Button>} />
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 2 }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 2, px: 1.5, py: 1, borderRadius: '10px', bgcolor: tokens.softBlue, border: '1px solid #DCE8FC' }}>
             <Chip label="Demo workspace" size="small" sx={{ bgcolor: tokens.softBlue, color: 'primary.dark' }} />
             <Typography variant="caption" color="text.secondary">All learning data below is illustrative. Nothing is saved.</Typography>
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' }, gap: 2, mb: 2 }}>
-            <DemoMetric label="Study time" value="4h 20m" note="Illustrative weekly total" icon="clock" tint={tokens.softBlue} />
-            <DemoMetric label="Lessons completed" value="12" note="Sample learning snapshot" icon="check" tint={tokens.softGreen} />
-            <DemoMetric label="Practice streak" value="5 days" note="An example of steady progress" icon="spark" tint={tokens.softOrange} />
-            <DemoMetric label="Course progress" value="68%" note="Illustrative course completion" icon="chart" tint={tokens.softPink} />
+            <DemoMetric label="Study time" value={`${weekDuration.hours}h ${weekDuration.minutes}m`} note="Illustrative weekly total" icon="clock" tint={tokens.softBlue} accent="#1753B5" />
+            <DemoMetric label="Lessons completed" value="12" note="Sample learning snapshot" icon="check" tint={tokens.softGreen} accent="#205D3A" />
+            <DemoMetric label="Practice streak" value="5 days" note="An example of steady progress" icon="spark" tint={tokens.softOrange} accent="#715014" />
+            <DemoMetric label="Course progress" value="68%" note="Illustrative course completion" icon="chart" tint={tokens.softPink} accent="#8D243A" />
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 3fr) minmax(0, 2fr)' }, gap: 2, mb: 2 }}>
-            <Paper sx={{ p: 2.5, minWidth: 0 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
-                    <Box><Typography variant="h6" component="h2">Learning rhythm</Typography><Typography variant="caption" color="text.secondary">Illustrative study time · minutes</Typography></Box>
-                    <Chip label="Sample week" size="small" variant="outlined" />
-                </Box>
-                <Box role="img" aria-label={`Demo study minutes: ${DEMO_WEEK.map((day) => `${day.day} ${day.minutes}`).join(', ')}.`}
-                    sx={{ display: 'flex', gap: { xs: 1, sm: 2 }, height: 210, alignItems: 'flex-end', mt: 3 }}>
-                    {DEMO_WEEK.map((day) => <Box key={day.day} aria-hidden="true" sx={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="caption" color="text.secondary">{day.minutes}</Typography>
-                        <Box sx={{ width: '100%', maxWidth: 38, height: `${day.height * .75}%`, minHeight: 3, borderRadius: '6px 6px 2px 2px', bgcolor: 'primary.light', border: '1px solid', borderColor: 'primary.dark' }} />
-                        <Typography variant="caption" color="text.secondary">{day.day}</Typography>
-                    </Box>)}
-                </Box>
-            </Paper>
+            <LearningRhythm />
             <Paper sx={{ p: 2.5, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                     <Typography variant="h6" component="h2">Keep your curiosity going</Typography>
                     <PresentationIcon name="book" sx={{ fontSize: 20, color: 'text.secondary' }} />
                 </Box>
-                <Box sx={{ px: 2, py: 2.5, borderRadius: '10px', bgcolor: tokens.softBlue, mb: 2, overflow: 'hidden' }}>
-                    <Typography variant="overline" color="primary.dark">Sample course</Typography>
-                    <Typography component="pre" sx={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: { xs: '.65rem', sm: '.75rem' }, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'primary.dark', mt: 1, mb: 0 }}>{"const nextStep = 'keep learning';"}</Typography>
+                <Box sx={{ p: 2, borderRadius: '12px', bgcolor: '#172B45', color: '#FFFFFF', mb: 1.5, overflow: 'hidden' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                        <Typography variant="caption" sx={{ color: '#CDDDF2' }}>practice.ts · illustrative code</Typography>
+                        <PresentationIcon name="code" sx={{ fontSize: 19, color: '#80C7FF' }} />
+                    </Box>
+                    <Typography component="pre" sx={{ m: 0, fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: '.8125rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: '#C2E7FF' }}>{"const goal = 'understand';\npractice({ step: 'one at a time' });"}</Typography>
                 </Box>
-                <Typography variant="subtitle1" component="h3">Programming foundations</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: .5, mb: 2 }}>Practice in small steps. Revisit what matters.</Typography>
+                <Typography variant="h6" component="h3">Programming foundations</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: .5, mb: 1.5 }}>Practice in small steps. Revisit what matters.</Typography>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: .75 }}><Typography variant="caption" color="text.secondary">Demo completion</Typography><Typography variant="caption">68%</Typography></Box>
                 <LinearProgress variant="determinate" value={68} aria-label="Sample course completion" />
-                <Button variant="outlined" endIcon={<PresentationIcon name="arrow" />} onClick={() => setDialog('lesson')} sx={{ mt: 2.5, alignSelf: 'flex-start' }}>Preview sample lesson</Button>
+                <Button variant="outlined" endIcon={<PresentationIcon name="arrow" />} onClick={() => setDialog('lesson')} sx={{ mt: 2, alignSelf: 'flex-start' }}>Preview sample lesson</Button>
             </Paper>
         </Box>
-        <Paper sx={{ overflow: 'hidden', minWidth: 0 }}>
+        <Paper component="section" id="sample-learning-path" aria-labelledby="sample-path-title" tabIndex={-1} sx={{ overflow: 'hidden', minWidth: 0, scrollMarginTop: 180 }}>
             <Box sx={{ p: 2.5, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', gap: 2 }}>
-                <Box><Typography variant="h6" component="h2">Your sample learning path</Typography><Typography variant="caption" color="text.secondary">Three lesson cards to explore the presentation.</Typography></Box>
-                <TextField size="small" label="Search sample lessons" value={query} onChange={(event) => setQuery(event.target.value)}
-                    slotProps={{ input: { startAdornment: <InputAdornment position="start"><PresentationIcon name="search" sx={{ fontSize: 18 }} /></InputAdornment> } }}
-                    sx={{ width: { xs: '100%', sm: 245 }, flexShrink: 0 }} />
+                <Box><Typography id="sample-path-title" variant="h6" component="h2">Your sample learning path</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Small steps through programming foundations.</Typography></Box>
+                <Typography role="status" variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>{lessons.length} of {DEMO_LESSONS.length} sample lessons</Typography>
             </Box>
-            <Tabs value={filter} onChange={(_, value: string) => setFilter(value)} variant="scrollable" scrollButtons="auto" aria-label="Filter sample lessons" sx={{ px: 1, borderBottom: 1, borderColor: 'divider' }}>
+            <Tabs value={filter} onChange={(_, value: string) => setFilter(value)} variant="scrollable" scrollButtons="auto" aria-label="Filter sample lessons" sx={{ px: 2, '& .MuiTab-root': { minHeight: 48 }, borderBottom: 1, borderColor: 'divider' }}>
                 <Tab value="all" label="All lessons" /><Tab value="active" label="To explore" /><Tab value="completed" label="Completed" />
             </Tabs>
             {lessons.length ? <TableContainer tabIndex={0} role="region" aria-label="Sample lesson table" sx={{ overflowX: 'auto' }}>
                 <Table size="small" sx={{ minWidth: 620 }}>
                     <TableHead><TableRow><TableCell>Lesson</TableCell><TableCell>Sample progress</TableCell><TableCell>Status</TableCell><TableCell align="right">Presentation</TableCell></TableRow></TableHead>
-                    <TableBody>{lessons.map((lesson) => <TableRow key={lesson.title} sx={{ '&:last-child td': { borderBottom: 0 } }}>
+                    <TableBody>{lessons.map((lesson) => <TableRow key={lesson.title} sx={{ '&:hover': { bgcolor: '#F6F9FD' }, '& td': { py: 2 }, '&:last-child td': { borderBottom: 0 } }}>
                         <TableCell><Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                             <Box sx={{ width: 34, height: 34, flexShrink: 0, display: 'grid', placeItems: 'center', bgcolor: tokens.softBlue, color: 'primary.dark', borderRadius: '8px' }}><PresentationIcon name={lesson.icon} sx={{ fontSize: 18 }} /></Box>
-                            <Box><Typography variant="body2" sx={{ fontWeight: 600 }}>{lesson.title}</Typography><Typography variant="caption" color="text.secondary">{lesson.topic}</Typography></Box>
+                            <Box><Typography variant="body2" sx={{ fontWeight: 500 }}>{lesson.title}</Typography><Typography variant="caption" color="text.secondary">{lesson.topic}</Typography></Box>
                         </Box></TableCell>
                         <TableCell sx={{ minWidth: 125 }}><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><LinearProgress variant="determinate" value={lesson.progress} aria-label={`${lesson.title} sample completion`} sx={{ flex: 1 }} /><Typography variant="caption">{lesson.progress}%</Typography></Box></TableCell>
                         <TableCell><Chip label={lesson.state} size="small" sx={{ bgcolor: lesson.state === 'Completed' ? tokens.softGreen : lesson.state === 'In progress' ? tokens.softBlue : tokens.softOrange,
@@ -135,6 +219,12 @@ export function PresentationPreview() {
                 </Table>
             </TableContainer> : <Box sx={{ p: 2 }}><EmptyView title="No sample lessons match" message="Try another lesson name or clear the filters."
                 action={<Button onClick={() => { setQuery(''); setFilter('all'); }}>Clear filters</Button>} /></Box>}
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, m: 2, p: 2, borderRadius: '12px', bgcolor: '#F3F7FC' }}>
+                <PresentationIcon name="spark" sx={{ color: 'primary.dark', fontSize: 21, mt: .25, flexShrink: 0 }} />
+                <Box><Typography variant="subtitle2" sx={{ color: 'primary.dark' }}>Sample recommendation · strengthen the foundation</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Revisit variables before exploring loops: in this static example, a prerequisite skill needs reinforcement.</Typography>
+                    <Typography variant="caption" color="text.secondary">Illustration only. No live mastery calculation is performed.</Typography></Box>
+            </Box>
         </Paper>
     </>;
 
@@ -178,7 +268,7 @@ export function PresentationPreview() {
         {selectedNav === 'auth-preview' ? <Box component="main" id="main-content" tabIndex={-1}><AuthLayout title="A calm space to start." subtitle="Authentication layout preview. No sign-in or session is implemented here.">
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>A reusable frame for caller-provided content, with room to focus.</Typography>
             <Button fullWidth variant="contained" onClick={() => setSelectedNav('overview')}>Back to demo workspace</Button>
-        </AuthLayout></Box> : <DashboardLayout headerTitle="Learning workspace" headerActions={<SessionNavigation />} navItems={NAV_ITEMS} selectedNavId={selectedNav} onNavSelect={setSelectedNav}>
+        </AuthLayout></Box> : <DashboardLayout headerTitle={selectedNav === 'components' ? 'Component preview' : 'Learning workspace'} headerActions={<SessionNavigation />} headerSearch={selectedNav === 'overview' ? sampleSearch : undefined} navItems={NAV_ITEMS} selectedNavId={selectedNav} onNavSelect={setSelectedNav}>
             {selectedNav === 'components' ? components : overview}
             <Typography role="status" variant="body2" sx={{ mt: notice ? 2 : 0 }}>{notice}</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3 }}>CodeMastery · Independent presentation preview</Typography>
