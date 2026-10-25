@@ -824,3 +824,220 @@ or approve a whole Issue. Existing sole-Leader CODEOWNER/author conflict, eligib
 independent review/last-push approval, exact-head CI/security and protected
 integration remain required. No provisioning, backup, restore, deployment, public
 exposure, runtime verification or protected merge was performed or authorized.
+
+## CT17 additional Interim deployment bindings — 25 October 2026
+
+### Authority, revision and actual resource evidence
+
+**CT17-INTERIM-BINDINGS-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION** for B1–B3 below only. The Leader's explicit
+**“CodeMastery — Complete Additional CT16, CT17 and CT14 Technical Approvals in
+Existing PRs”**, supplied 25 October 2026 (ICT), delegates ordinary technical
+selection/approval to Codex, the technical decision-maker. Actual expenditure,
+resource ownership, access grants, credential/key custody, public exposure and
+material risk acceptance remain personal Leader decisions. No provisioning,
+credential generation, deployment, renewal, recovery or external test is authorized.
+
+Fresh remote main is
+[e2128919fe0d47c0f24989166343e1d5ecf50483](https://github.com/chi-thanh-nguyen/codemastery/commit/e2128919fe0d47c0f24989166343e1d5ecf50483).
+[PR #103](https://github.com/chi-thanh-nguyen/codemastery/pull/103) starts at
+9d966c469d008afe21b0bb1a98e7181f81224ab7. The sole new main delta since
+0b29672 is six bounded Auth account-operation/DTO/test files; no infrastructure
+configuration or actual runtime binding was added. @TamiaoNguyen's APPROVED
+review covers the initial PR head; it is not approval of this new commit or
+sole-Leader documentation CODEOWNER approval.
+
+Search scope: full current CT01/CT14/CT16/CT17/CT18/CT20/CT21/CT38 Issue records,
+DP01 #71/DP03 #72, FE03/FE07 and QA handoffs; deployment/configuration source,
+ADRs and canonical PR records. Relevant #18/#19/#27/#70/#71/#72/#21 comment
+threads are empty at inspection. No actual institutional/team VM, cloud account,
+authorized VM identity/IP, owned hostname/DNS zone, certificate, operator grant,
+production secret/custody location or approved paid budget is established there.
+No cloud-console session, secret file or unrelated connected account was searched.
+**Verified authorized deployable environments: none established by these sources.**
+That is an evidence limitation, not a claim that no such resource exists.
+
+Preserve CT17-2026-10-24-r1 P1–P4, CT17-INTERIM-2026-10-24-r2 P5–P10 and
+CT17-FINAL-2026-10-25-r1 F1/F2 byte-for-byte. Existing one-VM topology,
+privilege separation, /api semantics, forwarding policy, immutable archives,
+restart/logging/readiness and Final recovery mechanisms are E — already approved;
+the following additional engineering selections do not approve them again.
+Earlier unselected OS/listener/permission statements remain dated records; this
+revision resolves only B1–B3. Actual host, origin, custody and location deferrals
+remain unresolved.
+
+### B1 — approved host platform and qualification boundary
+
+**Checkpoint CT17.I-host-platform: APPROVE** Ubuntu Server **24.04 LTS**, **x86_64
+(amd64)**, for the recommended new-VM technical platform, with Docker Engine and
+the Docker Compose plugin from Docker's official signed stable apt repository.
+This selects a host distribution/architecture and installation channel, not a
+provider/account/instance, package-install action or a new application technology.
+Keep Java 25/Spring Boot 4.1.1/PostgreSQL 17 and all existing application baselines.
+Release images/archives must be qualified for **linux/amd64**; host compatibility
+does not prove that a particular image or extension has that platform.
+
+The choice matches the existing Noble-based backend responsibility and officially
+supported Docker platform. Prefer the mature compatible LTS over a new host OS,
+Docker Desktop, an unreviewed convenience script or an ARM-only offer requiring
+unqualified images. An existing authorized team VM with another supported Linux
+platform remains an alternative needing its exact compatibility/authority evidence;
+this record does not order its replacement. Select and record the exact OS image
+and Engine/Compose/package versions before their separately authorized installation;
+verify effective OS/kernel/package versions and qualified image identities on the
+actual host before application deployment/exposure. Their current installed state
+and release compatibility cannot be certified without the selected host/artifacts.
+
+Do not infer capacity from this platform choice. Qualification must measure the
+selected Auth/catalogue concurrency, cost-14 real and dummy BCrypt work, JVM/PG/
+MinIO memory and startup peaks, filesystem/volume/artifact headroom, transfer and
+lecturer-network latency. Keep off-VM builds. Record the actual workload, limits,
+results and stop conditions; no RPS, latency target, heap/pool size, disk-retention
+promise or availability guarantee is invented. Do not lower BCrypt cost, omit
+MinIO or change storage architecture to make a small VM appear sufficient.
+CT01's production abuse-control evidence remains required before exposure; this
+record supplies no new numerical rate limit or exception.
+
+### B2 — approved engineering ingress/connection bindings
+
+**Checkpoint CT17.I-ingress-bindings: APPROVE** the following values/topology as
+engineering bindings for a future separately authorized host. They do not establish
+an actual browser origin, firewall grant or externally reachable service.
+
+| Binding | Selected value and invariant |
+| --- | --- |
+| External browser transport | HTTPS default TCP 443; one actual Leader-approved hostname/origin for SPA and REST, without a second product/API origin. Host 443 maps to TLS on the existing frontend Nginx container port 8080. No privileged in-container listener or extra gateway/service is needed. |
+| Internal API upstream | Existing Compose backend:8080, with /api retained. Match exact /api and the /api/ subtree before SPA fallback; use a prefix-preserving upstream URI. Preserve queries, HTTP status, content type and relevant headers; do not intercept API errors into HTML/200. |
+| Internal data connectivity | Retain existing service DNS postgres:5432 and MinIO API minio:9000 on private Compose connectivity; no host/public PostgreSQL, MinIO API/console or direct backend port. This reuses inspected service identities, not actual database/bucket/user names or grants. |
+| Frontend/backend public configuration | Reuse already approved VITE_API_BASE_URL=/api at build time; backend CORS equals the supplied actual HTTPS origin, no wildcard/localhost fallback. P7 forward-headers-strategy=NONE and regenerated ingress headers remain unchanged. |
+| Browser routes | Static shell and real asset 404 behavior; /profile is an additional client route only after the exact CT16 Profile contract validly integrates. It adds no REST endpoint and is not a CT20.I deployment-completion requirement. |
+
+A trusted full-chain certificate must match that actual hostname. Publish A and/or
+AAAA only for verified allocated addresses that really serve this ingress; do not
+publish untested IPv6 or a guessed DNS record. Reject unexpected Host values.
+No public HTTP application/API listener, Actuator/docs/storage-console exception,
+CDN or upstream proxy is selected. Certificate acquisition may need a separately
+approved port-80 challenge arrangement; B2 does not grant that exposure. SSH is
+limited to subsequently approved operator source addresses/identity, not 0.0.0.0/0
+or an invented access mechanism. Actual ingress/admin firewall rules and grants
+require the reserved inputs below. Verify Docker-published ports against its
+packet-filtering path; UFW configuration alone is not proof of private services.
+
+Changing the existing frontend listener to TLS requires a compatible separately
+authorized health-check implementation: the current plaintext HTTP loopback check
+is no longer a valid TLS-listener probe. Use qualified existing image tooling and
+verify intended certificate/hostname behavior; do not disable verification to
+claim TLS readiness or introduce a public health route. Liveness/configuration,
+real external TLS and selected feature readiness remain separate P4/P10 evidence.
+
+### B3 — approved secret delivery and certificate replacement conventions
+
+**Checkpoint CT17.I-secret-delivery: APPROVE** owner-only **0600** permissions for
+the existing ignored root .env when the actual approved checkout/location uses
+that input, with a non-public **0700** containing directory under the approved
+operator's control. Alternatively use the already approved scoped process
+environment; do not invent another secret file/service/location or source .env as
+shell code. Actual owner UID, checkout directory, custody and access grants remain
+unbound. Exclude real secret inputs from Git, image contexts/layers, CLI arguments,
+logs and rendered configuration; forward only each service's consumed variables.
+Runtime/admin identities remain P6-distinct; Docker-daemon/operator authority can
+read service environments and is privileged, not a secret-isolation boundary.
+Do not grant Docker-group/sudo/emergency access or claim least privilege from a
+GitHub assignment alone.
+
+Select a **read-only directory bind** for the existing Nginx's serving certificate
+chain/private key, after its actual source/target location is approved. The
+operator-supplied mapping must let the effective Nginx master UID traverse/read
+only required material; select private key mode **0400**, owned by that approved
+mapped UID, with owner-traversable restricted directories. A separately authorized
+privileged custodian performs replacement. Never solve unreadable keys with
+world/group readability or a root backend. Mount only serving material, not CA
+account keys/DNS credentials/other application secrets, and never place it in the
+SPA document root or image. Actual filesystem ownership/custody remains reserved.
+
+Require certificate/private-key match, full-chain/hostname/validity checks and a
+successful Nginx configuration test before a controlled reload, then independently
+observe the certificate actually served. A reload request alone is not acceptance;
+failed reload can leave the old certificate active. A directory mount must be
+qualified with the renewal method's atomic replacement/symlink layout so renewed
+files remain visible; do not rely on a stale single-file bind or mount a referenced
+key outside the approved directory. Record effective UID, readable paths, served
+certificate identity and renewal/reload outcomes without key content. No new CA
+client, timer, host path, certificate issuance or operational renewal schedule is
+selected or executed. Acquisition/renewal tooling depends on actual domain control,
+CA account/custody and the approved network arrangement; it is not silently filled
+with a default.
+
+Credential changes require a separately authorized operator procedure and coherent
+service reconfiguration/verification; do not overwrite roles/policies, silently
+reset volumes or accept old credentials as a fallback. Preserve ADR001 §11.3:
+JWT key replacement invalidates old signatures and is an operational incident
+action, not ordinary per-user logout. No new multi-key rotation, refresh, revocation,
+key generation or maintenance-risk acceptance is approved here.
+
+### Recommended resource and TLS packet — not approved actual bindings
+
+Priority is an already authorized compatible institutional/team VM, if the Leader
+can provide its real identity, capacity and access evidence; none is currently
+verified. Otherwise the selected **recommendation** is a DigitalOcean Basic Regular
+Droplet in Singapore SGP1, 2 shared vCPUs, 4 GiB RAM, 80 GiB SSD, published base
+price **USD 24/month**. The 4-vCPU/8-GiB/160-GiB **USD 48/month** tier offers more
+headroom if qualification fails. Published specifications/prices and regional
+listing were checked on 25 October 2026; account quota/stock, taxes, optional
+services and total payable cost are not verified. Neither plan is measured or
+certified sufficient for this workload; no account, VM, spend, region availability
+guarantee or capacity acceptance is approved. Shared CPU variability especially
+matters for BCrypt. A paid dedicated-CPU plan costs more without current evidence
+that it is necessary; application builds already occur off-host.
+
+For TLS, prefer a domain-owner-managed publicly trusted certificate/renewal flow
+that can supply the selected PEM serving boundary. If none exists, recommend
+ACME HTTP-01 through the existing Nginx only when the actual owner authorizes
+port 80/challenge location and a qualified host client/lifecycle; it avoids placing
+DNS-wide credentials in this VM. DNS-01 is the alternative when HTTP challenge
+access is unavailable and scoped DNS automation/custody exists. No wildcard is
+needed for one origin. Manual renewal without an accountable tested lifecycle is
+not a complete binding. No CA account, client dependency, challenge path, new
+host location, port-80 exposure, renewal timer or DNS grant is approved by these
+conditional recommendations. Failure to establish this lifecycle blocks exposure.
+
+### Exact remaining inputs, ownership and implementation handoff
+
+| Input | Evidence/status and smallest required decision |
+| --- | --- |
+| Actual host/provider/account/capacity/budget | Leader supplies or approves real resource identity, OS/architecture compatibility, paid budget/period and owner. Candidate price/specification is advisory; measured workload/capacity remains qualification evidence. |
+| Actual origin and DNS | Leader supplies an owned/authorized hostname/zone and DNS operator, actual IP allocations and single HTTPS origin; no placeholder is treated as an endpoint. |
+| TLS acquisition/renewal and key custody | Actual CA/client/challenge arrangement, accountable custodian/operator, serving directory/UID mapping and lifecycle/access authorization; B3 is the technical interface, not these grants. |
+| Operators and emergency access | GitHub lists @tihh647-ui on CT17/DP01/DP03 and CODEOWNS infrastructure with Leader; this is engineering responsibility only. Leader must name actual deployment/emergency identities, authenticated access method/source restrictions and grants. No operator consent or independent verifier is fabricated. |
+| DB/storage/runtime credentials | Leader-approved actual bootstrap/migrator/runtime identities, DB/schema/bucket, grants, JWT and other secret custodians/delivery locations, without publishing values. Do not copy local DB_USER=POSTGRES_USER into production or promote MinIO root to backend credentials. |
+| Release and production image qualification | Actual reviewed source/lock/build IDs, linux/amd64 images/checksums, license/maintenance/vulnerability and safe-init evidence. Local golithus MinIO/MC pins remain local-only; no qualified production replacement/build evidence is available. Ordinary artifact selection can be technically approved when that evidence exists; financial/material exceptions remain reserved. |
+| Host and artifact locations | Actual approved checkout/.env, serving certificate directory/mounts and transfer/recovery destinations plus ownership/access; no absolute host path is invented. |
+| Exposure and verification | Explicit Leader authorization for actual public/admin exposure; separate DP01 implementation/provision/deploy authority, QA01/QA07/DP03 actual component/security/external results and lecturer handoff. No credentials or trial accounts are created here. |
+
+DP01 #71 consumes B1–B3 only after protected integration and separate file/task
+authorization; frontend/nginx.conf, Compose, script, template and health checks
+still need implementation. Auth @duyduyit supplies actual JWT/login/security,
+Course @TamiaoNguyen supplies actual catalogue/detail endpoints and data, Frontend
+@heizseung supplies compatible clients; QA01/QA07/DP03 retain independent evidence.
+Missing registration/login/security/catalogue producers cannot be replaced by a
+healthy container. Final MinIO/encryption/RPO/RTO/retention/recovery commitments,
+U33/U34 and other feature contracts remain unchanged and pending.
+
+**CT17_INTERIM_CONCRETE_BINDING_PENDING_LEADER_INPUT.** B1–B3 complete the
+independently supported additional engineering selections above; actual binding,
+production artifact qualification, implementation authorization and runtime/external
+verification remain incomplete. U18 is not closed. No whole CT17 approval or
+ready-to-provision/deploy claim is made. All new technical selections remain
+**APPROVED_PENDING_PROTECTED_INTEGRATION**, subject to eligible independent
+CODEOWNER/last-push review, new-head required checks and resolved review threads.
+
+Primary evidence: [Docker's Ubuntu support/install channel and firewall limitations](https://docs.docker.com/engine/install/ubuntu/),
+[Docker privileged operator boundary](https://docs.docker.com/engine/install/linux-postinstall),
+[bind-mount semantics](https://docs.docker.com/engine/storage/bind-mounts/),
+[Nginx TLS/key/chain requirements](https://nginx.org/en/docs/http/configuring_https_servers.html)
+and [configuration/reload behavior](https://nginx.org/en/docs/control.html),
+[DigitalOcean specifications/base prices](https://www.digitalocean.com/pricing/droplets)
+and [regional listing](https://docs.digitalocean.com/products/droplets/details/availability/),
+[ACME challenge trade-offs](https://letsencrypt.org/docs/challenge-types/).
+These are vendor engineering/product facts, not CodeMastery resource ownership,
+account availability, risk acceptance or executed verification.
