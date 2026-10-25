@@ -27,11 +27,14 @@ export function LoginPage() {
             catch (error) { focusError.current = true; setFailure(formFailure(error, ['email', 'password'])); return; }
             const controller = new AbortController(), origin = document.activeElement;
             work.current?.abort(); work.current = controller; setLoading(true);
+            let generation = auth.generation;
             try {
-                await auth.login({ email, password }, controller.signal);
-                if (alive.current && work.current === controller && !controller.signal.aborted) navigate(auth.consumeReturn(), { replace: true });
+                const result = auth.login({ email, password }, controller.signal);
+                generation = auth.generation;
+                const installed = await result;
+                if (alive.current && work.current === controller && !controller.signal.aborted && auth.isCurrent(installed)) navigate(auth.consumeReturn(), { replace: true });
             } catch (error) {
-                if (!alive.current || work.current !== controller || controller.signal.aborted || error instanceof ApiError && error.kind === 'cancelled') return;
+                if (!alive.current || work.current !== controller || controller.signal.aborted || auth.generation !== generation || error instanceof ApiError && error.kind === 'cancelled') return;
                 focusError.current = document.activeElement === origin || document.activeElement === document.body;
                 setFailure(formFailure(error, ['email', 'password']));
             } finally { if (alive.current && work.current === controller) setLoading(false); }

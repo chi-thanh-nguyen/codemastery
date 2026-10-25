@@ -3,10 +3,10 @@ import { act, StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 import { ThemeProvider } from '@mui/material';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuthProvider } from './AuthProvider';
+import { AuthProvider, AuthContext } from './AuthProvider';
 import type { AuthContextValue } from './AuthProvider';
 import { useAuth } from '../../features/auth/hooks/useAuth';
 import { LoginPage } from '../../features/auth/pages/LoginPage';
@@ -37,7 +37,7 @@ async function mount(children?: ReactNode, strict = false) {
     const tree = <ThemeProvider theme={appTheme}><MemoryRouter><AuthProvider><Probe />{children}</AuthProvider></MemoryRouter></ThemeProvider>;
     await act(async () => root.render(strict ? <StrictMode>{tree}</StrictMode> : tree));
 }
-async function signIn(name = 'Person A', role: UserRole = 'Learner') { fetcher.mockResolvedValueOnce(json(response(name, role))); await act(async () => auth.login(payload)); }
+async function signIn(name = 'Person A', role: UserRole = 'Learner') { fetcher.mockResolvedValueOnce(json(response(name, role))); await act(async () => { await auth.login(payload); }); }
 async function change(name: string, value: string) {
     const input = host.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -121,7 +121,7 @@ describe('real provider concurrency, expiry and projection', () => {
     });
     it('uses JWT expiry earlier than receipt plus lifetime', async () => {
         await mount(); const now = Math.floor(Date.now() / 1000); fetcher.mockResolvedValueOnce(json(response('A', 'Learner', { iat: now - 899, exp: now + 1 })));
-        await act(async () => auth.login(payload)); await act(async () => vi.advanceTimersByTime(1000)); expect(auth.isAuthenticated).toBe(false);
+        await act(async () => { await auth.login(payload); }); await act(async () => vi.advanceTimersByTime(1000)); expect(auth.isAuthenticated).toBe(false);
     });
     it.each([
         (r: ReturnType<typeof response>) => ({ ...r, tokenType: 'Basic' }), (r: ReturnType<typeof response>) => ({ ...r, expiresIn: -1 }),
@@ -185,4 +185,54 @@ describe('additional UI failure and lifecycle regressions', () => {
 it.each(['Instructor', 'Administrator'] as const)('registration rejects a non-Learner success snapshot %s', async (role) => {
     await mount(<RegisterPage />); await fillRegister(); fetcher.mockResolvedValueOnce(json(user('Wrong role', role), 201)); await submit();
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('invalid response'); expect(auth.user).toBeNull(); expect(host.textContent).not.toContain('Your account was registered.');
+});
+
+it('returns a session receipt that consumers can reject after replacement or logout', async () => {
+    await mount(); fetcher.mockResolvedValueOnce(json(response())); let receipt!: number;
+    await act(async () => { receipt = await auth.login(payload); }); expect(auth.isCurrent(receipt)).toBe(true);
+    await signIn('Person B'); expect(auth.isCurrent(receipt)).toBe(false);
+    fetcher.mockResolvedValueOnce(json(response('Person C'))); await act(async () => { receipt = await auth.login(payload); });
+    await act(async () => auth.logout()); expect(auth.isCurrent(receipt)).toBe(false);
+});
+
+it.each(['logout', 'replacement'])('real LoginPage suppresses a resolved continuation after %s', async (transition) => {
+    function InterleavedLogin() {
+        const actual = useAuth(), location = useLocation();
+        // Delay only the consumer continuation; every session transition uses the real provider.
+        const consumer = Object.create(actual) as AuthContextValue;
+        consumer.login = async (input, signal) => {
+            const receipt = await actual.login(input, signal);
+            if (transition === 'logout') actual.logout(); else await actual.login(input);
+            return receipt;
+        };
+        return <AuthContext.Provider value={consumer}><LoginPage /><output id="consumer-path">{location.pathname}</output></AuthContext.Provider>;
+    }
+    await mount(<InterleavedLogin />); await change('email', payload.email); await change('password', payload.password);
+    fetcher.mockResolvedValueOnce(json(response('Person A')));
+    if (transition === 'replacement') fetcher.mockResolvedValueOnce(json(response('Person B')));
+    await submit(); expect(host.querySelector('#consumer-path')?.textContent).toBe('/');
+    expect(auth.user?.displayName ?? null).toBe(transition === 'replacement' ? 'Person B' : null);
+});
+
+it('real registration form suppresses success after logout between result and UI continuation', async () => {
+    function InterleavedRegistration() {
+        const actual = useAuth(), consumer = Object.create(actual) as AuthContextValue;
+        consumer.register = async (input, signal) => { const user = await actual.register(input, signal); actual.logout(); return user; };
+        return <AuthContext.Provider value={consumer}><RegisterPage /></AuthContext.Provider>;
+    }
+    await mount(<InterleavedRegistration />); await fillRegister(); fetcher.mockResolvedValueOnce(json(user(), 201)); await submit();
+    expect(host.textContent).not.toContain('Your account was registered.'); expect(host.querySelector('form')).not.toBeNull(); expect(auth.user).toBeNull();
+});
+
+it.each(['login', 'register'])('real %s form suppresses a rejected continuation after logout', async (kind) => {
+    function InterleavedFailure() {
+        const actual = useAuth(), consumer = Object.create(actual) as AuthContextValue;
+        consumer.login = async (input, signal) => { try { return await actual.login(input, signal); } catch (error) { actual.logout(); throw error; } };
+        consumer.register = async (input, signal) => { try { return await actual.register(input, signal); } catch (error) { actual.logout(); throw error; } };
+        return <AuthContext.Provider value={consumer}>{kind === 'login' ? <LoginPage /> : <RegisterPage />}</AuthContext.Provider>;
+    }
+    await mount(<InterleavedFailure />);
+    if (kind === 'login') { await change('email', payload.email); await change('password', payload.password); } else await fillRegister();
+    fetcher.mockResolvedValueOnce(json(null, kind === 'login' ? 401 : 400)); await submit();
+    expect(host.querySelector('[role="alert"]')).toBeNull(); expect(auth.user).toBeNull();
 });

@@ -11,7 +11,8 @@ export interface AuthContextValue {
     readonly user: PublicUser | null;
     readonly isAuthenticated: boolean;
     readonly generation: number;
-    login(payload: LoginRequest, signal?: AbortSignal): Promise<void>;
+    /** Receipt identifies the installed session; consumers recheck before publishing UI. */
+    login(payload: LoginRequest, signal?: AbortSignal): Promise<number>;
     register(payload: RegisterRequest, signal?: AbortSignal): Promise<PublicUser>;
     logout(): void;
     isCurrent(generation: number): boolean;
@@ -90,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             explicitLogout.current = false;
             const next = { user: response.user, accessToken: response.accessToken, expiresAt, generation: generation.current, controller: lifetime, signal: lifetime.signal };
             session.current = next; setSnapshot(next);
+            return next.generation;
         } finally { finish(); if (lastLogin.current === controller) lastLogin.current = null; }
     }, [eligible, expire, operation]);
     const register = useCallback(async (payload: RegisterRequest, signal?: AbortSignal) => {

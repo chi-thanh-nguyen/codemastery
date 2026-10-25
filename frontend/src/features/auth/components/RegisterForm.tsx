@@ -30,11 +30,14 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
         } catch (error) { focusError.current = true; setFailure(formFailure(error, ['email', 'password', 'displayName', 'confirmPassword'])); return; }
         const controller = new AbortController(), origin = document.activeElement;
         work.current?.abort(); work.current = controller; setLoading(true);
+        let generation = auth.generation;
         try {
-            await auth.register({ email, password, displayName }, controller.signal);
-            if (alive.current && work.current === controller && !controller.signal.aborted) onSuccess();
+            const result = auth.register({ email, password, displayName }, controller.signal);
+            generation = auth.generation;
+            await result;
+            if (alive.current && work.current === controller && !controller.signal.aborted && auth.generation === generation) onSuccess();
         } catch (error) {
-            if (!alive.current || work.current !== controller || controller.signal.aborted || error instanceof ApiError && error.kind === 'cancelled') return;
+            if (!alive.current || work.current !== controller || controller.signal.aborted || auth.generation !== generation || error instanceof ApiError && error.kind === 'cancelled') return;
             focusError.current = document.activeElement === origin || document.activeElement === document.body;
             setFailure(formFailure(error, ['email', 'password', 'displayName']));
         } finally { if (alive.current && work.current === controller) setLoading(false); }
