@@ -1035,3 +1035,70 @@ expanded and no tests are created or run by this decision record.
 
 Tool evidence: [jsdom unimplemented navigation/layout](https://github.com/jsdom/jsdom#unimplemented-parts-of-the-web-platform)
 confirms why DOM results cannot replace independent real-browser evidence.
+
+
+## FE03 implementation regression evidence — 25 October 2026
+
+PR #98 implements the approved FE03 allocation in exactly these existing CT14
+locations, using the inherited Vitest/jsdom/React toolchain without helper files,
+new testing libraries or runner configuration:
+
+- `frontend/src/shared/api/httpClient.test.ts`: 77 transport cases, including
+  explicit configuration/origin/namespace boundaries, all HeadersInit forms,
+  provider-owned bearer access, fixed credentials/redirect/cache behavior,
+  operation status/media/DTO validation, safe actual-status errors, cancellation
+  and session replacement while fetch or JSON decoding is unfinished.
+- `frontend/src/app/providers/AuthProvider.test.tsx`: 96 real-provider/Auth UI
+  cases, including exact Unicode/UTF-8 predicates and password bytes, ASCII email,
+  payload/status decoding, login races and replacement, public/stale/current 401,
+  403/network retention, timers/resume/pre-send expiry, snapshot invalidation,
+  registration without authentication, safe accessible pending/error/focus states
+  StrictMode cleanup/unmount cancellation and consumer session-receipt checks
+  after login resolution. Five UI continuation regressions were also run against
+  the previous committed forms and failed as expected (stale navigation, success
+  and errors); final source bytes were restored before the passing full run.
+- `frontend/src/routes/index.test.tsx`: 21 real-router/Profile cases, covering the
+  approved routes, guard/one-use return behavior, all roles, logout/expiry/401,
+  replacement and fresh-provider reload, literal text/three-field presentation,
+  no Profile API, browser history within jsdom, heading focus and current FE01
+  composition/formatter runtime. DOM history is not real browser delivery evidence.
+
+Commands were executed from the integrated branch's actual `frontend/` directory:
+
+| Command | Observed result |
+| --- | --- |
+| `npm ci` | PASS: 187 packages added, 188 audited, zero vulnerabilities; npm noted optional fsevents install-script policy. |
+| `npm run typecheck` | PASS. |
+| `npm test` | PASS: 251 tests across six suites; 194 FE03 plus 57 inherited FE01; zero failures/skips. |
+| `VITE_API_BASE_URL=http://localhost:8080 npm run build` | PASS; existing Vite large-chunk advisory remains (about 597 kB minified). |
+| `npm run test:browser -- <installed-playwright-module> <evidence-directory> http://127.0.0.1:4173/` | PASS: existing FE01 harness, 31 checks in Chromium 153.0.8010.12. |
+
+Frontend CI now runs the existing `npm test` between installation and build,
+without continue-on-error or exit-code suppression. A temporary deliberate
+failure in the approved HTTP suite returned npm exit code 1; the original bytes
+were restored before the passing suite and commit. Backend, Frontend and CodeQL
+contexts, triggers and protections are preserved. CI results belong to the
+actual resulting PR HEAD, not historical green checks.
+
+Additional local Chromium verification used controlled Auth responses and the
+production preview: 28 browser checks passed for direct entry/refresh,
+native Back/Forward, keyboard Tab/Enter and visible focus, named busy status,
+associated/focused validation errors, all three Profile roles/plain text,
+logout/expiry/one-use return, empty browser storage, Unicode registration,
+unknown routes and zero invented Profile requests. Profile and registration
+fit 320, 390, 1024 and 1440 CSS-pixel viewports at default zoom; FE01's harness
+also exercised its breakpoint, dialog and responsive controls. A discovered Auth
+submit focus-outline override was corrected in the authorized form/navigation
+composition and verified in Chromium. Visual inspection also caught a mobile
+header collision; bounded wrapping and removal of duplicate header identity were
+verified with rectangle-intersection checks and screenshots. No screen-reader or WCAG certification is
+claimed. Browser fixtures use synthetic users/tokens and are not backend
+credentials; redacted local reports/screenshots are review evidence, not a new
+committed E2E suite.
+
+The absent main login HTTP producer prevents a real Auth browser/backend run in
+this evidence. No actual PostgreSQL, configured backend authorization, lecturer
+access, Nginx/TLS or deployed deep-link delivery is established. Independent QA07
+and QA01 responsibilities remain; mocked/DOM/build evidence cannot replace them.
+AI assistance: Codex assisted the authorized implementation, regression authoring
+and local verification; no human approval or review is implied.

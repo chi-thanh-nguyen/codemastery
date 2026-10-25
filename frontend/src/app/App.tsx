@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { BrowserRouter } from 'react-router';
+import { AuthProvider } from './providers/AuthProvider';
+import { AppRouter, SessionNavigation } from '../routes/index';
 import { ThemeProvider, CssBaseline, Box, Button, TextField, Paper, Typography, Chip, LinearProgress,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, Tab, InputAdornment } from '@mui/material';
 import { appTheme, presentationTokens as tokens } from './theme/theme';
@@ -43,7 +46,7 @@ function DemoMetric({ label, value, note, icon, tint }: { label: string; value: 
     </Paper>;
 }
 
-export default function App() {
+function PresentationPreview() {
     const [selectedNav, setSelectedNav] = useState('overview');
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState('all');
@@ -169,13 +172,13 @@ export default function App() {
         </Paper>
     </>;
 
-    return <ThemeProvider theme={appTheme}><CssBaseline />
+    return <>
         <Box component="a" href="#main-content" sx={{ position: 'fixed', top: 8, left: 8, zIndex: 1600, transform: 'translateY(-200%)',
             '&:focus': { transform: 'none' }, bgcolor: 'primary.main', color: 'primary.contrastText', p: 1.5, borderRadius: '8px' }}>Skip to content</Box>
         {selectedNav === 'auth-preview' ? <Box component="main" id="main-content" tabIndex={-1}><AuthLayout title="A calm space to start." subtitle="Authentication layout preview. No sign-in or session is implemented here.">
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>A reusable frame for caller-provided content, with room to focus.</Typography>
             <Button fullWidth variant="contained" onClick={() => setSelectedNav('overview')}>Back to demo workspace</Button>
-        </AuthLayout></Box> : <DashboardLayout headerTitle="Learning workspace" userDisplayName="Demo learner" navItems={NAV_ITEMS} selectedNavId={selectedNav} onNavSelect={setSelectedNav}>
+        </AuthLayout></Box> : <DashboardLayout headerTitle="Learning workspace" headerActions={<SessionNavigation />} navItems={NAV_ITEMS} selectedNavId={selectedNav} onNavSelect={setSelectedNav}>
             {selectedNav === 'components' ? components : overview}
             <Typography role="status" variant="body2" sx={{ mt: notice ? 2 : 0 }}>{notice}</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3 }}>CodeMastery · Independent presentation preview</Typography>
@@ -184,5 +187,11 @@ export default function App() {
             message={dialog === 'reset' ? 'This clears only the search and debounce demonstration inputs. No learning data is changed.' : 'This is an illustrative lesson card. Course content, lesson delivery and learning progress are not connected in this presentation preview.'}
             confirmLabel={dialog === 'reset' ? 'Reset preview' : 'Done'} cancelLabel={dialog === 'reset' ? 'Keep editing' : 'Close'} isDestructive={dialog === 'reset'}
             onConfirm={dialog === 'reset' ? resetPreview : () => setDialog(null)} onCancel={() => setDialog(null)} />
+    </>;
+}
+
+export default function App() {
+    return <ThemeProvider theme={appTheme}><CssBaseline />
+        <BrowserRouter><AuthProvider><AppRouter catalogue={<PresentationPreview />} /></AuthProvider></BrowserRouter>
     </ThemeProvider>;
 }

@@ -349,7 +349,7 @@ Run the following commands from `frontend/`:
 | --- | --- |
 | `npm run dev` | Start the Vite development server. |
 | `npm run typecheck` | Check application source and Vite configuration without emitting files. |
-| `npm test` | Run bounded FE01 utility/hook/component regressions with Vitest/jsdom. |
+| `npm test` | Run FE01 and the approved FE03 HTTP/provider/router regressions with Vitest/jsdom. |
 | `npm run build` | Run type-checking and build production assets in `frontend/dist/`. |
 | `npm run preview` | Preview an existing production build locally; run after building. |
 | `npm run test:browser -- "<installed-playwright-module>" "<evidence-directory>" "<preview-url>"` | Run optional Chromium presentation checks against a running frontend, with actual prerequisite paths and URL substituted. |
@@ -1332,3 +1332,54 @@ eligible independent CODEOWNER/last-push review and QA evidence remain gates.
 Technical references: [declarative route composition](https://reactrouter.com/7.18.4/start/declarative/routing)
 and [React state ownership/reset](https://react.dev/learn/preserving-and-resetting-state);
 these support the existing-stack mechanism, not new backend authority.
+
+
+## FE03 implementation in PR #98 — 25 October 2026
+
+This is an implementation record, not a new technical decision or acceptance of
+real integration. The Leader explicitly authorized remediation, the 14 Issue #56
+primary files, the exact router manifest/lockfile change, the three CT14 FE03
+suites, factual setup/testing synchronization and the existing Frontend CI test
+step. The feature branch preserves its published commits and integrates main
+`1e23fe240af962f4d36041ddb1f53beb5edba943` with a regular merge.
+
+Consumed decisions are CT16-2026-10-24-r1, Final F1/F2 and
+CT16-PROFILE-2026-10-25-r1 (PR #102, merged `aed6985`), CT14's existing six-path
+exception, Final F1/F2 and Profile/Auth UI V1/V2 (PR #106, merged `1e23fe2`),
+and the unchanged CT01/CT18/CT38 slices identified above. These implementation
+facts do not alter the historical proposal, approval or provenance records.
+
+Install with `npm ci` in `frontend/`. The sole added direct production dependency
+is exact `react-router@7.18.4`; the lockfile also records its `cookie@1.1.1` and
+`set-cookie-parser@2.7.3` transitive resolutions. The existing Node range and all
+other direct versions remain unchanged. The clean installation reported zero
+npm audit vulnerabilities on this date; this is a dated scan, not a guarantee.
+
+Set the existing public build-time `VITE_API_BASE_URL` explicitly using one of
+the CT16 forms above. No fallback origin, new variable, secret or Vite proxy is
+introduced. Configuration is validated before any API request. Changing the
+build-time value requires rebuilding. The documented host-local producer address
+can be supplied for local frontend verification:
+
+```bash
+cd frontend
+npm run typecheck
+npm test
+VITE_API_BASE_URL=http://localhost:8080 npm run build
+npm run preview -- --host 127.0.0.1
+```
+
+One BrowserRouter and AuthProvider compose the current FE01 presentation at
+`/courses`, public Auth pages, the public Course-detail composition placeholder,
+the protected read-only `/profile`, root replacement and unknown-route state.
+The current FE01 dashboard and utilities remain explicitly illustrative; actual
+catalogue/detail rendering belongs to FE07. No Course membership is implemented.
+Profile reads only the validated login snapshot and performs no API lookup.
+Reload loses the memory session. Offline logout has the previously accepted
+client-local scope and does not revoke copied tokens on a server or other tab.
+
+The real login HTTP producer is absent from the integrated main AuthController.
+Controlled Auth responses establish frontend behavior only; QA07 browser/real
+REST/PostgreSQL, QA01 backend security, deployment/proxy/deep-link delivery and
+independent protected review retain their own evidence gates. See the execution
+record in [testing.md](testing.md#fe03-implementation-regression-evidence--25-october-2026).
