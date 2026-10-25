@@ -17,6 +17,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -132,9 +133,13 @@ class JwtTokenProviderTest {
 
     private static String signed(Map<String, Object> claims, Map<String, Object> header, byte[] key) throws Exception {
         // Raw JSON and JCA signing prevent a JWT builder from repairing malformed test claims.
+        return signedJson(JSON.writeValueAsString(claims), JSON.writeValueAsString(header), key);
+    }
+
+    private static String signedJson(String claims, String header, byte[] key) throws Exception {
         Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
-        String input = encoder.encodeToString(JSON.writeValueAsBytes(header)) + "."
-                + encoder.encodeToString(JSON.writeValueAsBytes(claims));
+        String input = encoder.encodeToString(header.getBytes(StandardCharsets.UTF_8)) + "."
+                + encoder.encodeToString(claims.getBytes(StandardCharsets.UTF_8));
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(Keys.hmacShaKeyFor(key));
         return input + "." + encoder.encodeToString(mac.doFinal(input.getBytes(StandardCharsets.US_ASCII)));
@@ -292,6 +297,131 @@ class JwtTokenProviderTest {
     }
 
     @Nested
+    @Timeout(5) // Local safety watchdog, not a latency benchmark or deployment limit.
+    class ParsingResourceSafety {
+        private Map<String, Object> header() {
+            return new LinkedHashMap<>(Map.of("alg", "HS256", "typ", "JWT"));
+        }
+
+        @Test
+        void headerClaimNamesAreMetadataAndNeverValidatedAsPayloadClaims() throws Exception {
+            Map<String, Object> header = header();
+            header.put("iat", "header metadata");
+            header.put("exp", new BigDecimal("1e10000"));
+            assertEquals(USER_ID, provider.parseSubject(signed(claims(), header, secret)));
+            rejected(provider, signed(claims(), header, settings().decodedSecret()));
+        }
+
+        @Test
+        void headerClaimsCannotSupplyMissingPayloadClaims() throws Exception {
+            Map<String, Object> header = header();
+            header.putAll(claims());
+            rejected(provider, signed(Map.of(), header, secret));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"iat", "exp"})
+        void rejectsExtremeNumericMagnitudesBeforeArithmetic(String field) throws Exception {
+            for (String number : List.of("1e10000", "-1e10000", "1e-10000", "0e-10000")) {
+                Map<String, Object> values = claims();
+                values.put(field, new BigDecimal(number));
+                rejected(provider, signed(values));
+            }
+        }
+
+        @Test
+        void unequalExtremeFractionalScalesNearEpochZeroCannotExpandDuringSubtraction() throws Exception {
+            Map<String, Object> values = claims();
+            values.put("iat", new BigDecimal("1e-10000"));
+            values.put("exp", 900);
+            rejected(providerAt(Instant.ofEpochSecond(1)), signed(values));
+            values.put("iat", new BigDecimal("0e-10000"));
+            assertEquals(USER_ID, providerAt(Instant.ofEpochSecond(1)).parseSubject(signed(values)));
+        }
+
+        @Test
+        void preservesEqualFractionsAndEquivalentDecimalRepresentations() throws Exception {
+            Map<String, Object> values = claims();
+            values.put("iat", new BigDecimal(NOW.getEpochSecond() + ".123456789012345678901234567890"));
+            values.put("exp", new BigDecimal((NOW.getEpochSecond() + 900) + ".12345678901234567890123456789"));
+            assertEquals(USER_ID, providerAt(NOW.plusSeconds(1)).parseSubject(signed(values)));
+        }
+
+        @Test
+        void compactInputAt16384CharactersIsAcceptedAndOneMoreIsRejected() throws Exception {
+            String boundary = paddedToken(16_384);
+            assertEquals(16_384, boundary.length());
+            assertEquals(USER_ID, provider.parseSubject(boundary));
+            String oversized = paddedToken(16_385);
+            assertEquals(16_385, oversized.length());
+            rejected(provider, oversized);
+            rejected(provider, " ".repeat(16_385));
+        }
+
+        private String paddedToken(int length) throws Exception {
+            // Base64url has a deterministic 4/3 expansion; only a few padding sizes
+            // around this independent estimate are needed, with no parser-derived oracle.
+            int fixedLength = signed(claims()).length();
+            for (int padding = (length - fixedLength) * 3 / 4 - 20;
+                 padding < (length - fixedLength) * 3 / 4 + 4; padding++) {
+                Map<String, Object> values = claims();
+                values.put("padding", "x".repeat(padding));
+                String candidate = signed(values);
+                if (candidate.length() == length) {
+                    return candidate;
+                }
+            }
+            throw new AssertionError("Test fixture could not reach the required compact length");
+        }
+
+        @ParameterizedTest
+        @ValueSource(booleans = {true, false})
+        void boundsNumericTokenLengthInHeadersAndClaims(boolean inHeader) throws Exception {
+            Map<String, Object> header = header();
+            Map<String, Object> values = claims();
+            Map<String, Object> target = inHeader ? header : values;
+            target.put("counter", new java.math.BigInteger("1".repeat(64)));
+            assertEquals(USER_ID, provider.parseSubject(signed(values, header, secret)));
+            target.put("counter", new java.math.BigInteger("1".repeat(65)));
+            rejected(provider, signed(values, header, secret));
+        }
+
+        @ParameterizedTest
+        @ValueSource(booleans = {true, false})
+        void boundsJsonNestingInHeadersAndClaims(boolean inHeader) throws Exception {
+            Map<String, Object> header = header();
+            Map<String, Object> values = claims();
+            Map<String, Object> target = inHeader ? header : values;
+            Object nested = "leaf";
+            for (int depth = 0; depth < 15; depth++) {
+                nested = List.of(nested);
+            }
+            target.put("nested", nested); // Root object plus 15 arrays = depth 16.
+            assertEquals(USER_ID, provider.parseSubject(signed(values, header, secret)));
+            target.put("nested", List.of(nested));
+            rejected(provider, signed(values, header, secret));
+        }
+
+        @ParameterizedTest
+        @ValueSource(booleans = {true, false})
+        void malformedJsonAndUnrepresentableExponentsRejectGenerically(boolean inHeader) throws Exception {
+            String header = JSON.writeValueAsString(header());
+            String payload = JSON.writeValueAsString(claims());
+            for (String invalid : List.of("null", "[]", "{} {}", "{\"value\":1e2147483648}")) {
+                rejected(provider, signedJson(inHeader ? payload : invalid, inHeader ? invalid : header, secret));
+            }
+        }
+
+        @Test
+        void compressionIsRejectedBeforePayloadExpansion() {
+            String token = Jwts.builder().header().type("JWT").and()
+                    .claims(claims()).compressWith(Jwts.ZIP.GZIP)
+                    .signWith(Keys.hmacShaKeyFor(secret), Jwts.SIG.HS256).compact();
+            rejected(provider, token);
+        }
+    }
+
+    @Nested
     class ComponentWiring {
         @Test
         void productionComponentsInitializeWithBootManagedJackson3AndSettings() {
@@ -415,6 +545,17 @@ class JwtTokenProviderTest {
             var response = mvc.perform(request).andExpect(status().isUnauthorized()).andReturn().getResponse();
             assertProblem(response, 401, "Authentication failed.", "/api/review-only-unselected");
             verifyNoInteractions(users);
+            assertEquals(0, endpoints.effects.get());
+        }
+
+        @Test
+        void oversizedBearerFailsSafelyBeforeAccountLookupOrEndpointEffects() throws Exception {
+            var response = mvc.perform(get("/api/review-only-unselected")
+                            .header("Authorization", "Bearer " + "x".repeat(16_385)))
+                    .andExpect(status().isUnauthorized()).andReturn().getResponse();
+            assertProblem(response, 401, "Authentication failed.", "/api/review-only-unselected");
+            verifyNoInteractions(users);
+            assertNull(SecurityContextHolder.getContext().getAuthentication());
             assertEquals(0, endpoints.effects.get());
         }
 
