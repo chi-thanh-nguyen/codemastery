@@ -12,19 +12,23 @@ import variableFontUrl from './plus-jakarta-sans-latin-wght.woff2';
 export const presentationTokens = {
     sidebarWidth: 248,
     headerHeight: 72,
-    cardRadius: 16,
+    cardRadius: 12,
     controlRadius: 10,
     frameRadius: 12,
     pageBackground: '#F8F9FA',
     surfaceBorder: '#E6E8EC',
     searchSurface: '#F5F6F8',
-    chartBarFill: '#DFF5FC',
-    chartBarEdge: '#518596',
-    chartBarActive: '#2D8EAF',
+    sidebarBackground: '#FFFFFE',
+    chartBarFill: '#52A5F7',
+    chartBarFade: '#EFF8FF',
+    chartBarEdge: '#3988CE',
+    chartBarActiveEdge: '#287CC9',
+    chartBarActive: '#2589DE',
     chartGrid: '#E8EBEF',
-    softBlue: '#EDF4FF',
-    softGreen: '#EDF7F0',
-    softOrange: '#FFF4E5',
+    softBlue: '#E3EEFF',
+    softGreen: '#D7F9E8',
+    softOrange: '#FFEDD5',
+    softViolet: '#EDE5FF',
     softPink: '#FCEFF4',
     muted: '#A8A6AF', // Decorative only; never ordinary interface text.
     warm: '#996F1F',
@@ -98,20 +102,25 @@ export const appTheme = createTheme({
         } },
         MuiIconButton: { styleOverrides: { root: { borderRadius: 8, width: 44, height: 44 } } },
         MuiOutlinedInput: { styleOverrides: {
-            root: { borderRadius: presentationTokens.controlRadius, backgroundColor: '#FFFFFF', fontSize: '.875rem', lineHeight: 1.5, '& .MuiOutlinedInput-notchedOutline': { borderColor: '#87919C' } },
-            input: { '&::placeholder': { color: '#4A5458', opacity: 1 } },
-        } },
-        MuiFilledInput: { styleOverrides: {
-            root: { borderRadius: presentationTokens.controlRadius, minHeight: 44, backgroundColor: presentationTokens.searchSurface,
-                fontSize: '.875rem', lineHeight: 1.5,
-                '&:hover, &.Mui-focused': { backgroundColor: presentationTokens.searchSurface },
-                '&::before': { borderBottomColor: '#7E8A98' },
-                '&::before, &::after': { borderBottomLeftRadius: presentationTokens.controlRadius, borderBottomRightRadius: presentationTokens.controlRadius },
-                '&.Mui-focused': { backgroundColor: presentationTokens.searchSurface, outline: '2px solid #1F6BE8', outlineOffset: 2 },
+            root: { borderRadius: presentationTokens.controlRadius, backgroundColor: '#FFFFFF', fontSize: '.875rem', lineHeight: 1.5,
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#87919C' },
+                variants: [{ props: { hiddenLabel: true }, style: {
+                    minHeight: 44, backgroundColor: presentationTokens.searchSurface,
+                    '& .MuiOutlinedInput-notchedOutline, &:hover .MuiOutlinedInput-notchedOutline': { borderWidth: 0 },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderWidth: 2, borderColor: '#1F6BE8' },
+                } }],
             },
             input: { '&::placeholder': { color: '#4A5458', opacity: 1 } },
+            // The opaque label masks the border while moving; animating the notch separately
+            // leaves a trailing gap after the label descends. Only the label needs to animate.
+            notchedOutline: { '& legend': { transition: 'none' } },
         } },
-        MuiInputLabel: { styleOverrides: { root: { color: '#4A5458' } } },
+        // MUI's legend uses .75em of the input font; its scaled label must use the same base size.
+        MuiInputLabel: { styleOverrides: {
+            root: { color: '#4A5458', fontSize: '.875rem', lineHeight: 1.5 },
+            // Keep the border behind the label throughout its motion, including interrupted blur.
+            outlined: { backgroundColor: '#FFFFFF' },
+        } },
         MuiChip: { styleOverrides: { root: { borderRadius: 6, fontWeight: 500, fontSize: '.8125rem' } } },
         MuiListItemButton: { styleOverrides: { root: {
             minHeight: 44, borderRadius: 8,

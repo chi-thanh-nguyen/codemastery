@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { Box, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Typography, useMediaQuery, useTheme } from '@mui/material';
 import { presentationTokens } from '../../app/theme/theme';
-import { PresentationIcon } from './PresentationIcon';
 import { BrandLogo } from './BrandLogo';
 
 export interface NavItem { id: string; label: string; badge?: string | number; icon?: ReactNode; group?: string }
@@ -21,7 +20,7 @@ export function SidebarNav({ items, selectedId, onSelect, mobileOpen, onMobileCl
     const reducedMotion = theme.motion.reducedMotion === 'always'
         || (theme.motion.reducedMotion === 'system' && prefersReducedMotion);
     const content = (
-        <Box component="nav" aria-label="Main navigation" sx={{ width, height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Box component="nav" aria-label="Main navigation" sx={{ width, height: '100%', display: 'flex', flexDirection: 'column', bgcolor: presentationTokens.sidebarBackground }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, px: 3, height: presentationTokens.headerHeight, flexShrink: 0 }}>
                 <BrandLogo size={34} decorative />
                 <Typography variant="h6" component="p" sx={{ fontWeight: 700 }}>CodeMastery</Typography>
@@ -47,8 +46,7 @@ export function SidebarNav({ items, selectedId, onSelect, mobileOpen, onMobileCl
             </List>
             <Box sx={{ mt: 'auto', mx: 2.5, mb: 3, pt: 4 }}>
                 {items.some((item) => item.group) && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: .5, mb: 2 }}>Local demonstration views</Typography>}
-                <Box sx={{ p: 2, borderRadius: '14px', bgcolor: presentationTokens.softBlue, border: '1px solid #DCE8FC' }}>
-                <PresentationIcon name="spark" sx={{ color: 'primary.dark', fontSize: 20, mb: .75 }} />
+                <Box sx={{ pt: 2, borderTop: 1, borderColor: 'divider' }}>
                 <Typography variant="subtitle2">One step at a time.</Typography>
                 <Typography variant="caption" color="text.secondary">Small progress. Lasting knowledge.</Typography>
                 </Box>

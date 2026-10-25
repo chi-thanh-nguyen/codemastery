@@ -108,15 +108,45 @@ let browser;
   }
   if(cdp)await cdp.detach();
  });
- await check('filled sample search keeps a contrasting boundary and visible keyboard focus',async()=>{
+ await check('sample search is borderless at rest and keeps one contrasting focus boundary',async()=>{
   const input=page.getByRole('textbox',{name:'Search sample lessons'});
   const root=input.locator('..');
-  const rest=await root.evaluate(e=>{const s=getComputedStyle(e),line=getComputedStyle(e,'::before');return {background:s.backgroundColor,boundary:line.borderBottomColor,height:e.getBoundingClientRect().height}});
-  assert(rest.height>=44);assert.notEqual(rest.background,'rgb(255, 255, 255)');assert(contrast(rest.boundary,rest.background)>=3);
+  const rest=await root.evaluate(e=>{const s=getComputedStyle(e),line=getComputedStyle(e.querySelector('fieldset'));return {background:s.backgroundColor,boundary:parseFloat(line.borderTopWidth),height:e.getBoundingClientRect().height}});
+  assert(rest.height>=44);assert.notEqual(rest.background,'rgb(255, 255, 255)');assert.equal(rest.boundary,0);
+  await input.hover();assert.equal(await root.locator('fieldset').evaluate(e=>parseFloat(getComputedStyle(e).borderTopWidth)),0);
   await input.focus();
-  const focus=await colors(root);assert(parseFloat(focus.outlineWidth)>=2);assert(!focus.outline.startsWith('none'));
+  const focus=await colors(root);const boundary=await root.locator('fieldset').evaluate(e=>{const s=getComputedStyle(e);return {width:parseFloat(s.borderTopWidth),color:s.borderTopColor}});
+  assert.equal(boundary.width,2);assert(contrast(boundary.color,rest.background)>=3);
+  for(const target of [input,root])assert.equal(await target.evaluate(e=>getComputedStyle(e).outlineStyle),'none');
+  for(const pseudo of ['::before','::after'])assert.equal(await root.evaluate((e,p)=>getComputedStyle(e,p).content,pseudo),'none');
   assert(contrast(focus.color,focus.background)>=4.5);
   await input.evaluate(e=>e.blur());
+ });
+ await check('dashboard uses flat surfaces, readable colorful metrics and an unshadowed chart',async()=>{
+  assert.equal(await page.locator('#main-content').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(255, 255, 255)');
+  assert.equal(await page.locator('.MuiDrawer-docked nav').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(255, 255, 254)');
+  const frame=page.locator('.MuiDrawer-docked').locator('..');
+  for(const surface of [frame,frame.locator('..')]){
+   const style=await surface.evaluate(e=>{const s=getComputedStyle(e);return {shadow:s.boxShadow,image:s.backgroundImage}});
+   assert.equal(style.shadow,'none');assert.equal(style.image,'none');
+  }
+  const accents=new Set();
+  for(const label of ['Study time','Lessons completed','Practice streak','Course progress']){
+   const metric=await page.getByText(label,{exact:true}).evaluate(e=>{
+    const card=e.closest('.MuiPaper-root'),icon=card.querySelector('svg').parentElement,c=getComputedStyle(card),i=getComputedStyle(icon);
+    return {shadow:c.boxShadow,background:c.backgroundColor,icon:i.color,accent:i.backgroundColor,iconShadow:i.boxShadow,iconBorder:parseFloat(i.borderTopWidth),
+     text:getComputedStyle(card.querySelector('.MuiTypography-caption')).color};
+   });
+   assert.equal(metric.shadow,'none');assert.equal(metric.background,'rgb(255, 255, 255)');
+   assert(contrast(metric.icon,metric.accent)>=3);assert(contrast(metric.text,metric.background)>=4.5);
+   assert.equal(metric.iconBorder,1);assert.notEqual(metric.iconShadow,'none');
+   assert.equal(metric.icon,'rgb(255, 255, 255)');
+   assert(contrast(metric.accent,'rgb(255,255,255)')>=3,'Icon containers should use a strong color');
+   accents.add(metric.accent);
+  }
+  assert.equal(accents.size,4);
+  const tooltip=page.getByRole('group',{name:'Sample weekly study minutes'}).getByRole('tooltip');
+  assert.equal(await tooltip.evaluate(e=>getComputedStyle(e).boxShadow),'none');
  });
  const layouts=[];
  for(const [width,height] of [[1440,900],[1024,768],[768,1024],[390,844],[320,844],[899,900],[900,900],[1199,900],[1200,900]]){
@@ -160,12 +190,17 @@ let browser;
   assert(Math.max(...positions)-Math.min(...positions)<3,JSON.stringify(positions));
  });
  await check('chart value boundaries and progress indicators meet non-text contrast',async()=>{
-  const bars=page.getByRole('group',{name:'Sample weekly study minutes'}).locator('[data-study-bar]');
+  const chart=page.getByRole('group',{name:'Sample weekly study minutes'}),bars=chart.locator('[data-study-bar]');
+  const grid=await chart.locator(':scope > div').nth(1).locator(':scope > div').first().locator('div').first().evaluate(e=>getComputedStyle(e).borderTopColor);
   assert.equal(await bars.count(),7);
   for(const bar of await bars.all()){
-   const s=await bar.evaluate(e=>{const s=getComputedStyle(e);return {border:s.borderTopColor,borderWidth:parseFloat(s.borderTopWidth),fill:s.backgroundColor}});
+   const s=await bar.evaluate(e=>{const s=getComputedStyle(e);return {border:s.borderTopColor,borderWidth:parseFloat(s.borderTopWidth),fill:s.backgroundColor,gradient:s.backgroundImage}});
    assert(s.borderWidth>=2);assert(contrast(s.border,'rgb(255,255,255)')>=3);
-   if(await bar.locator('..').locator('..').getAttribute('aria-pressed')!=='true')assert(contrast(s.border,s.fill)>=3);
+   assert(s.gradient.startsWith('linear-gradient('));
+   const stops=s.gradient.match(/rgb\([^)]+\)/g);assert.equal(stops?.length,2);
+   assert(contrast(stops[0],'rgb(255,255,255)')>contrast(stops[1],'rgb(255,255,255)'),'Sky blue must fade toward a lighter bottom');
+   // The cap marks the bar against the canvas/grid; it need not contrast with its own fill.
+   assert(contrast(s.border,grid)>=3);
   }
   const progress=page.getByRole('progressbar',{name:'Sample course completion',exact:true});const background=await progress.evaluate(e=>getComputedStyle(e).backgroundColor);const fill=await progress.locator('.MuiLinearProgress-bar').evaluate(e=>getComputedStyle(e).backgroundColor);assert(contrast(fill,background)>=3);
  });
@@ -195,8 +230,21 @@ let browser;
  await check('chart hover previews a day without replacing keyboard selection',async()=>{
   const chart=page.getByRole('group',{name:'Sample weekly study minutes'});
   await chart.getByRole('button',{name:'Tue: 45 sample study minutes',exact:true}).hover();assert.equal(await chart.getByRole('tooltip').textContent(),'Tue · 45 min');
+  const tue=await chart.getByRole('button',{name:'Tue: 45 sample study minutes',exact:true}).boundingBox();
+  const wed=await chart.getByRole('button',{name:'Wed: 25 sample study minutes',exact:true}).boundingBox();
+  await page.mouse.move((tue.x+tue.width+wed.x)/2,tue.y+tue.height/2);
+  assert.equal(await chart.getByRole('tooltip').textContent(),'Tue · 45 min','Moving through the column gap must retain the hover preview');
+  await chart.getByRole('button',{name:'Wed: 25 sample study minutes',exact:true}).hover();assert.equal(await chart.getByRole('tooltip').textContent(),'Wed · 25 min');
   assert.equal(await chart.getByRole('button',{name:'Sun: 25 sample study minutes',exact:true}).getAttribute('aria-pressed'),'true');
   await page.getByRole('heading',{name:'Learning rhythm',exact:true}).hover();assert.equal(await chart.getByRole('tooltip').textContent(),'Sun · 25 min');
+ });
+ await check('outside clicks clear chart selection and tooltip, with pointer and keyboard reselection',async()=>{
+  const chart=page.getByRole('group',{name:'Sample weekly study minutes'}),tue=chart.getByRole('button',{name:'Tue: 45 sample study minutes',exact:true});
+  await page.getByRole('textbox',{name:'Search sample lessons'}).click();
+  assert.equal(await chart.locator('[aria-pressed="true"]').count(),0);assert.equal(await chart.getByRole('tooltip').count(),0);
+  await tue.click();assert.equal(await tue.getAttribute('aria-pressed'),'true');assert.equal(await chart.getByRole('tooltip').textContent(),'Tue · 45 min');
+  await page.getByText('Study time',{exact:true}).click();assert.equal(await chart.locator('[aria-pressed="true"]').count(),0);assert.equal(await chart.getByRole('tooltip').count(),0);
+  await tue.focus();await page.keyboard.press('ArrowRight');assert.equal(await chart.getByRole('tooltip').textContent(),'Wed · 25 min');
  });
  await check('search filters the local sample table after debounce',async()=>{
   await page.getByRole('textbox',{name:'Search sample lessons'}).fill('decisions');await page.waitForTimeout(450);
@@ -212,8 +260,10 @@ let browser;
   await search.press('Enter');assert(await page.locator('#sample-learning-path').evaluate(e=>e===document.activeElement));
  });
  await check('adaptive explanation is explicitly static sample content',async()=>assert(await page.getByText('Illustration only. No live mastery calculation is performed.',{exact:true}).isVisible()));
- await check('tabs filter sample rows',async()=>{
+ await check('tabs filter sample rows without shrinking the learning path',async()=>{
+  const section=page.locator('#sample-learning-path');const height=await section.evaluate(e=>e.getBoundingClientRect().height);
   await page.getByRole('tab',{name:'Completed',exact:true}).click();assert.equal(await page.getByText('Thinking in variables',{exact:true}).count(),1);assert.equal(await page.getByText('Making decisions',{exact:true}).count(),0);
+  assert(Math.abs(await section.evaluate(e=>e.getBoundingClientRect().height)-height)<1);
   await page.getByRole('tab',{name:'All lessons',exact:true}).click();
  });
  await check('sample lesson control opens an honest accessible dialog',async()=>{
@@ -308,6 +358,91 @@ let browser;
  });
  const motionAudit=[],assetLoading=[];
  async function twoFrames(){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(null)))))}
+ const textFieldAudit=[],labelMotionAudit=[];
+ async function inspectLabelMotion(input){
+  const samples=await input.evaluate(async input=>{
+   const root=input.closest('.MuiOutlinedInput-root'),label=root.closest('.MuiFormControl-root').querySelector('label'),legend=root.querySelector('legend');
+   const frames=[];
+   for(const state of ['focus','blur','interrupted focus']){
+    if(state==='interrupted focus'){input.focus();input.blur();}
+    if(state==='blur')input.blur();else input.focus();
+    const start=performance.now();
+    await new Promise(resolve=>{
+     function frame(){
+      const l=getComputedStyle(label),g=getComputedStyle(legend),r=getComputedStyle(root),box=label.getBoundingClientRect(),outline=root.getBoundingClientRect();
+      frames.push({state,time:performance.now()-start,background:l.backgroundColor,surface:r.backgroundColor,delay:g.transitionDelay,transitionProperty:g.transitionProperty,shrink:label.dataset.shrink==='true',
+       transform:l.transform,notchWidth:legend.getBoundingClientRect().width,labelTop:box.top-outline.top,labelBottom:box.bottom-outline.top});
+      if(performance.now()-start<250)requestAnimationFrame(frame);else resolve();
+     }
+     requestAnimationFrame(frame);
+    });
+   }
+   return frames;
+  });
+  assert(samples.length>6,'Observe intermediate frames, not only the settled input');
+  for(const sample of samples){
+   assert.equal(sample.background,sample.surface,'Moving label must mask the border immediately, including reversed transitions');
+   assert.notEqual(sample.background,'rgba(0, 0, 0, 0)');
+   assert.equal(parseFloat(sample.delay),0,'Notch opening must not lag behind label motion');
+   assert.equal(sample.transitionProperty,'none','Notch must not animate independently of the opaque moving label');
+   if(!sample.shrink)assert(sample.notchWidth<1,'Empty-field border must close immediately on blur, without a trailing gap');
+  }
+  labelMotionAudit.push({id:await input.getAttribute('id'),viewport:page.viewportSize(),samples});
+ }
+ async function inspectField(input,state,shrink){
+  const metrics=await input.evaluate(e=>{
+   const root=e.closest('.MuiOutlinedInput-root'),form=root.closest('.MuiFormControl-root'),label=form.querySelector('label'),legend=root.querySelector('legend');
+   const css=getComputedStyle(e),r=getComputedStyle(root),border=getComputedStyle(root.querySelector('fieldset'));
+   const l=label&&getComputedStyle(label),b=label?.getBoundingClientRect();
+   return {id:e.id,state:null,value:e.value,focused:e===document.activeElement,font:parseFloat(css.fontSize),caret:css.caretColor,
+    outline:css.outlineStyle,rootOutline:r.outlineStyle,before:getComputedStyle(root,'::before').content,after:getComputedStyle(root,'::after').content,
+    borderWidth:parseFloat(border.borderTopWidth),borderColor:border.borderTopColor,radius:r.borderRadius,
+    label:label&&{font:parseFloat(l.fontSize),color:l.color,shrink:label.dataset.shrink==='true',width:b.width,height:b.height,transform:l.transform},
+    legend:{font:parseFloat(getComputedStyle(legend).fontSize),width:legend.getBoundingClientRect().width},
+    invalid:e.getAttribute('aria-invalid'),describedBy:e.getAttribute('aria-describedby'),overflow:document.documentElement.scrollWidth>innerWidth};
+  });
+  assert.equal(metrics.outline,'none',state);assert.equal(metrics.rootOutline,'none',state);
+  assert.equal(metrics.before,'none',state);assert.equal(metrics.after,'none',state);assert.equal(metrics.overflow,false,state);
+  assert.equal(metrics.radius,'10px');assert.equal(metrics.borderWidth,metrics.focused?2:1,state);
+  assert.equal(metrics.label.font,metrics.font,state);assert.equal(metrics.label.shrink,shrink,state);
+  if(shrink){
+   assert(Math.abs(metrics.legend.font-metrics.label.font*.75)<.1,state);
+   assert(Math.abs(metrics.legend.width-metrics.label.width-10)<1,`${state}: legend must clear the complete scaled label and required marker`);
+  }else assert(metrics.legend.width<1,`${state}: empty resting field must have a closed notch`);
+  if(metrics.invalid==='true'){assert(metrics.describedBy);assert.equal(metrics.label.color,metrics.borderColor,state);}
+  textFieldAudit.push({...metrics,state,route:new URL(page.url()).pathname,viewport:page.viewportSize(),preference:await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches?'reduce':'no-preference')});
+ }
+ for(const preference of ['no-preference','reduce'])for(const width of [1440,320]){
+  await check(`TextField label, notch and focus states: ${preference} at ${width}`,async()=>{
+   await page.emulateMedia({reducedMotion:preference});await page.setViewportSize({width,height:1000});
+   for(const route of ['/login','/register']){
+    await page.goto(new URL(route,previewUrl).href,{waitUntil:'networkidle'});await page.evaluate(()=>document.fonts.ready);
+    const inputs=page.locator('input');
+    for(const input of await inputs.all()){
+     await page.mouse.move(0,0);await inspectField(input,'empty resting',false);
+     await input.hover();await page.waitForTimeout(250);await inspectField(input,'empty hover',false);
+     await inspectLabelMotion(input);
+     await input.focus();await page.waitForTimeout(250);await inspectField(input,'focused empty',true);
+     const before=await input.locator('..').boundingBox();await input.fill('Example learner');await inspectField(input,'focused populated',true);
+     await page.keyboard.press('Tab');await page.waitForTimeout(250);await inspectField(input,'blur populated',true);
+     await input.fill('');await input.evaluate(e=>e.blur());await page.waitForTimeout(250);await inspectField(input,'blur cleared',false);
+     await input.focus();await input.evaluate(e=>e.blur());await input.focus();
+     // Observe the transition in flight, then its final state; neither may resize the control.
+     await twoFrames();const during=await input.locator('..').boundingBox();assert.equal(during.height,before.height);assert.equal(during.width,before.width);
+     await page.waitForTimeout(250);await inspectField(input,'rapid focus final',true);
+     await page.keyboard.press('Tab');await page.keyboard.press('Shift+Tab');assert(await input.evaluate(e=>e===document.activeElement));
+     await input.evaluate(e=>e.blur());await page.waitForTimeout(250);
+    }
+    await page.locator('button[type="submit"]').click();await page.waitForTimeout(250);
+    for(const input of await page.locator('input[aria-invalid="true"]').all())await inspectField(input,'validation error',await input.evaluate(e=>e===document.activeElement));
+    const first=inputs.first();await first.focus();await page.waitForTimeout(250);
+    await page.screenshot({path:`${out}/textfield-${route.slice(1)}-${width}-${preference}.png`,fullPage:true});
+   }
+   await page.goto(previewUrl,{waitUntil:'networkidle'});await page.getByRole('button',{name:'Explore components',exact:true}).click();
+   const shared=page.getByRole('textbox',{name:'Debounce sample input',exact:true});await shared.focus();await page.waitForTimeout(250);
+   await inspectField(shared,'shared utility focused',true);await shared.fill('Preview');await shared.evaluate(e=>e.blur());await page.waitForTimeout(250);await inspectField(shared,'shared utility populated',true);
+  });
+ }
  for(const preference of ['no-preference','reduce'])for(const width of [320,390,768,1024,1440]){
   await check(`interaction and motion matrix: ${preference} at ${width}`,async()=>{
    await page.emulateMedia({reducedMotion:preference});await page.setViewportSize({width,height:900});await page.mouse.move(0,0);
@@ -317,7 +452,7 @@ let browser;
     await toggle.focus();await page.keyboard.press('Enter');await page.keyboard.press('Escape');await toggle.press('Enter');
     await page.waitForFunction(()=>{const paper=document.querySelector('.MuiDrawer-modal .MuiDrawer-paper');return paper&&Math.abs(paper.getBoundingClientRect().left)<.5});
     assert.equal(await toggle.getAttribute('aria-expanded'),'true');await page.keyboard.press('Escape');
-    if(preference==='reduce'){await twoFrames();assert.equal(await page.locator('.MuiDrawer-modal').isVisible(),false);}
+    await twoFrames();assert.equal(await page.locator('.MuiDrawer-modal').isVisible(),false);
     await page.locator('.MuiDrawer-modal').waitFor({state:'hidden'});assert(await toggle.evaluate(e=>e===document.activeElement));
     await toggle.press('Enter');await page.setViewportSize({width:1024,height:900});await twoFrames();
     assert.equal(await page.locator('.MuiDrawer-modal').count(),0);assert.equal(await page.evaluate(()=>document.body.style.overflow),'');
@@ -339,8 +474,15 @@ let browser;
    await page.getByRole('tab',{name:'All lessons',exact:true}).focus();await page.keyboard.press('End');await page.keyboard.press('Enter');await twoFrames();
    const earlyScroll=await page.locator('.MuiTabs-scroller').evaluate(e=>e.scrollLeft);await page.waitForTimeout(330);
    const settledScroll=await page.locator('.MuiTabs-scroller').evaluate(e=>e.scrollLeft);
-   if(preference==='reduce')assert(Math.abs(earlyScroll-settledScroll)<1,'Reduced motion must not run JavaScript tab scrolling');
-   for(const label of ['All lessons','Completed','To explore','All lessons'])await page.getByRole('tab',{name:label,exact:true}).evaluate(e=>e.click());
+   assert(Math.abs(earlyScroll-settledScroll)<1,'Demo tab scrolling must settle immediately for every motion preference');
+   const section=page.locator('#sample-learning-path');
+   await page.getByRole('tab',{name:'All lessons',exact:true}).click();await twoFrames();
+   const stable=await section.evaluate(e=>({height:e.getBoundingClientRect().height,scroll:scrollY,document:document.documentElement.scrollHeight}));
+   for(const [label,count] of [['Completed',1],['To explore',2],['All lessons',3]]){
+    await page.getByRole('tab',{name:label,exact:true}).click();await twoFrames();assert.equal(await page.locator('tbody tr').count(),count);
+    const current=await section.evaluate(e=>({height:e.getBoundingClientRect().height,scroll:scrollY,document:document.documentElement.scrollHeight}));
+    for(const key of ['height','scroll','document'])assert(Math.abs(current[key]-stable[key])<=1,`${label} must preserve ${key} at ${width}`);
+   }
    await page.waitForTimeout(330);assert.equal(await page.getByRole('tab',{name:'All lessons',exact:true}).getAttribute('aria-selected'),'true');assert.equal(await page.locator('tbody tr').count(),3);
    const indicator=await page.locator('.MuiTabs-indicator').boundingBox(),selectedTab=await page.getByRole('tab',{name:'All lessons',exact:true}).boundingBox();
    assert(Math.abs(indicator.x-selectedTab.x)<1.5&&Math.abs(indicator.width-selectedTab.width)<1.5,'Tab indicator must settle on the final selection');
@@ -352,13 +494,13 @@ let browser;
    await page.keyboard.press('Tab');const confirm=dialog.getByRole('button',{name:'Reset preview',exact:true});assert(await confirm.evaluate(e=>e===document.activeElement));
    await page.waitForTimeout(260);assert(await confirm.evaluate(e=>e===document.activeElement),'Entry completion must not move user-selected focus');
    await page.keyboard.press('Tab');assert(await dialog.evaluate(e=>e.contains(document.activeElement)));await page.keyboard.press('Escape');
-   if(preference==='reduce'){await twoFrames();assert.equal(await page.locator('.MuiDialog-root').count(),0);assert.equal(await page.evaluate(()=>document.body.style.overflow),'');}
+   await twoFrames();assert.equal(await page.locator('.MuiDialog-root').count(),0);assert.equal(await page.evaluate(()=>document.body.style.overflow),'');
    await dialog.waitFor({state:'hidden'});assert(await trigger.evaluate(e=>e===document.activeElement));
    await trigger.press('Enter');await page.keyboard.press('Escape');await trigger.press('Enter');await dialog.waitFor();
    await dialog.getByRole('button',{name:'Keep editing',exact:true}).click();await dialog.waitFor({state:'hidden'});
    const loader=page.getByRole('progressbar',{name:'Loading sample content...'});
    const animations=await loader.evaluate(e=>e.getAnimations({subtree:true}).filter(a=>a.playState==='running').length);
-   if(preference==='reduce')assert.equal(animations,0);else assert(animations>0);
+   assert.equal(animations,0,'Demo loading feedback uses its named status without a decorative animation');
    if(width<900){await page.getByRole('button',{name:'Toggle navigation'}).click();await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Auth layout preview',exact:true}).click();}
    else await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Auth layout preview',exact:true}).click();
    assert(await page.locator('main h1').evaluate(e=>e===document.activeElement));await page.getByRole('button',{name:'Back to demo workspace'}).click();
@@ -402,7 +544,7 @@ let browser;
  await check('no uncaught browser exceptions',async()=>assert.deepEqual(errors,[]));
  await check('no browser console errors',async()=>assert.deepEqual(consoleErrors,[]));
  fs.writeFileSync(`${out}/studio-accessibility-tree.yml`,await page.locator('main').ariaSnapshot());
- const report={engine,browser:browser.version(),motionAudit,assetLoading,branding,faviconCaching,typography,viewports:layouts,checks,networkOrigins:[...origins],contrast:{onFocus:{...onFocus,ratio:contrast(onFocus.color,onFocus.background)},atRest:{...atRest,ratio:contrast(atRest.color,atRest.background)},onHover:{...onHover,ratio:contrast(onHover.color,onHover.background)},badge:{...badgeColors,ratio:contrast(badgeColors.color,badgeColors.background)}},errors,consoleErrors,consoleWarnings,screenReader:'Not executed'};
+ const report={engine,browser:browser.version(),textFieldAudit,labelMotionAudit,motionAudit,assetLoading,branding,faviconCaching,typography,viewports:layouts,checks,networkOrigins:[...origins],contrast:{onFocus:{...onFocus,ratio:contrast(onFocus.color,onFocus.background)},atRest:{...atRest,ratio:contrast(atRest.color,atRest.background)},onHover:{...onHover,ratio:contrast(onHover.color,onHover.background)},badge:{...badgeColors,ratio:contrast(badgeColors.color,badgeColors.background)}},errors,consoleErrors,consoleWarnings,screenReader:'Not executed'};
  fs.writeFileSync(`${out}/browser-report.json`,JSON.stringify(report,null,2));await browser.close();
  console.log(JSON.stringify({passed:checks.length,browser:report.browser,report:`${out}/browser-report.json`}));
 })().catch(async e=>{console.error(e);if(browser)await browser.close();process.exitCode=1});

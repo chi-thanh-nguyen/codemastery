@@ -29,16 +29,15 @@ export function DashboardLayout({ headerTitle, userDisplayName, navItems, select
         target?.focus();
     }, [desktop, mobileOpen]);
     return (
-        <Box sx={{ minHeight: '100dvh', p: { xs: 0, lg: 3 }, background: { xs: 'none', lg: presentationTokens.outerGradient } }}>
-            <Box sx={{ display: 'flex', maxWidth: 1600, mx: 'auto', minHeight: { xs: '100dvh', lg: 'calc(100dvh - 48px)' },
-                bgcolor: 'background.paper', borderRadius: { xs: 0, lg: `${presentationTokens.frameRadius}px` },
-                boxShadow: { lg: presentationTokens.frameShadow }, overflow: 'clip' }}>
+        <Box sx={{ minHeight: '100dvh', bgcolor: 'background.paper' }}>
+            <Box sx={{ display: 'flex', maxWidth: 1600, mx: 'auto', minHeight: '100dvh',
+                bgcolor: 'background.paper', overflow: 'clip' }}>
                 <SidebarNav items={navItems} selectedId={selectedNavId} onSelect={onNavSelect}
                     mobileOpen={mobileOpen && !desktop} onMobileClose={() => setMobileOpen(false)} width={presentationTokens.sidebarWidth} />
                 <Box sx={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
                     <AppHeader title={headerTitle} userDisplayName={userDisplayName} onMenuToggle={() => setMobileOpen((open) => !open)}
                         menuOpen={mobileOpen && !desktop} actions={headerActions} search={headerSearch} />
-                    <Box component="main" id="main-content" tabIndex={-1} sx={{ flex: 1, minWidth: 0, p: { xs: 2, md: 3 }, bgcolor: 'background.default' }}>
+                    <Box component="main" id="main-content" tabIndex={-1} sx={{ flex: 1, minWidth: 0, p: { xs: 2, md: 3 }, bgcolor: 'background.paper' }}>
                         {children}
                     </Box>
                 </Box>

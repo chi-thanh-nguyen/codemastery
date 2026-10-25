@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="275 247 702 760" fill="none" role="img" aria-labelledby="title desc">
   <title id="title">CodeMastery</title>
-  <desc id="desc">A softly rounded geometric C surrounding three ascending mastery milestones.</desc>
+  <desc id="desc">CodeMastery monogram: refined geometrical C with two identically long milestone connectors.</desc>
   <defs>
     <linearGradient id="blue" x1="320" y1="300" x2="870" y2="980" gradientUnits="userSpaceOnUse">
       <stop stop-color="#1968E8"/>
@@ -11,7 +11,7 @@
       <stop offset="1" stop-color="#4298F3"/>
     </linearGradient>
   </defs>
-  <!-- The long architectural edges remain straight; the rounded transitions are tangent to them. -->
+  <!-- C outline keeps the reference's polygonal sides and smoothly rounded corners. -->
   <path fill="url(#blue)" d="M 582 273
     Q 628 244 675 273
     L 856 372
@@ -27,13 +27,13 @@
     L 672 924
     Q 694 938 712 937
     L 640 983
-    Q 610 1002 560 978
-    L 329 843
-    Q 286 819 286 774
+    Q 610 1007 553 991
+    L 322 856
+    Q 286 831 286 774
     L 286 481
     Q 286 439 328 414
     Z"/>
-  <!-- Rounded end caps with straight diagonal flanks. -->
+  <!-- Independent lower-right stroke; straight edges and reference-faithful terminals. -->
   <path fill="url(#blue)" d="M 612 853
     L 834 732
     Q 855 720 878 734
@@ -44,11 +44,10 @@
     L 609 877
     Q 589 865 612 853
     Z"/>
-  <!-- Two equal-length straight-sided connectors; central milestone adjusted 5px right and 3px up. -->
-  <path fill="url(#blue)" d="M 555 686 L 620 647 Q 625 662 635 674 L 568 714 Q 564 699 555 686 Z"/>
-  <path fill="url(#blue)" d="M 746 582 L 811 543 Q 817 558 827 570 L 760 610 Q 755 595 746 582 Z"/>
-  <!-- Four-cubic circle contours for smooth, continuous tangent transitions. -->
-  <path fill="url(#light)" d="M 505 672 C 536.5 672 562 696.7 562 727.5 C 562 758.1 536.5 783 505 783 C 473.5 783 448 758.1 448 727.5 C 448 696.7 473.5 672 505 672 Z"/>
-  <path fill="url(#blue)" d="M 688 565 C 723.9 565 753 592.1 753 625.5 C 753 658.9 723.9 686 688 686 C 652.1 686 624 658.9 624 625.5 C 624 592.1 652.1 565 688 565 Z"/>
-  <path fill="url(#light)" d="M 879.5 454 C 915.7 454 945 482 945 516.5 C 945 551 915.7 579 879.5 579 C 843.3 579 814 551 814 516.5 C 814 482 843.3 454 879.5 454 Z"/>
+  <!-- Both links: same width, angle, and exact centerline length. -->
+  <path fill="url(#blue)" d="M 554.464 684.614 L 621.743 646.949 L 635.421 671.381 L 568.142 709.046 Z"/>
+  <path fill="url(#blue)" d="M 744.089 578.457 L 811.367 540.793 L 825.045 565.225 L 757.766 602.889 Z"/>
+  <ellipse cx="505.778" cy="727.914" rx="56.015" ry="54.467" fill="url(#light)"/>
+  <ellipse cx="689.755" cy="624.919" rx="62.824" ry="59.971" fill="url(#blue)"/>
+  <ellipse cx="881.197" cy="517.745" rx="65.041" ry="61.682" fill="url(#light)"/>
 </svg>

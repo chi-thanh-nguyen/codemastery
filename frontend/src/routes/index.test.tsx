@@ -108,6 +108,46 @@ describe('real declarative routing and Profile', () => {
         await click('Explore components'); expect(host.textContent).toContain('October 23, 2026'); expect(host.textContent).toContain('88.5%'); expect(host.textContent).toContain('1h 2m 5s'); expect(fetcher).not.toHaveBeenCalled();
         await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('main h1')?.textContent).toBe('Welcome back');
     });
+    it('keeps the hovered chart tooltip across column gaps without changing the selected day', async () => {
+        await act(async () => root.render(<App />));
+        const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
+        const day = (name: string) => chart.querySelector<HTMLButtonElement>(`button[aria-label^="${name}:"]`)!;
+        const sun = day('Sun'), tue = day('Tue'), wed = day('Wed'), plot = tue.parentElement!;
+        await act(async () => sun.click());
+        await act(async () => tue.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
+        await act(async () => tue.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: plot })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
+        expect(sun.getAttribute('aria-pressed')).toBe('true');
+        await act(async () => {
+            plot.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: wed }));
+            wed.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: plot }));
+        });
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        await act(async () => wed.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Sun · 25 min');
+        expect(sun.getAttribute('aria-pressed')).toBe('true'); expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('clears chart selection on outside pointer interaction and supports selecting again', async () => {
+        await act(async () => root.render(<App />));
+        const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
+        const tue = chart.querySelector<HTMLButtonElement>('button[aria-label^="Tue:"]')!;
+        await act(async () => tue.click());
+        await act(async () => tue.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        expect(tue.getAttribute('aria-pressed')).toBe('true');
+        await act(async () => host.querySelector('main h1')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        expect(chart.querySelector('[aria-pressed="true"]')).toBeNull();
+        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
+        await act(async () => tue.click());
+        expect(tue.getAttribute('aria-pressed')).toBe('true');
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
+        await act(async () => host.querySelector('main h1')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        const wed = chart.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
+        await act(async () => wed.focus());
+        expect(wed.getAttribute('aria-pressed')).toBe('true');
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        expect(fetcher).not.toHaveBeenCalled();
+    });
     it('focuses each local preview heading after its initiating control is removed, without changing routes', async () => {
         await act(async () => root.render(<App />));
         await click('Explore components'); expect(document.activeElement).toBe(host.querySelector('main h1'));

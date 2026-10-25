@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { BrowserRouter } from 'react-router';
+import { alpha, darken } from '@mui/material/styles';
 import { AuthProvider } from './providers/AuthProvider';
 import { AppRouter, SessionNavigation } from '../routes/index';
 import { ThemeProvider, CssBaseline, Box, Button, TextField, Paper, Typography, Chip, LinearProgress,
@@ -36,11 +37,13 @@ const NAV_ITEMS: NavItem[] = [
 const weekMinutes = DEMO_WEEK.reduce((total, day) => total + day.minutes, 0);
 const weekDuration = formatDurationSeconds(weekMinutes * 60);
 
-function DemoMetric({ label, value, note, icon, tint, accent }: { label: string; value: string; note: string; icon: PresentationIconName; tint: string; accent: string }) {
+function DemoMetric({ label, value, note, icon, accent }: { label: string; value: string; note: string; icon: PresentationIconName; accent: string }) {
     // Shared row tracks align labels, values and captions even when one card wraps.
     return <Paper sx={{ p: 2, minWidth: 0, display: 'grid', gridTemplateRows: 'subgrid', gridRow: 'span 3', rowGap: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Box sx={{ width: 40, height: 40, flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: '10px', bgcolor: tint, color: accent }}>
+            <Box sx={{ width: 40, height: 40, flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: '10px',
+                bgcolor: darken(accent, .04), color: '#FFFFFF', border: `1px solid ${alpha(accent, .25)}`,
+                boxShadow: `0 2px 6px ${alpha(accent, .06)}, inset 0 1px 0 rgba(255, 255, 255, .45)` }}>
                 <PresentationIcon name={icon} sx={{ fontSize: 23 }} />
             </Box>
             <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>{label}</Typography>
@@ -51,14 +54,24 @@ function DemoMetric({ label, value, note, icon, tint, accent }: { label: string;
 }
 
 function LearningRhythm() {
-    const [selected, setSelected] = useState(3);
+    const [selected, setSelected] = useState<number | null>(3);
     const [hovered, setHovered] = useState<number | null>(null);
     const [tooltipOpen, setTooltipOpen] = useState(true);
     const buttons = useRef<Array<HTMLButtonElement | null>>([]);
+    const chart = useRef<HTMLElement>(null);
+    useEffect(() => {
+        const dismissOutside = (event: PointerEvent) => {
+            if (event.target instanceof Node && chart.current && !chart.current.contains(event.target)) {
+                setSelected(null); setHovered(null); setTooltipOpen(false);
+            }
+        };
+        document.addEventListener('pointerdown', dismissOutside, true);
+        return () => document.removeEventListener('pointerdown', dismissOutside, true);
+    }, []);
     const tooltipId = useId();
     const active = hovered ?? selected;
     const maximum = Math.max(...DEMO_WEEK.map((day) => day.minutes));
-    return <Paper component="section" aria-labelledby="learning-rhythm-title" sx={{ p: 2.5, minWidth: 0 }}>
+    return <Paper ref={chart} component="section" aria-labelledby="learning-rhythm-title" sx={{ p: 2.5, minWidth: 0 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
             <Box><Typography id="learning-rhythm-title" variant="h6" component="h2">Learning rhythm</Typography>
                 <Typography variant="caption" color="text.secondary">A little time, a stronger foundation.</Typography></Box>
@@ -78,13 +91,13 @@ function LearningRhythm() {
                 <Box aria-hidden="true" sx={{ position: 'absolute', inset: '0 0 24px', pointerEvents: 'none' }}>
                     {[0, 25, 50, 75, 100].map((position) => <Box key={position} sx={{ position: 'absolute', top: `${position}%`, width: '100%', borderTop: `1px solid ${tokens.chartGrid}` }} />)}
                 </Box>
-                <Box sx={{ display: 'flex', gap: { xs: .75, sm: 1.5 }, position: 'relative' }}>
+                <Box onMouseLeave={() => setHovered(null)} sx={{ display: 'flex', gap: { xs: .75, sm: 1.5 }, position: 'relative' }}>
                     {DEMO_WEEK.map((day, index) => <Box component="button" key={day.day} type="button"
                         ref={(node: HTMLButtonElement | null) => { buttons.current[index] = node; }}
                         aria-label={`${day.day}: ${day.minutes} sample study minutes`} aria-pressed={selected === index}
                         aria-describedby={tooltipOpen && active === index ? tooltipId : undefined}
                         onClick={() => { setSelected(index); setTooltipOpen(true); }} onFocus={() => { setSelected(index); setHovered(null); setTooltipOpen(true); }}
-                        onMouseEnter={() => { setHovered(index); setTooltipOpen(true); }} onMouseLeave={() => setHovered(null)}
+                        onMouseEnter={() => { setHovered(index); setTooltipOpen(true); }}
                         onKeyDown={(event) => {
                             if (event.key === 'Escape') { event.preventDefault(); setTooltipOpen(false); return; }
                             let next: number;
@@ -102,12 +115,13 @@ function LearningRhythm() {
                                 left: index === 0 ? 0 : index === DEMO_WEEK.length - 1 ? 'auto' : '50%', right: index === DEMO_WEEK.length - 1 ? 0 : 'auto',
                                 transform: index > 0 && index < DEMO_WEEK.length - 1 ? 'translateX(-50%)' : 'none', zIndex: 1, px: 1.5, py: .5,
                                 borderRadius: '8px', border: 1, borderColor: 'divider', bgcolor: 'background.paper', color: 'text.primary',
-                                whiteSpace: 'nowrap', typography: 'caption', fontWeight: 500, boxShadow: '0 4px 12px rgba(16, 20, 24, .10)' }}>{day.day} · {day.minutes} min</Box>}
+                                whiteSpace: 'nowrap', typography: 'caption', fontWeight: 500 }}>{day.day} · {day.minutes} min</Box>}
                             <Box data-study-bar aria-hidden="true" sx={{ width: '100%', maxWidth: 36, height: `${day.minutes / maximum * 100}%`,
                                 // A contrasting cap preserves the value boundary without a full column outline.
-                                borderRadius: '7px 7px 3px 3px', border: 0, borderTop: '2px solid',
-                                borderColor: active === index ? 'primary.dark' : tokens.chartBarEdge,
-                                bgcolor: active === index ? tokens.chartBarActive : tokens.chartBarFill }} />
+                                borderRadius: '4px 4px 0 0', border: 0, borderTop: '2px solid',
+                                borderColor: active === index ? tokens.chartBarActiveEdge : tokens.chartBarEdge,
+                                bgcolor: tokens.chartBarFade,
+                                backgroundImage: `linear-gradient(180deg, ${active === index ? tokens.chartBarActive : tokens.chartBarFill} 0%, ${tokens.chartBarFade} 100%)` }} />
                         </Box>
                         <Typography component="span" variant="caption" sx={{ height: 24, display: 'grid', placeItems: 'end center', color: selected === index ? 'primary.dark' : 'text.secondary', fontWeight: selected === index ? 600 : 400,
                             textDecoration: selected === index ? 'underline' : 'none', textUnderlineOffset: '3px', textDecorationThickness: '2px' }}>{day.day}</Typography>
@@ -133,6 +147,23 @@ export function PresentationPreview() {
     }, [selectedNav]);
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState('all');
+    const lessonContent = useRef<HTMLDivElement>(null);
+    const [lessonAreaHeight, setLessonAreaHeight] = useState(0);
+    useLayoutEffect(() => {
+        const content = lessonContent.current;
+        if (!content) return;
+        // Reserve the largest rendered result area so fewer rows cannot pull the page upward.
+        // Observe real content to accommodate font loading and responsive row wrapping.
+        const measure = () => {
+            const height = Math.ceil(content.getBoundingClientRect().height);
+            setLessonAreaHeight((previous) => Math.max(previous, height));
+        };
+        measure();
+        if (typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(measure);
+        observer.observe(content);
+        return () => observer.disconnect();
+    }, [selectedNav]);
     const [utilityInput, setUtilityInput] = useState('');
     const [dialog, setDialog] = useState<'reset' | 'lesson' | null>(null);
     const [notice, setNotice] = useState('');
@@ -152,7 +183,7 @@ export function PresentationPreview() {
             const section = document.getElementById('sample-learning-path');
             section?.focus(); section?.scrollIntoView({ block: 'nearest' });
         }}>
-        <TextField fullWidth size="small" variant="filled" hiddenLabel placeholder="Find a sample lesson…" value={query} onChange={(event) => setQuery(event.target.value)}
+        <TextField fullWidth size="small" variant="outlined" hiddenLabel placeholder="Find a sample lesson…" value={query} onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}
             slotProps={{ htmlInput: { 'aria-label': 'Search sample lessons', 'aria-description': 'Filters local sample lessons only. Enter jumps to results. Escape clears search.' }, input: {
                 startAdornment: <InputAdornment position="start"><PresentationIcon name="search" sx={{ fontSize: 19, color: 'text.secondary' }} /></InputAdornment>,
@@ -169,10 +200,10 @@ export function PresentationPreview() {
             <Typography variant="caption" color="text.secondary">All learning data below is illustrative. Nothing is saved.</Typography>
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' }, gap: 2, mb: 2 }}>
-            <DemoMetric label="Study time" value={`${weekDuration.hours}h ${weekDuration.minutes}m`} note="Illustrative weekly total" icon="clock" tint={tokens.softBlue} accent="#1753B5" />
-            <DemoMetric label="Lessons completed" value="12" note="Sample learning snapshot" icon="check" tint={tokens.softGreen} accent="#205D3A" />
-            <DemoMetric label="Practice streak" value="5 days" note="An example of steady progress" icon="spark" tint={tokens.softOrange} accent="#715014" />
-            <DemoMetric label="Course progress" value="68%" note="Illustrative course completion" icon="chart" tint={tokens.softPink} accent="#8D243A" />
+            <DemoMetric label="Study time" value={`${weekDuration.hours}h ${weekDuration.minutes}m`} note="Illustrative weekly total" icon="clock" accent="#1769FF" />
+            <DemoMetric label="Lessons completed" value="12" note="Sample learning snapshot" icon="check" accent="#10A570" />
+            <DemoMetric label="Practice streak" value="5 days" note="An example of steady progress" icon="flame" accent="#F56516" />
+            <DemoMetric label="Course progress" value="68%" note="Illustrative course completion" icon="chart" accent="#8B5CF6" />
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 3fr) minmax(0, 2fr)' }, gap: 2, mb: 2 }}>
             <LearningRhythm />
@@ -181,12 +212,9 @@ export function PresentationPreview() {
                     <Typography variant="h6" component="h2">Keep your curiosity going</Typography>
                     <PresentationIcon name="book" sx={{ fontSize: 20, color: 'text.secondary' }} />
                 </Box>
-                <Box sx={{ p: 2, borderRadius: '12px', bgcolor: '#172B45', color: '#FFFFFF', mb: 1.5, overflow: 'hidden' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                        <Typography variant="caption" sx={{ color: '#CDDDF2' }}>practice.ts · illustrative code</Typography>
-                        <PresentationIcon name="code" sx={{ fontSize: 19, color: '#80C7FF' }} />
-                    </Box>
-                    <Typography component="pre" sx={{ m: 0, fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: '.8125rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: '#C2E7FF' }}>{"const goal = 'understand';\npractice({ step: 'one at a time' });"}</Typography>
+                <Box sx={{ p: 2, borderRadius: '8px', bgcolor: tokens.softBlue, color: 'primary.dark', mb: 1.5, overflow: 'hidden' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>practice.ts · illustrative code</Typography>
+                    <Typography component="pre" sx={{ m: 0, fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: '.8125rem', lineHeight: 1.7, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{"const goal = 'understand';\npractice({ step: 'one at a time' });"}</Typography>
                 </Box>
                 <Typography variant="h6" component="h3">Programming foundations</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: .5, mb: 1.5 }}>Practice in small steps. Revisit what matters.</Typography>
@@ -203,12 +231,14 @@ export function PresentationPreview() {
             <Tabs value={filter} onChange={(_, value: string) => setFilter(value)} variant="scrollable" scrollButtons="auto" aria-label="Filter sample lessons" sx={{ px: 2, '& .MuiTab-root': { minHeight: 48 }, borderBottom: 1, borderColor: 'divider' }}>
                 <Tab value="all" label="All lessons" /><Tab value="active" label="To explore" /><Tab value="completed" label="Completed" />
             </Tabs>
+            <Box sx={{ minHeight: lessonAreaHeight, minWidth: 0 }}>
+            <Box ref={lessonContent} sx={{ minWidth: 0 }}>
             {lessons.length ? <TableContainer tabIndex={0} role="region" aria-label="Sample lesson table" sx={{ overflowX: 'auto' }}>
                 <Table size="small" sx={{ minWidth: 620 }}>
                     <TableHead><TableRow><TableCell>Lesson</TableCell><TableCell>Sample progress</TableCell><TableCell>Status</TableCell><TableCell align="right">Presentation</TableCell></TableRow></TableHead>
-                    <TableBody>{lessons.map((lesson) => <TableRow key={lesson.title} sx={{ '&:hover': { bgcolor: '#F6F9FD' }, '& td': { py: 2 }, '&:last-child td': { borderBottom: 0 } }}>
+                    <TableBody>{lessons.map((lesson) => <TableRow key={lesson.title} sx={{ '&:hover': { bgcolor: tokens.softBlue }, '& td': { py: 1.5 }, '&:last-child td': { borderBottom: 0 } }}>
                         <TableCell><Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                            <Box sx={{ width: 34, height: 34, flexShrink: 0, display: 'grid', placeItems: 'center', bgcolor: tokens.softBlue, color: 'primary.dark', borderRadius: '8px' }}><PresentationIcon name={lesson.icon} sx={{ fontSize: 18 }} /></Box>
+                            <PresentationIcon name={lesson.icon} sx={{ fontSize: 20, color: 'primary.main', flexShrink: 0 }} />
                             <Box><Typography variant="body2" sx={{ fontWeight: 500 }}>{lesson.title}</Typography><Typography variant="caption" color="text.secondary">{lesson.topic}</Typography></Box>
                         </Box></TableCell>
                         <TableCell sx={{ minWidth: 125 }}><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><LinearProgress variant="determinate" value={lesson.progress} aria-label={`${lesson.title} sample completion`} sx={{ flex: 1 }} /><Typography variant="caption">{lesson.progress}%</Typography></Box></TableCell>
@@ -219,7 +249,9 @@ export function PresentationPreview() {
                 </Table>
             </TableContainer> : <Box sx={{ p: 2 }}><EmptyView title="No sample lessons match" message="Try another lesson name or clear the filters."
                 action={<Button onClick={() => { setQuery(''); setFilter('all'); }}>Clear filters</Button>} /></Box>}
-            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, m: 2, p: 2, borderRadius: '12px', bgcolor: '#F3F7FC' }}>
+            </Box>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, p: 2, borderTop: 1, borderColor: 'divider' }}>
                 <PresentationIcon name="spark" sx={{ color: 'primary.dark', fontSize: 21, mt: .25, flexShrink: 0 }} />
                 <Box><Typography variant="subtitle2" sx={{ color: 'primary.dark' }}>Sample recommendation · strengthen the foundation</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>Revisit variables before exploring loops: in this static example, a prerequisite skill needs reinforcement.</Typography>
@@ -262,7 +294,8 @@ export function PresentationPreview() {
         </Paper>
     </>;
 
-    return <>
+    // Simplify motion only in the local demo; real authentication keeps the shared theme.
+    return <ThemeProvider theme={{ motion: { reducedMotion: 'always' } }}>
         <Box component="a" href="#main-content" sx={{ position: 'fixed', top: 8, left: 8, zIndex: 1600, transform: 'translateY(-200%)',
             '&:focus': { transform: 'none' }, bgcolor: 'primary.main', color: 'primary.contrastText', p: 1.5, borderRadius: '8px' }}>Skip to content</Box>
         {selectedNav === 'auth-preview' ? <Box component="main" id="main-content" tabIndex={-1}><AuthLayout title="A calm space to start." subtitle="Authentication layout preview. No sign-in or session is implemented here.">
@@ -277,7 +310,7 @@ export function PresentationPreview() {
             message={dialog === 'reset' ? 'This clears only the search and debounce demonstration inputs. No learning data is changed.' : 'This is an illustrative lesson card. Course content, lesson delivery and learning progress are not connected in this presentation preview.'}
             confirmLabel={dialog === 'reset' ? 'Reset preview' : 'Done'} cancelLabel={dialog === 'reset' ? 'Keep editing' : 'Close'} isDestructive={dialog === 'reset'}
             onConfirm={dialog === 'reset' ? resetPreview : () => setDialog(null)} onCancel={() => setDialog(null)} />
-    </>;
+    </ThemeProvider>;
 }
 
 export default function App() {
