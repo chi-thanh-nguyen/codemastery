@@ -1,50 +1,33 @@
-import React from 'react';
-import { AppBar, Toolbar, Typography, IconButton, Box } from '@mui/material';
+import type { ReactNode } from 'react';
+import { AppBar, Toolbar, Typography, IconButton, Box, Avatar } from '@mui/material';
+import { PresentationIcon } from './PresentationIcon';
+import { presentationTokens } from '../../app/theme/theme';
 
 export interface AppHeaderProps {
     title?: string;
     onMenuToggle?: () => void;
     userDisplayName?: string;
-    actions?: React.ReactNode;
+    actions?: ReactNode;
+    menuOpen?: boolean;
 }
 
-export const AppHeader: React.FC<AppHeaderProps> = ({
-    title = 'CodeMastery',
-    onMenuToggle,
-    userDisplayName,
-    actions,
-}) => {
+export function AppHeader({ title = 'CodeMastery', onMenuToggle, userDisplayName, actions, menuOpen }: AppHeaderProps) {
     return (
-        <AppBar position="sticky" color="inherit" sx={{ borderBottom: '1px solid #e2e8f0', zIndex: 1201 }}>
-            <Toolbar>
-                {onMenuToggle && (
-                    <IconButton
-                        edge="start"
-                        color="inherit"
-                        aria-label="toggle menu"
-                        onClick={onMenuToggle}
-                        sx={{ mr: 2, display: { md: 'none' } }}
-                    >
-                        {/* SVG Menu Icon without external icon dependency */}
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
-                        </svg>
-                    </IconButton>
-                )}
-
-                <Typography variant="h6" component="div" sx={{ fontWeight: 'bold', color: 'primary.main', flexGrow: 1 }}>
-                    {title}
-                </Typography>
-
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    {userDisplayName && (
-                        <Typography variant="body2" color="text.secondary">
-                            {userDisplayName}
-                        </Typography>
-                    )}
+        <AppBar position="sticky" color="inherit" elevation={0} sx={{ border: 0, borderBottom: 1, borderColor: 'divider', zIndex: 'appBar', bgcolor: 'background.paper' }}>
+            <Toolbar sx={{ minHeight: `${presentationTokens.headerHeight}px !important`, px: { xs: 1.5, sm: 2.5 }, gap: 1 }}>
+                {onMenuToggle && <IconButton aria-label="Toggle navigation" aria-expanded={menuOpen} onClick={onMenuToggle}
+                    sx={{ display: { md: 'none' }, flexShrink: 0 }}><PresentationIcon name="menu" /></IconButton>}
+                <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }}>{title}</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
                     {actions}
+                    {userDisplayName && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Avatar aria-hidden sx={{ width: 32, height: 32, bgcolor: presentationTokens.softBlue, color: 'primary.dark', fontSize: '.75rem', fontWeight: 700 }}>
+                            {userDisplayName.charAt(0).toUpperCase()}
+                        </Avatar>
+                        <Typography variant="body2" sx={{ display: { xs: 'none', sm: 'block' } }}>{userDisplayName}</Typography>
+                    </Box>}
                 </Box>
             </Toolbar>
         </AppBar>
     );
-};
+}

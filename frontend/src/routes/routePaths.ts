@@ -1,8 +1,4 @@
 export const ROUTE_PATHS = {
-    HOME: '/',
-    LOGIN: '/login',
-    REGISTER: '/register',
-    PROFILE: '/profile',
+    HOME: '/', LOGIN: '/login', REGISTER: '/register', COURSES: '/courses',
+    COURSE_DETAIL: '/courses/:courseId', PROFILE: '/profile',
 } as const;
-
-export type AppRoutePath = (typeof ROUTE_PATHS)[keyof typeof ROUTE_PATHS];
