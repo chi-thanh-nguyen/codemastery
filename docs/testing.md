@@ -955,8 +955,8 @@ allocation. Existing password/session cases remain previously approved; this
 extension adds observable UI integration/accessible-state/focus obligations and
 Profile composition without duplicating the earlier generic HTTP matrix.
 
-In **AuthProvider.test.tsx**, mount real LoginForm/RegisterForm and their existing
-pages with the provider; the route suite owns navigation/focus-on-route cases:
+In **AuthProvider.test.tsx**, mount the existing LoginPage, RegisterForm and
+RegisterPage with the real AuthProvider; the route suite owns navigation/focus-on-route cases:
 
 - Registration: 14 versus 15 Unicode code points; supplementary-plane characters
   count once, combining sequences count by code point, not grapheme/UTF-16 length.
