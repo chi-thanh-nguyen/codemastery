@@ -1,6 +1,5 @@
 package com.codemastery.modules.auth.infrastructure.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
@@ -12,6 +11,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.net.URI;
@@ -20,9 +20,9 @@ import java.nio.charset.StandardCharsets;
 @Component
 public class RestSecurityErrorHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
 
-    private final ObjectMapper objectMapper;
+    private final JsonMapper objectMapper;
 
-    public RestSecurityErrorHandler(ObjectMapper objectMapper) {
+    public RestSecurityErrorHandler(JsonMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
@@ -38,14 +38,21 @@ public class RestSecurityErrorHandler implements AuthenticationEntryPoint, Acces
         write(request, response, HttpStatus.FORBIDDEN, false);
     }
 
+    public void accountReadFailed(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        write(request, response, HttpStatus.INTERNAL_SERVER_ERROR, false);
+    }
+
     private void write(HttpServletRequest request, HttpServletResponse response, HttpStatus status,
                        boolean challenge) throws IOException {
         if (response.isCommitted()) {
             return;
         }
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, status == HttpStatus.UNAUTHORIZED
-                ? "Authentication failed."
-                : "Access is denied.");
+        String detail = switch (status) {
+            case UNAUTHORIZED -> "Authentication failed.";
+            case FORBIDDEN -> "Access is denied.";
+            default -> "An unexpected error occurred.";
+        };
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setType(URI.create("about:blank"));
         problem.setTitle(status.getReasonPhrase());
         try {

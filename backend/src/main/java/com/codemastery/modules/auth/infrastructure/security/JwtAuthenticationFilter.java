@@ -24,10 +24,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final UserRepository userRepository;
+    private final RestSecurityErrorHandler errors;
 
-    public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider, UserRepository userRepository) {
+    public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider, UserRepository userRepository,
+                                   RestSecurityErrorHandler errors) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.userRepository = userRepository;
+        this.errors = errors;
     }
 
     @Override
@@ -43,6 +46,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                 .setAuthentication(authentication(user, request)));
             } catch (AuthenticationException ignored) {
                 SecurityContextHolder.clearContext();
+            } catch (RuntimeException failure) {
+                SecurityContextHolder.clearContext();
+                errors.accountReadFailed(request, response);
+                return;
             }
         }
         filterChain.doFilter(request, response);
@@ -71,6 +78,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return "OPTIONS".equalsIgnoreCase(request.getMethod());
+        return "OPTIONS".equalsIgnoreCase(request.getMethod())
+                || SecurityConfig.PUBLIC_OPERATIONS.matches(request);
     }
 }

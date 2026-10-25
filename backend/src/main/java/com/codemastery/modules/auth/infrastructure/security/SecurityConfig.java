@@ -12,6 +12,9 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -22,6 +25,12 @@ import java.util.List;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    static final RequestMatcher PUBLIC_OPERATIONS = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/register"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/login"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}"));
+
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http,
                                             JwtTokenProvider jwtTokenProvider,
@@ -29,7 +38,7 @@ public class SecurityConfig {
                                             RestSecurityErrorHandler restSecurityErrorHandler,
                                             AppConfig.CorsSettings corsSettings) throws Exception {
         JwtAuthenticationFilter jwtAuthenticationFilter =
-                new JwtAuthenticationFilter(jwtTokenProvider, userRepository);
+                new JwtAuthenticationFilter(jwtTokenProvider, userRepository, restSecurityErrorHandler);
         http
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -41,9 +50,9 @@ public class SecurityConfig {
                         .authenticationEntryPoint(restSecurityErrorHandler)
                         .accessDeniedHandler(restSecurityErrorHandler))
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/courses", "/api/courses/{courseId}").permitAll()
-                        .anyRequest().authenticated())
+                        .requestMatchers(PUBLIC_OPERATIONS).permitAll()
+                        // Selected protected REST bindings must supply their own approved policies.
+                        .anyRequest().denyAll())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
