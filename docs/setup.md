@@ -1182,3 +1182,153 @@ implementation; Auth/Course/affected feature owners review actual consumed
 boundaries. Sole-Leader documentation CODEOWNER/author conflict, independent
 last-push review, exact-head CI/security checks and protected integration remain.
 No reviewer, merge, implementation permission or actual QA success is invented.
+
+## CT16 bounded Profile extension — 25 October 2026
+
+### Authority, revision and inspected baseline
+
+**CT16-PROFILE-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION.** The Project Leader
+@chi-thanh-nguyen explicitly authorizes actual technical selection and approval
+in **“CodeMastery — Complete Additional CT16, CT17 and CT14 Technical Approvals in
+Existing PRs”**, supplied 25 October 2026 (ICT). Codex, the delegated technical
+decision-maker, **approves the three checkpoints below only**. This instruction
+authorizes these documentation/commit/PR updates, not application implementation,
+production access, new Auth operations or personal security-risk acceptance.
+
+Inspected remote main is
+[e2128919fe0d47c0f24989166343e1d5ecf50483](https://github.com/chi-thanh-nguyen/codemastery/commit/e2128919fe0d47c0f24989166343e1d5ecf50483).
+Since the previous 0b29672 baseline, six Auth account-operation/DTO/test files
+changed; the governing ADRs, OpenAPI and frontend inventory did not. Inspected
+[PR #102](https://github.com/chi-thanh-nguyen/codemastery/pull/102) starts at
+27780018dd20f6ebe01881afa890b2dc121005d5; #103 starts at 9d966c4 and #106 at
+a35059c. The existing @TamiaoNguyen APPROVED reviews cover those initial heads,
+not this extension. New commits require current-head review under active rules.
+No CODEOWNER, last-push or CT01 protected-integration gap is waived.
+
+The authoritative [OpenAPI](api/openapi.yaml) defines PublicUser with exactly
+id (UUID string), displayName (string) and role (Learner, Instructor or
+Administrator); LoginResponse requires user: PublicUser. Main's
+UserResponse.java now implements that public shape. AuthController implements
+registration only; the token-producing login HTTP operation is still absent.
+Its future contract is sufficient for a specification, not proof of a working
+session. [ADR001 §11](decisions/001-modular-monolith-module-boundaries.md#11-ct01-approved-technical-contract--protected-integration-pending)
+and ADR002 CT01.core/CT16.minimum/CT18.minimum/CT38.core retain their authority.
+The approved tree already contains features/auth/pages/ProfilePage.tsx,
+routes/index.tsx, routes/routePaths.ts, routes/guards/ProtectedRoute.tsx,
+app/providers/AuthProvider.tsx and features/auth/hooks/useAuth.ts.
+
+### P1 — authenticated Profile route and navigation
+
+**Checkpoint CT16.profile-routing: APPROVE** one additional browser route,
+**/profile**, for an effective, unexpired authenticated session of any existing
+role. Compose the existing ProfilePage through the selected declarative
+BrowserRouter/Routes/Route/Outlet architecture and existing ProtectedRoute; reuse
+one AuthProvider and FE01 layouts. No new router/provider/file, role inheritance,
+permission, role-specific administration route or backend operation is selected.
+Show one English Profile navigation destination only for the current eligible
+session; hiding a link is not authorization. Route protection must also apply to
+address-bar entry, internal navigation and browser back/forward.
+
+An anonymous/expired visit renders no Profile subtree or old user fields and
+replaces the protected history entry with /login. Capture only the validated
+literal return pathname /profile in transient provider/router memory, without
+query/fragment, user fields or credentials. After a valid, still-current login,
+consume it once and replace to /profile; otherwise retain the existing /courses
+fallback. Do not accept a URL/query/history-payload return target supplied by a
+caller as authority. Explicit logout clears a stored return destination; its
+redirect must not re-arm that destination from the discarded Profile. A new
+deliberate protected-route visit can establish a new return intent. Reuse CT16's
+external/API/asset/traversal rejection; no open redirect. A fresh document load loses both session and return memory; a new
+anonymous /profile entry may capture /profile again, not restore an old session.
+
+Expiry, logout or current-generation authenticated 401 invalidates the session
+before personal content can be published and replaces the active protected route
+with /login. Navigating back cannot reveal the discarded session. Evaluate
+current eligibility before rendering, not only in a post-render redirect effect;
+check expiry on resume/pageshow as well as the existing timer/pre-send checks.
+No Profile network request or polling is introduced. CT17 serves the same static
+SPA shell for deep links; it must not embed personal data in HTML or turn /api
+failures into that shell. Client guards do not replace backend authorization.
+
+### P2 — exact read-only session presentation
+
+**Checkpoint CT16.profile-data: APPROVE** projection of the validated current
+LoginResponse.user snapshot only, through existing useAuth, in the existing
+ProfilePage. The feature owns presentation; AuthProvider owns the snapshot and
+its generation. There is no independently fetched/cached Profile resource.
+
+| Existing field | Permitted presentation and invariant |
+| --- | --- |
+| id | Display only the current session's decoded UUID as plain text with an English User ID label; never as a token or lookup/directory capability. |
+| displayName | Render the returned display name as React text with an English label/heading; do not interpret HTML/Markdown, derive identity from the login email, or add another normalization/truncation rule. Preserve the validated value. |
+| role | Display exactly Learner, Instructor or Administrator with a Role label; do not present it as a list of granted permissions, ownership or implicit Administrator inheritance. |
+
+The existing LoginResponse decoder must establish the approved user/token/expiry
+shape before atomic session installation. Missing/invalid required user data is
+a protocol failure; do not mount a partially populated Profile or synthesize data.
+A failed replacement login leaves an unrelated valid current session intact.
+The snapshot is login-time display data, not a live account-status/role authority
+or a guarantee of subsequent freshness; backend checks remain authoritative.
+Do not expose accessToken, JWT claims, email, account status, password/hash, image,
+settings or permissions. No edit form, password change, account management,
+/api/profile, /api/users/me, public directory or extra request is approved.
+Additional fields/freshness/workflows await the owning CT01/CT02/API contract.
+
+### P3 — lifecycle and privacy
+
+**Checkpoint CT16.profile-lifecycle: APPROVE** the following concrete application
+of the already approved generation/expiry/logout rules, without changing CT01:
+
+- Install Profile eligibility/data only with the successfully decoded, latest live
+  login attempt in the still-current generation. Do not reuse registration's
+  PublicUser as an authenticated session or automatically log in after registration.
+- Logout, expiry and eligible current-session 401 clear the token/user/private
+  state, invalidate pending attempts/callbacks and remove personal UI. Stale/public
+  failures, cancellation, 403 and network/5xx errors do not invalidate another
+  valid session. Delayed login cannot resurrect a logout.
+- Successful session replacement atomically removes the previous user's private
+  view/state and installs the new snapshot/generation. A response from session A
+  cannot publish into session B, even if both have the same user UUID.
+- Read Profile values directly from current eligible provider state; do not copy
+  them into an independently persistent page cache. Route unmount/navigation
+  releases page-owned references/listeners/work and invalidates callbacks. Leaving
+  Profile alone does not log out or delete the still-valid provider session.
+  StrictMode mount/cleanup must not duplicate listeners or restore old data.
+- Refresh starts anonymous. Tokens/user snapshots never enter localStorage,
+  sessionStorage, IndexedDB, cookies, URLs/query/hash, history.state, logs,
+  diagnostics, analytics or a service-worker cache. No new persistence or telemetry
+  mechanism is introduced. This is state isolation, not forensic memory erasure.
+
+### Acceptance, consumers and retained gates
+
+Frontend @heizseung owns separately authorized implementation in the existing
+files; Auth @duyduyit reviews DTO/session consumption, Leader reviews documentation,
+and QA07 owns independent browser/integration evidence. CT14's bounded Profile/Auth
+extension in [PR #106](https://github.com/chi-thanh-nguyen/codemastery/pull/106)
+allocates deterministic cases to the existing provider and route suites. Verify
+all three roles, anonymous deep link/refresh, safe one-use return, expiry/logout,
+back/forward, replacement/late callbacks, exact plain-text fields and zero Profile
+requests. Real browser history/focus/responsive and configured Auth/security proof
+remain distinct from DOM tests. No result is claimed by this record.
+
+Alternatives: a /me/Profile endpoint duplicates an adequate login snapshot and
+requires missing Auth/API authority; local persistence changes CT01 security;
+a dedicated Profile cache creates stale cross-session state. Select the existing
+session projection and guard. Auth-free rendering or JWT role-based permission
+claims violate the established boundary.
+
+This is an **additional read-only Profile capability**, not part of or an expansion
+to [CT20.I](decisions/002-interim-delegated-contracts.md#ct20i--leader_authorized_by_explicit_instruction).
+CT16-2026-10-24-r1, CT16-INTERIM-COVERAGE-2026-10-24-r1, CT16-FINAL-2026-10-25-r1
+and the ADR002 path correction remain intact. Earlier route/Profile deferrals
+are prospectively refined only for /profile and these three fields/lifecycle;
+all Profile API/mutation/recovery deferrals remain. CT16 Final coverage remains
+partial. #98's existing Profile code/state-only navigation/session races are not
+retrospectively approved. Effective CT01 and exact CT16 protected integration,
+separate implementation authorization, actual login producer, required checks,
+eligible independent CODEOWNER/last-push review and QA evidence remain gates.
+
+Technical references: [declarative route composition](https://reactrouter.com/7.18.4/start/declarative/routing)
+and [React state ownership/reset](https://react.dev/learn/preserving-and-resetting-state);
+these support the existing-stack mechanism, not new backend authority.
