@@ -1,211 +1,69 @@
-import React, { useState } from 'react';
-import { ROUTE_PATHS, type AppRoutePath } from './routePaths';
+import { useLayoutEffect } from 'react';
+import type { ReactNode } from 'react';
+import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
+import { Box, Button } from '@mui/material';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
 import { ProfilePage } from '../features/auth/pages/ProfilePage';
 import { ProtectedRoute } from './guards/ProtectedRoute';
+import { useAuth } from '../features/auth/hooks/useAuth';
 import { DashboardLayout } from '../layouts/DashboardLayout';
 import { PageHeader } from '../shared/components/PageHeader';
-import { ConfirmDialog } from '../shared/components/ConfirmDialog';
-import { LoadingView, EmptyView, ErrorView } from '../shared/components/StatusViews';
-import { useDebounce } from '../shared/hooks/useDebounce';
-import { formatDate, formatNumber, formatDurationSeconds } from '../shared/utils/format';
-import { useAuth } from '../features/auth/hooks/useAuth';
-import { Box, Button, TextField, Paper, Typography } from '@mui/material';
-import type { NavItem } from '../shared/components/SidebarNav';
+import { CourseCataloguePage } from '../features/catalogue/pages/CourseCataloguePage';
+import { CourseMembershipActions, MyCoursesPage } from '../features/learning/pages/MyCoursesPage';
+import { CourseDetailPage } from '../features/catalogue/pages/CourseDetailPage';
 
-export const AppRouter: React.FC = () => {
-    const [currentPath, setCurrentPath] = useState<AppRoutePath>(ROUTE_PATHS.HOME);
-    const { user, isAuthenticated, logout } = useAuth();
-
-    // Helper navigate function to satisfy (path: string) => void
-    const handleNavigate = (path: string) => {
-        setCurrentPath(path as AppRoutePath);
-    };
-
-    // FE01 Showcase state
-    const [dialogOpen, setDialogOpen] = useState(false);
-    const [dialogResult, setDialogResult] = useState<string | null>(null);
-    const [inputValue, setInputValue] = useState('');
-    const debouncedInput = useDebounce(inputValue, 400);
-
-    const currentDateFormatted = formatDate(new Date(), {
-        locale: 'en-US',
-        options: { dateStyle: 'full', timeZone: 'UTC' },
-    });
-
-    const formattedScore = formatNumber(0.885, {
-        locale: 'en-US',
-        options: {
-            style: 'percent',
-            roundingMode: 'halfExpand',
-            minimumFractionDigits: 1,
-            maximumFractionDigits: 1,
-        },
-    });
-
-    const duration = formatDurationSeconds(3725);
-
-    const navItems: NavItem[] = [
-        { id: ROUTE_PATHS.HOME, label: 'Platform Showcase' },
-        ...(isAuthenticated
-            ? [{ id: ROUTE_PATHS.PROFILE, label: 'My Profile' }]
-            : [
-                { id: ROUTE_PATHS.LOGIN, label: 'Sign In' },
-                { id: ROUTE_PATHS.REGISTER, label: 'Register' },
-            ]),
-    ];
-
-    const handleNavSelect = (id: string) => {
-        handleNavigate(id);
-    };
-
-    // Render individual auth routes
-    if (currentPath === ROUTE_PATHS.LOGIN) {
-        return <LoginPage onNavigate={handleNavigate} />;
-    }
-
-    if (currentPath === ROUTE_PATHS.REGISTER) {
-        return <RegisterPage onNavigate={handleNavigate} />;
-    }
-
-    return (
-        <DashboardLayout
-            headerTitle="CodeMastery"
-            userDisplayName={user ? `${user.displayName} (${user.role})` : undefined}
-            navItems={navItems}
-            selectedNavId={currentPath}
-            onNavSelect={handleNavSelect}
-            headerActions={
-                isAuthenticated ? (
-                    <Button color="inherit" size="small" onClick={logout}>
-                        Sign Out
-                    </Button>
-                ) : (
-                    <Button
-                        variant="contained"
-                        size="small"
-                        onClick={() => handleNavigate(ROUTE_PATHS.LOGIN)}
-                    >
-                        Sign In
-                    </Button>
-                )
-            }
-        >
-            {currentPath === ROUTE_PATHS.PROFILE ? (
-                <ProtectedRoute onNavigate={handleNavigate}>
-                    <ProfilePage onNavigate={handleNavigate} />
-                </ProtectedRoute>
-            ) : (
-                <Box>
-                    {/* Auth Session Status Banner */}
-                    <Paper sx={{ p: 2.5, mb: 3, borderLeft: '4px solid #1976d2' }}>
-                        <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                            {isAuthenticated
-                                ? `Welcome back, ${user?.displayName}!`
-                                : 'Authentication Session Status: Guest (Public Mode)'}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                            {isAuthenticated
-                                ? `Active role: ${user?.role}. Bearer token is safely held in memory.`
-                                : 'You are currently browsing publicly. Sign in or register to test the core Auth integration.'}
-                        </Typography>
-                    </Paper>
-
-                    {/* Preserved FE01 Presentation Work */}
-                    <PageHeader
-                        title="Component & Utility Showcase"
-                        subtitle="Independent presentation components and parameterized utilities (FE01)"
-                        actions={
-                            <Button
-                                variant="contained"
-                                color="primary"
-                                onClick={() => setDialogOpen(true)}
-                            >
-                                Open Confirm Dialog
-                            </Button>
-                        }
-                    />
-
-                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, mb: 4 }}>
-                        <Paper sx={{ p: 2.5 }}>
-                            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-                                useDebounce Hook Demo
-                            </Typography>
-                            <TextField
-                                size="small"
-                                fullWidth
-                                label="Type to test debounce..."
-                                value={inputValue}
-                                onChange={(e) => setInputValue(e.target.value)}
-                                sx={{ mb: 2 }}
-                            />
-                            <Typography variant="body2" color="text.secondary">
-                                Real-time value: <strong>{inputValue || '(empty)'}</strong>
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                Debounced value (400ms): <strong>{debouncedInput || '(empty)'}</strong>
-                            </Typography>
-                        </Paper>
-
-                        <Paper sx={{ p: 2.5 }}>
-                            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-                                Parameterized Format Utilities Demo
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                Formatted Date (en-US): <strong>{currentDateFormatted}</strong>
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                Formatted Score: <strong>{formattedScore}</strong>
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                                Parsed Duration (3725s):{' '}
-                                <strong>
-                                    {duration.hours}h {duration.minutes}m {duration.seconds}s
-                                </strong>
-                            </Typography>
-                        </Paper>
-                    </Box>
-
-                    <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 2 }}>
-                        Status Views Showcase
-                    </Typography>
-                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 3, mb: 4 }}>
-                        <Paper sx={{ p: 2 }}>
-                            <LoadingView message="Loading skill assessment..." />
-                        </Paper>
-                        <EmptyView
-                            title="No courses enrolled"
-                            message="Please browse the course catalog to get started."
-                        />
-                        <ErrorView
-                            title="Failed to load diagnostic"
-                            message="Could not reach the server endpoint."
-                            onRetry={() => alert('Retry callback triggered')}
-                        />
-                    </Box>
-
-                    {dialogResult && (
-                        <Typography variant="body2" color="success.main" sx={{ mt: 2, fontWeight: 'bold' }}>
-                            {dialogResult}
-                        </Typography>
-                    )}
-
-                    <ConfirmDialog
-                        open={dialogOpen}
-                        title="Submit Assessment?"
-                        message="Are you sure you want to finalize this attempt? This action cannot be reversed."
-                        confirmLabel="Submit"
-                        cancelLabel="Review Answers"
-                        isDestructive={false}
-                        onConfirm={() => {
-                            setDialogOpen(false);
-                            setDialogResult('Confirmed action at: ' + new Date().toLocaleTimeString());
-                        }}
-                        onCancel={() => setDialogOpen(false)}
-                    />
-                </Box>
-            )}
-        </DashboardLayout>
-    );
-};
+export function SessionNavigation() {
+    const auth = useAuth(), navigate = useNavigate();
+    return <Box component="nav" aria-label="Account navigation" sx={{ display: 'flex', flexWrap: 'wrap', gap: .5, maxWidth: { xs: 144, sm: 'none' }, '& .MuiButton-root': { minWidth: 0, px: 1 }, '& :focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 } }}>
+        <Button component={Link} to="/courses" size="small">Courses</Button>
+        {auth.isAuthenticated ? <>
+            {auth.user?.role === 'Learner' && <Button component={Link} to="/my-courses" size="small">My Courses</Button>}
+            <Button component={Link} to="/profile" size="small">Profile</Button>
+            <Button size="small" onClick={() => { auth.logout(); navigate('/login', { replace: true }); }}>Sign out</Button>
+        </> : <><Button component={Link} to="/login" size="small">Sign in</Button><Button component={Link} to="/register" size="small">Register</Button></>}
+    </Box>;
+}
+function Workspace() {
+    const auth = useAuth(), navigate = useNavigate(), location = useLocation();
+    return <DashboardLayout headerTitle="CodeMastery"
+        navItems={[{ id: '/courses', label: 'Courses' }, ...(auth.isAuthenticated ? [...(auth.user?.role === 'Learner' ? [{ id: '/my-courses', label: 'My Courses' }] : []), { id: '/profile', label: 'Profile' }] : [])]}
+        selectedNavId={location.pathname} onNavSelect={(path) => navigate(path)} headerActions={<SessionNavigation />}>
+        <Outlet />
+    </DashboardLayout>;
+}
+function RouteFocus() {
+    const { pathname } = useLocation();
+    useLayoutEffect(() => {
+        const heading = document.querySelector<HTMLElement>('main h1');
+        if (heading) { heading.tabIndex = -1; heading.focus(); }
+    }, [pathname]);
+    return null;
+}
+function Catalogue() {
+    const navigate = useNavigate();
+    return <CourseCataloguePage onSelectCourse={(id) => navigate(`/courses/${encodeURIComponent(id)}`)} />;
+}
+function CourseDetail() {
+    const { courseId } = useParams(), navigate = useNavigate(), auth = useAuth();
+    return <CourseDetailPage key={courseId} courseId={courseId!} onBack={() => navigate('/courses')} membershipActions={<CourseMembershipActions key={`${courseId}:${auth.generation}`} courseId={courseId!} />} />;
+}
+/** Public catalogue routes share the current Auth/Profile workspace. */
+export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; preview?: ReactNode }) {
+    const auth = useAuth();
+    return <><Routes>
+        <Route path="/" element={<Navigate to="/courses" replace />} />
+        <Route path="/preview" element={preview ?? <Navigate to="/courses" replace />} />
+        <Route path="/login" element={<Box component="main" id="main-content"><LoginPage /></Box>} />
+        <Route path="/register" element={<Box component="main" id="main-content"><RegisterPage /></Box>} />
+        <Route path="/courses" element={catalogue ?? <Workspace />}>
+            {!catalogue && <Route index element={<Catalogue />} />}
+        </Route>
+        <Route element={<Workspace />}>
+            <Route path="/courses/:courseId" element={<CourseDetail />} />
+            <Route path="/my-courses" element={<ProtectedRoute roles={['Learner']}><MyCoursesPage key={auth.generation} /></ProtectedRoute>} />
+            <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+            <Route path="*" element={<PageHeader title="Page not found" subtitle="Choose an available page from navigation." />} />
+        </Route>
+    </Routes><RouteFocus /></>;
+}

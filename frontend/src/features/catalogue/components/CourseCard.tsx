@@ -47,6 +47,9 @@ export const CourseCard: React.FC<CourseCardProps> = ({
                 >
                     {course.description}
                 </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                    Instructor: {course.instructorDisplayName ?? 'Instructor name unavailable'}
+                </Typography>
             </CardContent>
             <CardActions sx={{ px: 2, pb: 2 }}>
                 <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>

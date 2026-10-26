@@ -46,7 +46,7 @@ Deferred: Server logout/revocation and explicit acceptance of residual-token val
 
 ### CT16.minimum — DELEGATED_APPROVED
 
-Use native fetch in existing shared/api/httpClient.ts with explicit VITE_API_BASE_URL (absolute origin or same-origin /api path), JSON request/response normalization matching OpenAPI, typed PageResponse and ProblemDetail in shared/types/apiTypes.ts. Bearer token held in Auth-provider memory only; reload requires login. Send Authorization only to the configured API origin; no browser persistent token storage, URL token or default credentials cookie. On401 clear memory and request login; preserve403 separately; show safe English validation/general/network errors. No automatic retries for POST; GET retries, cancellation and router package selection remain deferred. Feature-specific clients use existing authApi.ts/courseApi.ts paths; no new Axios/client framework dependency.
+Use native fetch in existing shared/api/httpClient.ts with explicit VITE_API_BASE_URL (absolute origin or same-origin /api path), JSON request/response normalization matching OpenAPI, typed PageResponse and ProblemDetail in shared/types/apiTypes.ts. Bearer token held in Auth-provider memory only; reload requires login. Send Authorization only to the configured API origin; no browser persistent token storage, URL token or default credentials cookie. On401 clear memory and request login; preserve403 separately; show safe English validation/general/network errors. No automatic retries for POST; GET retries, cancellation and router package selection remain deferred. Feature-specific clients use existing authApi.ts and frontend/src/features/catalogue/api/catalogueApi.ts paths; no new Axios/client framework dependency.
 
 Rationale: Native fetch satisfies the bounded client need without dependency duplication. Memory-only token handling reduces durable token theft, with explicit re-login usability cost.
 
@@ -55,6 +55,17 @@ Alternatives considered: Multiple clients or cookie/token hybrids create inconsi
 Owner: Frontend @heizseung; Auth and Leader review. Consumers: CT16, FE03, FE07, QA07. Checkpoints: ['CT16.http', 'CT16.shell', 'CT16.auth', 'FE03', 'FE07 consumed client'].
 
 Deferred: Server logout semantics; router dependency selection and full Frontend behavior; no existing executable consumer assumed.
+
+**CT16 path correction provenance — 24 October 2026:** Under the Leader's
+explicit “CodeMastery — Bounded Technical Approval Under Explicit Leader
+Delegation”, Codex technically approves only the mistaken `courseApi.ts`
+reference correction above to the canonical existing
+`frontend/src/features/catalogue/api/catalogueApi.ts`. The immutable original
+repository tree and current approved inventory agree on this location. See
+[CT16-2026-10-24-r1](../setup.md#ct16-delegated-technical-approval--24-october-2026)
+for authority, evidence and protected-integration gates. This correction is
+**APPROVED_PENDING_PROTECTED_INTEGRATION**; no filename, API, unrelated ADR002
+clause or historical disposition is changed, and no implementation is authorized.
 
 ### CT38.core — DELEGATED_APPROVED
 
@@ -256,3 +267,114 @@ Independently reviewed arithmetic and actual executable prototype results remain
 | CT38.remaining | DEFERRED | No new technical values approved. Preserve existing approved clauses and the prior family/slice definition. |
 | CT39 | DEFERRED | No new technical values approved. Preserve existing approved clauses and the prior family/slice definition. |
 | CT40 | DEFERRED | No new technical values approved. Preserve existing approved clauses and the prior family/slice definition. |
+
+
+## FE07 full implementation — delegated approval, 27 October 2026
+
+Revision `FE07-2026-10-27-r1`, recorded in PR #101, is
+**APPROVED_PENDING_PROTECTED_INTEGRATION**. Authorization: Project Leader
+@chi-thanh-nguyen's explicit “PR #101 Full FE07 Completion, Delegated Contract
+Approval and Integration” task, sections 2.1–2.4, delegates selection and technical
+approval of necessary FE07 dependencies to Codex and authorizes their implementation,
+repository documentation, normal push and PR-body update. Codex exercised that
+bounded delegation here. This is a new approval, not a reinterpretation of the
+historical CT22 DEFERRED inventory above. It is not yet an effective decision on
+main, a manual GitHub review, runtime acceptance, Issue closure or protected merge.
+Affected owners retain required reviews; no Issue or Project metadata is changed.
+
+### Approved slices and alternatives
+
+- **CT22 #43, membership only:** Course owns GET/PUT/DELETE
+  `/api/courses/{courseId}/membership` and GET `/api/me/courses`. A singleton
+  membership resource is preferable to the old verb-based `/enroll` candidates:
+  PUT/DELETE express idempotent transitions, and `/me` derives identity without
+  accepting another learner's ID. All successful responses are JSON 200 (including
+  unchanged operations), fitting the existing strict HTTP decoder. No new module,
+  public Java boundary, migration, timestamp, completion calculation or progress
+  mutation is introduced.
+- **CT21 #23, FE07 catalogue extension:** preserve existing fields, published-only
+  visibility, page=0, size=20 (1–100), and title COLLATE C then UUID order. Add
+  optional `q` (at most 100 UTF-16 units, trimmed, case-insensitive literal substring
+  of title or description; percent/underscore have no wildcard meaning) and
+  `prerequisites=any|none|described` (default any; null/non-null prerequisite text).
+  Search and filter are ANDed before paging and counting. Unknown/duplicate query
+  keys and invalid values return 400. This bounded filter uses existing public data;
+  new taxonomy, instructor directory and fuzzy search were rejected as unnecessary.
+  Add required nullable `instructorDisplayName` to summary/detail, composed through
+  the existing CT01.identity bulk lookup over only selected published IDs. Missing
+  names render “Instructor name unavailable”; no invented name, email or account
+  state. This additive representation revision replaces only the old four/six-field
+  closed shapes consumed by FE07; other CT21 authoring remains deferred.
+- **CT03 #22 / CT18 #20 protected membership binding:** Auth's existing current
+  identity facade and JWT/current-account validation; Learner only, no role
+  inheritance. Authentication 401 precedes role 403, which precedes resource
+  lookup. Hidden and missing Course yield the same safe 404, including membership
+  reads/mutations; malformed UUID/query yields 400 after filter authentication and
+  role admission. Existing RFC 9457 errors and 401 session invalidation are reused.
+  Membership responses/errors are no-store. CORS adds PUT/DELETE for these selected
+  operations; default-deny remains for all other unselected protected REST routes.
+- **CT16 #19 FE07 binding / CT14 #27 FE07 tests:** authenticated calls use the existing
+  provider-owned, memory-only session transport, required decoders, expected status,
+  cancellation/current-generation checks. `/my-courses` is guarded for LEARNER;
+  anonymous detail offers sign-in, then explicit My Courses navigation without
+  changing the existing Profile return contract. Reuse Vitest/jsdom/React act and
+  JUnit/Mockito plus the shared disposable PostgreSQL harness. Necessary test
+  locations are documented in repository-structure.md. Real browser evidence uses
+  Playwright against actual backend/PostgreSQL where available, separately from
+  unit doubles. No new dependency or E2E pipeline is selected.
+
+### Exact membership semantics
+
+One canonical row per learner/Course uses existing V002 statuses `active`,
+`completed`, `left`. GET returns `{courseId,status}` with status `none` for no row.
+PUT inserts ACTIVE with a new UUID and null resume only when absent; LEFT becomes
+ACTIVE on the same row; ACTIVE/COMPLETED are unchanged. DELETE changes ACTIVE or
+COMPLETED to LEFT; LEFT remains LEFT; absent remains NONE without insertion.
+No row, resume target, LessonProgress, recommendation or other history is deleted
+or reset. A completed row that is left and rejoined becomes ACTIVE; this operation
+never recalculates completion or mastery. Missing prerequisite mastery never blocks
+membership. Course must be published for every operation; hidden memberships are
+concealed but retained. An operation admitted before a later account lock retains
+CT01's existing in-flight semantics.
+
+Mutations hold a PostgreSQL row lock on the published Course root for the entire
+transaction, including membership lookup/write. This serializes same-Course
+mutations (including initially absent memberships) and publication changes without
+race-prone check-then-insert, lost transitions or unique-violation retries. It is a
+simple deliberately coarse lock; per-member advisory locks/new tables were rejected
+as unnecessary at this scale. Opposing concurrent operations follow lock acquisition
+order; repeated same operations converge. All writes roll back together on failure.
+No CT22.atomic mastery/progress transaction propagation is selected.
+
+My Courses accepts page/size above and `status=joined|active|completed|left|all`
+(default joined = active or completed). Only the current learner's published
+Courses appear, ordered by the same fixed title/UUID order; hidden rows do not
+contribute to counts. Content is the extended Course summary plus membership
+`status`; no enrolment ID, user ID, invented enrolment date, progress or resume data.
+List and count execute within a repeatable-read transaction. Public catalogue/detail
+also use repeatable-read assembly to avoid mixing publication/name/syllabus snapshots.
+
+Consumers unlocked: FE07, bounded CO07 membership producer and QA07 membership
+verification. CT22.progress/resume/atomic, FE08, CT21 authoring, full CT18/CT16/CT14,
+Adaptive and deployment remain excluded/deferred. Approval, implementation and
+verification are separate: execution evidence belongs in docs/testing.md.
+
+
+FE07's actual login dependency also requires binding the already approved
+POST `/api/auth/login` response to existing AuthService.authenticate and
+JwtTokenProvider.createToken in AuthController, using existing AuthResponse and
+LoginRequest locations. This is implementation of effective CT01/core and the
+accepted exact login representation (Bearer, expiresIn=900, PublicUser), not a new
+JWT/logout decision or bypass of AU05/QA01 review. Strict DTO parsing, costly
+verification, no-store and generic 401 are retained. It is included solely because
+the inspected main had credential verification/JWT production but no login REST
+binding; a browser membership flow could not otherwise authenticate.
+
+
+CT16 FE07 composition also preserves the original FE01 visual preview at public
+`/preview`, independently of the real `/courses` default. It remains labelled
+illustrative/local and creates no membership, progress or authentication data.
+The existing router's injectable catalogue test seam remains supported. Local
+browser verification may use an isolated preview listener at localhost:5174 when
+5173 is occupied; its explicitly supplied test-only CORS origin does not change
+the committed origin/configuration defaults.

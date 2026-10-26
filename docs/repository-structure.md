@@ -53,6 +53,29 @@ filename, directory, ownership or structural change is approved. Unrelated pendi
 CT14 proposals retain their dispositions; original AU04 implementation authorization
 and protected review/integration are not established by this prospective grant.
 
+## Bounded FE01 inventory additions
+
+The Leader/Owner's explicit D1–D4 delegation in “CodeMastery — Authorized FE01
+Remediation and Professional Dashboard UI/UX Implementation”, supplied on
+2026-10-23 (Asia/Ho_Chi_Minh), authorized necessary frontend presentation and
+verification additions within the existing subtrees. [PR #99](https://github.com/chi-thanh-nguyen/codemastery/pull/99)
+merged them as `89998c6e0be1764ed5ec8fcf101124a369a984f2` on 2026-10-24.
+The precise additions, now included in the tree below, are:
+
+- `frontend/src/shared/components/PresentationIcon.tsx` — original shared outline SVGs.
+- `frontend/src/shared/components/presentation.browser.cjs` — optional existing-Playwright browser verification and evidence capture.
+- `frontend/src/shared/components/presentation.test.tsx` — presentation/semantics/callback regressions.
+- `frontend/src/shared/hooks/useDebounce.test.tsx` — real React state/timer lifecycle regressions.
+- `frontend/src/shared/utils/format.test.ts` — caller-owned formatting and finite-duration regressions.
+
+[The bounded FE01 record](testing.md#bounded-fe01-decisions-and-regression-coverage)
+preserves authority, rationale, contracts, verification and exclusions without a
+new ADR. The Leader's 2026-10-24 post-merge documentation instruction authorizes
+this synchronization-debt correction; independent review/protected integration
+remain pending. This does not retroactively satisfy pre-merge documentation
+timing, rewrite the immutable canonical tree, change ownership/hierarchy, approve
+unrelated CT14/CT37 scope or establish Issue #37 completion.
+
 ```text
 codemastery/
 
@@ -1410,13 +1433,21 @@ codemastery/
 
 │           │   ├── PageHeader.tsx
 
+│           │   ├── PresentationIcon.tsx
+
 │           │   ├── SidebarNav.tsx
 
-│           │   └── StatusViews.tsx
+│           │   ├── StatusViews.tsx
+
+│           │   ├── presentation.browser.cjs
+
+│           │   └── presentation.test.tsx
 
 │           ├── hooks/
 
-│           │   └── useDebounce.ts
+│           │   ├── useDebounce.ts
+
+│           │   └── useDebounce.test.tsx
 
 │           ├── api/
 
@@ -1428,7 +1459,9 @@ codemastery/
 
 │           └── utils/
 
-│               └── format.ts
+│               ├── format.ts
+
+│               └── format.test.ts
 
 ├── e2e/
 
@@ -1526,3 +1559,44 @@ codemastery/
 
 └── CONTRIBUTING.md
 ```
+
+## Bounded Interim FE03/FE07 test inventory
+
+**CT14-INTERIM-FE03-FE07-2026-10-24-r1 —
+APPROVED_PENDING_PROTECTED_INTEGRATION.** The Leader's explicit
+“CodeMastery — Complete Interim Technical Contract Approvals (CT16, CT17, CT14)”,
+24 October 2026, delegates technical approval of the smallest FE03/FE07 test
+inventory. Codex acts as the delegated approval authority for exactly:
+
+- frontend/src/shared/api/httpClient.test.ts
+- frontend/src/app/providers/AuthProvider.test.tsx
+- frontend/src/routes/index.test.tsx
+- frontend/src/features/catalogue/api/catalogueApi.test.ts
+- frontend/src/features/catalogue/pages/CourseCataloguePage.test.tsx
+- frontend/src/features/catalogue/pages/CourseDetailPage.test.tsx
+
+These six planned additions use existing owning directories and current
+@heizseung/@chi-thanh-nguyen CODEOWNERS; no new helper, hierarchy or ownership rule.
+[The exact testing contract](testing.md#approved-interim-fe03fe07-verification-contract--24-october-2026)
+records coverage, isolation, CT16 pending-PR dependency and execution limits.
+No listed file is created or claimed implemented by this documentation change.
+The original canonical tree and existing AU03/AU04/FE01 exceptions are unchanged;
+this explicit bounded exception does not approve unrelated test inventory.
+Separate implementation authority and compliant protected integration are required.
+
+
+### FE07 delegated test placement — 27 October 2026
+
+The Leader's explicit full-FE07 task authorizes the necessary test additions below
+within existing owning feature/module and integration directories (ADR002
+`FE07-2026-10-27-r1`). Existing scaffolds remain the production callable locations;
+no module or production directory is added.
+
+- frontend/src/features/learning/api/learningApi.test.ts
+- frontend/src/features/learning/pages/MyCoursesPage.test.tsx
+- backend/src/test/java/com/codemastery/integration/EnrollmentIntegrationTest.java
+
+Existing CourseCatalogue API/page tests and routes/index.test.tsx cover the other
+FE07 changes. e2e/tests/learner-flow.spec.ts is the existing browser-flow location;
+the external Playwright installation used for local execution is not a dependency
+or E2E pipeline change.

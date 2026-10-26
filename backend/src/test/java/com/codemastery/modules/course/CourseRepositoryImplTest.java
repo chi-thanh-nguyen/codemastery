@@ -2,6 +2,8 @@ package com.codemastery.modules.course;
 
 import com.codemastery.modules.course.domain.model.Course;
 import com.codemastery.modules.course.domain.model.PublishStatus;
+import com.codemastery.modules.course.domain.model.EnrollmentStatus;
+import com.codemastery.modules.course.domain.repository.CourseRepository.AccessSnapshot;
 import com.codemastery.modules.course.infrastructure.persistence.entity.CourseEntity;
 import com.codemastery.modules.course.infrastructure.persistence.mapper.CourseMapper;
 import com.codemastery.modules.course.infrastructure.persistence.repository.CourseJpaRepository;
@@ -36,6 +38,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class CourseRepositoryImplTest {
@@ -182,6 +186,125 @@ class CourseRepositoryImplTest {
         when(jpa.findPublishedCatalogue(any())).thenThrow(failure);
         assertSame(failure, assertThrows(DataAccessResourceFailureException.class,
                 () -> repository.findPublishedCourses(PageRequest.of(0, 20))));
+    }
+
+    @Test
+    void courseSnapshotMapsScalarProjectionWithSingleQuery() {
+        UUID lessonId = UUID.randomUUID();
+        UUID materialId = UUID.randomUUID();
+        var row = accessRow(lessonId, "hidden", materialId, "published", "completed");
+        when(jpa.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, lessonId, materialId))
+                .thenReturn(Optional.of(row));
+
+        assertEquals(new AccessSnapshot(COURSE_ID, INSTRUCTOR_ID, PublishStatus.PUBLISHED,
+                lessonId, PublishStatus.HIDDEN, materialId, PublishStatus.PUBLISHED, EnrollmentStatus.COMPLETED),
+                repository.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, lessonId, materialId).orElseThrow());
+        verify(jpa).findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, lessonId, materialId);
+        verifyNoMoreInteractions(jpa);
+    }
+
+    @Test
+    void absentDescendantsAndMembershipAreNotDefaulted() {
+        var row = accessRow(null, null, null, null, null);
+        when(jpa.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null))
+                .thenReturn(Optional.of(row));
+        assertEquals(new AccessSnapshot(COURSE_ID, INSTRUCTOR_ID, PublishStatus.PUBLISHED,
+                null, null, null, null, null),
+                repository.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null).orElseThrow());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"active", "completed", "left"})
+    void lessonSnapshotUsesExactPersistedStatusCodes(String code) {
+        UUID lessonId = UUID.randomUUID();
+        var row = accessRow(lessonId, "published", null, null, code);
+        when(jpa.findLessonAccessSnapshot(INSTRUCTOR_ID, lessonId))
+                .thenReturn(Optional.of(row));
+        assertEquals(EnrollmentStatus.valueOf(code.toUpperCase(java.util.Locale.ROOT)),
+                repository.findLessonAccessSnapshot(INSTRUCTOR_ID, lessonId).orElseThrow().enrollmentStatus());
+        verify(jpa).findLessonAccessSnapshot(INSTRUCTOR_ID, lessonId);
+        verifyNoMoreInteractions(jpa);
+    }
+
+    @Test
+    void bothSnapshotQueriesPreserveMissingRoot() {
+        when(jpa.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null)).thenReturn(Optional.empty());
+        when(jpa.findLessonAccessSnapshot(INSTRUCTOR_ID, COURSE_ID)).thenReturn(Optional.empty());
+        assertTrue(repository.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null).isEmpty());
+        assertTrue(repository.findLessonAccessSnapshot(INSTRUCTOR_ID, COURSE_ID).isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ACTIVE", "unknown", ""})
+    void corruptMembershipIsProviderFailureNotAbsentOrAllowed(String code) {
+        var row = accessRow(null, null, null, null, code);
+        when(jpa.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null))
+                .thenReturn(Optional.of(row));
+        assertThrows(IllegalStateException.class,
+                () -> repository.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null));
+    }
+
+    @Test
+    void corruptRequiredFieldsAndDescendantPairsAreProviderFailures() {
+        var malformed = new ArrayList<CourseJpaRepository.AccessRow>();
+        var noCourse = accessRow(null, null, null, null, null);
+        when(noCourse.getCourseId()).thenReturn(null);
+        malformed.add(noCourse);
+        var noOwner = accessRow(null, null, null, null, null);
+        when(noOwner.getInstructorId()).thenReturn(null);
+        malformed.add(noOwner);
+        for (String code : java.util.Arrays.asList(null, "PUBLISHED", "unknown")) {
+            var badStatus = accessRow(null, null, null, null, null);
+            when(badStatus.getCourseStatus()).thenReturn(code);
+            malformed.add(badStatus);
+        }
+        malformed.add(accessRow(COURSE_ID, null, null, null, null));
+        malformed.add(accessRow(null, "published", null, null, null));
+        malformed.add(accessRow(COURSE_ID, "published", COURSE_ID, null, null));
+        malformed.add(accessRow(COURSE_ID, "published", null, "hidden", null));
+        malformed.add(accessRow(null, null, COURSE_ID, "published", null));
+        for (var row : malformed) {
+            when(jpa.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null)).thenReturn(Optional.of(row));
+            assertThrows(IllegalStateException.class,
+                    () -> repository.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null));
+        }
+    }
+
+    @Test
+    void snapshotProviderFailuresPropagateForBothShapes() {
+        var failure = new DataAccessResourceFailureException("unavailable");
+        when(jpa.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null)).thenThrow(failure);
+        when(jpa.findLessonAccessSnapshot(INSTRUCTOR_ID, COURSE_ID)).thenThrow(failure);
+        assertSame(failure, assertThrows(DataAccessResourceFailureException.class,
+                () -> repository.findCourseAccessSnapshot(INSTRUCTOR_ID, COURSE_ID, null, null)));
+        assertSame(failure, assertThrows(DataAccessResourceFailureException.class,
+                () -> repository.findLessonAccessSnapshot(INSTRUCTOR_ID, COURSE_ID)));
+    }
+
+    @Test
+    void invalidRequiredSnapshotArgumentsNeverQueryPersistence() {
+        assertThrows(NullPointerException.class,
+                () -> repository.findCourseAccessSnapshot(null, COURSE_ID, null, null));
+        assertThrows(NullPointerException.class,
+                () -> repository.findCourseAccessSnapshot(INSTRUCTOR_ID, null, null, null));
+        assertThrows(NullPointerException.class, () -> repository.findLessonAccessSnapshot(null, COURSE_ID));
+        assertThrows(NullPointerException.class, () -> repository.findLessonAccessSnapshot(INSTRUCTOR_ID, null));
+        verifyNoInteractions(jpa);
+    }
+
+    private static CourseJpaRepository.AccessRow accessRow(
+            UUID lesson, String lessonStatus, UUID material, String materialStatus, String membership) {
+        var row = mock(CourseJpaRepository.AccessRow.class);
+        // Lenient projection fields permit early corruption rejection without requiring later reads.
+        lenient().when(row.getCourseId()).thenReturn(COURSE_ID);
+        lenient().when(row.getInstructorId()).thenReturn(INSTRUCTOR_ID);
+        lenient().when(row.getCourseStatus()).thenReturn("published");
+        lenient().when(row.getLessonId()).thenReturn(lesson);
+        lenient().when(row.getLessonStatus()).thenReturn(lessonStatus);
+        lenient().when(row.getMaterialId()).thenReturn(material);
+        lenient().when(row.getMaterialStatus()).thenReturn(materialStatus);
+        lenient().when(row.getEnrollmentStatus()).thenReturn(membership);
+        return row;
     }
 
     private static CourseEntity course(UUID id, String title) {

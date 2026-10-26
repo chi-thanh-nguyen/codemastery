@@ -1,5 +1,5 @@
-import React from 'react';
-import { Box, Button, Pagination, Typography } from '@mui/material';
+import React, { useState } from 'react';
+import { Box, Button, MenuItem, Pagination, TextField, Typography } from '@mui/material';
 import { PageHeader } from '../../../shared/components/PageHeader';
 import { LoadingView, EmptyView, ErrorView } from '../../../shared/components/StatusViews';
 import { CourseCard } from '../components/CourseCard';
@@ -12,6 +12,8 @@ export interface CourseCataloguePageProps {
 export const CourseCataloguePage: React.FC<CourseCataloguePageProps> = ({
     onSelectCourse,
 }) => {
+    const [q, setQuery] = useState('');
+    const [prerequisites, setPrerequisites] = useState<'any' | 'none' | 'described'>('any');
     const {
         courses,
         page,
@@ -21,6 +23,7 @@ export const CourseCataloguePage: React.FC<CourseCataloguePageProps> = ({
         error,
         setPage,
         refetch,
+        applyFilters,
     } = useCourseCatalogue();
 
     return (
@@ -30,6 +33,14 @@ export const CourseCataloguePage: React.FC<CourseCataloguePageProps> = ({
                 subtitle="Explore introductory programming courses designed for mastery learning"
             />
 
+            <Box component="form" aria-label="Filter courses" onSubmit={(event) => { event.preventDefault(); applyFilters({ q: q.trim(), prerequisites }); }}
+                sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3, alignItems: 'center' }}>
+                <TextField label="Search courses" value={q} onChange={(event) => setQuery(event.target.value)} slotProps={{ htmlInput: { maxLength: 100 } }} sx={{ flex: '1 1 200px' }} />
+                <TextField select label="Prerequisites" value={prerequisites} onChange={(event) => setPrerequisites(event.target.value as typeof prerequisites)} sx={{ minWidth: 180 }}>
+                    <MenuItem value="any">Any prerequisites</MenuItem><MenuItem value="none">None specified</MenuItem><MenuItem value="described">Prerequisites described</MenuItem>
+                </TextField>
+                <Button type="submit" variant="outlined">Apply filters</Button>
+            </Box>
             {loading && <LoadingView message="Loading available courses..." />}
 
             {error && (
@@ -43,7 +54,7 @@ export const CourseCataloguePage: React.FC<CourseCataloguePageProps> = ({
             {!loading && !error && courses.length === 0 && (
                 <EmptyView
                     title="No published courses found"
-                    message="Courses are currently being authored by instructors. Please check back later."
+                    message="No published courses match these filters. Try another search."
                     action={
                         <Button variant="outlined" onClick={refetch}>
                             Refresh

@@ -1,45 +1,34 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getPublishedCourses } from '../api/catalogueApi';
 import type { CourseSummary } from '../types/catalogueTypes';
+import { ApiError } from '../../../shared/types/apiTypes';
 
-export function useCourseCatalogue(initialPage = 0, initialSize = 10) {
+export function useCourseCatalogue(initialPage = 0, initialSize = 20) {
     const [courses, setCourses] = useState<CourseSummary[]>([]);
     const [page, setPage] = useState(initialPage);
+    const [filters, setFilters] = useState<{ q: string; prerequisites: 'any' | 'none' | 'described' }>({ q: '', prerequisites: 'any' });
     const [size] = useState(initialSize);
     const [totalPages, setTotalPages] = useState(0);
     const [totalElements, setTotalElements] = useState(0);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
-    const fetchCourses = useCallback(async (targetPage: number) => {
-        try {
-            setLoading(true);
-            setError(null);
-            const data = await getPublishedCourses(targetPage, size);
-            setCourses(data.content);
-            setPage(data.page);
-            setTotalPages(data.totalPages);
-            setTotalElements(data.totalElements);
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Failed to fetch course catalogue';
-            setError(message);
-        } finally {
-            setLoading(false);
-        }
-    }, [size]);
+    const [revision, retry] = useState(0);
+    const refetch = useCallback(() => retry((value) => value + 1), []);
 
     useEffect(() => {
-        fetchCourses(page);
-    }, [fetchCourses, page]);
+        const controller = new AbortController();
+        let current = true;
+        setLoading(true); setError(null);
+        getPublishedCourses(page, size, { ...filters, signal: controller.signal, isCurrent: () => current }).then((data) => {
+            if (!current) return;
+            setCourses(data.content); setTotalPages(data.totalPages); setTotalElements(data.totalElements);
+        }).catch((error: unknown) => {
+            if (current && !(error instanceof ApiError && error.kind === 'cancelled')) {
+                setError(error instanceof ApiError ? error.message : 'Failed to fetch course catalogue.');
+            }
+        }).finally(() => { if (current) setLoading(false); });
+        return () => { current = false; controller.abort(); };
+    }, [page, size, revision, filters]);
 
-    return {
-        courses,
-        page,
-        totalPages,
-        totalElements,
-        loading,
-        error,
-        setPage,
-        refetch: () => fetchCourses(page),
-    };
+    return { courses, page, totalPages, totalElements, loading, error, setPage: (next: number) => { setLoading(true); setError(null); setPage(next); }, refetch, applyFilters: (next: typeof filters) => { setLoading(true); setError(null); setPage(0); setFilters(next); } };
 }

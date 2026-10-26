@@ -16,51 +16,48 @@ import {
 import { PageHeader } from '../../../shared/components/PageHeader';
 import { LoadingView, ErrorView } from '../../../shared/components/StatusViews';
 import { getPublishedCourseById } from '../api/catalogueApi';
+import { ApiError } from '../../../shared/types/apiTypes';
 import type { CourseDetail } from '../types/catalogueTypes';
 
 export interface CourseDetailPageProps {
     courseId: string;
     onBack: () => void;
-    onEnroll?: (courseId: string) => void;
-    isEnrolled?: boolean;
+    membershipActions?: React.ReactNode;
 }
 
 export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({
     courseId,
     onBack,
-    onEnroll,
-    isEnrolled = false,
+    membershipActions,
 }) => {
     const [course, setCourse] = useState<CourseDetail | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const fetchDetail = async () => {
-        try {
-            setLoading(true);
-            setError(null);
-            const data = await getPublishedCourseById(courseId);
-            setCourse(data);
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Failed to load course details';
-            setError(message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
+    const [revision, retry] = useState(0);
+    const fetchDetail = () => retry((value) => value + 1);
     useEffect(() => {
-        fetchDetail();
-    }, [courseId]);
+        const controller = new AbortController();
+        let current = true;
+        setLoading(true); setError(null); setCourse(null);
+        getPublishedCourseById(courseId, { signal: controller.signal, isCurrent: () => current }).then((data) => {
+            if (current) setCourse(data);
+        }).catch((error: unknown) => {
+            if (current && !(error instanceof ApiError && error.kind === 'cancelled')) {
+                setError(error instanceof ApiError ? error.message : 'Failed to load course details.');
+            }
+        }).finally(() => { if (current) setLoading(false); });
+        return () => { current = false; controller.abort(); };
+    }, [courseId, revision]);
 
-    if (loading) return <LoadingView message="Loading course syllabus..." />;
+    if (loading) return <Box><PageHeader title="Course details" /><LoadingView message="Loading course syllabus..." /></Box>;
     if (error || !course) {
         return (
-            <ErrorView
-                title="Course not found"
+            <Box><PageHeader title="Course details" /><ErrorView
+                title="Could not load course"
                 message={error || 'The requested course does not exist or has been unpublished.'}
                 onRetry={fetchDetail}
-            />
+            /></Box>
         );
     }
 
@@ -74,20 +71,13 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({
                         <Button variant="outlined" onClick={onBack}>
                             Back to Catalogue
                         </Button>
-                        {onEnroll && (
-                            <Button
-                                variant="contained"
-                                color={isEnrolled ? 'success' : 'primary'}
-                                onClick={() => onEnroll(course.id)}
-                                disabled={isEnrolled}
-                            >
-                                {isEnrolled ? 'Already Enrolled' : 'Enroll Now'}
-                            </Button>
-                        )}
+
                     </Box>
                 }
             />
 
+            {membershipActions}
+            <Typography sx={{ mb: 2 }}>Instructor: {course.instructorDisplayName ?? 'Instructor name unavailable'}</Typography>
             {/* Description & Prerequisites */}
             <Paper sx={{ p: 3, mb: 3 }}>
                 <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1 }}>
@@ -108,7 +98,7 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({
                     </Alert>
                 ) : (
                     <Typography variant="body2" color="text.secondary">
-                        No specific prerequisites required. Beginner friendly!
+                        No prerequisites specified.
                     </Typography>
                 )}
             </Paper>
@@ -126,7 +116,6 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({
                 </Paper>
             ) : (
                 course.syllabus
-                    .sort((a, b) => a.position - b.position)
                     .map((chapter) => (
                         <Accordion key={chapter.id} defaultExpanded sx={{ mb: 1.5 }}>
                             <AccordionSummary>
@@ -137,7 +126,6 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({
                             <AccordionDetails>
                                 <List dense disablePadding>
                                     {chapter.lessons
-                                        .sort((a, b) => a.position - b.position)
                                         .map((lesson) => (
                                             <ListItem key={lesson.id} sx={{ pl: 2 }}>
                                                 <ListItemText

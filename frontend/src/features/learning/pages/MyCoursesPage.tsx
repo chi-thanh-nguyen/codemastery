@@ -1,189 +1,91 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-    Box,
-    Card,
-    CardContent,
-    CardActions,
-    Typography,
-    Button,
-    Chip,
-} from '@mui/material';
-import { PageHeader } from '../../../shared/components/PageHeader';
-import { LoadingView, EmptyView, ErrorView } from '../../../shared/components/StatusViews';
-import { ConfirmDialog } from '../../../shared/components/ConfirmDialog';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Box, Button, MenuItem, Pagination, Paper, TextField, Typography } from '@mui/material';
+import { Link } from 'react-router';
 import { useAuth } from '../../auth/hooks/useAuth';
-import { getMyEnrolledCourses, leaveCourse } from '../api/learningApi';
-import type { CourseMembership } from '../types/learningTypes';
+import { getCourseMembership, getMyEnrolledCourses, enrollInCourse, leaveCourse } from '../api/learningApi';
+import type { CourseMembership, MembershipFilter, MembershipPage } from '../types/learningTypes';
+import { ApiError } from '../../../shared/types/apiTypes';
+import { PageHeader } from '../../../shared/components/PageHeader';
+import { ConfirmDialog } from '../../../shared/components/ConfirmDialog';
+import { LoadingView, ErrorView, EmptyView } from '../../../shared/components/StatusViews';
 
-export interface MyCoursesPageProps {
-    onSelectCourse: (courseId: string) => void;
-    onBrowseCatalogue: () => void;
+const failure = (error: unknown) => error instanceof ApiError ? error.message : 'The request could not be completed. Please try again.';
+
+/** Mounted with a course/session key by the router; no token leaves the Auth provider. */
+export function CourseMembershipActions({ courseId }: { courseId: string }) {
+    const auth = useAuth();
+    const [membership, setMembership] = useState<CourseMembership | null>(null), [error, setError] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false), [confirm, setConfirm] = useState(false), [revision, retry] = useState(0);
+    const work = useRef<AbortController | null>(null), alive = useRef(false), pending = useRef(false);
+    const generation = auth.generation;
+    const eligible = auth.isAuthenticated && auth.user?.role === 'Learner';
+    useEffect(() => {
+        alive.current = true;
+        if (!eligible) return () => { alive.current = false; };
+        const controller = new AbortController(); work.current = controller;
+        const current = () => alive.current && work.current === controller && auth.isCurrent(generation);
+        setBusy(true); setError(null);
+        getCourseMembership(courseId, { signal: controller.signal, isCurrent: current }).then((value) => { if (current()) setMembership(value); })
+            .catch((error: unknown) => { if (current() && !(error instanceof ApiError && error.kind === 'cancelled')) setError(failure(error)); })
+            .finally(() => { if (current()) setBusy(false); });
+        return () => { alive.current = false; work.current?.abort(); };
+    }, [courseId, generation, eligible, revision]);
+    async function mutate(joining: boolean) {
+        if (pending.current || busy || !eligible) return;
+        pending.current = true; setConfirm(false); setBusy(true); setError(null);
+        work.current?.abort(); const controller = new AbortController(); work.current = controller;
+        const current = () => alive.current && work.current === controller && auth.isCurrent(generation);
+        try { const value = await (joining ? enrollInCourse : leaveCourse)(courseId, { signal: controller.signal, isCurrent: current }); if (current()) setMembership(value); }
+        catch (error) { if (current() && !(error instanceof ApiError && error.kind === 'cancelled')) setError(failure(error)); }
+        finally { pending.current = false; if (current()) setBusy(false); }
+    }
+    if (!auth.isAuthenticated) return <Button component={Link} to="/login" variant="contained" sx={{ mb: 2 }}>Sign in to enroll</Button>;
+    if (!eligible) return <Alert severity="info" sx={{ mb: 2 }}>Course membership is available to learners.</Alert>;
+    const joined = membership?.status === 'active' || membership?.status === 'completed';
+    return <Box sx={{ mb: 3 }} aria-busy={busy}>
+        {busy && <Typography role="status">Updating membership…</Typography>}
+        {error && <Alert severity="error" action={<Button onClick={() => retry((value) => value + 1)} disabled={busy}>Retry</Button>}>{error}</Alert>}
+        {membership && <Typography role="status" sx={{ mb: 1 }}>Membership: {membership.status}</Typography>}
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {membership && <Button variant="contained" disabled={busy} onClick={() => joined ? setConfirm(true) : void mutate(true)}>
+                {joined ? 'Leave course' : membership.status === 'left' ? 'Re-enroll' : 'Enroll in course'}
+            </Button>}
+            <Button component={Link} to="/my-courses">My Courses</Button>
+        </Box>
+        <ConfirmDialog open={confirm} title="Leave course?" message="Your learning history will be preserved. You can re-enroll while the course is published."
+            confirmLabel="Leave course" isDestructive onCancel={() => setConfirm(false)} onConfirm={() => void mutate(false)} />
+    </Box>;
 }
 
-export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({
-    onSelectCourse,
-    onBrowseCatalogue,
-}) => {
-    const { token } = useAuth();
-    const [memberships, setMemberships] = useState<CourseMembership[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    // Confirm Leave Dialog state
-    const [selectedCourseToLeave, setSelectedCourseToLeave] = useState<CourseMembership | null>(null);
-    const [leaving, setLeaving] = useState(false);
-
-    const fetchMyCourses = useCallback(async () => {
-        if (!token) return;
-        try {
-            setLoading(true);
-            setError(null);
-            const data = await getMyEnrolledCourses(token);
-            setMemberships(data);
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Failed to fetch enrolled courses';
-            setError(message);
-        } finally {
-            setLoading(false);
-        }
-    }, [token]);
-
+export function MyCoursesPage() {
+    const auth = useAuth(), generation = auth.generation;
+    const [data, setData] = useState<MembershipPage | null>(null), [page, setPage] = useState(0);
+    const [filter, setFilter] = useState<MembershipFilter>('joined'), [revision, retry] = useState(0);
+    const [loading, setLoading] = useState(true), [error, setError] = useState<string | null>(null);
     useEffect(() => {
-        fetchMyCourses();
-    }, [fetchMyCourses]);
-
-    const handleConfirmLeave = async () => {
-        if (!selectedCourseToLeave || !token) return;
-        try {
-            setLeaving(true);
-            await leaveCourse(selectedCourseToLeave.courseId, token);
-            setSelectedCourseToLeave(null);
-            await fetchMyCourses(); // Refresh list
-        } catch (err: unknown) {
-            alert(err instanceof Error ? err.message : 'Could not leave course');
-        } finally {
-            setLeaving(false);
-        }
-    };
-
-    if (loading) return <LoadingView message="Loading your enrolled courses..." />;
-
-    return (
-        <Box>
-            <PageHeader
-                title="My Courses"
-                subtitle="Manage your active enrolled courses and progress"
-                actions={
-                    <Button variant="contained" onClick={onBrowseCatalogue}>
-                        Browse More Courses
-                    </Button>
-                }
-            />
-
-            {error && (
-                <ErrorView
-                    title="Could not load courses"
-                    message={error}
-                    onRetry={fetchMyCourses}
-                />
-            )}
-
-            {!error && memberships.length === 0 && (
-                <EmptyView
-                    title="You are not enrolled in any courses"
-                    message="Browse the course catalogue to find a suitable programming course."
-                    action={
-                        <Button variant="contained" onClick={onBrowseCatalogue}>
-                            Explore Catalogue
-                        </Button>
-                    }
-                />
-            )}
-
-            {!error && memberships.length > 0 && (
-                <Box
-                    sx={{
-                        display: 'grid',
-                        gridTemplateColumns: {
-                            xs: '1fr',
-                            sm: 'repeat(2, 1fr)',
-                            md: 'repeat(3, 1fr)',
-                        },
-                        gap: 3,
-                    }}
-                >
-                    {memberships.map((item) => (
-                        <Card
-                            key={item.courseId}
-                            sx={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                height: '100%',
-                                borderRadius: 2,
-                            }}
-                        >
-                            <CardContent sx={{ flexGrow: 1 }}>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                                    <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold' }}>
-                                        {item.courseTitle}
-                                    </Typography>
-                                    <Chip
-                                        label={item.status}
-                                        color={item.status === 'ACTIVE' ? 'success' : 'default'}
-                                        size="small"
-                                    />
-                                </Box>
-                                {item.courseDescription && (
-                                    <Typography
-                                        variant="body2"
-                                        color="text.secondary"
-                                        sx={{
-                                            display: '-webkit-box',
-                                            WebkitLineClamp: 3,
-                                            WebkitBoxOrient: 'vertical',
-                                            overflow: 'hidden',
-                                        }}
-                                    >
-                                        {item.courseDescription}
-                                    </Typography>
-                                )}
-                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-                                    Enrolled on: {new Date(item.enrolledAt).toLocaleDateString()}
-                                </Typography>
-                            </CardContent>
-
-                            <CardActions sx={{ px: 2, pb: 2, justifyContent: 'space-between' }}>
-                                <Button
-                                    size="small"
-                                    color="error"
-                                    onClick={() => setSelectedCourseToLeave(item)}
-                                >
-                                    Leave Course
-                                </Button>
-                                <Button
-                                    size="small"
-                                    variant="contained"
-                                    onClick={() => onSelectCourse(item.courseId)}
-                                >
-                                    Enter Course
-                                </Button>
-                            </CardActions>
-                        </Card>
-                    ))}
-                </Box>
-            )}
-
-            {/* Confirm Dialog when Leaving a Course */}
-            <ConfirmDialog
-                open={Boolean(selectedCourseToLeave)}
-                title="Leave Course?"
-                message={`Are you sure you want to unenroll from "${selectedCourseToLeave?.courseTitle}"? Your learning history for this course will be archived.`}
-                confirmLabel={leaving ? 'Leaving...' : 'Confirm Leave'}
-                cancelLabel="Keep Enrolled"
-                isDestructive={true}
-                onConfirm={handleConfirmLeave}
-                onCancel={() => setSelectedCourseToLeave(null)}
-            />
-        </Box>
-    );
-};
+        let alive = true; const controller = new AbortController();
+        const current = () => alive && auth.isCurrent(generation);
+        setLoading(true); setError(null); setData(null);
+        getMyEnrolledCourses(page, filter, { signal: controller.signal, isCurrent: current }).then((value) => { if (current()) setData(value); })
+            .catch((error: unknown) => { if (current() && !(error instanceof ApiError && error.kind === 'cancelled')) setError(failure(error)); })
+            .finally(() => { if (current()) setLoading(false); });
+        return () => { alive = false; controller.abort(); };
+    }, [page, filter, generation, revision]);
+    return <Box><PageHeader title="My Courses" subtitle="Your published course memberships" actions={<Button onClick={() => retry((value) => value + 1)}>Refresh</Button>} />
+        <TextField select label="Membership status" value={filter} sx={{ minWidth: 200, mb: 3 }} onChange={(event) => { setPage(0); setFilter(event.target.value as MembershipFilter); }}>
+            <MenuItem value="joined">Joined</MenuItem><MenuItem value="active">Active</MenuItem><MenuItem value="completed">Completed</MenuItem><MenuItem value="left">Left</MenuItem><MenuItem value="all">All memberships</MenuItem>
+        </TextField>
+        {loading && <LoadingView message="Loading your courses…" />}
+        {error && <ErrorView message={error} onRetry={() => retry((value) => value + 1)} />}
+        {!loading && !error && data?.content.length === 0 && <EmptyView title="No courses found" message="Choose a different status or browse the catalogue." action={<Button component={Link} to="/courses">Browse courses</Button>} />}
+        {data && <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' } }}>
+            {data.content.map((course) => <Paper key={course.id} sx={{ p: 3, overflowWrap: 'anywhere' }}>
+                <Typography variant="h6" component="h2">{course.title}</Typography><Typography>{course.description}</Typography>
+                <Typography>Instructor: {course.instructorDisplayName ?? 'Instructor name unavailable'}</Typography>
+                <Typography>Membership: {course.status}</Typography>
+                <Button component={Link} to={`/courses/${encodeURIComponent(course.id)}`}>View course and membership</Button>
+            </Paper>)}
+        </Box>}
+        {data && data.totalPages > 1 && <Pagination count={data.totalPages} page={page + 1} onChange={(_, next) => setPage(next - 1)} sx={{ mt: 3 }} />}
+    </Box>;
+}

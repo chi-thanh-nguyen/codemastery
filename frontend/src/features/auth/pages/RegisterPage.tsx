@@ -1,39 +1,14 @@
-import React, { useState } from 'react';
-import { Alert, Box, Button } from '@mui/material';
+import { useState } from 'react';
+import { Alert, Button } from '@mui/material';
+import { Link } from 'react-router';
 import { AuthLayout } from '../../../layouts/AuthLayout';
 import { RegisterForm } from '../components/RegisterForm';
-
-export interface RegisterPageProps {
-    onNavigate: (path: string) => void;
-}
-
-export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
+export function RegisterPage() {
     const [registered, setRegistered] = useState(false);
-
-    return (
-        <AuthLayout
-            title="Create Account"
-            subtitle="Join CodeMastery to start adaptive learning"
-        >
-            {registered ? (
-                <Box sx={{ textAlign: 'center' }}>
-                    <Alert severity="success" sx={{ mb: 3 }}>
-                        Account registered successfully! You can now sign in.
-                    </Alert>
-                    <Button
-                        variant="contained"
-                        fullWidth
-                        onClick={() => onNavigate('/login')}
-                    >
-                        Proceed to Login
-                    </Button>
-                </Box>
-            ) : (
-                <RegisterForm
-                    onSuccess={() => setRegistered(true)}
-                    onGoToLogin={() => onNavigate('/login')}
-                />
-            )}
-        </AuthLayout>
-    );
-};
+    return <AuthLayout title="Create account" subtitle="Start learning with CodeMastery">
+        {registered ? <>
+            <Alert severity="success" role="status" sx={{ mb: 2 }}>Your account was registered. Sign in to continue.</Alert>
+            <Button variant="contained" sx={{ '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 } }} component={Link} to="/login">Proceed to sign in</Button>
+        </> : <RegisterForm onSuccess={() => setRegistered(true)} />}
+    </AuthLayout>;
+}

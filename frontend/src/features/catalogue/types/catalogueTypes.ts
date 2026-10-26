@@ -3,6 +3,7 @@ export interface CourseSummary {
     title: string;
     description: string;
     instructorId: string;
+    instructorDisplayName: string | null;
 }
 
 export interface SyllabusLesson {
@@ -23,6 +24,7 @@ export interface CourseDetail {
     title: string;
     description: string;
     instructorId: string;
+    instructorDisplayName: string | null;
     prerequisiteDescription: string | null;
     syllabus: SyllabusChapter[];
 }
