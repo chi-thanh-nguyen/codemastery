@@ -1,5 +1,6 @@
 package com.codemastery.modules.auth;
 
+import com.codemastery.common.config.AppConfig;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.GlobalExceptionHandler;
 import com.codemastery.modules.auth.api.controller.AuthController;
@@ -7,6 +8,16 @@ import com.codemastery.modules.auth.api.dto.AuthRequests;
 import com.codemastery.modules.auth.api.dto.UserResponse;
 import com.codemastery.modules.auth.application.service.AuthService;
 import com.codemastery.modules.auth.application.service.UserAccountService;
+import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
+import com.codemastery.modules.auth.application.service.UserAccountService.IdentityRole;
+import com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser;
+import com.codemastery.modules.auth.infrastructure.security.SecurityConfig;
+import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import com.codemastery.modules.auth.infrastructure.security.RestSecurityErrorHandler;
+import com.codemastery.modules.course.application.service.CourseAccessService;
+import com.codemastery.modules.course.domain.repository.CourseRepository;
+import com.codemastery.modules.course.domain.model.PublishStatus;
+import com.codemastery.modules.course.domain.model.EnrollmentStatus;
 import com.codemastery.modules.auth.domain.model.AccountStatus;
 import com.codemastery.modules.auth.domain.model.Role;
 import com.codemastery.modules.auth.domain.model.User;
@@ -16,6 +27,7 @@ import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -31,6 +43,16 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.context.annotation.Bean;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Import;
+import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
+import org.springframework.mock.web.MockServletContext;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
+import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -43,6 +65,10 @@ import org.springframework.validation.beanvalidation.SpringValidatorAdapter;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.sql.SQLException;
+import java.security.SecureRandom;
+import java.time.Duration;
+import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -299,7 +325,7 @@ class AuthServiceTest {
 
         @Test
         void emptyInputDoesNotQueryStorage() {
-            assertEquals(Map.of(), new UserAccountService(users).instructorDisplayNames(Set.of()));
+            assertEquals(Map.of(), new UserAccountService(users, () -> { throw new AssertionError("Public names must not read identity"); }).instructorDisplayNames(Set.of()));
             verifyNoInteractions(users);
         }
 
@@ -313,7 +339,7 @@ class AuthServiceTest {
                     passwordHash, "Locked Instructor", Role.INSTRUCTOR, AccountStatus.LOCKED)));
             when(users.findById(learner)).thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
             when(users.findById(missing)).thenReturn(Optional.empty());
-            Map<UUID, String> result = new UserAccountService(users)
+            Map<UUID, String> result = new UserAccountService(users, () -> { throw new AssertionError("Public names must not read identity"); })
                     .instructorDisplayNames(Set.of(USER_ID, locked, learner, missing));
             assertEquals(Map.of(USER_ID, "Unit Learner", locked, "Locked Instructor"), result);
             assertThrows(UnsupportedOperationException.class, () -> result.put(learner, "Forbidden addition"));
@@ -324,7 +350,102 @@ class AuthServiceTest {
             var failure = new DataAccessResourceFailureException("Synthetic unavailable storage");
             when(users.findById(USER_ID)).thenThrow(failure);
             assertSame(failure, assertThrows(DataAccessResourceFailureException.class,
-                    () -> new UserAccountService(users).instructorDisplayNames(Set.of(USER_ID))));
+                    () -> new UserAccountService(users, () -> { throw new AssertionError("Public names must not read identity"); }).instructorDisplayNames(Set.of(USER_ID))));
+        }
+    }
+
+    @Nested
+    class CurrentIdentityBinding {
+        private AnnotationConfigWebApplicationContext context;
+        private UserAccountService identities;
+        private CourseRepository courses;
+
+        @BeforeEach void startProductionBeans() {
+            SecurityContextHolder.clearContext();
+            context = new AnnotationConfigWebApplicationContext();
+            context.setServletContext(new MockServletContext());
+            context.register(IdentityFixture.class);
+            context.refresh();
+            identities = context.getBean(UserAccountService.class);
+            courses = context.getBean(CourseRepository.class);
+        }
+
+        @AfterEach void closeProductionBeans() {
+            SecurityContextHolder.clearContext();
+            if (context != null) context.close();
+        }
+
+        @ParameterizedTest @EnumSource(Role.class)
+        void springWiresRequestLocalIdentityAndCourseToTheActualAuthAdapter(Role role) {
+            var principal = new AuthenticatedUser(USER_ID, role);
+            SecurityContextHolder.getContext().setAuthentication(
+                    new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+            IdentityRole expected = switch (role) {
+                case LEARNER -> IdentityRole.LEARNER;
+                case INSTRUCTOR -> IdentityRole.INSTRUCTOR;
+                case ADMIN -> IdentityRole.ADMINISTRATOR;
+            };
+            assertEquals(new CurrentIdentity(USER_ID, expected), identities.requireCurrentIdentity());
+            UUID course = UUID.randomUUID();
+            if (role == Role.ADMIN) {
+                assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                        () -> context.getBean(CourseAccessService.class).requireLearnerCourseAccess(course));
+                verifyNoInteractions(courses);
+            } else {
+                when(courses.findCourseAccessSnapshot(USER_ID, course, null, null)).thenReturn(Optional.of(
+                        new CourseRepository.AccessSnapshot(course, USER_ID, PublishStatus.PUBLISHED,
+                                null, null, null, null, EnrollmentStatus.ACTIVE)));
+                var access = context.getBean(CourseAccessService.class);
+                if (role == Role.LEARNER) access.requireLearnerCourseAccess(course);
+                else access.requireCourseOwnership(course);
+                verify(courses).findCourseAccessSnapshot(USER_ID, course, null, null);
+            }
+            verifyNoInteractions(context.getBean(UserRepository.class)); // No redundant account read.
+            SecurityContextHolder.clearContext();
+            assertThrows(AuthenticationCredentialsNotFoundException.class, identities::requireCurrentIdentity);
+        }
+
+        @Test void rejectsAbsentUnauthenticatedAndForeignPrincipalsWithoutCourseReads() {
+            assertThrows(AuthenticationCredentialsNotFoundException.class, identities::requireCurrentIdentity);
+            for (var authentication : List.of(
+                    new UsernamePasswordAuthenticationToken(new AuthenticatedUser(USER_ID, Role.LEARNER), null),
+                    new UsernamePasswordAuthenticationToken("caller-supplied-id", null, List.of()),
+                    new UsernamePasswordAuthenticationToken(new AuthenticatedUser(null, Role.LEARNER), null, List.of()),
+                    new UsernamePasswordAuthenticationToken(new AuthenticatedUser(USER_ID, null), null, List.of()))) {
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+                assertThrows(AuthenticationCredentialsNotFoundException.class,
+                        () -> context.getBean(CourseAccessService.class).requireLearnerCourseAccess(UUID.randomUUID()));
+            }
+            verifyNoInteractions(courses, context.getBean(UserRepository.class));
+        }
+
+        @Test void producerFailureAndInvalidResultsAreServerFailuresRatherThanAuthenticationDenials() {
+            var failure = new DataAccessResourceFailureException("Synthetic provider failure");
+            var facade = new UserAccountService(users, () -> { throw failure; });
+            assertSame(failure, assertThrows(DataAccessResourceFailureException.class, facade::requireCurrentIdentity));
+            for (var invalid : java.util.Arrays.asList(null,
+                    new CurrentIdentity(null, IdentityRole.LEARNER), new CurrentIdentity(USER_ID, null))) {
+                assertThrows(IllegalStateException.class,
+                        () -> new UserAccountService(users, () -> invalid).requireCurrentIdentity());
+            }
+            verifyNoInteractions(users);
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    @EnableWebMvc
+    @Import({SecurityConfig.class, JwtTokenProvider.class, RestSecurityErrorHandler.class,
+            JacksonAutoConfiguration.class, UserAccountService.class, CourseAccessService.class})
+    static class IdentityFixture {
+        @Bean UserRepository users() { return mock(UserRepository.class); }
+        @Bean CourseRepository courses() { return mock(CourseRepository.class); }
+        @Bean AppConfig.JwtSettings jwtSettings() {
+            byte[] key = new byte[32];
+            new SecureRandom().nextBytes(key);
+            return new AppConfig.JwtSettings(HexFormat.of().formatHex(key), Duration.ofMinutes(15), "codemastery");
+        }
+        @Bean AppConfig.CorsSettings corsSettings() {
+            return new AppConfig.CorsSettings(List.of("http://localhost:5173"));
         }
     }
 

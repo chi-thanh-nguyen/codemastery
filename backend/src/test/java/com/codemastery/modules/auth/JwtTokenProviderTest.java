@@ -30,7 +30,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpMethod;
@@ -683,7 +683,7 @@ class JwtTokenProviderTest {
         assertFalse(response.getContentAsString().contains("confidential"));
     }
 
-    @Configuration(proxyBeanMethods = false)
+    @TestConfiguration(proxyBeanMethods = false)
     @EnableWebMvc
     @Import({SecurityConfig.class, JwtTokenProvider.class, RestSecurityErrorHandler.class,
             JacksonAutoConfiguration.class, FixtureEndpoints.class})

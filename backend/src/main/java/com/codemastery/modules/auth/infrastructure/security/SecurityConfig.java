@@ -1,11 +1,16 @@
 package com.codemastery.modules.auth.infrastructure.security;
 
 import com.codemastery.common.config.AppConfig;
+import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
+import com.codemastery.modules.auth.application.service.UserAccountService.IdentityRole;
 import com.codemastery.modules.auth.domain.repository.UserRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -20,6 +25,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 @Configuration
 @EnableWebSecurity
@@ -30,6 +36,25 @@ public class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/login"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}"));
+
+    /** Adapts only Auth's validated principal, keeping infrastructure out of application consumers. */
+    @Bean
+    Supplier<CurrentIdentity> currentIdentity() {
+        return () -> {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication == null || !authentication.isAuthenticated()
+                    || !(authentication.getPrincipal() instanceof AuthenticatedUser principal)
+                    || principal.userId() == null || principal.role() == null) {
+                throw new AuthenticationCredentialsNotFoundException("Authentication failed.");
+            }
+            IdentityRole role = switch (principal.role()) {
+                case LEARNER -> IdentityRole.LEARNER;
+                case INSTRUCTOR -> IdentityRole.INSTRUCTOR;
+                case ADMIN -> IdentityRole.ADMINISTRATOR;
+            };
+            return new CurrentIdentity(principal.userId(), role);
+        };
+    }
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http,

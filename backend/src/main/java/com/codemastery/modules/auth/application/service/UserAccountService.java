@@ -7,18 +7,34 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
-/** CT01.identity public-name read only; current-identity adaptation awaits AU05. */
+/** Approved CT01.identity reads; security principal adaptation stays in Auth infrastructure. */
 @Service
 public class UserAccountService {
 
     private final UserRepository users;
+    private final Supplier<CurrentIdentity> currentIdentity;
 
-    public UserAccountService(UserRepository users) {
-        this.users = users;
+    public UserAccountService(UserRepository users, Supplier<CurrentIdentity> currentIdentity) {
+        this.users = Objects.requireNonNull(users);
+        this.currentIdentity = Objects.requireNonNull(currentIdentity);
     }
+
+    /** Reads the identity already validated by Auth for this request; never caches or revalidates it. */
+    public CurrentIdentity requireCurrentIdentity() {
+        CurrentIdentity identity = currentIdentity.get();
+        if (identity == null || identity.userId() == null || identity.role() == null) {
+            throw new IllegalStateException("Invalid current identity provider result");
+        }
+        return identity;
+    }
+
+    public record CurrentIdentity(UUID userId, IdentityRole role) {}
+    public enum IdentityRole { LEARNER, INSTRUCTOR, ADMINISTRATOR }
 
     /** Callers supply IDs from their approved published-course page/detail scope. */
     @Transactional(readOnly = true)
