@@ -1,6 +1,5 @@
 import { request } from '../../../shared/api/httpClient';
 import { isRecord, protocolError } from '../../../shared/types/apiTypes';
-import { decodeSummary } from '../../catalogue/api/catalogueApi';
 import type { CourseMembership, MembershipFilter, MembershipPage, MembershipStatus } from '../types/learningTypes';
 
 export interface MembershipOptions { signal?: AbortSignal; isCurrent?: () => boolean }
@@ -18,9 +17,13 @@ function page(value: unknown): MembershipPage {
         || !Number.isSafeInteger(value.totalElements) || (value.totalElements as number) < 0
         || !Number.isSafeInteger(value.totalPages) || (value.totalPages as number) < 0) throw protocolError();
     const content = value.content.map((item) => {
-        if (!isRecord(item) || !status(item.status)) throw protocolError();
-        const { status: state, ...summary } = item;
-        return { ...decodeSummary(summary), status: state };
+        if (!isRecord(item) || Object.keys(item).length !== 6 || !status(item.status)
+            || typeof item.id !== 'string' || !uuid.test(item.id)
+            || typeof item.title !== 'string' || typeof item.description !== 'string'
+            || typeof item.instructorId !== 'string' || !uuid.test(item.instructorId)
+            || item.instructorDisplayName !== null && typeof item.instructorDisplayName !== 'string') throw protocolError();
+        return { id: item.id, title: item.title, description: item.description, instructorId: item.instructorId,
+            instructorDisplayName: item.instructorDisplayName as string | null, status: item.status };
     });
     return { content, page: value.page as number, size: value.size as number, totalElements: value.totalElements as number, totalPages: value.totalPages as number };
 }

@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { dirname, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { bindAuthSession } from '../../../shared/api/httpClient';
 import { getCourseMembership, getMyEnrolledCourses, enrollInCourse, leaveCourse } from './learningApi';
@@ -60,3 +63,29 @@ for (const [operation, method] of membershipOperations) {
         await expect(operation(route)).rejects.toMatchObject({ kind: 'protocol' });
     });
 }
+
+it.each(['./learningApi.ts', '../types/learningTypes.ts'])('keeps %s within the CT16 learning/shared import boundary', (relative) => {
+    const path = fileURLToPath(new URL(relative, import.meta.url));
+    const featureRoot = resolve(dirname(path), '..'), featuresRoot = dirname(featureRoot);
+    const imports = [...readFileSync(path, 'utf8').matchAll(/(?:\bfrom\s*|\b(?:import|require)\s*(?:\(\s*)?)(['"])([^'"]+)\1/g)].map((match) => match[2]);
+    const crossFeature = imports.filter((fileName) => {
+        if (!fileName.startsWith('.')) return false;
+        const target = resolve(dirname(path), fileName);
+        return target.startsWith(featuresRoot + sep) && !target.startsWith(featureRoot + sep);
+    });
+    expect(crossFeature).toEqual([]);
+});
+const member = { id, title: 'Course', description: 'Description', instructorId: id, instructorDisplayName: null, status: 'active' };
+it.each(['active', 'completed', 'left'])('decodes the learning-owned membership course with status %s', async (status) => {
+    const result = { content: [{ ...member, status }], page: 0, size: 20, totalElements: 1, totalPages: 1 };
+    fetcher.mockResolvedValue(json(result)); expect(await getMyEnrolledCourses()).toEqual(result);
+});
+it.each([
+    null, [], { ...member, id: 'invalid' }, { ...member, id: 4 },
+    { ...member, instructorId: 'invalid' }, { ...member, title: 3 }, { ...member, description: null },
+    { ...member, instructorDisplayName: 4 }, { ...member, instructorDisplayName: undefined },
+    { ...member, title: undefined }, { ...member, status: 'ACTIVE' }, { ...member, email: 'private@example.test' },
+])('rejects malformed, missing or additional membership course fields (%#)', async (value) => {
+    fetcher.mockResolvedValue(json({ content: [value], page: 0, size: 20, totalElements: 1, totalPages: 1 }));
+    await expect(getMyEnrolledCourses()).rejects.toMatchObject({ kind: 'protocol' });
+});

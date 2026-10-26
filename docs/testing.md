@@ -1229,3 +1229,44 @@ all-browser/screen-reader certification or formal Issue completion. Required CI,
 CODEOWNER/last-push review and protected integration remain independent gates.
 Codex assisted the delegated contract selection, implementation, conflict resolution,
 automated regression authoring and local execution; no human approval is fabricated.
+
+## PR #101 Round 2 review regressions — 27 October 2026
+
+The reviewed baseline was `37fc2d17e239b4de80980a938a33061602c24c42`.
+New PostgreSQL tests reproduced 500 responses for page=107374183,size=20 and
+page=2147483647,size=100. The parser already accepted those inputs; no new page
+limit, API representation or transaction policy was selected. Oversized offsets
+now count the same published/filtered snapshot, return empty content without row
+loading beyond its total, and use a bound PostgreSQL long offset if rows exist.
+Tests cover ordinary paging, offset boundaries, filtered/zero counts, failure
+propagation and the large-offset row-fetch fallback. CourseSearchRequest remains
+unchanged; a parser regression explicitly preserves the reported valid request.
+
+`cd backend && ./mvnw verify` passed 458 unit and 58 integration tests, with zero
+failures/errors/skips. `npm test` from frontend passed 353 tests in 11 files;
+`npm run typecheck` and `VITE_API_BASE_URL=http://localhost:8080 npm run build`
+also passed. Existing pagination-recovery, UUID-casing and Auth/session tests remain.
+The two affected learning API/type files now own their membership representation
+and decoder, using the existing shared HTTP/error primitives. Import-boundary
+checks and malformed/missing/extra-field cases protect CT16 compliance; no shared
+contract or HTTP transport was added.
+
+The existing browser script now additionally requires the primary published
+fixture's description to be exactly `D` repeated 500 times. All other fixture
+IDs, counts and credentials remain as described above. The local preparer
+`python3 -B /private/tmp/pr101-r2-runtime.py` supplied that disposable fixture and
+executed the committed script against production assets, real REST and PostgreSQL.
+All nine scenarios passed, including the exact large-page 200 response with
+content=[], page=107374183, size=20, totalElements=21 and totalPages=2.
+
+Description layout checks at 320/768/1280px assert text-element client/scroll
+widths, full 500-character content and every text Range rectangle, including
+vertical containment; hiding/clipping/scrolling the paragraph is rejected.
+At 320px the reproduced 5,332px scroll width in a 238px paragraph is now 238px.
+Separate before/after measurements confirmed the same overflow in title,
+instructor, prerequisites, chapter and lesson text; inherited wrapping contains
+all of them. Local result.json, overflow-after.json and description screenshots
+are in `/private/tmp/codemastery-pr101-r2-runtime/evidence/`. The runtime was
+cleaned up; no credentials, screenshots, generated artifacts or dependencies were
+committed. These are local execution results, not independent protected-review
+or deployed QA acceptance. Codex assisted the scoped fixes and regression execution.
