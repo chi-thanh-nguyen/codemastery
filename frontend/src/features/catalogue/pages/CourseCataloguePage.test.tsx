@@ -50,3 +50,58 @@ it('submits search/filter criteria and resets a later page to zero', async () =>
     await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(vi.mocked(getPublishedCourses).mock.calls.at(-1)).toEqual([0, 20, expect.objectContaining({ q: 'basics', prerequisites: 'any' })]);
 });
+
+function catalogueResult(total: number, index: number): CoursePage {
+    return { ...page, page: index, totalElements: total, totalPages: Math.ceil(total / 20),
+        content: Array.from({ length: Math.max(0, Math.min(20, total - index * 20)) }, (_, offset) => ({
+            ...page.content[0], id: `00000000-0000-4000-8000-${String(index * 20 + offset + 1).padStart(12, '0')}`,
+            title: `Programming ${index * 20 + offset + 1}`,
+        })) };
+}
+it.each([[21, 20], [61, 21]])('recovers catalogue pagination when %i results shrink to %i', async (before, after) => {
+    const oldLast = Math.ceil(before / 20) - 1, last = Math.ceil(after / 20) - 1;
+    let recover!: (value: CoursePage) => void;
+    vi.mocked(getPublishedCourses).mockResolvedValueOnce(catalogueResult(before, 0))
+        .mockResolvedValueOnce(catalogueResult(after, oldLast))
+        .mockImplementationOnce(() => new Promise((resolve) => { recover = resolve; }));
+    await mount();
+    const seen: string[] = [], observer = new MutationObserver(() => seen.push(host.textContent ?? ''));
+    observer.observe(host, { childList: true, subtree: true });
+    try {
+        await act(async () => host.querySelector<HTMLButtonElement>(`[aria-label="Go to page ${oldLast + 1}"]`)!.click());
+        expect(vi.mocked(getPublishedCourses).mock.calls.map(([index]) => index)).toEqual([0, oldLast, last]);
+        expect(host.textContent).toContain('Loading available courses');
+        expect(host.textContent).not.toContain('No published courses found');
+        await act(async () => recover(catalogueResult(after, last)));
+        expect(host.textContent).toContain(`Showing ${Math.min(20, after - last * 20)} of ${after}`);
+        expect(seen.every((text) => !text.includes('No published courses found'))).toBe(true);
+        expect(getPublishedCourses).toHaveBeenCalledTimes(3);
+    } finally { observer.disconnect(); }
+});
+it.each([21, 0])('does not issue an extra catalogue request for valid or zero results (%i)', async (total) => {
+    vi.mocked(getPublishedCourses).mockResolvedValueOnce(catalogueResult(21, 0)).mockResolvedValueOnce(catalogueResult(total, 1));
+    await mount(); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click());
+    expect(vi.mocked(getPublishedCourses).mock.calls.map(([index]) => index)).toEqual([0, 1]);
+    expect(host.textContent?.includes('No published courses found')).toBe(total === 0);
+    expect(host.textContent).not.toContain('Loading available courses');
+});
+it('retries a failed catalogue recovery on the corrected page', async () => {
+    vi.mocked(getPublishedCourses).mockResolvedValueOnce(catalogueResult(21, 0)).mockResolvedValueOnce(catalogueResult(20, 1))
+        .mockRejectedValueOnce(new ApiError('network', 'Unable to connect. Please try again.')).mockResolvedValueOnce(catalogueResult(20, 0));
+    await mount(); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click());
+    expect(host.textContent).toContain('Could not load catalogue'); expect(host.textContent).not.toContain('No published courses found');
+    await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!.click());
+    expect(host.textContent).toContain('Showing 20 of 20');
+    expect(vi.mocked(getPublishedCourses).mock.calls.map(([index]) => index)).toEqual([0, 1, 0, 0]);
+});
+it('cancels catalogue recovery and ignores its late result after filters change', async () => {
+    let recover!: (value: CoursePage) => void;
+    vi.mocked(getPublishedCourses).mockResolvedValueOnce(catalogueResult(21, 0)).mockResolvedValueOnce(catalogueResult(20, 1))
+        .mockImplementationOnce(() => new Promise((resolve) => { recover = resolve; })).mockResolvedValueOnce(catalogueResult(1, 0));
+    await mount(); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click());
+    const options = vi.mocked(getPublishedCourses).mock.calls[2][2]!;
+    await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(options.signal?.aborted).toBe(true); expect(options.isCurrent?.()).toBe(false);
+    await act(async () => recover(catalogueResult(20, 0)));
+    expect(host.textContent).toContain('Showing 1 of 1'); expect(getPublishedCourses).toHaveBeenCalledTimes(4);
+});

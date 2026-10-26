@@ -63,12 +63,20 @@ export function MyCoursesPage() {
     const [filter, setFilter] = useState<MembershipFilter>('joined'), [revision, retry] = useState(0);
     const [loading, setLoading] = useState(true), [error, setError] = useState<string | null>(null);
     useEffect(() => {
-        let alive = true; const controller = new AbortController();
+        let alive = true, recovering = false; const controller = new AbortController();
         const current = () => alive && auth.isCurrent(generation);
         setLoading(true); setError(null); setData(null);
-        getMyEnrolledCourses(page, filter, { signal: controller.signal, isCurrent: current }).then((value) => { if (current()) setData(value); })
+        getMyEnrolledCourses(page, filter, { signal: controller.signal, isCurrent: current }).then((value) => {
+            if (!current()) return;
+            if (value.totalPages > 0 && page >= value.totalPages) {
+                recovering = true;
+                setPage(value.totalPages - 1);
+                return;
+            }
+            setData(value);
+        })
             .catch((error: unknown) => { if (current() && !(error instanceof ApiError && error.kind === 'cancelled')) setError(failure(error)); })
-            .finally(() => { if (current()) setLoading(false); });
+            .finally(() => { if (current() && !recovering) setLoading(false); });
         return () => { alive = false; controller.abort(); };
     }, [page, filter, generation, revision]);
     return <Box><PageHeader title="My Courses" subtitle="Your published course memberships" actions={<Button onClick={() => retry((value) => value + 1)}>Refresh</Button>} />
@@ -77,7 +85,7 @@ export function MyCoursesPage() {
         </TextField>
         {loading && <LoadingView message="Loading your courses…" />}
         {error && <ErrorView message={error} onRetry={() => retry((value) => value + 1)} />}
-        {!loading && !error && data?.content.length === 0 && <EmptyView title="No courses found" message="Choose a different status or browse the catalogue." action={<Button component={Link} to="/courses">Browse courses</Button>} />}
+        {!loading && !error && data?.totalElements === 0 && <EmptyView title="No courses found" message="Choose a different status or browse the catalogue." action={<Button component={Link} to="/courses">Browse courses</Button>} />}
         {data && <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' } }}>
             {data.content.map((course) => <Paper key={course.id} sx={{ p: 3, overflowWrap: 'anywhere' }}>
                 <Typography variant="h6" component="h2">{course.title}</Typography><Typography>{course.description}</Typography>

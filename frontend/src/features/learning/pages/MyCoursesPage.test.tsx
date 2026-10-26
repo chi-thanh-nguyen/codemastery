@@ -69,3 +69,67 @@ it('does not publish protected results from a superseded session', async () => {
     await mount(); auth.isCurrent = () => false;
     await act(async () => resolve({ courseId: id, status: 'active' })); expect(host.textContent).not.toContain('Membership: active');
 });
+
+function membershipResult(total: number, index: number): MembershipPage {
+    return { ...listing, page: index, totalElements: total, totalPages: Math.ceil(total / 20),
+        content: Array.from({ length: Math.max(0, Math.min(20, total - index * 20)) }, (_, offset) => ({
+            ...listing.content[0], id: `00000000-0000-4000-8000-${String(index * 20 + offset + 1).padStart(12, '0')}`,
+            title: `Programming ${index * 20 + offset + 1}`,
+        })) };
+}
+it.each([[21, 20], [61, 21]])('recovers My Courses pagination when %i results shrink to %i', async (before, after) => {
+    const oldLast = Math.ceil(before / 20) - 1, last = Math.ceil(after / 20) - 1;
+    let recover!: (value: MembershipPage) => void;
+    vi.mocked(getMyEnrolledCourses).mockResolvedValueOnce(membershipResult(before, 0))
+        .mockResolvedValueOnce(membershipResult(before, oldLast))
+        .mockResolvedValueOnce(membershipResult(after, oldLast))
+        .mockImplementationOnce(() => new Promise((resolve) => { recover = resolve; }));
+    await mount(<MyCoursesPage />);
+    await act(async () => host.querySelector<HTMLButtonElement>(`[aria-label="Go to page ${oldLast + 1}"]`)!.click());
+    const seen: string[] = [], observer = new MutationObserver(() => seen.push(host.textContent ?? ''));
+    observer.observe(host, { childList: true, subtree: true });
+    try {
+        await click('Refresh');
+        expect(vi.mocked(getMyEnrolledCourses).mock.calls.map(([index]) => index)).toEqual([0, oldLast, oldLast, last]);
+        expect(host.textContent).toContain('Loading your courses');
+        expect(host.textContent).not.toContain('No courses found');
+        await act(async () => recover(membershipResult(after, last)));
+        expect(host.querySelectorAll('h2')).toHaveLength(Math.min(20, after - last * 20));
+        expect(seen.every((text) => !text.includes('No courses found'))).toBe(true);
+        expect(getMyEnrolledCourses).toHaveBeenCalledTimes(4);
+    } finally { observer.disconnect(); }
+});
+it.each([21, 0])('does not issue an extra My Courses request for valid or zero results (%i)', async (total) => {
+    vi.mocked(getMyEnrolledCourses).mockResolvedValueOnce(membershipResult(21, 0)).mockResolvedValueOnce(membershipResult(total, 1));
+    await mount(<MyCoursesPage />); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click());
+    expect(vi.mocked(getMyEnrolledCourses).mock.calls.map(([index]) => index)).toEqual([0, 1]);
+    expect(host.textContent?.includes('No courses found')).toBe(total === 0);
+    expect(host.textContent).not.toContain('Loading your courses');
+});
+it('retries a failed My Courses recovery on the corrected page', async () => {
+    vi.mocked(getMyEnrolledCourses).mockResolvedValueOnce(membershipResult(21, 0)).mockResolvedValueOnce(membershipResult(20, 1))
+        .mockRejectedValueOnce(new ApiError('network', 'Unable to connect. Please try again.')).mockResolvedValueOnce(membershipResult(20, 0));
+    await mount(<MyCoursesPage />); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click());
+    expect(host.textContent).toContain('Unable to connect'); expect(host.textContent).not.toContain('No courses found');
+    await click('Retry'); expect(host.querySelectorAll('h2')).toHaveLength(20);
+    expect(vi.mocked(getMyEnrolledCourses).mock.calls.map(([index]) => index)).toEqual([0, 1, 0, 0]);
+});
+it('cancels My Courses recovery on unmount and ignores a late private response', async () => {
+    let recover!: (value: MembershipPage) => void;
+    vi.mocked(getMyEnrolledCourses).mockResolvedValueOnce(membershipResult(21, 0)).mockResolvedValueOnce(membershipResult(20, 1))
+        .mockImplementationOnce(() => new Promise((resolve) => { recover = resolve; }));
+    await mount(<MyCoursesPage />); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click());
+    const options = vi.mocked(getMyEnrolledCourses).mock.calls[2][2]!;
+    await act(async () => root.unmount()); root = createRoot(host);
+    expect(options.signal?.aborted).toBe(true); expect(options.isCurrent?.()).toBe(false);
+    await act(async () => recover(membershipResult(20, 0))); expect(host.textContent).toBe(''); expect(getMyEnrolledCourses).toHaveBeenCalledTimes(3);
+});
+it('does not recover an invalid page from a superseded session', async () => {
+    let resolve!: (value: MembershipPage) => void;
+    vi.mocked(getMyEnrolledCourses).mockResolvedValueOnce(membershipResult(21, 0))
+        .mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    await mount(<MyCoursesPage />); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click());
+    auth.isCurrent = () => false;
+    await act(async () => resolve(membershipResult(20, 1)));
+    expect(getMyEnrolledCourses).toHaveBeenCalledTimes(2); expect(host.textContent).not.toContain('No courses found');
+});

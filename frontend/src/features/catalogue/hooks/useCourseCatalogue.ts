@@ -17,16 +17,22 @@ export function useCourseCatalogue(initialPage = 0, initialSize = 20) {
 
     useEffect(() => {
         const controller = new AbortController();
-        let current = true;
+        let current = true, recovering = false;
         setLoading(true); setError(null);
         getPublishedCourses(page, size, { ...filters, signal: controller.signal, isCurrent: () => current }).then((data) => {
             if (!current) return;
+            if (data.totalPages > 0 && page >= data.totalPages) {
+                // A non-empty result set shrank: keep loading until the last valid page arrives.
+                recovering = true;
+                setPage(data.totalPages - 1);
+                return;
+            }
             setCourses(data.content); setTotalPages(data.totalPages); setTotalElements(data.totalElements);
         }).catch((error: unknown) => {
             if (current && !(error instanceof ApiError && error.kind === 'cancelled')) {
                 setError(error instanceof ApiError ? error.message : 'Failed to fetch course catalogue.');
             }
-        }).finally(() => { if (current) setLoading(false); });
+        }).finally(() => { if (current && !recovering) setLoading(false); });
         return () => { current = false; controller.abort(); };
     }, [page, size, revision, filters]);
 

@@ -123,7 +123,7 @@ it.each(['Instructor', 'Administrator'])('denies %s before mounting My Courses o
 });
 it('mounts real learner My Courses with authenticated transport and removes it at expiry', async () => {
     await mount('/courses'); await login();
-    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? { ...page, content: [] } : page)));
+    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? { ...page, content: [], totalElements: 0, totalPages: 0 } : page)));
     await go('/my-courses'); expect(host.querySelector('main h1')?.textContent).toBe('My Courses'); expect(host.textContent).toContain('No courses found');
     const [, init] = fetcher.mock.calls.find(([url]) => new URL(url).pathname === '/api/me/courses')!;
     expect(init.headers.has('Authorization')).toBe(true);

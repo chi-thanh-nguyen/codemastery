@@ -51,7 +51,7 @@ export const CourseCataloguePage: React.FC<CourseCataloguePageProps> = ({
                 />
             )}
 
-            {!loading && !error && courses.length === 0 && (
+            {!loading && !error && totalElements === 0 && (
                 <EmptyView
                     title="No published courses found"
                     message="No published courses match these filters. Try another search."
