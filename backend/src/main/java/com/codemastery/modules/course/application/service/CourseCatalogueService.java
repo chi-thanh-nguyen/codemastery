@@ -1,4 +1,4 @@
-package com.codemastery.modules.course.application.service;
+gipackage com.codemastery.modules.course.application.service;
 
 import com.codemastery.common.api.PageResponse;
 import com.codemastery.common.exception.BusinessRuleException;
