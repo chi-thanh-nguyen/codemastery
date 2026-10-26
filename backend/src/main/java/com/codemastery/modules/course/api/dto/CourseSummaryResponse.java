@@ -4,9 +4,7 @@ import com.codemastery.modules.course.domain.model.Course;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * Public published-course summary item for GET /api/courses.
- */
+
 public record CourseSummaryResponse(
         UUID id,
         String title,

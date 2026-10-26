@@ -1,7 +1,8 @@
-gipackage com.codemastery.modules.course.application.service;
+package com.codemastery.modules.course.application.service;
 
 import com.codemastery.common.api.PageResponse;
 import com.codemastery.common.exception.BusinessRuleException;
+import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.course.api.dto.CourseDetailResponse;
 import com.codemastery.modules.course.api.dto.CourseDetailResponse.SyllabusChapter;
 import com.codemastery.modules.course.api.dto.CourseDetailResponse.SyllabusLesson;
@@ -15,13 +16,14 @@ import com.codemastery.modules.course.domain.repository.CourseContentRepository;
 import com.codemastery.modules.course.domain.repository.CourseRepository;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,11 +48,8 @@ public class CourseCatalogueService {
     public CourseCatalogueService(
             CourseRepository courseRepository,
             CourseContentRepository courseContentRepository) {
-        this(
-                courseRepository,
-                courseContentRepository,
-                new CourseAccessService(courseRepository, courseContentRepository)
-        );
+        this(courseRepository, courseContentRepository,
+                new CourseAccessService(courseRepository, courseContentRepository));
     }
 
     @Autowired
@@ -65,87 +64,92 @@ public class CourseCatalogueService {
                 courseAccessService, "courseAccessService must not be null");
     }
 
-    /**
-     * Lists published courses using the approved pagination contract.
-     */
-    public PageResponse<CourseSummaryResponse> listPublishedCourses(CourseSearchRequest request) {
-        CourseSearchRequest effectiveRequest = request != null ? request : CourseSearchRequest.defaults();
-        Pageable pageable = effectiveRequest.toValidatedPageable();
+    // =========================================================================
+    //  Catalogue listing
+    // =========================================================================
 
-        Page<Course> publishedPage = courseRepository.findPublishedCourses(pageable);
-        List<CourseSummaryResponse> summaries = publishedPage.getContent().stream()
-                .filter(course -> course.publicationStatus() == PublishStatus.PUBLISHED)
-                .map(CourseSummaryResponse::from)
-                .toList();
-
-        return PageResponse.of(
-                summaries,
-                effectiveRequest.effectivePage(),
-                effectiveRequest.effectiveSize(),
-                publishedPage.getTotalElements()
-        );
+    public Page<CourseSummaryResponse> searchPublishedCourses(CourseSearchRequest request, Pageable pageable) {
+        Pageable effectivePageable = resolvePageable(request, pageable);
+        Page<Course> publishedPage = courseRepository.findPublishedCourses(effectivePageable);
+        return publishedPage.map(course -> CourseSummaryResponse.from(requirePublishedRow(course)));
     }
 
-    /**
-     * Convenience overload for listing published courses by raw page and size.
-     */
+    public PageResponse<CourseSummaryResponse> listPublishedCourses(CourseSearchRequest request) {
+        return PageResponse.from(searchPublishedCourses(request, null));
+    }
+
+    /* Convenience overload using raw {@code page} and {@code size}. */
     public PageResponse<CourseSummaryResponse> listPublishedCourses(Integer page, Integer size) {
         return listPublishedCourses(CourseSearchRequest.of(page, size));
     }
+
+    // =========================================================================
+    //  Course detail
+    // =========================================================================
 
     public CourseDetailResponse getPublishedCourseDetail(UUID courseId) {
         if (courseId == null) {
             throw new BusinessRuleException("courseId must not be null");
         }
-
         Course course = courseAccessService.requirePublishedCourse(courseId);
+        return CourseDetailResponse.from(course, assemblePublicSyllabus(course.id()));
+    }
 
-        List<Chapter> chapters = courseContentRepository.findChaptersByCourseId(course.id());
-        List<Lesson> publishedLessons = courseContentRepository.findPublishedLessonsByCourseId(course.id());
+    /** Alias matching OpenAPI {@code operationId: getPublishedCourse}. */
+    public CourseDetailResponse getPublishedCourse(UUID courseId) {
+        return getPublishedCourseDetail(courseId);
+    }
 
-        Map<UUID, List<Lesson>> publishedLessonsByChapter = new HashMap<>();
+    // =========================================================================
+    //  Internal helpers
+    // =========================================================================
+
+    private static Pageable resolvePageable(CourseSearchRequest request, Pageable pageable) {
+        CourseSearchRequest effectiveRequest = request != null ? request : CourseSearchRequest.defaults();
+        if (pageable == null || pageable.isUnpaged()) {
+            return effectiveRequest.toValidatedPageable();
+        }
+        if (pageable.getSort().isSorted()) {
+            throw new BusinessRuleException("Sorting is not supported by the published catalogue");
+        }
+        int page = pageable.getPageNumber();
+        int size = pageable.getPageSize();
+        PageResponse.validateRequest(page, size);
+        if ((effectiveRequest.page() != null && effectiveRequest.page() != page)
+                || (effectiveRequest.size() != null && effectiveRequest.size() != size)) {
+            throw new BusinessRuleException("Conflicting paging parameters");
+        }
+        return PageRequest.of(page, size);
+    }
+
+    /* Fail closed if a non-published row ever reaches the public mapping. */
+    private static Course requirePublishedRow(Course course) {
+        if (course == null || course.publicationStatus() != PublishStatus.PUBLISHED) {
+            throw new IllegalStateException("Published catalogue query returned a non-published course");
+        }
+        return course;
+    }
+
+    private List<SyllabusChapter> assemblePublicSyllabus(UUID courseId) {
+        List<Chapter> chapters = courseContentRepository.findChaptersByCourseId(courseId);
+        List<Lesson> publishedLessons = courseContentRepository.findPublishedLessonsByCourseId(courseId);
+
+        Map<UUID, List<Lesson>> lessonsByChapter = new LinkedHashMap<>();
         for (Lesson lesson : publishedLessons) {
             if (lesson != null && lesson.publicationStatus() == PublishStatus.PUBLISHED) {
-                publishedLessonsByChapter
-                        .computeIfAbsent(lesson.chapterId(), ignored -> new ArrayList<>())
-                        .add(lesson);
+                lessonsByChapter.computeIfAbsent(lesson.chapterId(), ignored -> new ArrayList<>()).add(lesson);
             }
         }
 
-        List<SyllabusChapter> syllabus = chapters.stream()
+        return chapters.stream()
                 .filter(Objects::nonNull)
                 .sorted(CHAPTER_ORDER)
-                .map(chapter -> {
-                    List<SyllabusLesson> chapterLessons = publishedLessonsByChapter
-                            .getOrDefault(chapter.id(), List.of())
-                            .stream()
-                            .sorted(LESSON_ORDER)
-                            .map(SyllabusLesson::from)
-                            .toList();
-                    return new SyllabusChapter(
-                            chapter.id(),
-                            chapter.title(),
-                            chapter.position(),
-                            chapterLessons
-                    );
-                })
+                .map(chapter -> SyllabusChapter.from(chapter,
+                        lessonsByChapter.getOrDefault(chapter.id(), List.of()).stream()
+                                .sorted(LESSON_ORDER)
+                                .map(SyllabusLesson::from)
+                                .toList()))
                 .filter(chapter -> !chapter.lessons().isEmpty())
                 .toList();
-
-        return new CourseDetailResponse(
-                course.id(),
-                course.title(),
-                course.description(),
-                course.instructorId(),
-                course.prerequisiteDescription(),
-                syllabus
-        );
-    }
-
-    /**
-     * Alias matching OpenAPI operationId: getPublishedCourse.
-     */
-    public CourseDetailResponse getPublishedCourse(UUID courseId) {
-        return getPublishedCourseDetail(courseId);
     }
 }
