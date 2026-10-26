@@ -32,6 +32,50 @@ verification, unrelated CT14 proposals and protected review/integration remain
 separate gates; original AU03 implementation authorization is not established by
 this grant.
 
+## Bounded AU04 test inventory addition
+
+On 2026-10-22 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen explicitly approved one additional file-inventory exception in
+“CodeMastery — PR #95: Direct B2 Regression-Test Remediation”:
+`backend/src/test/java/com/codemastery/modules/auth/StrongPasswordTest.java`.
+The same instruction prospectively authorizes this test and the two documentation
+updates on PR #95's existing branch. Its sole responsibility is AU04 password
+predicate and Jakarta Bean Validation regression coverage, including Unicode/byte
+bounds, whitespace, null/requiredness composition and supported `CharSequence`
+inputs. Existing Auth CODEOWNERS remain @duyduyit and @chi-thanh-nguyen.
+[The bounded testing decision](testing.md#approved-au04-password-validation-regression-test-placement)
+records the exact scope and retained AU06/QA01 consumer/integration gates.
+
+This single approved addition is shown in the Auth test inventory below, alongside
+the separate AU03 exception. The immutable canonical `final-repository-tree.docx`
+is unchanged; its original contents are not reinterpreted or rewritten. No other
+filename, directory, ownership or structural change is approved. Unrelated pending
+CT14 proposals retain their dispositions; original AU04 implementation authorization
+and protected review/integration are not established by this prospective grant.
+
+## Bounded FE01 inventory additions
+
+The Leader/Owner's explicit D1–D4 delegation in “CodeMastery — Authorized FE01
+Remediation and Professional Dashboard UI/UX Implementation”, supplied on
+2026-10-23 (Asia/Ho_Chi_Minh), authorized necessary frontend presentation and
+verification additions within the existing subtrees. [PR #99](https://github.com/chi-thanh-nguyen/codemastery/pull/99)
+merged them as `89998c6e0be1764ed5ec8fcf101124a369a984f2` on 2026-10-24.
+The precise additions, now included in the tree below, are:
+
+- `frontend/src/shared/components/PresentationIcon.tsx` — original shared outline SVGs.
+- `frontend/src/shared/components/presentation.browser.cjs` — optional existing-Playwright browser verification and evidence capture.
+- `frontend/src/shared/components/presentation.test.tsx` — presentation/semantics/callback regressions.
+- `frontend/src/shared/hooks/useDebounce.test.tsx` — real React state/timer lifecycle regressions.
+- `frontend/src/shared/utils/format.test.ts` — caller-owned formatting and finite-duration regressions.
+
+[The bounded FE01 record](testing.md#bounded-fe01-decisions-and-regression-coverage)
+preserves authority, rationale, contracts, verification and exclusions without a
+new ADR. The Leader's 2026-10-24 post-merge documentation instruction authorizes
+this synchronization-debt correction; independent review/protected integration
+remain pending. This does not retroactively satisfy pre-merge documentation
+timing, rewrite the immutable canonical tree, change ownership/hierarchy, approve
+unrelated CT14/CT37 scope or establish Issue #37 completion.
+
 ```text
 codemastery/
 
@@ -807,6 +851,8 @@ codemastery/
 
 │           │           │   │   ├── JwtTokenProviderTest.java
 
+│           │           │   │   ├── StrongPasswordTest.java
+
 │           │           │   │   └── UserPersistenceTest.java
 
 │           │           │   ├── course/
@@ -1387,13 +1433,21 @@ codemastery/
 
 │           │   ├── PageHeader.tsx
 
+│           │   ├── PresentationIcon.tsx
+
 │           │   ├── SidebarNav.tsx
 
-│           │   └── StatusViews.tsx
+│           │   ├── StatusViews.tsx
+
+│           │   ├── presentation.browser.cjs
+
+│           │   └── presentation.test.tsx
 
 │           ├── hooks/
 
-│           │   └── useDebounce.ts
+│           │   ├── useDebounce.ts
+
+│           │   └── useDebounce.test.tsx
 
 │           ├── api/
 
@@ -1405,7 +1459,9 @@ codemastery/
 
 │           └── utils/
 
-│               └── format.ts
+│               ├── format.ts
+
+│               └── format.test.ts
 
 ├── e2e/
 
@@ -1503,3 +1559,27 @@ codemastery/
 
 └── CONTRIBUTING.md
 ```
+
+## Bounded Interim FE03/FE07 test inventory
+
+**CT14-INTERIM-FE03-FE07-2026-10-24-r1 —
+APPROVED_PENDING_PROTECTED_INTEGRATION.** The Leader's explicit
+“CodeMastery — Complete Interim Technical Contract Approvals (CT16, CT17, CT14)”,
+24 October 2026, delegates technical approval of the smallest FE03/FE07 test
+inventory. Codex acts as the delegated approval authority for exactly:
+
+- frontend/src/shared/api/httpClient.test.ts
+- frontend/src/app/providers/AuthProvider.test.tsx
+- frontend/src/routes/index.test.tsx
+- frontend/src/features/catalogue/api/catalogueApi.test.ts
+- frontend/src/features/catalogue/pages/CourseCataloguePage.test.tsx
+- frontend/src/features/catalogue/pages/CourseDetailPage.test.tsx
+
+These six planned additions use existing owning directories and current
+@heizseung/@chi-thanh-nguyen CODEOWNERS; no new helper, hierarchy or ownership rule.
+[The exact testing contract](testing.md#approved-interim-fe03fe07-verification-contract--24-october-2026)
+records coverage, isolation, CT16 pending-PR dependency and execution limits.
+No listed file is created or claimed implemented by this documentation change.
+The original canonical tree and existing AU03/AU04/FE01 exceptions are unchanged;
+this explicit bounded exception does not approve unrelated test inventory.
+Separate implementation authority and compliant protected integration are required.
