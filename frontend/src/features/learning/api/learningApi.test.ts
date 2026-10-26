@@ -37,3 +37,26 @@ it('does not send after expiry or publish a cancelled response', async () => {
     await expect(enrollInCourse(id)).rejects.toMatchObject({ kind: 'cancelled' }); expect(fetcher).not.toHaveBeenCalled();
     await expect(getCourseMembership(id, { isCurrent: () => false })).rejects.toMatchObject({ kind: 'cancelled' });
 });
+
+const membershipOperations = [[getCourseMembership, 'GET'], [enrollInCourse, 'PUT'], [leaveCourse, 'DELETE']] as const;
+const canonicalId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+for (const [operation, method] of membershipOperations) {
+    it.each([
+        [canonicalId.toUpperCase(), canonicalId],
+        [canonicalId, canonicalId.toUpperCase()],
+        ['aBcDeFaB-cDeF-4aBc-8DeF-aBcDeFaBcDeF', 'AbCdEfAb-CdEf-4AbC-8dEf-AbCdEfAbCdEf'],
+    ])(`${method} accepts equivalent UUID identities with different casing: %s / %s`, async (route, response) => {
+        fetcher.mockResolvedValue(json({ courseId: response, status: 'active' }));
+        expect(await operation(route)).toEqual({ courseId: response, status: 'active' });
+        expect(fetcher.mock.calls[0][1].method).toBe(method);
+    });
+    it.each([
+        [canonicalId, 'not-a-uuid'],
+        ['not-a-uuid', canonicalId],
+        ['not-a-uuid', 'not-a-uuid'],
+        [canonicalId, 'abcdefab-cdef-4abc-8def-abcdefabcdee'],
+    ])(`${method} rejects malformed or different UUID identities: %s / %s`, async (route, response) => {
+        fetcher.mockResolvedValue(json({ courseId: response, status: 'active' }));
+        await expect(operation(route)).rejects.toMatchObject({ kind: 'protocol' });
+    });
+}

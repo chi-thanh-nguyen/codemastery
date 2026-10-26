@@ -26,7 +26,7 @@ function page(value: unknown): MembershipPage {
 }
 function operation(courseId: string, method: 'GET' | 'PUT' | 'DELETE', options: MembershipOptions) {
     return request(`/courses/${encodeURIComponent(courseId)}/membership`, { ...options, method, auth: 'authenticated', expectedStatus: 200,
-        decode: (value) => { const result = membership(value); if (result.courseId !== courseId) throw protocolError(); return result; } });
+        decode: (value) => { const result = membership(value); if (!uuid.test(courseId) || result.courseId.toLowerCase() !== courseId.toLowerCase()) throw protocolError(); return result; } });
 }
 export const getCourseMembership = (courseId: string, options: MembershipOptions = {}) => operation(courseId, 'GET', options);
 export const enrollInCourse = (courseId: string, options: MembershipOptions = {}) => operation(courseId, 'PUT', options);
