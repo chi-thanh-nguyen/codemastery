@@ -8,6 +8,7 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 
 public interface CourseJpaRepository extends Repository<CourseEntity, UUID> {
@@ -32,6 +33,28 @@ public interface CourseJpaRepository extends Repository<CourseEntity, UUID> {
             """, nativeQuery = true)
     Page<CourseEntity> searchPublishedCatalogue(Pageable pageable, @Param("query") String query,
                                                @Param("prerequisites") String prerequisites);
+
+    @Query(value = "SELECT count(*) FROM public.courses WHERE publication_status = 'published'", nativeQuery = true)
+    long countPublishedCatalogue();
+
+    @Query(value = """
+            SELECT count(*) FROM public.courses WHERE publication_status = 'published'
+            AND (strpos(lower(title), lower(:query)) > 0 OR strpos(lower(description), lower(:query)) > 0)
+            AND (:prerequisites = 'any' OR (:prerequisites = 'none' AND prerequisite_description IS NULL)
+                 OR (:prerequisites = 'described' AND prerequisite_description IS NOT NULL))
+            """, nativeQuery = true)
+    long countPublishedSearch(@Param("query") String query, @Param("prerequisites") String prerequisites);
+
+    /** PostgreSQL accepts bigint OFFSET; no JPA setFirstResult(int) conversion. */
+    @Query(value = """
+            SELECT * FROM public.courses WHERE publication_status = 'published'
+            AND (strpos(lower(title), lower(:query)) > 0 OR strpos(lower(description), lower(:query)) > 0)
+            AND (:prerequisites = 'any' OR (:prerequisites = 'none' AND prerequisite_description IS NULL)
+                 OR (:prerequisites = 'described' AND prerequisite_description IS NOT NULL))
+            ORDER BY title COLLATE "C" ASC, id ASC LIMIT :limit OFFSET :offset
+            """, nativeQuery = true)
+    List<CourseEntity> findPublishedAtOffset(@Param("query") String query, @Param("prerequisites") String prerequisites,
+                                           @Param("limit") int limit, @Param("offset") long offset);
 
     Optional<CourseEntity> findByIdAndPublicationStatus(
             @Param("id") UUID id, @Param("publicationStatus") String publicationStatus);

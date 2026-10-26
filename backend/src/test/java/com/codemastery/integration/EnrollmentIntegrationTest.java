@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -43,6 +44,7 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
     private static final String KEY = key();
     @Autowired WebApplicationContext context;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.codemastery.modules.course.infrastructure.persistence.repository.CourseJpaRepository catalogueRows;
     @Autowired JwtTokenProvider tokens;
     @Autowired PlatformTransactionManager transactions;
     private MockMvc mvc;
@@ -84,6 +86,24 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
     }
     @ParameterizedTest @ValueSource(strings = {"size=0", "size=101", "page=-1", "page=1.0", "sort=title", "prerequisites=invalid", "q=a&q=b"})
     void invalidCatalogueQueriesAre400(String query) throws Exception { mvc.perform(get("/api/courses?" + query)).andExpect(status().isBadRequest()).andExpect(content().contentTypeCompatibleWith("application/problem+json")); }
+    @ParameterizedTest
+    @CsvSource({"107374181,20", "107374182,20", "107374183,20", "2147483646,1", "2147483647,1", "2147483647,100"})
+    void largeCataloguePagesPreserveCountsFiltersAndAcceptedMetadata(int page, int size) throws Exception {
+        mvc.perform(get("/api/courses").param("page", Integer.toString(page)).param("size", Integer.toString(size)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content", hasSize(0)))
+                .andExpect(jsonPath("$.page").value(page)).andExpect(jsonPath("$.size").value(size))
+                .andExpect(jsonPath("$.totalElements").value(2)).andExpect(jsonPath("$.totalPages").value((2 + size - 1) / size));
+        mvc.perform(get("/api/courses").param("page", Integer.toString(page)).param("size", Integer.toString(size))
+                        .param("q", "BASICS").param("prerequisites", "described"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content", hasSize(0)))
+                .andExpect(jsonPath("$.page").value(page)).andExpect(jsonPath("$.size").value(size))
+                .andExpect(jsonPath("$.totalElements").value(1)).andExpect(jsonPath("$.totalPages").value(1));
+        mvc.perform(get("/api/courses").param("page", Integer.toString(page)).param("size", Integer.toString(size))
+                        .param("q", "no matching course"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content", hasSize(0)))
+                .andExpect(jsonPath("$.page").value(page)).andExpect(jsonPath("$.size").value(size))
+                .andExpect(jsonPath("$.totalElements").value(0)).andExpect(jsonPath("$.totalPages").value(0));
+    }
     @Test void longSearchIs400AndInstructorNameDoesNotDependOnAccountLock() throws Exception {
         mvc.perform(get("/api/courses/" + COURSE).param("unsupported", "value")).andExpect(status().isBadRequest());
         mvc.perform(get("/api/courses").param("q", "x".repeat(101))).andExpect(status().isBadRequest());
@@ -177,4 +197,15 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         mvc.perform(options(membership(COURSE)).header("Origin", "http://localhost:5173").header("Access-Control-Request-Method", "PUT").header("Access-Control-Request-Headers", "authorization"))
                 .andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Methods", containsString("PUT"))).andExpect(header().doesNotExist("Access-Control-Allow-Credentials"));
     }
+    @Test void nativeLongOffsetQueryRetainsPublishedFiltersStableOrderAndBounds() {
+        var rows = catalogueRows.findPublishedAtOffset("BASICS", "any", 1, 1L);
+        assertEquals(List.of(SECOND), rows.stream().map(row -> row.getId()).toList());
+        assertEquals(List.of(SECOND), catalogueRows.findPublishedAtOffset("BASICS", "described", 20, 0L)
+                .stream().map(row -> row.getId()).toList());
+        assertTrue(catalogueRows.findPublishedAtOffset("", "any", 20, 2147483660L).isEmpty());
+        assertEquals(2, catalogueRows.countPublishedCatalogue());
+        assertEquals(1, catalogueRows.countPublishedSearch("BASICS", "described"));
+        assertEquals(0, catalogueRows.countPublishedSearch("Secret", "any"));
+    }
+
 }

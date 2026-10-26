@@ -310,4 +310,65 @@ class CourseRepositoryImplTest {
     private static CourseEntity course(UUID id, String title) {
         return new CourseEntity(id, INSTRUCTOR_ID, title, "Description", null, "published", false, null);
     }
+    @Test
+    void oversizedUnfilteredOffsetCountsWithoutLoadingRows() {
+        var page = PageRequest.of(107374183, 20);
+        when(jpa.countPublishedCatalogue()).thenReturn(5L);
+        var result = repository.findPublishedCourses(page);
+        assertTrue(result.isEmpty()); assertEquals(107374183, result.getNumber()); assertEquals(20, result.getSize());
+        assertEquals(5, result.getTotalElements()); assertEquals(1, result.getTotalPages());
+        verify(jpa).countPublishedCatalogue(); verifyNoMoreInteractions(jpa);
+    }
+
+    @Test
+    void oversizedFilteredOffsetUsesTheSameSelectedPredicatesForItsCount() {
+        var page = PageRequest.of(Integer.MAX_VALUE, 100);
+        when(jpa.countPublishedSearch("BASICS", "described")).thenReturn(1L);
+        var result = repository.searchPublishedCourses(page, "BASICS", "described");
+        assertTrue(result.isEmpty()); assertEquals(Integer.MAX_VALUE, result.getNumber());
+        assertEquals(1, result.getTotalElements()); assertEquals(1, result.getTotalPages());
+        verify(jpa).countPublishedSearch("BASICS", "described"); verifyNoMoreInteractions(jpa);
+    }
+
+    @Test
+    void oversizedOffsetInsideAnActualResultSetUsesBoundLongOffsetWithoutTruncation() {
+        var page = PageRequest.of(107374183, 20);
+        long total = page.getOffset() + 2;
+        var rows = List.of(course(COURSE_ID, "A"), course(INSTRUCTOR_ID, "B"));
+        when(jpa.countPublishedSearch("", "any")).thenReturn(total);
+        when(jpa.findPublishedAtOffset("", "any", 20, 2147483660L)).thenReturn(rows);
+        var result = repository.searchPublishedCourses(page, "", "any");
+        assertEquals(rows.stream().map(CourseEntity::getId).toList(), result.map(Course::id).getContent());
+        assertEquals(total, result.getTotalElements()); assertEquals(107374184, result.getTotalPages());
+        verify(jpa).countPublishedSearch("", "any"); verify(jpa).findPublishedAtOffset("", "any", 20, 2147483660L);
+        verifyNoMoreInteractions(jpa);
+    }
+
+    @Test
+    void supportedJpaOffsetBoundaryRetainsOrdinaryFilteredPaginationAndIgnoresCallerSort() {
+        var page = PageRequest.of(Integer.MAX_VALUE, 1);
+        when(jpa.searchPublishedCatalogue(page, "", "any")).thenReturn(new PageImpl<>(List.of(), page, 2));
+        var result = repository.searchPublishedCourses(PageRequest.of(Integer.MAX_VALUE, 1, Sort.by("title")), "", "any");
+        assertTrue(result.isEmpty()); assertEquals(2, result.getTotalElements()); assertEquals(2, result.getTotalPages());
+        verify(jpa).searchPublishedCatalogue(page, "", "any"); verifyNoMoreInteractions(jpa);
+    }
+
+    @Test
+    void oversizedCountFailureDoesNotInventAnEmptyResult() {
+        var failure = new DataAccessResourceFailureException("unavailable");
+        when(jpa.countPublishedCatalogue()).thenThrow(failure);
+        assertSame(failure, assertThrows(DataAccessResourceFailureException.class,
+                () -> repository.findPublishedCourses(PageRequest.of(Integer.MAX_VALUE, 100))));
+        verify(jpa).countPublishedCatalogue(); verifyNoMoreInteractions(jpa);
+    }
+
+    @Test
+    void approvedLargePageIsAcceptedWithoutAnOffsetDerivedValidationCap() {
+        var params = new org.springframework.util.LinkedMultiValueMap<String, String>();
+        params.add("page", "107374183"); params.add("size", "20");
+        var request = com.codemastery.modules.course.api.dto.CourseSearchRequest.parse(params, false);
+        assertEquals(107374183, request.page()); assertEquals(20, request.size());
+        assertEquals(2147483660L, PageRequest.of(request.page(), request.size()).getOffset());
+    }
+
 }
