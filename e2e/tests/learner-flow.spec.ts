@@ -22,6 +22,11 @@ page.on('request', (request) => {
 async function check(name, action) { await action(); checks.push(name); console.log('PASS', name); }
 async function visibleText(text) { await page.getByText(text, { exact: true }).waitFor({ state: 'visible' }); }
 try {
+    await check('approved large-page REST request returns 200 and accurate empty-page metadata', async () => {
+        const response = await page.request.get(backend + '/api/courses?page=107374183&size=20');
+        assert.equal(response.status(), 200);
+        assert.deepEqual(await response.json(), { content: [], page: 107374183, size: 20, totalElements: 21, totalPages: 2 });
+    });
     await page.goto(frontend + '/courses');
     await check('real published catalogue, search and prerequisite filtering', async () => {
         await page.getByRole('heading', { name: 'Course Catalogue' }).waitFor();
@@ -41,6 +46,27 @@ try {
         await visibleText('1. Visible lesson');
         assert.equal(await page.getByText('Hidden lesson').count(), 0);
         await page.getByRole('link', { name: 'Sign in to enroll' }).waitFor();
+    });
+    await check('500-character unbroken description remains accessible at 320px, tablet and desktop', async () => {
+        const description = page.getByText('D'.repeat(500), { exact: true });
+        await description.waitFor();
+        for (const width of [320, 768, 1280]) {
+            await page.setViewportSize({ width, height: 900 });
+            const measured = await description.evaluate((element) => {
+                const rect = element.getBoundingClientRect(), range = document.createRange();
+                range.selectNodeContents(element);
+                const lines = [...range.getClientRects()];
+                return { clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+                    text: element.textContent, lineCount: lines.length,
+                    contained: lines.every((line) => line.left >= rect.left - 1 && line.right <= rect.right + 1 && line.bottom <= rect.bottom + 1),
+                    hidden: ['hidden', 'clip', 'scroll', 'auto'].includes(getComputedStyle(element).overflowX) };
+            });
+            assert.equal(measured.text, 'D'.repeat(500));
+            assert(measured.clientWidth > 0 && measured.scrollWidth <= measured.clientWidth + 1, `Description overflow at ${width}`);
+            assert(measured.contained && measured.lineCount > 1 && !measured.hidden, `Description must wrap without clipping at ${width}`);
+            await page.screenshot({ path: `${output}/long-description-${width}.png`, fullPage: true });
+        }
+        await page.setViewportSize({ width: 1280, height: 900 });
     });
     const coursePath = new URL(page.url()).pathname;
     const password = 'FE07-' + randomUUID() + '!';

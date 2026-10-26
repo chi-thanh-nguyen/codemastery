@@ -62,7 +62,7 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({
     }
 
     return (
-        <Box>
+        <Box sx={{ overflowWrap: 'anywhere' }}>
             <PageHeader
                 title={course.title}
                 subtitle="Course Syllabus & Requirements"
