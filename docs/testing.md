@@ -1270,3 +1270,45 @@ are in `/private/tmp/codemastery-pr101-r2-runtime/evidence/`. The runtime was
 cleaned up; no credentials, screenshots, generated artifacts or dependencies were
 committed. These are local execution results, not independent protected-review
 or deployed QA acceptance. Codex assisted the scoped fixes and regression execution.
+
+## PR #101 Round 3 input-validation regressions — 27 October 2026
+
+Reviewed baseline: `95f600258f79634be115b2ad6d7dedcf80696889`. The explicit Round 3
+remediation request supplies the NUL rejection requirement; it does not broaden
+other character restrictions or change the approved UTF-16 limit/UUID identities.
+
+New PostgreSQL/MVC tests reproduced five NUL searches returning 500 and nine
+shortened/signed UUID requests returning 200. Search parsing now rejects NUL
+before catalogue SQL. Both Course controllers receive path text and require full
+8-4-4-4-12 hexadecimal syntax before UUID conversion/application calls. Protected
+requests still pass authentication and role admission first. Tests verify no
+application call for malformed IDs, unchanged persisted membership, full upper/
+mixed-case identity, and safe hidden/missing 404 responses.
+
+OpenAPI's q schema now documents NUL exclusion and the existing post-trim limit
+through `x-max-utf16-code-units: 100`. It intentionally has no JSON Schema
+`maxLength`: that keyword does not express this metric. The NUL-only pattern
+adds no Unicode length restriction. Real PostgreSQL cases cover ordinary Unicode,
+100/101 BMP units, 50/51 emoji, mixed BMP/supplementary input and outer trimming.
+Frontend checks connect the OpenAPI extension to HTML maxlength=100 and preserve
+supplementary search data; Chromium also verifies an extra emoji cannot exceed it.
+ADR002's approved length rule remains unchanged.
+
+Executed successfully: `cd backend && ./mvnw verify` (462 unit + 91 integration
+tests, zero failures/errors/skips); from frontend, `npm test` (355 tests/11 files),
+`npm run typecheck`, and `VITE_API_BASE_URL=http://localhost:8080 npm run build`.
+OpenAPI JSON parsing, all 63 local references/eight operation IDs, the NUL pattern
+and UTF-16 extension checks passed; this is a structural/consistency check rather
+than an external OpenAPI-validator certification.
+
+`python3 -B /private/tmp/pr101-r3-runtime.py` ran the committed browser script
+against production assets, real REST and disposable PostgreSQL. All 12 runtime/
+browser scenarios passed, including q=a%00b → safe ProblemDetail 400,
+q=50 emoji → 200 / 51 emoji → 400, malformed membership GET/PUT/DELETE → 400 with
+canonical membership still absent, anonymous malformed membership → 401, and
+valid mixed-case nonexistent identifiers → 404. Earlier catalogue/detail,
+large-offset, text-wrapping, membership, Auth and navigation scenarios also passed.
+Local evidence is `/private/tmp/codemastery-pr101-r3-runtime/evidence/result.json`;
+its temporary runtime/credentials were cleaned up. Independent protected review
+and deployed QA acceptance remain separate. Codex assisted these scoped fixes,
+contract-documentation correction and regression execution.

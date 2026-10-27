@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 const [modulePath, frontend, backend, output] = process.argv.slice(2);
 assert(modulePath && frontend && backend && output, 'Supply Playwright module, frontend URL, backend URL and evidence directory.');
 const { chromium } = createRequire(`${process.cwd()}/package.json`)(modulePath);
@@ -22,6 +22,34 @@ page.on('request', (request) => {
 async function check(name, action) { await action(); checks.push(name); console.log('PASS', name); }
 async function visibleText(text) { await page.getByText(text, { exact: true }).waitFor({ state: 'visible' }); }
 try {
+    await check('NUL search returns safe 400 while literal percent text and Unicode remain valid', async () => {
+        const bad = await page.request.get(backend + '/api/courses?q=a%00b');
+        assert.equal(bad.status(), 400); assert(bad.headers()['content-type'].startsWith('application/problem+json'));
+        const problem = await bad.json(); assert.equal(problem.detail, 'The request is invalid.'); assert.equal(problem.instance, '/api/courses');
+        for (const value of ['a%00b', '東京']) assert.equal((await page.request.get(backend + '/api/courses?q=' + encodeURIComponent(value))).status(), 200);
+    });
+    await check('OpenAPI and real search requests use 100 UTF-16 units: 50 emoji accepted, 51 rejected', async () => {
+        const spec = JSON.parse(await readFile('docs/api/openapi.yaml', 'utf8'));
+        const query = spec.paths['/api/courses'].get.parameters.find((parameter) => parameter.name === 'q');
+        assert(!Object.hasOwn(query.schema, 'maxLength')); assert.equal(query.schema['x-max-utf16-code-units'], 100);
+        assert.equal('😀'.repeat(50).length, 100); assert.equal('😀'.repeat(51).length, 102);
+        for (const [count, status] of [[50, 200], [51, 400]]) assert.equal((await page.request.get(backend + '/api/courses?q=' + encodeURIComponent('😀'.repeat(count)))).status(), status);
+    });
+    await check('malformed UUID membership requests are rejected without changing canonical membership', async () => {
+        const credentials = { email: `r3-${randomUUID()}@example.test`, password: 'Probe-' + randomUUID() + '!' };
+        assert.equal((await page.request.post(backend + '/api/auth/register', { data: { ...credentials, displayName: 'Round Three Probe' } })).status(), 201);
+        const login = await page.request.post(backend + '/api/auth/login', { data: credentials }); assert.equal(login.status(), 200);
+        const headers = { Authorization: 'Bearer ' + (await login.json()).accessToken };
+        const bad = backend + '/api/courses/0-0-4000-8000-2/membership';
+        assert.equal((await page.request.get(bad)).status(), 401);
+        for (const method of ['GET', 'PUT', 'DELETE']) assert.equal((await page.request.fetch(bad, { method, headers })).status(), 400);
+        assert.equal((await page.request.get(backend + '/api/courses/0-0-4000-8000-2')).status(), 400);
+        const canonical = await page.request.get(backend + '/api/courses/00000000-0000-4000-8000-000000000002/membership', { headers });
+        assert.equal(canonical.status(), 200); assert.equal((await canonical.json()).status, 'none');
+        const missing = '/api/courses/aBcDeFaB-cDeF-4aBc-8DeF-aBcDeFaBcDeF';
+        assert.equal((await page.request.get(backend + missing)).status(), 404);
+        assert.equal((await page.request.get(backend + missing + '/membership', { headers })).status(), 404);
+    });
     await check('approved large-page REST request returns 200 and accurate empty-page metadata', async () => {
         const response = await page.request.get(backend + '/api/courses?page=107374183&size=20');
         assert.equal(response.status(), 200);
@@ -30,7 +58,10 @@ try {
     await page.goto(frontend + '/courses');
     await check('real published catalogue, search and prerequisite filtering', async () => {
         await page.getByRole('heading', { name: 'Course Catalogue' }).waitFor();
-        await page.getByLabel('Search courses').fill('FE07');
+        const search = page.getByLabel('Search courses');
+        await search.fill('😀'.repeat(50)); await search.press('End'); await search.pressSequentially('😀');
+        assert.equal(await search.inputValue(), '😀'.repeat(50));
+        await search.fill('FE07');
         await page.getByRole('button', { name: 'Apply filters' }).click();
         await page.getByRole('heading', { name: 'FE07 Programming', exact: true }).waitFor();
         assert.equal(await page.getByRole('heading', { name: 'FE07 Hidden', exact: true }).count(), 0);

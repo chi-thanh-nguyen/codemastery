@@ -60,3 +60,9 @@ it('encodes literal search and the selected prerequisite filter separately from 
     fetcher.mockResolvedValue(json(page)); await getPublishedCourses(0, 20, { q: '100%_ basics', prerequisites: 'none' });
     const url = new URL(fetcher.mock.calls[0][0]); expect(url.searchParams.get('q')).toBe('100%_ basics'); expect(url.searchParams.get('prerequisites')).toBe('none'); expect(url.pathname).toBe('/api/courses');
 });
+
+it('transmits supplementary Unicode search unchanged at the 100 UTF-16-unit boundary', async () => {
+    const query = '😀'.repeat(50); expect(query.length).toBe(100);
+    fetcher.mockResolvedValue(json(page)); await getPublishedCourses(0, 20, { q: query });
+    expect(new URL(fetcher.mock.calls[0][0]).searchParams.get('q')).toBe(query);
+});

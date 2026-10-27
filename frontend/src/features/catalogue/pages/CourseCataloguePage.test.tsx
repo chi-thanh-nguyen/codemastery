@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
@@ -104,4 +106,23 @@ it('cancels catalogue recovery and ignores its late result after filters change'
     expect(options.signal?.aborted).toBe(true); expect(options.isCurrent?.()).toBe(false);
     await act(async () => recover(catalogueResult(20, 0)));
     expect(host.textContent).toContain('Showing 1 of 1'); expect(getPublishedCourses).toHaveBeenCalledTimes(4);
+});
+
+it('keeps OpenAPI and the search input on the approved UTF-16-unit limit', async () => {
+    const spec: { paths: Record<string, { get: { parameters: { name: string; schema: Record<string, unknown>; description: string }[] } }> } =
+        JSON.parse(readFileSync(resolve(process.cwd(), '../docs/api/openapi.yaml'), 'utf8'));
+    const query = spec.paths['/api/courses'].get.parameters.find((parameter) => parameter.name === 'q')!;
+    expect(query.schema).not.toHaveProperty('maxLength');
+    expect(query.schema['x-max-utf16-code-units']).toBe(100);
+    expect(query.description).toContain('UTF-16');
+    const allowed = new RegExp(String(query.schema.pattern));
+    expect(allowed.test('a\0b')).toBe(false); expect(allowed.test('a%00b')).toBe(true);
+    expect(allowed.test('😀'.repeat(51))).toBe(true); // Length is the explicit UTF-16 extension, not this NUL-only pattern.
+    await mount();
+    const input = host.querySelector<HTMLInputElement>('input:not([aria-hidden])')!;
+    expect(input.maxLength).toBe(query.schema['x-max-utf16-code-units']);
+    const value = '😀'.repeat(50); expect(value.length).toBe(100); expect('😀'.repeat(51).length).toBe(102);
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(vi.mocked(getPublishedCourses).mock.calls.at(-1)?.[2]?.q).toBe(value);
 });

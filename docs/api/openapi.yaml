@@ -199,10 +199,11 @@
             "name": "q",
             "schema": {
               "type": "string",
-              "maxLength": 100,
-              "default": ""
+              "default": "",
+              "x-max-utf16-code-units": 100,
+              "pattern": "^[^\\u0000]*$"
             },
-            "description": "Trimmed case-insensitive literal substring of title or description; no SQL wildcard syntax."
+            "description": "Trimmed case-insensitive literal substring of title or description; no SQL wildcard syntax. NUL (U+0000) is rejected with 400 before persistence. After trimming, the limit is 100 UTF-16 code units (Java String.length / HTML maxlength); supplementary characters count as two units, so 50 emoji fit and 51 do not. x-max-utf16-code-units expresses this application constraint; JSON Schema maxLength uses a different Unicode length metric and is intentionally absent."
           },
           {
             "in": "query",
