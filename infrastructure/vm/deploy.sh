@@ -36,6 +36,9 @@ ARCHIVE=""
 ARCHIVE_SHA256=""
 SOURCE_REVISION=""
 INITIALIZER_QUALIFICATION=""
+PROVISION_AUTHORIZATION=""
+DEPLOY_AUTHORIZATION=""
+EXPOSURE_AUTHORIZATION=""
 WAIT_TIMEOUT=""
 RECOVERY_VERIFIED="no"
 COMPATIBILITY_VERIFIED="no"
@@ -94,6 +97,21 @@ provision / deploy / all:
   --initializer-qualification REF
                                 Non-secret reference to repeat-run and
                                 conflict-stop qualification for the exact init image
+  provision requires backend and frontend to already be stopped. Use `all` for
+  a coordinated update that quiesces and then restarts the complete application.
+
+provision / all:
+  --provision-authorization REF
+                                Non-secret reference to the separate approved
+                                provisioning authority
+
+deploy / all:
+  --deployment-authorization REF
+                                Non-secret reference to the separate approved
+                                deployment authority
+  --public-exposure-authorization REF
+                                Non-secret reference to Leader authorization for
+                                this actual public HTTPS origin
 
 Updates:
   --recovery-artifact-verified  Operator attests that an independently checked,
@@ -127,6 +145,9 @@ parse_args() {
       (--wait-timeout)     WAIT_TIMEOUT="${2:?--wait-timeout needs a value}"; shift 2 ;;
       (--source-revision)  SOURCE_REVISION="${2:?--source-revision needs a value}"; shift 2 ;;
       (--initializer-qualification) INITIALIZER_QUALIFICATION="${2:?--initializer-qualification needs a reference}"; shift 2 ;;
+      (--provision-authorization) PROVISION_AUTHORIZATION="${2:?--provision-authorization needs a reference}"; shift 2 ;;
+      (--deployment-authorization) DEPLOY_AUTHORIZATION="${2:?--deployment-authorization needs a reference}"; shift 2 ;;
+      (--public-exposure-authorization) EXPOSURE_AUTHORIZATION="${2:?--public-exposure-authorization needs a reference}"; shift 2 ;;
       (--recovery-artifact-verified) RECOVERY_VERIFIED="yes"; shift ;;
       (--schema-image-compatibility-verified) COMPATIBILITY_VERIFIED="yes"; shift ;;
       (--persistent-state-preserved) PERSISTENT_STATE_PRESERVED="yes"; shift ;;
@@ -170,12 +191,34 @@ require_inputs() {
       [[ -n "${INITIALIZER_QUALIFICATION}" ]] || fail "--initializer-qualification is required for ${SUBCOMMAND}."
       ;;
   esac
+  case "${SUBCOMMAND}" in
+    (provision|all)
+      [[ -n "${PROVISION_AUTHORIZATION}" ]] || fail "--provision-authorization is required for ${SUBCOMMAND}."
+      ;;
+  esac
+  case "${SUBCOMMAND}" in
+    (deploy|all)
+      [[ -n "${DEPLOY_AUTHORIZATION}" ]] || fail "--deployment-authorization is required for ${SUBCOMMAND}."
+      [[ -n "${EXPOSURE_AUTHORIZATION}" ]] || fail "--public-exposure-authorization is required for ${SUBCOMMAND}."
+      ;;
+  esac
   [[ "${SOURCE_REVISION}" != *$'\n'* && "${SOURCE_REVISION}" != *$'\r'* ]] \
     || fail "--source-revision must be a single-line identifier."
   [[ "${UPDATE_AUTHORIZATION}" != *$'\n'* && "${UPDATE_AUTHORIZATION}" != *$'\r'* ]] \
     || fail "--update-authorization must be a single-line record reference."
   [[ "${INITIALIZER_QUALIFICATION}" != *$'\n'* && "${INITIALIZER_QUALIFICATION}" != *$'\r'* ]] \
     || fail "--initializer-qualification must be a single-line record reference."
+  [[ "${PROVISION_AUTHORIZATION}" != *$'\n'* && "${PROVISION_AUTHORIZATION}" != *$'\r'* ]] \
+    || fail "--provision-authorization must be a single-line record reference."
+  [[ "${DEPLOY_AUTHORIZATION}" != *$'\n'* && "${DEPLOY_AUTHORIZATION}" != *$'\r'* ]] \
+    || fail "--deployment-authorization must be a single-line record reference."
+  [[ "${EXPOSURE_AUTHORIZATION}" != *$'\n'* && "${EXPOSURE_AUTHORIZATION}" != *$'\r'* ]] \
+    || fail "--public-exposure-authorization must be a single-line record reference."
+  for ref in "${UPDATE_AUTHORIZATION}" "${INITIALIZER_QUALIFICATION}" \
+             "${PROVISION_AUTHORIZATION}" "${DEPLOY_AUTHORIZATION}" "${EXPOSURE_AUTHORIZATION}"; do
+    [[ -z "${ref}" || "${ref}" =~ [^[:space:]] ]] \
+      || fail "Authorization and qualification references must not be whitespace-only."
+  done
 }
 # Env file handling (parsed as data, never sourced)
 env_get() {
@@ -348,6 +391,20 @@ def env_of(s):
         e = dict(x.split("=", 1) for x in e if "=" in x)
     return e
 
+allowed_environment = {
+    "postgres": {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"},
+    "minio": {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"},
+    "minio-init": {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "STORAGE_ACCESS_KEY",
+                   "STORAGE_SECRET_KEY", "STORAGE_BUCKET", "STORAGE_REGION"},
+    "backend": {"DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
+                "SPRING_FLYWAY_URL", "SPRING_FLYWAY_USER", "SPRING_FLYWAY_PASSWORD",
+                "STORAGE_ENDPOINT", "STORAGE_PATH_STYLE_ACCESS", "STORAGE_BUCKET",
+                "STORAGE_REGION", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY",
+                "JWT_SECRET", "JWT_EXPIRATION", "CORS_ALLOWED_ORIGINS",
+                "SERVER_PORT", "SERVER_FORWARD_HEADERS_STRATEGY", "SPRING_PROFILES_ACTIVE"},
+    "frontend": set(),
+}
+
 names = {"postgres", "minio", "minio-init", "backend", "frontend"}
 if set(svc) != names:
     problems.append("effective configuration must contain exactly the five approved services")
@@ -366,6 +423,8 @@ else:
     if default_network.get("name") not in (None, "codemastery_default"):
         problems.append("the Compose default network must remain private to the codemastery project")
 for n, s in svc.items():
+    if set(env_of(s)) - allowed_environment.get(n, set()):
+        problems.append("service '%s' contains unapproved environment variables" % n)
     if not s.get("image") or any(c.isspace() for c in s["image"]):
         problems.append("service '%s' needs an explicit immutable-release image reference" % n)
     if s.get("platform", "linux/amd64") != "linux/amd64":
@@ -377,8 +436,14 @@ for n, s in svc.items():
     # A release cannot smuggle another service into an up/run dependency traversal.
     if set(s.get("depends_on", {})) - names:
         problems.append("service '%s' has an unapproved dependency" % n)
-    if s.get("privileged") or s.get("pid") == "host" or s.get("ipc") == "host":
-        problems.append("service '%s' requests host-level privileges/namespaces" % n)
+    elevated_options = ('cap_add', 'cap_drop', 'devices', 'device_cgroup_rules',
+                        'security_opt', 'userns_mode', 'cgroup', 'cgroup_parent',
+                        'uts', 'volumes_from', 'group_add', 'runtime',
+                        'use_api_socket', 'env_file', 'user', 'sysctls')
+    if (s.get("privileged") or s.get("pid") or s.get("ipc")
+            or s.get("uts") or s.get("cgroup")
+            or any(s.get(option) for option in elevated_options)):
+        problems.append("service '%s' requests an unapproved privilege, host namespace, identity or external environment" % n)
     attached = s.get("networks")
     if attached and set(attached) != {"default"}:
         problems.append("service '%s' must attach only to the private Compose network" % n)
@@ -1024,6 +1089,18 @@ run_provision() {
   verify_container_images minio-init
   log "PROVISION PROCESS CHECK: postgres ready, minio running, minio-init exited 0."
   log "MinIO policy/state correctness and safe re-execution require qualified initializer evidence; storage feature behavior is NOT verified."
+  log "Provision authority reference: ${PROVISION_AUTHORIZATION}"
+}
+
+# A standalone provision must never take an already-running app offline and
+# report success without restoring it. Coordinated updates use `all`, which
+# quiesces and then runs the complete deploy path.
+require_application_stopped() {
+  local running
+  running="$("${COMPOSE[@]}" ps -q backend frontend 2>/dev/null)" \
+    || fail "Cannot determine whether application services are running; provisioning stopped."
+  [[ -z "${running}" ]] \
+    || fail "Application services are running; use the coordinated 'all' command or stop them under separate operator authority before provisioning."
 }
 
 # Deploy: backend + frontend, private health, deployment record
@@ -1242,6 +1319,9 @@ print_record() {
   echo "Script checkout rev : ${rev} (${dirty})"
   echo "Image source rev    : ${SOURCE_REVISION} (declared by operator)"
   echo "Initializer qualification: ${INITIALIZER_QUALIFICATION:-not applicable} (operator-supplied reference)"
+  echo "Deployment authority : ${DEPLOY_AUTHORIZATION:-not applicable} (operator-supplied reference)"
+  echo "Public exposure authority: ${EXPOSURE_AUTHORIZATION:-not applicable} (operator-supplied reference)"
+  echo "Provision authority  : ${PROVISION_AUTHORIZATION:-not applicable} (operator-supplied reference)"
   echo "Update authority    : ${UPDATE_AUTHORIZATION:-not an update} (declared by operator)"
   echo "Recovery preconditions: artifact=${RECOVERY_VERIFIED}, compatibility=${COMPATIBILITY_VERIFIED}, state=${PERSISTENT_STATE_PRESERVED} (operator attestations)"
   [[ -z "${ARCHIVE_SHA256}" ]] || echo "Archive SHA-256     : ${ARCHIVE_SHA256}"
@@ -1275,7 +1355,7 @@ main() {
   trap 'exit 143' TERM
   case "${SUBCOMMAND}" in
     (load) run_load ;;
-    (provision) verify_images; quiesce_application; run_provision ;;
+    (provision) verify_images; require_application_stopped; run_provision ;;
     (deploy) verify_images; quiesce_application; run_deploy ;;
     (all) run_load; quiesce_application; run_provision; run_deploy ;;
   esac

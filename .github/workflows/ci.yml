@@ -51,3 +51,98 @@ jobs:
         run: npm test
       - name: Typecheck and build frontend
         run: npm run build
+
+  deployment-script:
+    name: VM deployment script
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check shell syntax and authorization gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          bash -n "$script"
+
+          require_gate() {
+            local expected="$1"
+            shift
+            local output
+            if output="$(bash "$script" "$@" 2>&1)"; then
+              echo "Expected deployment preflight to reject missing authorization: $expected" >&2
+              exit 1
+            fi
+            if [[ "$output" != *"$expected"* ]]; then
+              echo "Expected gate '$expected'; received:" >&2
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+          }
+
+          common=(--env-file /dev/null --origin https://example.invalid
+                  --expect-image backend=sha256:0000000000000000000000000000000000000000000000000000000000000000
+                  --wait-timeout 30 --initializer-qualification fixture)
+          deploy_common=("${common[@]}" --archive /dev/null
+                         --archive-sha256 0000000000000000000000000000000000000000000000000000000000000000
+                         --source-revision fixture)
+          require_gate '--provision-authorization is required' provision "${common[@]}"
+          require_gate 'must not be whitespace-only' provision "${common[@]}" \
+            --provision-authorization '   '
+          require_gate '--deployment-authorization is required' deploy "${deploy_common[@]}"
+          require_gate '--public-exposure-authorization is required' deploy "${deploy_common[@]}" \
+            --deployment-authorization deployment-record
+      - name: Check offline Compose and provisioning safety guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          bash -c '
+            source "$1"
+            mock_compose() { printf "container-id\\n"; }
+            COMPOSE=(mock_compose)
+            if output="$(require_application_stopped 2>&1)"; then
+              echo "Provisioning must reject a running application service." >&2
+              exit 1
+            fi
+            [[ "$output" == *"Application services are running"* ]]
+            mock_compose() { :; }
+            require_application_stopped
+          ' _ "$script"
+          python3 - "$script" <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          source = open(sys.argv[1], encoding="utf-8").read()
+          env_marker = "read -r -d '' PY_ENV_POLICY <<'PYEOF' || true\n"
+          marker = "read -r -d '' PY_CHECK <<'PYEOF' || true\n"
+          env_policy = source.split(env_marker, 1)[1].split("\nPYEOF", 1)[0]
+          check_policy = source.split(marker, 1)[1].split("\nPYEOF", 1)[0]
+          policy = env_policy + "\n" + check_policy
+          cases = {
+              "cap_add": ["SYS_ADMIN"],
+              "devices": ["/dev/sda:/dev/sda:rwm"],
+              "security_opt": ["apparmor:unconfined"],
+              "userns_mode": "host",
+              "volumes_from": ["host-container"],
+              "user": "0:0",
+              "env_file": ["/tmp/unreviewed.env"],
+              "pid": "host",
+          }
+          for option, value in cases.items():
+              config = {"services": {"postgres": {"image": "postgres:17", option: value}}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              if result.returncode == 0 or "unapproved privilege" not in result.stderr:
+                  raise SystemExit(f"Compose policy did not reject {option}")
+          config = {"services": {"backend": {"image": "backend:reviewed",
+                                               "environment": {"LD_PRELOAD": "/tmp/unreviewed.so"}}}}
+          result = subprocess.run(
+              [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+              input=json.dumps(config), text=True, capture_output=True, check=False,
+          )
+          if result.returncode == 0 or "unapproved environment variables" not in result.stderr:
+              raise SystemExit("Compose policy did not reject an unapproved environment variable")
+          PY
