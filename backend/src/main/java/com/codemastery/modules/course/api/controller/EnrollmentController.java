@@ -14,7 +14,6 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
-import java.util.UUID;
 
 @RestController
 public class EnrollmentController {
@@ -22,19 +21,19 @@ public class EnrollmentController {
     public EnrollmentController(EnrollmentService enrollments) { this.enrollments = enrollments; }
 
     @GetMapping("/api/courses/{courseId}/membership")
-    public ResponseEntity<Membership> membership(@PathVariable UUID courseId, @RequestParam MultiValueMap<String, String> params) {
+    public ResponseEntity<Membership> membership(@PathVariable String courseId, @RequestParam MultiValueMap<String, String> params) {
         CourseSearchRequest.noQuery(params);
-        return response(enrollments.membership(courseId));
+        return response(enrollments.membership(CourseSearchRequest.parseCourseId(courseId)));
     }
     @PutMapping("/api/courses/{courseId}/membership")
-    public ResponseEntity<Membership> enroll(@PathVariable UUID courseId, @RequestParam MultiValueMap<String, String> params) {
+    public ResponseEntity<Membership> enroll(@PathVariable String courseId, @RequestParam MultiValueMap<String, String> params) {
         CourseSearchRequest.noQuery(params);
-        return response(enrollments.enroll(courseId));
+        return response(enrollments.enroll(CourseSearchRequest.parseCourseId(courseId)));
     }
     @DeleteMapping("/api/courses/{courseId}/membership")
-    public ResponseEntity<Membership> leave(@PathVariable UUID courseId, @RequestParam MultiValueMap<String, String> params) {
+    public ResponseEntity<Membership> leave(@PathVariable String courseId, @RequestParam MultiValueMap<String, String> params) {
         CourseSearchRequest.noQuery(params);
-        return response(enrollments.leave(courseId));
+        return response(enrollments.leave(CourseSearchRequest.parseCourseId(courseId)));
     }
     @GetMapping("/api/me/courses")
     public ResponseEntity<MembershipPage> mine(@RequestParam MultiValueMap<String, String> params) {

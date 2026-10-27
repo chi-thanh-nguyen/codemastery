@@ -7,6 +7,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -42,6 +45,14 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
     private static final UUID CHAPTER = id("chapter"), LESSON = id("lesson"), HIDDEN_LESSON = id("hidden-lesson");
     private static final UUID ENROLLMENT = id("enrollment"), PROGRESS = id("progress");
     private static final String KEY = key();
+    private static final ThreadLocal<List<String>> INPUT_SQL = new ThreadLocal<>();
+    public static class InputStatementInspector implements StatementInspector {
+        @Override public String inspect(String sql) {
+            var statements = INPUT_SQL.get();
+            if (statements != null) statements.add(sql);
+            return sql;
+        }
+    }
     @Autowired WebApplicationContext context;
     @Autowired JdbcTemplate jdbc;
     @Autowired com.codemastery.modules.course.infrastructure.persistence.repository.CourseJpaRepository catalogueRows;
@@ -51,7 +62,9 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
 
     private static UUID id(String name) { return UUID.nameUUIDFromBytes(("fe07/" + name).getBytes(StandardCharsets.UTF_8)); }
     private static String key() { byte[] key = new byte[32]; new SecureRandom().nextBytes(key); return HexFormat.of().formatHex(key); }
-    @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) { registry.add("JWT_SECRET", () -> KEY); }
+    @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) { registry.add("JWT_SECRET", () -> KEY);
+        registry.add("spring.jpa.properties.hibernate.session_factory.statement_inspector", () -> InputStatementInspector.class.getName());
+    }
 
     @BeforeEach void fixtures() {
         mvc = webAppContextSetup(context).apply(springSecurity()).build();
@@ -206,6 +219,84 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         assertEquals(2, catalogueRows.countPublishedCatalogue());
         assertEquals(1, catalogueRows.countPublishedSearch("BASICS", "described"));
         assertEquals(0, catalogueRows.countPublishedSearch("Secret", "any"));
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"a b", " ", " prefix", "suffix ", "😀 "})
+    void nulSearchIsRejectedBeforeAnyCatalogueSql(String query) throws Exception {
+        var statements = new java.util.ArrayList<String>(); INPUT_SQL.set(statements);
+        try {
+            mvc.perform(get("/api/courses").param("q", query)).andExpect(status().isBadRequest())
+                    .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                    .andExpect(jsonPath("$.type").value("about:blank")).andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.detail").value("The request is invalid."));
+            assertTrue(statements.isEmpty(), "Invalid search must not reach catalogue persistence");
+        } finally { INPUT_SQL.remove(); }
+    }
+    @ParameterizedTest @ValueSource(strings = {"café", "東京", "😀", "Учимся", "100%_"})
+    void validUnicodeSearchRemainsLiteralAndFindsPublishedContent(String query) throws Exception {
+        jdbc.update("UPDATE public.courses SET title=? WHERE id=?", query, COURSE);
+        mvc.perform(get("/api/courses").param("q", query)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1)).andExpect(jsonPath("$.content[0].id").value(COURSE.toString()));
+    }
+    static java.util.stream.Stream<Arguments> utf16SearchBoundaries() {
+        return java.util.stream.Stream.of(Arguments.of("😀".repeat(50), 200), Arguments.of("😀".repeat(51), 400),
+                Arguments.of("a".repeat(100), 200), Arguments.of("a".repeat(101), 400),
+                Arguments.of("a" + "😀".repeat(49) + "b", 200), Arguments.of("a" + "😀".repeat(49) + "bc", 400),
+                Arguments.of("  " + "😀".repeat(50) + "  ", 200));
+    }
+    @ParameterizedTest @MethodSource("utf16SearchBoundaries")
+    void searchUsesTheApprovedTrimmedUtf16UnitLimit(String query, int expected) throws Exception {
+        var statements = new java.util.ArrayList<String>(); INPUT_SQL.set(statements);
+        try {
+            mvc.perform(get("/api/courses").param("q", query)).andExpect(status().is(expected));
+            assertEquals(expected == 400, statements.isEmpty());
+        } finally { INPUT_SQL.remove(); }
+    }
+    static java.util.stream.Stream<Arguments> malformedMembershipIds() {
+        return java.util.stream.Stream.of("GET", "PUT", "DELETE").flatMap(method -> java.util.stream.Stream.of(
+                "0-0-4000-8000-2", "00000000-0000-4000-8000-2", "+0-0-4000-8000-2", "000000000-0000-4000-8000-000000000002")
+                .map(value -> Arguments.of(method, value)));
+    }
+    @ParameterizedTest @MethodSource("malformedMembershipIds")
+    void malformedCourseSyntaxCannotReadOrMutateCanonicalMembership(String method, String value) throws Exception {
+        var canonical = UUID.fromString("00000000-0000-4000-8000-000000000002");
+        try {
+            jdbc.update("INSERT INTO public.courses (id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'Canonical','UUID fixture','published',false)", canonical, OWNER);
+            jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,?)", id("strict-uuid-membership"), LEARNER, canonical, method.equals("PUT") ? "left" : "active");
+            var before = jdbc.queryForList("SELECT * FROM public.enrollments WHERE user_id=? AND course_id=?", LEARNER, canonical);
+            mvc.perform(as(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request(
+                            org.springframework.http.HttpMethod.valueOf(method), "/api/courses/" + value + "/membership"), LEARNER))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.detail").value("The request is invalid."));
+            assertEquals(before, jdbc.queryForList("SELECT * FROM public.enrollments WHERE user_id=? AND course_id=?", LEARNER, canonical));
+            mvc.perform(get("/api/courses/" + value)).andExpect(status().isBadRequest());
+        } finally {
+            jdbc.update("DELETE FROM public.enrollments WHERE course_id=?", canonical);
+            jdbc.update("DELETE FROM public.courses WHERE id=?", canonical);
+        }
+    }
+    @ParameterizedTest @ValueSource(strings = {"GET", "PUT", "DELETE"})
+    void authenticationAndRolePrecedeMalformedUuidValidation(String method) throws Exception {
+        String path = "/api/courses/0-0-4000-8000-2/membership";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request(org.springframework.http.HttpMethod.valueOf(method), path))
+                .andExpect(status().isUnauthorized());
+        for (var actor : List.of(OWNER, ADMIN)) mvc.perform(as(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request(
+                org.springframework.http.HttpMethod.valueOf(method), path), actor)).andExpect(status().isForbidden());
+    }
+    @Test void fullUpperAndMixedCaseUuidsPreserveIdentityAndHiddenResourceRules() throws Exception {
+        String upper = COURSE.toString().toUpperCase(java.util.Locale.ROOT);
+        var mixed = new StringBuilder(COURSE.toString());
+        for (int index = 0; index < mixed.length(); index += 2) mixed.setCharAt(index, Character.toUpperCase(mixed.charAt(index)));
+        for (String value : List.of(upper, mixed.toString())) {
+            mvc.perform(get("/api/courses/" + value)).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(COURSE.toString()));
+            mvc.perform(as(get("/api/courses/" + value + "/membership"), LEARNER)).andExpect(status().isOk());
+            mvc.perform(as(put("/api/courses/" + value + "/membership"), LEARNER)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("active"));
+            mvc.perform(as(delete("/api/courses/" + value + "/membership"), LEARNER)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("left"));
+        }
+        for (String value : List.of(HIDDEN.toString().toUpperCase(java.util.Locale.ROOT), "00000000-0000-0000-0000-000000000000")) {
+            mvc.perform(get("/api/courses/" + value)).andExpect(status().isNotFound());
+            for (var request : List.of(get("/api/courses/" + value + "/membership"), put("/api/courses/" + value + "/membership"), delete("/api/courses/" + value + "/membership")))
+                mvc.perform(as(request, LEARNER)).andExpect(status().isNotFound()).andExpect(jsonPath("$.detail").value("The requested resource is unavailable."));
+        }
     }
 
 }

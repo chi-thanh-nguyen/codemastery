@@ -6,7 +6,6 @@ import com.codemastery.modules.course.api.dto.CourseSearchRequest;
 import com.codemastery.modules.course.application.service.CourseCatalogueService;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/courses")
@@ -20,8 +19,8 @@ public class CourseCatalogueController {
         return catalogue.list(request.page(), request.size(), request.query(), request.filter());
     }
     @GetMapping("/{courseId}")
-    public CourseDetailResponse detail(@PathVariable UUID courseId, @RequestParam MultiValueMap<String, String> params) {
+    public CourseDetailResponse detail(@PathVariable String courseId, @RequestParam MultiValueMap<String, String> params) {
         CourseSearchRequest.noQuery(params);
-        return catalogue.detail(courseId);
+        return catalogue.detail(CourseSearchRequest.parseCourseId(courseId));
     }
 }

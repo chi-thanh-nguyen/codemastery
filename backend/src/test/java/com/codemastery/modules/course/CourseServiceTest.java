@@ -319,4 +319,15 @@ class CourseServiceTest {
         verify(repository).searchPublishedCourses(page, "basics", "described"); verifyNoInteractions(content);
     }
 
+    @Test
+    void publicDetailRejectsMalformedUuidBeforeCallingCatalogueApplicationCode() throws Exception {
+        var application = mock(CourseCatalogueService.class);
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+                new com.codemastery.modules.course.api.controller.CourseCatalogueController(application))
+                .setControllerAdvice(new com.codemastery.common.exception.GlobalExceptionHandler()).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/courses/0-0-4000-8000-2"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+        verifyNoInteractions(application);
+    }
+
 }
