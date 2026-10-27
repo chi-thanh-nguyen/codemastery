@@ -136,6 +136,42 @@ try {
         assert.equal(await page.getByText('Hidden lesson').count(), 0);
         await page.getByRole('link', { name: 'Sign in to enroll' }).waitFor();
     });
+    await check('syllabus chapter controls label unique regions and support Enter/Space expansion', async () => {
+        const names = ['Chapter 1: Foundations', 'Chapter 2: Practice'];
+        const associations = [];
+        for (const name of names) {
+            const control = page.getByRole('button', { name, exact: true });
+            const id = await control.getAttribute('id'), panelId = await control.getAttribute('aria-controls');
+            assert(id && panelId, `${name} must identify its control and panel`);
+            const panel = page.locator(`[id="${panelId}"]`);
+            assert.equal(await page.locator(`[id="${id}"]`).count(), 1);
+            assert.equal(await panel.count(), 1);
+            assert.equal(await panel.getAttribute('role'), 'region');
+            assert.equal(await panel.getAttribute('aria-labelledby'), id);
+            assert.equal(await page.getByRole('region', { name, exact: true }).count(), 1);
+            assert.equal(await control.getAttribute('aria-expanded'), 'true');
+            associations.push({ name, id, panelId });
+        }
+        assert.equal(new Set(associations.flatMap(({ id, panelId }) => [id, panelId])).size, 4);
+        for (const [index, { name, id, panelId }] of associations.entries()) {
+            const control = page.getByRole('button', { name, exact: true });
+            const panel = page.locator(`[id="${panelId}"]`);
+            await control.focus();
+            await page.keyboard.press(index === 0 ? 'Enter' : 'Space');
+            await panel.waitFor({ state: 'hidden' });
+            assert.equal(await control.getAttribute('aria-expanded'), 'false');
+            assert.equal(await page.getByRole('region', { name, exact: true }).count(), 0);
+            assert.equal(await page.getByRole('button', { name: names[1 - index], exact: true }).getAttribute('aria-expanded'), 'true');
+            assert(await control.evaluate((element) => document.activeElement === element));
+            await page.keyboard.press(index === 0 ? 'Space' : 'Enter');
+            await panel.waitFor({ state: 'visible' });
+            assert.equal(await control.getAttribute('aria-expanded'), 'true');
+            assert.equal(await page.getByRole('region', { name, exact: true }).count(), 1);
+            assert.equal(await control.getAttribute('id'), id);
+            assert.equal(await control.getAttribute('aria-controls'), panelId);
+        }
+        await writeFile(`${output}/syllabus-accessibility.json`, JSON.stringify({ associations, keyboard: 'Enter and Space collapse/reopen each chapter independently; focus and IDs retained' }, null, 2));
+    });
     await check('500-character unbroken description remains accessible at 320px, tablet and desktop', async () => {
         const description = page.getByText('D'.repeat(500), { exact: true });
         await description.waitFor();

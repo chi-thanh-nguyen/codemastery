@@ -118,7 +118,10 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({
                 course.syllabus
                     .map((chapter) => (
                         <Accordion key={chapter.id} defaultExpanded sx={{ mb: 1.5 }}>
-                            <AccordionSummary>
+                            <AccordionSummary
+                                id={`course-${course.id}-chapter-${chapter.id}-summary`}
+                                aria-controls={`course-${course.id}-chapter-${chapter.id}-panel`}
+                            >
                                 <Typography sx={{ fontWeight: 'bold' }}>
                                     Chapter {chapter.position}: {chapter.title}
                                 </Typography>

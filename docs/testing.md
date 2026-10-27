@@ -1351,3 +1351,30 @@ are in /private/tmp/codemastery-pr101-card-runtime/evidence/. Task-owned runtime
 resources were cleaned up; no generated artifacts, credentials or dependencies
 were committed. Independent protected review remains a separate gate. Codex
 assisted this scoped styling correction and regression execution.
+
+## PR #101 syllabus accessibility regression — 27 October 2026
+
+On baseline a97df9e, the focused CourseDetailPage regression failed because chapter
+summary controls had no IDs. Each summary now supplies stable Course/chapter UUID
+IDs and aria-controls; MUI derives the corresponding region ID and aria-labelledby.
+No styling, expansion policy or syllabus data behavior changed.
+
+The component regression verifies two chapters, four unique identifiers, correct
+region/control relationships and stable associations through toggles/rerender.
+The existing learner-flow Chromium script also verifies accessible region names,
+Enter/Space collapse and expansion for both chapters, independent state, hidden
+collapsed regions, focus retention and stable IDs. Its disposable fixture adds
+a second published chapter (ID ending 0007, Practice) and lesson (ending 0008,
+Apply concepts) to FE07 Programming; published Course counts remain unchanged.
+
+From frontend/, npm test passed 356 tests in 11 files, npm run typecheck passed,
+and VITE_API_BASE_URL=http://localhost:8080 npm run build passed with the existing
+bundle-size warning. python3 -B /private/tmp/pr101-accordion-runtime.py executed
+the committed e2e/tests/learner-flow.spec.ts against production assets, real REST
+and disposable PostgreSQL: all 14 scenarios passed, including prior catalogue,
+detail, membership, Auth, navigation and responsive regressions. Local evidence:
+/private/tmp/codemastery-pr101-accordion-runtime/evidence/syllabus-accessibility.json
+and result.json. Task-owned resources and ephemeral credentials were cleaned up;
+no dependencies or generated artifacts were added. These focused checks do not
+claim a comprehensive accessibility audit or replace protected review. Codex
+assisted this scoped accessibility correction and regression execution.
