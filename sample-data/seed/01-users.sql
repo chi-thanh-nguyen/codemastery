@@ -9,15 +9,23 @@
 --   -v instructor_password_hash='<local BCrypt hash>' \
 --   -v learner_password_hash='<local BCrypt hash>' -f 01-users.sql
 
+\set ON_ERROR_STOP on
+
 \if :{?instructor_password_hash}
 \else
-\echo 'Required psql variable instructor_password_hash is missing.'
-\quit 3
+DO $sd01_input$
+BEGIN
+    RAISE EXCEPTION 'Required psql variable instructor_password_hash is missing.';
+END;
+$sd01_input$;
 \endif
 \if :{?learner_password_hash}
 \else
-\echo 'Required psql variable learner_password_hash is missing.'
-\quit 3
+DO $sd01_input$
+BEGIN
+    RAISE EXCEPTION 'Required psql variable learner_password_hash is missing.';
+END;
+$sd01_input$;
 \endif
 
 BEGIN;
