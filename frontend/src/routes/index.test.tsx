@@ -11,7 +11,7 @@ import { AuthProvider } from '../app/providers/AuthProvider';
 import type { AuthContextValue } from '../app/providers/AuthProvider';
 import { useAuth } from '../features/auth/hooks/useAuth';
 import { appTheme } from '../app/theme/theme';
-import App from '../app/App';
+import App, { PresentationPreview } from '../app/App';
 import { request } from '../shared/api/httpClient';
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root, host: HTMLDivElement, auth: AuthContextValue, navigate: NavigateFunction, fetcher: ReturnType<typeof vi.fn>;
@@ -21,10 +21,13 @@ function loginResponse(name = 'Person A', role = 'Learner') {
     const iat = Math.floor(Date.now() / 1000);
     return { accessToken: `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: id, iss: 'codemastery', aud: 'codemastery-api', iat, exp: iat + 900 })}.${'A'.repeat(43)}`, tokenType: 'Bearer', expiresIn: 900, user: { id, displayName: name, role } };
 }
+const course = { id, title: 'Course details', description: 'Programming foundations', instructorId: id, instructorDisplayName: 'Instructor Demo' };
+const page = { content: [course], page: 0, size: 20, totalElements: 1, totalPages: 1 };
+const detail = { ...course, prerequisiteDescription: null, syllabus: [] };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 function Probe() { auth = useAuth(); navigate = useNavigate(); return null; }
 beforeEach(() => {
-    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080'); fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080'); fetcher = vi.fn((url: string, _init?: RequestInit) => Promise.resolve(json(new URL(url).pathname.startsWith('/api/courses/') ? detail : page))); vi.stubGlobal('fetch', fetcher);
     window.history.replaceState(null, '', '/'); localStorage.clear(); sessionStorage.clear(); host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); window.history.replaceState(null, '', '/'); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
@@ -45,8 +48,8 @@ async function click(text: string) {
     const node = [...host.querySelectorAll<HTMLElement>('button,a')].find((element) => element.textContent === text)!; expect(node).toBeTruthy(); await act(async () => node.click());
 }
 describe('real declarative routing and Profile', () => {
-    it.each([['/', '/courses', 'Courses'], ['/login', '/login', 'Welcome back'], ['/register', '/register', 'Create account'], ['/courses', '/courses', 'Courses'], ['/courses/course-one', '/courses/course-one', 'Course details'], ['/missing', '/missing', 'Page not found']])('direct entry %s', async (path, finalPath, title) => {
-        await mount(path); expect(location.pathname).toBe(finalPath); expect(host.querySelector('main h1')?.textContent).toBe(title); expect(fetcher).not.toHaveBeenCalled(); expect(document.activeElement).toBe(host.querySelector('main h1'));
+    it.each([['/', '/courses', 'Course Catalogue'], ['/login', '/login', 'Welcome back'], ['/register', '/register', 'Create account'], ['/courses', '/courses', 'Course Catalogue'], ['/courses/course-one', '/courses/course-one', 'Course details'], ['/missing', '/missing', 'Page not found']])('direct entry %s', async (path, finalPath, title) => {
+        await mount(path); expect(location.pathname).toBe(finalPath); expect(host.querySelector('main h1')?.textContent).toBe(title); expect(fetcher.mock.calls.every(([url]) => new URL(url).pathname.startsWith('/api/courses'))).toBe(true); expect(document.activeElement).toBe(host.querySelector('main h1'));
     });
     it('anonymous /profile never mounts personal fields and replaces with login', async () => {
         const seen: string[] = [], observer = new MutationObserver(() => seen.push(host.textContent ?? '')); observer.observe(host, { subtree: true, childList: true });
@@ -64,11 +67,11 @@ describe('real declarative routing and Profile', () => {
         expect([...host.querySelectorAll('dt')].map((node) => node.textContent)).toEqual(['User ID', 'Display name', 'Role']);
         expect([...host.querySelectorAll('dd')].map((node) => node.textContent)).toEqual([id, 'Person A', role]); expect(host.querySelector('form')).toBeNull();
         const links = host.querySelectorAll('nav[aria-label="Account navigation"] a[href="/profile"]'); expect(links).toHaveLength(1);
-        expect(fetcher).toHaveBeenCalledTimes(1); expect(fetcher.mock.calls[0][0]).toBe('http://localhost:8080/api/auth/login'); expect(host.textContent).not.toMatch(/email|permissions|password|accessToken/i);
+        expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/auth/login')).toHaveLength(1); expect(host.textContent).not.toMatch(/email|permissions|password|accessToken/i);
     });
     it('renders hostile display names as plain text and preserves snapshot after leaving Profile', async () => {
         await mount('/courses'); await login('<img src=x onerror=alert(1)>'); await go('/profile'); expect(host.querySelector('dd:nth-of-type(2)')?.textContent).toBe('<img src=x onerror=alert(1)>'); expect(host.querySelector('img')).toBeNull();
-        await go('/courses'); expect(auth.isAuthenticated).toBe(true); await go('/profile'); expect(fetcher).toHaveBeenCalledTimes(1);
+        await go('/courses'); expect(auth.isAuthenticated).toBe(true); await go('/profile'); expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/auth/login')).toHaveLength(1);
     });
     it('successful same-UUID replacement removes A and renders only B without stealing focus', async () => {
         await mount('/courses'); await login(); await go('/profile'); const link = host.querySelector<HTMLAnchorElement>('a[href="/courses"]')!; link.focus();
@@ -95,9 +98,34 @@ describe('real declarative routing and Profile', () => {
         async function travel(action: () => void) { await act(async () => { const popped = new Promise<void>((done) => window.addEventListener('popstate', () => done(), { once: true })); action(); await popped; }); }
         await travel(() => window.history.back()); expect(location.pathname).toBe('/profile'); expect(host.querySelector('dl')).not.toBeNull(); await travel(() => window.history.forward()); expect(location.pathname).toBe('/courses/one'); await act(async () => auth.logout()); await travel(() => window.history.back()); expect(location.pathname).toBe('/login'); expect(host.querySelector('dl')).toBeNull();
     });
-    it('preserves current-main FE01 dashboard, formatter runtime and utilities in actual App', async () => {
-        await act(async () => root.render(<App />)); expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Your learning, in focus.'); expect(host.textContent).toContain('Demo workspace'); expect(host.textContent).not.toContain('Demo learner');
+    it('preserves current-main FE01 dashboard, formatter runtime and utilities as an independent preview', async () => {
+        window.history.replaceState(null, '', '/courses');
+        await act(async () => root.render(<ThemeProvider theme={appTheme}><BrowserRouter><AuthProvider><AppRouter catalogue={<PresentationPreview />} /></AuthProvider></BrowserRouter></ThemeProvider>)); expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Your learning, in focus.'); expect(host.textContent).toContain('Demo workspace'); expect(host.textContent).not.toContain('Demo learner');
         await click('Explore components'); expect(host.textContent).toContain('October 23, 2026'); expect(host.textContent).toContain('88.5%'); expect(host.textContent).toContain('1h 2m 5s'); expect(fetcher).not.toHaveBeenCalled();
         await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('main h1')?.textContent).toBe('Welcome back');
     });
+    it('composes the actual public catalogue/detail with current Auth navigation', async () => {
+        await act(async () => root.render(<App />));
+        expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Course Catalogue');
+        await click('View Syllabus'); expect(location.pathname).toBe(`/courses/${id}`); expect(host.querySelector('h1')?.textContent).toBe('Course details');
+        await click('Back to Catalogue'); expect(location.pathname).toBe('/courses');
+        expect(fetcher.mock.calls.every(([, init]) => !new Headers((init as RequestInit).headers).has('Authorization'))).toBe(true);
+        await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('h1')?.textContent).toBe('Welcome back');
+    });
+
+});
+
+it.each(['Instructor', 'Administrator'])('denies %s before mounting My Courses or issuing private requests', async (role) => {
+    await mount('/courses'); await login('Role test', role); await go('/my-courses');
+    expect(host.querySelector('main h1')?.textContent).toBe('Access is denied.');
+    expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/me/courses')).toHaveLength(0);
+    expect(host.querySelector('nav[aria-label="Account navigation"] a[href="/my-courses"]')).toBeNull();
+});
+it('mounts real learner My Courses with authenticated transport and removes it at expiry', async () => {
+    await mount('/courses'); await login();
+    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? { ...page, content: [], totalElements: 0, totalPages: 0 } : page)));
+    await go('/my-courses'); expect(host.querySelector('main h1')?.textContent).toBe('My Courses'); expect(host.textContent).toContain('No courses found');
+    const [, init] = fetcher.mock.calls.find(([url]) => new URL(url).pathname === '/api/me/courses')!;
+    expect(init.headers.has('Authorization')).toBe(true);
+    await act(async () => vi.advanceTimersByTime(900000)); expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('My Courses');
 });

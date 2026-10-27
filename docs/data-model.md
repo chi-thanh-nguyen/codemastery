@@ -551,3 +551,17 @@ same-Course membership, complete immutable evidence or coverage readiness. U08/U
 callables, production policy values, settings-change/replay consistency and actual
 verification remain explicit approval gates; a non-NULL JSON object does not satisfy
 them. This reference neither approves the proposal nor expands persistence scope.
+
+
+### FE07 membership operations (27 October 2026)
+
+ADR002 revision `FE07-2026-10-27-r1` newly approves CT22.membership under explicit
+Leader delegation in PR #101, pending protected integration. Existing V002 remains
+unchanged: one canonical user/Course row, statuses active/completed/left, absent
+resume on insertion. Leave updates status only; rejoin reuses the row and preserves
+resume, LessonProgress and other history. Completed → left → active does not
+recalculate progress/completion. API `none` describes absence, never a stored status.
+Course-root locking serializes mutations and publication changes. Hidden memberships
+remain stored but are concealed from learner REST reads/counts/mutations. No dates,
+progress/resume policy, atomic mastery participation or schema changes are selected.
+See ADR002 and OpenAPI for exact operations, precedence, representations and filters.

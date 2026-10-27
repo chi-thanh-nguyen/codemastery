@@ -1583,3 +1583,20 @@ No listed file is created or claimed implemented by this documentation change.
 The original canonical tree and existing AU03/AU04/FE01 exceptions are unchanged;
 this explicit bounded exception does not approve unrelated test inventory.
 Separate implementation authority and compliant protected integration are required.
+
+
+### FE07 delegated test placement — 27 October 2026
+
+The Leader's explicit full-FE07 task authorizes the necessary test additions below
+within existing owning feature/module and integration directories (ADR002
+`FE07-2026-10-27-r1`). Existing scaffolds remain the production callable locations;
+no module or production directory is added.
+
+- frontend/src/features/learning/api/learningApi.test.ts
+- frontend/src/features/learning/pages/MyCoursesPage.test.tsx
+- backend/src/test/java/com/codemastery/integration/EnrollmentIntegrationTest.java
+
+Existing CourseCatalogue API/page tests and routes/index.test.tsx cover the other
+FE07 changes. e2e/tests/learner-flow.spec.ts is the existing browser-flow location;
+the external Playwright installation used for local execution is not a dependency
+or E2E pipeline change.

@@ -45,7 +45,7 @@ public final class AuthRequests {
         }
     }
 
-    /** Approved request representation; the token-producing login endpoint is not implemented here. */
+    /** Approved login representation; registration complexity is not imposed on login. */
     public record LoginRequest(@NotNull @Email @Pattern(regexp = "[!-~]+") String email,
                                @NotNull String password) {
         public LoginRequest {

@@ -21,6 +21,8 @@ public interface CourseRepository {
      */
     Page<Course> findPublishedCourses(Pageable pageable);
 
+    Page<Course> searchPublishedCourses(Pageable pageable, String query, String prerequisites);
+
     /** One Course-owned query snapshot; optional descendants stay scoped to this Course. */
     Optional<AccessSnapshot> findCourseAccessSnapshot(
             UUID actorId, UUID courseId, UUID lessonId, UUID materialId);

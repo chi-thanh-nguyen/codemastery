@@ -2,6 +2,9 @@ package com.codemastery.modules.auth.api.controller;
 
 import com.codemastery.modules.auth.api.dto.AuthRequests.RegisterRequest;
 import com.codemastery.modules.auth.api.dto.UserResponse;
+import com.codemastery.modules.auth.api.dto.AuthResponse;
+import com.codemastery.modules.auth.api.dto.AuthRequests.LoginRequest;
+import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
 import com.codemastery.modules.auth.application.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.core.MethodParameter;
@@ -25,8 +28,17 @@ public class AuthController {
 
     private final AuthService auth;
 
-    public AuthController(AuthService auth) {
-        this.auth = auth;
+    private final JwtTokenProvider tokens;
+
+    public AuthController(AuthService auth, JwtTokenProvider tokens) {
+        this.auth = auth; this.tokens = tokens;
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+        var user = auth.authenticate(request.email(), request.password());
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(new AuthResponse(tokens.createToken(user.id()), "Bearer", 900, UserResponse.from(user)));
     }
 
     @PostMapping("/register")
@@ -48,7 +60,8 @@ public class AuthController {
         public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType contentType,
                                       Class<? extends HttpMessageConverter<?>> converterType,
                                       ServerHttpRequest request, ServerHttpResponse response) {
-            if ("/api/auth/register".equals(request.getURI().getPath())) {
+            String path = request.getURI().getPath();
+            if ("/api/auth/register".equals(path) || "/api/auth/login".equals(path)) {
                 response.getHeaders().setCacheControl("no-store");
             }
             return body;
