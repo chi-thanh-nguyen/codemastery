@@ -204,11 +204,14 @@ describe('real declarative routing and Profile', () => {
         await setQuery('variables'); await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
         expect(input.value).toBe(''); expect(fetcher).not.toHaveBeenCalled();
     });
-    it('search submit focuses its local result section and static recommendations make no requests', async () => {
+    it.each(['form submit', 'search button'])('%s focuses its local result section and static recommendations make no requests', async (trigger) => {
         await act(async () => root.render(<App />));
         const section = host.querySelector<HTMLElement>('#sample-learning-path')!;
         section.scrollIntoView = vi.fn();
-        await act(async () => host.querySelector('form[role="search"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+        await act(async () => {
+            if (trigger === 'search button') host.querySelector<HTMLButtonElement>('button[aria-label="Search sample lessons"]')!.click();
+            else host.querySelector('form[role="search"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        });
         expect(document.activeElement).toBe(section); expect(section.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' });
         expect(host.textContent).toContain('No live mastery calculation is performed.'); expect(fetcher).not.toHaveBeenCalled();
         expect(location.pathname).toBe('/courses'); expect(localStorage.length + sessionStorage.length).toBe(0);

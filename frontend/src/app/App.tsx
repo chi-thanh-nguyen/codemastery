@@ -186,8 +186,14 @@ export function PresentationPreview() {
         <TextField fullWidth size="small" variant="outlined" hiddenLabel placeholder="Find a sample lesson…" value={query} onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}
             slotProps={{ htmlInput: { 'aria-label': 'Search sample lessons', 'aria-description': 'Filters local sample lessons only. Enter jumps to results. Escape clears search.' }, input: {
-                startAdornment: <InputAdornment position="start"><PresentationIcon name="search" sx={{ fontSize: 19, color: 'text.secondary' }} /></InputAdornment>,
-                endAdornment: query ? <InputAdornment position="end"><IconButton size="small" aria-label="Clear sample lesson search" onClick={() => setQuery('')} sx={{ width: 28, height: 28, fontSize: 20 }}>×</IconButton></InputAdornment> : undefined,
+                sx: { pr: 1.0 },
+                endAdornment: <InputAdornment position="end" sx={{ maxHeight: 'none', gap: .5, flexShrink: 0 }}>
+                    {query && <IconButton size="small" aria-label="Clear sample lesson search" onClick={() => setQuery('')} sx={{ width: 28, height: 28, fontSize: 20 }}>×</IconButton>}
+                    <IconButton type="submit" aria-label="Search sample lessons" disableRipple sx={{ width: 36, height: 36, borderRadius: '50%', bgcolor: 'primary.main', color: 'primary.contrastText',
+                        '&:hover, &:active': { bgcolor: 'primary.main' }, '&.Mui-focusVisible': { outline: '2px solid', outlineColor: 'primary.dark', outlineOffset: 2 } }}>
+                        <PresentationIcon name="search" sx={{ fontSize: 18 }} />
+                    </IconButton>
+                </InputAdornment>,
             } }} />
     </Box>;
     function resetPreview() { setQuery(''); setFilter('all'); setUtilityInput(''); setNotice('Sample controls reset.'); setDialog(null); }
