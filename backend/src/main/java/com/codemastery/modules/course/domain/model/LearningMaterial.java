@@ -1,7 +1,5 @@
 package com.codemastery.modules.course.domain.model;
 
-import com.codemastery.modules.course.domain.model.PublishStatus;
-
 import java.util.UUID;
 
 public record LearningMaterial(UUID id,
