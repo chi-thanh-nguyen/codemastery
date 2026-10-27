@@ -1312,3 +1312,42 @@ Local evidence is `/private/tmp/codemastery-pr101-r3-runtime/evidence/result.jso
 its temporary runtime/credentials were cleaned up. Independent protected review
 and deployed QA acceptance remain separate. Codex assisted these scoped fixes,
 contract-documentation correction and regression execution.
+
+## PR #101 Course Card text regression — 27 October 2026
+
+Baseline `b113f218375c320a2091251e857a22573d00259e` reproduced clipping in all
+nine title-only, instructor-only and both-long cases at 320/768/1280px. Each long
+value contains 100 consecutive W characters. Title text scrolled to 1,552px and
+instructor text to 1,251px inside elements only 254/318/273px wide. Two scoped
+Typography overflowWrap:anywhere declarations fix the measured defect; no
+intrinsic-size override was needed. Description preview styles remain unchanged.
+
+The existing e2e/tests/learner-flow.spec.ts now checks full text, element/card/text
+Range rectangles, client/scroll width and height, distinct wrapped lines, absence
+of ellipsis/clamping/scrolling workarounds and actual detail navigation in all nine
+cases. It also checks that description preview retains its three-line clamp.
+All nine cases passed; the both-long measurements were:
+
+| Viewport | Title client/scroll width; lines | Instructor client/scroll width; lines |
+| --- | --- | --- |
+| 320px | 254/254px; 7 | 254/254px; 6 |
+| 768px | 318/318px; 5 | 318/318px; 5 |
+| 1280px | 273/273px; 6 | 273/273px; 6 |
+
+The disposable fixture retains 21 published Courses. Course IDs ending in
+8001-000000000001/2/3 supply title-only/instructor-only/both-long cases. A second
+Instructor (00000000-0000-4000-8000-000000000006) has the long public display name;
+only the latter two Courses use it. These valid test-owned rows do not change
+backend behavior or contracts. The local preparer is
+`python3 -B /private/tmp/pr101-card-runtime.py`; it executes the committed script
+against production frontend assets, real REST and disposable PostgreSQL.
+
+All 13 runtime/browser scenarios passed, retaining catalogue/detail, membership,
+Auth and previous review coverage. From frontend, npm test passed all 355 tests
+in 11 files, npm run typecheck passed and
+VITE_API_BASE_URL=http://localhost:8080 npm run build passed with the existing
+bundle-size warning. Local course-card-text.json and course-card-320/768/1280.png
+are in /private/tmp/codemastery-pr101-card-runtime/evidence/. Task-owned runtime
+resources were cleaned up; no generated artifacts, credentials or dependencies
+were committed. Independent protected review remains a separate gate. Codex
+assisted this scoped styling correction and regression execution.

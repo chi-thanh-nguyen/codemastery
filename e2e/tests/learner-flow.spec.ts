@@ -56,6 +56,64 @@ try {
         assert.deepEqual(await response.json(), { content: [], page: 107374183, size: 20, totalElements: 21, totalPages: 2 });
     });
     await page.goto(frontend + '/courses');
+    await check('course-card title/instructor text and navigation remain accessible in all nine responsive cases', async () => {
+        const long = 'W'.repeat(100), measurements = [], failures = [];
+        const variants = [
+            { name: 'title-only', title: long, instructor: 'Instructor: FE07 Runtime Instructor', id: '00000000-0000-4000-8001-000000000001', query: long, count: 2 },
+            { name: 'instructor-only', title: 'Long instructor fixture', instructor: 'Instructor: ' + long, id: '00000000-0000-4000-8001-000000000002', query: 'Long instructor fixture', count: 1 },
+            { name: 'both-long', title: long, instructor: 'Instructor: ' + long, id: '00000000-0000-4000-8001-000000000003', query: long, count: 2 },
+        ];
+        async function geometry(locator) {
+            return locator.evaluate((element) => {
+                const rect = element.getBoundingClientRect(), card = element.closest('.MuiCard-root').getBoundingClientRect();
+                const range = document.createRange(); range.selectNodeContents(element);
+                const fragments = [...range.getClientRects()].filter((part) => part.width > 0 && part.height > 0);
+                const style = getComputedStyle(element);
+                return { text: element.textContent, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+                    clientHeight: element.clientHeight, scrollHeight: element.scrollHeight,
+                    rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                    card: { left: card.left, right: card.right, top: card.top, bottom: card.bottom },
+                    fragments: fragments.map((part) => ({ left: part.left, right: part.right, top: part.top, bottom: part.bottom })),
+                    lines: new Set(fragments.map((part) => part.top.toFixed(2))).size,
+                    overflowWrap: style.overflowWrap, overflowX: style.overflowX, overflowY: style.overflowY,
+                    textOverflow: style.textOverflow, lineClamp: style.webkitLineClamp };
+            });
+        }
+        for (const variant of variants) for (const width of [320, 768, 1280]) {
+            await page.setViewportSize({ width, height: 900 });
+            await page.getByRole('heading', { name: 'Course Catalogue', exact: true }).waitFor();
+            await page.getByLabel('Search courses').fill(variant.query);
+            await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
+            await visibleText(`Showing ${variant.count} of ${variant.count} published courses`);
+            const card = page.locator('.MuiCard-root').filter({ has: page.getByRole('heading', { name: variant.title, exact: true }) })
+                .filter({ has: page.getByText(variant.instructor, { exact: true }) });
+            assert.equal(await card.count(), 1);
+            await page.evaluate(() => document.fonts.ready);
+            await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+            const title = await geometry(card.getByRole('heading', { name: variant.title, exact: true }));
+            const instructor = await geometry(card.getByText(variant.instructor, { exact: true }));
+            measurements.push({ variant: variant.name, width, title, instructor });
+            for (const [field, measured, expected] of [['title', title, variant.title], ['instructor', instructor, variant.instructor]]) {
+                const label = `${variant.name}/${width}/${field}`;
+                if (measured.text !== expected) failures.push(`${label}: incomplete text`);
+                if (!(measured.clientWidth > 0 && measured.scrollWidth <= measured.clientWidth + 1 && measured.scrollHeight <= measured.clientHeight + 1)) failures.push(`${label}: element overflow`);
+                if (!measured.fragments.every((part) => part.left >= measured.rect.left - 1 && part.right <= measured.rect.right + 1 && part.top >= measured.rect.top - 1 && part.bottom <= measured.rect.bottom + 1)) failures.push(`${label}: text outside element`);
+                if (!(measured.rect.left >= measured.card.left - 1 && measured.rect.right <= measured.card.right + 1 && measured.rect.top >= measured.card.top - 1 && measured.rect.bottom <= measured.card.bottom + 1 && measured.card.left >= 0 && measured.card.right <= width + 1)) failures.push(`${label}: clipped by card or viewport`);
+                if (['hidden', 'clip', 'scroll', 'auto'].includes(measured.overflowX) || ['hidden', 'clip', 'scroll', 'auto'].includes(measured.overflowY) || measured.textOverflow === 'ellipsis' || Number.parseInt(measured.lineClamp) > 0) failures.push(`${label}: truncation or scrolling workaround`);
+                if (expected.includes(long) && measured.lines <= 1) failures.push(`${label}: unbroken text did not wrap`);
+            }
+            const description = await card.getByText('Pagination fixture', { exact: true }).evaluate((element) => ({ clamp: getComputedStyle(element).webkitLineClamp, overflow: getComputedStyle(element).overflow }));
+            assert.equal(description.clamp, '3'); assert.equal(description.overflow, 'hidden');
+            if (variant.name === 'both-long') await page.screenshot({ path: `${output}/course-card-${width}.png`, fullPage: true });
+            await card.getByRole('button', { name: 'View Syllabus', exact: true }).click();
+            await page.waitForURL(frontend + '/courses/' + variant.id);
+            await page.getByRole('heading', { level: 1, name: variant.title, exact: true }).waitFor();
+            await page.getByRole('button', { name: 'Back to Catalogue', exact: true }).click();
+        }
+        await writeFile(`${output}/course-card-text.json`, JSON.stringify({ measurements, failures }, null, 2));
+        assert.deepEqual(failures, []);
+        await page.setViewportSize({ width: 1280, height: 900 });
+    });
     await check('real published catalogue, search and prerequisite filtering', async () => {
         await page.getByRole('heading', { name: 'Course Catalogue' }).waitFor();
         const search = page.getByLabel('Search courses');

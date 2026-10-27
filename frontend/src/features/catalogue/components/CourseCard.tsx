@@ -32,7 +32,7 @@ export const CourseCard: React.FC<CourseCardProps> = ({
             }}
         >
             <CardContent sx={{ flexGrow: 1 }}>
-                <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold', mb: 1, overflowWrap: 'anywhere' }}>
                     {course.title}
                 </Typography>
                 <Typography
@@ -47,7 +47,7 @@ export const CourseCard: React.FC<CourseCardProps> = ({
                 >
                     {course.description}
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 2, overflowWrap: 'anywhere' }}>
                     Instructor: {course.instructorDisplayName ?? 'Instructor name unavailable'}
                 </Typography>
             </CardContent>
