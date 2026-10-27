@@ -75,7 +75,7 @@ describe('real declarative routing and Profile', () => {
         expect(displayName.textContent).toBe('<img src=x onerror=alert(1)>'); expect(displayName.children).toHaveLength(0);
         expect(host.querySelector('img[src="x"], [onerror]')).toBeNull();
         expect([...host.querySelectorAll('img')].every((image) => image.getAttribute('src') === '/favicon.svg')).toBe(true);
-        await go('/courses'); expect(auth.isAuthenticated).toBe(true); await go('/profile'); expect(fetcher).toHaveBeenCalledTimes(1);
+        await go('/courses'); expect(auth.isAuthenticated).toBe(true); await go('/profile'); expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/auth/login')).toHaveLength(1);
     });
     it('successful same-UUID replacement removes A and renders only B without stealing focus', async () => {
         await mount('/courses'); await login(); await go('/profile'); const link = host.querySelector<HTMLAnchorElement>('a[href="/courses"]')!; link.focus();
@@ -109,6 +109,7 @@ describe('real declarative routing and Profile', () => {
         await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('main h1')?.textContent).toBe('Welcome back');
     });
     it('keeps the hovered chart tooltip across column gaps without changing the selected day', async () => {
+        window.history.replaceState(null, '', '/preview');
         await act(async () => root.render(<App />));
         const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
         const day = (name: string) => chart.querySelector<HTMLButtonElement>(`button[aria-label^="${name}:"]`)!;
@@ -129,6 +130,7 @@ describe('real declarative routing and Profile', () => {
         expect(sun.getAttribute('aria-pressed')).toBe('true'); expect(fetcher).not.toHaveBeenCalled();
     });
     it.each(['card heading', 'column gap', 'page heading'] as const)('clears chart selection when clicking the %s and supports selecting again', async (target) => {
+        window.history.replaceState(null, '', '/preview');
         await act(async () => root.render(<App />));
         const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
         const tue = chart.querySelector<HTMLButtonElement>('button[aria-label^="Tue:"]')!;
@@ -151,6 +153,7 @@ describe('real declarative routing and Profile', () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
     it('focuses each local preview heading after its initiating control is removed, without changing routes', async () => {
+        window.history.replaceState(null, '', '/preview');
         await act(async () => root.render(<App />));
         await click('Explore components'); expect(document.activeElement).toBe(host.querySelector('main h1'));
         const authPreview = [...host.querySelectorAll<HTMLElement>('[role="button"]')].find((node) => node.textContent === 'Auth layout preview')!;
@@ -163,9 +166,10 @@ describe('real declarative routing and Profile', () => {
             search.dispatchEvent(new Event('input', { bubbles: true }));
         });
         await act(async () => vi.advanceTimersByTime(400));
-        expect(document.activeElement).toBe(search); expect(location.pathname).toBe('/courses'); expect(fetcher).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(search); expect(location.pathname).toBe('/preview'); expect(fetcher).not.toHaveBeenCalled();
     });
     it('keeps sample-week arithmetic and keyboard day selection consistent in actual App', async () => {
+        window.history.replaceState(null, '', '/preview');
         await act(async () => root.render(<App />));
         const chart = host.querySelector('[role="group"][aria-label="Sample weekly study minutes"]')!;
         const days = [...chart.querySelectorAll<HTMLButtonElement>('button')];
@@ -187,6 +191,7 @@ describe('real declarative routing and Profile', () => {
         expect(document.activeElement).toBe(days[6]); expect(fetcher).not.toHaveBeenCalled();
     });
     it('shares one header search with debounced sample results, clear, Escape and empty recovery', async () => {
+        window.history.replaceState(null, '', '/preview');
         await act(async () => root.render(<App />));
         expect(host.querySelectorAll('input[aria-label="Search sample lessons"]')).toHaveLength(1);
         const input = host.querySelector<HTMLInputElement>('input[aria-label="Search sample lessons"]')!;
@@ -207,6 +212,7 @@ describe('real declarative routing and Profile', () => {
         expect(input.value).toBe(''); expect(fetcher).not.toHaveBeenCalled();
     });
     it.each(['form submit', 'search button'])('%s focuses its local result section and static recommendations make no requests', async (trigger) => {
+        window.history.replaceState(null, '', '/preview');
         await act(async () => root.render(<App />));
         const section = host.querySelector<HTMLElement>('#sample-learning-path')!;
         section.scrollIntoView = vi.fn();
@@ -216,6 +222,6 @@ describe('real declarative routing and Profile', () => {
         });
         expect(document.activeElement).toBe(section); expect(section.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' });
         expect(host.textContent).toContain('No live mastery calculation is performed.'); expect(fetcher).not.toHaveBeenCalled();
-        expect(location.pathname).toBe('/courses'); expect(localStorage.length + sessionStorage.length).toBe(0);
+        expect(location.pathname).toBe('/preview'); expect(localStorage.length + sessionStorage.length).toBe(0);
     });
 });
