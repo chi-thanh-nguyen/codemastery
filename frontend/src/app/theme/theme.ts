@@ -1,5 +1,4 @@
-import { createTheme } from '@mui/material/styles';
-import variableFontUrl from './plus-jakarta-sans-latin-wght.woff2';
+import { createTheme } from '@mui/material/styles';import variableFontUrl from './plus-jakarta-sans-latin-wght.woff2';
 
 /**
  * Presentation-only tokens selected under the Leader's 2026-10-23 UI delegation.
@@ -19,11 +18,11 @@ export const presentationTokens = {
     surfaceBorder: '#E6E8EC',
     searchSurface: '#F5F6F8',
     sidebarBackground: '#FFFFFE',
-    chartBarFill: '#52A5F7',
-    chartBarFade: '#EFF8FF',
-    chartBarEdge: '#3988CE',
-    chartBarActiveEdge: '#287CC9',
-    chartBarActive: '#2589DE',
+    chartBarFill: '#65cefe',
+    chartBarFade: '#F0F9FF',
+    chartBarEdge: '#44c1ff',
+    chartBarActiveEdge: '#0192e0',
+    chartBarActive: '#0192e0',
     chartGrid: '#E8EBEF',
     softBlue: '#E3EEFF',
     softGreen: '#D7F9E8',
@@ -105,9 +104,13 @@ export const appTheme = createTheme({
             root: { borderRadius: presentationTokens.controlRadius, backgroundColor: '#FFFFFF', fontSize: '.875rem', lineHeight: 1.5,
                 '& .MuiOutlinedInput-notchedOutline': { borderColor: '#87919C' },
                 variants: [{ props: { hiddenLabel: true }, style: {
-                    minHeight: 44, backgroundColor: presentationTokens.searchSurface,
-                    '& .MuiOutlinedInput-notchedOutline, &:hover .MuiOutlinedInput-notchedOutline': { borderWidth: 0 },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderWidth: 2, borderColor: '#1F6BE8' },
+                    minHeight: 50, borderRadius: 25, backgroundColor: presentationTokens.searchSurface,
+                    transition: 'background-color 180ms ease',
+                    '& .MuiOutlinedInput-notchedOutline': { borderWidth: 2, borderColor: 'transparent', transition: 'border-color 180ms ease' },
+                    '&:hover:not(.Mui-disabled), &.Mui-focused': {
+                        backgroundColor: '#FFFFFF',
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: '#8fb7f7' },
+                    },
                 } }],
             },
             input: { '&::placeholder': { color: '#4A5458', opacity: 1 } },
@@ -134,7 +137,7 @@ export const appTheme = createTheme({
         } },
         MuiLinearProgress: { styleOverrides: { root: { height: 7, borderRadius: 8, backgroundColor: '#E3EBF8' }, bar: { borderRadius: 8 } } },
         MuiDialog: { styleOverrides: { paper: { borderRadius: 12, margin: 16, width: 'calc(100% - 32px)' } } },
-        MuiDialogTitle: { styleOverrides: { root: { fontSize: '1.125rem', fontWeight: 600, lineHeight: 1.4 } } },
+        MuiDialogTitle: { styleOverrides: { root: { fontSize: '1.125rem', fontWeight: 650 } } },
         MuiTab: { styleOverrides: { root: { textTransform: 'none', fontSize: '.875rem', fontWeight: 500, lineHeight: 1.5, '&.Mui-selected': { fontWeight: 600 } } } },
     },
 });

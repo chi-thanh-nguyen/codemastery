@@ -21,8 +21,8 @@ export function SidebarNav({ items, selectedId, onSelect, mobileOpen, onMobileCl
         || (theme.motion.reducedMotion === 'system' && prefersReducedMotion);
     const content = (
         <Box component="nav" aria-label="Main navigation" sx={{ width, height: '100%', display: 'flex', flexDirection: 'column', bgcolor: presentationTokens.sidebarBackground }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, px: 3, height: presentationTokens.headerHeight, flexShrink: 0 }}>
-                <BrandLogo size={34} decorative />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 3, height: presentationTokens.headerHeight, flexShrink: 0 }}>
+                <BrandLogo size={52} decorative />
                 <Typography variant="h6" component="p" sx={{ fontWeight: 700 }}>CodeMastery</Typography>
             </Box>
             {!items.some((item) => item.group) && <Typography variant="overline" color="text.secondary" sx={{ px: 3, mt: 3, mb: 1 }}>Workspace</Typography>}
@@ -35,7 +35,7 @@ export function SidebarNav({ items, selectedId, onSelect, mobileOpen, onMobileCl
                                 '&.Mui-selected': { bgcolor: 'action.selected', color: 'primary.dark' },
                                 '&.Mui-selected:hover, &.Mui-selected.Mui-focusVisible': { bgcolor: 'action.focus' } }}>
                             {item.icon && <ListItemIcon sx={{ minWidth: 0, color: item.id === selectedId ? 'primary.dark' : 'text.secondary', '& svg': { fontSize: 20 } }}>{item.icon}</ListItemIcon>}
-                            <ListItemText primary={item.label} slotProps={{ primary: { variant: 'subtitle1', sx: { fontWeight: item.id === selectedId ? 500 : 400 } } }} />
+                            <ListItemText primary={item.label} slotProps={{ primary: { variant: 'subtitle1', sx: { color: item.id === selectedId ? 'inherit' : '#5b5e61', fontWeight: item.id === selectedId ? 500 : 400 } } }} />
                             {item.badge !== undefined && item.badge !== '' && <Box component="span" sx={{ minWidth: 22, px: .75, py: .125,
                                 textAlign: 'center', borderRadius: '5px', bgcolor: 'action.focus', color: 'text.primary', typography: 'caption', fontWeight: 500 }}>
                                 {item.badge}

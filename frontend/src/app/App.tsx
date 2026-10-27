@@ -42,9 +42,9 @@ function DemoMetric({ label, value, note, icon, accent }: { label: string; value
     return <Paper sx={{ p: 2, minWidth: 0, display: 'grid', gridTemplateRows: 'subgrid', gridRow: 'span 3', rowGap: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Box sx={{ width: 40, height: 40, flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: '10px',
-                bgcolor: darken(accent, .04), color: '#FFFFFF', border: `1px solid ${alpha(accent, .25)}`,
-                boxShadow: `0 2px 6px ${alpha(accent, .06)}, inset 0 1px 0 rgba(255, 255, 255, .45)` }}>
-                <PresentationIcon name={icon} sx={{ fontSize: 23 }} />
+                bgcolor: accent, color: '#FFFFFF', border: `1px solid ${accent}`,
+                boxShadow: `0 1px 0 ${darken(accent, .2)}, 0 2px 5px ${alpha(accent, .16)}, inset 0 1px 1px rgba(255, 255, 255, .55), inset 0 -1px 2px rgba(0, 0, 0, .06)` }}>
+                <PresentationIcon name={icon} sx={{ fontSize: 23, filter: 'drop-shadow(0 .5px .5px rgba(0, 0, 0, .12))' }} />
             </Box>
             <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>{label}</Typography>
         </Box>
@@ -58,20 +58,20 @@ function LearningRhythm() {
     const [hovered, setHovered] = useState<number | null>(null);
     const [tooltipOpen, setTooltipOpen] = useState(true);
     const buttons = useRef<Array<HTMLButtonElement | null>>([]);
-    const chart = useRef<HTMLElement>(null);
     useEffect(() => {
         const dismissOutside = (event: PointerEvent) => {
-            if (event.target instanceof Node && chart.current && !chart.current.contains(event.target)) {
+            const selectedButton = selected === null ? null : buttons.current[selected];
+            if (event.target instanceof Node && !selectedButton?.contains(event.target)) {
                 setSelected(null); setHovered(null); setTooltipOpen(false);
             }
         };
         document.addEventListener('pointerdown', dismissOutside, true);
         return () => document.removeEventListener('pointerdown', dismissOutside, true);
-    }, []);
+    }, [selected]);
     const tooltipId = useId();
     const active = hovered ?? selected;
     const maximum = Math.max(...DEMO_WEEK.map((day) => day.minutes));
-    return <Paper ref={chart} component="section" aria-labelledby="learning-rhythm-title" sx={{ p: 2.5, minWidth: 0 }}>
+    return <Paper component="section" aria-labelledby="learning-rhythm-title" sx={{ p: 2.5, minWidth: 0 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
             <Box><Typography id="learning-rhythm-title" variant="h6" component="h2">Learning rhythm</Typography>
                 <Typography variant="caption" color="text.secondary">A little time, a stronger foundation.</Typography></Box>
@@ -183,7 +183,7 @@ export function PresentationPreview() {
             const section = document.getElementById('sample-learning-path');
             section?.focus(); section?.scrollIntoView({ block: 'nearest' });
         }}>
-        <TextField fullWidth size="small" variant="outlined" hiddenLabel placeholder="Find a sample lesson…" value={query} onChange={(event) => setQuery(event.target.value)}
+        <TextField fullWidth size="small" variant="outlined" hiddenLabel placeholder="What are you looking for?" sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f0f0f0' } }} value={query} onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}
             slotProps={{ htmlInput: { 'aria-label': 'Search sample lessons', 'aria-description': 'Filters local sample lessons only. Enter jumps to results. Escape clears search.' }, input: {
                 sx: { pr: 1.0 },
@@ -206,10 +206,10 @@ export function PresentationPreview() {
             <Typography variant="caption" color="text.secondary">All learning data below is illustrative. Nothing is saved.</Typography>
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' }, gap: 2, mb: 2 }}>
-            <DemoMetric label="Study time" value={`${weekDuration.hours}h ${weekDuration.minutes}m`} note="Illustrative weekly total" icon="clock" accent="#1769FF" />
-            <DemoMetric label="Lessons completed" value="12" note="Sample learning snapshot" icon="check" accent="#10A570" />
-            <DemoMetric label="Practice streak" value="5 days" note="An example of steady progress" icon="flame" accent="#F56516" />
-            <DemoMetric label="Course progress" value="68%" note="Illustrative course completion" icon="chart" accent="#8B5CF6" />
+            <DemoMetric label="Study time" value={`${weekDuration.hours}h ${weekDuration.minutes}m`} note="Illustrative weekly total" icon="clock" accent="#007bff" />
+            <DemoMetric label="Lessons completed" value="12" note="Sample learning snapshot" icon="check" accent="#01d012" />
+            <DemoMetric label="Practice streak" value="5 days" note="An example of steady progress" icon="flame" accent="#ff0000" />
+            <DemoMetric label="Course progress" value="68%" note="Illustrative course completion" icon="chart" accent="#7b34ff" />
         </Box>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 3fr) minmax(0, 2fr)' }, gap: 2, mb: 2 }}>
             <LearningRhythm />

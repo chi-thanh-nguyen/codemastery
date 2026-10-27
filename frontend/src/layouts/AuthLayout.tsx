@@ -8,7 +8,7 @@ export function AuthLayout({ title = 'CodeMastery', subtitle = 'Mastery-Based Pr
     return <Box sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', p: { xs: 2, sm: 3 }, background: presentationTokens.outerGradient }}>
         <Container maxWidth="xs" disableGutters>
             <Paper sx={{ p: { xs: 2.5, sm: 4 }, boxShadow: presentationTokens.frameShadow }}>
-                <Box sx={{ mb: 3 }}><BrandLogo size={44} /></Box>
+                <Box sx={{ mb: 3 }}><BrandLogo size={64} /></Box>
                 <Typography variant="h4" component="h1">{title}</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>{subtitle}</Typography>
                 {children}

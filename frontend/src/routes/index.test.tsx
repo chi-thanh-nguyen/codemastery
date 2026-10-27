@@ -128,20 +128,22 @@ describe('real declarative routing and Profile', () => {
         expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Sun · 25 min');
         expect(sun.getAttribute('aria-pressed')).toBe('true'); expect(fetcher).not.toHaveBeenCalled();
     });
-    it('clears chart selection on outside pointer interaction and supports selecting again', async () => {
+    it.each(['card heading', 'column gap', 'page heading'] as const)('clears chart selection when clicking the %s and supports selecting again', async (target) => {
         await act(async () => root.render(<App />));
         const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
         const tue = chart.querySelector<HTMLButtonElement>('button[aria-label^="Tue:"]')!;
         await act(async () => tue.click());
-        await act(async () => tue.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        await act(async () => tue.querySelector('[data-study-bar]')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
         expect(tue.getAttribute('aria-pressed')).toBe('true');
-        await act(async () => host.querySelector('main h1')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        const outside = target === 'card heading' ? host.querySelector('#learning-rhythm-title')!
+            : target === 'column gap' ? tue.parentElement! : host.querySelector('main h1')!;
+        await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
         expect(chart.querySelector('[aria-pressed="true"]')).toBeNull();
         expect(chart.querySelector('[role="tooltip"]')).toBeNull();
         await act(async () => tue.click());
         expect(tue.getAttribute('aria-pressed')).toBe('true');
         expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
-        await act(async () => host.querySelector('main h1')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
         const wed = chart.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
         await act(async () => wed.focus());
         expect(wed.getAttribute('aria-pressed')).toBe('true');

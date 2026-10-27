@@ -6,6 +6,7 @@ const engine=process.argv[5] || 'chromium';
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const path=require('node:path');
+const {createHash}=require('node:crypto');
 const out=path.resolve(process.argv[3] || path.join(require('node:os').tmpdir(),'codemastery-fe01-evidence'));
 fs.mkdirSync(out,{recursive:true});
 const previewUrl=process.argv[4] || 'http://127.0.0.1:5173/';
@@ -24,7 +25,8 @@ let browser;
  function contrast(a,b){const lum=s=>{const v=s.match(/[\d.]+/g).slice(0,3).map(Number).map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4});return v[0]*.2126+v[1]*.7152+v[2]*.0722};const [l,h]=[lum(a),lum(b)].sort((a,b)=>a-b);return(h+.05)/(l+.05)}
  async function colors(locator){return locator.evaluate(e=>{const s=getComputedStyle(e);return {color:s.color,background:s.backgroundColor,outline:s.outline,outlineWidth:s.outlineWidth,transition:s.transitionDuration}})}
  const canonicalArtwork=fs.readFileSync(path.resolve(__dirname,'../../../public/favicon.svg'));
- const branding=[];let brandUrl,brandRatio;
+ const canonicalIcon=fs.readFileSync(path.resolve(__dirname,'../../../public/favicon.ico'));
+ const branding=[];let brandUrl,brandRatio,faviconUrl;
  async function verifyBrandLogo(locator,height,decorative){
   assert.equal(await locator.count(),1);await locator.evaluate(image=>image.decode());
   const rendered=await locator.evaluate(image=>{
@@ -44,24 +46,44 @@ let browser;
  await page.goto(previewUrl,{waitUntil:'networkidle'});
  await check('overview is explicitly demo data',async()=>{await page.getByRole('heading',{name:'Your learning, in focus.'}).waitFor();assert(await page.getByText('All learning data below is illustrative. Nothing is saved.').isVisible())});
  let faviconCaching;
- await check('favicon resolves to canonical SVG bytes, decodes and revalidates its cache',async()=>{
-  const favicon=page.locator('link[rel="icon"]');assert.equal(await favicon.count(),1);assert.equal(await favicon.getAttribute('type'),'image/svg+xml');
-  brandUrl=await favicon.evaluate(e=>e.href);assert.equal(new URL(brandUrl).pathname,new URL('favicon.svg',previewUrl).pathname);
-  const response=await context.request.get(brandUrl);assert(response.ok());assert.match(response.headers()['content-type'],/image\/svg\+xml/);
-  assert((await response.body()).equals(canonicalArtwork),'Favicon must serve the unmodified canonical asset');
+ await check('multi-size favicon resolves, matches the canonical logo and revalidates its cache',async()=>{
+  const favicon=page.locator('link[rel="icon"]');assert.equal(await favicon.count(),1);assert.equal(await favicon.getAttribute('type'),'image/x-icon');
+  assert.equal(await favicon.getAttribute('sizes'),'16x16 32x32 48x48 64x64');
+  faviconUrl=await favicon.evaluate(e=>e.href);assert.equal(new URL(faviconUrl).pathname,new URL('favicon.ico',previewUrl).pathname);
+  assert.equal(new URL(faviconUrl).searchParams.get('v'),createHash('sha256').update(canonicalIcon).digest('hex').slice(0,12),'Favicon URL version must match its current contents');
+  const response=await context.request.get(faviconUrl);assert(response.ok());assert.match(response.headers()['content-type'],/image\/(x-icon|vnd\.microsoft\.icon)/);
+  assert((await response.body()).equals(canonicalIcon));
+  assert.equal(canonicalIcon.readUInt16LE(0),0);assert.equal(canonicalIcon.readUInt16LE(2),1);assert.equal(canonicalIcon.readUInt16LE(4),4);
+  for(const [i,size]of [16,32,48,64].entries()){
+   const entry=6+i*16;assert.equal(canonicalIcon[entry],size);assert.equal(canonicalIcon[entry+1],size);
+   const length=canonicalIcon.readUInt32LE(entry+8),offset=canonicalIcon.readUInt32LE(entry+12),png=canonicalIcon.subarray(offset,offset+length);
+   assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+   const difference=await page.evaluate(async({svg,png,size})=>{
+    const original=new Image(),raster=new Image();original.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);raster.src='data:image/png;base64,'+png;
+    await Promise.all([original.decode(),raster.decode()]);
+    if(raster.naturalWidth!==size||raster.naturalHeight!==size)throw new Error('Incorrect favicon frame size');
+    const box=new DOMParser().parseFromString(svg,'image/svg+xml').documentElement.viewBox.baseVal,ratio=box.width/box.height;
+    const pixels=(image,canonical)=>{const c=document.createElement('canvas');c.width=c.height=size;const ctx=c.getContext('2d');if(canonical)ctx.drawImage(image,(size-size*ratio)/2,0,size*ratio,size);else ctx.drawImage(image,0,0);return ctx.getImageData(0,0,size,size).data};
+    const a=pixels(original,true),b=pixels(raster,false);let error=0,visible=0;for(let j=0;j<a.length;j++){error+=Math.abs(a[j]-b[j]);if(j%4===3&&b[j]>32)visible++;}
+    if(visible<size)throw new Error('Favicon frame is blank');return error/a.length;
+   },{svg:canonicalArtwork.toString('utf8'),png:png.toString('base64'),size});
+   assert(difference<12,`${size}px favicon must preserve the canonical SVG artwork`);
+  }
+  brandUrl=new URL('favicon.svg',previewUrl).href;
+  const original=await context.request.get(brandUrl);assert(original.ok());assert((await original.body()).equals(canonicalArtwork));
   brandRatio=await page.evaluate(async({url,source})=>{
    const image=new Image();image.src=url;await image.decode();
    const svg=new DOMParser().parseFromString(source,'image/svg+xml').documentElement,viewBox=svg.viewBox.baseVal;
    if(!image.naturalWidth||!image.naturalHeight)throw new Error('Canonical SVG did not decode');
    return viewBox.width/viewBox.height;
   },{url:brandUrl,source:canonicalArtwork.toString('utf8')});
-  const headers=response.headers();faviconCaching={url:brandUrl,cacheControl:headers['cache-control'],etag:headers.etag};
-  if(headers.etag){const conditional=await context.request.get(brandUrl,{headers:{'If-None-Match':headers.etag}});assert.equal(conditional.status(),304);faviconCaching.conditionalStatus=conditional.status();}
-  const outdated=await context.request.get(brandUrl,{headers:{'If-None-Match':'W/"previous-logo"'}});
-  assert.equal(outdated.status(),200);assert((await outdated.body()).equals(canonicalArtwork));faviconCaching.outdatedValidatorStatus=outdated.status();
+  const headers=response.headers();faviconCaching={url:faviconUrl,source:brandUrl,cacheControl:headers['cache-control'],etag:headers.etag};
+  if(headers.etag){const conditional=await context.request.get(faviconUrl,{headers:{'If-None-Match':headers.etag}});assert.equal(conditional.status(),304);faviconCaching.conditionalStatus=conditional.status();}
+  const outdated=await context.request.get(faviconUrl,{headers:{'If-None-Match':'W/"previous-logo"'}});
+  assert.equal(outdated.status(),200);assert((await outdated.body()).equals(canonicalIcon));faviconCaching.outdatedValidatorStatus=outdated.status();
  });
  await check('desktop sidebar uses canonical artwork without a background or duplicate accessible name',async()=>{
-  await verifyBrandLogo(page.locator('.MuiDrawer-docked nav img'),34,true);
+  await verifyBrandLogo(page.locator('.MuiDrawer-docked nav img'),52,true);
  });
  const typography=[];
  await check('self-hosted variable font loads real 400/500/600/700 weights',async()=>{
@@ -108,19 +130,25 @@ let browser;
   }
   if(cdp)await cdp.detach();
  });
- await check('sample search is borderless at rest and keeps one contrasting focus boundary',async()=>{
+ await check('sample search animates a white surface and primary border on hover and focus without shifting layout',async()=>{
   const input=page.getByRole('textbox',{name:'Search sample lessons'});
   const root=input.locator('..');
   const rest=await root.evaluate(e=>{const s=getComputedStyle(e),line=getComputedStyle(e.querySelector('fieldset'));return {background:s.backgroundColor,boundary:parseFloat(line.borderTopWidth),height:e.getBoundingClientRect().height}});
-  assert(rest.height>=44);assert.notEqual(rest.background,'rgb(255, 255, 255)');assert.equal(rest.boundary,0);
-  await input.hover();assert.equal(await root.locator('fieldset').evaluate(e=>parseFloat(getComputedStyle(e).borderTopWidth)),0);
+  assert(rest.height>=44);assert.notEqual(rest.background,'rgb(255, 255, 255)');assert.equal(rest.boundary,2);
+  assert.equal(await root.locator('fieldset').evaluate(e=>getComputedStyle(e).borderTopColor),'rgba(0, 0, 0, 0)');
+  await input.hover();
+  await page.waitForFunction(()=>{const root=document.querySelector('input[aria-label="Search sample lessons"]').closest('.MuiOutlinedInput-root');return getComputedStyle(root).backgroundColor==='rgb(255, 255, 255)'&&getComputedStyle(root.querySelector('fieldset')).borderTopColor==='rgb(31, 107, 232)'});
+  assert.equal(await root.evaluate(e=>e.getBoundingClientRect().height),rest.height);
+  assert(parseFloat((await colors(root)).transition)>0);
   await input.focus();
+  await page.mouse.move(0,0);
   const focus=await colors(root);const boundary=await root.locator('fieldset').evaluate(e=>{const s=getComputedStyle(e);return {width:parseFloat(s.borderTopWidth),color:s.borderTopColor}});
   assert.equal(boundary.width,2);assert(contrast(boundary.color,rest.background)>=3);
   for(const target of [input,root])assert.equal(await target.evaluate(e=>getComputedStyle(e).outlineStyle),'none');
   for(const pseudo of ['::before','::after'])assert.equal(await root.evaluate((e,p)=>getComputedStyle(e,p).content,pseudo),'none');
   assert(contrast(focus.color,focus.background)>=4.5);
   await input.evaluate(e=>e.blur());
+  await page.waitForFunction(()=>{const root=document.querySelector('input[aria-label="Search sample lessons"]').closest('.MuiOutlinedInput-root');return getComputedStyle(root).backgroundColor==='rgb(245, 246, 248)'&&getComputedStyle(root.querySelector('fieldset')).borderTopColor==='rgba(0, 0, 0, 0)'});
  });
  await check('dashboard uses flat surfaces, readable colorful metrics and an unshadowed chart',async()=>{
   assert.equal(await page.locator('#main-content').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(255, 255, 255)');
@@ -134,14 +162,14 @@ let browser;
   for(const label of ['Study time','Lessons completed','Practice streak','Course progress']){
    const metric=await page.getByText(label,{exact:true}).evaluate(e=>{
     const card=e.closest('.MuiPaper-root'),icon=card.querySelector('svg').parentElement,c=getComputedStyle(card),i=getComputedStyle(icon);
-    return {shadow:c.boxShadow,background:c.backgroundColor,icon:i.color,accent:i.backgroundColor,iconShadow:i.boxShadow,iconBorder:parseFloat(i.borderTopWidth),
+    return {shadow:c.boxShadow,background:c.backgroundColor,icon:i.color,accent:i.backgroundColor,iconShadow:i.boxShadow,iconBorder:parseFloat(i.borderTopWidth),iconHidden:card.querySelector('svg').getAttribute('aria-hidden'),label:getComputedStyle(e).color,
      text:getComputedStyle(card.querySelector('.MuiTypography-caption')).color};
    });
    assert.equal(metric.shadow,'none');assert.equal(metric.background,'rgb(255, 255, 255)');
-   assert(contrast(metric.icon,metric.accent)>=3);assert(contrast(metric.text,metric.background)>=4.5);
+   // Decorative glyphs use the reference palette; visible labels and captions carry the information.
+   assert.equal(metric.iconHidden,'true');assert(contrast(metric.label,metric.background)>=4.5);assert(contrast(metric.text,metric.background)>=4.5);
    assert.equal(metric.iconBorder,1);assert.notEqual(metric.iconShadow,'none');
    assert.equal(metric.icon,'rgb(255, 255, 255)');
-   assert(contrast(metric.accent,'rgb(255,255,255)')>=3,'Icon containers should use a strong color');
    accents.add(metric.accent);
   }
   assert.equal(accents.size,4);
@@ -188,6 +216,25 @@ let browser;
  await check('four KPI cards form a single desktop row',async()=>{
   const positions=[];for(const t of ['Study time','Lessons completed','Practice streak','Course progress'])positions.push((await page.getByText(t,{exact:true}).boundingBox()).y);
   assert(Math.max(...positions)-Math.min(...positions)<3,JSON.stringify(positions));
+ });
+ await check('KPI icons retain exact palette, raised surface and geometry across color preferences and viewport sizes',async()=>{
+  const palette=[['Study time','rgb(104, 166, 231)'],['Lessons completed','rgb(87, 191, 96)'],['Practice streak','rgb(242, 172, 84)'],['Course progress','rgb(165, 139, 212)']];
+  try{
+   for(const colorScheme of ['light','dark',null])for(const width of [390,1440]){
+    await page.emulateMedia({colorScheme});await page.setViewportSize({width,height:900});
+    for(const [label,expected] of palette){
+     const actual=await page.getByText(label,{exact:true}).evaluate(e=>{
+      const icon=e.closest('.MuiPaper-root').querySelector('svg'),tile=icon.parentElement,s=getComputedStyle(tile),r=tile.getBoundingClientRect();
+      const modifiers=[];for(let parent=tile;parent;parent=parent.parentElement){const p=getComputedStyle(parent);if(p.opacity!=='1'||p.filter!=='none'||p.backdropFilter!=='none'||p.mixBlendMode!=='normal')modifiers.push(parent.tagName);}
+      return{background:s.backgroundColor,image:s.backgroundImage,border:s.borderTopColor,borderWidth:s.borderTopWidth,shadow:s.boxShadow,color:getComputedStyle(icon).color,stroke:getComputedStyle(icon).stroke,width:r.width,height:r.height,radius:s.borderRadius,iconSize:getComputedStyle(icon).fontSize,modifiers};
+     });
+     assert.equal(actual.background,expected,label);assert.equal(actual.border,expected,label);
+     assert.equal(actual.color,'rgb(255, 255, 255)',label);assert.equal(actual.stroke,actual.color,label);
+     assert.equal(actual.image,'none',label);assert(actual.shadow.includes('inset'),label);assert.deepEqual(actual.modifiers,[],label);
+     assert.equal(actual.width,40,label);assert.equal(actual.height,40,label);assert.equal(actual.radius,'10px',label);assert.equal(actual.borderWidth,'1px',label);assert.equal(actual.iconSize,'23px',label);
+    }
+   }
+  }finally{await page.emulateMedia({colorScheme:null});await page.setViewportSize({width:1440,height:900});}
  });
  await check('chart value boundaries and progress indicators meet non-text contrast',async()=>{
   const chart=page.getByRole('group',{name:'Sample weekly study minutes'}),bars=chart.locator('[data-study-bar]');
@@ -310,7 +357,7 @@ let browser;
   const toggle=page.getByRole('button',{name:'Toggle navigation'});await toggle.click();
   const nav=page.getByRole('navigation',{name:'Main navigation'});await nav.waitFor();assert.equal(await nav.locator('[aria-current="true"]').count(),1);
   await page.waitForFunction(()=>{const paper=document.querySelector('.MuiDrawer-modal .MuiDrawer-paper');return paper&&Math.abs(paper.getBoundingClientRect().left)<.5});
-  await verifyBrandLogo(nav.locator('img'),34,true);
+  await verifyBrandLogo(nav.locator('img'),52,true);
   await page.screenshot({path:`${out}/drawer-390.png`,fullPage:true});await page.keyboard.press('Escape');await nav.waitFor({state:'hidden'});
   assert(await toggle.evaluate(e=>e===document.activeElement));
  });
@@ -324,7 +371,7 @@ let browser;
  });
  await check('auth layout preview is reachable and returns to overview',async()=>{
   await page.getByRole('navigation',{name:'Main navigation'}).getByRole('button',{name:'Auth layout preview',exact:true}).click();await page.getByRole('heading',{name:'A calm space to start.'}).waitFor();
-  await verifyBrandLogo(page.getByRole('img',{name:'CodeMastery',exact:true}),44,false);
+  await verifyBrandLogo(page.getByRole('img',{name:'CodeMastery',exact:true}),64,false);
   await page.screenshot({path:`${out}/auth-900.png`,fullPage:true});await page.setViewportSize({width:320,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth));await page.screenshot({path:`${out}/auth-320.png`,fullPage:true});await page.getByRole('button',{name:'Back to demo workspace'}).click();
  });
  await check('reduced motion suppresses long animation/transition',async()=>{
@@ -344,8 +391,8 @@ let browser;
  await check('real login and registration share canonical branding at desktop and mobile sizes',async()=>{
   for(const route of ['/login','/register'])for(const width of [1440,390,320]){
    await page.setViewportSize({width,height:900});await page.goto(new URL(route,previewUrl).href,{waitUntil:'networkidle'});await page.evaluate(()=>document.fonts.ready);
-   await verifyBrandLogo(page.getByRole('img',{name:'CodeMastery',exact:true}),44,false);
-   assert.equal(await page.locator('link[rel="icon"]').evaluate(e=>e.href),brandUrl);
+   await verifyBrandLogo(page.getByRole('img',{name:'CodeMastery',exact:true}),64,false);
+   assert.equal(await page.locator('link[rel="icon"]').evaluate(e=>e.href),faviconUrl);
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth));
    await page.screenshot({path:`${out}/${route.slice(1)}-${width}.png`,fullPage:true});
   }
