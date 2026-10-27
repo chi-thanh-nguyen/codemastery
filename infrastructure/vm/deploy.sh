@@ -35,6 +35,7 @@ ORIGIN=""
 ARCHIVE=""
 ARCHIVE_SHA256=""
 SOURCE_REVISION=""
+INITIALIZER_QUALIFICATION=""
 WAIT_TIMEOUT=""
 RECOVERY_VERIFIED="no"
 COMPATIBILITY_VERIFIED="no"
@@ -50,6 +51,9 @@ RELEASE_IMAGES=""
 CONTAIN_ON_FAILURE="no"
 RELEASE_COMPLETE="no"
 STAGED_FRONTEND_CID=""
+HOST_PLATFORM=""
+DOCKER_SERVER_VERSION=""
+DOCKER_COMPOSE_VERSION=""
 
 log()  { printf '[%s] %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -86,6 +90,11 @@ provision / deploy / all:
 deploy / all:
   --source-revision REV         Source revision the images were built from
 
+provision / deploy / all:
+  --initializer-qualification REF
+                                Non-secret reference to repeat-run and
+                                conflict-stop qualification for the exact init image
+
 Updates:
   --recovery-artifact-verified  Operator attests that an independently checked,
                                 restorable pre-update artifact is in approved custody.
@@ -117,6 +126,7 @@ parse_args() {
       (--expect-image)     EXPECT_IMAGES+=("${2:?--expect-image needs a value}"); shift 2 ;;
       (--wait-timeout)     WAIT_TIMEOUT="${2:?--wait-timeout needs a value}"; shift 2 ;;
       (--source-revision)  SOURCE_REVISION="${2:?--source-revision needs a value}"; shift 2 ;;
+      (--initializer-qualification) INITIALIZER_QUALIFICATION="${2:?--initializer-qualification needs a reference}"; shift 2 ;;
       (--recovery-artifact-verified) RECOVERY_VERIFIED="yes"; shift ;;
       (--schema-image-compatibility-verified) COMPATIBILITY_VERIFIED="yes"; shift ;;
       (--persistent-state-preserved) PERSISTENT_STATE_PRESERVED="yes"; shift ;;
@@ -155,10 +165,17 @@ require_inputs() {
       [[ -n "${SOURCE_REVISION}" ]] || fail "--source-revision is required for ${SUBCOMMAND}."
       ;;
   esac
+  case "${SUBCOMMAND}" in
+    (provision|deploy|all)
+      [[ -n "${INITIALIZER_QUALIFICATION}" ]] || fail "--initializer-qualification is required for ${SUBCOMMAND}."
+      ;;
+  esac
   [[ "${SOURCE_REVISION}" != *$'\n'* && "${SOURCE_REVISION}" != *$'\r'* ]] \
     || fail "--source-revision must be a single-line identifier."
   [[ "${UPDATE_AUTHORIZATION}" != *$'\n'* && "${UPDATE_AUTHORIZATION}" != *$'\r'* ]] \
     || fail "--update-authorization must be a single-line record reference."
+  [[ "${INITIALIZER_QUALIFICATION}" != *$'\n'* && "${INITIALIZER_QUALIFICATION}" != *$'\r'* ]] \
+    || fail "--initializer-qualification must be a single-line record reference."
 }
 # Env file handling (parsed as data, never sourced)
 env_get() {
@@ -259,9 +276,29 @@ validate_env_file() {
 validate_host() {
   [[ "$(uname -s)" == "Linux" ]] || fail "Linux host required."
   [[ "$(uname -m)" == "x86_64" ]] || fail "Approved host platform is linux/amd64 (B1); found $(uname -m)."
+  local distro context endpoint daemon_os
+  distro="$(awk -F= '$1 == "ID" { gsub(/\"/, "", $2); id=$2 } $1 == "VERSION_ID" { gsub(/\"/, "", $2); version=$2 } END { print id ":" version }' /etc/os-release 2>/dev/null)"
+  [[ "${distro}" == "ubuntu:24.04" ]] \
+    || fail "CT17 B1 requires the approved Ubuntu Server 24.04 host; found ${distro:-unknown}."
+  HOST_PLATFORM="${distro} $(uname -m)"
   command -v docker  >/dev/null 2>&1 || fail "docker not found."
   docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin not found."
+  [[ -z "${DOCKER_HOST:-}" ]] \
+    || fail "DOCKER_HOST is set; refusing to target an unverified Docker daemon."
+  context="$(docker context show 2>/dev/null)" || fail "Cannot identify the active Docker context."
+  endpoint="$(docker context inspect "${context}" --format '{{(index .Endpoints "docker").Host}}' 2>/dev/null)" \
+    || fail "Cannot inspect the active Docker endpoint."
+  [[ "${endpoint}" == unix://* ]] \
+    || fail "Docker endpoint must be a local Unix socket; remote Docker contexts are not approved."
   docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable for this user."
+  daemon_os="$(docker info --format '{{.OSType}}' 2>/dev/null)" || fail "Cannot inspect Docker daemon platform."
+  [[ "${daemon_os}" == "linux" ]] || fail "Docker daemon must be Linux; found ${daemon_os}."
+  DOCKER_SERVER_VERSION="$(docker version --format '{{.Server.Version}}' 2>/dev/null)" \
+    || fail "Cannot record Docker Engine version."
+  DOCKER_COMPOSE_VERSION="$(docker compose version --short 2>/dev/null)" \
+    || fail "Cannot record Docker Compose version."
+  [[ -n "${DOCKER_SERVER_VERSION}" && -n "${DOCKER_COMPOSE_VERSION}" ]] \
+    || fail "Docker Engine and Compose versions must be identifiable."
   command -v python3 >/dev/null 2>&1 || fail "python3 is required to inspect the rendered Compose configuration."
   command -v sha256sum >/dev/null 2>&1 || fail "sha256sum not found."
   command -v timeout >/dev/null 2>&1 || fail "timeout not found."
@@ -314,6 +351,20 @@ def env_of(s):
 names = {"postgres", "minio", "minio-init", "backend", "frontend"}
 if set(svc) != names:
     problems.append("effective configuration must contain exactly the five approved services")
+
+# Keep every service on this Compose project's private bridge network. External,
+# custom-driver, and additional networks can connect private state to other stacks.
+networks = cfg.get("networks", {})
+if set(networks) != {"default"}:
+    problems.append("services must use only the Compose project's default network")
+else:
+    default_network = networks["default"]
+    if default_network.get("external") or default_network.get("driver") not in (None, "bridge"):
+        problems.append("the Compose default network must be a project-managed bridge")
+    if set(default_network) - {"name", "driver", "internal"}:
+        problems.append("the Compose default network contains unapproved network options")
+    if default_network.get("name") not in (None, "codemastery_default"):
+        problems.append("the Compose default network must remain private to the codemastery project")
 for n, s in svc.items():
     if not s.get("image") or any(c.isspace() for c in s["image"]):
         problems.append("service '%s' needs an explicit immutable-release image reference" % n)
@@ -328,6 +379,19 @@ for n, s in svc.items():
         problems.append("service '%s' has an unapproved dependency" % n)
     if s.get("privileged") or s.get("pid") == "host" or s.get("ipc") == "host":
         problems.append("service '%s' requests host-level privileges/namespaces" % n)
+    attached = s.get("networks")
+    if attached and set(attached) != {"default"}:
+        problems.append("service '%s' must attach only to the private Compose network" % n)
+    if isinstance(attached, dict) and attached.get("default"):
+        default_attachment = attached["default"]
+        if set(default_attachment):
+            problems.append("service '%s' has unapproved network attachment options" % n)
+
+minio = svc.get("minio", {})
+if minio.get("entrypoint") is not None or minio.get("command") != ["server", "/data", "--console-address", ":9001"]:
+    problems.append("minio must use the approved server command and image entrypoint")
+if set(env_of(minio)) - {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"}:
+    problems.append("minio contains unapproved environment bindings")
 
 # P2/B2: only the frontend ingress is published; data/backend stay private.
 for n in ("postgres", "minio", "minio-init", "backend"):
@@ -495,6 +559,7 @@ run_preflight() {
   build_compose_cmd
   validate_compose
   log "PREFLIGHT OK: inputs, env file, host and Compose policy checks passed."
+  log "HOST_PLATFORM: ${HOST_PLATFORM}; Docker Engine ${DOCKER_SERVER_VERSION}; Docker Compose ${DOCKER_COMPOSE_VERSION}"
 }
 
 # Release archive and image identity (P3, P8)
@@ -526,7 +591,7 @@ verify_images() {
   # Inspect baked defaults as well as rendered Compose inputs before starting
   # anything. Image identity alone does not establish effective configuration.
   local service
-  for service in backend postgres minio-init frontend; do
+  for service in backend postgres minio minio-init frontend; do
     ref="$(printf '%s' "${COMPOSE_MODEL}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"][sys.argv[1]]["image"])' "${service}")"
     verify_image_configuration "${service}" "${ref}"
   done
@@ -649,10 +714,18 @@ if any(actual.get(k) != str(v) for k,v in expected.items()):
     sys.exit(1)
 if sys.argv[1] == "backend" and any(forbidden_backend_key(k) or (k.startswith(("SPRING_", "SERVER_", "CODEMASTERY_", "HIBERNATE_")) and k not in expected) for k in actual):
     sys.exit(1)
-if sys.argv[1] in ("backend", "postgres", "minio-init", "frontend"):
-    for key in ("Entrypoint", "Cmd"):
-        if (container.get(key) or []) != (data["image"].get(key) or []):
-            sys.exit(1)
+if sys.argv[1] in ("backend", "postgres", "minio", "minio-init", "frontend"):
+    service = cfg["services"][sys.argv[1]]
+    expected_entrypoint = service.get("entrypoint")
+    expected_command = service.get("command")
+    if expected_entrypoint is None:
+        expected_entrypoint = data["image"].get("Entrypoint")
+    if expected_command is None:
+        expected_command = data["image"].get("Cmd")
+    if (container.get("Entrypoint") or []) != (expected_entrypoint or []):
+        sys.exit(1)
+    if (container.get("Cmd") or []) != (expected_command or []):
+        sys.exit(1)
 if sys.argv[1] == "frontend" and container.get("Healthcheck") != data["image"].get("Healthcheck"):
     sys.exit(1)
 ' "${service}" 2>/dev/null; then
@@ -936,7 +1009,7 @@ run_provision() {
 
   provision_db_roles
 
-  log "Running the verified-image MinIO initializer; its release qualification must establish idempotency and conflict-stop behavior."
+  log "Running the verified-image MinIO initializer; qualification record ${INITIALIZER_QUALIFICATION} is operator-supplied."
   assert_release_configuration
   "${COMPOSE[@]}" up -d --no-build --pull never --no-deps minio-init >/dev/null \
     || fail "Could not start minio-init."
@@ -949,8 +1022,8 @@ run_provision() {
     fail "minio-init exited with code ${code}; backend startup must not proceed."
   fi
   verify_container_images minio-init
-  log "PROVISION OK: postgres ready, minio running, minio-init exit 0."
-  log "Note: this is service availability only; the application storage feature is NOT verified."
+  log "PROVISION PROCESS CHECK: postgres ready, minio running, minio-init exited 0."
+  log "MinIO policy/state correctness and safe re-execution require qualified initializer evidence; storage feature behavior is NOT verified."
 }
 
 # Deploy: backend + frontend, private health, deployment record
@@ -1162,9 +1235,13 @@ print_record() {
   echo "Time UTC            : $(date -u '+%Y-%m-%d %H:%M:%S')"
   echo "Time Vietnam (ICT)  : $(TZ=Asia/Ho_Chi_Minh date '+%Y-%m-%d %H:%M:%S')"
   echo "Host                : $(hostname)"
+  echo "Host platform       : ${HOST_PLATFORM}"
+  echo "Docker Engine       : ${DOCKER_SERVER_VERSION}"
+  echo "Docker Compose      : ${DOCKER_COMPOSE_VERSION}"
   echo "Approved origin     : ${ORIGIN}"
   echo "Script checkout rev : ${rev} (${dirty})"
   echo "Image source rev    : ${SOURCE_REVISION} (declared by operator)"
+  echo "Initializer qualification: ${INITIALIZER_QUALIFICATION:-not applicable} (operator-supplied reference)"
   echo "Update authority    : ${UPDATE_AUTHORIZATION:-not an update} (declared by operator)"
   echo "Recovery preconditions: artifact=${RECOVERY_VERIFIED}, compatibility=${COMPATIBILITY_VERIFIED}, state=${PERSISTENT_STATE_PRESERVED} (operator attestations)"
   [[ -z "${ARCHIVE_SHA256}" ]] || echo "Archive SHA-256     : ${ARCHIVE_SHA256}"
