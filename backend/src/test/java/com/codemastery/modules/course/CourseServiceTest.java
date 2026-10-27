@@ -305,4 +305,29 @@ class CourseServiceTest {
         assertEquals(0, CourseAccessService.class.getDeclaredMethod("requireMaterialReadAccess", UUID.class, UUID.class, UUID.class)
                 .getModifiers() & (Modifier.PUBLIC | Modifier.PROTECTED | Modifier.PRIVATE));
     }
+    @Test
+    void catalogueServicePreservesLargePageAndFilteredCountInTheRestRepresentation() {
+        var page = org.springframework.data.domain.PageRequest.of(107374183, 20);
+        when(repository.searchPublishedCourses(page, "basics", "described"))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(), page, 1));
+        when(identity.instructorDisplayNames(Set.of())).thenReturn(java.util.Map.of());
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var catalogue = new CourseCatalogueService(repository, content, identity);
+        var result = catalogue.list(107374183, 20, "basics", "described");
+        assertTrue(result.content().isEmpty()); assertEquals(107374183, result.page()); assertEquals(20, result.size());
+        assertEquals(1, result.totalElements()); assertEquals(1, result.totalPages());
+        verify(repository).searchPublishedCourses(page, "basics", "described"); verifyNoInteractions(content);
+    }
+
+    @Test
+    void publicDetailRejectsMalformedUuidBeforeCallingCatalogueApplicationCode() throws Exception {
+        var application = mock(CourseCatalogueService.class);
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+                new com.codemastery.modules.course.api.controller.CourseCatalogueController(application))
+                .setControllerAdvice(new com.codemastery.common.exception.GlobalExceptionHandler()).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/courses/0-0-4000-8000-2"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+        verifyNoInteractions(application);
+    }
+
 }

@@ -3,9 +3,9 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Bounded contracts; NOT_IMPLEMENTED. ADR002 effective slices and the separate 2026-10-18 CT01.identity approval remain effective. CT01-2026-10-21-r1 is technically approved under explicit Leader delegation, pending protected integration; the Leader separately accepted the specified logout residual risks on 2026-10-21. CT03 has its own disposition in ADR001 section 12 and its extension below. No implementation, GitHub review or verification is implied."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101; see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance."
   },
-  "x-implementation-status": "NOT_IMPLEMENTED",
+  "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
   "paths": {
     "/api/auth/register": {
@@ -173,7 +173,7 @@
       "get": {
         "operationId": "listPublishedCourses",
         "security": [],
-        "description": "Only published catalogue metadata; title COLLATE C then UUID order. Unsupported query parameters400. No selected search/filter.",
+        "description": "Published only; literal case-insensitive search and prerequisite filter are ANDed before paging/counting. Fixed title COLLATE C then UUID order. Unknown/duplicate query keys return 400. FE07-2026-10-27-r1 in ADR002.",
         "parameters": [
           {
             "in": "query",
@@ -192,6 +192,30 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string",
+              "default": "",
+              "x-max-utf16-code-units": 100,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "description": "Trimmed case-insensitive literal substring of title or description; no SQL wildcard syntax. NUL (U+0000) is rejected with 400 before persistence. After trimming, the limit is 100 UTF-16 code units (Java String.length / HTML maxlength); supplementary characters count as two units, so 50 emoji fit and 51 do not. x-max-utf16-code-units expresses this application constraint; JSON Schema maxLength uses a different Unicode length metric and is intentionally absent."
+          },
+          {
+            "in": "query",
+            "name": "prerequisites",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "any",
+                "none",
+                "described"
+              ],
+              "default": "any"
             }
           }
         ],
@@ -245,7 +269,7 @@
             }
           }
         ],
-        "description": "Published headings only, canonical chapter/lesson position. No Auth internal join; instructor displayName remains separate pending contract.",
+        "description": "Published Course and published lesson headings only, canonical chapter/lesson position. Instructor display name composed through CT01.identity; null when unavailable. Missing/hidden identical 404.",
         "responses": {
           "200": {
             "description": "Published detail",
@@ -289,6 +313,550 @@
           }
         },
         "x-ct03-reconciliation-reference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation"
+      }
+    },
+    "/api/courses/{courseId}/membership": {
+      "get": {
+        "operationId": "getCourseMembership",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Current learner membership; none if absent. Learner only; authentication then role then visibility. See ADR002 FE07-2026-10-27-r1.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current learner membership; none if absent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Membership"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid UUID/query",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid authentication or locked account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "WWW-Authenticate": {
+                "$ref": "#/components/headers/BearerChallenge"
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated non-Learner",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or hidden Course",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "enrollInCourse",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Idempotent join/rejoin: absent inserts active; left reuses row as active; active/completed unchanged. No history reset. Learner only; authentication then role then visibility. See ADR002 FE07-2026-10-27-r1.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Idempotent join/rejoin: absent inserts active; left reuses row as active; active/completed unchanged. No history reset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Membership"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid UUID/query",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid authentication or locked account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "WWW-Authenticate": {
+                "$ref": "#/components/headers/BearerChallenge"
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated non-Learner",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or hidden Course",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "leaveCourse",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Idempotent leave: active/completed becomes left; left unchanged; absent remains none without insertion. History retained. Learner only; authentication then role then visibility. See ADR002 FE07-2026-10-27-r1.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Idempotent leave: active/completed becomes left; left unchanged; absent remains none without insertion. History retained.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Membership"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid UUID/query",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid authentication or locked account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "WWW-Authenticate": {
+                "$ref": "#/components/headers/BearerChallenge"
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated non-Learner",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or hidden Course",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/courses": {
+      "get": {
+        "operationId": "getMyCourses",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Paged current learner published memberships, with selected status filter. Learner only; authentication then role then visibility. See ADR002 FE07-2026-10-27-r1.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "joined",
+                "active",
+                "completed",
+                "left",
+                "all"
+              ],
+              "default": "joined"
+            },
+            "description": "Joined includes active/completed. Only current learner and published Courses; fixed title COLLATE C then UUID order. Unknown/duplicate keys return 400."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paged current learner published memberships, with selected status filter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembershipPage"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid UUID/query",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid authentication or locked account",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "WWW-Authenticate": {
+                "$ref": "#/components/headers/BearerChallenge"
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated non-Learner",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -419,13 +987,21 @@
           "instructorId": {
             "type": "string",
             "format": "uuid"
+          },
+          "instructorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stored public Instructor display name from the approved Auth facade; null when unavailable."
           }
         },
         "required": [
           "id",
           "title",
           "description",
-          "instructorId"
+          "instructorId",
+          "instructorDisplayName"
         ]
       },
       "SyllabusLesson": {
@@ -508,6 +1084,13 @@
             "items": {
               "$ref": "#/components/schemas/SyllabusChapter"
             }
+          },
+          "instructorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stored public Instructor display name from the approved Auth facade; null when unavailable."
           }
         },
         "required": [
@@ -516,7 +1099,8 @@
           "description",
           "instructorId",
           "prerequisiteDescription",
-          "syllabus"
+          "syllabus",
+          "instructorDisplayName"
         ]
       },
       "CoursePage": {
@@ -607,6 +1191,108 @@
           "instance"
         ],
         "additionalProperties": true
+      },
+      "Membership": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "courseId",
+          "status"
+        ],
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "none",
+              "active",
+              "completed",
+              "left"
+            ]
+          }
+        }
+      },
+      "MembershipCourse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "instructorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "instructorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stored public Instructor display name from the approved Auth facade; null when unavailable."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed",
+              "left"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "instructorId",
+          "instructorDisplayName",
+          "status"
+        ]
+      },
+      "MembershipPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MembershipCourse"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
       }
     },
     "responses": {
@@ -756,6 +1442,23 @@
       "Protected CODEOWNERS/owner review, required checks/security scanning, last-push approval, resolved conversations and integration into main",
       "Full U07 requires an effective CT40.lesson-read structural contract or explicit no-extra-read disposition; no CT40 approval here",
       "Owning-Issue operation/REST/mutation approvals, implementation authorization and actual runtime verification remain separate"
+    ]
+  },
+  "x-fe07-delegated-approval": {
+    "revision": "FE07-2026-10-27-r1",
+    "status": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "reference": "../decisions/002-interim-delegated-contracts.md#fe07-full-implementation--delegated-approval-27-october-2026",
+    "scope": [
+      "CT22.membership",
+      "CT21.FE07 catalogue extension",
+      "CT03/CT18 membership binding",
+      "CT16/CT14 FE07 binding/testing"
+    ],
+    "excluded": [
+      "CT22.progress",
+      "CT22.resume",
+      "CT22.atomic",
+      "FE08"
     ]
   }
 }

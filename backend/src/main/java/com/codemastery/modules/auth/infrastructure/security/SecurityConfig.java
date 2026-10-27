@@ -76,7 +76,10 @@ public class SecurityConfig {
                         .accessDeniedHandler(restSecurityErrorHandler))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(PUBLIC_OPERATIONS).permitAll()
-                        // Selected protected REST bindings must supply their own approved policies.
+                        .requestMatchers(HttpMethod.GET, "/api/me/courses", "/api/courses/{courseId}/membership").hasRole("LEARNER")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/membership").hasRole("LEARNER")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/membership").hasRole("LEARNER")
+                        // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
@@ -85,7 +88,7 @@ public class SecurityConfig {
     private static CorsConfigurationSource corsConfigurationSource(AppConfig.CorsSettings corsSettings) {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(corsSettings.allowedOrigins());
-        configuration.setAllowedMethods(List.of(HttpMethod.GET.name(), HttpMethod.POST.name(), HttpMethod.OPTIONS.name()));
+        configuration.setAllowedMethods(List.of(HttpMethod.GET.name(), HttpMethod.POST.name(), HttpMethod.PUT.name(), HttpMethod.DELETE.name(), HttpMethod.OPTIONS.name()));
         configuration.setAllowedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
         configuration.setAllowCredentials(false);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

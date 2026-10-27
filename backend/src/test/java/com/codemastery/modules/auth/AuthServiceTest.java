@@ -458,7 +458,7 @@ class AuthServiceTest {
         @BeforeEach
         void setUpMvc() {
             application = mock(AuthService.class);
-            mvc = MockMvcBuilders.standaloneSetup(new AuthController(application))
+            mvc = MockMvcBuilders.standaloneSetup(new AuthController(application, mock(JwtTokenProvider.class)))
                     .setControllerAdvice(new GlobalExceptionHandler(), new AuthController.RegistrationCacheAdvice())
                     .setValidator(new SpringValidatorAdapter(validator)).build();
         }

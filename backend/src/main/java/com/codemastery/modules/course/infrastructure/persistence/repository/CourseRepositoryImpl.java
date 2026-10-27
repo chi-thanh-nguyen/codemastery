@@ -5,12 +5,15 @@ import com.codemastery.modules.course.domain.model.EnrollmentStatus;
 import com.codemastery.modules.course.domain.model.PublishStatus;
 import com.codemastery.modules.course.domain.repository.CourseRepository;
 import com.codemastery.modules.course.infrastructure.persistence.mapper.CourseMapper;
+import com.codemastery.modules.course.infrastructure.persistence.entity.CourseEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -42,7 +45,27 @@ public class CourseRepositoryImpl implements CourseRepository {
         Pageable pagination = pageable == null ? PageRequest.of(0, 20)
                 : pageable.isPaged() ? PageRequest.of(pageable.getPageNumber(), pageable.getPageSize())
                 : Pageable.unpaged();
+        if (pagination.isPaged() && pagination.getOffset() > Integer.MAX_VALUE) {
+            return oversizedPage(pagination, "", "any", false);
+        }
         return courseJpaRepository.findPublishedCatalogue(pagination).map(courseMapper::toDomain);
+    }
+
+    @Override
+    public Page<Course> searchPublishedCourses(Pageable pageable, String query, String prerequisites) {
+        Pageable pagination = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+        if (pagination.getOffset() > Integer.MAX_VALUE) return oversizedPage(pagination, query, prerequisites, true);
+        return courseJpaRepository.searchPublishedCatalogue(pagination, query, prerequisites)
+                .map(courseMapper::toDomain);
+    }
+
+    private Page<Course> oversizedPage(Pageable page, String query, String prerequisites, boolean filtered) {
+        // The application service retains the read-only repeatable-read snapshot for count/content.
+        long total = filtered ? courseJpaRepository.countPublishedSearch(query, prerequisites)
+                : courseJpaRepository.countPublishedCatalogue();
+        List<CourseEntity> rows = page.getOffset() >= total ? List.of()
+                : courseJpaRepository.findPublishedAtOffset(query, prerequisites, page.getPageSize(), page.getOffset());
+        return new PageImpl<>(rows, page, total).map(courseMapper::toDomain);
     }
 
     @Override

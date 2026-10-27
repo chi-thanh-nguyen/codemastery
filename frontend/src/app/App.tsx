@@ -46,7 +46,7 @@ function DemoMetric({ label, value, note, icon, tint }: { label: string; value: 
     </Paper>;
 }
 
-function PresentationPreview() {
+export function PresentationPreview() {
     const [selectedNav, setSelectedNav] = useState('overview');
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState('all');
@@ -192,6 +192,6 @@ function PresentationPreview() {
 
 export default function App() {
     return <ThemeProvider theme={appTheme}><CssBaseline />
-        <BrowserRouter><AuthProvider><AppRouter catalogue={<PresentationPreview />} /></AuthProvider></BrowserRouter>
+        <BrowserRouter><AuthProvider><AppRouter preview={<PresentationPreview />} /></AuthProvider></BrowserRouter>
     </ThemeProvider>;
 }

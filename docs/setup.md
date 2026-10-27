@@ -1383,3 +1383,29 @@ Controlled Auth responses establish frontend behavior only; QA07 browser/real
 REST/PostgreSQL, QA01 backend security, deployment/proxy/deep-link delivery and
 independent protected review retain their own evidence gates. See the execution
 record in [testing.md](testing.md#fe03-implementation-regression-evidence--25-october-2026).
+
+
+## FE07 catalogue and membership integration — 27 October 2026
+
+PR #101 implements ADR002 `FE07-2026-10-27-r1` under explicit Leader delegation;
+the new technical decisions await protected integration. Existing runtime variables,
+dependencies, ports/default origins and applied migrations are unchanged.
+
+`/courses` is the real public catalogue, with literal title/description search,
+prerequisite filter and server pagination. `/courses/:courseId` shows published
+syllabus/instructor/prerequisites and learner membership actions. Anonymous users
+sign in through the existing approved login contract; the backend now binds that
+REST operation to credential verification and JWT issuance. `/my-courses` is
+Learner-only, defaults to joined memberships and supports status filters. Leaving
+requires confirmation; re-enrolment preserves the canonical row and learning
+history. Reload still clears the memory-only session, and Profile return behavior
+is unchanged. The FE01 illustrative workspace remains independently available at
+`/preview`; it does not represent saved learning data.
+
+Course owns GET/PUT/DELETE `/api/courses/{courseId}/membership` and GET
+`/api/me/courses`. Read exact DTOs/visibility/idempotency in OpenAPI and ADR002;
+old `/api/learning/my-courses` and `/enroll` candidates are not supported aliases.
+CORS admits PUT/DELETE for the selected authenticated flow while other protected
+routes remain denied. No token parameter is exposed to feature clients.
+See docs/testing.md for executed local PostgreSQL/browser evidence, fixture and
+external Playwright requirements; the E2E directory still has no npm pipeline.

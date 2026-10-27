@@ -1102,3 +1102,279 @@ access, Nginx/TLS or deployed deep-link delivery is established. Independent QA0
 and QA01 responsibilities remain; mocked/DOM/build evidence cannot replace them.
 AI assistance: Codex assisted the authorized implementation, regression authoring
 and local verification; no human approval or review is implied.
+
+## PR #101 local merge verification — 26 October 2026
+
+Historical conflict-only execution, superseded for the current PR by the full-FE07
+verification below. The earlier CT22 blocker was valid under the authorization
+available then; the later delegated approval is a new decision.
+
+The local resolution combines PR head `8417205b0c5445a1ebace7b8a5f13847c50eddf5`
+with `origin/main` at `21088c8cc3ae60cc679ef375e6fbfb7480dc2d68`.
+It retains the remediated Auth/session/HTTP implementation and declarative router,
+then connects the public catalogue/detail pages to the approved transport and DTOs.
+The FE01 presentation preview remains independently covered; the application
+entry now renders the public catalogue. No membership route or contract is added.
+
+From `frontend/`, `npm test` passed all 279 tests in nine files. The three existing
+CT14-approved catalogue test paths now cover client decoding, paging, cancellation,
+list/detail rendering and stale-response suppression; routing tests also exercise
+catalogue/detail navigation alongside Auth/Profile and the retained FE01 preview.
+These are controlled-fetch/DOM results, not real backend/PostgreSQL, browser or
+independent QA acceptance.
+
+`npm run typecheck` and `VITE_API_BASE_URL=http://localhost:8080 npm run build`
+fail on four preserved CT22-dependent TypeScript errors: `learningApi.ts` still
+supplies caller-owned tokens and `MyCoursesPage.tsx` reads the former public token
+property. All three membership source files remain byte-identical to the PR head.
+CT22 is deferred, its endpoints are absent from OpenAPI, and the Leader confirmed
+no later approved membership contract was identified. Do not weaken the shared
+transport, fabricate response/status/transition contracts, or treat this portion
+as integration-ready. The local merge remains uncommitted and is not push-ready.
+Codex assisted the conflict resolution and local verification.
+
+
+## PR #101 full FE07 verification — 27 October 2026
+
+Authorization and contract revision: ADR002 `FE07-2026-10-27-r1`, newly approved
+under the Leader's explicit delegation, pending protected integration. This work
+extends the former frontend-only PR with Course-owned REST/application/persistence
+implementation and the missing existing-contract Auth login REST binding. It does
+not implement FE08, CT22 progress/resume/atomic or change V001–V006.
+
+### Acceptance evidence
+
+| FE07 Issue #57 criterion | Implementation and executed evidence |
+| --- | --- |
+| Catalogue/detail match approved fields and visibility | CourseCatalogueController/Service, scoped repository reads, strict frontend decoders; real PostgreSQL REST tests and browser verify published-only courses/lesson headings, omission of empty chapters, instructor name and prerequisites, uniform hidden/missing 404. |
+| Search/filter/pagination | Literal q plus prerequisite filter before fixed-order paging/counting; query bounds/unknown/duplicate-key 400 tests; browser exercises filtering and the second page of 21 published fixtures. |
+| Approved membership semantics | GET/PUT/DELETE membership singleton, Learner-only filter and application checks, coarse Course-root locking, repeat/leave/rejoin tests, six concurrent joins and six concurrent leaves, transaction rollback. |
+| Actual My Courses results | Current-identity, published-only status-filtered page/count; leave removes the course from default Joined and Left filter permits rejoin. Real browser and PostgreSQL evidence. |
+| English/responsive/loading/error/validation | Abort/current-session guards, mutation exclusion, confirmation dialog, retry/empty states; DOM tests and Chromium screenshots at 1280/768/390/320px, no horizontal overflow, no browser exceptions. |
+| Doubles vs actual runtime distinguished | Vitest uses controlled API/transport fixtures; backend integration uses real shared disposable PostgreSQL and Spring Security/MVC; browser uses production Vite assets, real registration/login/REST and a separate disposable PostgreSQL container. No intercepted endpoints or mock server. |
+
+### Executed commands and results
+
+From `frontend/`:
+
+```bash
+npm ci --cache /private/tmp/codemastery-pr101-npm-cache
+npm test
+npm run typecheck
+VITE_API_BASE_URL=http://localhost:8080 npm run build
+```
+
+All passed: 302 tests in 11 files, zero TypeScript errors, successful production
+bundle. Clean install audited 188 packages with zero vulnerabilities. npm reported
+an unapproved optional fsevents install script; no install-script policy was changed.
+Vite reported a roughly 640 kB minified entry chunk warning; no dependency or
+unrelated bundling change was introduced.
+
+From `backend/`, `./mvnw verify` passed: 451 unit tests and 51 integration tests,
+zero failures/errors/skips; 18 integration cases are in EnrollmentIntegrationTest.
+The actual EnrollmentService has all 29 executable lines and all 16 branches
+covered in the local JaCoCo report; this is execution evidence, not a new threshold.
+The first sandboxed focused run failed because Mockito could not attach under
+Java 25. Re-execution with sandbox permission succeeded without modifying JVM,
+Mockito, Maven or dependency configuration. New test compilation/selector mistakes
+were corrected before the final passing runs.
+
+OpenAPI JSON parsing, all 63 local $ref resolutions and eight unique operation IDs
+passed a Python standard-library structural check. This is not a full external
+OpenAPI-validator certification; strict frontend DTO tests and real REST response
+assertions additionally check the consumed contracts.
+
+### Real browser runtime and reproducibility limits
+
+The existing `e2e/tests/learner-flow.spec.ts` now supplies a local Playwright
+verification script. It accepts an explicitly installed Playwright module,
+frontend URL, backend URL and evidence directory; it adds no dependency, npm
+script or CI pipeline. After provisioning its deterministic disposable fixture,
+the executed command from the repository root was:
+
+```bash
+node --input-type=module - /Users/nguyenchithanh/.npm/_npx/e41f203b7505f1fb/node_modules/playwright http://localhost:5174 http://localhost:8080 /private/tmp/codemastery-pr101-fe07-runtime/evidence < e2e/tests/learner-flow.spec.ts
+```
+
+The local orchestrator `/private/tmp/pr101-runtime.py` created a task-owned
+`postgres:17.11-bookworm` container, ran the built backend jar and
+`npm run preview -- --host localhost --port 5174 --strictPort`, and applied only
+disposable test fixtures. The already running localhost:5173 process was preserved.
+It generated ephemeral database/JWT/browser credentials, then stopped only its
+own processes/container and deleted its credential file. This local orchestration
+helper and screenshots are outside Git; the committed browser script expects a
+prepared fixture and is not a newly configured portable E2E pipeline.
+
+Fixture: Instructor `00000000-0000-4000-8000-000000000001`, public FE07 Programming
+Course `...0002`, Chapter `...0003`, published Lesson `...0004`, hidden Lesson
+`...0005`, hidden FE07 Course `...0099`; 20 additional published Courses use UUIDs
+`00000000-0000-4000-8001-000000000001` through `...000000000020`, titles Course 01–20.
+The primary Course alone has prerequisite text, and its instructor's public name
+is FE07 Runtime Instructor. Browser registration generates an independent synthetic
+Learner, rather than relying on seeded credentials. Backend integration fixtures
+are separately self-contained and cleaned up by the shared test harness.
+
+All seven browser scenarios passed, with 10 authenticated membership requests,
+16 public requests without bearer headers, and zero browser errors. Evidence is
+local in the directory above: result.json and four membership screenshots. Manual
+inspection of the 320px and 1280px images found legible, separated controls. The
+browser also checks memory-only storage, guarded direct entry, sign-out, leave
+confirmation and row-state-driven rejoin navigation. `/preview` retains the FE01
+illustrative UI. Vitest additionally verifies session expiry, role rejection,
+cancellation, stale responses and rapid mutation exclusion.
+
+This establishes a local browser → production frontend → REST → PostgreSQL flow,
+not deployed Nginx/TLS behavior, independent QA07/QA01 acceptance, a human review,
+all-browser/screen-reader certification or formal Issue completion. Required CI,
+CODEOWNER/last-push review and protected integration remain independent gates.
+Codex assisted the delegated contract selection, implementation, conflict resolution,
+automated regression authoring and local execution; no human approval is fabricated.
+
+## PR #101 Round 2 review regressions — 27 October 2026
+
+The reviewed baseline was `37fc2d17e239b4de80980a938a33061602c24c42`.
+New PostgreSQL tests reproduced 500 responses for page=107374183,size=20 and
+page=2147483647,size=100. The parser already accepted those inputs; no new page
+limit, API representation or transaction policy was selected. Oversized offsets
+now count the same published/filtered snapshot, return empty content without row
+loading beyond its total, and use a bound PostgreSQL long offset if rows exist.
+Tests cover ordinary paging, offset boundaries, filtered/zero counts, failure
+propagation and the large-offset row-fetch fallback. CourseSearchRequest remains
+unchanged; a parser regression explicitly preserves the reported valid request.
+
+`cd backend && ./mvnw verify` passed 458 unit and 58 integration tests, with zero
+failures/errors/skips. `npm test` from frontend passed 353 tests in 11 files;
+`npm run typecheck` and `VITE_API_BASE_URL=http://localhost:8080 npm run build`
+also passed. Existing pagination-recovery, UUID-casing and Auth/session tests remain.
+The two affected learning API/type files now own their membership representation
+and decoder, using the existing shared HTTP/error primitives. Import-boundary
+checks and malformed/missing/extra-field cases protect CT16 compliance; no shared
+contract or HTTP transport was added.
+
+The existing browser script now additionally requires the primary published
+fixture's description to be exactly `D` repeated 500 times. All other fixture
+IDs, counts and credentials remain as described above. The local preparer
+`python3 -B /private/tmp/pr101-r2-runtime.py` supplied that disposable fixture and
+executed the committed script against production assets, real REST and PostgreSQL.
+All nine scenarios passed, including the exact large-page 200 response with
+content=[], page=107374183, size=20, totalElements=21 and totalPages=2.
+
+Description layout checks at 320/768/1280px assert text-element client/scroll
+widths, full 500-character content and every text Range rectangle, including
+vertical containment; hiding/clipping/scrolling the paragraph is rejected.
+At 320px the reproduced 5,332px scroll width in a 238px paragraph is now 238px.
+Separate before/after measurements confirmed the same overflow in title,
+instructor, prerequisites, chapter and lesson text; inherited wrapping contains
+all of them. Local result.json, overflow-after.json and description screenshots
+are in `/private/tmp/codemastery-pr101-r2-runtime/evidence/`. The runtime was
+cleaned up; no credentials, screenshots, generated artifacts or dependencies were
+committed. These are local execution results, not independent protected-review
+or deployed QA acceptance. Codex assisted the scoped fixes and regression execution.
+
+## PR #101 Round 3 input-validation regressions — 27 October 2026
+
+Reviewed baseline: `95f600258f79634be115b2ad6d7dedcf80696889`. The explicit Round 3
+remediation request supplies the NUL rejection requirement; it does not broaden
+other character restrictions or change the approved UTF-16 limit/UUID identities.
+
+New PostgreSQL/MVC tests reproduced five NUL searches returning 500 and nine
+shortened/signed UUID requests returning 200. Search parsing now rejects NUL
+before catalogue SQL. Both Course controllers receive path text and require full
+8-4-4-4-12 hexadecimal syntax before UUID conversion/application calls. Protected
+requests still pass authentication and role admission first. Tests verify no
+application call for malformed IDs, unchanged persisted membership, full upper/
+mixed-case identity, and safe hidden/missing 404 responses.
+
+OpenAPI's q schema now documents NUL exclusion and the existing post-trim limit
+through `x-max-utf16-code-units: 100`. It intentionally has no JSON Schema
+`maxLength`: that keyword does not express this metric. The NUL-only pattern
+adds no Unicode length restriction. Real PostgreSQL cases cover ordinary Unicode,
+100/101 BMP units, 50/51 emoji, mixed BMP/supplementary input and outer trimming.
+Frontend checks connect the OpenAPI extension to HTML maxlength=100 and preserve
+supplementary search data; Chromium also verifies an extra emoji cannot exceed it.
+ADR002's approved length rule remains unchanged.
+
+Executed successfully: `cd backend && ./mvnw verify` (462 unit + 91 integration
+tests, zero failures/errors/skips); from frontend, `npm test` (355 tests/11 files),
+`npm run typecheck`, and `VITE_API_BASE_URL=http://localhost:8080 npm run build`.
+OpenAPI JSON parsing, all 63 local references/eight operation IDs, the NUL pattern
+and UTF-16 extension checks passed; this is a structural/consistency check rather
+than an external OpenAPI-validator certification.
+
+`python3 -B /private/tmp/pr101-r3-runtime.py` ran the committed browser script
+against production assets, real REST and disposable PostgreSQL. All 12 runtime/
+browser scenarios passed, including q=a%00b → safe ProblemDetail 400,
+q=50 emoji → 200 / 51 emoji → 400, malformed membership GET/PUT/DELETE → 400 with
+canonical membership still absent, anonymous malformed membership → 401, and
+valid mixed-case nonexistent identifiers → 404. Earlier catalogue/detail,
+large-offset, text-wrapping, membership, Auth and navigation scenarios also passed.
+Local evidence is `/private/tmp/codemastery-pr101-r3-runtime/evidence/result.json`;
+its temporary runtime/credentials were cleaned up. Independent protected review
+and deployed QA acceptance remain separate. Codex assisted these scoped fixes,
+contract-documentation correction and regression execution.
+
+## PR #101 Course Card text regression — 27 October 2026
+
+Baseline `b113f218375c320a2091251e857a22573d00259e` reproduced clipping in all
+nine title-only, instructor-only and both-long cases at 320/768/1280px. Each long
+value contains 100 consecutive W characters. Title text scrolled to 1,552px and
+instructor text to 1,251px inside elements only 254/318/273px wide. Two scoped
+Typography overflowWrap:anywhere declarations fix the measured defect; no
+intrinsic-size override was needed. Description preview styles remain unchanged.
+
+The existing e2e/tests/learner-flow.spec.ts now checks full text, element/card/text
+Range rectangles, client/scroll width and height, distinct wrapped lines, absence
+of ellipsis/clamping/scrolling workarounds and actual detail navigation in all nine
+cases. It also checks that description preview retains its three-line clamp.
+All nine cases passed; the both-long measurements were:
+
+| Viewport | Title client/scroll width; lines | Instructor client/scroll width; lines |
+| --- | --- | --- |
+| 320px | 254/254px; 7 | 254/254px; 6 |
+| 768px | 318/318px; 5 | 318/318px; 5 |
+| 1280px | 273/273px; 6 | 273/273px; 6 |
+
+The disposable fixture retains 21 published Courses. Course IDs ending in
+8001-000000000001/2/3 supply title-only/instructor-only/both-long cases. A second
+Instructor (00000000-0000-4000-8000-000000000006) has the long public display name;
+only the latter two Courses use it. These valid test-owned rows do not change
+backend behavior or contracts. The local preparer is
+`python3 -B /private/tmp/pr101-card-runtime.py`; it executes the committed script
+against production frontend assets, real REST and disposable PostgreSQL.
+
+All 13 runtime/browser scenarios passed, retaining catalogue/detail, membership,
+Auth and previous review coverage. From frontend, npm test passed all 355 tests
+in 11 files, npm run typecheck passed and
+VITE_API_BASE_URL=http://localhost:8080 npm run build passed with the existing
+bundle-size warning. Local course-card-text.json and course-card-320/768/1280.png
+are in /private/tmp/codemastery-pr101-card-runtime/evidence/. Task-owned runtime
+resources were cleaned up; no generated artifacts, credentials or dependencies
+were committed. Independent protected review remains a separate gate. Codex
+assisted this scoped styling correction and regression execution.
+
+## PR #101 syllabus accessibility regression — 27 October 2026
+
+On baseline a97df9e, the focused CourseDetailPage regression failed because chapter
+summary controls had no IDs. Each summary now supplies stable Course/chapter UUID
+IDs and aria-controls; MUI derives the corresponding region ID and aria-labelledby.
+No styling, expansion policy or syllabus data behavior changed.
+
+The component regression verifies two chapters, four unique identifiers, correct
+region/control relationships and stable associations through toggles/rerender.
+The existing learner-flow Chromium script also verifies accessible region names,
+Enter/Space collapse and expansion for both chapters, independent state, hidden
+collapsed regions, focus retention and stable IDs. Its disposable fixture adds
+a second published chapter (ID ending 0007, Practice) and lesson (ending 0008,
+Apply concepts) to FE07 Programming; published Course counts remain unchanged.
+
+From frontend/, npm test passed 356 tests in 11 files, npm run typecheck passed,
+and VITE_API_BASE_URL=http://localhost:8080 npm run build passed with the existing
+bundle-size warning. python3 -B /private/tmp/pr101-accordion-runtime.py executed
+the committed e2e/tests/learner-flow.spec.ts against production assets, real REST
+and disposable PostgreSQL: all 14 scenarios passed, including prior catalogue,
+detail, membership, Auth, navigation and responsive regressions. Local evidence:
+/private/tmp/codemastery-pr101-accordion-runtime/evidence/syllabus-accessibility.json
+and result.json. Task-owned resources and ephemeral credentials were cleaned up;
+no dependencies or generated artifacts were added. These focused checks do not
+claim a comprehensive accessibility audit or replace protected review. Codex
+assisted this scoped accessibility correction and regression execution.
