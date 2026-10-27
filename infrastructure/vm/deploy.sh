@@ -13,8 +13,8 @@
 #   - never prints secrets or the rendered Compose configuration;
 #   - never builds on the VM and never pulls images (--no-build, --pull never);
 #   - never runs `down -v`, volume removal, `flyway repair` or data reset;
-#   - an update of an existing deployment requires an explicit attestation that
-#     a verified recovery artifact exists (P9);
+#   - updates require checked recovery, schema/image compatibility, preserved
+#     state and a reference to operator authority before any changes (P9);
 #   - PostgreSQL identities are separated (P6): the bootstrap administrator
 #     (POSTGRES_USER) only provisions; Flyway runs as SPRING_FLYWAY_USER (owns the
 #     schema objects); the backend runtime uses DB_USER (data access only, no DDL).
@@ -37,11 +37,19 @@ ARCHIVE_SHA256=""
 SOURCE_REVISION=""
 WAIT_TIMEOUT=""
 RECOVERY_VERIFIED="no"
+COMPATIBILITY_VERIFIED="no"
+PERSISTENT_STATE_PRESERVED="no"
+UPDATE_AUTHORIZATION=""
 OVERRIDES=()
 EXPECT_IMAGES=()
 COMPOSE=()
 DB_SEPARATION_RESULT="not checked"
 HEALTH_RESULT="not checked"
+COMPOSE_MODEL=""
+RELEASE_IMAGES=""
+CONTAIN_ON_FAILURE="no"
+RELEASE_COMPLETE="no"
+STAGED_FRONTEND_CID=""
 
 log()  { printf '[%s] %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -59,11 +67,18 @@ Compose:
                                 file infrastructure/docker-compose.yml is always
                                 first. An override at an approved location is
                                 needed to make it deployable (see preflight).
+                                Qualified images supply the minio-init executable
+                                and frontend healthcheck. Clear the local Compose
+                                overrides for those fields; certificate binds must
+                                contain only PEM material, with private keys 0400.
 
 load / deploy / all:
   --archive PATH                `docker save` archive of the reviewed release
   --archive-sha256 HEX          Expected SHA-256 of that archive
-  --expect-image REF=sha256:ID  Expected image content ID (repeatable)
+
+Every state-changing command (including provision):
+  --expect-image REF=sha256:ID  Verified artifact for EVERY effective service image
+                                (repeatable; no extra or duplicate references)
 
 provision / deploy / all:
   --wait-timeout SECONDS        Deadline for readiness waits (no default)
@@ -73,8 +88,17 @@ deploy / all:
 
 Updates:
   --recovery-artifact-verified  Operator attests that an independently checked,
-                                restorable pre-update recovery artifact exists.
-                                Required when a backend container already exists.
+                                restorable pre-update artifact is in approved custody.
+  --schema-image-compatibility-verified
+                                Candidate images are verified compatible with the
+                                current schema/data and reviewed migration plan.
+  --persistent-state-preserved Operator verified the intended existing PostgreSQL
+                                and MinIO state/volume bindings are preserved.
+  --update-authorization REF   Reference to the existing operator/update authority
+                                (a record reference, never a credential).
+                                All four are required before changes when project
+                                containers or persistent volumes already exist.
+                                Inventory errors stop work.
 EOF
 }
 
@@ -94,6 +118,9 @@ parse_args() {
       (--wait-timeout)     WAIT_TIMEOUT="${2:?--wait-timeout needs a value}"; shift 2 ;;
       (--source-revision)  SOURCE_REVISION="${2:?--source-revision needs a value}"; shift 2 ;;
       (--recovery-artifact-verified) RECOVERY_VERIFIED="yes"; shift ;;
+      (--schema-image-compatibility-verified) COMPATIBILITY_VERIFIED="yes"; shift ;;
+      (--persistent-state-preserved) PERSISTENT_STATE_PRESERVED="yes"; shift ;;
+      (--update-authorization) UPDATE_AUTHORIZATION="${2:?--update-authorization needs a reference}"; shift 2 ;;
       (-h|--help)          usage; exit 0 ;;
       (*)                  usage; fail "Unknown option: $1" ;;
     esac
@@ -108,6 +135,9 @@ parse_args() {
 require_inputs() {
   [[ -n "${ENV_FILE}" ]] || fail "--env-file is required."
   [[ -n "${ORIGIN}" ]]   || fail "--origin is required."
+  if [[ "${SUBCOMMAND}" != "preflight" ]]; then
+    [[ ${#EXPECT_IMAGES[@]} -ge 1 ]] || fail "Every state-changing command requires --expect-image for all effective service images."
+  fi
   case "${SUBCOMMAND}" in
     (load|deploy|all)
       [[ -n "${ARCHIVE}" ]]        || fail "--archive is required for ${SUBCOMMAND}."
@@ -125,6 +155,10 @@ require_inputs() {
       [[ -n "${SOURCE_REVISION}" ]] || fail "--source-revision is required for ${SUBCOMMAND}."
       ;;
   esac
+  [[ "${SOURCE_REVISION}" != *$'\n'* && "${SOURCE_REVISION}" != *$'\r'* ]] \
+    || fail "--source-revision must be a single-line identifier."
+  [[ "${UPDATE_AUTHORIZATION}" != *$'\n'* && "${UPDATE_AUTHORIZATION}" != *$'\r'* ]] \
+    || fail "--update-authorization must be a single-line record reference."
 }
 # Env file handling (parsed as data, never sourced)
 env_get() {
@@ -195,7 +229,7 @@ validate_env_file() {
 
   # valid identifiers (they are embedded in SQL) and one database for all identities.
   local nm
-  for nm in "${db_user}" "${fw_user}"; do
+  for nm in "${pg_user}" "${db_user}" "${fw_user}" "$(env_get DB_NAME)"; do
     [[ "${nm}" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] \
       || fail "Database role names must be lowercase letters, digits and '_' (start with a letter or '_')."
   done
@@ -204,10 +238,11 @@ validate_env_file() {
 
   #Flyway URL targets the same private database, carries no credentials.
   local fw_url; fw_url="$(env_get SPRING_FLYWAY_URL)"
-  [[ "${fw_url}" == "jdbc:postgresql://postgres:5432/$(env_get DB_NAME)"* ]] \
+  [[ "${fw_url}" == "jdbc:postgresql://postgres:5432/$(env_get DB_NAME)" ||
+     "${fw_url}" == "jdbc:postgresql://postgres:5432/$(env_get DB_NAME)?currentSchema=public" ]] \
     || fail "SPRING_FLYWAY_URL must target jdbc:postgresql://postgres:5432/<DB_NAME>."
-  [[ "${fw_url}" != *@* && "${fw_url,,}" != *user=* && "${fw_url,,}" != *password=* ]] \
-    || fail "SPRING_FLYWAY_URL must not embed credentials."
+  [[ "$(env_get DB_PASSWORD)" != "$(env_get POSTGRES_PASSWORD)" ]] \
+    || fail "DB_PASSWORD must differ from POSTGRES_PASSWORD."
 
   # storage identity separation, CORS bound to the single approved origin.
   [[ "$(env_get STORAGE_ACCESS_KEY)" != "$(env_get MINIO_ROOT_USER)" ]] \
@@ -229,11 +264,15 @@ validate_host() {
   docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable for this user."
   command -v python3 >/dev/null 2>&1 || fail "python3 is required to inspect the rendered Compose configuration."
   command -v sha256sum >/dev/null 2>&1 || fail "sha256sum not found."
+  command -v timeout >/dev/null 2>&1 || fail "timeout not found."
+  command -v openssl >/dev/null 2>&1 || fail "openssl is required to validate certificate-only bind directories."
 }
 
 build_compose_cmd() {
   [[ -f "${BASE_COMPOSE}" ]] || fail "Base Compose file missing: ${BASE_COMPOSE}"
-  COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${BASE_COMPOSE}")
+  # The base file names this single stack "codemastery". Do not let a shell
+  # COMPOSE_PROJECT_NAME switch recovery inventory to an unrelated empty project.
+  COMPOSE=(docker compose --project-name codemastery --env-file "${ENV_FILE}" -f "${BASE_COMPOSE}")
   local f
   for f in ${OVERRIDES[@]+"${OVERRIDES[@]}"}; do
     [[ -f "${f}" ]] || fail "Compose override not found: ${f}"
@@ -241,13 +280,30 @@ build_compose_cmd() {
   done
 }
 
-read -r -d '' PY_CHECK <<'PYEOF' || true
-import json, sys
+read -r -d '' PY_ENV_POLICY <<'PYEOF' || true
+def forbidden_backend_key(key):
+    normalized = key.upper().replace('.', '_').replace('-', '_')
+    native = {'SPRING_FLYWAY_URL', 'SPRING_FLYWAY_USER', 'SPRING_FLYWAY_PASSWORD',
+              'SPRING_PROFILES_ACTIVE', 'SERVER_PORT', 'SERVER_FORWARD_HEADERS_STRATEGY'}
+    return ((normalized.startswith(('SPRING_', 'SERVER_', 'CODEMASTERY_', 'HIBERNATE_'))
+             and key not in native)
+            or normalized in {'JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS', 'JAVA_OPTS', '_JAVA_OPTIONS'})
+PYEOF
 
-origin = sys.argv[1]
+read -r -d '' PY_CHECK <<'PYEOF' || true
+import json, os, pathlib, re, subprocess, sys
+
+origin, env_path = sys.argv[1:]
 cfg = json.load(sys.stdin)
 svc = cfg.get("services", {})
 problems = []
+expected = {}
+with open(env_path) as f:
+    for line in f:
+        line = line.rstrip("\r\n")
+        if line and not line.lstrip().startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            expected[k] = v
 
 def env_of(s):
     e = s.get("environment", {}) or {}
@@ -255,9 +311,23 @@ def env_of(s):
         e = dict(x.split("=", 1) for x in e if "=" in x)
     return e
 
-for n in ("postgres", "minio", "minio-init", "backend", "frontend"):
-    if n not in svc:
-        problems.append("service '%s' is missing" % n)
+names = {"postgres", "minio", "minio-init", "backend", "frontend"}
+if set(svc) != names:
+    problems.append("effective configuration must contain exactly the five approved services")
+for n, s in svc.items():
+    if not s.get("image") or any(c.isspace() for c in s["image"]):
+        problems.append("service '%s' needs an explicit immutable-release image reference" % n)
+    if s.get("platform", "linux/amd64") != "linux/amd64":
+        problems.append("service '%s' has an incompatible platform" % n)
+    if s.get("network_mode") or s.get("profiles") or s.get("scale", 1) != 1:
+        problems.append("service '%s' must use the private Compose network without profiles or scaling" % n)
+    if s.get("pull_policy") == "build":
+        problems.append("service '%s' must not force an image build" % n)
+    # A release cannot smuggle another service into an up/run dependency traversal.
+    if set(s.get("depends_on", {})) - names:
+        problems.append("service '%s' has an unapproved dependency" % n)
+    if s.get("privileged") or s.get("pid") == "host" or s.get("ipc") == "host":
+        problems.append("service '%s' requests host-level privileges/namespaces" % n)
 
 # P2/B2: only the frontend ingress is published; data/backend stay private.
 for n in ("postgres", "minio", "minio-init", "backend"):
@@ -271,12 +341,63 @@ if [str(p.get("published")) for p in ports] != ["443"]:
 for p in ports:
     if str(p.get("target")) != "8080":
         problems.append("frontend host 443 must map to container port 8080")
+    if p.get("protocol", "tcp") != "tcp":
+        problems.append("frontend HTTPS ingress must use TCP")
     if p.get("host_ip") in ("127.0.0.1", "::1"):
         problems.append("frontend 443 must not be loopback-only")
 
 # B3: certificate material through a read-only bind directory.
-if not [v for v in (fe.get("volumes") or []) if v.get("type") == "bind" and v.get("read_only")]:
+fe_volumes = fe.get("volumes") or []
+if not fe_volumes or any(v.get("type") != "bind" or not v.get("read_only") for v in fe_volumes):
     problems.append("frontend needs a read-only bind mount for serving certificate material")
+found_certificate = found_key = False
+for volume in fe_volumes:
+    # B3 permits serving certificate directories, not config/code overlays. Check
+    # content rather than trusting a filename or an operator-supplied mount label.
+    try:
+        target = pathlib.PurePosixPath(volume.get('target', ''))
+        # These are code/config locations used by the existing frontend image,
+        # not newly selected certificate locations. Never serve key material or
+        # shadow executable configuration through a certificate mount.
+        protected = map(pathlib.PurePosixPath, ('/usr/share/nginx/html', '/etc/nginx/nginx.conf',
+                         '/etc/nginx/conf.d', '/docker-entrypoint.sh', '/docker-entrypoint.d'))
+        if not target.is_absolute() or '..' in target.parts or any(
+                target == p or target in p.parents or p in target.parents for p in protected):
+            raise ValueError()
+        source = pathlib.Path(volume.get('source', ''))
+        if source.is_symlink() or not source.is_dir():
+            raise ValueError()
+        for root, dirs, files in os.walk(source, followlinks=False):
+            if any((pathlib.Path(root) / d).is_symlink() for d in dirs):
+                raise ValueError()
+            for name in files:
+                path = pathlib.Path(root) / name
+                if path.is_symlink() or not path.is_file():
+                    raise ValueError()
+                data = path.read_bytes()
+                blocks = list(re.finditer(rb'-----BEGIN (CERTIFICATE|PRIVATE KEY|RSA PRIVATE KEY|EC PRIVATE KEY)-----\r?\n.*?-----END \1-----', data, re.S))
+                if not blocks or re.sub(rb'-----BEGIN (CERTIFICATE|PRIVATE KEY|RSA PRIVATE KEY|EC PRIVATE KEY)-----\r?\n.*?-----END \1-----', b'', data, flags=re.S).strip():
+                    raise ValueError()
+                for block in blocks:
+                    certificate = block.group(1) == b'CERTIFICATE'
+                    command = ['openssl', 'x509', '-noout'] if certificate else ['openssl', 'pkey', '-noout', '-passin', 'pass:']
+                    if subprocess.run(command, input=block.group(0) + b'\n', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
+                        raise ValueError()
+                    if certificate:
+                        found_certificate = True
+                    else:
+                        if path.stat().st_mode & 0o777 != 0o400:
+                            raise ValueError()
+                        found_key = True
+    except Exception:
+        problems.append('frontend bind must be an existing certificate/key-only directory with private keys mode 0400')
+if not found_certificate or not found_key:
+    problems.append('frontend certificate binds must contain a certificate and private key')
+if fe.get('command') is not None or fe.get('entrypoint') is not None or any(fe.get(k) for k in ('configs', 'secrets')):
+    problems.append("frontend must use the verified image configuration with read-only certificate binds only")
+hc = fe.get("healthcheck", {})
+if hc:
+    problems.append("frontend healthcheck must come from the verified image; remove the local Compose healthcheck override")
 
 # P8: restart policy.
 for n in ("postgres", "minio", "backend", "frontend"):
@@ -287,28 +408,84 @@ if svc.get("minio-init", {}).get("restart") not in (None, "no"):
 
 # P5/P6/P7: backend runtime bindings.
 be = env_of(svc.get("backend", {}))
-if be.get("CORS_ALLOWED_ORIGINS") != origin:
-    problems.append("backend CORS_ALLOWED_ORIGINS does not equal the approved origin")
-for k in ("SPRING_FLYWAY_URL", "SPRING_FLYWAY_USER", "SPRING_FLYWAY_PASSWORD"):
-    if not be.get(k):
-        problems.append("backend is not given %s" % k)
-if be.get("SPRING_FLYWAY_USER") and be.get("SPRING_FLYWAY_USER") == be.get("DB_USER"):
-    problems.append("backend migrator and runtime DB users are identical")
+
+def bindings(service, keys):
+    actual = env_of(svc.get(service, {}))
+    for k in keys:
+        if not expected.get(k) or actual.get(k) != expected[k]:
+            # Report names only; neither effective nor expected values are logged.
+            problems.append("%s effective %s differs from the authoritative env file" % (service, k))
+
+bindings("postgres", ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"))
+bindings("backend", ("DB_NAME", "DB_USER", "DB_PASSWORD", "SPRING_FLYWAY_URL",
+                     "SPRING_FLYWAY_USER", "SPRING_FLYWAY_PASSWORD", "JWT_SECRET",
+                     "CORS_ALLOWED_ORIGINS", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY"))
+bindings("minio", ("MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"))
+bindings("minio-init", ("MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY"))
+for k, v in {"DB_HOST": "postgres", "DB_PORT": "5432", "STORAGE_ENDPOINT": "http://minio:9000",
+             "STORAGE_PATH_STYLE_ACCESS": "true", "SERVER_PORT": "8080",
+             "SERVER_FORWARD_HEADERS_STRATEGY": "NONE", "SPRING_PROFILES_ACTIVE": "prod"}.items():
+    if str(be.get(k, "")).lower() != v.lower():
+        problems.append("backend %s does not match the approved deployed binding" % k)
+if be.get("JWT_EXPIRATION", "PT15M") != "PT15M":
+    problems.append("backend JWT_EXPIRATION must remain PT15M")
+# Spring relaxed binding, JVM options, config imports and command-line properties
+# can bypass DB_* / the native Flyway triple. Admit only the approved native keys.
+for k in be:
+    if forbidden_backend_key(k):
+        problems.append("backend contains an unapproved configuration override key")
+for n in ("backend", "postgres", "minio-init"):
+    s = svc.get(n, {})
+    if s.get("command") is not None or s.get("entrypoint") is not None or s.get("configs") or s.get("secrets"):
+        problems.append("%s must use the verified image's configuration/entrypoint" % n)
+for n in ('backend', 'minio-init'):
+    if svc.get(n, {}).get('volumes'):
+        problems.append('%s must not overlay the verified image with configuration/code mounts' % n)
+if any(svc.get("backend", {}).get(k) for k in ("extra_hosts", "dns", "dns_search", "links", "external_links")):
+    problems.append("backend must not override private service-name resolution")
+pg = env_of(svc.get("postgres", {}))
+if any(k.startswith("PG") or (k.startswith("POSTGRES_") and k not in {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"}) for k in pg):
+    problems.append("postgres contains an unapproved initialization/authentication override")
+for k in ("STORAGE_BUCKET", "STORAGE_REGION"):
+    values = [env_of(svc.get(n, {})).get(k) for n in ("backend", "minio-init")]
+    if not values[0] or values[0] != values[1] or (k in expected and values[0] != expected[k]):
+        problems.append("backend and initializer must use the same approved %s" % k)
 if any(k.startswith("MINIO_ROOT_") for k in be):
     problems.append("backend must not receive MinIO root credentials")
+
+# Inventory must cover the actual persistent state, including an external volume.
+for n, target in (("postgres", "/var/lib/postgresql/data"), ("minio", "/data")):
+    volumes = svc.get(n, {}).get("volumes") or []
+    if len(volumes) != 1 or any(v.get("type") != "volume" or v.get("source") not in cfg.get("volumes", {}) or v.get("target") != target for v in volumes):
+        problems.append("%s persistence must use declared named volumes" % n)
+for v in cfg.get("volumes", {}).values():
+    if not v.get("name"):
+        problems.append("every persistent volume needs a resolved name for recovery inventory")
 
 if problems:
     for p in problems:
         print("  - " + p, file=sys.stderr)
     sys.exit(1)
 PYEOF
+PY_CHECK="${PY_ENV_POLICY}"$'\n'"${PY_CHECK}"
 
 validate_compose() {
   log "Validating Compose configuration (no rendered output is printed)."
-  "${COMPOSE[@]}" config --quiet || fail "docker compose config --quiet failed."
-  if ! "${COMPOSE[@]}" config --format json | python3 -c "${PY_CHECK}" "${ORIGIN}"; then
+  COMPOSE_MODEL="$("${COMPOSE[@]}" config --format json 2>/dev/null)" \
+    || fail "docker compose config failed (diagnostics suppressed to protect configuration values)."
+  if ! printf '%s' "${COMPOSE_MODEL}" | python3 -c "${PY_CHECK}" "${ORIGIN}" "${ENV_FILE}"; then
     fail "Rendered Compose configuration is not deployable under the approved CT17 policy (see items above). The local base file alone is not; an approved override is required."
   fi
+  RELEASE_IMAGES="$(printf '%s' "${COMPOSE_MODEL}" | python3 -c 'import json,sys; print("\n".join(sorted(set(s["image"] for s in json.load(sys.stdin)["services"].values()))))')"
+}
+
+assert_release_configuration() {
+  local current
+  current="$("${COMPOSE[@]}" config --format json 2>/dev/null)" || fail "Cannot recheck effective release configuration."
+  [[ "${current}" == "${COMPOSE_MODEL}" ]] || fail "Effective Compose configuration changed since preflight; release stopped."
+  validate_env_file
+  printf '%s' "${current}" | python3 -c "${PY_CHECK}" "${ORIGIN}" "${ENV_FILE}" \
+    || fail "Env bindings changed since preflight; release stopped."
 }
 
 run_preflight() {
@@ -321,42 +498,180 @@ run_preflight() {
 }
 
 # Release archive and image identity (P3, P8)
-verify_images() {
-  local entry ref want got plat
+verify_image_coverage() {
+  local entry ref want seen=$'\n' count=0
   for entry in ${EXPECT_IMAGES[@]+"${EXPECT_IMAGES[@]}"}; do
     ref="${entry%%=*}"; want="${entry#*=}"
-    [[ -n "${ref}" && "${want}" =~ ^sha256:[0-9a-f]{64}$ ]] \
-      || fail "--expect-image must look like REF=sha256:<64 hex> (got: ${entry})."
+    [[ -n "${ref}" && "${ref}" != *[[:space:]]* && "${want}" =~ ^sha256:[0-9a-f]{64}$ ]] \
+      || fail "--expect-image must look like REF=sha256:<64 lowercase hex>."
+    [[ "${seen}" != *$'\n'"${ref}"$'\n'* ]] || fail "Duplicate --expect-image reference."
+    printf '%s\n' "${RELEASE_IMAGES}" | grep -Fxq -- "${ref}" || fail "An expected image is not used by the effective Compose release."
+    seen+="${ref}"$'\n'; count=$(( count + 1 ))
+  done
+  [[ "${count}" -eq "$(printf '%s\n' "${RELEASE_IMAGES}" | wc -l | tr -d ' ')" ]] \
+    || fail "Every effective Compose service image must have an approved --expect-image identity."
+}
+
+verify_images() {
+  verify_image_coverage
+  local entry ref want got plat
+  for entry in "${EXPECT_IMAGES[@]}"; do
+    ref="${entry%%=*}"; want="${entry#*=}"
     got="$(docker image inspect --format '{{.Id}}' "${ref}" 2>/dev/null)" \
       || fail "Image not present locally: ${ref}"
     [[ "${got}" == "${want}" ]] || fail "Image ${ref} content ID does not match the expected value."
     plat="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${ref}")"
     [[ "${plat}" == "linux/amd64" ]] || fail "Image ${ref} platform is ${plat}; linux/amd64 required."
   done
-  [[ ${#EXPECT_IMAGES[@]} -eq 0 ]] || log "Image identities verified (content ID, linux/amd64)."
+  # Inspect baked defaults as well as rendered Compose inputs before starting
+  # anything. Image identity alone does not establish effective configuration.
+  local service
+  for service in backend postgres minio-init frontend; do
+    ref="$(printf '%s' "${COMPOSE_MODEL}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"][sys.argv[1]]["image"])' "${service}")"
+    verify_image_configuration "${service}" "${ref}"
+  done
+  log "All effective service image identities verified (content ID, linux/amd64)."
+}
+
+verify_image_configuration() {
+  local service="$1" ref="$2"
+  { printf '{"model":%s,"image":' "${COMPOSE_MODEL}"; docker image inspect --format '{{json .Config}}' "${ref}" 2>/dev/null; printf '}'; } | python3 -c "${PY_IMAGE_POLICY}" "${service}" \
+    || fail "${service} image has an unsafe environment or missing executable/healthcheck configuration."
+}
+
+read -r -d '' PY_IMAGE_POLICY <<'PYEOF' || true
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    service = sys.argv[1]
+    expected = data['model']['services'][service].get('environment', {})
+    image = data['image']
+    environment = {}
+    for entry in image.get('Env') or []:
+        key, value = entry.split('=', 1)
+        if key in environment:
+            raise ValueError()
+        environment[key] = value
+    if service == 'backend':
+        for key, value in environment.items():
+            if forbidden_backend_key(key):
+                raise ValueError()
+            if key.startswith(('SPRING_', 'SERVER_', 'CODEMASTERY_', 'HIBERNATE_')) and key not in expected:
+                raise ValueError()
+    if not image.get('Entrypoint') and not image.get('Cmd'):
+        raise ValueError()
+    if service == 'frontend':
+        health = image.get('Healthcheck') or {}
+        if not health.get('Test') or health['Test'][0] == 'NONE':
+            raise ValueError()
+except Exception:
+    sys.exit(1)
+PYEOF
+PY_IMAGE_POLICY="${PY_ENV_POLICY}"$'\n'"${PY_IMAGE_POLICY}"
+
+verify_archive() {
+  verify_image_coverage
+  [[ -f "${ARCHIVE}" && -r "${ARCHIVE}" ]] || fail "Archive not found or unreadable: ${ARCHIVE}"
+  [[ "${ARCHIVE_SHA256}" =~ ^[0-9A-Fa-f]{64}$ ]] || fail "--archive-sha256 must be 64 hex characters."
+  ARCHIVE_SHA256="$(printf '%s' "${ARCHIVE_SHA256}" | tr '[:upper:]' '[:lower:]')"
+  local actual; actual="$(sha256sum "${ARCHIVE}" | awk '{print $1}')"
+  [[ "${actual}" == "${ARCHIVE_SHA256}" ]] || fail "Archive SHA-256 mismatch; refusing release."
+  # Inspect Docker's native save manifest/configs without extracting the archive.
+  # Image IDs are hashes of the exact config bytes, not archive-supplied labels.
+  python3 - "${ARCHIVE}" "${EXPECT_IMAGES[@]}" <<'PY' || fail "Archive does not contain exactly the verified linux/amd64 release artifacts."
+import hashlib, json, sys, tarfile
+try:
+    expected = dict(x.rsplit("=", 1) for x in sys.argv[2:])
+    with tarfile.open(sys.argv[1], "r:*") as t:
+        members = t.getmembers()
+        if len({m.name for m in members}) != len(members):
+            raise ValueError("duplicate archive entries")
+        manifest = json.load(t.extractfile("manifest.json"))
+        ids = set()
+        for item in manifest:
+            data = t.extractfile(item["Config"]).read()
+            identity = "sha256:" + hashlib.sha256(data).hexdigest()
+            config = json.loads(data)
+            if config.get("os") != "linux" or config.get("architecture") != "amd64":
+                raise ValueError("platform")
+            if identity not in expected.values():
+                raise ValueError("unapproved archive image")
+            ids.add(identity)
+            for tag in item.get("RepoTags") or []:
+                if expected.get(tag) != identity:
+                    raise ValueError("unapproved archive tag mapping")
+        if ids != set(expected.values()):
+            raise ValueError("missing artifact")
+except Exception:
+    sys.exit(1)  # Do not print untrusted archive metadata or contents.
+PY
 }
 
 run_load() {
-  [[ -f "${ARCHIVE}" && -r "${ARCHIVE}" ]] || fail "Archive not found or unreadable: ${ARCHIVE}"
-  [[ "${ARCHIVE_SHA256,,}" =~ ^[0-9a-f]{64}$ ]] || fail "--archive-sha256 must be 64 hex characters."
-  local actual; actual="$(sha256sum "${ARCHIVE}" | awk '{print $1}')"
-  [[ "${actual}" == "${ARCHIVE_SHA256,,}" ]] || fail "Archive SHA-256 mismatch; refusing to load."
+  verify_archive
   log "Archive checksum verified. Loading images (no registry pull, no rebuild)."
-  docker load -i "${ARCHIVE}" >/dev/null || fail "docker load failed."
+  docker load -i "${ARCHIVE}" >/dev/null 2>&1 || fail "docker load failed."
   verify_images
 }
 
+verify_container_images() {
+  local service cid
+  for service in "$@"; do
+    cid="$("${COMPOSE[@]}" ps -a -q "${service}" 2>/dev/null)" || fail "Cannot inspect release container inventory."
+    [[ -n "${cid}" && "${cid}" != *$'\n'* ]] || fail "Expected exactly one ${service} container."
+    verify_service_container "${service}" "${cid}"
+  done
+}
+
+verify_service_container() {
+  local service="$1" cid="$2" ref want="" got entry
+  ref="$(printf '%s' "${COMPOSE_MODEL}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"][sys.argv[1]]["image"])' "${service}")"
+  for entry in "${EXPECT_IMAGES[@]}"; do
+    [[ "${entry%%=*}" != "${ref}" ]] || want="${entry#*=}"
+  done
+  got="$(docker inspect --format '{{.Image}}' "${cid}" 2>/dev/null)" || fail "Cannot inspect ${service} image."
+  [[ -n "${want}" && "${got}" == "${want}" ]] || fail "${service} is not running its verified release image."
+  # An existing container can use the right image with stale database/secrets
+  # bindings. Compare actual container values in memory, never on the command line.
+  if ! { printf '{"model":%s,"container":' "${COMPOSE_MODEL}"; docker inspect --format '{{json .Config}}' "${cid}" 2>/dev/null; printf ',"image":'; docker image inspect --format '{{json .Config}}' "${ref}" 2>/dev/null; printf '}'; } | python3 -c "${PY_ENV_POLICY}"$'\n''
+import json,sys
+data = json.load(sys.stdin)
+cfg = data["model"]
+container = data["container"]
+actual = {}
+for entry in container.get("Env") or []:
+    key, value = entry.split("=",1)
+    if key in actual:
+        sys.exit(1)
+    actual[key] = value
+expected = cfg["services"][sys.argv[1]].get("environment",{})
+if any(actual.get(k) != str(v) for k,v in expected.items()):
+    sys.exit(1)
+if sys.argv[1] == "backend" and any(forbidden_backend_key(k) or (k.startswith(("SPRING_", "SERVER_", "CODEMASTERY_", "HIBERNATE_")) and k not in expected) for k in actual):
+    sys.exit(1)
+if sys.argv[1] in ("backend", "postgres", "minio-init", "frontend"):
+    for key in ("Entrypoint", "Cmd"):
+        if (container.get(key) or []) != (data["image"].get(key) or []):
+            sys.exit(1)
+if sys.argv[1] == "frontend" and container.get("Healthcheck") != data["image"].get("Healthcheck"):
+    sys.exit(1)
+' "${service}" 2>/dev/null; then
+    fail "${service} container environment, executable or healthcheck differs from the verified release configuration."
+  fi
+}
+
 # PostgreSQL identities (P6): provision, harden, verify.
+# Only expected SQL goes to these helpers; diagnostics are never emitted verbatim.
 psql_admin() {  # bootstrap administrator over the container's local socket
   "${COMPOSE[@]}" exec -T postgres sh -c \
-    'exec psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -'
+    'unset PGSERVICE PGSERVICEFILE PGHOST PGHOSTADDR PGPORT PGOPTIONS; exec psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -'
 }
 
 psql_as() {  # $1=role $2=password; SQL on stdin. TCP to the service name, so the password is really checked.
   local role="$1" pw="$2" sql
   sql="$(cat)"
   printf '%s\n%s\n' "${pw}" "${sql}" | "${COMPOSE[@]}" exec -T postgres sh -c \
-    'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -q -tA -v ON_ERROR_STOP=1 -h postgres -U "'"${role}"'" -d "$POSTGRES_DB" -f -'
+    'unset PGSERVICE PGSERVICEFILE PGHOSTADDR PGOPTIONS; IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -q -tA -v ON_ERROR_STOP=1 -h postgres -p 5432 -U "'"${role}"'" -d "$POSTGRES_DB" -f -'
 }
 
 expect_denied() {  # description role password;SQL on stdin
@@ -374,14 +689,31 @@ expect_allowed() {  # description role password; SQL on stdin
 }
 
 provision_db_roles() {
-  local db app app_pw mig mig_pw sql
+  local db app app_pw mig mig_pw sql existing_roles
   db="$(env_get POSTGRES_DB)"
   app="$(env_get DB_USER)";            app_pw="$(env_get DB_PASSWORD)"
   mig="$(env_get SPRING_FLYWAY_USER)"; mig_pw="$(env_get SPRING_FLYWAY_PASSWORD)"
+  # POSTGRES_PASSWORD only initializes an empty volume; an existing cluster can
+  # retain a different password despite a matching container environment.
+  expect_allowed "bootstrap database connection" "$(env_get POSTGRES_USER)" "$(env_get POSTGRES_PASSWORD)" <<<'SELECT 1;'
+  expect_denied "bootstrap connection with an incorrect password" "$(env_get POSTGRES_USER)" "$(env_get POSTGRES_PASSWORD).invalid" <<<'SELECT 1;'
+  existing_roles="$(psql_admin 2>/dev/null <<<"SELECT coalesce(string_agg(rolname, ',' ORDER BY rolname), '') FROM pg_roles WHERE rolname IN ('${app}', '${mig}');")" \
+    || fail "Could not inspect existing database identities before provisioning."
+  if [[ ",${existing_roles}," == *",${app},"* ]]; then
+    verify_db_credential "runtime" "${app}" "${app_pw}"
+  fi
+  if [[ ",${existing_roles}," == *",${mig},"* ]]; then
+    verify_db_credential "migrator" "${mig}" "${mig_pw}"
+  fi
 
   read -r -d '' sql <<'SQL' || true
 -- Never write statement text (it contains passwords) to the server log on error.
 SET log_min_error_statement = 'panic';
+SET log_statement = 'none';
+SET log_min_duration_statement = -1;
+SET log_min_duration_sample = -1;
+SET log_transaction_sample_rate = 0;
+BEGIN;
 DO $body$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '@MIG@') THEN
@@ -397,30 +729,162 @@ BEGIN
   END IF;
 END
 $body$;
-REVOKE "@MIG@" FROM "@APP@";
 GRANT CONNECT ON DATABASE "@DB@" TO "@APP@", "@MIG@";
+-- TEMPORARY is granted to PUBLIC by PostgreSQL. A per-role REVOKE cannot
+-- override that grant. Conflicting explicit/membership grants fail the policy.
+REVOKE TEMPORARY ON DATABASE "@DB@" FROM PUBLIC;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE, CREATE ON SCHEMA public TO "@MIG@";
 GRANT USAGE ON SCHEMA public TO "@APP@";
-REVOKE CREATE ON SCHEMA public FROM "@APP@";
--- Tables/sequences that Flyway (the migrator) creates become usable by the runtime role.
-ALTER DEFAULT PRIVILEGES FOR ROLE "@MIG@" IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "@APP@";
-ALTER DEFAULT PRIVILEGES FOR ROLE "@MIG@" IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "@APP@";
+-- Do not grant runtime rights by default: that would expose Flyway history while
+-- migrations run. Grant existing application objects explicitly, before ingress.
+ALTER DEFAULT PRIVILEGES FOR ROLE "@MIG@" IN SCHEMA public REVOKE ALL ON TABLES FROM "@APP@";
+ALTER DEFAULT PRIVILEGES FOR ROLE "@MIG@" IN SCHEMA public REVOKE ALL ON SEQUENCES FROM "@APP@";
 SQL
   sql="${sql//@MIGPW@/${mig_pw}}"; sql="${sql//@APPPW@/${app_pw}}"
   sql="${sql//@MIG@/${mig}}";      sql="${sql//@APP@/${app}}";  sql="${sql//@DB@/${db}}"
 
   log "Provisioning PostgreSQL roles: migrator and runtime (existing roles are not overwritten)."
-  if ! printf '%s\n' "${sql}" | psql_admin >/dev/null 2>&1; then
+  if ! { printf '%s\n' "${sql}"; role_policy_sql; application_grants_sql; printf 'COMMIT;\n'; } | psql_admin >/dev/null 2>&1; then
     fail "PostgreSQL role provisioning failed (output suppressed: it may contain credentials). Check role state with the bootstrap administrator."
   fi
+  verify_db_credentials
   log "Roles ready: '${mig}' (migrations) and '${app}' (runtime)."
 }
 
+verify_db_credentials() {
+  local app app_pw mig mig_pw
+  app="$(env_get DB_USER)"; app_pw="$(env_get DB_PASSWORD)"
+  mig="$(env_get SPRING_FLYWAY_USER)"; mig_pw="$(env_get SPRING_FLYWAY_PASSWORD)"
+  verify_db_credential "runtime" "${app}" "${app_pw}"
+  verify_db_credential "migrator" "${mig}" "${mig_pw}"
+}
+
+verify_db_credential() {
+  local label="$1" role="$2" password="$3"
+  expect_allowed "${label} database connection" "${role}" "${password}" <<<'SELECT 1;'
+  expect_denied "${label} connection with an incorrect password" "${role}" "${password}.invalid" <<<'SELECT 1;'
+}
+
+role_policy_sql() {
+  local sql app mig
+  app="$(env_get DB_USER)"; mig="$(env_get SPRING_FLYWAY_USER)"
+  read -r -d '' sql <<'SQL' || true
+DO $policy$
+BEGIN
+  -- Examine the complete membership closure, including NOINHERIT groups whose
+  -- SET option permits a later SET ROLE, and cycles (UNION makes this finite).
+  IF EXISTS (
+    WITH RECURSIVE reachable(root, roleid) AS (
+      SELECT oid, oid FROM pg_roles WHERE rolname IN ('@APP@', '@MIG@')
+      UNION
+      SELECT r.root, m.roleid FROM reachable r JOIN pg_auth_members m ON m.member=r.roleid
+    )
+    SELECT 1 FROM reachable r JOIN pg_roles target ON target.oid=r.roleid
+      JOIN pg_roles origin ON origin.oid=r.root
+    WHERE target.rolsuper OR target.rolcreatedb OR target.rolcreaterole
+      OR target.rolreplication OR target.rolbypassrls
+      OR target.rolname LIKE 'pg\_%' ESCAPE '\'
+      OR EXISTS (SELECT 1 FROM pg_database WHERE datdba=target.oid)
+      OR EXISTS (SELECT 1 FROM pg_database WHERE NOT datistemplate
+                 AND datname NOT IN (current_database(), 'postgres')
+                 AND has_database_privilege(target.oid, oid, 'CONNECT'))
+      OR has_database_privilege(target.oid, current_database(), 'CREATE')
+      OR EXISTS (
+        SELECT 1 FROM pg_namespace n
+        WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\'
+          AND n.nspname <> 'information_schema'
+          AND (n.nspowner=target.oid OR has_schema_privilege(target.oid, n.oid, 'CREATE'))
+          AND NOT (origin.rolname='@MIG@' AND n.nspname='public'))
+      OR EXISTS (
+        SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\'
+          AND n.nspname <> 'information_schema' AND c.relowner=target.oid
+          AND NOT (origin.rolname='@MIG@' AND n.nspname='public'))
+      OR EXISTS (
+        SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\'
+          AND n.nspname NOT IN ('information_schema', 'public')
+          AND c.relkind IN ('r','p','v','m','S')
+          AND (CASE WHEN c.relkind='S'
+                    THEN has_sequence_privilege(target.oid,c.oid,'USAGE,SELECT,UPDATE')
+                    ELSE has_table_privilege(target.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') END))
+      OR (origin.rolname='@APP@' AND (
+        target.rolname='@MIG@'
+        OR has_database_privilege(target.oid, current_database(), 'TEMPORARY')
+        OR has_schema_privilege(target.oid, 'public', 'CREATE')
+        OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=target.oid AND nspname='public')
+        OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                   WHERE n.nspname='public' AND c.relowner=target.oid)))
+  ) THEN
+    RAISE EXCEPTION 'Unexpected direct or indirect application-role elevation; operator reconciliation required';
+  END IF;
+END
+$policy$;
+SQL
+  printf '%s\n' "${sql//@APP@/${app}}" | sed "s/@MIG@/${mig}/g"
+}
+
+application_grants_sql() {
+  local sql app mig
+  app="$(env_get DB_USER)"; mig="$(env_get SPRING_FLYWAY_USER)"
+  read -r -d '' sql <<'SQL' || true
+DO $grants$
+DECLARE obj record;
+BEGIN
+  FOR obj IN SELECT c.relname, c.relkind, c.relowner FROM pg_class c
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND c.relkind IN ('r','p','S')
+  LOOP
+    IF obj.relowner <> (SELECT oid FROM pg_roles WHERE rolname='@MIG@') THEN
+      RAISE EXCEPTION 'Unexpected application object owner; no ownership transfer is permitted';
+    END IF;
+    IF obj.relname='flyway_schema_history' THEN
+      EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', obj.relname, '@APP@');
+    ELSIF obj.relkind='S' THEN
+      EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE public.%I TO %I', obj.relname, '@APP@');
+    ELSE
+      IF has_table_privilege('@APP@', obj.relname, 'TRUNCATE')
+         OR has_table_privilege('@APP@', obj.relname, 'REFERENCES')
+         OR has_table_privilege('@APP@', obj.relname, 'TRIGGER') THEN
+        RAISE EXCEPTION 'Runtime role has unexpected broad table privileges; operator reconciliation required';
+      END IF;
+      EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO %I', obj.relname, '@APP@');
+    END IF;
+  END LOOP;
+END
+$grants$;
+SQL
+  printf '%s\n' "${sql//@APP@/${app}}" | sed "s/@MIG@/${mig}/g"
+}
+
 harden_after_migration() {
-  local app; app="$(env_get DB_USER)"
-  psql_admin >/dev/null <<<"REVOKE ALL ON TABLE public.flyway_schema_history FROM \"${app}\";" \
-    || fail "Could not revoke runtime access to the Flyway history table."
+  { printf 'BEGIN;\n'; role_policy_sql; application_grants_sql; printf 'COMMIT;\n'; } | psql_admin >/dev/null 2>&1 \
+    || fail "Application grants/history hardening failed; ingress remains closed. Reconcile unexpected ownership/privileges explicitly."
+}
+
+verify_application_grants() {
+  local app result
+  app="$(env_get DB_USER)"
+  # ACL checks exercise existing objects, including updates with old migrations.
+  # Keep each required privilege separate: PostgreSQL's comma list means ANY.
+  result="$(psql_admin 2>/dev/null <<SQL
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+ WHERE n.nspname='public' AND c.relkind IN ('r','p') AND c.relname<>'flyway_schema_history')
+ AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+ WHERE n.nspname='public' AND (
+  (c.relkind IN ('r','p') AND c.relname<>'flyway_schema_history' AND NOT (
+    has_table_privilege('${app}',c.oid,'SELECT') AND has_table_privilege('${app}',c.oid,'INSERT')
+    AND has_table_privilege('${app}',c.oid,'UPDATE') AND has_table_privilege('${app}',c.oid,'DELETE')))
+  OR (c.relkind='S' AND NOT (has_sequence_privilege('${app}',c.oid,'USAGE')
+    AND has_sequence_privilege('${app}',c.oid,'SELECT')))
+  OR (c.relkind IN ('r','p') AND (has_table_privilege('${app}',c.oid,'TRUNCATE')
+    OR has_table_privilege('${app}',c.oid,'REFERENCES') OR has_table_privilege('${app}',c.oid,'TRIGGER')))
+  OR (c.relname='flyway_schema_history' AND has_table_privilege('${app}',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
+ )) THEN 'ok' ELSE 'invalid' END;
+SQL
+  )" || fail "Could not verify existing application object privileges."
+  [[ "${result}" == "ok" ]] || fail "Runtime lacks required privileges on existing application tables/sequences."
 }
 
 verify_role_separation() {
@@ -428,11 +892,17 @@ verify_role_separation() {
   app="$(env_get DB_USER)";            app_pw="$(env_get DB_PASSWORD)"
   mig="$(env_get SPRING_FLYWAY_USER)"; mig_pw="$(env_get SPRING_FLYWAY_PASSWORD)"
   log "Verifying migration/runtime privilege separation (all probes are rolled back)."
+  role_policy_sql | psql_admin >/dev/null 2>&1 || fail "Direct/indirect database role elevation detected."
 
-  expect_allowed "runtime role connecting and reading" "${app}" "${app_pw}" <<<'SELECT 1;'
+  verify_db_credentials
   expect_denied  "runtime role creating a table (DDL)" "${app}" "${app_pw}" <<'SQL'
 BEGIN;
 CREATE TABLE public.cm_ddl_probe (x integer);
+ROLLBACK;
+SQL
+  expect_denied "runtime role creating a temporary table (DDL)" "${app}" "${app_pw}" <<'SQL'
+BEGIN;
+CREATE TEMP TABLE cm_temp_ddl_probe (x integer);
 ROLLBACK;
 SQL
   expect_denied  "runtime role reading Flyway history" "${app}" "${app_pw}" <<<'SELECT 1 FROM public.flyway_schema_history LIMIT 1;'
@@ -441,12 +911,13 @@ BEGIN;
 CREATE TABLE public.cm_ddl_probe (x integer);
 ROLLBACK;
 SQL
+  verify_application_grants
 
-  owned="$(psql_admin <<<"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner='${app}';")"
+  owned="$(psql_admin 2>/dev/null <<<"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner='${app}';")"
   [[ "${owned}" == "0" ]] || fail "ROLE SEPARATION FAILED: the runtime role owns ${owned} table(s) in public."
   log "  ok: runtime role owns no tables"
 
-  by="$(psql_admin <<<"SELECT coalesce(string_agg(DISTINCT installed_by, ','), 'none') FROM public.flyway_schema_history;")"
+  by="$(psql_admin 2>/dev/null <<<"SELECT coalesce(string_agg(DISTINCT installed_by, ','), 'none') FROM public.flyway_schema_history;")"
   if [[ "${by}" == "${mig}" ]]; then
     log "  ok: Flyway history installed_by = migrator only"
   else
@@ -456,14 +927,17 @@ SQL
 }
 # Provisioning: PostgreSQL + MinIO availability (not feature behavior)
 run_provision() {
+  assert_release_configuration
   verify_images
   log "Starting PostgreSQL and MinIO (private network; images must already be loaded)."
-  "${COMPOSE[@]}" up -d --no-build --pull never --wait --wait-timeout "${WAIT_TIMEOUT}" postgres minio \
+  "${COMPOSE[@]}" up -d --no-build --pull never --no-deps --wait --wait-timeout "${WAIT_TIMEOUT}" postgres minio \
     || fail "PostgreSQL/MinIO did not become ready within ${WAIT_TIMEOUT}s."
+  verify_container_images postgres minio
 
   provision_db_roles
 
-  log "Running one-shot MinIO initializer (idempotent; stops on conflicting state)."
+  log "Running the verified-image MinIO initializer; its release qualification must establish idempotency and conflict-stop behavior."
+  assert_release_configuration
   "${COMPOSE[@]}" up -d --no-build --pull never --no-deps minio-init >/dev/null \
     || fail "Could not start minio-init."
   local cid code
@@ -472,59 +946,203 @@ run_provision() {
   code="$(timeout "${WAIT_TIMEOUT}" docker wait "${cid}")" \
     || fail "minio-init did not finish within ${WAIT_TIMEOUT}s."
   if [[ "${code}" != "0" ]]; then
-    "${COMPOSE[@]}" logs --no-color --tail 20 minio-init >&2 || true
     fail "minio-init exited with code ${code}; backend startup must not proceed."
   fi
+  verify_container_images minio-init
   log "PROVISION OK: postgres ready, minio running, minio-init exit 0."
   log "Note: this is service availability only; the application storage feature is NOT verified."
 }
 
 # Deploy: backend + frontend, private health, deployment record
 guard_update() {
-  local existing; existing="$("${COMPOSE[@]}" ps -a -q backend 2>/dev/null || true)"
-  if [[ -n "${existing}" ]]; then
+  local existing volumes project_volumes names name persisted="no"
+  existing="$("${COMPOSE[@]}" ps -a -q 2>/dev/null)" || fail "Recovery inventory failed; no state-changing operation is permitted."
+  volumes="$(docker volume ls --format '{{.Name}}' 2>/dev/null)" || fail "Persistent-volume inventory failed; no state-changing operation is permitted."
+  project_volumes="$(docker volume ls --filter label=com.docker.compose.project=codemastery --format '{{.Name}}' 2>/dev/null)" \
+    || fail "Project-volume inventory failed; no state-changing operation is permitted."
+  [[ -z "${project_volumes}" ]] || persisted="yes"
+  names="$(printf '%s' "${COMPOSE_MODEL}" | python3 -c 'import json,sys; print("\n".join(v["name"] for v in json.load(sys.stdin).get("volumes",{}).values()))')" \
+    || fail "Cannot determine persistent-state inventory; no changes permitted."
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] || continue
+    if printf '%s\n' "${volumes}" | grep -Fxq -- "${name}"; then persisted="yes"; fi
+  done <<<"${names}"
+  if [[ -n "${existing}" || "${persisted}" == "yes" ]]; then
     [[ "${RECOVERY_VERIFIED}" == "yes" ]] \
-      || fail "An existing backend was found (update). Stop: no verified recovery artifact attested. Re-run with --recovery-artifact-verified only after an independently checked backup exists (P9)."
-    log "Update detected; operator attested a verified recovery artifact exists."
+      || fail "Existing containers or persistent state found. No verified recovery artifact attested; no changes permitted (P9)."
+    [[ "${COMPATIBILITY_VERIFIED}" == "yes" && "${PERSISTENT_STATE_PRESERVED}" == "yes" && -n "${UPDATE_AUTHORIZATION}" ]] \
+      || fail "Update requires verified schema/image compatibility, preserved persistent state and an operator authorization reference (P9); no changes permitted."
+    log "Update detected; operator attested compatibility, preserved state and checked recovery under referenced authority."
   else
-    log "First deployment (no existing backend container)."
+    log "No existing project containers or declared persistent volumes found."
   fi
 }
 
+contain_failure() {
+  local rc=$?
+  trap - EXIT INT TERM
+  if [[ "${RELEASE_COMPLETE}" != "yes" && "${CONTAIN_ON_FAILURE}" == "yes" ]]; then
+    [[ "${rc}" -ne 0 ]] || rc=1
+    log "Release stopped. Containing application services; preserved data requires explicit operator recovery."
+    if ! "${COMPOSE[@]}" stop --timeout "${WAIT_TIMEOUT}" frontend backend >/dev/null 2>&1; then
+      printf 'ERROR: Application stop failed; ingress containment is NOT verified. Operator intervention required.\n' >&2
+    fi
+  fi
+  if [[ -n "${STAGED_FRONTEND_CID}" ]]; then
+    docker stop --time "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
+      || { printf 'ERROR: Private frontend probe cleanup failed; inspect the one-off container.\n' >&2; rc=1; }
+  fi
+  exit "${rc}"
+}
+
+quiesce_application() {
+  assert_release_configuration
+  # Mark before stop: a partial stop/error must still trigger containment.
+  CONTAIN_ON_FAILURE="yes"
+  "${COMPOSE[@]}" stop --timeout "${WAIT_TIMEOUT}" frontend backend >/dev/null 2>&1 \
+    || fail "Could not close ingress and stop the existing backend; release stopped."
+}
+
+verify_private_dependencies() {
+  local cid state
+  verify_container_images postgres minio minio-init
+  cid="$("${COMPOSE[@]}" ps -a -q postgres)"
+  state="$(docker inspect --format '{{.State.Health.Status}}' "${cid}" 2>/dev/null)" || fail "Cannot inspect PostgreSQL health."
+  [[ "${state}" == "healthy" ]] || fail "PostgreSQL is not healthy."
+  cid="$("${COMPOSE[@]}" ps -a -q minio)"
+  state="$(docker inspect --format '{{.State.Running}}' "${cid}" 2>/dev/null)" || fail "Cannot inspect MinIO state."
+  [[ "${state}" == "true" ]] || fail "MinIO is not running."
+  cid="$("${COMPOSE[@]}" ps -a -q minio-init)"
+  state="$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "${cid}" 2>/dev/null)" || fail "Cannot inspect initializer completion."
+  [[ "${state}" == "exited:0" ]] || fail "MinIO initializer has not completed successfully."
+}
+
+stage_frontend() {
+  # Compose run omits service ports by default. Never add --service-ports/-p.
+  # Exercise the approved image, certificate mount and TLS healthcheck privately.
+  STAGED_FRONTEND_CID="$("${COMPOSE[@]}" run -d --rm --no-deps --pull never frontend 2>/dev/null)" \
+    || fail "Could not stage the frontend without published ports."
+  [[ -n "${STAGED_FRONTEND_CID}" && "${STAGED_FRONTEND_CID}" != *$'\n'* ]] || fail "Invalid private frontend container identity."
+  verify_service_container frontend "${STAGED_FRONTEND_CID}"
+  docker inspect --format '{{json .NetworkSettings.Ports}}' "${STAGED_FRONTEND_CID}" 2>/dev/null | python3 -c \
+    'import json,sys; sys.exit(1 if any((json.load(sys.stdin) or {}).values()) else 0)' \
+    || fail "Private frontend probe unexpectedly publishes a host port."
+  local deadline state
+  deadline=$(( SECONDS + WAIT_TIMEOUT ))
+  while :; do
+    state="$(docker inspect --format '{{.State.Running}}:{{.State.Health.Status}}' "${STAGED_FRONTEND_CID}" 2>/dev/null)" \
+      || fail "Private frontend exited or has no qualified TLS healthcheck."
+    [[ "${state}" != "true:healthy" ]] || break
+    [[ "${state}" == "true:starting" && SECONDS -lt deadline ]] || fail "Private frontend TLS healthcheck failed."
+    sleep "${POLL_INTERVAL_SECONDS}"
+  done
+  verify_private_tls
+}
+
+read -r -d '' PY_TLS_CHECK <<'PYEOF' || true
+import http.client, ipaddress, os, socket, ssl, sys, time, urllib.parse
+try:
+    origin, address, port, seconds = sys.argv[1:]
+    host = urllib.parse.urlsplit(origin).hostname
+    if not ipaddress.ip_address(address).is_private:
+        raise ValueError()
+    deadline = time.monotonic() + int(seconds)
+    context = ssl.create_default_context(cafile=os.environ.get('SSL_CERT_FILE') or None,
+                                         capath=os.environ.get('SSL_CERT_DIR') or None)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.maximum_version = ssl.TLSVersion.TLSv1_3
+    with socket.create_connection((address, int(port)), timeout=int(seconds)) as raw:
+        raw.settimeout(max(0.001, deadline - time.monotonic()))
+        with context.wrap_socket(raw, server_hostname=host) as connection:
+            # The real handshake verifies trust, expiry, hostname and possession
+            # of the matching private key. Never substitute Docker health alone.
+            connection.settimeout(max(0.001, deadline - time.monotonic()))
+            connection.sendall(('GET / HTTP/1.1\r\nHost: ' + host + '\r\nConnection: close\r\n\r\n').encode('ascii'))
+            response = http.client.HTTPResponse(connection)
+            response.begin()
+            if response.status != 200 or time.monotonic() > deadline:
+                raise ValueError()
+except Exception:
+    sys.exit(1)  # Never print response bodies, TLS material or raw diagnostics.
+PYEOF
+
+verify_private_tls() {
+  local address
+  address="$({ printf '{"model":%s,"networks":' "${COMPOSE_MODEL}"; docker inspect --format '{{json .NetworkSettings.Networks}}' "${STAGED_FRONTEND_CID}" 2>/dev/null; printf '}'; } | python3 -c '
+import ipaddress,json,sys
+try:
+    data=json.load(sys.stdin)
+    model=data["model"]
+    approved={model["networks"][n]["name"] for n in model["services"]["frontend"]["networks"]}
+    if set(data["networks"]) != approved:
+        raise ValueError()
+    addresses=[v.get("IPAddress") or v.get("GlobalIPv6Address") for k,v in sorted(data["networks"].items())]
+    if not addresses or any(not ipaddress.ip_address(a).is_private for a in addresses):
+        raise ValueError()
+    print(addresses[0])
+except Exception:
+    sys.exit(1)
+')" || fail "Cannot identify the private frontend address on the approved Compose network."
+  python3 -c "${PY_TLS_CHECK}" "${ORIGIN}" "${address}" 8080 "${WAIT_TIMEOUT}" \
+    || fail "Private HTTPS certificate/hostname/expiry or HTTP readiness verification failed; ingress remains closed."
+  log "Private HTTPS handshake and ingress response verified."
+}
+
 wait_backend_health() {
-  local deadline out code
+  local deadline out code remaining
   deadline=$(( SECONDS + WAIT_TIMEOUT ))
   log "Waiting for the backend to answer privately (up to ${WAIT_TIMEOUT}s)."
   while :; do
-    out="$(timeout 20 "${COMPOSE[@]}" exec -T frontend wget -S -O - http://backend:8080/actuator/health 2>&1 </dev/null || true)"
-    code="$(printf '%s\n' "${out}" | grep -Eo 'HTTP/[0-9.]+ [0-9]{3}' | tail -1 | awk '{print $2}')"
+    remaining=$(( deadline - SECONDS ))
+    (( remaining > 0 )) || fail "Backend readiness deadline expired; release stopped."
+    out="$(timeout "${remaining}" docker exec "${STAGED_FRONTEND_CID}" wget -S -O - http://backend:8080/actuator/health 2>&1 </dev/null || true)"
+    code="$(printf '%s\n' "${out}" | grep -Eo 'HTTP/[0-9.]+ [0-9]{3}' | tail -1 | awk '{print $2}' || true)"
     case "${code}" in
       (200)
         if [[ "${out}" == *'"status":"UP"'* ]]; then
           HEALTH_RESULT="UP (HTTP 200, non-detailed)"; break
         fi ;;
       (401|403)
-        HEALTH_RESULT="backend answering; /actuator/health needs authentication at this revision (HTTP ${code}), so UP is not observable"
-        break ;;
+        fail "Backend health is protected (HTTP ${code}); UP is not verified, so ingress remains closed." ;;
     esac
     if (( SECONDS >= deadline )); then
-      "${COMPOSE[@]}" logs --no-color --tail 30 backend >&2 || true
       fail "Backend did not answer within ${WAIT_TIMEOUT}s. Migration/config failure stops the release; nothing is retried or reset."
     fi
-    sleep "${POLL_INTERVAL_SECONDS}"
+    remaining=$(( deadline - SECONDS ))
+    if (( remaining < POLL_INTERVAL_SECONDS )); then sleep "${remaining}"; else sleep "${POLL_INTERVAL_SECONDS}"; fi
   done
   log "SERVICE_HEALTH: ${HEALTH_RESULT}"
 }
 
 run_deploy() {
   verify_images
-  guard_update
-  log "Starting backend and frontend from the loaded images (no build, no pull)."
-  "${COMPOSE[@]}" up -d --no-build --pull never backend frontend \
-    || fail "docker compose up failed."
+  verify_private_dependencies
+  # Deploy may be invoked independently of provision. Do not silently assume the
+  # existing grants/defaults/history permissions already satisfy this release.
+  provision_db_roles
+  assert_release_configuration
+  log "Starting the backend privately; public frontend remains stopped."
+  "${COMPOSE[@]}" up -d --no-build --pull never --no-deps backend \
+    || fail "Private backend startup failed."
+  verify_container_images backend
+  stage_frontend
   wait_backend_health
+  local migration_state
+  migration_state="$(psql_admin 2>/dev/null <<'SQL'
+SELECT CASE WHEN count(*) FILTER (WHERE success)>0 AND count(*) FILTER (WHERE NOT success)=0
+ THEN 'ok' ELSE 'invalid' END FROM public.flyway_schema_history;
+SQL
+  )" || fail "Flyway history could not be verified; ingress remains closed."
+  [[ "${migration_state}" == "ok" ]] || fail "Flyway history does not establish successful migrations."
   harden_after_migration
   verify_role_separation
+  verify_images
+  assert_release_configuration
+  verify_private_tls
+  log "Private release checks passed. Starting the sole HTTPS ingress."
+  "${COMPOSE[@]}" up -d --no-build --pull never --no-deps --wait --wait-timeout "${WAIT_TIMEOUT}" frontend \
+    || fail "Frontend startup failed; stopping application services."
+  verify_container_images frontend backend
   print_record
 }
 
@@ -547,7 +1165,9 @@ print_record() {
   echo "Approved origin     : ${ORIGIN}"
   echo "Script checkout rev : ${rev} (${dirty})"
   echo "Image source rev    : ${SOURCE_REVISION} (declared by operator)"
-  [[ -z "${ARCHIVE_SHA256}" ]] || echo "Archive SHA-256     : ${ARCHIVE_SHA256,,}"
+  echo "Update authority    : ${UPDATE_AUTHORIZATION:-not an update} (declared by operator)"
+  echo "Recovery preconditions: artifact=${RECOVERY_VERIFIED}, compatibility=${COMPATIBILITY_VERIFIED}, state=${PERSISTENT_STATE_PRESERVED} (operator attestations)"
+  [[ -z "${ARCHIVE_SHA256}" ]] || echo "Archive SHA-256     : ${ARCHIVE_SHA256}"
   echo "Flyway success|fail : ${flyway}"
   echo "DB role separation  : ${DB_SEPARATION_RESULT}"
   echo "--- images in use ---"
@@ -566,13 +1186,25 @@ print_record() {
 main() {
   parse_args "$@"
   require_inputs
+  run_preflight
+  [[ "${SUBCOMMAND}" != "preflight" ]] || return 0
+  verify_image_coverage
+  case "${SUBCOMMAND}" in (load|deploy|all) verify_archive ;; esac
+  assert_release_configuration
+  # This read-only guard precedes load, container changes AND role/ACL changes.
+  guard_update
+  trap contain_failure EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   case "${SUBCOMMAND}" in
-    (preflight) run_preflight ;;
-    (load)      run_preflight; run_load ;;
-    (provision) run_preflight; run_provision ;;
-    (deploy)    run_preflight; run_deploy ;;
-    (all)       run_preflight; run_load; run_provision; run_deploy ;;
+    (load) run_load ;;
+    (provision) verify_images; quiesce_application; run_provision ;;
+    (deploy) verify_images; quiesce_application; run_deploy ;;
+    (all) run_load; quiesce_application; run_provision; run_deploy ;;
   esac
+  RELEASE_COMPLETE="yes"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
