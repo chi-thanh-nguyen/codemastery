@@ -931,14 +931,24 @@ psql_as() {  # $1=role $2=password; SQL on stdin. TCP to the service name, so th
   local role="$1" pw="$2" sql
   sql="$(cat)"
   printf '%s\n%s\n' "${pw}" "${sql}" | "${COMPOSE[@]}" exec -T postgres sh -c \
-    'unset PGSERVICE PGSERVICEFILE PGHOSTADDR PGOPTIONS; IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -q -tA -v ON_ERROR_STOP=1 -h postgres -p 5432 -U "'"${role}"'" -d "$POSTGRES_DB" -f -'
+    'unset PGSERVICE PGSERVICEFILE PGHOSTADDR PGOPTIONS; IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -q -tA -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -h postgres -p 5432 -U "'"${role}"'" -d "$POSTGRES_DB" -f -'
 }
 
-expect_denied() {  # description role password;SQL on stdin
-  local desc="$1"; shift
-  if psql_as "$@" >/dev/null 2>&1; then
+expect_denied() {  # description expected-SQLSTATE role password; SQL on stdin
+  local desc="$1" expected_state="$2" output; shift 2
+  if output="$(psql_as "$@" 2>&1)"; then
     fail "ROLE SEPARATION FAILED: ${desc} was allowed."
   fi
+  case "${expected_state}" in
+    (28P01)
+      [[ "${output}" == *"password authentication failed"* ]] \
+        || fail "ROLE SEPARATION INCONCLUSIVE: ${desc} did not fail with PostgreSQL's password-authentication error."
+      ;;
+    (*)
+      [[ "${output}" == *"SQL state: ${expected_state}"* || "${output}" == *"${expected_state}:"* ]] \
+        || fail "ROLE SEPARATION INCONCLUSIVE: ${desc} did not fail with the expected PostgreSQL SQLSTATE ${expected_state}."
+      ;;
+  esac
   log "  ok: ${desc} is denied"
 }
 
@@ -956,7 +966,7 @@ provision_db_roles() {
   # POSTGRES_PASSWORD only initializes an empty volume; an existing cluster can
   # retain a different password despite a matching container environment.
   expect_allowed "bootstrap database connection" "$(env_get POSTGRES_USER)" "$(env_get POSTGRES_PASSWORD)" <<<'SELECT 1;'
-  expect_denied "bootstrap connection with an incorrect password" "$(env_get POSTGRES_USER)" "$(env_get POSTGRES_PASSWORD).invalid" <<<'SELECT 1;'
+  expect_denied "bootstrap connection with an incorrect password" 28P01 "$(env_get POSTGRES_USER)" "$(env_get POSTGRES_PASSWORD).invalid" <<<'SELECT 1;'
   existing_roles="$(psql_admin 2>/dev/null <<<"SELECT coalesce(string_agg(rolname, ',' ORDER BY rolname), '') FROM pg_roles WHERE rolname IN ('${app}', '${mig}');")" \
     || fail "Could not inspect existing database identities before provisioning."
   if [[ ",${existing_roles}," == *",${app},"* ]]; then
@@ -1023,7 +1033,7 @@ verify_db_credentials() {
 verify_db_credential() {
   local label="$1" role="$2" password="$3"
   expect_allowed "${label} database connection" "${role}" "${password}" <<<'SELECT 1;'
-  expect_denied "${label} connection with an incorrect password" "${role}" "${password}.invalid" <<<'SELECT 1;'
+  expect_denied "${label} connection with an incorrect password" 28P01 "${role}" "${password}.invalid" <<<'SELECT 1;'
 }
 
 role_policy_sql() {
@@ -1155,17 +1165,17 @@ verify_role_separation() {
   role_policy_sql | psql_admin >/dev/null 2>&1 || fail "Direct/indirect database role elevation detected."
 
   verify_db_credentials
-  expect_denied  "runtime role creating a table (DDL)" "${app}" "${app_pw}" <<'SQL'
+  expect_denied  "runtime role creating a table (DDL)" 42501 "${app}" "${app_pw}" <<'SQL'
 BEGIN;
 CREATE TABLE public.cm_ddl_probe (x integer);
 ROLLBACK;
 SQL
-  expect_denied "runtime role creating a temporary table (DDL)" "${app}" "${app_pw}" <<'SQL'
+  expect_denied "runtime role creating a temporary table (DDL)" 42501 "${app}" "${app_pw}" <<'SQL'
 BEGIN;
 CREATE TEMP TABLE cm_temp_ddl_probe (x integer);
 ROLLBACK;
 SQL
-  expect_denied  "runtime role reading Flyway history" "${app}" "${app_pw}" <<<'SELECT 1 FROM public.flyway_schema_history LIMIT 1;'
+  expect_denied  "runtime role reading Flyway history" 42501 "${app}" "${app_pw}" <<<'SELECT 1 FROM public.flyway_schema_history LIMIT 1;'
   expect_allowed "migrator role creating a table (DDL, rolled back)" "${mig}" "${mig_pw}" <<'SQL'
 BEGIN;
 CREATE TABLE public.cm_ddl_probe (x integer);

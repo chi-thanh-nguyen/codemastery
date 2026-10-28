@@ -645,7 +645,7 @@ jobs:
           INSERT INTO public.normal_table (value) VALUES ('runtime DML allowed');
           INSERT INTO public."QuotedTable" (value) VALUES ('quoted identifier DML allowed');
           SQL
-          expect_denied 'runtime TRUNCATE privilege' "$runtime" "$runtime_password" <<'SQL'
+          expect_denied 'runtime TRUNCATE privilege' 42501 "$runtime" "$runtime_password" <<'SQL'
           TRUNCATE TABLE public."QuotedTable";
           SQL
           echo 'POSTGRES_ROLE_TESTS_PASS: grants, history denial, quoted identifiers, and baseline escalation checks.'
