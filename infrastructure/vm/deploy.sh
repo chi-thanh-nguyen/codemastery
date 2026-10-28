@@ -794,66 +794,152 @@ verify_archive() {
   # computed as the image ID this host's image store will report after load.
   python3 - "${ARCHIVE}" "${IMAGE_STORE}" "${EXPECT_IMAGES[@]}" <<'PY' || fail "Archive does not contain exactly the verified linux/amd64 release artifacts."
 import hashlib, json, sys, tarfile
+
+PLATFORM = ("linux", "amd64")
+UNKNOWN_PLATFORM = ("unknown", "unknown")
+INDEX_TYPES = {"application/vnd.oci.image.index.v1+json",
+               "application/vnd.docker.distribution.manifest.list.v2+json"}
+MANIFEST_TYPES = {"application/vnd.oci.image.manifest.v1+json",
+                  "application/vnd.docker.distribution.manifest.v2+json"}
+IN_TOTO = "application/vnd.in-toto+json"
+SUBJECT = "io.containerd.manifest.subject"
+NAME = "io.containerd.image.name"
+HEX = set("0123456789abcdef")
+
+def reference(name):
+    # Docker reference normalization: default registry, library namespace and
+    # latest tag. With a digest, a tag beside it is kept only for matching.
+    repository, _, digest = name.partition("@")
+    tag = ""
+    if repository.rfind(":") > repository.rfind("/"):
+        repository, tag = repository.rsplit(":", 1)
+    parts = repository.split("/")
+    if len(parts) == 1 or not ("." in parts[0] or ":" in parts[0] or parts[0] == "localhost"):
+        parts.insert(0, "docker.io")
+    if parts[0] == "docker.io" and len(parts) == 2:
+        parts.insert(1, "library")
+    if not tag and not digest:
+        tag = "latest"
+    return "/".join(parts), tag, digest
+
+def denotes(name, ref):
+    (repository, tag, digest), (want_repository, want_tag, want_digest) = name, ref
+    return (repository == want_repository and bool(tag or digest)
+            and (not tag or tag == want_tag) and (not digest or digest == want_digest))
+
+def platform(value):
+    value = value or {}
+    return value.get("os"), value.get("architecture")
+
 try:
     store = sys.argv[2]
     expected = dict(x.rsplit("=", 1) for x in sys.argv[3:])
+    approved = [(reference(ref), identity) for ref, identity in expected.items()]
+
+    def check_names(names, identity):
+        # Every name the archive applies must be an approved reference to this image.
+        for name in names:
+            if {i for ref, i in approved if denotes(reference(name), ref)} != {identity}:
+                raise ValueError("unapproved archive tag mapping")
+
     with tarfile.open(sys.argv[1], "r:*") as t:
         members = t.getmembers()
         if len({m.name for m in members}) != len(members):
             raise ValueError("duplicate archive entries")
 
-        def blob(digest):
-            # Every followed OCI descriptor must match its content-addressed bytes.
-            algorithm, _, hexdigest = digest.partition(":")
-            if algorithm != "sha256" or len(hexdigest) != 64:
+        def blob(descriptor):
+            # Every followed descriptor must match its content-addressed bytes and size.
+            algorithm, _, hexdigest = descriptor["digest"].partition(":")
+            if algorithm != "sha256" or len(hexdigest) != 64 or set(hexdigest) - HEX:
                 raise ValueError("descriptor")
             data = t.extractfile("blobs/sha256/" + hexdigest).read()
             if hashlib.sha256(data).hexdigest() != hexdigest:
                 raise ValueError("blob digest")
+            if "size" in descriptor and descriptor["size"] != len(data):
+                raise ValueError("descriptor size")
             return data
 
-        # containerd image IDs are the saved OCI index/manifest digests. Bind each
-        # to the single linux/amd64 image config it resolves to; attestation
-        # manifests are not runnable images and are ignored.
-        targets = {}
+        def document(descriptor, kinds):
+            if descriptor.get("mediaType") not in kinds:
+                raise ValueError("media type")
+            parsed = json.loads(blob(descriptor))
+            if parsed.get("mediaType", descriptor["mediaType"]) != descriptor["mediaType"]:
+                raise ValueError("media type")
+            return parsed
+
+        targets = {}      # runnable config digest -> image ID on this store
+        selected = set()  # runnable manifest digests that a referrer may describe
+        names = {}        # image ID -> names the archive index applies
         if store == "containerd":
+            # The image ID is the top-level index or manifest digest. A registry
+            # index lists every platform, but Docker saves only the platforms it
+            # holds: select the unique linux/amd64 manifest and never read the
+            # other platforms. Attestation children are not runnable images.
+            referrers = []
             for top in json.load(t.extractfile("index.json"))["manifests"]:
-                document = json.loads(blob(top["digest"]))
-                if "manifests" in document:
-                    images = [m for m in document["manifests"]
-                              if (m.get("annotations") or {}).get("vnd.docker.reference.type") != "attestation-manifest"]
-                    platform = (images[0].get("platform") or {}) if len(images) == 1 else {}
-                    if platform.get("os") != "linux" or platform.get("architecture") != "amd64":
+                annotations = top.get("annotations") or {}
+                if SUBJECT in annotations:
+                    referrers.append(top)
+                    continue
+                if top.get("mediaType") in INDEX_TYPES:
+                    candidates = []
+                    for child in document(top, INDEX_TYPES)["manifests"]:
+                        if (child.get("annotations") or {}).get("vnd.docker.reference.type") == "attestation-manifest":
+                            if platform(child.get("platform")) != UNKNOWN_PLATFORM:
+                                raise ValueError("attestation platform")
+                        elif platform(child.get("platform")) == PLATFORM:
+                            candidates.append(child)
+                    if len(candidates) != 1 or candidates[0]["platform"].get("variant"):
                         raise ValueError("platform")
-                    document = json.loads(blob(images[0]["digest"]))
-                if targets.setdefault(document["config"]["digest"], top["digest"]) != top["digest"]:
+                    descriptor = candidates[0]
+                else:
+                    descriptor = top
+                image = document(descriptor, MANIFEST_TYPES)
+                if targets.setdefault(image["config"]["digest"], top["digest"]) != top["digest"]:
                     raise ValueError("ambiguous image identity")
+                selected.add(descriptor["digest"])
+                names.setdefault(top["digest"], set())
+                if NAME in annotations:
+                    names[top["digest"]].add(annotations[NAME])
+            # `docker save --platform` writes each image's attestation as a
+            # top-level referrer. Accept only an unnamed in-toto statement about
+            # a selected image; it must never resolve to a runnable image.
+            for top in referrers:
+                annotations = top["annotations"]
+                if (NAME in annotations or "org.opencontainers.image.ref.name" in annotations
+                        or annotations[SUBJECT] not in selected):
+                    raise ValueError("unexpected referrer")
+                statement = document(top, MANIFEST_TYPES)
+                layers = statement.get("layers") or []
+                if (not layers or any(layer.get("mediaType") != IN_TOTO for layer in layers)
+                        or platform(json.loads(blob(statement["config"]))) != UNKNOWN_PLATFORM
+                        or statement["config"]["digest"] in targets):
+                    raise ValueError("unexpected referrer")
         elif store != "graphdriver":
             raise ValueError("image store")
 
-        manifest = json.load(t.extractfile("manifest.json"))
         ids = set()
         resolved = set()
-        for item in manifest:
+        for item in json.load(t.extractfile("manifest.json")):
             data = t.extractfile(item["Config"]).read()
             config_digest = "sha256:" + hashlib.sha256(data).hexdigest()
             identity = targets.get(config_digest) if store == "containerd" else config_digest
             if identity is None:
                 raise ValueError("image without a verified OCI identity")
             resolved.add(config_digest)
-            config = json.loads(data)
-            if config.get("os") != "linux" or config.get("architecture") != "amd64":
+            if platform(json.loads(data)) != PLATFORM:
                 raise ValueError("platform")
             if identity not in expected.values():
                 raise ValueError("unapproved archive image")
             ids.add(identity)
-            for tag in item.get("RepoTags") or []:
-                if expected.get(tag) != identity:
-                    raise ValueError("unapproved archive tag mapping")
+            check_names(item.get("RepoTags") or [], identity)
         if ids != set(expected.values()):
             raise ValueError("missing artifact")
-        if store == "containerd" and set(targets) != resolved:
-            raise ValueError("unexpected archive image")
+        if store == "containerd":
+            if set(targets) != resolved:
+                raise ValueError("unexpected archive image")
+            for identity, applied in names.items():
+                check_names(applied, identity)
 except Exception:
     sys.exit(1)  # Do not print untrusted archive metadata or contents.
 PY

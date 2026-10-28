@@ -397,87 +397,173 @@ jobs:
           script=infrastructure/vm/deploy.sh
           work="$(mktemp -d)"
           trap 'rm -rf "$work"' EXIT
-          # Synthetic docker-save layouts: an OCI index per image (containerd
-          # image store) plus manifest.json, which both image stores emit.
+          # Synthetic layouts shaped like Docker's own saves. With the containerd
+          # image store a registry image is a multi-platform index whose other
+          # platforms are absent from the archive, with in-toto attestation
+          # manifests; --platform saves add those attestations as top-level
+          # referrers. The classic store identifies images by config digest.
           python3 - "$work" <<'PY'
-          import hashlib, io, json, sys, tarfile
+          import copy, hashlib, io, json, sys, tarfile
 
           work = sys.argv[1]
-          digest = lambda data: "sha256:" + hashlib.sha256(data).hexdigest()
-          index_type = "application/vnd.oci.image.index.v1+json"
-          manifest_type = "application/vnd.oci.image.manifest.v1+json"
+          INDEX = "application/vnd.oci.image.index.v1+json"
+          MANIFEST = "application/vnd.oci.image.manifest.v1+json"
+          CONFIG = "application/vnd.oci.image.config.v1+json"
+          LAYER = "application/vnd.oci.image.layer.v1.tar+gzip"
+          IN_TOTO = "application/vnd.in-toto+json"
+          NAME, REF, SUBJECT = "io.containerd.image.name", "org.opencontainers.image.ref.name", "io.containerd.manifest.subject"
 
-          def image(n, arch="amd64", extra_platform=None, attestation=True):
-              blobs = {}
-              def put(document):
-                  data = json.dumps(document, sort_keys=True).encode()
-                  blobs[digest(data)] = data
-                  return digest(data), len(data)
-              def platform_manifest(architecture):
-                  config = put({"architecture": architecture, "os": "linux", "fixture": n,
-                                "config": {"Cmd": ["/payload"]}, "rootfs": {"type": "layers", "diff_ids": []}})
-                  manifest = put({"schemaVersion": 2, "mediaType": manifest_type, "layers": [],
-                                  "config": {"mediaType": "application/vnd.oci.image.config.v1+json",
-                                             "digest": config[0], "size": config[1]}})
-                  return config, manifest
-              config, manifest = platform_manifest(arch)
-              children = [{"mediaType": manifest_type, "digest": manifest[0], "size": manifest[1],
-                           "platform": {"os": "linux", "architecture": arch}}]
-              if extra_platform:
-                  _, other = platform_manifest(extra_platform)
-                  children.append({"mediaType": manifest_type, "digest": other[0], "size": other[1],
-                                   "platform": {"os": "linux", "architecture": extra_platform}})
-              if attestation:
-                  statement = put({"schemaVersion": 2, "mediaType": manifest_type, "layers": [],
-                                   "config": {"mediaType": "application/vnd.oci.empty.v1+json",
-                                              "digest": digest(b"{}"), "size": 2}})
-                  children.append({"mediaType": manifest_type, "digest": statement[0], "size": statement[1],
-                                   "platform": {"os": "unknown", "architecture": "unknown"},
-                                   "annotations": {"vnd.docker.reference.type": "attestation-manifest",
-                                                   "vnd.docker.reference.digest": manifest[0]}})
-              index = put({"schemaVersion": 2, "mediaType": index_type, "manifests": children})
-              return {"config": config[0], "index": index, "blobs": blobs}
+          def put(blobs, document):
+              data = json.dumps(document, sort_keys=True).encode()
+              digest = "sha256:" + hashlib.sha256(data).hexdigest()
+              blobs[digest] = data
+              return {"digest": digest, "size": len(data)}
 
-          def archive(name, entries, orphan=None, tamper=False, duplicate=False):
+          def attestation(blobs, subject, config_platform=("unknown", "unknown"), layer_type=IN_TOTO):
+              statement = put(blobs, {"_type": "https://in-toto.io/Statement/v1",
+                                      "subject": [{"digest": {"sha256": subject[7:]}}]})
+              config = put(blobs, {"os": config_platform[0], "architecture": config_platform[1],
+                                   "config": {}, "rootfs": {"type": "layers", "diff_ids": []}})
+              return put(blobs, {"schemaVersion": 2, "mediaType": MANIFEST,
+                                 "config": dict(config, mediaType=CONFIG),
+                                 "layers": [dict(statement, mediaType=layer_type)]})
+
+          def image(tag, platforms=(("amd64", None), ("arm64", "v8")), present=("amd64",),
+                    attest=True, attestation_platform=("unknown", "unknown"), nested=False):
+              saved, children, out = {}, [], {"tag": tag}
+              for arch, variant in platforms:
+                  blobs = {}
+                  config = put(blobs, {"architecture": arch, "os": "linux", "fixture": tag,
+                                       "config": {"Cmd": ["/payload"]}, "rootfs": {"type": "layers", "diff_ids": []}})
+                  manifest = put(blobs, {"schemaVersion": 2, "mediaType": MANIFEST, "layers": [],
+                                         "config": dict(config, mediaType=CONFIG)})
+                  platform = {"os": "linux", "architecture": arch}
+                  if variant:
+                      platform["variant"] = variant
+                  children.append(dict(manifest, platform=platform,
+                                       mediaType=INDEX if nested and arch == "amd64" else MANIFEST))
+                  if attest:
+                      statement = attestation(blobs, manifest["digest"])
+                      children.append(dict(statement, mediaType=MANIFEST,
+                                           platform={"os": attestation_platform[0], "architecture": attestation_platform[1]},
+                                           annotations={"vnd.docker.reference.type": "attestation-manifest",
+                                                        "vnd.docker.reference.digest": manifest["digest"]}))
+                      out.setdefault("attestations", {})[arch] = statement
+                  if arch in present:
+                      saved.update(blobs)
+                      out.setdefault("config", config["digest"])
+                  out.setdefault("manifests", {})[arch] = manifest
+              out["index"] = put(saved, {"schemaVersion": 2, "mediaType": INDEX, "manifests": children})
+              out["blobs"] = saved
+              return out
+
+          def default_tops(images):
+              return [dict(i["index"], mediaType=INDEX,
+                           annotations={NAME: "docker.io/library/" + i["tag"], REF: i["tag"].split(":")[1]})
+                      for i in images]
+
+          def platform_tops(images):
+              tops = []
+              for i in images:
+                  tops.append(dict(i["manifests"]["amd64"], mediaType=MANIFEST,
+                                   annotations={NAME: "docker.io/library/" + i["tag"], REF: i["tag"].split(":")[1]}))
+                  tops.append(dict(i["attestations"]["amd64"], mediaType=MANIFEST,
+                                   annotations={SUBJECT: i["manifests"]["amd64"]["digest"]}))
+              return tops
+
+          def items(images):
+              return [{"Config": "blobs/sha256/" + i["config"][7:], "RepoTags": [i["tag"]], "Layers": []}
+                      for i in images]
+
+          def archive(name, images, tops, entries, blobs=None, tamper=False, duplicate=False):
+              everything = dict(blobs or {})
+              for i in images:
+                  everything.update(i["blobs"])
               with tarfile.open(f"{work}/{name}.tar", "w") as t:
                   def add(path, data):
                       info = tarfile.TarInfo(path)
                       info.size = len(data)
                       t.addfile(info, io.BytesIO(data))
-                  blobs = {}
-                  for _, item in entries + ([("", orphan)] if orphan else []):
-                      blobs.update(item["blobs"])
-                  for key, data in sorted(blobs.items()):
-                      if tamper and key == entries[0][1]["index"][0]:
+                  for key, data in sorted(everything.items()):
+                      if tamper and key == images[0]["index"]["digest"]:
                           data = data.replace(b'"schemaVersion": 2', b'"schemaVersion":  2')
                       add("blobs/sha256/" + key[7:], data)
                   if duplicate:
-                      add("blobs/sha256/" + entries[0][1]["config"][7:], blobs[entries[0][1]["config"]])
-                  add("index.json", json.dumps({"schemaVersion": 2, "mediaType": index_type, "manifests": [
-                      {"mediaType": index_type, "digest": item["index"][0], "size": item["index"][1]}
-                      for _, item in entries + ([("", orphan)] if orphan else [])]}).encode())
-                  add("manifest.json", json.dumps([
-                      {"Config": "blobs/sha256/" + item["config"][7:], "RepoTags": [tag], "Layers": []}
-                      for tag, item in entries]).encode())
+                      add("blobs/sha256/" + images[0]["config"][7:], everything[images[0]["config"]])
+                  add("index.json", json.dumps({"schemaVersion": 2, "mediaType": INDEX, "manifests": tops}).encode())
+                  add("manifest.json", json.dumps(entries).encode())
 
-          backend, frontend, extra = image(1), image(2, attestation=False), image(3)
-          arm64, multi = image(4, arch="arm64"), image(5, extra_platform="arm64")
-          release = [("backend:r1", backend), ("frontend:r1", frontend)]
-          archive("valid", release)
-          archive("unexpected", release + [("extra:r1", extra)])
-          archive("orphan-index", release, orphan=extra)
-          archive("arm64", [("backend:r1", arm64), ("frontend:r1", frontend)])
-          archive("multi-platform", [("backend:r1", multi), ("frontend:r1", frontend)])
-          archive("tampered", release, tamper=True)
-          archive("duplicate", release, duplicate=True)
-          ids = {name: {"config": item["config"], "index": item["index"][0]}
-                 for name, item in (("backend", backend), ("frontend", frontend), ("extra", extra),
-                                    ("arm64", arm64), ("multi", multi))}
+          backend, frontend = image("backend:r1"), image("frontend:r1")
+          release = [backend, frontend]
+          archive("registry", release, default_tops(release), items(release))
+          archive("registry-platform", release, platform_tops(release), items(release))
+          built = [image("backend:r1", platforms=(("amd64", None),)), image("frontend:r1", platforms=(("amd64", None),))]
+          archive("built", built, default_tops(built), items(built))
+          plain = [image("backend:r1", attest=False), image("frontend:r1", attest=False)]
+          archive("unattested", plain, default_tops(plain), items(plain))
+          nameless = copy.deepcopy(default_tops(release))
+          for top in nameless:
+              del top["annotations"]
+          unnamed = items(release)
+          for entry in unnamed:
+              entry["RepoTags"] = None
+          archive("nameless", release, nameless, unnamed)
+
+          variants = {}
+          def variant(name, **options):
+              # Each case is checked against its own identities, so a rejection
+              # cannot come from an unrelated identity mismatch.
+              variants[name] = image("backend:r1", **options)
+              images = [variants[name], frontend]
+              archive(name, images, default_tops(images), items(images))
+          variant("ambiguous-amd64", platforms=(("amd64", None), ("amd64", "v3")))
+          variant("amd64-variant", platforms=(("amd64", "v3"), ("arm64", "v8")))
+          variant("amd64-absent", present=("arm64",))
+          variant("arm64-only", platforms=(("arm64", "v8"),), present=("arm64",))
+          variant("attestation-platform", attestation_platform=("linux", "amd64"))
+          variant("nested-index", nested=True)
+          tops = default_tops(release); tops[0]["size"] += 1
+          archive("size-mismatch", release, tops, items(release))
+          tops = default_tops(release); tops[0]["mediaType"] = "application/vnd.example.unknown+json"
+          archive("media-type", release, tops, items(release))
+
+          def referrer(name, change, blobs=None):
+              tops = platform_tops(release)
+              change(tops[1])
+              archive(name, release, tops, items(release), blobs=blobs)
+          referrer("referrer-unknown-subject",
+                   lambda top: top["annotations"].update({SUBJECT: "sha256:" + "1" * 64}))
+          referrer("referrer-other-platform",
+                   lambda top: top["annotations"].update({SUBJECT: backend["manifests"]["arm64"]["digest"]}))
+          referrer("referrer-named", lambda top: top["annotations"].update({NAME: "docker.io/library/backend:r1"}))
+          extra_blobs = {}
+          runnable = attestation(extra_blobs, backend["manifests"]["amd64"]["digest"], layer_type=LAYER)
+          referrer("referrer-runnable-layers", lambda top: top.update(runnable), extra_blobs)
+          linux_blobs = {}
+          linux = attestation(linux_blobs, backend["manifests"]["amd64"]["digest"], config_platform=("linux", "amd64"))
+          referrer("referrer-linux-config", lambda top: top.update(linux), linux_blobs)
+
+          extra = image("extra:r1")
+          archive("orphan-index", release + [extra], default_tops(release + [extra]), items(release))
+          archive("unexpected", release + [extra], default_tops(release + [extra]), items(release + [extra]))
+          tops = default_tops(release); tops[0]["annotations"][NAME] = "docker.io/library/frontend:r1"
+          archive("name-mismatch", release, tops, items(release))
+          entries = items(release); entries[0]["RepoTags"] = ["backend:latest"]
+          archive("unapproved-repotag", release, default_tops(release), entries)
+          archive("tampered", release, default_tops(release), items(release), tamper=True)
+          archive("duplicate", release, default_tops(release), items(release), duplicate=True)
+
+          ids = {}
+          for key, item in [("backend", backend), ("frontend", frontend), ("extra", extra),
+                            ("built-backend", built[0]), ("built-frontend", built[1]),
+                            ("plain-backend", plain[0]), ("plain-frontend", plain[1])] + list(variants.items()):
+              ids[key] = {"index": item["index"]["digest"], "config": item["config"],
+                          "manifest": item["manifests"].get("amd64", {}).get("digest", "")}
           json.dump(ids, open(f"{work}/ids.json", "w"))
           PY
           id() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]][sys.argv[3]])' "$work/ids.json" "$1" "$2"; }
           archive_check() {  # expected-result store archive [sha256|-] REF=ID...
-            local want="$1" store="$2" archive="$work/$3.tar" sha="$4" result=accepted
+            local want="$1" store="$2" name="$3" archive="$work/$3.tar" sha="$4" result=accepted
             shift 4
             [[ "$sha" != - ]] || sha="$(sha256sum "$archive" | awk '{print $1}')"
             if ! bash -c '
@@ -486,28 +572,48 @@ jobs:
               verify_archive' _ "$script" "$store" "$archive" "$sha" "$@" >/dev/null 2>&1; then
               result=rejected
             fi
-            echo "$result: $store $*"
-            [[ "$result" == "$want" ]] || { echo "Expected $want." >&2; exit 1; }
+            echo "$result: ${store:-<none>} $name"
+            [[ "$result" == "$want" ]] || { echo "Expected $want for ${store:-<none>} $name." >&2; exit 1; }
           }
           be_index="backend:r1=$(id backend index)"; fe_index="frontend:r1=$(id frontend index)"
           be_config="backend:r1=$(id backend config)"; fe_config="frontend:r1=$(id frontend config)"
-          archive_check accepted containerd valid - "$be_index" "$fe_index"
-          archive_check accepted graphdriver valid - "$be_config" "$fe_config"
-          archive_check rejected containerd valid - "$be_config" "$fe_config"
-          archive_check rejected graphdriver valid - "$be_index" "$fe_index"
-          archive_check rejected containerd valid "$(printf '0%.0s' {1..64})" "$be_index" "$fe_index"
-          archive_check rejected containerd valid - "backend:r1=$(id extra index)" "$fe_index"
-          archive_check rejected containerd valid - "$be_index" "$fe_index" "extra:r1=$(id extra index)"
-          archive_check rejected containerd unexpected - "$be_index" "$fe_index"
-          archive_check rejected containerd orphan-index - "$be_index" "$fe_index"
-          archive_check rejected containerd valid - "backend:r1=$(id frontend index)" "frontend:r1=$(id backend index)"
-          archive_check rejected graphdriver valid - "backend:r1=$(id frontend config)" "frontend:r1=$(id backend config)"
-          archive_check rejected containerd tampered - "$be_index" "$fe_index"
-          archive_check rejected containerd duplicate - "$be_index" "$fe_index"
-          archive_check rejected "" valid - "$be_config" "$fe_config"
-          archive_check rejected containerd arm64 - "backend:r1=$(id arm64 index)" "$fe_index"
-          archive_check rejected graphdriver arm64 - "backend:r1=$(id arm64 config)" "$fe_config"
-          archive_check rejected containerd multi-platform - "backend:r1=$(id multi index)" "$fe_index"
+          be_manifest="backend:r1=$(id backend manifest)"; fe_manifest="frontend:r1=$(id frontend manifest)"
+          # Registry multi-platform indexes, as saved by the containerd store.
+          archive_check accepted containerd registry - "$be_index" "$fe_index"
+          archive_check accepted containerd registry-platform - "$be_manifest" "$fe_manifest"
+          archive_check accepted containerd built - "backend:r1=$(id built-backend index)" "frontend:r1=$(id built-frontend index)"
+          archive_check accepted containerd unattested - "backend:r1=$(id plain-backend index)" "frontend:r1=$(id plain-frontend index)"
+          archive_check accepted containerd nameless - "$be_index" "$fe_index"
+          archive_check accepted containerd registry - "backend:r1@$(id backend index)=$(id backend index)" "$fe_index"
+          archive_check accepted graphdriver registry - "$be_config" "$fe_config"
+          # Store-specific identity kinds, checksum and mapping.
+          archive_check rejected containerd registry - "$be_config" "$fe_config"
+          archive_check rejected graphdriver registry - "$be_index" "$fe_index"
+          archive_check rejected containerd registry-platform - "$be_index" "$fe_index"
+          archive_check rejected containerd registry "$(printf '0%.0s' {1..64})" "$be_index" "$fe_index"
+          archive_check rejected containerd registry - "backend:r1=$(id extra index)" "$fe_index"
+          archive_check rejected containerd registry - "$be_index"
+          archive_check rejected containerd registry - "$be_index" "$fe_index" "extra:r1=$(id extra index)"
+          archive_check rejected containerd registry - "backend:r1=$(id frontend index)" "frontend:r1=$(id backend index)"
+          archive_check rejected graphdriver registry - "backend:r1=$(id frontend config)" "frontend:r1=$(id backend config)"
+          archive_check rejected "" registry - "$be_config" "$fe_config"
+          # Platform selection and digest-chain integrity.
+          for case in ambiguous-amd64 amd64-variant amd64-absent arm64-only attestation-platform nested-index; do
+            archive_check rejected containerd "$case" - "backend:r1=$(id "$case" index)" "$fe_index"
+          done
+          archive_check rejected graphdriver arm64-only - "backend:r1=$(id arm64-only config)" "$fe_config"
+          for case in size-mismatch media-type tampered duplicate; do
+            archive_check rejected containerd "$case" - "$be_index" "$fe_index"
+          done
+          # Referrers, extra images and names applied by the archive.
+          for case in referrer-unknown-subject referrer-other-platform referrer-named \
+                      referrer-runnable-layers referrer-linux-config; do
+            archive_check rejected containerd "$case" - "$be_manifest" "$fe_manifest"
+          done
+          for case in orphan-index unexpected name-mismatch unapproved-repotag; do
+            archive_check rejected containerd "$case" - "$be_index" "$fe_index"
+          done
+          archive_check rejected graphdriver unapproved-repotag - "$be_config" "$fe_config"
       - name: Check image identity through a real save/load round trip
         shell: bash
         run: |
@@ -733,3 +839,169 @@ jobs:
           }
           run_containment_case no
           run_containment_case yes
+
+  deployment-script-containerd:
+    name: VM deployment containerd image store
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable the containerd image store
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo python3 - <<'PY'
+          import json, pathlib
+          path = pathlib.Path("/etc/docker/daemon.json")
+          text = path.read_text() if path.exists() else ""
+          config = json.loads(text) if text.strip() else {}
+          config.setdefault("features", {})["containerd-snapshotter"] = True
+          path.write_text(json.dumps(config, indent=2) + "\n")
+          PY
+          sudo systemctl restart docker
+          for attempt in {1..30}; do
+            docker info >/dev/null 2>&1 && break
+            sleep 2
+          done
+          store="$(docker info --format '{{range .DriverStatus}}{{if eq (index . 0) "driver-type"}}{{index . 1}}{{end}}{{end}}')"
+          [[ "$store" == io.containerd.snapshotter.v1 ]] || { echo "containerd image store is not active: '$store'" >&2; exit 1; }
+          docker version --format 'Docker Engine {{.Server.Version}}, {{.Server.Os}}/{{.Server.Arch}}, image store '"$store"
+      - name: Verify registry archives through real save/load round trips
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          prefix="codemastery-ci-containerd-${GITHUB_RUN_ID:-local}-$$"
+          cleanup() {
+            docker ps -aq --filter "name=$prefix" | xargs -r docker rm -f >/dev/null 2>&1 || true
+            docker image ls --format '{{.Repository}}:{{.Tag}}' | grep "^$prefix/" | xargs -r docker image rm -f >/dev/null 2>&1 || true
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          # The base Compose file's registry images: official multi-platform
+          # PostgreSQL and the digest-pinned MinIO server and client. They remain
+          # local-only pins; this exercises their real registry index and
+          # attestation structure, not their production admission.
+          mapfile -t registry < <(sed -n 's/^    image: //p' infrastructure/docker-compose.yml)
+          [[ ${#registry[@]} -eq 3 ]] || { echo "Unexpected base Compose image list." >&2; exit 1; }
+          for ref in "${registry[@]}"; do docker pull -q "$ref" >/dev/null; done
+          printf 'fixture\n' > "$work/payload"
+          printf 'FROM scratch\nCOPY payload /payload\nCMD ["/payload"]\n' > "$work/backend.Dockerfile"
+          printf 'FROM scratch\nCOPY payload /payload\nHEALTHCHECK CMD ["/payload"]\nCMD ["/payload"]\n' > "$work/frontend.Dockerfile"
+          for service in backend frontend; do
+            docker build -q --platform linux/amd64 -f "$work/$service.Dockerfile" -t "$prefix/$service:r1" "$work" >/dev/null
+          done
+          # Disposable names, so removing and reloading exercises the real store.
+          refs=()
+          for i in 0 1 2; do
+            service=(postgres minio minio-init); refs+=("$prefix/${service[$i]}:r1")
+            docker tag "${registry[$i]}" "${refs[$i]}"
+          done
+          refs+=("$prefix/backend:r1" "$prefix/frontend:r1")
+          cat > "$work/structure.py" <<'PY'
+          import json, sys, tarfile
+          # Prove the archive has the structure the old check rejected.
+          t = tarfile.open(sys.argv[1]); names = set(t.getnames()); mode = sys.argv[2]
+          tops = json.load(t.extractfile("index.json"))["manifests"]
+          if mode == "default":
+              index = next(m for m in tops if m["mediaType"].endswith("image.index.v1+json")
+                           and "postgres" in (m.get("annotations") or {}).get("io.containerd.image.name", ""))
+              children = json.loads(t.extractfile("blobs/sha256/" + index["digest"][7:]).read())["manifests"]
+              runnable = [c for c in children
+                          if (c.get("annotations") or {}).get("vnd.docker.reference.type") != "attestation-manifest"]
+              absent = [c for c in runnable if "blobs/sha256/" + c["digest"][7:] not in names]
+              assert len(runnable) > 1 and absent, "PostgreSQL index is not a partial multi-platform save"
+              print(f"PostgreSQL index: {len(runnable)} platforms listed, {len(absent)} absent from the archive")
+          else:
+              referrers = [m for m in tops if "io.containerd.manifest.subject" in (m.get("annotations") or {})]
+              assert referrers, "--platform save has no top-level attestation referrer"
+              print(f"--platform save: {len(referrers)} top-level attestation referrers")
+          PY
+          cat > "$work/ids.py" <<'PY'
+          import json, sys, tarfile
+          # Image IDs a --platform archive will produce: its named top-level manifests.
+          t = tarfile.open(sys.argv[1])
+          named = {(m.get("annotations") or {}).get("io.containerd.image.name"): m["digest"]
+                   for m in json.load(t.extractfile("index.json"))["manifests"]}
+          for ref in sys.argv[2:]:
+              print(f"{ref}={named['docker.io/' + ref]}")
+          PY
+          cat > "$work/mutate.py" <<'PY'
+          import io, json, sys, tarfile
+          # Real-archive mutations: drop PostgreSQL's amd64 manifest, or alter a referrer.
+          source, target, mode = sys.argv[1:]
+          NAME, SUBJECT = "io.containerd.image.name", "io.containerd.manifest.subject"
+          with tarfile.open(source) as t, tarfile.open(target, "w") as out:
+              index = json.load(t.extractfile("index.json"))
+              skip = set()
+              if mode == "drop-amd64":
+                  top = next(m for m in index["manifests"] if "postgres" in (m.get("annotations") or {}).get(NAME, ""))
+                  children = json.loads(t.extractfile("blobs/sha256/" + top["digest"][7:]).read())["manifests"]
+                  amd64 = next(c for c in children if (c.get("platform") or {}).get("architecture") == "amd64")
+                  skip.add("blobs/sha256/" + amd64["digest"][7:])
+              else:
+                  referrer = next(m for m in index["manifests"] if SUBJECT in (m.get("annotations") or {}))
+                  if mode == "referrer-subject":
+                      referrer["annotations"][SUBJECT] = "sha256:" + "1" * 64
+                  else:
+                      referrer["annotations"][NAME] = "docker.io/library/unreviewed:latest"
+              for member in t.getmembers():
+                  if member.name in skip:
+                      continue
+                  data = t.extractfile(member).read() if member.isfile() else None
+                  if member.name == "index.json":
+                      data = json.dumps(index).encode()
+                      member.size = len(data)
+                  out.addfile(member, io.BytesIO(data) if data is not None else None)
+          PY
+          bash -c '
+            set -euo pipefail
+            source "$1"; work="$2"; shift 2; refs=("$@")
+            services=(postgres minio minio-init backend frontend)
+            detect_image_store
+            [[ "$IMAGE_STORE" == containerd ]] || { echo "Expected the containerd image store." >&2; exit 1; }
+            COMPOSE_MODEL="$(python3 -c "import json,sys; s=sys.argv[1:]; print(json.dumps({\"services\": {s[i]: {\"image\": s[i+1]} for i in range(0, len(s), 2)}}))" \
+              postgres "${refs[0]}" minio "${refs[1]}" minio-init "${refs[2]}" backend "${refs[3]}" frontend "${refs[4]}")"
+            RELEASE_IMAGES="$(printf "%s\n" "${refs[@]}")"
+            current_ids() { local ref; for ref in "${refs[@]}"; do printf "%s=%s\n" "$ref" "$(docker image inspect --format "{{.Id}}" "$ref")"; done; }
+            remove_release() { local ref; for ref in "${refs[@]}"; do docker image rm -f "$(docker image inspect --format "{{.Id}}" "$ref")" >/dev/null; done; }
+            check_archive() { ARCHIVE="$1"; ARCHIVE_SHA256="$(sha256sum "$ARCHIVE" | awk "{print \$1}")"; verify_archive; }
+            rejects() { if ("$@") >/dev/null 2>&1; then echo "Accepted: $*" >&2; exit 1; fi; }
+            containers() {
+              local i cid
+              for i in "${!services[@]}"; do
+                cid="$(docker create "${refs[$i]}")"
+                verify_service_container "${services[$i]}" "$cid"
+                docker rm "$cid" >/dev/null
+              done
+            }
+
+            mapfile -t default_ids < <(current_ids)
+            docker save -o "$work/default.tar" "${refs[@]}"
+            python3 "$work/structure.py" "$work/default.tar" default
+            EXPECT_IMAGES=("${default_ids[@]}"); check_archive "$work/default.tar"
+            remove_release; docker load -i "$work/default.tar" >/dev/null
+            verify_images; containers
+            echo "Default save: archive, loaded image and container identities agree."
+
+            docker save --platform linux/amd64 -o "$work/platform.tar" "${refs[@]}"
+            python3 "$work/structure.py" "$work/platform.tar" platform
+            mapfile -t platform_ids < <(python3 "$work/ids.py" "$work/platform.tar" "${refs[@]}")
+            EXPECT_IMAGES=("${platform_ids[@]}"); check_archive "$work/platform.tar"
+            remove_release; docker load -i "$work/platform.tar" >/dev/null
+            verify_images; containers
+            echo "--platform save: archive, loaded image and container identities agree."
+
+            EXPECT_IMAGES=("${default_ids[@]}"); rejects check_archive "$work/platform.tar"
+            EXPECT_IMAGES=("${platform_ids[@]}"); rejects check_archive "$work/default.tar"
+            EXPECT_IMAGES=("${default_ids[@]}"); rejects eval "IMAGE_STORE=graphdriver; check_archive \"$work/default.tar\""
+            EXPECT_IMAGES=("${refs[0]}=${default_ids[1]#*=}" "${refs[1]}=${default_ids[0]#*=}" "${default_ids[@]:2}")
+            rejects check_archive "$work/default.tar"
+            for mode in drop-amd64 referrer-subject referrer-name; do
+              source_archive="$work/platform.tar"; EXPECT_IMAGES=("${platform_ids[@]}")
+              [[ "$mode" != drop-amd64 ]] || { source_archive="$work/default.tar"; EXPECT_IMAGES=("${default_ids[@]}"); }
+              python3 "$work/mutate.py" "$source_archive" "$work/$mode.tar" "$mode"
+              rejects check_archive "$work/$mode.tar"
+            done
+            echo "Wrong identities, store kind, swapped mapping, missing amd64 manifest and altered referrers are rejected."
+          ' _ "$script" "$work" "${refs[@]}"
