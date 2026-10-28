@@ -145,6 +145,25 @@ jobs:
           )
           if result.returncode == 0 or "unapproved environment variables" not in result.stderr:
               raise SystemExit("Compose policy did not reject an unapproved environment variable")
+          for option, value in (
+              ("pre_start", [{"command": ["sh", "-c", "true"]}]),
+              ("post_start", [{"command": ["sh", "-c", "true"], "privileged": True}]),
+              ("pre_stop", [{"command": ["sh", "-c", "true"]}]),
+              ("post_stop", [{"command": ["sh", "-c", "true"]}]),
+              ("deploy", {"replicas": 2, "privileged": True}),
+              ("logging", {"driver": "syslog"}),
+              ("tmpfs", ["/run"]),
+              ("secrets", ["unreviewed"]),
+              ("configs", ["unreviewed"]),
+              ("develop", {"watch": [{"path": ".", "action": "sync"}]}),
+          ):
+              config = {"services": {"postgres": {"image": "postgres:17", option: value}}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              if result.returncode == 0 or "unsupported Compose options" not in result.stderr:
+                  raise SystemExit(f"Compose policy did not reject unapproved {option}")
           network_problem = "the Compose default network contains unapproved network options"
           for network, approved in (
               ({"name": "codemastery_default", "ipam": {}}, True),
@@ -245,7 +264,7 @@ jobs:
             local expected="$1" name="$2" output
             cat > "$work/$name.yml"
             if output="$(preflight --compose-override "$work/$name.yml" 2>&1)"; then
-              echo "Preflight accepted the $name network override." >&2
+              echo "Preflight accepted the $name policy override." >&2
               exit 1
             fi
             if [[ "$output" != *"$expected"* ]]; then
@@ -296,6 +315,86 @@ jobs:
           networks:
             side: {}
           EOF
+          reject 'unsupported Compose options' post-start-hook <<'EOF'
+          services:
+            frontend:
+              post_start:
+                - command: ["sh", "-c", "echo synthetic-hook"]
+          EOF
+          reject 'unsupported Compose options' pre-stop-hook <<'EOF'
+          services:
+            backend:
+              pre_stop:
+                - command: ["sh", "-c", "echo synthetic-hook"]
+          EOF
+          reject 'unsupported Compose options' deploy-replicas <<'EOF'
+          services:
+            backend:
+              deploy:
+                replicas: 2
+          EOF
+          reject 'unsupported Compose options' deploy-privileged <<'EOF'
+          services:
+            backend:
+              deploy:
+                privileged: true
+          EOF
+          reject 'unsupported Compose options' logging-sink <<'EOF'
+          services:
+            backend:
+              logging:
+                driver: syslog
+          EOF
+          reject 'unsupported Compose options' tmpfs-mount <<'EOF'
+          services:
+            backend:
+              tmpfs: ["/run"]
+          EOF
+          reject 'unsupported Compose options' minio-secret <<'EOF'
+          secrets:
+            synthetic:
+              file: /dev/null
+          services:
+            minio:
+              secrets: [synthetic]
+          EOF
+          reject_certificate() {
+            local expected="$1" name="$2" output
+            if output="$(preflight 2>&1)"; then
+              echo "Preflight accepted invalid certificate material: $name." >&2
+              exit 1
+            fi
+            if [[ "$output" != *"$expected"* ]]; then
+              echo "Unexpected certificate rejection for $name:" >&2
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+          }
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/certs/extra-key.pem" 2>/dev/null
+          chmod 400 "$work/certs/extra-key.pem"
+          reject_certificate 'exactly one certificate matching its single private key' extra-private-key
+          rm "$work/certs/extra-key.pem"
+          cp "$work/certs/privkey.pem" "$work/privkey.original"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/certs/privkey.pem" 2>/dev/null
+          chmod 400 "$work/certs/privkey.pem"
+          reject_certificate 'exactly one certificate matching its single private key' mismatched-key
+          mv "$work/privkey.original" "$work/certs/privkey.pem"
+          chmod 400 "$work/certs/privkey.pem"
+          chmod 755 "$work/certs"
+          reject_certificate 'owner-restricted' permissive-directory
+          chmod 700 "$work/certs"
+          mkdir -m 777 "$work/certs/nested"
+          cp "$work/certs/fullchain.pem" "$work/certs/nested/chain.pem"
+          reject_certificate 'owner-restricted' permissive-nested-directory
+          rm -rf "$work/certs/nested"
+          printf '%s\n' 'synthetic unexpected secret material' > "$work/certs/unexpected-secret.txt"
+          reject_certificate 'owner-restricted' unexpected-secret-file
+          rm "$work/certs/unexpected-secret.txt"
+          if ! output="$(preflight 2>&1)" || [[ "$output" != *"PREFLIGHT OK"* ]]; then
+            printf '%s\n' "$output" >&2
+            echo "Valid serving certificate/key material was rejected after negative cases." >&2
+            exit 1
+          fi
       - name: Check release archive identity models
         shell: bash
         run: |
@@ -476,3 +575,166 @@ jobs:
             fi
             echo "Mismatched services, identities and image-store digest kinds are rejected."
           ' _ "$script" "$prefix" "$work"
+
+  deployment-script-postgres:
+    name: VM deployment PostgreSQL and containment tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise script database roles and failure containment
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          suffix="${GITHUB_RUN_ID:-local}-$$"
+          network="codemastery-pr110-test-${suffix}"
+          container="${network}-postgres"
+          cleanup() {
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            docker network rm "$network" >/dev/null 2>&1 || true
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          chmod 700 "$work"
+          mkdir -m 700 "$work/env"
+          secret() { openssl rand -hex 24; }
+          bootstrap_password="$(secret)"
+          cat > "$work/env/.env" <<EOF
+          POSTGRES_DB=codemastery
+          POSTGRES_USER=cm_bootstrap
+          POSTGRES_PASSWORD=$bootstrap_password
+          DB_NAME=codemastery
+          DB_USER=cm_runtime
+          DB_PASSWORD=$(secret)
+          SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
+          SPRING_FLYWAY_USER=cm_migrator
+          SPRING_FLYWAY_PASSWORD=$(secret)
+          EOF
+          chmod 600 "$work/env/.env"
+          docker network create --internal "$network" >/dev/null
+          docker run --detach --name "$container" --network "$network" --network-alias postgres \
+            --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=256m \
+            -e POSTGRES_USER=cm_bootstrap -e POSTGRES_PASSWORD="$bootstrap_password" \
+            -e POSTGRES_DB=codemastery postgres:17.11-bookworm >/dev/null
+          for attempt in {1..60}; do
+            if docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null
+          cat > "$work/exercise-db.sh" <<'BASH'
+          set -Eeuo pipefail
+          source "$1"
+          ENV_FILE="$2"
+          pgcompose() {
+            [[ "$1" == exec ]] || return 97; shift
+            [[ "$1" == -T ]] && shift
+            [[ "$1" == postgres ]] && shift
+            docker exec -i "$PGTEST_CONTAINER" "$@"
+          }
+          COMPOSE=(pgcompose)
+          provision_db_roles
+          migrator="$(env_get SPRING_FLYWAY_USER)"
+          migrator_password="$(env_get SPRING_FLYWAY_PASSWORD)"
+          runtime="$(env_get DB_USER)"
+          runtime_password="$(env_get DB_PASSWORD)"
+          psql_as "$migrator" "$migrator_password" <<'SQL'
+          CREATE TABLE public.normal_table (id bigserial PRIMARY KEY, value text NOT NULL);
+          CREATE TABLE public."QuotedTable" (id bigserial PRIMARY KEY, value text NOT NULL);
+          CREATE TABLE public.flyway_schema_history (installed_by text NOT NULL, success boolean NOT NULL);
+          INSERT INTO public.flyway_schema_history VALUES (current_user, true);
+          SQL
+          harden_after_migration
+          verify_role_separation
+          psql_as "$runtime" "$runtime_password" <<'SQL'
+          INSERT INTO public.normal_table (value) VALUES ('runtime DML allowed');
+          INSERT INTO public."QuotedTable" (value) VALUES ('quoted identifier DML allowed');
+          SQL
+          expect_denied 'runtime TRUNCATE privilege' "$runtime" "$runtime_password" <<'SQL'
+          TRUNCATE TABLE public."QuotedTable";
+          SQL
+          echo 'POSTGRES_ROLE_TESTS_PASS: grants, history denial, quoted identifiers, and baseline escalation checks.'
+
+          psql_admin <<'SQL'
+          CREATE ROLE cm_escalated NOLOGIN CREATEDB;
+          GRANT cm_escalated TO cm_runtime;
+          SQL
+          if role_policy_sql | psql_admin >/dev/null 2>&1; then
+            echo 'Role policy accepted indirect CREATEDB membership.' >&2; exit 1
+          fi
+          psql_admin <<'SQL'
+          REVOKE cm_escalated FROM cm_runtime;
+          DROP ROLE cm_escalated;
+          ALTER ROLE cm_migrator CREATEDB;
+          SQL
+          if role_policy_sql | psql_admin >/dev/null 2>&1; then
+            echo 'Role policy accepted a migrator with CREATEDB.' >&2; exit 1
+          fi
+          psql_admin <<'SQL'
+          ALTER ROLE cm_migrator NOCREATEDB;
+          CREATE TABLE public.owner_probe (id integer);
+          ALTER TABLE public.owner_probe OWNER TO cm_runtime;
+          SQL
+          if role_policy_sql | psql_admin >/dev/null 2>&1; then
+            echo 'Role policy accepted an application-owned table.' >&2; exit 1
+          fi
+          if application_grants_sql | psql_admin >/dev/null 2>&1; then
+            echo 'Grant policy accepted an unexpected table owner.' >&2; exit 1
+          fi
+          psql_admin <<'SQL'
+          ALTER TABLE public.owner_probe OWNER TO cm_migrator;
+          DROP TABLE public.owner_probe;
+          SQL
+          echo 'POSTGRES_NEGATIVE_TESTS_PASS: indirect role escalation, CREATEDB, and unexpected ownership rejected.'
+          BASH
+          PGTEST_CONTAINER="$container" bash "$work/exercise-db.sh" "$script" "$work/env/.env"
+
+          cat > "$work/exercise-containment.sh" <<'BASH'
+          set -Eeuo pipefail
+          source "$1"
+          WAIT_TIMEOUT=10
+          INITIALIZER_QUALIFICATION=synthetic-test
+          RELEASE_COMPLETE=no
+          stop_count=0
+          test_compose() {
+            case "$1" in
+              stop)
+                stop_count=$((stop_count + 1))
+                printf '%s\n' "$*" >> "$CONTAINMENT_MARKER"
+                [[ "$stop_count" -ne 2 || "${TEST_STOP_FAIL:-no}" != yes ]]
+                ;;
+              up) return 0 ;;
+              ps) printf 'synthetic-minio-init\n' ;;
+              *) return 97 ;;
+            esac
+          }
+          docker() { [[ "$1" == wait ]] || return 97; printf '23\n'; }
+          timeout() { shift; "$@"; }
+          assert_release_configuration() { :; }
+          verify_images() { :; }
+          verify_container_images() { :; }
+          provision_db_roles() { :; }
+          COMPOSE=(test_compose)
+          trap contain_failure EXIT
+          quiesce_application
+          run_provision
+          BASH
+          run_containment_case() {
+            local mode="$1" marker="$work/$1.stop-log" output
+            if output="$(CONTAINMENT_MARKER="$marker" TEST_STOP_FAIL="$mode" bash \
+                "$work/exercise-containment.sh" "$script" 2>&1)"; then
+              echo "Expected synthetic provisioning failure for stop mode $mode." >&2
+              exit 1
+            fi
+            [[ "$output" == *"minio-init exited with code 23"* ]]
+            [[ "$(wc -l < "$marker" | tr -d ' ')" == 2 ]]
+            if [[ "$mode" == yes ]]; then
+              [[ "$output" == *"ingress containment is NOT verified"* ]]
+              echo 'CONTAINMENT_TEST_PASS: failed stop is reported as unverified.'
+            else
+              [[ "$output" == *"Containing application services"* ]]
+              echo 'CONTAINMENT_TEST_PASS: provisioning failure stops application services.'
+            fi
+          }
+          run_containment_case no
+          run_containment_case yes

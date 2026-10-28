@@ -392,7 +392,7 @@ def forbidden_backend_key(key):
 PYEOF
 
 read -r -d '' PY_CHECK <<'PYEOF' || true
-import json, os, pathlib, re, subprocess, sys
+import hashlib, json, os, pathlib, re, stat, subprocess, sys
 
 origin, env_path = sys.argv[1:]
 cfg = json.load(sys.stdin)
@@ -429,6 +429,28 @@ allowed_environment = {
 names = {"postgres", "minio", "minio-init", "backend", "frontend"}
 if set(svc) != names:
     problems.append("effective configuration must contain exactly the five approved services")
+
+# The local Compose foundation uses only these service options. Keep the release
+# model closed to hooks, deploy extensions, log sinks, tmpfs mounts, secrets,
+# configs, and future options that could change execution or security policy.
+allowed_service_options = {
+    "postgres": {"command", "depends_on", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"},
+    "minio": {"command", "entrypoint", "environment", "image", "networks", "ports", "restart", "volumes"},
+    "minio-init": {"command", "depends_on", "entrypoint", "environment", "image", "networks", "restart"},
+    "backend": {"build", "command", "depends_on", "entrypoint", "environment", "image", "networks", "ports", "restart"},
+    "frontend": {"build", "command", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"},
+}
+for n, s in svc.items():
+    extra = set(s) - allowed_service_options.get(n, set())
+    if extra:
+        problems.append("service '%s' contains unsupported Compose options: %s" % (n, ", ".join(sorted(extra))))
+    executable_or_unapproved = {"pre_start", "post_start", "pre_stop", "post_stop",
+                                "deploy", "logging", "tmpfs", "configs", "secrets"}
+    if executable_or_unapproved.intersection(s):
+        problems.append("service '%s' contains an unapproved lifecycle, deploy, logging, tmpfs, config or secret option" % n)
+
+if set(cfg) - {"name", "services", "networks", "volumes"}:
+    problems.append("effective configuration contains unsupported top-level Compose options")
 
 # Keep every service on this Compose project's private bridge network. External,
 # custom-driver, and additional networks can connect private state to other stacks.
@@ -503,7 +525,22 @@ for p in ports:
 fe_volumes = fe.get("volumes") or []
 if not fe_volumes or any(v.get("type") != "bind" or not v.get("read_only") for v in fe_volumes):
     problems.append("frontend needs a read-only bind mount for serving certificate material")
-found_certificate = found_key = False
+certificate_public_keys = []
+private_key_public_keys = []
+pem_pattern = re.compile(
+    rb'-----BEGIN (CERTIFICATE|PRIVATE KEY|RSA PRIVATE KEY|EC PRIVATE KEY|DSA PRIVATE KEY)-----\r?\n.*?-----END \1-----',
+    re.S)
+
+def openssl_public_key_digest(command, pem):
+    result = subprocess.run(command, input=pem + b'\n', stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL)
+    if result.returncode:
+        raise ValueError()
+    return hashlib.sha256(result.stdout).digest()
+
+def walk_error(error):
+    raise error
+
 for volume in fe_volumes:
     # B3 permits serving certificate directories, not config/code overlays. Check
     # content rather than trusting a filename or an operator-supplied mount label.
@@ -520,32 +557,52 @@ for volume in fe_volumes:
         source = pathlib.Path(volume.get('source', ''))
         if source.is_symlink() or not source.is_dir():
             raise ValueError()
-        for root, dirs, files in os.walk(source, followlinks=False):
-            if any((pathlib.Path(root) / d).is_symlink() for d in dirs):
+        root_owner = source.lstat().st_uid
+        for root, dirs, files in os.walk(source, followlinks=False, onerror=walk_error):
+            root_path = pathlib.Path(root)
+            root_stat = root_path.lstat()
+            root_mode = stat.S_IMODE(root_stat.st_mode)
+            if (root_stat.st_uid != root_owner or root_mode & 0o077
+                    or root_mode & 0o500 != 0o500):
                 raise ValueError()
+            for directory in dirs:
+                child = root_path / directory
+                child_stat = child.lstat()
+                child_mode = stat.S_IMODE(child_stat.st_mode)
+                if (child.is_symlink() or not child.is_dir()
+                        or child_stat.st_uid != root_owner or child_mode & 0o077
+                        or child_mode & 0o500 != 0o500):
+                    raise ValueError()
             for name in files:
-                path = pathlib.Path(root) / name
-                if path.is_symlink() or not path.is_file():
+                path = root_path / name
+                file_stat = path.lstat()
+                if path.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
                     raise ValueError()
                 data = path.read_bytes()
-                blocks = list(re.finditer(rb'-----BEGIN (CERTIFICATE|PRIVATE KEY|RSA PRIVATE KEY|EC PRIVATE KEY)-----\r?\n.*?-----END \1-----', data, re.S))
-                if not blocks or re.sub(rb'-----BEGIN (CERTIFICATE|PRIVATE KEY|RSA PRIVATE KEY|EC PRIVATE KEY)-----\r?\n.*?-----END \1-----', b'', data, flags=re.S).strip():
+                blocks = list(pem_pattern.finditer(data))
+                if not blocks or pem_pattern.sub(b'', data).strip():
                     raise ValueError()
                 for block in blocks:
-                    certificate = block.group(1) == b'CERTIFICATE'
-                    command = ['openssl', 'x509', '-noout'] if certificate else ['openssl', 'pkey', '-noout', '-passin', 'pass:']
-                    if subprocess.run(command, input=block.group(0) + b'\n', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
-                        raise ValueError()
-                    if certificate:
-                        found_certificate = True
-                    else:
-                        if path.stat().st_mode & 0o777 != 0o400:
+                    pem = block.group(0)
+                    if block.group(1) == b'CERTIFICATE':
+                        public_pem = subprocess.run(
+                            ['openssl', 'x509', '-pubkey', '-noout'], input=pem + b'\n',
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                        if public_pem.returncode:
                             raise ValueError()
-                        found_key = True
+                        certificate_public_keys.append(openssl_public_key_digest(
+                            ['openssl', 'pkey', '-pubin', '-outform', 'DER'], public_pem.stdout))
+                    else:
+                        if (stat.S_IMODE(file_stat.st_mode) != 0o400
+                                or file_stat.st_uid != root_owner or file_stat.st_nlink != 1):
+                            raise ValueError()
+                        private_key_public_keys.append(openssl_public_key_digest(
+                            ['openssl', 'pkey', '-pubout', '-outform', 'DER', '-passin', 'pass:'], pem))
     except Exception:
-        problems.append('frontend bind must be an existing certificate/key-only directory with private keys mode 0400')
-if not found_certificate or not found_key:
-    problems.append('frontend certificate binds must contain a certificate and private key')
+        problems.append('frontend certificate directory must be owner-restricted, symlink-free, and contain only valid serving certificates plus one mode-0400 private key')
+if (not certificate_public_keys or len(private_key_public_keys) != 1
+        or sum(cert == private_key_public_keys[0] for cert in certificate_public_keys) != 1):
+    problems.append('frontend certificate chain must contain exactly one certificate matching its single private key')
 if fe.get('command') is not None or fe.get('entrypoint') is not None or any(fe.get(k) for k in ('configs', 'secrets')):
     problems.append("frontend must use the verified image configuration with read-only certificate binds only")
 hc = fe.get("healthcheck", {})
@@ -612,7 +669,7 @@ for n, target in (("postgres", "/var/lib/postgresql/data"), ("minio", "/data")):
     if len(volumes) != 1 or any(v.get("type") != "volume" or v.get("source") not in cfg.get("volumes", {}) or v.get("target") != target for v in volumes):
         problems.append("%s persistence must use declared named volumes" % n)
 for v in cfg.get("volumes", {}).values():
-    if not v.get("name"):
+    if set(v) - {"name"} or not v.get("name"):
         problems.append("every persistent volume needs a resolved name for recovery inventory")
 
 if problems:
@@ -1035,7 +1092,7 @@ application_grants_sql() {
 DO $grants$
 DECLARE obj record;
 BEGIN
-  FOR obj IN SELECT c.relname, c.relkind, c.relowner FROM pg_class c
+  FOR obj IN SELECT c.oid, c.relname, c.relkind, c.relowner FROM pg_class c
     JOIN pg_namespace n ON n.oid=c.relnamespace
     WHERE n.nspname='public' AND c.relkind IN ('r','p','S')
   LOOP
@@ -1047,9 +1104,9 @@ BEGIN
     ELSIF obj.relkind='S' THEN
       EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE public.%I TO %I', obj.relname, '@APP@');
     ELSE
-      IF has_table_privilege('@APP@', obj.relname, 'TRUNCATE')
-         OR has_table_privilege('@APP@', obj.relname, 'REFERENCES')
-         OR has_table_privilege('@APP@', obj.relname, 'TRIGGER') THEN
+      IF has_table_privilege('@APP@', obj.oid, 'TRUNCATE')
+         OR has_table_privilege('@APP@', obj.oid, 'REFERENCES')
+         OR has_table_privilege('@APP@', obj.oid, 'TRIGGER') THEN
         RAISE EXCEPTION 'Runtime role has unexpected broad table privileges; operator reconciliation required';
       END IF;
       EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO %I', obj.relname, '@APP@');
@@ -1239,6 +1296,8 @@ stage_frontend() {
     || fail "Could not stage the frontend without published ports."
   [[ -n "${STAGED_FRONTEND_CID}" && "${STAGED_FRONTEND_CID}" != *$'\n'* ]] || fail "Invalid private frontend container identity."
   verify_service_container frontend "${STAGED_FRONTEND_CID}"
+  docker exec "${STAGED_FRONTEND_CID}" nginx -t >/dev/null 2>&1 \
+    || fail "Frontend Nginx configuration check failed; ingress remains closed."
   docker inspect --format '{{json .NetworkSettings.Ports}}' "${STAGED_FRONTEND_CID}" 2>/dev/null | python3 -c \
     'import json,sys; sys.exit(1 if any((json.load(sys.stdin) or {}).values()) else 0)' \
     || fail "Private frontend probe unexpectedly publishes a host port."
