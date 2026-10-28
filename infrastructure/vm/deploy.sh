@@ -115,10 +115,13 @@ provision / deploy / all:
                                 provisioning authority. deploy also creates
                                 missing roles and changes database grants.
 
-deploy / all:
+load / deploy / all:
   --deployment-authorization REF
                                 Non-secret reference to the separate approved
-                                deployment authority
+                                deployment authority (load installs release
+                                artifacts into this host's image store)
+
+deploy / all:
   --public-exposure-authorization REF
                                 Non-secret reference to Leader authorization for
                                 this actual public HTTPS origin
@@ -216,9 +219,14 @@ require_inputs() {
       [[ -n "${PROVISION_AUTHORIZATION}" ]] || fail "--provision-authorization is required for ${SUBCOMMAND}."
       ;;
   esac
+  # load installs release artifacts into the host image store: the first deployment step.
+  case "${SUBCOMMAND}" in
+    (load|deploy|all)
+      [[ -n "${DEPLOY_AUTHORIZATION}" ]] || fail "--deployment-authorization is required for ${SUBCOMMAND}."
+      ;;
+  esac
   case "${SUBCOMMAND}" in
     (deploy|all)
-      [[ -n "${DEPLOY_AUTHORIZATION}" ]] || fail "--deployment-authorization is required for ${SUBCOMMAND}."
       [[ -n "${EXPOSURE_AUTHORIZATION}" ]] || fail "--public-exposure-authorization is required for ${SUBCOMMAND}."
       [[ -n "${PACKET_FILTER_VERIFICATION}" ]] || fail "--packet-filter-verification is required for ${SUBCOMMAND}."
       ;;
@@ -998,6 +1006,7 @@ run_load() {
   log "Archive checksum verified. Loading images (no registry pull, no rebuild)."
   docker load -i "${ARCHIVE}" >/dev/null 2>&1 || fail "docker load failed."
   verify_images
+  log "Deployment authority reference: ${DEPLOY_AUTHORIZATION}"
 }
 
 verify_container_images() {

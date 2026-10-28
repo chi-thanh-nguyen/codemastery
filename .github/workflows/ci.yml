@@ -105,6 +105,16 @@ jobs:
           # With every reference present, input gates pass and validation moves on.
           require_gate 'Env file not found or unreadable' deploy "${authorized[@]}" \
             --packet-filter-verification packet-filter-record
+          # load installs release artifacts on the host, the first deployment step.
+          load_common=(--env-file /dev/null --origin https://example.invalid
+                       --expect-image backend=sha256:0000000000000000000000000000000000000000000000000000000000000000
+                       --archive /dev/null
+                       --archive-sha256 0000000000000000000000000000000000000000000000000000000000000000)
+          require_gate '--deployment-authorization is required' load "${load_common[@]}"
+          require_gate 'must not be whitespace-only' load "${load_common[@]}" \
+            --deployment-authorization '   '
+          require_gate 'Env file not found or unreadable' load "${load_common[@]}" \
+            --deployment-authorization deployment-record
       - name: Check offline Compose and provisioning safety guards
         shell: bash
         run: |
