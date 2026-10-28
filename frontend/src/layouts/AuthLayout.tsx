@@ -13,7 +13,7 @@ export function AuthLayout({ title = 'CodeMastery', subtitle = 'Mastery-Based Pr
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>{subtitle}</Typography>
                 {children}
             </Paper>
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block', textAlign: 'center' }}>CodeMastery · Presentation preview</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block', textAlign: 'center' }}>CodeMastery · Learn at your own pace</Typography>
         </Container>
     </Box>;
 }

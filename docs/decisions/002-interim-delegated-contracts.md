@@ -158,6 +158,17 @@ unchanged. Existing test responsibilities, production visibility, CODEOWNERS,
 other contract dispositions and protected review requirements remain unchanged;
 this placement correction establishes no test result or broader approval.
 
+**Enrollment test placement amendment — 2026-10-29 (Asia/Ho_Chi_Minh).** During
+“CodeMastery — Comprehensive Review, Remediation and Direct Update of PR #114”,
+the Project Leader explicitly instructed: “Retain the relocation; I authorize
+this bounded placement correction and matching documentation”. This authorizes
+`backend/src/test/java/com/codemastery/modules/course/application/service/EnrollmentServiceTest.java`
+in place of `backend/src/test/java/com/codemastery/modules/course/EnrollmentServiceTest.java`.
+Only this test's placement is superseded; its existing application-service package,
+package-private access, test responsibilities and Course CODEOWNERS are preserved.
+This approval grants no new enrolment policy, production visibility, dependency,
+verification result or waiver of protected review.
+
 Rationale: Layered evidence matches the approved test strategy and distinguishes local arithmetic from persistence/browser/deployment behavior. Test scope follows consumed capabilities, not whole-Issue blocking.
 
 Alternatives considered: Mocks do not prove PG constraints; browser screenshots do not prove every API denial. A new frontend runner adds dependency/scope approval; fabricating commands for currently empty E2E files is misleading.

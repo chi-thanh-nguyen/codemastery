@@ -146,6 +146,9 @@ export function PresentationPreview() {
         if (heading) { heading.tabIndex = -1; heading.focus(); }
     }, [selectedNav]);
     const [query, setQuery] = useState('');
+    const searchInput = useRef<HTMLInputElement>(null);
+    const sampleTabsId = useId();
+    const clearSearch = () => { setQuery(''); searchInput.current?.focus(); };
     const [filter, setFilter] = useState('all');
     const lessonContent = useRef<HTMLDivElement>(null);
     const [lessonAreaHeight, setLessonAreaHeight] = useState(0);
@@ -183,12 +186,12 @@ export function PresentationPreview() {
             const section = document.getElementById('sample-learning-path');
             section?.focus(); section?.scrollIntoView({ block: 'nearest' });
         }}>
-        <TextField fullWidth size="small" variant="outlined" hiddenLabel placeholder="What are you looking for?" sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#f0f0f0' } }} value={query} onChange={(event) => setQuery(event.target.value)}
+        <TextField fullWidth size="small" variant="outlined" hiddenLabel inputRef={searchInput} placeholder="What are you looking for?" value={query} onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setQuery(''); } }}
             slotProps={{ htmlInput: { 'aria-label': 'Search sample lessons', 'aria-description': 'Filters local sample lessons only. Enter jumps to results. Escape clears search.' }, input: {
                 sx: { pr: 1.0 },
                 endAdornment: <InputAdornment position="end" sx={{ maxHeight: 'none', gap: .5, flexShrink: 0 }}>
-                    {query && <IconButton size="small" aria-label="Clear sample lesson search" onClick={() => setQuery('')} sx={{ width: 28, height: 28, fontSize: 20 }}>×</IconButton>}
+                    {query && <IconButton size="small" aria-label="Clear sample lesson search" onClick={clearSearch} sx={{ width: 28, height: 28, fontSize: 20 }}>×</IconButton>}
                     <IconButton type="submit" aria-label="Search sample lessons" disableRipple sx={{ width: 36, height: 36, borderRadius: '50%', bgcolor: 'primary.main', color: 'primary.contrastText',
                         '&:hover, &:active': { bgcolor: 'primary.main' }, '&.Mui-focusVisible': { outline: '2px solid', outlineColor: 'primary.dark', outlineOffset: 2 } }}>
                         <PresentationIcon name="search" sx={{ fontSize: 18 }} />
@@ -235,9 +238,9 @@ export function PresentationPreview() {
                 <Typography role="status" variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>{lessons.length} of {DEMO_LESSONS.length} sample lessons</Typography>
             </Box>
             <Tabs value={filter} onChange={(_, value: string) => setFilter(value)} variant="scrollable" scrollButtons="auto" aria-label="Filter sample lessons" sx={{ px: 2, '& .MuiTab-root': { minHeight: 48 }, borderBottom: 1, borderColor: 'divider' }}>
-                <Tab value="all" label="All lessons" /><Tab value="active" label="To explore" /><Tab value="completed" label="Completed" />
+                <Tab id={`${sampleTabsId}-all`} aria-controls={`${sampleTabsId}-results`} value="all" label="All lessons" /><Tab id={`${sampleTabsId}-active`} aria-controls={`${sampleTabsId}-results`} value="active" label="To explore" /><Tab id={`${sampleTabsId}-completed`} aria-controls={`${sampleTabsId}-results`} value="completed" label="Completed" />
             </Tabs>
-            <Box sx={{ minHeight: lessonAreaHeight, minWidth: 0 }}>
+            <Box role="tabpanel" id={`${sampleTabsId}-results`} aria-labelledby={`${sampleTabsId}-${filter}`} sx={{ minHeight: lessonAreaHeight, minWidth: 0 }}>
             <Box ref={lessonContent} sx={{ minWidth: 0 }}>
             {lessons.length ? <TableContainer tabIndex={0} role="region" aria-label="Sample lesson table" sx={{ overflowX: 'auto' }}>
                 <Table size="small" sx={{ minWidth: 620 }}>
@@ -254,7 +257,7 @@ export function PresentationPreview() {
                     </TableRow>)}</TableBody>
                 </Table>
             </TableContainer> : <Box sx={{ p: 2 }}><EmptyView title="No sample lessons match" message="Try another lesson name or clear the filters."
-                action={<Button onClick={() => { setQuery(''); setFilter('all'); }}>Clear filters</Button>} /></Box>}
+                action={<Button onClick={() => { clearSearch(); setFilter('all'); }}>Clear filters</Button>} /></Box>}
             </Box>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, p: 2, borderTop: 1, borderColor: 'divider' }}>

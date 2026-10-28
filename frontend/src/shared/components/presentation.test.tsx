@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
@@ -111,13 +111,23 @@ describe('FE01 presentation contracts', () => {
     it('names/describes the dialog and focuses cancel after destructive-dialog entry', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         try {
-            await render(<ConfirmDialog open title="Discard preview?" message="Only local inputs change" isDestructive onConfirm={vi.fn()} onCancel={vi.fn()} />);
+            await render(<StrictMode><ConfirmDialog open title="Discard preview?" message="Only local inputs change" isDestructive onConfirm={vi.fn()} onCancel={vi.fn()} /></StrictMode>);
+            expect(document.activeElement?.textContent).toBe('Cancel');
             await act(async () => vi.advanceTimersByTime(300));
             const dialog = document.querySelector('[role="dialog"]')!;
             expect(document.getElementById(dialog.getAttribute('aria-labelledby')!)?.textContent).toBe('Discard preview?');
             expect(document.getElementById(dialog.getAttribute('aria-describedby')!)?.textContent).toBe('Only local inputs change');
             expect(document.activeElement?.textContent).toBe('Cancel');
         } finally { vi.useRealTimers(); }
+    });
+    it('advances dialog-surface focus while preserving an action chosen before the focus microtask', async () => {
+        await render(<StrictMode><ConfirmDialog open title="Discard preview?" message="Local inputs only" isDestructive onConfirm={vi.fn()} onCancel={vi.fn()} /></StrictMode>);
+        const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+        const actions = dialog.querySelectorAll('button');
+        await act(async () => { dialog.focus(); actions[1].focus(); });
+        expect(document.activeElement).toBe(actions[1]);
+        await act(async () => dialog.focus());
+        expect(document.activeElement).toBe(actions[0]);
     });
     it('keeps a user-selected dialog action focused when the entry transition completes', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

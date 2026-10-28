@@ -20,8 +20,8 @@ export const presentationTokens = {
     sidebarBackground: '#FFFFFE',
     chartBarFill: '#65cefe',
     chartBarFade: '#F0F9FF',
-    chartBarEdge: '#44c1ff',
-    chartBarActiveEdge: '#0192e0',
+    chartBarEdge: '#0077B5',
+    chartBarActiveEdge: '#006DA8',
     chartBarActive: '#0192e0',
     chartGrid: '#E8EBEF',
     softBlue: '#E3EEFF',
@@ -109,11 +109,11 @@ export const appTheme = createTheme({
                     '& .MuiOutlinedInput-notchedOutline': { borderWidth: 2, borderColor: 'transparent', transition: 'border-color 180ms ease' },
                     '&:hover:not(.Mui-disabled), &.Mui-focused': {
                         backgroundColor: '#FFFFFF',
-                        '& .MuiOutlinedInput-notchedOutline': { borderColor: '#8fb7f7' },
+                        '& .MuiOutlinedInput-notchedOutline': { borderColor: '#1F6BE8' },
                     },
                 } }],
             },
-            input: { '&::placeholder': { color: '#4A5458', opacity: 1 } },
+            input: { '&:focus-visible': { outline: 'none' }, '&::placeholder': { color: '#4A5458', opacity: 1 } },
             // The opaque label masks the border while moving; animating the notch separately
             // leaves a trailing gap after the label descends. Only the label needs to animate.
             notchedOutline: { '& legend': { transition: 'none' } },

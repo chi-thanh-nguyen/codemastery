@@ -168,12 +168,22 @@ npm run build
 
 `npm ci` installs the locked dependency graph. `typecheck` checks source and
 Vite configuration without emitting files. The `build` script already runs
-`npm run typecheck` before `vite build`, so CI runs only install and build.
+`npm run typecheck` before `vite build`, so the CI build step also typechecks.
 Build output goes to `frontend/dist/`. Development-only Vitest `5.0.5` and jsdom
 `27.4.0` execute the bounded frontend suite through `npm test` (`vitest run`).
-No lint script is implemented. The required Frontend CI job still runs only
-installation and build; it does not run `npm test` or the browser harness.
+No lint script is implemented. The required Frontend CI job runs `npm ci`, `npm test`, then `npm run build`.
+The optional browser harness is separate and is not run by that job.
 Build success alone does not establish behavioral coverage or deployment readiness.
+
+For the existing optional `npm run test:browser` script, supply an installed
+Playwright module, artifact directory, preview URL and `chromium` or `webkit`.
+No browser is downloaded by this script. When validating a standalone frontend
+configured with the approved `/api` base and no API proxy, append `--standalone`.
+That mode verifies the Course error view and records exactly the two detail-read
+404s and one cold catalogue-read 404 separately from unexpected console errors.
+It does not establish real browser → REST → PostgreSQL integration. Backend
+connectivity/CORS, successful Auth/Course transactions and assistive-technology
+acceptance require their independent evidence.
 
 ### Bounded FE01 decisions and regression coverage
 
@@ -509,7 +519,7 @@ or editing any test still needs its separate implementation/file authorization.
 
 The remaining approved inventory is preserved, without selecting new behavior:
 
-- Course enrolment/progress: `modules/course/EnrollmentServiceTest.java` and
+- Course enrolment/progress: `modules/course/application/service/EnrollmentServiceTest.java` and
   `modules/course/LessonProgressServiceTest.java`; CT22 owns mutation/resume semantics.
 - Assessment: `modules/assessment/AttemptServiceTest.java`,
   `modules/assessment/QuizGradingServiceTest.java`,
@@ -710,8 +720,8 @@ router, new renderer, testing-library, request mock server or E2E runner is adde
   DOM tests cannot assert real browser navigation/TLS/network guarantees.
 
 Future execution uses existing npm test from frontend/ with the approved file
-filters; no command is executed by this documentation task. CI currently builds/
-typechecks frontend but does not run npm test. No new CI job, coverage percentage,
+filters; no command is executed by this documentation task. At the 24 October contract-selection baseline, CI built/typechecked frontend
+without npm test; the later FE03 implementation added npm test to CI (see below). No new CI job, coverage percentage,
 pass count, browser installation or success result is invented here.
 
 ### Existing Interim backend and independent evidence contracts
@@ -763,6 +773,18 @@ The sole-Leader-CODEOWNER PR-authorship conflict, eligible independent human
 review, last-push approval, checks and exact-revision integration remain unresolved;
 non-owner review or another contributor's push alone cannot substitute. Issue #27
 checkboxes/whole-Issue completion remain unchanged.
+
+## Enrollment unit-test placement amendment — 29 October 2026
+
+During PR #114 review/remediation, the Project Leader explicitly authorized
+retaining the existing relocation and synchronizing documentation. The canonical
+file is now `backend/src/test/java/com/codemastery/modules/course/application/service/EnrollmentServiceTest.java`,
+matching its existing `com.codemastery.modules.course.application.service` package.
+[ADR002](decisions/002-interim-delegated-contracts.md#ct14interim--delegated_approved)
+records the exact authority and bounded location supersession. Existing test
+contents/responsibilities, package-private access and Course CODEOWNERS remain
+unchanged. This is placement approval, not approval of new CT22 behavior or an
+executed test result; only one canonical test class is retained.
 
 ## CT14 consolidation and bounded Final approvals — 25 October 2026
 

@@ -94,6 +94,14 @@ exception, not a reinterpretation of its original inventory. Other test paths,
 contract decisions, test execution and protected review remain outside this
 correction.
 
+The Project Leader separately authorized retaining the existing
+`EnrollmentServiceTest.java` relocation on 2026-10-29 (Asia/Ho_Chi_Minh) during
+PR #114 remediation. [ADR002's Enrollment test placement amendment](decisions/002-interim-delegated-contracts.md#ct14interim--delegated_approved)
+records the exact instruction and supersession of its former `modules/course/`
+path by `modules/course/application/service/EnrollmentServiceTest.java`.
+Existing test responsibilities, package-private access and Course CODEOWNERS
+remain unchanged; no production behavior or other inventory change is approved.
+
 ```text
 codemastery/
 
@@ -879,9 +887,9 @@ codemastery/
 
 │           │           │   │   │   └── service/
 
-│           │           │   │   │       └── CourseServiceTest.java
+│           │           │   │   │       ├── CourseServiceTest.java
 
-│           │           │   │   ├── EnrollmentServiceTest.java
+│           │           │   │   │       └── EnrollmentServiceTest.java
 
 │           │           │   │   └── LessonProgressServiceTest.java
 

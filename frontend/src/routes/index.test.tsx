@@ -204,7 +204,11 @@ describe('real declarative routing and Profile', () => {
         await act(async () => vi.advanceTimersByTime(399)); expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
         await act(async () => vi.advanceTimersByTime(1)); expect(host.querySelectorAll('tbody tr')).toHaveLength(1);
         expect(host.querySelector('tbody')?.textContent).toContain('Making decisions');
-        await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Clear sample lesson search"]')!.click());
+        await act(async () => {
+            const clear = host.querySelector<HTMLButtonElement>('[aria-label="Clear sample lesson search"]')!;
+            clear.focus(); clear.click();
+        });
+        expect(document.activeElement).toBe(input);
         expect(input.value).toBe(''); await act(async () => vi.advanceTimersByTime(400)); expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
         await setQuery('no such lesson'); await act(async () => vi.advanceTimersByTime(400)); expect(host.textContent).toContain('No sample lessons match');
         await click('Clear filters'); await act(async () => vi.advanceTimersByTime(400)); expect(input.value).toBe('');
@@ -224,4 +228,43 @@ describe('real declarative routing and Profile', () => {
         expect(host.textContent).toContain('No live mastery calculation is performed.'); expect(fetcher).not.toHaveBeenCalled();
         expect(location.pathname).toBe('/preview'); expect(localStorage.length + sessionStorage.length).toBe(0);
     });
+    it('composes the actual public catalogue/detail with current Auth navigation', async () => {
+        await act(async () => root.render(<App />));
+        expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Course Catalogue');
+        await click('View Syllabus'); expect(location.pathname).toBe(`/courses/${id}`); expect(host.querySelector('h1')?.textContent).toBe('Course details');
+        await click('Back to Catalogue'); expect(location.pathname).toBe('/courses');
+        expect(fetcher.mock.calls.every(([, init]) => !new Headers((init as RequestInit).headers).has('Authorization'))).toBe(true);
+        await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('h1')?.textContent).toBe('Welcome back');
+    });
+
+    it('associates the active sample filter tab with its result panel', async () => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        const panel = host.querySelector('[role="tabpanel"]')!;
+        for (const label of ['All lessons', 'Completed', 'To explore']) {
+            const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((node) => node.textContent === label)!;
+            await act(async () => tab.click());
+            expect(tab.getAttribute('aria-selected')).toBe('true');
+            expect(tab.getAttribute('aria-controls')).toBe(panel.id);
+            expect(panel.getAttribute('aria-labelledby')).toBe(tab.id);
+        }
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+});
+
+
+it.each(['Instructor', 'Administrator'])('denies %s before mounting My Courses or issuing private requests', async (role) => {
+    await mount('/courses'); await login('Role test', role); await go('/my-courses');
+    expect(host.querySelector('main h1')?.textContent).toBe('Access is denied.');
+    expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/me/courses')).toHaveLength(0);
+    expect(host.querySelector('nav[aria-label="Account navigation"] a[href="/my-courses"]')).toBeNull();
+});
+it('mounts real learner My Courses with authenticated transport and removes it at expiry', async () => {
+    await mount('/courses'); await login();
+    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? { ...page, content: [], totalElements: 0, totalPages: 0 } : page)));
+    await go('/my-courses'); expect(host.querySelector('main h1')?.textContent).toBe('My Courses'); expect(host.textContent).toContain('No courses found');
+    const [, init] = fetcher.mock.calls.find(([url]) => new URL(url).pathname === '/api/me/courses')!;
+    expect(init.headers.has('Authorization')).toBe(true);
+    await act(async () => vi.advanceTimersByTime(900000)); expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('My Courses');
 });

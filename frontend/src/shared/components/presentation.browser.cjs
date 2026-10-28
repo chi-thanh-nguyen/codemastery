@@ -1,8 +1,12 @@
 // Optional local-browser verification using an explicitly supplied Playwright installation.
 // No browser package is downloaded by this script. See the PR verification record.
+// Real Course routes require a configured VITE_API_BASE_URL. A standalone /api
+// setup with the optional sixth --standalone argument exercises API error views,
+// not browser-to-backend integration. Only its exact expected API 404s are exempt.
 const {chromium,webkit} = require(process.argv[2] || 'playwright');
 // Optional engine argument uses an installed browser; never downloads one.
 const engine=process.argv[5] || 'chromium';
+const standalone=process.argv[6] === '--standalone';
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const path=require('node:path');
@@ -16,9 +20,21 @@ let browser;
  browser=await ({chromium,webkit}[engine]).launch({headless:true});
  const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:1});
  const page=await context.newPage();
+ // Vite's MUI development graph can exceed the browser's default resource-timing buffer.
+ await page.addInitScript(()=>performance.setResourceTimingBufferSize(4000));
  const errors=[];const origins=new Set();page.on('request',r=>origins.add(new URL(r.url()).origin));page.on('pageerror',e=>errors.push(String(e)));
- const consoleErrors=[],consoleWarnings=[];
- function recordConsole(message){if(message.type()==='error')consoleErrors.push(message.text());if(message.type()==='warning')consoleWarnings.push(message.text())}
+ const consoleErrors=[],consoleWarnings=[],expectedApiConsoleErrors=[];
+ function recordConsole(message){
+  if(message.type()==='error'){
+   const location=message.location().url;
+   const url=location&&new URL(location);
+   const expected=standalone&&url&&url.origin===new URL(previewUrl).origin&&
+    (url.pathname==='/api/courses/sample'&&!url.search||url.pathname==='/api/courses'&&url.search==='?page=0&size=20')&&
+    message.text()==='Failed to load resource: the server responded with a status of 404 (Not Found)';
+   if(expected)expectedApiConsoleErrors.push({url:location,message:message.text()});else consoleErrors.push(message.text());
+  }
+  if(message.type()==='warning')consoleWarnings.push(message.text());
+ }
  page.on('console',recordConsole);
  const checks=[];
  async function check(name,fn){await fn();checks.push({name,passed:true});console.log('PASS',name)}
@@ -98,7 +114,7 @@ let browser;
   assert(faces.some(f=>f.family==='Plus Jakarta Sans'&&f.weight==='200 800'&&f.status==='loaded'));
   const fontResponses=await page.evaluate(()=>performance.getEntriesByType('resource').filter(e=>e.name.includes('.woff2')).map(e=>({url:e.name,size:e.decodedBodySize})));
   assert(fontResponses.some(f=>new URL(f.url).origin===new URL(previewUrl).origin&&f.size>0));
-  const license=await context.request.get(new URL('/plus-jakarta-sans-OFL.txt',previewUrl).href);
+  const license=await context.request.get(new URL('plus-jakarta-sans-OFL.txt',previewUrl).href);
   assert(license.ok());const licenseText=await license.text();
   assert(licenseText.includes('Copyright 2020 The Plus Jakarta Sans Project Authors'));
   assert(licenseText.includes('SIL OPEN FONT LICENSE Version 1.1'));
@@ -218,7 +234,7 @@ let browser;
   assert(Math.max(...positions)-Math.min(...positions)<3,JSON.stringify(positions));
  });
  await check('KPI icons retain exact palette, raised surface and geometry across color preferences and viewport sizes',async()=>{
-  const palette=[['Study time','rgb(104, 166, 231)'],['Lessons completed','rgb(87, 191, 96)'],['Practice streak','rgb(242, 172, 84)'],['Course progress','rgb(165, 139, 212)']];
+  const palette=[['Study time','rgb(0, 123, 255)'],['Lessons completed','rgb(1, 208, 18)'],['Practice streak','rgb(255, 0, 0)'],['Course progress','rgb(123, 52, 255)']];
   try{
    for(const colorScheme of ['light','dark',null])for(const width of [390,1440]){
     await page.emulateMedia({colorScheme});await page.setViewportSize({width,height:900});
@@ -304,6 +320,9 @@ let browser;
   await search.fill('variables');await search.press('Escape');assert.equal(await search.inputValue(),'');await page.waitForTimeout(450);
   await search.fill('no such lesson');await page.waitForTimeout(450);assert(await page.getByRole('heading',{name:'No sample lessons match',exact:true}).isVisible());
   await page.getByRole('button',{name:'Clear filters',exact:true}).click();await page.waitForTimeout(450);assert.equal(await search.inputValue(),'');
+  assert(await search.evaluate(e=>e===document.activeElement),'Clearing empty results must return focus to search');
+  await search.fill('variables');const clear=page.getByRole('button',{name:'Clear sample lesson search',exact:true});await clear.focus();await page.keyboard.press('Enter');
+  assert(await search.evaluate(e=>e===document.activeElement),'Removing the clear button must preserve search focus');
   await search.press('Enter');assert(await page.locator('#sample-learning-path').evaluate(e=>e===document.activeElement));
  });
  await check('adaptive explanation is explicitly static sample content',async()=>assert(await page.getByText('Illustration only. No live mastery calculation is performed.',{exact:true}).isVisible()));
@@ -400,6 +419,7 @@ let browser;
  await check('direct public deep links and the anonymous Profile guard remain intact',async()=>{
   await page.goto(new URL('/courses/sample',previewUrl).href,{waitUntil:'networkidle'});await page.getByRole('heading',{name:'Course details',exact:true}).waitFor();
   await page.reload({waitUntil:'networkidle'});assert(await page.getByRole('heading',{name:'Course details',exact:true}).isVisible());
+  if(standalone)assert(await page.getByRole('heading',{name:'Could not load course',exact:true}).isVisible(),'Standalone mode must exercise the real API error view');
   await page.goto(new URL('/profile',previewUrl).href,{waitUntil:'networkidle'});await page.getByRole('heading',{name:'Welcome back',exact:true}).waitFor();assert.equal(new URL(page.url()).pathname,'/login');
   assert.equal(await page.locator('dl').count(),0);
  });
@@ -589,9 +609,12 @@ let browser;
  await page.goto(previewUrl,{waitUntil:'networkidle'});
  await page.getByRole('button',{name:'Explore components',exact:true}).click();
  await check('no uncaught browser exceptions',async()=>assert.deepEqual(errors,[]));
- await check('no browser console errors',async()=>assert.deepEqual(consoleErrors,[]));
+ await check('no unexpected browser console errors',async()=>{
+  assert.deepEqual(consoleErrors,[]);
+  if(standalone)assert.equal(expectedApiConsoleErrors.length,3,'Only the two invalid detail reads and cold catalogue read may fail');
+ });
  fs.writeFileSync(`${out}/studio-accessibility-tree.yml`,await page.locator('main').ariaSnapshot());
- const report={engine,browser:browser.version(),textFieldAudit,labelMotionAudit,motionAudit,assetLoading,branding,faviconCaching,typography,viewports:layouts,checks,networkOrigins:[...origins],contrast:{onFocus:{...onFocus,ratio:contrast(onFocus.color,onFocus.background)},atRest:{...atRest,ratio:contrast(atRest.color,atRest.background)},onHover:{...onHover,ratio:contrast(onHover.color,onHover.background)},badge:{...badgeColors,ratio:contrast(badgeColors.color,badgeColors.background)}},errors,consoleErrors,consoleWarnings,screenReader:'Not executed'};
+ const report={engine,standalone,expectedApiConsoleErrors,integration:'NOT_RUN: this presentation harness does not establish browser-to-REST-to-PostgreSQL behavior',browser:browser.version(),textFieldAudit,labelMotionAudit,motionAudit,assetLoading,branding,faviconCaching,typography,viewports:layouts,checks,networkOrigins:[...origins],contrast:{onFocus:{...onFocus,ratio:contrast(onFocus.color,onFocus.background)},atRest:{...atRest,ratio:contrast(atRest.color,atRest.background)},onHover:{...onHover,ratio:contrast(onHover.color,onHover.background)},badge:{...badgeColors,ratio:contrast(badgeColors.color,badgeColors.background)}},errors,consoleErrors,consoleWarnings,screenReader:'Not executed'};
  fs.writeFileSync(`${out}/browser-report.json`,JSON.stringify(report,null,2));await browser.close();
  console.log(JSON.stringify({passed:checks.length,browser:report.browser,report:`${out}/browser-report.json`}));
 })().catch(async e=>{console.error(e);if(browser)await browser.close();process.exitCode=1});
