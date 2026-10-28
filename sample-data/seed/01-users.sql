@@ -10,6 +10,8 @@
 --   -v learner_password_hash='<local BCrypt hash>' -f 01-users.sql
 
 \set ON_ERROR_STOP on
+-- Constraint-error DETAIL can include the complete row and its password hash.
+\set VERBOSITY terse
 
 \if :{?instructor_password_hash}
 \else
@@ -29,6 +31,9 @@ $sd01_input$;
 \endif
 
 BEGIN;
+
+-- Serialize loaders and other User writers before taking a data snapshot.
+LOCK TABLE public.users IN SHARE ROW EXCLUSIVE MODE;
 
 CREATE TEMP TABLE sd01_user_seed (
     id uuid NOT NULL,
@@ -51,7 +56,7 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM sd01_user_seed
-        WHERE password_hash !~ '^[$]2b[$]14[$][./A-Za-z0-9]{53}$'
+        WHERE password_hash !~ '^[$]2b[$]14[$][./A-Za-z0-9]{21}[.Oeu][./A-Za-z0-9]{30}[.CGKOSWaeimquy26]$'
     ) THEN
         RAISE EXCEPTION 'SD01 requires valid BCrypt $2b$14$ password hashes';
     END IF;
