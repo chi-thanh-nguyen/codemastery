@@ -51,3 +51,1585 @@ jobs:
         run: npm test
       - name: Typecheck and build frontend
         run: npm run build
+
+  deployment-script:
+    name: VM deployment script
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check shell syntax and authorization gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          bash -n "$script"
+
+          require_gate() {
+            local expected="$1"
+            shift
+            local output
+            if output="$(bash "$script" "$@" 2>&1)"; then
+              echo "Expected deployment preflight to reject missing authorization: $expected" >&2
+              exit 1
+            fi
+            if [[ "$output" != *"$expected"* ]]; then
+              echo "Expected gate '$expected'; received:" >&2
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+          }
+
+          common=(--env-file /dev/null --origin https://example.invalid
+                  --expect-image backend=sha256:0000000000000000000000000000000000000000000000000000000000000000
+                  --wait-timeout 30 --initializer-qualification fixture)
+          deploy_common=("${common[@]}" --archive /dev/null
+                         --archive-sha256 0000000000000000000000000000000000000000000000000000000000000000
+                         --source-revision fixture)
+          require_gate '--provision-authorization is required' provision "${common[@]}"
+          require_gate 'must not be whitespace-only' provision "${common[@]}" \
+            --provision-authorization '   '
+          # deploy re-provisions database roles and grants, so it needs the same
+          # provisioning authority as provision and all.
+          require_gate '--provision-authorization is required' deploy "${deploy_common[@]}"
+          deploy_common+=(--provision-authorization provisioning-record)
+          require_gate '--deployment-authorization is required' deploy "${deploy_common[@]}"
+          require_gate '--public-exposure-authorization is required' deploy "${deploy_common[@]}" \
+            --deployment-authorization deployment-record
+          authorized=("${deploy_common[@]}" --deployment-authorization deployment-record
+                      --public-exposure-authorization exposure-record)
+          for command in deploy all; do
+            require_gate '--packet-filter-verification is required' "$command" "${authorized[@]}"
+          done
+          require_gate 'must not be whitespace-only' deploy "${authorized[@]}" \
+            --packet-filter-verification '   '
+          # With every reference present, input gates pass and validation moves on.
+          require_gate 'Env file not found or unreadable' deploy "${authorized[@]}" \
+            --packet-filter-verification packet-filter-record
+          # load installs release artifacts on the host, the first deployment step.
+          load_common=(--env-file /dev/null --origin https://example.invalid
+                       --expect-image backend=sha256:0000000000000000000000000000000000000000000000000000000000000000
+                       --archive /dev/null
+                       --archive-sha256 0000000000000000000000000000000000000000000000000000000000000000)
+          require_gate '--deployment-authorization is required' load "${load_common[@]}"
+          require_gate 'must not be whitespace-only' load "${load_common[@]}" \
+            --deployment-authorization '   '
+          require_gate 'Env file not found or unreadable' load "${load_common[@]}" \
+            --deployment-authorization deployment-record
+      - name: Check offline Compose and provisioning safety guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          bash -c '
+            source "$1"
+            mock_compose() { printf "container-id\\n"; }
+            COMPOSE=(mock_compose)
+            if output="$(require_application_stopped 2>&1)"; then
+              echo "Provisioning must reject a running application service." >&2
+              exit 1
+            fi
+            [[ "$output" == *"Application services are running"* ]]
+            mock_compose() { :; }
+            require_application_stopped
+          ' _ "$script"
+          python3 - "$script" <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          source = open(sys.argv[1], encoding="utf-8").read()
+          env_marker = "read -r -d '' PY_ENV_POLICY <<'PYEOF' || true\n"
+          marker = "read -r -d '' PY_CHECK <<'PYEOF' || true\n"
+          env_policy = source.split(env_marker, 1)[1].split("\nPYEOF", 1)[0]
+          check_policy = source.split(marker, 1)[1].split("\nPYEOF", 1)[0]
+          policy = env_policy + "\n" + check_policy
+          cases = {
+              "cap_add": ["SYS_ADMIN"],
+              "devices": ["/dev/sda:/dev/sda:rwm"],
+              "security_opt": ["apparmor:unconfined"],
+              "userns_mode": "host",
+              "volumes_from": ["host-container"],
+              "user": "0:0",
+              "env_file": ["/tmp/unreviewed.env"],
+              "pid": "host",
+          }
+          for option, value in cases.items():
+              config = {"services": {"postgres": {"image": "postgres:17", option: value}}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              if result.returncode == 0 or "unapproved privilege" not in result.stderr:
+                  raise SystemExit(f"Compose policy did not reject {option}")
+          config = {"services": {"backend": {"image": "backend:reviewed",
+                                               "environment": {"LD_PRELOAD": "/tmp/unreviewed.so"}}}}
+          result = subprocess.run(
+              [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+              input=json.dumps(config), text=True, capture_output=True, check=False,
+          )
+          if result.returncode == 0 or "unapproved environment variables" not in result.stderr:
+              raise SystemExit("Compose policy did not reject an unapproved environment variable")
+          for option, value in (
+              ("pre_start", [{"command": ["sh", "-c", "true"]}]),
+              ("post_start", [{"command": ["sh", "-c", "true"], "privileged": True}]),
+              ("pre_stop", [{"command": ["sh", "-c", "true"]}]),
+              ("post_stop", [{"command": ["sh", "-c", "true"]}]),
+              ("deploy", {"replicas": 2, "privileged": True}),
+              ("logging", {"driver": "syslog"}),
+              ("tmpfs", ["/run"]),
+              ("secrets", ["unreviewed"]),
+              ("configs", ["unreviewed"]),
+              ("develop", {"watch": [{"path": ".", "action": "sync"}]}),
+          ):
+              config = {"services": {"postgres": {"image": "postgres:17", option: value}}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              if result.returncode == 0 or "unsupported Compose options" not in result.stderr:
+                  raise SystemExit(f"Compose policy did not reject unapproved {option}")
+          network_problem = "the Compose default network contains unapproved network options"
+          for network, approved in (
+              ({"name": "codemastery_default", "ipam": {}}, True),
+              ({"name": "codemastery_default"}, True),
+              ({"name": "codemastery_default", "ipam": {"driver": "default"}}, False),
+              ({"name": "codemastery_default", "ipam": {"config": [{"subnet": "10.231.0.0/24"}]}}, False),
+              ({"name": "codemastery_default", "ipam": {"options": {"x": "y"}}}, False),
+              ({"name": "codemastery_default", "attachable": True}, False),
+          ):
+              config = {"services": {}, "networks": {"default": network}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              if (network_problem not in result.stderr) != approved:
+                  raise SystemExit(f"Default network policy mismatch for {network}")
+          # B2 publishes 443 without naming an interface; a declared host_ip must
+          # be a real non-loopback address. This proves nothing about firewalls.
+          host_ip_problems = ("loopback-only", "host_ip must be an IP address")
+          for host_ip, problem in (
+              (None, None), ("0.0.0.0", None), ("203.0.113.10", None), ("2001:db8::10", None),
+              ("127.0.0.1", "loopback-only"), ("127.0.0.2", "loopback-only"),
+              ("::1", "loopback-only"), ("not-an-address", "host_ip must be an IP address"),
+          ):
+              port = {"target": 8080, "published": "443", "protocol": "tcp"}
+              if host_ip:
+                  port["host_ip"] = host_ip
+              config = {"services": {"frontend": {"image": "frontend:reviewed", "ports": [port]}}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              found = [p for p in host_ip_problems if p in result.stderr]
+              if found != ([problem] if problem else []) or "exactly host port 443" in result.stderr:
+                  raise SystemExit(f"host_ip policy mismatch for {host_ip}: {found}")
+          port_marker = "read -r -d '' PY_PORT_POLICY <<'PYEOF' || true\n"
+          port_policy = source.split(port_marker, 1)[1].split("\nPYEOF", 1)[0]
+          unspecified = [{"HostIp": "", "HostPort": "443"}]
+          dual_stack = [{"HostIp": "0.0.0.0", "HostPort": "443"}, {"HostIp": "::", "HostPort": "443"}]
+          def ports(service, host, actual, running=True, host_ip=None):
+              port = {"target": 8080, "published": "443"}
+              if host_ip:
+                  port["host_ip"] = host_ip
+              data = {"model": {"services": {"frontend": {"ports": [port]}}},
+                      "container": {"host": host, "ports": actual, "running": running}}
+              return subprocess.run([sys.executable, "-c", port_policy, service],
+                                    input=json.dumps(data), text=True, capture_output=True, check=False)
+          for name, service, host, actual, kwargs, accepted in (
+              ("frontend dual-stack 443", "frontend", {"PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack, "80/tcp": None}, {}, True),
+              ("frontend declared address", "frontend",
+               {"PortBindings": {"8080/tcp": [{"HostIp": "203.0.113.10", "HostPort": "443"}]}},
+               {"8080/tcp": [{"HostIp": "203.0.113.10", "HostPort": "443"}]}, {"host_ip": "203.0.113.10"}, True),
+              ("frontend actual address differs", "frontend", {"PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack}, {"host_ip": "203.0.113.10"}, False),
+              ("frontend extra published port", "frontend", {"PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack, "80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "80"}]}, {}, False),
+              ("frontend wrong host port", "frontend", {"PortBindings": {"8080/tcp": [{"HostIp": "", "HostPort": "8443"}]}},
+               {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8443"}]}, {}, False),
+              ("frontend not running", "frontend", {"PortBindings": {"8080/tcp": unspecified}}, {}, {"running": False}, False),
+              ("frontend publish-all", "frontend", {"PublishAllPorts": True, "PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack}, {}, False),
+              ("backend private", "backend", {"PortBindings": {}}, {"8080/tcp": None}, {}, True),
+              ("backend published", "backend", {"PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack}, {}, False),
+              ("postgres host network", "postgres", {"NetworkMode": "host"}, {}, {}, False),
+              ("minio publish-all", "minio", {"PublishAllPorts": True}, {}, {}, False),
+          ):
+              result = ports(service, host, actual, **kwargs)
+              if (result.returncode == 0) != accepted:
+                  raise SystemExit(f"Published-port policy mismatch: {name}")
+          if ports("frontend", {"PortBindings": {"8080/tcp": unspecified}}, {"8080/tcp": dual_stack}).stdout.strip() \
+                  != "0.0.0.0:443, [::]:443":
+              raise SystemExit("Published-port evidence summary is not recorded")
+          PY
+      - name: Check the runtime privilege matrix and its contract record
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          bash -c '
+            set -euo pipefail
+            source "$1"
+            runtime_matrix_values >/dev/null
+            [[ "$(runtime_matrix_values | wc -l | tr -d " ")" == 24 ]]
+            approved="$RUNTIME_PRIVILEGE_MATRIX"
+            reject() {
+              RUNTIME_PRIVILEGE_MATRIX="$2"
+              if runtime_matrix_values >/dev/null 2>&1; then
+                echo "Malformed matrix accepted: $1" >&2; exit 1
+              fi
+              if (ENV_FILE=/dev/null; application_grants_sql) >/dev/null 2>&1; then
+                echo "Grant SQL produced from a malformed matrix: $1" >&2; exit 1
+              fi
+              echo "  rejected malformed matrix: $1"
+            }
+            reject "duplicate relation" "$approved
+          users SELECT - id"
+            reject "privilege outside SELECT/INSERT/UPDATE/DELETE" "users SELECT,TRUNCATE - id"
+            reject "column privilege on an unreviewed column" "users SELECT UPDATE(role) id,email"
+            reject "column privilege on an unpinned relation" "flyway_schema_history - SELECT(version) *"
+            reject "DELETE as a column privilege" "users - DELETE(id) id"
+            reject "extra field" "users SELECT - id extra"
+            reject "non-identifier relation" "Users SELECT - id"
+            reject "empty matrix" ""
+          ' _ "$script"
+          # The executable matrix must equal the dated contract record exactly.
+          python3 - "$script" docs/deployment.md <<'PY'
+          import re, sys
+          script, record = (open(path, encoding="utf-8").read() for path in sys.argv[1:3])
+          block = re.search(r"^RUNTIME_PRIVILEGE_MATRIX='\n(.*?)^'$", script, re.M | re.S).group(1)
+          def normalize(table_privs, column_privs):
+              return frozenset(table_privs), frozenset(column_privs)
+          executable = {}
+          for line in block.splitlines():
+              if not line.strip():
+                  continue
+              rel, tprivs, cprivs, _cols = line.split()
+              columns = set()
+              if cprivs != "-":
+                  for group in cprivs.split("+"):
+                      priv, names = re.fullmatch(r"([A-Z]+)\(([a-z_,]+)\)", group).groups()
+                      columns |= {f"{priv}:{name}" for name in names.split(",")}
+              executable[rel] = normalize(set() if tprivs == "-" else set(tprivs.split(",")), columns)
+          section = record.split("## CT17 runtime database privileges and operation gates — 28 October 2026", 1)[1]
+          documented = {}
+          for rel, privileges in re.findall(r"^\| `([a-z_]+)` \([a-z]+\) \| ([^|]+?) \|", section, re.M):
+              assert rel not in documented, f"{rel} documented twice"
+              table, columns = set(), set()
+              if privileges != "none":
+                  for part in privileges.split(";"):
+                      part = part.strip()
+                      found = re.fullmatch(r"([A-Z]+) \(([a-z_, ]+)\)", part)
+                      if found:
+                          columns |= {f"{found.group(1)}:{name.strip()}" for name in found.group(2).split(",")}
+                      else:
+                          table |= {name.strip() for name in part.split(",")}
+              documented[rel] = normalize(table, columns)
+          if executable != documented:
+              for rel in sorted(set(executable) | set(documented)):
+                  if executable.get(rel) != documented.get(rel):
+                      print(f"mismatch for {rel}: script={executable.get(rel)} record={documented.get(rel)}", file=sys.stderr)
+              sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES-2026-10-28-r1")
+          print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match the dated record")
+          PY
+      - name: Check env-file custody
+        shell: bash
+        run: |
+          set -euo pipefail
+          script="$PWD/infrastructure/vm/deploy.sh"
+          base="$(mktemp -d)"
+          trap 'sudo rm -rf "$base"' EXIT
+          chmod 755 "$base"
+          origin=https://deploy-ci.example.invalid
+          secrets=("$(openssl rand -hex 16)" "$(openssl rand -hex 16)" "$(openssl rand -hex 32)")
+          write_env() {
+            cat > "$1" <<EOF
+          POSTGRES_DB=codemastery
+          POSTGRES_USER=cm_bootstrap
+          POSTGRES_PASSWORD=${secrets[0]}a
+          DB_NAME=codemastery
+          DB_USER=cm_runtime
+          DB_PASSWORD=${secrets[0]}b
+          SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
+          SPRING_FLYWAY_USER=cm_migrator
+          SPRING_FLYWAY_PASSWORD=${secrets[0]}c
+          MINIO_ROOT_USER=ci-root
+          MINIO_ROOT_PASSWORD=${secrets[1]}
+          STORAGE_ACCESS_KEY=ci-app
+          STORAGE_SECRET_KEY=${secrets[1]}d
+          JWT_SECRET=${secrets[2]}
+          CORS_ALLOWED_ORIGINS=$origin
+          EOF
+            chmod 600 "$1"
+          }
+          fresh() {  # a compliant 0600 file in a new 0700 directory
+            mkdir -m 700 "$base/$1"
+            write_env "$base/$1/.env"
+            printf '%s\n' "$base/$1/.env"
+          }
+          validate() {  # [sudo] path; prints VALID or the script's error
+            local runner=()
+            [[ "$1" != sudo ]] || { runner=(sudo); shift; }
+            "${runner[@]}" bash -c 'source "$1"; ENV_FILE="$2"; ORIGIN="$3"; validate_env_file && echo VALID' \
+              _ "$script" "$1" "$origin" 2>&1 || true
+          }
+          expect() {  # expected-fragment case-name output
+            local secret
+            if [[ "$3" != *"$1"* ]]; then
+              echo "Env custody case '$2' expected '$1'; received:" >&2
+              printf '%s\n' "$3" >&2
+              exit 1
+            fi
+            for secret in "${secrets[@]}"; do
+              [[ "$3" != *"$secret"* ]] || { echo "Env custody case '$2' printed a secret." >&2; exit 1; }
+            done
+            echo "ok: $2"
+          }
+          mode_error='must be mode 0600, owned by the invoking user and have no other hard link'
+          directory_error='directory must be mode 0700 and owned by the invoking user'
+          ancestor_error='the secret directory is not under operator control'
+
+          expect VALID 'compliant 0600 file in 0700 directory' "$(validate "$(fresh valid)")"
+          for mode in 400 640 644 700 2600; do
+            env="$(fresh "file-$mode")"; chmod "$mode" "$env"
+            expect "$mode_error" "file mode $mode" "$(validate "$env")"
+          done
+          for mode in 500 750 755 2700; do
+            env="$(fresh "dir-$mode")"; chmod "$mode" "$(dirname "$env")"
+            expect "$directory_error" "directory mode $mode" "$(validate "$env")"
+          done
+          env="$(fresh hard-link)"; mkdir -m 777 "$base/public"; ln "$env" "$base/public/copy.env"
+          expect "$mode_error" 'extra hard link in a public directory' "$(validate "$env")"
+          target="$(fresh symlink-target)"; mkdir -m 700 "$base/symlink"; ln -s "$target" "$base/symlink/.env"
+          expect 'must not be a symbolic link' 'symlinked env file' "$(validate "$base/symlink/.env")"
+          ln -s "$base/valid" "$base/valid-alias"
+          expect VALID 'directory symlink resolved to a compliant directory' "$(validate "$base/valid-alias/.env")"
+          mkdir -m 755 "$base/open"; write_env "$base/open/.env"; ln -s "$base/open" "$base/open-alias"
+          expect "$directory_error" 'directory symlink resolved to a 0755 directory' "$(validate "$base/open-alias/.env")"
+          mkdir -m 777 "$base/world"; mkdir -m 700 "$base/world/inner"; write_env "$base/world/inner/.env"
+          expect "$ancestor_error" '0700 directory inside a world-writable parent' "$(validate "$base/world/inner/.env")"
+          mkdir -m 1777 "$base/sticky"; mkdir -m 700 "$base/sticky/inner"; write_env "$base/sticky/inner/.env"
+          expect VALID '0700 directory inside a sticky shared parent' "$(validate "$base/sticky/inner/.env")"
+          sudo mkdir -m 755 "$base/foreign"; sudo chown nobody "$base/foreign"
+          sudo mkdir -m 700 "$base/foreign/inner"; sudo chown "$(id -u):$(id -g)" "$base/foreign/inner"
+          write_env "$base/foreign/inner/.env"
+          expect "$ancestor_error" 'parent owned by another user' "$(validate "$base/foreign/inner/.env")"
+          env="$(fresh other-owner)"; sudo chown nobody "$env"
+          expect "$mode_error" 'file owned by another user, checked as root' "$(validate sudo "$env")"
+          expect 'not found or unreadable' 'missing path' "$(validate "$base/valid/missing.env")"
+          expect 'not found or unreadable' 'directory instead of a file' "$(validate "$base/valid")"
+          # Re-validation (assert_release_configuration) must notice replacement.
+          env="$(fresh replaced)"; write_env "$base/replacement.env"
+          output="$(bash -c 'source "$1"; ENV_FILE="$2"; ORIGIN="$3"; validate_env_file
+                             mv "$4" "$2"; validate_env_file && echo VALID' \
+                      _ "$script" "$env" "$origin" "$base/replacement.env" 2>&1 || true)"
+          expect 'replaced or changed since preflight' 'file replaced after preflight' "$output"
+          env="$(fresh edited)"
+          output="$(bash -c 'source "$1"; ENV_FILE="$2"; ORIGIN="$3"; validate_env_file
+                             printf "# edited\n" >> "$2"; validate_env_file && echo VALID' \
+                      _ "$script" "$env" "$origin" 2>&1 || true)"
+          expect 'replaced or changed since preflight' 'file edited after preflight' "$output"
+      - name: Check preflight against rendered Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          mkdir -m 700 "$work/env" "$work/certs"
+          origin=https://deploy-ci.example.invalid
+          secret() { openssl rand -hex 16; }
+          # Synthetic CI-only inputs. This is not an approved release override.
+          cat > "$work/env/.env" <<EOF
+          POSTGRES_DB=codemastery
+          POSTGRES_USER=cm_bootstrap
+          POSTGRES_PASSWORD=$(secret)
+          DB_NAME=codemastery
+          DB_USER=cm_runtime
+          DB_PASSWORD=$(secret)
+          SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
+          SPRING_FLYWAY_USER=cm_migrator
+          SPRING_FLYWAY_PASSWORD=$(secret)
+          MINIO_ROOT_USER=ci-root
+          MINIO_ROOT_PASSWORD=$(secret)
+          STORAGE_ACCESS_KEY=ci-app
+          STORAGE_SECRET_KEY=$(secret)
+          JWT_SECRET=$(openssl rand -hex 32)
+          CORS_ALLOWED_ORIGINS=$origin
+          EOF
+          chmod 600 "$work/env/.env"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=deploy-ci.example.invalid \
+            -keyout "$work/certs/privkey.pem" -out "$work/certs/fullchain.pem" 2>/dev/null
+          chmod 400 "$work/certs/privkey.pem"
+          cat > "$work/release.yml" <<EOF
+          services:
+            postgres:
+              ports: !reset []
+              restart: unless-stopped
+            minio:
+              ports: !reset []
+              restart: unless-stopped
+            minio-init:
+              image: registry.invalid/codemastery/minio-init@sha256:$(printf 'a%.0s' {1..64})
+              entrypoint: !reset null
+              command: !reset null
+            backend:
+              image: registry.invalid/codemastery/backend:ci-fixture
+              ports: !reset []
+              restart: unless-stopped
+              environment:
+                CORS_ALLOWED_ORIGINS: \${CORS_ALLOWED_ORIGINS:?}
+                SPRING_FLYWAY_URL: \${SPRING_FLYWAY_URL:?}
+                SPRING_FLYWAY_USER: \${SPRING_FLYWAY_USER:?}
+                SPRING_FLYWAY_PASSWORD: \${SPRING_FLYWAY_PASSWORD:?}
+                SERVER_FORWARD_HEADERS_STRATEGY: NONE
+                SPRING_PROFILES_ACTIVE: prod
+            frontend:
+              image: registry.invalid/codemastery/frontend:ci-fixture
+              ports: !override
+                - "443:8080"
+              healthcheck: !reset null
+              restart: unless-stopped
+              volumes:
+                - type: bind
+                  source: $work/certs
+                  target: /etc/nginx/certs
+                  read_only: true
+          EOF
+          preflight() {
+            bash "$script" preflight --env-file "$work/env/.env" --origin "$origin" \
+              --compose-override "$work/release.yml" "$@"
+          }
+          docker compose --project-name codemastery --env-file "$work/env/.env" \
+            -f infrastructure/docker-compose.yml -f "$work/release.yml" config --format json \
+            | python3 -c 'import json,sys; print("Rendered default network keys:", sorted(json.load(sys.stdin)["networks"]["default"]))'
+          if ! output="$(preflight 2>&1)" || [[ "$output" != *"PREFLIGHT OK"* ]]; then
+            printf '%s\n' "$output" >&2
+            exit 1
+          fi
+          printf '%s\n' "$output" | grep 'HOST_PLATFORM'
+          reject() {
+            local expected="$1" name="$2" output
+            cat > "$work/$name.yml"
+            if output="$(preflight --compose-override "$work/$name.yml" 2>&1)"; then
+              echo "Preflight accepted the $name policy override." >&2
+              exit 1
+            fi
+            if [[ "$output" != *"$expected"* ]]; then
+              echo "Unexpected preflight result for $name:" >&2
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+          }
+          reject 'unapproved network options' ipam-subnet <<'EOF'
+          networks:
+            default:
+              ipam:
+                config:
+                  - subnet: 10.231.0.0/24
+          EOF
+          reject 'unapproved network options' ipam-driver <<'EOF'
+          networks:
+            default:
+              ipam:
+                driver: default
+          EOF
+          reject 'unapproved network options' driver-options <<'EOF'
+          networks:
+            default:
+              driver_opts:
+                com.docker.network.bridge.enable_icc: "true"
+          EOF
+          reject 'unapproved network options' ipv6 <<'EOF'
+          networks:
+            default:
+              enable_ipv6: true
+          EOF
+          reject 'project-managed bridge' custom-driver <<'EOF'
+          networks:
+            default:
+              driver: macvlan
+          EOF
+          reject 'project-managed bridge' external <<'EOF'
+          networks:
+            default:
+              name: shared-host-network
+              external: true
+          EOF
+          reject "only the Compose project's default network" extra-network <<'EOF'
+          services:
+            backend:
+              networks: [default, side]
+          networks:
+            side: {}
+          EOF
+          reject 'unsupported Compose options' post-start-hook <<'EOF'
+          services:
+            frontend:
+              post_start:
+                - command: ["sh", "-c", "echo synthetic-hook"]
+          EOF
+          reject 'unsupported Compose options' pre-stop-hook <<'EOF'
+          services:
+            backend:
+              pre_stop:
+                - command: ["sh", "-c", "echo synthetic-hook"]
+          EOF
+          reject 'unsupported Compose options' deploy-replicas <<'EOF'
+          services:
+            backend:
+              deploy:
+                replicas: 2
+          EOF
+          reject 'unsupported Compose options' logging-sink <<'EOF'
+          services:
+            backend:
+              logging:
+                driver: syslog
+          EOF
+          reject 'unsupported Compose options' tmpfs-mount <<'EOF'
+          services:
+            backend:
+              tmpfs: ["/run"]
+          EOF
+          reject 'unsupported Compose options' minio-secret <<'EOF'
+          secrets:
+            synthetic:
+              file: /dev/null
+          services:
+            minio:
+              secrets: [synthetic]
+          EOF
+          reject_certificate() {
+            local expected="$1" name="$2" output
+            if output="$(preflight 2>&1)"; then
+              echo "Preflight accepted invalid certificate material: $name." >&2
+              exit 1
+            fi
+            if [[ "$output" != *"$expected"* ]]; then
+              echo "Unexpected certificate rejection for $name:" >&2
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+          }
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/certs/extra-key.pem" 2>/dev/null
+          chmod 400 "$work/certs/extra-key.pem"
+          reject_certificate 'exactly one certificate matching its single private key' extra-private-key
+          rm "$work/certs/extra-key.pem"
+          cp "$work/certs/privkey.pem" "$work/privkey.original"
+          chmod 600 "$work/certs/privkey.pem"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/certs/privkey.pem" 2>/dev/null
+          chmod 400 "$work/certs/privkey.pem"
+          reject_certificate 'exactly one certificate matching its single private key' mismatched-key
+          mv "$work/privkey.original" "$work/certs/privkey.pem"
+          chmod 400 "$work/certs/privkey.pem"
+          chmod 755 "$work/certs"
+          reject_certificate 'owner-restricted' permissive-directory
+          chmod 700 "$work/certs"
+          mkdir -m 777 "$work/certs/nested"
+          cp "$work/certs/fullchain.pem" "$work/certs/nested/chain.pem"
+          reject_certificate 'owner-restricted' permissive-nested-directory
+          rm -rf "$work/certs/nested"
+          printf '%s\n' 'synthetic unexpected secret material' > "$work/certs/unexpected-secret.txt"
+          reject_certificate 'owner-restricted' unexpected-secret-file
+          rm "$work/certs/unexpected-secret.txt"
+          if ! output="$(preflight 2>&1)" || [[ "$output" != *"PREFLIGHT OK"* ]]; then
+            printf '%s\n' "$output" >&2
+            echo "Valid serving certificate/key material was rejected after negative cases." >&2
+            exit 1
+          fi
+      - name: Check release archive identity models
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          # Synthetic layouts shaped like Docker's own saves. With the containerd
+          # image store a registry image is a multi-platform index whose other
+          # platforms are absent from the archive, with in-toto attestation
+          # manifests; --platform saves add those attestations as top-level
+          # referrers. The classic store identifies images by config digest.
+          python3 - "$work" <<'PY'
+          import copy, hashlib, io, json, sys, tarfile
+
+          work = sys.argv[1]
+          INDEX = "application/vnd.oci.image.index.v1+json"
+          MANIFEST = "application/vnd.oci.image.manifest.v1+json"
+          CONFIG = "application/vnd.oci.image.config.v1+json"
+          LAYER = "application/vnd.oci.image.layer.v1.tar+gzip"
+          IN_TOTO = "application/vnd.in-toto+json"
+          NAME, REF, SUBJECT = "io.containerd.image.name", "org.opencontainers.image.ref.name", "io.containerd.manifest.subject"
+
+          def put(blobs, document):
+              data = json.dumps(document, sort_keys=True).encode()
+              digest = "sha256:" + hashlib.sha256(data).hexdigest()
+              blobs[digest] = data
+              return {"digest": digest, "size": len(data)}
+
+          def attestation(blobs, subject, config_platform=("unknown", "unknown"), layer_type=IN_TOTO):
+              statement = put(blobs, {"_type": "https://in-toto.io/Statement/v1",
+                                      "subject": [{"digest": {"sha256": subject[7:]}}]})
+              config = put(blobs, {"os": config_platform[0], "architecture": config_platform[1],
+                                   "config": {}, "rootfs": {"type": "layers", "diff_ids": []}})
+              return put(blobs, {"schemaVersion": 2, "mediaType": MANIFEST,
+                                 "config": dict(config, mediaType=CONFIG),
+                                 "layers": [dict(statement, mediaType=layer_type)]})
+
+          def image(tag, platforms=(("amd64", None), ("arm64", "v8")), present=("amd64",),
+                    attest=True, attestation_platform=("unknown", "unknown"), nested=False):
+              saved, children, out = {}, [], {"tag": tag}
+              for arch, variant in platforms:
+                  blobs = {}
+                  config = put(blobs, {"architecture": arch, "os": "linux", "fixture": tag,
+                                       "config": {"Cmd": ["/payload"]}, "rootfs": {"type": "layers", "diff_ids": []}})
+                  manifest = put(blobs, {"schemaVersion": 2, "mediaType": MANIFEST, "layers": [],
+                                         "config": dict(config, mediaType=CONFIG)})
+                  platform = {"os": "linux", "architecture": arch}
+                  if variant:
+                      platform["variant"] = variant
+                  children.append(dict(manifest, platform=platform,
+                                       mediaType=INDEX if nested and arch == "amd64" else MANIFEST))
+                  if attest:
+                      statement = attestation(blobs, manifest["digest"])
+                      children.append(dict(statement, mediaType=MANIFEST,
+                                           platform={"os": attestation_platform[0], "architecture": attestation_platform[1]},
+                                           annotations={"vnd.docker.reference.type": "attestation-manifest",
+                                                        "vnd.docker.reference.digest": manifest["digest"]}))
+                      out.setdefault("attestations", {})[arch] = statement
+                  if arch in present:
+                      saved.update(blobs)
+                      out.setdefault("config", config["digest"])
+                  out.setdefault("manifests", {})[arch] = manifest
+              out["index"] = put(saved, {"schemaVersion": 2, "mediaType": INDEX, "manifests": children})
+              out["blobs"] = saved
+              return out
+
+          def default_tops(images):
+              return [dict(i["index"], mediaType=INDEX,
+                           annotations={NAME: "docker.io/library/" + i["tag"], REF: i["tag"].split(":")[1]})
+                      for i in images]
+
+          def platform_tops(images):
+              tops = []
+              for i in images:
+                  tops.append(dict(i["manifests"]["amd64"], mediaType=MANIFEST,
+                                   annotations={NAME: "docker.io/library/" + i["tag"], REF: i["tag"].split(":")[1]}))
+                  tops.append(dict(i["attestations"]["amd64"], mediaType=MANIFEST,
+                                   annotations={SUBJECT: i["manifests"]["amd64"]["digest"]}))
+              return tops
+
+          def items(images):
+              return [{"Config": "blobs/sha256/" + i["config"][7:], "RepoTags": [i["tag"]], "Layers": []}
+                      for i in images]
+
+          def archive(name, images, tops, entries, blobs=None, tamper=False, duplicate=False):
+              everything = dict(blobs or {})
+              for i in images:
+                  everything.update(i["blobs"])
+              with tarfile.open(f"{work}/{name}.tar", "w") as t:
+                  def add(path, data):
+                      info = tarfile.TarInfo(path)
+                      info.size = len(data)
+                      t.addfile(info, io.BytesIO(data))
+                  for key, data in sorted(everything.items()):
+                      if tamper and key == images[0]["index"]["digest"]:
+                          data = data.replace(b'"schemaVersion": 2', b'"schemaVersion":  2')
+                      add("blobs/sha256/" + key[7:], data)
+                  if duplicate:
+                      add("blobs/sha256/" + images[0]["config"][7:], everything[images[0]["config"]])
+                  add("index.json", json.dumps({"schemaVersion": 2, "mediaType": INDEX, "manifests": tops}).encode())
+                  add("manifest.json", json.dumps(entries).encode())
+
+          backend, frontend = image("backend:r1"), image("frontend:r1")
+          release = [backend, frontend]
+          archive("registry", release, default_tops(release), items(release))
+          archive("registry-platform", release, platform_tops(release), items(release))
+          built = [image("backend:r1", platforms=(("amd64", None),)), image("frontend:r1", platforms=(("amd64", None),))]
+          archive("built", built, default_tops(built), items(built))
+          plain = [image("backend:r1", attest=False), image("frontend:r1", attest=False)]
+          archive("unattested", plain, default_tops(plain), items(plain))
+          nameless = copy.deepcopy(default_tops(release))
+          for top in nameless:
+              del top["annotations"]
+          unnamed = items(release)
+          for entry in unnamed:
+              entry["RepoTags"] = None
+          archive("nameless", release, nameless, unnamed)
+
+          variants = {}
+          def variant(name, **options):
+              # Each case is checked against its own identities, so a rejection
+              # cannot come from an unrelated identity mismatch.
+              variants[name] = image("backend:r1", **options)
+              images = [variants[name], frontend]
+              archive(name, images, default_tops(images), items(images))
+          variant("ambiguous-amd64", platforms=(("amd64", None), ("amd64", "v3")))
+          variant("amd64-variant", platforms=(("amd64", "v3"), ("arm64", "v8")))
+          variant("amd64-absent", present=("arm64",))
+          variant("arm64-only", platforms=(("arm64", "v8"),), present=("arm64",))
+          variant("attestation-platform", attestation_platform=("linux", "amd64"))
+          variant("nested-index", nested=True)
+          tops = default_tops(release); tops[0]["size"] += 1
+          archive("size-mismatch", release, tops, items(release))
+          tops = default_tops(release); tops[0]["mediaType"] = "application/vnd.example.unknown+json"
+          archive("media-type", release, tops, items(release))
+
+          def referrer(name, change, blobs=None):
+              tops = platform_tops(release)
+              change(tops[1])
+              archive(name, release, tops, items(release), blobs=blobs)
+          referrer("referrer-unknown-subject",
+                   lambda top: top["annotations"].update({SUBJECT: "sha256:" + "1" * 64}))
+          referrer("referrer-other-platform",
+                   lambda top: top["annotations"].update({SUBJECT: backend["manifests"]["arm64"]["digest"]}))
+          referrer("referrer-named", lambda top: top["annotations"].update({NAME: "docker.io/library/backend:r1"}))
+          extra_blobs = {}
+          runnable = attestation(extra_blobs, backend["manifests"]["amd64"]["digest"], layer_type=LAYER)
+          referrer("referrer-runnable-layers", lambda top: top.update(runnable), extra_blobs)
+          linux_blobs = {}
+          linux = attestation(linux_blobs, backend["manifests"]["amd64"]["digest"], config_platform=("linux", "amd64"))
+          referrer("referrer-linux-config", lambda top: top.update(linux), linux_blobs)
+
+          extra = image("extra:r1")
+          archive("orphan-index", release + [extra], default_tops(release + [extra]), items(release))
+          archive("unexpected", release + [extra], default_tops(release + [extra]), items(release + [extra]))
+          tops = default_tops(release); tops[0]["annotations"][NAME] = "docker.io/library/frontend:r1"
+          archive("name-mismatch", release, tops, items(release))
+          entries = items(release); entries[0]["RepoTags"] = ["backend:latest"]
+          archive("unapproved-repotag", release, default_tops(release), entries)
+          archive("tampered", release, default_tops(release), items(release), tamper=True)
+          archive("duplicate", release, default_tops(release), items(release), duplicate=True)
+
+          ids = {}
+          for key, item in [("backend", backend), ("frontend", frontend), ("extra", extra),
+                            ("built-backend", built[0]), ("built-frontend", built[1]),
+                            ("plain-backend", plain[0]), ("plain-frontend", plain[1])] + list(variants.items()):
+              ids[key] = {"index": item["index"]["digest"], "config": item["config"],
+                          "manifest": item["manifests"].get("amd64", {}).get("digest", "")}
+          json.dump(ids, open(f"{work}/ids.json", "w"))
+          PY
+          id() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]][sys.argv[3]])' "$work/ids.json" "$1" "$2"; }
+          archive_check() {  # expected-result store archive [sha256|-] REF=ID...
+            local want="$1" store="$2" name="$3" archive="$work/$3.tar" sha="$4" result=accepted
+            shift 4
+            [[ "$sha" != - ]] || sha="$(sha256sum "$archive" | awk '{print $1}')"
+            if ! bash -c '
+              source "$1"; IMAGE_STORE="$2"; ARCHIVE="$3"; ARCHIVE_SHA256="$4"; shift 4
+              EXPECT_IMAGES=("$@"); RELEASE_IMAGES="$(printf "%s\n" "${EXPECT_IMAGES[@]%%=*}")"
+              verify_archive' _ "$script" "$store" "$archive" "$sha" "$@" >/dev/null 2>&1; then
+              result=rejected
+            fi
+            echo "$result: ${store:-<none>} $name"
+            [[ "$result" == "$want" ]] || { echo "Expected $want for ${store:-<none>} $name." >&2; exit 1; }
+          }
+          be_index="backend:r1=$(id backend index)"; fe_index="frontend:r1=$(id frontend index)"
+          be_config="backend:r1=$(id backend config)"; fe_config="frontend:r1=$(id frontend config)"
+          be_manifest="backend:r1=$(id backend manifest)"; fe_manifest="frontend:r1=$(id frontend manifest)"
+          # Registry multi-platform indexes, as saved by the containerd store.
+          archive_check accepted containerd registry - "$be_index" "$fe_index"
+          archive_check accepted containerd registry-platform - "$be_manifest" "$fe_manifest"
+          archive_check accepted containerd built - "backend:r1=$(id built-backend index)" "frontend:r1=$(id built-frontend index)"
+          archive_check accepted containerd unattested - "backend:r1=$(id plain-backend index)" "frontend:r1=$(id plain-frontend index)"
+          archive_check accepted containerd nameless - "$be_index" "$fe_index"
+          archive_check accepted containerd registry - "backend:r1@$(id backend index)=$(id backend index)" "$fe_index"
+          archive_check accepted graphdriver registry - "$be_config" "$fe_config"
+          # Store-specific identity kinds, checksum and mapping.
+          archive_check rejected containerd registry - "$be_config" "$fe_config"
+          archive_check rejected graphdriver registry - "$be_index" "$fe_index"
+          archive_check rejected containerd registry-platform - "$be_index" "$fe_index"
+          archive_check rejected containerd registry "$(printf '0%.0s' {1..64})" "$be_index" "$fe_index"
+          archive_check rejected containerd registry - "backend:r1=$(id extra index)" "$fe_index"
+          archive_check rejected containerd registry - "$be_index"
+          archive_check rejected containerd registry - "$be_index" "$fe_index" "extra:r1=$(id extra index)"
+          archive_check rejected containerd registry - "backend:r1=$(id frontend index)" "frontend:r1=$(id backend index)"
+          archive_check rejected graphdriver registry - "backend:r1=$(id frontend config)" "frontend:r1=$(id backend config)"
+          archive_check rejected "" registry - "$be_config" "$fe_config"
+          # Platform selection and digest-chain integrity.
+          for case in ambiguous-amd64 amd64-variant amd64-absent arm64-only attestation-platform nested-index; do
+            archive_check rejected containerd "$case" - "backend:r1=$(id "$case" index)" "$fe_index"
+          done
+          archive_check rejected graphdriver arm64-only - "backend:r1=$(id arm64-only config)" "$fe_config"
+          for case in size-mismatch media-type tampered duplicate; do
+            archive_check rejected containerd "$case" - "$be_index" "$fe_index"
+          done
+          # Referrers, extra images and names applied by the archive.
+          for case in referrer-unknown-subject referrer-other-platform referrer-named \
+                      referrer-runnable-layers referrer-linux-config; do
+            archive_check rejected containerd "$case" - "$be_manifest" "$fe_manifest"
+          done
+          for case in orphan-index unexpected name-mismatch unapproved-repotag; do
+            archive_check rejected containerd "$case" - "$be_index" "$fe_index"
+          done
+          archive_check rejected graphdriver unapproved-repotag - "$be_config" "$fe_config"
+      - name: Check image identity through a real save/load round trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          prefix="codemastery-ci-fixture-${GITHUB_RUN_ID:-local}-$$"
+          cleanup() {
+            docker rm -f "$prefix-backend" "$prefix-frontend" >/dev/null 2>&1 || true
+            docker image rm -f "$prefix/backend:r1" "$prefix/frontend:r1" >/dev/null 2>&1 || true
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          printf 'fixture\n' > "$work/payload"
+          printf 'FROM scratch\nCOPY payload /payload\nCMD ["/payload"]\n' > "$work/backend.Dockerfile"
+          printf 'FROM scratch\nCOPY payload /payload\nHEALTHCHECK CMD ["/payload"]\nCMD ["/payload"]\n' > "$work/frontend.Dockerfile"
+          for service in backend frontend; do
+            docker build -q --platform linux/amd64 -f "$work/$service.Dockerfile" \
+              -t "$prefix/$service:r1" "$work" >/dev/null
+          done
+          bash -c '
+            set -euo pipefail
+            source "$1"; prefix="$2"; work="$3"
+            detect_image_store
+            echo "Docker image store: $IMAGE_STORE"
+            be="$prefix/backend:r1"; fe="$prefix/frontend:r1"
+            be_id="$(docker image inspect --format "{{.Id}}" "$be")"
+            fe_id="$(docker image inspect --format "{{.Id}}" "$fe")"
+            EXPECT_IMAGES=("$be=$be_id" "$fe=$fe_id")
+            RELEASE_IMAGES="$(printf "%s\n" "$be" "$fe")"
+            COMPOSE_MODEL="$(python3 -c "import json,sys; b,f=sys.argv[1:]; print(json.dumps({\"services\": {
+              \"postgres\": {\"image\": b}, \"minio\": {\"image\": b}, \"minio-init\": {\"image\": b},
+              \"backend\": {\"image\": b}, \"frontend\": {\"image\": f}}}))" "$be" "$fe")"
+            ARCHIVE="$work/release.tar"
+            docker save -o "$ARCHIVE" "$be" "$fe"
+            ARCHIVE_SHA256="$(sha256sum "$ARCHIVE" | awk "{print \$1}")"
+            verify_archive
+            docker image rm "$be" "$fe" >/dev/null
+            docker load -i "$ARCHIVE" >/dev/null
+            verify_images
+            docker create --name "$prefix-backend" "$be" >/dev/null
+            docker create --name "$prefix-frontend" "$fe" >/dev/null
+            be_cid="$(docker inspect --format "{{.Id}}" "$prefix-backend")"
+            fe_cid="$(docker inspect --format "{{.Id}}" "$prefix-frontend")"
+            verify_service_container backend "$be_cid"
+            verify_service_container frontend "$fe_cid"
+            echo "Archive, loaded image and container identities agree."
+            if (verify_service_container backend "$fe_cid") >/dev/null 2>&1; then
+              echo "A frontend container was accepted for the backend service." >&2; exit 1
+            fi
+            if (EXPECT_IMAGES=("$be=$fe_id" "$fe=$be_id"); verify_archive) >/dev/null 2>&1; then
+              echo "A swapped image mapping was accepted." >&2; exit 1
+            fi
+            if (EXPECT_IMAGES=("$be=sha256:$(printf "0%.0s" {1..64})" "$fe=$fe_id"); verify_images) >/dev/null 2>&1; then
+              echo "An incorrect image identity was accepted." >&2; exit 1
+            fi
+            other=containerd; [[ "$IMAGE_STORE" != containerd ]] || other=graphdriver
+            if (IMAGE_STORE="$other"; verify_archive) >/dev/null 2>&1; then
+              echo "Archive identities were accepted for the wrong image store." >&2; exit 1
+            fi
+            echo "Mismatched services, identities and image-store digest kinds are rejected."
+          ' _ "$script" "$prefix" "$work"
+
+  deployment-script-postgres:
+    name: VM deployment PostgreSQL and containment tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Exercise the runtime privilege matrix on the real schema and failure containment
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          suffix="${GITHUB_RUN_ID:-local}-$$"
+          network="codemastery-pr110-test-${suffix}"
+          container="${network}-postgres"
+          cleanup() {
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            docker network rm "$network" >/dev/null 2>&1 || true
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          chmod 700 "$work"
+          mkdir -m 700 "$work/env"
+          secret() { openssl rand -hex 24; }
+          bootstrap_password="$(secret)"
+          cat > "$work/env/.env" <<EOF
+          POSTGRES_DB=codemastery
+          POSTGRES_USER=cm_bootstrap
+          POSTGRES_PASSWORD=$bootstrap_password
+          DB_NAME=codemastery
+          DB_USER=cm_runtime
+          DB_PASSWORD=$(secret)
+          SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
+          SPRING_FLYWAY_USER=cm_migrator
+          SPRING_FLYWAY_PASSWORD=$(secret)
+          EOF
+          chmod 600 "$work/env/.env"
+          docker network create --internal "$network" >/dev/null
+          docker run --detach --name "$container" --network "$network" --network-alias postgres \
+            --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=256m \
+            -e POSTGRES_USER=cm_bootstrap -e POSTGRES_PASSWORD="$bootstrap_password" \
+            -e POSTGRES_DB=codemastery postgres:17.11-bookworm >/dev/null
+          for attempt in {1..60}; do
+            if docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null
+          cat > "$work/exercise-db.sh" <<'BASH'
+          set -Eeuo pipefail
+          source "$1"
+          ENV_FILE="$2"
+          pgcompose() {
+            [[ "$1" == exec ]] || return 97; shift
+            [[ "$1" == -T ]] && shift
+            [[ "$1" == postgres ]] && shift
+            docker exec -i "$PGTEST_CONTAINER" "$@"
+          }
+          COMPOSE=(pgcompose)
+          APP="$(env_get DB_USER)"; APP_PW="$(env_get DB_PASSWORD)"
+          MIG="$(env_get SPRING_FLYWAY_USER)"; MIG_PW="$(env_get SPRING_FLYWAY_PASSWORD)"
+          as_app() { psql_as "$APP" "$APP_PW"; }
+          as_mig() { psql_as "$MIG" "$MIG_PW"; }
+          sqlstate() { grep -Eo 'ERROR:  [0-9A-Z]{5}' | head -1 | awk '{print $2}'; }
+          probe() {  # label expected(ok|SQLSTATE) SQL: runs as runtime inside a rolled-back transaction
+            local out rc=0 got=ok
+            out="$(printf 'BEGIN;\n%s\nROLLBACK;\n' "$3" | as_app 2>&1)" || rc=$?
+            [[ $rc -eq 0 ]] || got="$(printf '%s' "$out" | sqlstate)"
+            [[ "$got" == "$2" ]] || { echo "PROBE FAILED: $1 (expected $2, got ${got:-error})" >&2; exit 1; }
+            printf '  probe ok: %-62s %s\n' "$1" "$got"
+          }
+          expect_failure() {  # label substring command...: the command must fail and mention substring
+            local label="$1" want="$2" out; shift 2
+            if out="$( ("$@") 2>&1 )"; then echo "NOT REJECTED: $label" >&2; exit 1; fi
+            [[ "$out" == *"$want"* ]] || { echo "WRONG REJECTION: $label"; printf '%s\n' "$out" | tail -5; exit 1; } >&2
+            printf '  rejected: %-60s [%s]\n' "$label" "$want"
+          }
+          admin() { psql_admin >/dev/null; }
+          acl_snapshot() { psql_admin <<<"SELECT string_agg(c.relname || '=' || coalesce(c.relacl::text,'') || coalesce((SELECT string_agg(a.attname || ':' || a.attacl::text, ';' ORDER BY a.attnum) FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attacl IS NOT NULL),''), ' ' ORDER BY c.relname) FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind='r';"; }
+
+          echo "== fresh provisioning (no schema yet) and Flyway-equivalent migration as the migrator"
+          provision_db_roles >/dev/null
+          as_mig >/dev/null <<'SQL'
+          CREATE TABLE public.flyway_schema_history (installed_rank integer PRIMARY KEY, version varchar(50),
+            description varchar(200) NOT NULL, type varchar(20) NOT NULL, script varchar(1000) NOT NULL,
+            checksum integer, installed_by varchar(100) NOT NULL, installed_on timestamp NOT NULL DEFAULT now(),
+            execution_time integer NOT NULL, success boolean NOT NULL);
+          SQL
+          n=0
+          for f in "$MIGRATIONS"/V*.sql; do
+            n=$((n+1))
+            { printf 'BEGIN;\n'; cat "$f"; printf "INSERT INTO public.flyway_schema_history VALUES (%d,'%d','m','SQL','%s',0,current_user,now(),1,true);\nCOMMIT;\n" "$n" "$n" "${f##*/}"; } | as_mig >/dev/null
+          done
+          echo "  applied $n migrations"
+          expect_failure "migrated tables before hardening (no runtime grants yet)" "column privilege SELECT on public.courses.title: expected true" verify_runtime_privileges complete
+          harden_after_migration
+          verify_role_separation >/dev/null
+          echo "  verify_role_separation: PASS (exact matrix)"
+
+          echo "== approved operations succeed as the runtime role"
+          admin <<'SQL'
+          INSERT INTO public.users VALUES ('00000000-0000-0000-0000-0000000000a1','instructor@example.test','x','Instructor','instructor','active');
+          INSERT INTO public.courses VALUES ('00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000000a1','Course','D',NULL,'published',false,NULL),
+                                            ('00000000-0000-0000-0000-0000000000c2','00000000-0000-0000-0000-0000000000a1','Empty','D',NULL,'published',false,NULL);
+          INSERT INTO public.chapters VALUES ('00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000c1','Ch',1);
+          INSERT INTO public.lessons VALUES ('00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000000d1','L',NULL,1,'published');
+          INSERT INTO public.learning_materials VALUES ('00000000-0000-0000-0000-0000000000f1','00000000-0000-0000-0000-0000000000e1','M','file','published',NULL,'k','f.pdf',NULL);
+          SQL
+          probe "users: SELECT (login, JWT account check, names)"      ok "SELECT * FROM public.users;"
+          probe "users: INSERT (registration)"                         ok "INSERT INTO public.users VALUES (gen_random_uuid(),'l@example.test','h','L','learner','active');"
+          probe "courses/chapters/lessons: catalogue and syllabus"     ok "SELECT * FROM public.courses c JOIN public.chapters ch ON ch.course_id=c.id JOIN public.lessons l ON l.chapter_id=ch.id;"
+          probe "courses: membership row lock (FOR UPDATE)"            ok "SELECT id FROM public.courses WHERE publication_status='published' FOR UPDATE;"
+          probe "learning_materials: access-snapshot columns"          ok "SELECT m.id, m.publication_status FROM public.learning_materials m WHERE m.lesson_id IS NOT NULL;"
+          probe "enrollments: SELECT/INSERT/UPDATE status"             ok "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c1','active',NULL); UPDATE public.enrollments SET status='left' WHERE id='00000000-0000-0000-0000-0000000000b1'; SELECT * FROM public.enrollments;"
+          echo "== everything else is denied"
+          probe "users: change role"                                   42501 "UPDATE public.users SET role='admin';"
+          probe "users: overwrite password hash"                       42501 "UPDATE public.users SET password_hash='x';"
+          probe "users: delete"                                        42501 "DELETE FROM public.users;"
+          probe "courses: change publication"                          42501 "UPDATE public.courses SET publication_status='hidden';"
+          probe "courses: change instructor ownership"                 42501 "UPDATE public.courses SET instructor_id=instructor_id;"
+          probe "courses: insert"                                      42501 "INSERT INTO public.courses SELECT * FROM public.courses WHERE false;"
+          probe "courses: re-key a referenced Course (FK NO ACTION)"   23503 "UPDATE public.courses SET id=gen_random_uuid() WHERE id='00000000-0000-0000-0000-0000000000c1';"
+          probe "chapters/lessons: modify structure"                   42501 "UPDATE public.lessons SET publication_status='published';"
+          probe "learning_materials: read payload/object keys"         42501 "SELECT object_key, text_content FROM public.learning_materials;"
+          probe "learning_materials: SELECT *"                         42501 "SELECT * FROM public.learning_materials;"
+          probe "enrollments: change resume target"                    42501 "UPDATE public.enrollments SET resume_lesson_id=NULL;"
+          probe "enrollments: reassign learner/Course"                 42501 "UPDATE public.enrollments SET user_id=user_id;"
+          probe "enrollments: delete history"                          42501 "DELETE FROM public.enrollments;"
+          probe "lesson_progress: read"                                42501 "SELECT 1 FROM public.lesson_progress;"
+          probe "questions: read answer keys"                          42501 "SELECT correct_options FROM public.questions;"
+          probe "attempts: rewrite scores"                             42501 "UPDATE public.attempts SET score_percentage=100;"
+          probe "attempt_answers: delete"                              42501 "DELETE FROM public.attempt_answers;"
+          probe "submissions: self-grade"                              42501 "UPDATE public.submissions SET grade_percentage=100;"
+          probe "learner_skill_masteries: write"                       42501 "INSERT INTO public.learner_skill_masteries SELECT * FROM public.learner_skill_masteries WHERE false;"
+          probe "path_recommendations: read"                           42501 "SELECT 1 FROM public.path_recommendations;"
+          probe "notifications: read"                                  42501 "SELECT 1 FROM public.notifications;"
+          probe "audit_logs: erase"                                    42501 "DELETE FROM public.audit_logs;"
+          probe "audit_logs: forge"                                    42501 "INSERT INTO public.audit_logs VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000a1','x','x','x',now());"
+          probe "flyway_schema_history: read"                          42501 "SELECT 1 FROM public.flyway_schema_history;"
+          probe "any table: TRUNCATE"                                  42501 "TRUNCATE public.enrollments;"
+          probe "DDL in public"                                        42501 "CREATE TABLE public.x (id int);"
+
+          echo "== repeated provisioning is idempotent"
+          before="$(acl_snapshot)"
+          provision_db_roles >/dev/null; harden_after_migration; verify_role_separation >/dev/null
+          [[ "$(acl_snapshot)" == "$before" ]] || { echo "ACL changed on repeated provisioning" >&2; exit 1; }
+          echo "  ACLs identical after a second provision + harden + verify"
+
+          echo "== drift and escalation fail closed"
+          admin <<<"GRANT UPDATE, DELETE ON public.users TO $APP; GRANT UPDATE (title) ON public.courses TO $APP; GRANT SELECT ON public.questions TO $APP;"
+          expect_failure "owner-granted excess before reconciliation" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
+          drift="$(harden_after_migration)"
+          [[ "$drift" == *"excess: column privilege UPDATE on public.courses.title: expected false"* && "$drift" == *"excess: table privilege DELETE on public.users: expected false"* ]] \
+            || { echo "drift was not reported: $drift" >&2; exit 1; }
+          verify_runtime_privileges complete >/dev/null
+          echo "  owner-granted excess (table and column level) reported, revoked and re-verified"
+          admin <<<"GRANT SELECT ON public.questions TO PUBLIC;"
+          harden_after_migration >/dev/null
+          expect_failure "SELECT on answer keys through PUBLIC" "table privilege SELECT on public.questions: expected false" verify_runtime_privileges complete
+          admin <<<"REVOKE SELECT ON public.questions FROM PUBLIC;"
+          admin <<<"CREATE ROLE cm_grantor NOLOGIN; GRANT UPDATE ON public.users TO cm_grantor WITH GRANT OPTION; SET ROLE cm_grantor; GRANT UPDATE ON public.users TO $APP; RESET ROLE;"
+          harden_after_migration >/dev/null
+          expect_failure "UPDATE users from another grantor survives reset" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
+          admin <<<"REVOKE UPDATE ON public.users FROM cm_grantor CASCADE; DROP ROLE cm_grantor;"
+          admin <<<"CREATE ROLE cm_group NOLOGIN; GRANT SELECT ON public.audit_logs TO cm_group; GRANT cm_group TO $APP;"
+          expect_failure "inherited role membership (hardening)" "hardening failed" harden_after_migration
+          expect_failure "inherited role membership (verification)" "role elevation detected" verify_role_separation
+          admin <<<"REVOKE cm_group FROM $APP; GRANT cm_group TO $APP WITH INHERIT FALSE;"
+          expect_failure "NOINHERIT membership (SET ROLE path)" "role elevation detected" verify_role_separation
+          admin <<<"REVOKE cm_group FROM $APP; REVOKE ALL ON public.audit_logs FROM cm_group; DROP ROLE cm_group;"
+          admin <<<"CREATE ROLE cm_other NOLOGIN; GRANT SELECT ON public.users TO $APP WITH GRANT OPTION;"
+          as_app >/dev/null <<<"GRANT SELECT ON public.users TO cm_other;"
+          expect_failure "runtime passed a grant on (no CASCADE)" "hardening failed" harden_after_migration
+          admin <<<"REVOKE SELECT ON public.users FROM $APP CASCADE; DROP ROLE cm_other;"
+          harden_after_migration >/dev/null
+          as_mig >/dev/null <<<"CREATE TABLE public.future_table (id uuid PRIMARY KEY);"
+          harden_after_migration >/dev/null
+          expect_failure "unreviewed table from a future migration" "unexpected relation public.future_table" verify_runtime_privileges complete
+          [[ "$(psql_admin <<<"SELECT has_any_column_privilege('$APP','public.future_table','SELECT,INSERT,UPDATE,REFERENCES') OR has_table_privilege('$APP','public.future_table','DELETE,TRUNCATE,TRIGGER');")" == f ]] \
+            || { echo "future table received runtime privileges" >&2; exit 1; }
+          echo "  the unreviewed table received no runtime privilege"
+          as_mig >/dev/null <<<'DROP TABLE public.future_table; CREATE TABLE public."QuotedTable" (id integer);'
+          expect_failure "unreviewed quoted identifier" "unexpected relation public.QuotedTable" verify_runtime_privileges complete
+          as_mig >/dev/null <<<'DROP TABLE public."QuotedTable"; CREATE SEQUENCE public.unreviewed_seq;'
+          expect_failure "unreviewed sequence" "unexpected relation public.unreviewed_seq" verify_runtime_privileges complete
+          as_mig >/dev/null <<<"DROP SEQUENCE public.unreviewed_seq; CREATE VIEW public.user_view AS SELECT id FROM public.users;"
+          expect_failure "unreviewed view" "unexpected relation public.user_view" verify_runtime_privileges complete
+          as_mig >/dev/null <<<"DROP VIEW public.user_view; CREATE FUNCTION public.f() RETURNS int LANGUAGE sql SECURITY DEFINER AS 'SELECT 1';"
+          expect_failure "SECURITY DEFINER routine in public" "unexpected routine public.f()" verify_runtime_privileges complete
+          as_mig >/dev/null <<<"DROP FUNCTION public.f(); ALTER TABLE public.users ADD COLUMN mfa_secret text;"
+          expect_failure "column added to a table-level grant" "columns differ from the reviewed matrix on public.users" verify_runtime_privileges complete
+          as_mig >/dev/null <<<"ALTER TABLE public.users DROP COLUMN mfa_secret; DROP TABLE public.audit_logs;"
+          expect_failure "reviewed table missing after migration" "missing reviewed table public.audit_logs" verify_runtime_privileges complete
+          as_mig >/dev/null <<<"CREATE VIEW public.audit_logs AS SELECT id AS actor_id FROM public.users;"
+          expect_failure "reviewed name replaced by a view" "unexpected relation kind for public.audit_logs" verify_runtime_privileges complete
+          as_mig >/dev/null <<<"DROP VIEW public.audit_logs;"
+          sed -n '/CREATE TABLE public.audit_logs/,$p' "$MIGRATIONS"/V006__*.sql | as_mig >/dev/null
+          admin <<<"ALTER DEFAULT PRIVILEGES FOR ROLE $MIG GRANT SELECT ON TABLES TO $APP;"
+          expect_failure "default privileges for future tables" "default privileges grant future tables to the runtime role" verify_runtime_privileges complete
+          admin <<<"ALTER DEFAULT PRIVILEGES FOR ROLE $MIG REVOKE SELECT ON TABLES FROM $APP;"
+          admin <<<"GRANT MAINTAIN ON public.users TO PUBLIC;"
+          expect_failure "MAINTAIN through PUBLIC" "table privilege MAINTAIN on public.users: expected false" verify_runtime_privileges complete
+          admin <<<"REVOKE MAINTAIN ON public.users FROM PUBLIC;"
+          admin <<<"ALTER TABLE public.users OWNER TO cm_bootstrap;"
+          expect_failure "table owned outside the migrator" "hardening failed" harden_after_migration
+          admin <<<"ALTER TABLE public.users OWNER TO $MIG;"
+          harden_after_migration; verify_role_separation >/dev/null
+          [[ "$(acl_snapshot)" == "$before" ]] || { echo "ACL differs from the approved state after restoration" >&2; exit 1; }
+          psql_admin <<'SQL'
+          CREATE ROLE cm_escalated NOLOGIN CREATEDB;
+          GRANT cm_escalated TO cm_runtime;
+          SQL
+          if role_policy_sql | psql_admin >/dev/null 2>&1; then
+            echo 'Role policy accepted indirect CREATEDB membership.' >&2; exit 1
+          fi
+          psql_admin <<'SQL'
+          REVOKE cm_escalated FROM cm_runtime;
+          DROP ROLE cm_escalated;
+          ALTER ROLE cm_migrator CREATEDB;
+          SQL
+          if role_policy_sql | psql_admin >/dev/null 2>&1; then
+            echo 'Role policy accepted a migrator with CREATEDB.' >&2; exit 1
+          fi
+          psql_admin <<'SQL'
+          ALTER ROLE cm_migrator NOCREATEDB;
+          CREATE TABLE public.owner_probe (id integer);
+          ALTER TABLE public.owner_probe OWNER TO cm_runtime;
+          SQL
+          if role_policy_sql | psql_admin >/dev/null 2>&1; then
+            echo 'Role policy accepted an application-owned table.' >&2; exit 1
+          fi
+          if application_grants_sql | psql_admin >/dev/null 2>&1; then
+            echo 'Grant policy accepted an unexpected table owner.' >&2; exit 1
+          fi
+          psql_admin <<'SQL'
+          ALTER TABLE public.owner_probe OWNER TO cm_migrator;
+          DROP TABLE public.owner_probe;
+          SQL
+          echo 'MATRIX_TESTS_PASS: exact grants, denials, idempotency, drift, escalation and ownership.'
+          BASH
+          PGTEST_CONTAINER="$container" MIGRATIONS=backend/src/main/resources/db/migration \
+            bash "$work/exercise-db.sh" "$script" "$work/env/.env"
+
+          cat > "$work/exercise-containment.sh" <<'BASH'
+          set -Eeuo pipefail
+          source "$1"
+          WAIT_TIMEOUT=10
+          INITIALIZER_QUALIFICATION=synthetic-test
+          RELEASE_COMPLETE=no
+          stop_count=0
+          test_compose() {
+            case "$1" in
+              stop)
+                stop_count=$((stop_count + 1))
+                printf '%s\n' "$*" >> "$CONTAINMENT_MARKER"
+                [[ "$stop_count" -ne 2 || "${TEST_STOP_FAIL:-no}" != yes ]]
+                ;;
+              up) return 0 ;;
+              ps) printf 'synthetic-minio-init\n' ;;
+              *) return 97 ;;
+            esac
+          }
+          docker() { [[ "$1" == wait ]] || return 97; printf '23\n'; }
+          timeout() { shift; "$@"; }
+          assert_release_configuration() { :; }
+          verify_images() { :; }
+          verify_container_images() { :; }
+          provision_db_roles() { :; }
+          COMPOSE=(test_compose)
+          trap contain_failure EXIT
+          quiesce_application
+          run_provision
+          BASH
+          run_containment_case() {
+            local mode="$1" marker="$work/$1.stop-log" output
+            if output="$(CONTAINMENT_MARKER="$marker" TEST_STOP_FAIL="$mode" bash \
+                "$work/exercise-containment.sh" "$script" 2>&1)"; then
+              echo "Expected synthetic provisioning failure for stop mode $mode." >&2
+              exit 1
+            fi
+            [[ "$output" == *"minio-init exited with code 23"* ]]
+            [[ "$(wc -l < "$marker" | tr -d ' ')" == 2 ]]
+            if [[ "$mode" == yes ]]; then
+              [[ "$output" == *"ingress containment is NOT verified"* ]]
+              echo 'CONTAINMENT_TEST_PASS: failed stop is reported as unverified.'
+            else
+              [[ "$output" == *"Containing application services"* ]]
+              echo 'CONTAINMENT_TEST_PASS: provisioning failure stops application services.'
+            fi
+          }
+          run_containment_case no
+          run_containment_case yes
+      - name: Exercise published-port verification against real containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          prefix="codemastery-pr110-ports-${GITHUB_RUN_ID:-local}-$$"
+          names=(ingress loopback publish-all private stopped)
+          cleanup() {
+            local name
+            for name in "${names[@]}"; do docker rm -f "$prefix-$name" >/dev/null 2>&1 || true; done
+          }
+          trap cleanup EXIT
+          # Real Docker port state. Nothing listens on container port 8080.
+          start() {
+            docker run --detach --name "$prefix-$1" -e POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+              "${@:2}" postgres:17.11-bookworm >/dev/null
+          }
+          start ingress -p 443:8080
+          start loopback -p 127.0.0.1:15432:5432
+          start publish-all -P
+          start private
+          docker create --name "$prefix-stopped" -p 443:8080 postgres:17.11-bookworm >/dev/null
+          bash -c '
+            set -euo pipefail
+            source "$1"; prefix="$2"
+            fake_compose() {
+              [[ "$1 $2 $3" == "ps -a -q" && "$4" == "$CHECK_SERVICE" ]] || return 97
+              printf "%s\n" "$CHECK_CONTAINER"
+            }
+            COMPOSE=(fake_compose)
+            check() {  # expected service container [declared-host-ip]
+              local want="$1" service="$2" result=accepted
+              CHECK_SERVICE="$service"; CHECK_CONTAINER="$prefix-$3"
+              COMPOSE_MODEL="$(python3 -c "import json,sys; port={\"target\": 8080, \"published\": \"443\"}
+          if sys.argv[1]: port[\"host_ip\"] = sys.argv[1]
+          print(json.dumps({\"services\": {\"frontend\": {\"ports\": [port]}}}))" "${4:-}")"
+              (verify_published_ports "$service") >/dev/null 2>&1 || result=rejected
+              echo "$result: $service on $3${4:+ (declared $4)}"
+              [[ "$result" == "$want" ]] || { echo "Expected $want." >&2; exit 1; }
+            }
+            check accepted frontend ingress
+            check accepted backend private
+            check rejected backend ingress
+            check rejected postgres loopback
+            check rejected minio publish-all
+            check rejected frontend ingress 203.0.113.10
+            check rejected frontend stopped
+            check rejected frontend private
+            CHECK_SERVICE=frontend; CHECK_CONTAINER="$prefix-ingress"
+            verify_published_ports frontend
+            echo "Recorded evidence: $PUBLISHED_PORTS_RESULT"
+            [[ "$PUBLISHED_PORTS_RESULT" == *"0.0.0.0:443"* ]]
+          ' _ "$script" "$prefix"
+
+  deployment-script-runtime:
+    name: VM runtime privileges with the real backend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the backend image from this revision
+        run: docker build -q -t codemastery-backend:privilege-test backend >/dev/null
+      - name: Exercise real Auth, catalogue and membership under the approved matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          suffix="${GITHUB_RUN_ID:-local}-$$"
+          network="codemastery-runtime-test-${suffix}"
+          container="${network}-postgres"
+          cleanup() {
+            docker rm -f "${container}-backend" "$container" >/dev/null 2>&1 || true
+            docker network rm "$network" >/dev/null 2>&1 || true
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          chmod 700 "$work"
+          mkdir -m 700 "$work/env" "$work/http"
+          secret() { openssl rand -hex 24; }
+          bootstrap_password="$(secret)"
+          cat > "$work/env/.env" <<EOF
+          POSTGRES_DB=codemastery
+          POSTGRES_USER=cm_bootstrap
+          POSTGRES_PASSWORD=$bootstrap_password
+          DB_NAME=codemastery
+          DB_USER=cm_runtime
+          DB_PASSWORD=$(secret)
+          SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
+          SPRING_FLYWAY_USER=cm_migrator
+          SPRING_FLYWAY_PASSWORD=$(secret)
+          EOF
+          chmod 600 "$work/env/.env"
+          # Not --internal: the backend API is published to the runner's loopback only.
+          docker network create "$network" >/dev/null
+          docker run --detach --name "$container" --network "$network" --network-alias postgres \
+            --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=256m \
+            -e POSTGRES_USER=cm_bootstrap -e POSTGRES_PASSWORD="$bootstrap_password" \
+            -e POSTGRES_DB=codemastery postgres:17.11-bookworm >/dev/null
+          for attempt in {1..60}; do
+            if docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null
+          cat > "$work/exercise-runtime.sh" <<'BASH'
+          set -Eeuo pipefail
+          source "$1"
+          ENV_FILE="$2"; work="$3"
+          pgcompose() {
+            [[ "$1" == exec ]] || return 97; shift
+            [[ "$1" == -T ]] && shift
+            [[ "$1" == postgres ]] && shift
+            docker exec -i "$PGTEST_CONTAINER" "$@"
+          }
+          COMPOSE=(pgcompose)
+          backend="${PGTEST_CONTAINER}-backend"
+          port="${BACKEND_PORT:-18080}"
+          api="http://127.0.0.1:${port}"
+          cleanup_backend() { docker rm -f "$backend" >/dev/null 2>&1 || true; }
+          [[ "${KEEP_BACKEND:-no}" == yes ]] || trap cleanup_backend EXIT
+          check() { [[ "$2" == "$3" ]] || { echo "CHECK FAILED: $1 (expected $3, got $2)" >&2; docker logs "$backend" 2>&1 | tail -20 >&2; exit 1; }; printf '  ok: %-64s %s\n' "$1" "$2"; }
+          call() {  # method path token body -> sets STATUS and BODY
+            local args=(-s -o "$work/body" -w '%{http_code}' -X "$1" "$api$2" -H 'Accept: application/json')
+            [[ -z "$3" ]] || args+=(-H "Authorization: Bearer $3")
+            [[ -z "${4:-}" ]] || args+=(-H 'Content-Type: application/json' --data-binary "$4")
+            STATUS="$(curl "${args[@]}")"; BODY="$(cat "$work/body")"
+          }
+          field() { python3 -c 'import json,sys; d=json.loads(sys.argv[1]); [d:=d[int(k)] if isinstance(d,list) else d[k] for k in sys.argv[2].split(".")]; print(d)' "$BODY" "$1"; }
+
+          echo "== provision roles on an empty database, then start the real backend (Flyway runs as the migrator)"
+          provision_db_roles >/dev/null
+          umask 077
+          { printf 'DB_HOST=postgres\nDB_PORT=5432\nDB_NAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\n' "$(env_get DB_NAME)" "$(env_get DB_USER)" "$(env_get DB_PASSWORD)"
+            printf 'SPRING_FLYWAY_URL=%s\nSPRING_FLYWAY_USER=%s\nSPRING_FLYWAY_PASSWORD=%s\n' "$(env_get SPRING_FLYWAY_URL)" "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)"
+            printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\n' "$(openssl rand -hex 32)"
+          } > "$work/backend.env"
+          docker run -d --name "$backend" --network "$PGTEST_NETWORK" -p "127.0.0.1:${port}:8080" --env-file "$work/backend.env" "$BACKEND_IMAGE" >/dev/null
+          for _ in $(seq 1 180); do
+            docker logs "$backend" 2>&1 | grep -q 'Started CodeMasteryApplication' && break
+            [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || { docker logs "$backend" 2>&1 | tail -30 >&2; echo "backend exited during startup" >&2; exit 1; }
+            sleep 1
+          done
+          docker logs "$backend" 2>&1 | grep -q 'Started CodeMasteryApplication' || { echo "backend did not start" >&2; exit 1; }
+          check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "6/6 $(env_get SPRING_FLYWAY_USER)"
+          harden_after_migration
+          verify_role_separation >/dev/null
+          echo "  verify_role_separation: PASS (exact matrix on the real Flyway schema)"
+
+          echo "== fixture Course data (inserted by the bootstrap administrator; no seed policy implied)"
+          psql_admin >/dev/null <<'SQL'
+          INSERT INTO public.users VALUES ('10000000-0000-0000-0000-0000000000a1','instructor@example.test','not-a-login-hash','Test Instructor','instructor','active');
+          INSERT INTO public.courses VALUES
+           ('20000000-0000-0000-0000-0000000000c1','10000000-0000-0000-0000-0000000000a1','Algorithms','Published course',NULL,'published',false,NULL),
+           ('20000000-0000-0000-0000-0000000000c2','10000000-0000-0000-0000-0000000000a1','Hidden','Hidden course',NULL,'hidden',false,NULL);
+          INSERT INTO public.chapters VALUES ('30000000-0000-0000-0000-0000000000d1','20000000-0000-0000-0000-0000000000c1','Basics',1);
+          INSERT INTO public.lessons VALUES
+           ('40000000-0000-0000-0000-0000000000e1','30000000-0000-0000-0000-0000000000d1','Published lesson','Body',1,'published'),
+           ('40000000-0000-0000-0000-0000000000e2','30000000-0000-0000-0000-0000000000d1','Hidden lesson','Body',2,'hidden');
+          INSERT INTO public.learning_materials VALUES ('50000000-0000-0000-0000-0000000000f1','40000000-0000-0000-0000-0000000000e1','Slides','file','published',NULL,'private/object-key','slides.pdf',NULL);
+          SQL
+          course=20000000-0000-0000-0000-0000000000c1; hidden=20000000-0000-0000-0000-0000000000c2
+          password='Correct-Horse-Battery-2026'
+
+          echo "== Auth (users: SELECT, INSERT)"
+          for who in learner.a learner.b learner.c; do
+            call POST /api/auth/register "" "{\"email\":\"$who@example.test\",\"password\":\"$password\",\"displayName\":\"$who\"}"
+            check "register $who" "$STATUS" 201
+          done
+          call POST /api/auth/register "" "{\"email\":\"learner.a@example.test\",\"password\":\"$password\",\"displayName\":\"dup\"}"
+          check "duplicate canonical email" "$STATUS" 409
+          check "self-registration stores role learner/active" "$(psql_admin <<<"SELECT role || '/' || account_status FROM public.users WHERE email='learner.a@example.test';")" "learner/active"
+          call POST /api/auth/login "" "{\"email\":\"learner.a@example.test\",\"password\":\"wrong-password-value\"}"
+          check "login with a wrong password" "$STATUS" 401
+          for who in a b c; do
+            call POST /api/auth/login "" "{\"email\":\"learner.$who@example.test\",\"password\":\"$password\"}"
+            check "login learner.$who" "$STATUS" 200
+            printf -v "token_$who" '%s' "$(field accessToken)"
+          done
+
+          echo "== catalogue and detail (courses/chapters/lessons SELECT; instructor names via users SELECT)"
+          call GET /api/courses ""
+          check "catalogue list" "$STATUS" 200
+          check "catalogue shows only the published Course" "$(field totalElements)/$(field content.0.title)/$(field content.0.instructorDisplayName)" "1/Algorithms/Test Instructor"
+          call GET "/api/courses?q=algo&prerequisites=none" ""
+          check "catalogue search/filter" "$STATUS/$(field totalElements)" "200/1"
+          call GET "/api/courses/$course" ""
+          check "Course detail with published syllabus" "$STATUS" 200
+          check "syllabus excludes the hidden lesson" "$(python3 -c 'import sys; b=sys.argv[1]; print(("Published lesson" in b, "Hidden lesson" in b, "object-key" in b))' "$BODY")" "(True, False, False)"
+          call GET "/api/courses/$hidden" ""
+          check "hidden Course detail is concealed" "$STATUS" 404
+
+          echo "== CT22 membership (enrollments SELECT/INSERT/UPDATE(status); courses FOR UPDATE via UPDATE(id))"
+          call GET "/api/courses/$course/membership" "$token_a"; check "membership read (access snapshot incl. material columns)" "$STATUS/$(field status)" "200/none"
+          call PUT "/api/courses/$course/membership" "$token_a"; check "join (row lock + INSERT)" "$STATUS/$(field status)" "200/active"
+          call PUT "/api/courses/$course/membership" "$token_a"; check "join again is unchanged" "$STATUS/$(field status)" "200/active"
+          call DELETE "/api/courses/$course/membership" "$token_a"; check "leave (UPDATE status)" "$STATUS/$(field status)" "200/left"
+          call PUT "/api/courses/$course/membership" "$token_a"; check "rejoin reuses the row" "$STATUS/$(field status)" "200/active"
+          check "one canonical row per learner/Course" "$(psql_admin <<<"SELECT count(*) FROM public.enrollments e JOIN public.users u ON u.id=e.user_id WHERE u.email='learner.a@example.test';")" 1
+          call GET "/api/me/courses" "$token_a"; check "My Courses" "$STATUS/$(field totalElements)/$(field content.0.status)" "200/1/active"
+          call PUT "/api/courses/$hidden/membership" "$token_a"; check "hidden Course membership is concealed" "$STATUS" 404
+
+          echo "== Course-root lock still serializes membership mutations under the runtime role"
+          docker exec -i "$PGTEST_CONTAINER" psql -X -q -U "$(env_get POSTGRES_USER)" -d "$(env_get POSTGRES_DB)" >/dev/null 2>&1 <<SQL &
+          BEGIN;
+          SELECT id FROM public.courses WHERE id='$course' FOR UPDATE;
+          SELECT pg_sleep(6);
+          COMMIT;
+          SQL
+          holder=$!
+          sleep 1
+          start=$SECONDS
+          call PUT "/api/courses/$course/membership" "$token_b" &
+          put_pid=$!
+          waiting=0
+          for _ in $(seq 1 30); do
+            waiting="$(psql_admin <<<"SELECT count(*) FROM pg_stat_activity WHERE usename='$(env_get DB_USER)' AND wait_event_type='Lock';")"
+            [[ "$waiting" == 0 ]] || break
+            sleep 0.2
+          done
+          check "runtime session waits on the held Course row lock" "$waiting" 1
+          wait "$put_pid"; wait "$holder"
+          elapsed=$((SECONDS - start))
+          call GET "/api/courses/$course/membership" "$token_b"
+          check "blocked join completes after the lock is released" "$STATUS/$(field status)/$([[ $elapsed -ge 3 ]] && echo waited)" "200/active/waited"
+          ( call PUT "/api/courses/$course/membership" "$token_c"; echo "$STATUS" > "$work/c1" ) &
+          ( call DELETE "/api/courses/$course/membership" "$token_b"; echo "$STATUS" > "$work/b1" ) &
+          wait
+          check "concurrent mutations by two learners both succeed" "$(cat "$work/c1")/$(cat "$work/b1")" "200/200"
+          check "membership rows after the concurrent operations" "$(psql_admin <<<"SELECT string_agg(u.email || '=' || e.status, ',' ORDER BY u.email) FROM public.enrollments e JOIN public.users u ON u.id=e.user_id;")" "learner.a@example.test=active,learner.b@example.test=left,learner.c@example.test=active"
+
+          echo "== current account state is enforced (users SELECT on every protected request)"
+          psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
+          call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
+          call POST /api/auth/login "" "{\"email\":\"learner.c@example.test\",\"password\":\"$password\"}"; check "locked account cannot log in" "$STATUS" 401
+
+          echo "== no permission failure anywhere, and the matrix is unchanged"
+          check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
+          verify_runtime_privileges complete >/dev/null
+          echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, catalogue/detail and CT22 membership under the approved matrix"
+          BASH
+          PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
+            BACKEND_IMAGE=codemastery-backend:privilege-test \
+            bash "$work/exercise-runtime.sh" "$script" "$work/env/.env" "$work/http"
+
+  deployment-script-containerd:
+    name: VM deployment containerd image store
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable the containerd image store
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo python3 - <<'PY'
+          import json, pathlib
+          path = pathlib.Path("/etc/docker/daemon.json")
+          text = path.read_text() if path.exists() else ""
+          config = json.loads(text) if text.strip() else {}
+          config.setdefault("features", {})["containerd-snapshotter"] = True
+          path.write_text(json.dumps(config, indent=2) + "\n")
+          PY
+          sudo systemctl restart docker
+          for attempt in {1..30}; do
+            docker info >/dev/null 2>&1 && break
+            sleep 2
+          done
+          store="$(docker info --format '{{range .DriverStatus}}{{if eq (index . 0) "driver-type"}}{{index . 1}}{{end}}{{end}}')"
+          [[ "$store" == io.containerd.snapshotter.v1 ]] || { echo "containerd image store is not active: '$store'" >&2; exit 1; }
+          docker version --format 'Docker Engine {{.Server.Version}}, {{.Server.Os}}/{{.Server.Arch}}, image store '"$store"
+      - name: Verify registry archives through real save/load round trips
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          prefix="codemastery-ci-containerd-${GITHUB_RUN_ID:-local}-$$"
+          cleanup() {
+            docker ps -aq --filter "name=$prefix" | xargs -r docker rm -f >/dev/null 2>&1 || true
+            docker image ls --format '{{.Repository}}:{{.Tag}}' | grep "^$prefix/" | xargs -r docker image rm -f >/dev/null 2>&1 || true
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          # The base Compose file's registry images: official multi-platform
+          # PostgreSQL and the digest-pinned MinIO server and client. They remain
+          # local-only pins; this exercises their real registry index and
+          # attestation structure, not their production admission.
+          mapfile -t registry < <(sed -n 's/^    image: //p' infrastructure/docker-compose.yml)
+          [[ ${#registry[@]} -eq 3 ]] || { echo "Unexpected base Compose image list." >&2; exit 1; }
+          for ref in "${registry[@]}"; do docker pull -q "$ref" >/dev/null; done
+          printf 'fixture\n' > "$work/payload"
+          printf 'FROM scratch\nCOPY payload /payload\nCMD ["/payload"]\n' > "$work/backend.Dockerfile"
+          printf 'FROM scratch\nCOPY payload /payload\nHEALTHCHECK CMD ["/payload"]\nCMD ["/payload"]\n' > "$work/frontend.Dockerfile"
+          for service in backend frontend; do
+            docker build -q --platform linux/amd64 -f "$work/$service.Dockerfile" -t "$prefix/$service:r1" "$work" >/dev/null
+          done
+          # Disposable names, so removing and reloading exercises the real store.
+          refs=()
+          for i in 0 1 2; do
+            service=(postgres minio minio-init); refs+=("$prefix/${service[$i]}:r1")
+            docker tag "${registry[$i]}" "${refs[$i]}"
+          done
+          refs+=("$prefix/backend:r1" "$prefix/frontend:r1")
+          cat > "$work/structure.py" <<'PY'
+          import json, sys, tarfile
+          # Prove the archive has the structure the old check rejected.
+          t = tarfile.open(sys.argv[1]); names = set(t.getnames()); mode = sys.argv[2]
+          tops = json.load(t.extractfile("index.json"))["manifests"]
+          if mode == "default":
+              index = next(m for m in tops if m["mediaType"].endswith("image.index.v1+json")
+                           and "postgres" in (m.get("annotations") or {}).get("io.containerd.image.name", ""))
+              children = json.loads(t.extractfile("blobs/sha256/" + index["digest"][7:]).read())["manifests"]
+              runnable = [c for c in children
+                          if (c.get("annotations") or {}).get("vnd.docker.reference.type") != "attestation-manifest"]
+              absent = [c for c in runnable if "blobs/sha256/" + c["digest"][7:] not in names]
+              assert len(runnable) > 1 and absent, "PostgreSQL index is not a partial multi-platform save"
+              print(f"PostgreSQL index: {len(runnable)} platforms listed, {len(absent)} absent from the archive")
+          else:
+              # Docker 29 writes attestations as top-level referrers; Docker 28
+              # does not. Both layouts are valid; synthetic fixtures cover both.
+              referrers = [m for m in tops if "io.containerd.manifest.subject" in (m.get("annotations") or {})]
+              print(f"--platform save: {len(referrers)} top-level attestation referrers")
+          PY
+          cat > "$work/ids.py" <<'PY'
+          import json, sys, tarfile
+          # Image IDs a --platform archive will produce: its named top-level manifests.
+          t = tarfile.open(sys.argv[1])
+          named = {(m.get("annotations") or {}).get("io.containerd.image.name"): m["digest"]
+                   for m in json.load(t.extractfile("index.json"))["manifests"]}
+          for ref in sys.argv[2:]:
+              print(f"{ref}={named['docker.io/' + ref]}")
+          PY
+          cat > "$work/mutate.py" <<'PY'
+          import io, json, sys, tarfile
+          # Real-archive mutations: drop PostgreSQL's amd64 manifest, or alter a referrer.
+          source, target, mode = sys.argv[1:]
+          NAME, SUBJECT = "io.containerd.image.name", "io.containerd.manifest.subject"
+          with tarfile.open(source) as t:
+              index = json.load(t.extractfile("index.json"))
+              skip = set()
+              if mode == "drop-amd64":
+                  top = next(m for m in index["manifests"] if "postgres" in (m.get("annotations") or {}).get(NAME, ""))
+                  children = json.loads(t.extractfile("blobs/sha256/" + top["digest"][7:]).read())["manifests"]
+                  amd64 = next(c for c in children if (c.get("platform") or {}).get("architecture") == "amd64")
+                  skip.add("blobs/sha256/" + amd64["digest"][7:])
+              else:
+                  referrer = next((m for m in index["manifests"] if SUBJECT in (m.get("annotations") or {})), None)
+                  if referrer is None:
+                      sys.exit(0)  # This Engine wrote no referrer; no mutated archive.
+                  if mode == "referrer-subject":
+                      referrer["annotations"][SUBJECT] = "sha256:" + "1" * 64
+                  else:
+                      referrer["annotations"][NAME] = "docker.io/library/unreviewed:latest"
+              out = tarfile.open(target, "w")
+              for member in t.getmembers():
+                  if member.name in skip:
+                      continue
+                  data = t.extractfile(member).read() if member.isfile() else None
+                  if member.name == "index.json":
+                      data = json.dumps(index).encode()
+                      member.size = len(data)
+                  out.addfile(member, io.BytesIO(data) if data is not None else None)
+              out.close()
+          PY
+          bash -c '
+            set -euo pipefail
+            source "$1"; work="$2"; shift 2; refs=("$@")
+            services=(postgres minio minio-init backend frontend)
+            detect_image_store
+            [[ "$IMAGE_STORE" == containerd ]] || { echo "Expected the containerd image store." >&2; exit 1; }
+            COMPOSE_MODEL="$(python3 -c "import json,sys; s=sys.argv[1:]; print(json.dumps({\"services\": {s[i]: {\"image\": s[i+1]} for i in range(0, len(s), 2)}}))" \
+              postgres "${refs[0]}" minio "${refs[1]}" minio-init "${refs[2]}" backend "${refs[3]}" frontend "${refs[4]}")"
+            RELEASE_IMAGES="$(printf "%s\n" "${refs[@]}")"
+            current_ids() { local ref; for ref in "${refs[@]}"; do printf "%s=%s\n" "$ref" "$(docker image inspect --format "{{.Id}}" "$ref")"; done; }
+            remove_release() { local ref; for ref in "${refs[@]}"; do docker image rm -f "$(docker image inspect --format "{{.Id}}" "$ref")" >/dev/null; done; }
+            check_archive() { ARCHIVE="$1"; ARCHIVE_SHA256="$(sha256sum "$ARCHIVE" | awk "{print \$1}")"; verify_archive; }
+            rejects() { if ("$@") >/dev/null 2>&1; then echo "Accepted: $*" >&2; exit 1; fi; }
+            containers() {
+              local i cid
+              for i in "${!services[@]}"; do
+                cid="$(docker create "${refs[$i]}")"
+                verify_service_container "${services[$i]}" "$cid"
+                docker rm "$cid" >/dev/null
+              done
+            }
+
+            mapfile -t default_ids < <(current_ids)
+            docker save -o "$work/default.tar" "${refs[@]}"
+            python3 "$work/structure.py" "$work/default.tar" default
+            EXPECT_IMAGES=("${default_ids[@]}"); check_archive "$work/default.tar"
+            remove_release; docker load -i "$work/default.tar" >/dev/null
+            verify_images; containers
+            echo "Default save: archive, loaded image and container identities agree."
+
+            docker save --platform linux/amd64 -o "$work/platform.tar" "${refs[@]}"
+            python3 "$work/structure.py" "$work/platform.tar" platform
+            mapfile -t platform_ids < <(python3 "$work/ids.py" "$work/platform.tar" "${refs[@]}")
+            EXPECT_IMAGES=("${platform_ids[@]}"); check_archive "$work/platform.tar"
+            remove_release; docker load -i "$work/platform.tar" >/dev/null
+            verify_images; containers
+            echo "--platform save: archive, loaded image and container identities agree."
+
+            EXPECT_IMAGES=("${default_ids[@]}"); rejects check_archive "$work/platform.tar"
+            EXPECT_IMAGES=("${platform_ids[@]}"); rejects check_archive "$work/default.tar"
+            EXPECT_IMAGES=("${default_ids[@]}"); rejects eval "IMAGE_STORE=graphdriver; check_archive \"$work/default.tar\""
+            EXPECT_IMAGES=("${refs[0]}=${default_ids[1]#*=}" "${refs[1]}=${default_ids[0]#*=}" "${default_ids[@]:2}")
+            rejects check_archive "$work/default.tar"
+            for mode in drop-amd64 referrer-subject referrer-name; do
+              source_archive="$work/platform.tar"; EXPECT_IMAGES=("${platform_ids[@]}")
+              [[ "$mode" != drop-amd64 ]] || { source_archive="$work/default.tar"; EXPECT_IMAGES=("${default_ids[@]}"); }
+              python3 "$work/mutate.py" "$source_archive" "$work/$mode.tar" "$mode"
+              if [[ ! -f "$work/$mode.tar" ]]; then
+                echo "No top-level referrer from this Docker Engine; $mode is covered by the synthetic fixtures."
+                continue
+              fi
+              rejects check_archive "$work/$mode.tar"
+            done
+            echo "Wrong identities, store kind, swapped mapping, missing amd64 manifest and altered referrers are rejected."
+          ' _ "$script" "$work" "${refs[@]}"
