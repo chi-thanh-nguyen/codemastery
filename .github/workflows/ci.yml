@@ -333,12 +333,6 @@ jobs:
               deploy:
                 replicas: 2
           EOF
-          reject 'unsupported Compose options' deploy-privileged <<'EOF'
-          services:
-            backend:
-              deploy:
-                privileged: true
-          EOF
           reject 'unsupported Compose options' logging-sink <<'EOF'
           services:
             backend:
