@@ -369,6 +369,7 @@ jobs:
           reject_certificate 'exactly one certificate matching its single private key' extra-private-key
           rm "$work/certs/extra-key.pem"
           cp "$work/certs/privkey.pem" "$work/privkey.original"
+          chmod 600 "$work/certs/privkey.pem"
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/certs/privkey.pem" 2>/dev/null
           chmod 400 "$work/certs/privkey.pem"
           reject_certificate 'exactly one certificate matching its single private key' mismatched-key
