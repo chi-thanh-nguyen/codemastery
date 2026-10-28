@@ -1,56 +1,107 @@
 package com.codemastery.modules.course.application.service;
 
+import com.codemastery.common.api.PageResponse;
 import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.auth.application.service.UserAccountService;
-import com.codemastery.modules.course.api.dto.CourseSummaryResponse;
-import com.codemastery.modules.course.api.dto.CourseSummaryResponse.CoursePage;
 import com.codemastery.modules.course.api.dto.CourseDetailResponse;
+import com.codemastery.modules.course.api.dto.CourseSummaryResponse;
+import com.codemastery.modules.course.domain.model.Chapter;
 import com.codemastery.modules.course.domain.model.Course;
-import com.codemastery.modules.course.domain.repository.CourseRepository;
+import com.codemastery.modules.course.domain.model.Lesson;
+import com.codemastery.modules.course.domain.model.PublishStatus;
 import com.codemastery.modules.course.domain.repository.CourseContentRepository;
+import com.codemastery.modules.course.domain.repository.CourseRepository;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.stream.Collectors;
-
 @Service
 @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 public class CourseCatalogueService {
-    private final CourseRepository courses;
-    private final CourseContentRepository content;
+
+    private static final Comparator<Chapter> CHAPTER_ORDER =
+            Comparator.comparingInt(Chapter::position)
+                    .thenComparing(Chapter::id, Comparator.nullsLast(Comparator.naturalOrder()));
+
+    private static final Comparator<Lesson> LESSON_ORDER =
+            Comparator.comparingInt(Lesson::position)
+                    .thenComparing(Lesson::id, Comparator.nullsLast(Comparator.naturalOrder()));
+
+    private final CourseRepository courseRepository;
+    private final CourseContentRepository courseContentRepository;
     private final UserAccountService identities;
 
-    public CourseCatalogueService(CourseRepository courses, CourseContentRepository content, UserAccountService identities) {
-        this.courses = courses; this.content = content; this.identities = identities;
+    public CourseCatalogueService(
+            CourseRepository courseRepository,
+            CourseContentRepository courseContentRepository,
+            UserAccountService identities) {
+        this.courseRepository = Objects.requireNonNull(courseRepository, "courseRepository must not be null");
+        this.courseContentRepository = Objects.requireNonNull(
+                courseContentRepository, "courseContentRepository must not be null");
+        this.identities = Objects.requireNonNull(identities, "identities must not be null");
     }
 
-    public CoursePage list(int page, int size, String query, String prerequisites) {
-        var result = courses.searchPublishedCourses(PageRequest.of(page, size), query, prerequisites);
-        var names = identities.instructorDisplayNames(result.stream().map(Course::instructorId).collect(Collectors.toSet()));
-        return new CoursePage(result.stream().map(course -> summary(course, names)).toList(), page, size,
-                result.getTotalElements(), result.getTotalPages());
+    public CourseSummaryResponse.CoursePage list(int page, int size, String query, String prerequisites) {
+        var result = courseRepository.searchPublishedCourses(PageRequest.of(page, size), query, prerequisites);
+        var selected = result.getContent().stream().map(CourseCatalogueService::requirePublishedRow).toList();
+        var names = identities.instructorDisplayNames(
+                selected.stream().map(Course::instructorId).collect(Collectors.toSet()));
+        var summaries = selected.stream().map(course -> new CourseSummaryResponse(
+                course.id(), course.title(), course.description(), course.instructorId(),
+                names.get(course.instructorId()))).toList();
+        var response = new PageResponse<>(summaries, page, size, result.getTotalElements());
+        return new CourseSummaryResponse.CoursePage(response.content(), response.page(), response.size(),
+                response.totalElements(), response.totalPages());
     }
 
-    public CourseDetailResponse detail(UUID id) {
-        var course = courses.findPublishedById(id).orElseThrow(() -> new ResourceNotFoundException("Resource not available"));
+    public CourseDetailResponse detail(UUID courseId) {
+        Course course = courseRepository.findPublishedById(courseId)
+                .filter(row -> row.publicationStatus() == PublishStatus.PUBLISHED)
+                .orElseThrow(() -> new ResourceNotFoundException("Resource not available"));
         var names = identities.instructorDisplayNames(Set.of(course.instructorId()));
-        var lessons = content.findPublishedLessonsByCourseId(id);
-        var chapters = content.findChaptersByCourseId(id).stream()
-                .filter(chapter -> lessons.stream().anyMatch(lesson -> lesson.chapterId().equals(chapter.id())))
-                .map(chapter -> new CourseDetailResponse.Chapter(
-                chapter.id(), chapter.title(), chapter.position(), lessons.stream()
-                .filter(lesson -> lesson.chapterId().equals(chapter.id()))
-                .map(lesson -> new CourseDetailResponse.Lesson(lesson.id(), lesson.title(), lesson.position())).toList())).toList();
         return new CourseDetailResponse(course.id(), course.title(), course.description(), course.instructorId(),
-                names.get(course.instructorId()), course.prerequisiteDescription(), chapters);
+                names.get(course.instructorId()), course.prerequisiteDescription(), assemblePublicSyllabus(course.id()));
     }
 
-    private static CourseSummaryResponse summary(Course course, Map<UUID, String> names) {
-        return new CourseSummaryResponse(course.id(), course.title(), course.description(), course.instructorId(), names.get(course.instructorId()));
+    /** Fail closed if a non-published row ever reaches the public mapping. */
+    private static Course requirePublishedRow(Course course) {
+        if (course == null || course.publicationStatus() != PublishStatus.PUBLISHED) {
+            throw new IllegalStateException("Published catalogue query returned a non-published course");
+        }
+        return course;
+    }
+
+    private List<CourseDetailResponse.Chapter> assemblePublicSyllabus(UUID courseId) {
+        var chapters = courseContentRepository.findChaptersByCourseId(courseId);
+        var publishedLessons = courseContentRepository.findPublishedLessonsByCourseId(courseId);
+
+        Map<UUID, List<Lesson>> lessonsByChapter = new LinkedHashMap<>();
+        for (var lesson : publishedLessons) {
+            if (lesson != null && lesson.publicationStatus() == PublishStatus.PUBLISHED) {
+                lessonsByChapter.computeIfAbsent(lesson.chapterId(), ignored -> new ArrayList<>()).add(lesson);
+            }
+        }
+
+        return chapters.stream()
+                .filter(Objects::nonNull)
+                .filter(chapter -> courseId.equals(chapter.courseId()))
+                .sorted(CHAPTER_ORDER)
+                .map(chapter -> new CourseDetailResponse.Chapter(chapter.id(), chapter.title(), chapter.position(),
+                        lessonsByChapter.getOrDefault(chapter.id(), List.of()).stream()
+                                .sorted(LESSON_ORDER)
+                                .map(lesson -> new CourseDetailResponse.Lesson(lesson.id(), lesson.title(), lesson.position()))
+                                .toList()))
+                .filter(chapter -> !chapter.lessons().isEmpty())
+                .toList();
     }
 }

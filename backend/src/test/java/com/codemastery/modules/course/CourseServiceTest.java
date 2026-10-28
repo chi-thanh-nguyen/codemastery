@@ -330,4 +330,106 @@ class CourseServiceTest {
         verifyNoInteractions(application);
     }
 
+    @Test void catalogueMetadataPreservesTotalPagesBeyondTheSpringPageIntegerCeiling() {
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var paging = org.springframework.data.domain.PageRequest.of(0, 1);
+        long total = (long) Integer.MAX_VALUE + 1;
+        when(repository.searchPublishedCourses(paging, "", "any"))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(catalogueCourse(COURSE, PUBLISHED)), paging, total));
+        when(identity.instructorDisplayNames(Set.of(ACTOR))).thenReturn(java.util.Map.of());
+        var result = new CourseCatalogueService(repository, content, identity).list(0, 1, "", "any");
+        assertEquals(total, result.totalElements()); assertEquals(total, result.totalPages());
+    }
+
+    @Test void catalogueResolvesOnlyDistinctInstructorsOnTheSelectedPublishedPage() {
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var catalogue = new CourseCatalogueService(repository, content, identity);
+        var paging = org.springframework.data.domain.PageRequest.of(1, 2);
+        var first = catalogueCourse(COURSE, PUBLISHED);
+        var second = catalogueCourse(OTHER, PUBLISHED);
+        when(repository.searchPublishedCourses(paging, "%_", "none"))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(first, second), paging, 5));
+        when(identity.instructorDisplayNames(Set.of(ACTOR))).thenReturn(java.util.Map.of(ACTOR, "Public name"));
+        var result = catalogue.list(1, 2, "%_", "none");
+        assertEquals(List.of(COURSE, OTHER), result.content().stream().map(row -> row.id()).toList());
+        assertTrue(result.content().stream().allMatch(row -> "Public name".equals(row.instructorDisplayName())));
+        assertEquals(5, result.totalElements()); assertEquals(3, result.totalPages());
+        verify(identity).instructorDisplayNames(Set.of(ACTOR));
+        verify(repository).searchPublishedCourses(paging, "%_", "none");
+        verifyNoMoreInteractions(identity, repository); verifyNoInteractions(content);
+    }
+
+    @Test void catalogueFailsClosedBeforeIdentityLookupIfProviderReturnsHiddenContent() {
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var paging = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(repository.searchPublishedCourses(paging, "", "any"))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(catalogueCourse(COURSE, HIDDEN))));
+        assertThrows(IllegalStateException.class,
+                () -> new CourseCatalogueService(repository, content, identity).list(0, 20, "", "any"));
+        verifyNoInteractions(identity, content);
+    }
+
+    @Test void detailUsesCanonicalOrderAndOmitsHiddenForeignAndEmptySyllabusEntries() {
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var catalogue = new CourseCatalogueService(repository, content, identity);
+        when(repository.findPublishedById(COURSE)).thenReturn(Optional.of(catalogueCourse(COURSE, PUBLISHED)));
+        when(identity.instructorDisplayNames(Set.of(ACTOR))).thenReturn(java.util.Map.of());
+        when(content.findChaptersByCourseId(COURSE)).thenReturn(List.of(
+                new com.codemastery.modules.course.domain.model.Chapter(OTHER, COURSE, "Second", 1),
+                new com.codemastery.modules.course.domain.model.Chapter(ACTOR, COURSE, "First", 1),
+                new com.codemastery.modules.course.domain.model.Chapter(MATERIAL, COURSE, "Empty", 2),
+                new com.codemastery.modules.course.domain.model.Chapter(LESSON, OTHER, "Foreign", 0)));
+        when(content.findPublishedLessonsByCourseId(COURSE)).thenReturn(List.of(
+                new com.codemastery.modules.course.domain.model.Lesson(MATERIAL, ACTOR, "Later tie", "private body", 1, PUBLISHED),
+                new com.codemastery.modules.course.domain.model.Lesson(LESSON, ACTOR, "Earlier tie", "private body", 1, PUBLISHED),
+                new com.codemastery.modules.course.domain.model.Lesson(ACTOR, OTHER, "Second chapter", "body", 1, PUBLISHED),
+                new com.codemastery.modules.course.domain.model.Lesson(OTHER, MATERIAL, "Hidden", "secret", 1, HIDDEN),
+                new com.codemastery.modules.course.domain.model.Lesson(COURSE, LESSON, "Foreign", "secret", 1, PUBLISHED)));
+        var result = catalogue.detail(COURSE);
+        assertNull(result.instructorDisplayName());
+        assertEquals(List.of(ACTOR, OTHER), result.syllabus().stream().map(row -> row.id()).toList());
+        assertEquals(List.of(LESSON, MATERIAL), result.syllabus().getFirst().lessons().stream().map(row -> row.id()).toList());
+        assertThrows(UnsupportedOperationException.class, () -> result.syllabus().clear());
+        assertThrows(UnsupportedOperationException.class, () -> result.syllabus().getFirst().lessons().clear());
+        verify(identity).instructorDisplayNames(Set.of(ACTOR)); verifyNoMoreInteractions(identity);
+    }
+
+    @Test void hiddenAndMissingDetailHaveTheSameFailureWithoutIdentityOrSyllabusReads() {
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var catalogue = new CourseCatalogueService(repository, content, identity);
+        when(repository.findPublishedById(COURSE)).thenReturn(Optional.empty());
+        var missing = assertThrows(ResourceNotFoundException.class, () -> catalogue.detail(COURSE));
+        when(repository.findPublishedById(COURSE)).thenReturn(Optional.of(catalogueCourse(COURSE, HIDDEN)));
+        var hidden = assertThrows(ResourceNotFoundException.class, () -> catalogue.detail(COURSE));
+        assertEquals(missing.getMessage(), hidden.getMessage()); verifyNoInteractions(identity, content);
+    }
+
+    @Test void nullablePublicFieldsArePresentAndResponsesContainOnlyContractProperties() throws Exception {
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var catalogue = new CourseCatalogueService(repository, content, identity);
+        var paging = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(repository.findPublishedById(COURSE)).thenReturn(Optional.of(catalogueCourse(COURSE, PUBLISHED)));
+        when(repository.searchPublishedCourses(paging, "", "any"))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(catalogueCourse(COURSE, PUBLISHED))));
+        when(identity.instructorDisplayNames(Set.of(ACTOR))).thenReturn(java.util.Map.of());
+        when(content.findChaptersByCourseId(COURSE)).thenReturn(List.of());
+        when(content.findPublishedLessonsByCourseId(COURSE)).thenReturn(List.of());
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+                new com.codemastery.modules.course.api.controller.CourseCatalogueController(catalogue))
+                .setControllerAdvice(new com.codemastery.common.exception.GlobalExceptionHandler()).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/courses/" + COURSE))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().json(
+                        "{\"id\":\"" + COURSE + "\",\"title\":\"Title\",\"description\":\"Description\",\"instructorId\":\"" + ACTOR
+                        + "\",\"instructorDisplayName\":null,\"prerequisiteDescription\":null,\"syllabus\":[]}",
+                        org.springframework.test.json.JsonCompareMode.STRICT));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/courses"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.content[0].instructorDisplayName").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.content[0].length()").value(5));
+    }
+
+    private com.codemastery.modules.course.domain.model.Course catalogueCourse(UUID id, PublishStatus publication) {
+        return new com.codemastery.modules.course.domain.model.Course(id, ACTOR, "Title", "Description", null,
+                publication, true, java.util.Map.of("private", "settings"));
+    }
+
 }
