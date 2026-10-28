@@ -49,6 +49,7 @@ OVERRIDES=()
 EXPECT_IMAGES=()
 COMPOSE=()
 DB_SEPARATION_RESULT="not checked"
+DB_GRANTS_RESULT="not checked"
 HEALTH_RESULT="not checked"
 PUBLISHED_PORTS_RESULT="not checked"
 ENV_FILE_IDENTITY=""
@@ -1157,6 +1158,9 @@ provision_db_roles() {
   if [[ ",${existing_roles}," == *",${mig},"* ]]; then
     verify_db_credential "migrator" "${mig}" "${mig_pw}"
   fi
+  if [[ ",${existing_roles}," == *",${app},"* ]]; then
+    report_runtime_privilege_drift
+  fi
 
   read -r -d '' sql <<'SQL' || true
 -- Never write statement text (it contains passwords) to the server log on error.
@@ -1201,6 +1205,7 @@ SQL
     fail "PostgreSQL role provisioning failed (output suppressed: it may contain credentials). Check role state with the bootstrap administrator."
   fi
   verify_db_credentials
+  verify_runtime_privileges present
   log "Roles ready: '${mig}' (migrations) and '${app}' (runtime)."
 }
 
@@ -1261,8 +1266,11 @@ BEGIN
           AND (CASE WHEN c.relkind='S'
                     THEN has_sequence_privilege(target.oid,c.oid,'USAGE,SELECT,UPDATE')
                     ELSE has_table_privilege(target.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') END))
+      -- The runtime role needs no membership: any granted role (INHERIT or SET)
+      -- could add privileges outside the approved matrix.
       OR (origin.rolname='@APP@' AND (
-        target.rolname='@MIG@'
+        target.oid <> origin.oid
+        OR target.rolname='@MIG@'
         OR has_database_privilege(target.oid, current_database(), 'TEMPORARY')
         OR has_schema_privilege(target.oid, 'public', 'CREATE')
         OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=target.oid AND nspname='public')
@@ -1277,66 +1285,205 @@ SQL
   printf '%s\n' "${sql//@APP@/${app}}" | sed "s/@MIG@/${mig}/g"
 }
 
+# CT17-P6-PRIVILEGES-2026-10-28-r1 (docs/deployment.md): the complete runtime
+# privilege matrix for the reviewed V001-V006 schema. Every relation in schema
+# public must be listed, and its reviewed columns are pinned, so a later migration
+# cannot silently widen a table-level grant. Nothing is granted to future objects.
+# Change a row only together with that record and an implemented, approved consumer.
+# Fields: relation, table privileges, column privileges (PRIV(col,...) joined by
+# '+'), reviewed columns ('*' = Flyway-managed, not pinned); '-' means none.
+RUNTIME_PRIVILEGE_MATRIX='
+users                    SELECT,INSERT  -                                        id,email,password_hash,display_name,role,account_status
+courses                  SELECT         UPDATE(id)                               id,instructor_id,title,description,prerequisite_description,publication_status,adaptive_enabled,adaptive_settings
+chapters                 SELECT         -                                        id,course_id,title,position
+lessons                  SELECT         -                                        id,chapter_id,title,content_markdown,position,publication_status
+learning_materials       -              SELECT(id,lesson_id,publication_status)  id,lesson_id,title,material_type,publication_status,text_content,object_key,original_filename,external_video_url
+enrollments              SELECT,INSERT  UPDATE(status)                           id,user_id,course_id,status,resume_lesson_id
+lesson_progress          -              -                                        id,enrollment_id,lesson_id,completed,mastery_skipped
+skills                   -              -                                        id,course_id,name,description
+skill_prerequisites      -              -                                        id,course_id,skill_id,prerequisite_skill_id
+lesson_skills            -              -                                        id,lesson_id,skill_id
+quizzes                  -              -                                        id,course_id,title,kind,time_limit_seconds,publication_status
+questions                -              -                                        id,skill_id,prompt,kind,difficulty,options,correct_options
+quiz_questions           -              -                                        id,quiz_id,question_id,position
+attempts                 -              -                                        id,user_id,quiz_id,attempt_number,started_at,expires_at,submitted_at,score_percentage
+attempt_answers          -              -                                        id,attempt_id,question_id,position,selected_options,is_correct
+assignments              -              -                                        id,course_id,lesson_id,title,instructions,deadline_at,publication_status
+submissions              -              -                                        id,assignment_id,user_id,object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at
+learner_skill_masteries  -              -                                        id,user_id,skill_id,state
+path_recommendations     -              -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
+discussion_posts         -              -                                        id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden
+notifications            -              -                                        id,user_id,message,is_read,created_at
+content_reports          -              -                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at
+audit_logs               -              -                                        id,actor_id,action,target_type,target_reference,occurred_at
+flyway_schema_history    -              -                                        *
+'
+
+runtime_matrix_values() {  # the matrix as SQL VALUES rows; non-zero on any malformed row
+  local rel tprivs cprivs cols extra group priv col t c k rows="" seen="," nl=$'\n'
+  local ident='[a-z_][a-z0-9_]*'
+  while read -r rel tprivs cprivs cols extra; do
+    [[ -n "${rel}" ]] || continue
+    [[ -z "${extra}" && "${rel}" =~ ^${ident}$ && "${seen}" != *",${rel},"* ]] || return 1
+    seen+="${rel},"
+    [[ "${tprivs}" == "-" || "${tprivs}" =~ ^(SELECT|INSERT|UPDATE|DELETE)(,(SELECT|INSERT|UPDATE|DELETE))*$ ]] || return 1
+    [[ "${cols}" == "*" || "${cols}" =~ ^${ident}(,${ident})*$ ]] || return 1
+    [[ "${cprivs}" == "-" || ( "${cols}" != "*" \
+       && "${cprivs}" =~ ^(SELECT|INSERT|UPDATE)\(${ident}(,${ident})*\)(\+(SELECT|INSERT|UPDATE)\(${ident}(,${ident})*\))*$ ) ]] || return 1
+    t=""; c=""; k=""
+    [[ "${tprivs}" == "-" ]] || for priv in ${tprivs//,/ }; do t+="${t:+,}'${priv}'"; done
+    [[ "${cols}" == "*" ]] || for col in ${cols//,/ }; do k+="${k:+,}'${col}'"; done
+    if [[ "${cprivs}" != "-" ]]; then
+      for group in ${cprivs//+/ }; do
+        priv="${group%%(*}"; group="${group#*(}"; group="${group%)}"
+        for col in ${group//,/ }; do
+          [[ ",${cols}," == *",${col},"* ]] || return 1
+          c+="${c:+,}'${priv}:${col}'"
+        done
+      done
+    fi
+    rows+="${rows:+,${nl}}('${rel}',ARRAY[${t}]::text[],ARRAY[${c}]::text[],ARRAY[${k}]::text[])"
+  done <<<"${RUNTIME_PRIVILEGE_MATRIX}"
+  [[ -n "${rows}" ]] || return 1
+  printf '%s\n' "${rows}"
+}
+
 application_grants_sql() {
-  local sql app mig
+  local sql app mig values
   app="$(env_get DB_USER)"; mig="$(env_get SPRING_FLYWAY_USER)"
+  values="$(runtime_matrix_values)" || fail "The runtime privilege matrix is malformed; nothing was granted."
   read -r -d '' sql <<'SQL' || true
 DO $grants$
-DECLARE obj record;
+DECLARE obj record; entry record; item text;
 BEGIN
-  FOR obj IN SELECT c.oid, c.relname, c.relkind, c.relowner FROM pg_class c
+  FOR obj IN SELECT c.relname, c.relkind, c.relowner FROM pg_class c
     JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relkind IN ('r','p','S')
+    WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f')
   LOOP
     IF obj.relowner <> (SELECT oid FROM pg_roles WHERE rolname='@MIG@') THEN
       RAISE EXCEPTION 'Unexpected application object owner; no ownership transfer is permitted';
     END IF;
-    IF obj.relname='flyway_schema_history' THEN
-      EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', obj.relname, '@APP@');
-    ELSIF obj.relkind='S' THEN
-      EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE public.%I TO %I', obj.relname, '@APP@');
-    ELSE
-      IF has_table_privilege('@APP@', obj.oid, 'TRUNCATE')
-         OR has_table_privilege('@APP@', obj.oid, 'REFERENCES')
-         OR has_table_privilege('@APP@', obj.oid, 'TRIGGER') THEN
-        RAISE EXCEPTION 'Runtime role has unexpected broad table privileges; operator reconciliation required';
-      END IF;
-      EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO %I', obj.relname, '@APP@');
+    -- Reset the owner-granted runtime ACL, column grants included. No CASCADE:
+    -- grants that the runtime role passed on to other roles stop provisioning.
+    EXECUTE format('REVOKE ALL ON %s public.%I FROM %I',
+                   CASE WHEN obj.relkind='S' THEN 'SEQUENCE' ELSE 'TABLE' END, obj.relname, '@APP@');
+  END LOOP;
+  -- Grant exactly the approved matrix on reviewed tables that exist. Verification
+  -- rejects unexpected relations, column drift and privileges from any other source.
+  FOR entry IN SELECT * FROM (VALUES
+@MATRIX@
+  ) AS m(relname, table_privs, column_privs, columns)
+  LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                              WHERE n.nspname='public' AND c.relname=entry.relname AND c.relkind='r');
+    IF cardinality(entry.table_privs) > 0 THEN
+      EXECUTE format('GRANT %s ON TABLE public.%I TO %I',
+                     array_to_string(entry.table_privs, ', '), entry.relname, '@APP@');
     END IF;
+    FOREACH item IN ARRAY entry.column_privs LOOP
+      EXECUTE format('GRANT %s (%I) ON TABLE public.%I TO %I',
+                     split_part(item, ':', 1), split_part(item, ':', 2), entry.relname, '@APP@');
+    END LOOP;
   END LOOP;
 END
 $grants$;
 SQL
+  sql="${sql//@MATRIX@/${values}}"
   printf '%s\n' "${sql//@APP@/${app}}" | sed "s/@MIG@/${mig}/g"
 }
 
-harden_after_migration() {
-  { printf 'BEGIN;\n'; role_policy_sql; application_grants_sql; printf 'COMMIT;\n'; } | psql_admin >/dev/null 2>&1 \
-    || fail "Application grants/history hardening failed; ingress remains closed. Reconcile unexpected ownership/privileges explicitly."
+runtime_privilege_violations_sql() {  # present|complete; one row per violation, none when exact
+  local sql app values mode="$1"
+  [[ "${mode}" == "present" || "${mode}" == "complete" ]] || fail "Unknown privilege verification mode."
+  app="$(env_get DB_USER)"
+  values="$(runtime_matrix_values)" || fail "The runtime privilege matrix is malformed."
+  # Effective privileges count PUBLIC and inherited grants. has_table_privilege
+  # ignores column grants, so both levels are compared separately.
+  read -r -d '' sql <<'SQL' || true
+WITH matrix(relname, table_privs, column_privs, columns) AS (VALUES
+@MATRIX@
+), app AS (SELECT oid FROM pg_roles WHERE rolname='@APP@'),
+rel AS (SELECT c.oid, c.relname::text AS relname, c.relkind FROM pg_class c
+        JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f')),
+reviewed AS (SELECT r.oid, m.* FROM matrix m JOIN rel r USING (relname) WHERE r.relkind='r'),
+table_priv(priv) AS (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),('REFERENCES'),('TRIGGER')),
+column_priv(priv) AS (VALUES ('SELECT'),('INSERT'),('UPDATE'),('REFERENCES'))
+SELECT 'runtime role @APP@ does not exist' WHERE NOT EXISTS (SELECT 1 FROM app)
+UNION ALL
+SELECT 'unexpected relation public.' || r.relname FROM rel r
+ WHERE r.relname NOT IN (SELECT relname FROM matrix)
+UNION ALL
+SELECT 'unexpected relation kind for public.' || r.relname FROM rel r JOIN matrix m USING (relname)
+ WHERE r.relkind <> 'r'
+UNION ALL
+SELECT 'missing reviewed table public.' || m.relname FROM matrix m
+ WHERE '@MODE@'='complete' AND NOT EXISTS (SELECT 1 FROM rel r WHERE r.relname=m.relname)
+UNION ALL
+SELECT 'columns differ from the reviewed matrix on public.' || v.relname FROM reviewed v
+ WHERE cardinality(v.columns) > 0
+   AND ARRAY(SELECT a.attname::text FROM pg_attribute a
+             WHERE a.attrelid=v.oid AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attname::text COLLATE "C")
+       <> ARRAY(SELECT x FROM unnest(v.columns) x ORDER BY x COLLATE "C")
+UNION ALL
+SELECT format('table privilege %s on public.%s: expected %s', p.priv, v.relname, (p.priv = ANY (v.table_privs))::text)
+  FROM reviewed v CROSS JOIN app CROSS JOIN table_priv p
+ WHERE has_table_privilege(app.oid, v.oid, p.priv) <> (p.priv = ANY (v.table_privs))
+UNION ALL
+SELECT format('table privilege MAINTAIN on public.%s: expected false', v.relname)
+  FROM reviewed v CROSS JOIN app
+ WHERE CASE WHEN current_setting('server_version_num')::int >= 170000
+            THEN has_table_privilege(app.oid, v.oid, 'MAINTAIN') ELSE false END
+UNION ALL
+SELECT format('column privilege %s on public.%s.%s: expected %s', p.priv, v.relname, a.attname,
+              (p.priv = ANY (v.table_privs) OR (p.priv || ':' || a.attname) = ANY (v.column_privs))::text)
+  FROM reviewed v CROSS JOIN app CROSS JOIN column_priv p
+  JOIN pg_attribute a ON a.attrelid=v.oid AND a.attnum>0 AND NOT a.attisdropped
+ WHERE has_column_privilege(app.oid, v.oid, a.attnum, p.priv)
+       <> (p.priv = ANY (v.table_privs) OR (p.priv || ':' || a.attname) = ANY (v.column_privs))
+UNION ALL
+SELECT format('unexpected routine public.%s(%s)', p.proname, pg_get_function_identity_arguments(p.oid)) FROM pg_proc p
+  JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'
+UNION ALL
+SELECT 'default privileges grant future ' || CASE d.defaclobjtype WHEN 'r' THEN 'tables' ELSE 'sequences' END
+       || ' to ' || CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE 'the runtime role' END
+  FROM pg_default_acl d CROSS JOIN LATERAL aclexplode(d.defaclacl) x
+ WHERE d.defaclobjtype IN ('r','S') AND d.defaclnamespace IN (0, 'public'::regnamespace)
+   AND (x.grantee=0 OR x.grantee IN (SELECT oid FROM app))
+ORDER BY 1;
+SQL
+  sql="${sql//@MATRIX@/${values}}"; sql="${sql//@MODE@/${mode}}"
+  printf '%s\n' "${sql//@APP@/${app}}"
 }
 
-verify_application_grants() {
-  local app result
-  app="$(env_get DB_USER)"
-  # ACL checks exercise existing objects, including updates with old migrations.
-  # Keep each required privilege separate: PostgreSQL's comma list means ANY.
-  result="$(psql_admin 2>/dev/null <<SQL
-SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
- WHERE n.nspname='public' AND c.relkind IN ('r','p') AND c.relname<>'flyway_schema_history')
- AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
- WHERE n.nspname='public' AND (
-  (c.relkind IN ('r','p') AND c.relname<>'flyway_schema_history' AND NOT (
-    has_table_privilege('${app}',c.oid,'SELECT') AND has_table_privilege('${app}',c.oid,'INSERT')
-    AND has_table_privilege('${app}',c.oid,'UPDATE') AND has_table_privilege('${app}',c.oid,'DELETE')))
-  OR (c.relkind='S' AND NOT (has_sequence_privilege('${app}',c.oid,'USAGE')
-    AND has_sequence_privilege('${app}',c.oid,'SELECT')))
-  OR (c.relkind IN ('r','p') AND (has_table_privilege('${app}',c.oid,'TRUNCATE')
-    OR has_table_privilege('${app}',c.oid,'REFERENCES') OR has_table_privilege('${app}',c.oid,'TRIGGER')))
-  OR (c.relname='flyway_schema_history' AND has_table_privilege('${app}',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))
- )) THEN 'ok' ELSE 'invalid' END;
-SQL
-  )" || fail "Could not verify existing application object privileges."
-  [[ "${result}" == "ok" ]] || fail "Runtime lacks required privileges on existing application tables/sequences."
+report_runtime_privilege_drift() {
+  # Owner-granted excess is reset by application_grants_sql; any other source
+  # (PUBLIC, membership, another grantor) survives that reset and fails verification.
+  local excess
+  excess="$(runtime_privilege_violations_sql present | psql_admin 2>/dev/null | grep -F ': expected false' || true)"
+  [[ -n "${excess}" ]] || return 0
+  log "Runtime privileges beyond the approved matrix were detected; owner-granted ones are revoked now:"
+  printf '%s\n' "${excess}" | head -n 25 | sed 's/^/    excess: /'
+}
+
+verify_runtime_privileges() {  # present (before migration) | complete (after migration)
+  local mode="$1" violations
+  violations="$(runtime_privilege_violations_sql "${mode}" | psql_admin 2>/dev/null)" \
+    || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
+  if [[ -n "${violations}" ]]; then
+    printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
+    fail "Runtime database privileges or objects differ from the approved matrix (CT17-P6-PRIVILEGES-2026-10-28-r1); reconcile explicitly. Ingress remains closed."
+  fi
+  if [[ "${mode}" == "complete" ]]; then
+    DB_GRANTS_RESULT="exact CT17-P6-PRIVILEGES-2026-10-28-r1 matrix verified (every public relation reviewed)"
+  fi
+  log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
+}
+
+harden_after_migration() {
+  report_runtime_privilege_drift
+  { printf 'BEGIN;\n'; role_policy_sql; application_grants_sql; printf 'COMMIT;\n'; } | psql_admin >/dev/null 2>&1 \
+    || fail "Application grants/history hardening failed; ingress remains closed. Reconcile unexpected ownership/privileges explicitly."
 }
 
 verify_role_separation() {
@@ -1358,12 +1505,24 @@ CREATE TEMP TABLE cm_temp_ddl_probe (x integer);
 ROLLBACK;
 SQL
   expect_denied  "runtime role reading Flyway history" 42501 "${app}" "${app_pw}" <<<'SELECT 1 FROM public.flyway_schema_history LIMIT 1;'
+  # Behavioral probes complement the exact ACL comparison below; none touches a row.
+  expect_denied  "runtime role changing account roles or credentials" 42501 "${app}" "${app_pw}" <<<'UPDATE public.users SET role = role WHERE false;'
+  expect_denied  "runtime role changing Course publication" 42501 "${app}" "${app_pw}" <<<'UPDATE public.courses SET publication_status = publication_status WHERE false;'
+  expect_denied  "runtime role deleting memberships" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.enrollments WHERE false;'
+  expect_denied  "runtime role reading question answer keys" 42501 "${app}" "${app_pw}" <<<'SELECT correct_options FROM public.questions WHERE false;'
+  expect_denied  "runtime role reading protected material payloads" 42501 "${app}" "${app_pw}" <<<'SELECT object_key FROM public.learning_materials WHERE false;'
+  expect_denied  "runtime role erasing audit records" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.audit_logs WHERE false;'
+  expect_allowed "runtime role locking a published Course root (CT22 membership)" "${app}" "${app_pw}" <<'SQL'
+BEGIN;
+SELECT id FROM public.courses WHERE false FOR UPDATE;
+ROLLBACK;
+SQL
   expect_allowed "migrator role creating a table (DDL, rolled back)" "${mig}" "${mig_pw}" <<'SQL'
 BEGIN;
 CREATE TABLE public.cm_ddl_probe (x integer);
 ROLLBACK;
 SQL
-  verify_application_grants
+  verify_runtime_privileges complete
 
   owned="$(psql_admin 2>/dev/null <<<"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner='${app}';")"
   [[ "${owned}" == "0" ]] || fail "ROLE SEPARATION FAILED: the runtime role owns ${owned} table(s) in public."
@@ -1649,7 +1808,7 @@ print_record() {
   [[ -z "${ARCHIVE_SHA256}" ]] || echo "Archive SHA-256     : ${ARCHIVE_SHA256}"
   echo "Flyway success|fail : ${flyway}"
   echo "DB role separation  : ${DB_SEPARATION_RESULT}"
-  echo "DB runtime grants   : SELECT/INSERT/UPDATE/DELETE on every migrator-owned public table; no approved per-object P6 matrix"
+  echo "DB runtime grants   : ${DB_GRANTS_RESULT}"
   echo "Published ports     : ${PUBLISHED_PORTS_RESULT}"
   echo "--- verified image identities ---"
   for entry in "${EXPECT_IMAGES[@]}"; do echo "${entry}"; done
