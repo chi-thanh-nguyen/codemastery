@@ -95,9 +95,16 @@ jobs:
           require_gate '--deployment-authorization is required' deploy "${deploy_common[@]}"
           require_gate '--public-exposure-authorization is required' deploy "${deploy_common[@]}" \
             --deployment-authorization deployment-record
+          authorized=("${deploy_common[@]}" --deployment-authorization deployment-record
+                      --public-exposure-authorization exposure-record)
+          for command in deploy all; do
+            require_gate '--packet-filter-verification is required' "$command" "${authorized[@]}"
+          done
+          require_gate 'must not be whitespace-only' deploy "${authorized[@]}" \
+            --packet-filter-verification '   '
           # With every reference present, input gates pass and validation moves on.
-          require_gate 'Env file not found or unreadable' deploy "${deploy_common[@]}" \
-            --deployment-authorization deployment-record --public-exposure-authorization exposure-record
+          require_gate 'Env file not found or unreadable' deploy "${authorized[@]}" \
+            --packet-filter-verification packet-filter-record
       - name: Check offline Compose and provisioning safety guards
         shell: bash
         run: |
@@ -187,6 +194,64 @@ jobs:
               )
               if (network_problem not in result.stderr) != approved:
                   raise SystemExit(f"Default network policy mismatch for {network}")
+          # B2 publishes 443 without naming an interface; a declared host_ip must
+          # be a real non-loopback address. This proves nothing about firewalls.
+          host_ip_problems = ("loopback-only", "host_ip must be an IP address")
+          for host_ip, problem in (
+              (None, None), ("0.0.0.0", None), ("203.0.113.10", None), ("2001:db8::10", None),
+              ("127.0.0.1", "loopback-only"), ("127.0.0.2", "loopback-only"),
+              ("::1", "loopback-only"), ("not-an-address", "host_ip must be an IP address"),
+          ):
+              port = {"target": 8080, "published": "443", "protocol": "tcp"}
+              if host_ip:
+                  port["host_ip"] = host_ip
+              config = {"services": {"frontend": {"image": "frontend:reviewed", "ports": [port]}}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              found = [p for p in host_ip_problems if p in result.stderr]
+              if found != ([problem] if problem else []) or "exactly host port 443" in result.stderr:
+                  raise SystemExit(f"host_ip policy mismatch for {host_ip}: {found}")
+          port_marker = "read -r -d '' PY_PORT_POLICY <<'PYEOF' || true\n"
+          port_policy = source.split(port_marker, 1)[1].split("\nPYEOF", 1)[0]
+          unspecified = [{"HostIp": "", "HostPort": "443"}]
+          dual_stack = [{"HostIp": "0.0.0.0", "HostPort": "443"}, {"HostIp": "::", "HostPort": "443"}]
+          def ports(service, host, actual, running=True, host_ip=None):
+              port = {"target": 8080, "published": "443"}
+              if host_ip:
+                  port["host_ip"] = host_ip
+              data = {"model": {"services": {"frontend": {"ports": [port]}}},
+                      "container": {"host": host, "ports": actual, "running": running}}
+              return subprocess.run([sys.executable, "-c", port_policy, service],
+                                    input=json.dumps(data), text=True, capture_output=True, check=False)
+          for name, service, host, actual, kwargs, accepted in (
+              ("frontend dual-stack 443", "frontend", {"PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack, "80/tcp": None}, {}, True),
+              ("frontend declared address", "frontend",
+               {"PortBindings": {"8080/tcp": [{"HostIp": "203.0.113.10", "HostPort": "443"}]}},
+               {"8080/tcp": [{"HostIp": "203.0.113.10", "HostPort": "443"}]}, {"host_ip": "203.0.113.10"}, True),
+              ("frontend actual address differs", "frontend", {"PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack}, {"host_ip": "203.0.113.10"}, False),
+              ("frontend extra published port", "frontend", {"PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack, "80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "80"}]}, {}, False),
+              ("frontend wrong host port", "frontend", {"PortBindings": {"8080/tcp": [{"HostIp": "", "HostPort": "8443"}]}},
+               {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8443"}]}, {}, False),
+              ("frontend not running", "frontend", {"PortBindings": {"8080/tcp": unspecified}}, {}, {"running": False}, False),
+              ("frontend publish-all", "frontend", {"PublishAllPorts": True, "PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack}, {}, False),
+              ("backend private", "backend", {"PortBindings": {}}, {"8080/tcp": None}, {}, True),
+              ("backend published", "backend", {"PortBindings": {"8080/tcp": unspecified}},
+               {"8080/tcp": dual_stack}, {}, False),
+              ("postgres host network", "postgres", {"NetworkMode": "host"}, {}, {}, False),
+              ("minio publish-all", "minio", {"PublishAllPorts": True}, {}, {}, False),
+          ):
+              result = ports(service, host, actual, **kwargs)
+              if (result.returncode == 0) != accepted:
+                  raise SystemExit(f"Published-port policy mismatch: {name}")
+          if ports("frontend", {"PortBindings": {"8080/tcp": unspecified}}, {"8080/tcp": dual_stack}).stdout.strip() \
+                  != "0.0.0.0:443, [::]:443":
+              raise SystemExit("Published-port evidence summary is not recorded")
           PY
       - name: Check env-file custody
         shell: bash
@@ -943,6 +1008,59 @@ jobs:
           }
           run_containment_case no
           run_containment_case yes
+      - name: Exercise published-port verification against real containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          prefix="codemastery-pr110-ports-${GITHUB_RUN_ID:-local}-$$"
+          names=(ingress loopback publish-all private stopped)
+          cleanup() {
+            local name
+            for name in "${names[@]}"; do docker rm -f "$prefix-$name" >/dev/null 2>&1 || true; done
+          }
+          trap cleanup EXIT
+          # Real Docker port state. Nothing listens on container port 8080.
+          start() {
+            docker run --detach --name "$prefix-$1" -e POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+              "${@:2}" postgres:17.11-bookworm >/dev/null
+          }
+          start ingress -p 443:8080
+          start loopback -p 127.0.0.1:15432:5432
+          start publish-all -P
+          start private
+          docker create --name "$prefix-stopped" -p 443:8080 postgres:17.11-bookworm >/dev/null
+          bash -c '
+            set -euo pipefail
+            source "$1"; prefix="$2"
+            fake_compose() {
+              [[ "$1 $2 $3" == "ps -a -q" && "$4" == "$CHECK_SERVICE" ]] || return 97
+              printf "%s\n" "$CHECK_CONTAINER"
+            }
+            COMPOSE=(fake_compose)
+            check() {  # expected service container [declared-host-ip]
+              local want="$1" service="$2" result=accepted
+              CHECK_SERVICE="$service"; CHECK_CONTAINER="$prefix-$3"
+              COMPOSE_MODEL="$(python3 -c "import json,sys; port={\"target\": 8080, \"published\": \"443\"}
+          if sys.argv[1]: port[\"host_ip\"] = sys.argv[1]
+          print(json.dumps({\"services\": {\"frontend\": {\"ports\": [port]}}}))" "${4:-}")"
+              (verify_published_ports "$service") >/dev/null 2>&1 || result=rejected
+              echo "$result: $service on $3${4:+ (declared $4)}"
+              [[ "$result" == "$want" ]] || { echo "Expected $want." >&2; exit 1; }
+            }
+            check accepted frontend ingress
+            check accepted backend private
+            check rejected backend ingress
+            check rejected postgres loopback
+            check rejected minio publish-all
+            check rejected frontend ingress 203.0.113.10
+            check rejected frontend stopped
+            check rejected frontend private
+            CHECK_SERVICE=frontend; CHECK_CONTAINER="$prefix-ingress"
+            verify_published_ports frontend
+            echo "Recorded evidence: $PUBLISHED_PORTS_RESULT"
+            [[ "$PUBLISHED_PORTS_RESULT" == *"0.0.0.0:443"* ]]
+          ' _ "$script" "$prefix"
 
   deployment-script-containerd:
     name: VM deployment containerd image store

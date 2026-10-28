@@ -39,6 +39,7 @@ INITIALIZER_QUALIFICATION=""
 PROVISION_AUTHORIZATION=""
 DEPLOY_AUTHORIZATION=""
 EXPOSURE_AUTHORIZATION=""
+PACKET_FILTER_VERIFICATION=""
 WAIT_TIMEOUT=""
 RECOVERY_VERIFIED="no"
 COMPATIBILITY_VERIFIED="no"
@@ -49,6 +50,7 @@ EXPECT_IMAGES=()
 COMPOSE=()
 DB_SEPARATION_RESULT="not checked"
 HEALTH_RESULT="not checked"
+PUBLISHED_PORTS_RESULT="not checked"
 ENV_FILE_IDENTITY=""
 COMPOSE_MODEL=""
 RELEASE_IMAGES=""
@@ -119,6 +121,13 @@ deploy / all:
   --public-exposure-authorization REF
                                 Non-secret reference to Leader authorization for
                                 this actual public HTTPS origin
+  --packet-filter-verification REF
+                                Non-secret reference to operator evidence that
+                                this host's packet filtering, including the path
+                                Docker uses for published ports (a UFW rule set
+                                alone is not proof), admits only the approved
+                                HTTPS ingress and operator access (CT17 B2).
+                                This script cannot verify host firewall rules.
 
 Updates:
   --recovery-artifact-verified  Operator attests that an independently checked,
@@ -155,6 +164,7 @@ parse_args() {
       (--provision-authorization) PROVISION_AUTHORIZATION="${2:?--provision-authorization needs a reference}"; shift 2 ;;
       (--deployment-authorization) DEPLOY_AUTHORIZATION="${2:?--deployment-authorization needs a reference}"; shift 2 ;;
       (--public-exposure-authorization) EXPOSURE_AUTHORIZATION="${2:?--public-exposure-authorization needs a reference}"; shift 2 ;;
+      (--packet-filter-verification) PACKET_FILTER_VERIFICATION="${2:?--packet-filter-verification needs a reference}"; shift 2 ;;
       (--recovery-artifact-verified) RECOVERY_VERIFIED="yes"; shift ;;
       (--schema-image-compatibility-verified) COMPATIBILITY_VERIFIED="yes"; shift ;;
       (--persistent-state-preserved) PERSISTENT_STATE_PRESERVED="yes"; shift ;;
@@ -209,6 +219,7 @@ require_inputs() {
     (deploy|all)
       [[ -n "${DEPLOY_AUTHORIZATION}" ]] || fail "--deployment-authorization is required for ${SUBCOMMAND}."
       [[ -n "${EXPOSURE_AUTHORIZATION}" ]] || fail "--public-exposure-authorization is required for ${SUBCOMMAND}."
+      [[ -n "${PACKET_FILTER_VERIFICATION}" ]] || fail "--packet-filter-verification is required for ${SUBCOMMAND}."
       ;;
   esac
   [[ "${SOURCE_REVISION}" != *$'\n'* && "${SOURCE_REVISION}" != *$'\r'* ]] \
@@ -223,8 +234,11 @@ require_inputs() {
     || fail "--deployment-authorization must be a single-line record reference."
   [[ "${EXPOSURE_AUTHORIZATION}" != *$'\n'* && "${EXPOSURE_AUTHORIZATION}" != *$'\r'* ]] \
     || fail "--public-exposure-authorization must be a single-line record reference."
+  [[ "${PACKET_FILTER_VERIFICATION}" != *$'\n'* && "${PACKET_FILTER_VERIFICATION}" != *$'\r'* ]] \
+    || fail "--packet-filter-verification must be a single-line record reference."
   for ref in "${UPDATE_AUTHORIZATION}" "${INITIALIZER_QUALIFICATION}" \
-             "${PROVISION_AUTHORIZATION}" "${DEPLOY_AUTHORIZATION}" "${EXPOSURE_AUTHORIZATION}"; do
+             "${PROVISION_AUTHORIZATION}" "${DEPLOY_AUTHORIZATION}" "${EXPOSURE_AUTHORIZATION}" \
+             "${PACKET_FILTER_VERIFICATION}"; do
     [[ -z "${ref}" || "${ref}" =~ [^[:space:]] ]] \
       || fail "Authorization and qualification references must not be whitespace-only."
   done
@@ -418,7 +432,7 @@ def forbidden_backend_key(key):
 PYEOF
 
 read -r -d '' PY_CHECK <<'PYEOF' || true
-import hashlib, json, os, pathlib, re, stat, subprocess, sys
+import hashlib, ipaddress, json, os, pathlib, re, stat, subprocess, sys
 
 origin, env_path = sys.argv[1:]
 cfg = json.load(sys.stdin)
@@ -544,8 +558,15 @@ for p in ports:
         problems.append("frontend host 443 must map to container port 8080")
     if p.get("protocol", "tcp") != "tcp":
         problems.append("frontend HTTPS ingress must use TCP")
-    if p.get("host_ip") in ("127.0.0.1", "::1"):
-        problems.append("frontend 443 must not be loopback-only")
+    # B2 selects public 443 without naming an interface: an omitted host_ip is
+    # allowed. A declared one must be a real, non-loopback address. A valid
+    # mapping is not evidence about the host's packet filtering.
+    if p.get("host_ip"):
+        try:
+            if ipaddress.ip_address(p["host_ip"]).is_loopback:
+                problems.append("frontend 443 must not be loopback-only")
+        except ValueError:
+            problems.append("frontend 443 host_ip must be an IP address")
 
 # B3: certificate material through a read-only bind directory.
 fe_volumes = fe.get("volumes") or []
@@ -1032,6 +1053,55 @@ if sys.argv[1] == "frontend" and container.get("Healthcheck") != data["image"].g
   fi
 }
 
+# Actual Docker port publication (P2/B2). Static Compose checks cover the model;
+# this checks what Docker was asked to publish and is publishing. It says nothing
+# about host packet filtering, which remains operator evidence.
+verify_published_ports() {
+  local service cid summary
+  for service in "$@"; do
+    cid="$("${COMPOSE[@]}" ps -a -q "${service}" 2>/dev/null)" || fail "Cannot inspect release container inventory."
+    [[ -n "${cid}" && "${cid}" != *$'\n'* ]] || fail "Expected exactly one ${service} container."
+    summary="$({ printf '{"model":%s,"container":' "${COMPOSE_MODEL}"; docker inspect --format '{"host":{{json .HostConfig}},"ports":{{json .NetworkSettings.Ports}},"running":{{json .State.Running}}}' "${cid}" 2>/dev/null; printf '}'; } | python3 -c "${PY_PORT_POLICY}" "${service}")" \
+      || fail "${service} host port publication differs from the approved ingress (frontend 443/tcp to 8080 only)."
+    [[ "${service}" != "frontend" ]] \
+      || PUBLISHED_PORTS_RESULT="frontend 8080/tcp on ${summary}; no other release service publishes host ports"
+  done
+}
+
+read -r -d '' PY_PORT_POLICY <<'PYEOF' || true
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    service = sys.argv[1]
+    host = data["container"]["host"] or {}
+    network_mode = str(host.get("NetworkMode") or "")
+    if host.get("PublishAllPorts") or network_mode == "host" or network_mode.startswith("container:"):
+        raise ValueError()
+    configured = {k: v for k, v in (host.get("PortBindings") or {}).items() if v}
+    actual = {k: v for k, v in (data["container"]["ports"] or {}).items() if v}
+    if service != "frontend":
+        if configured or actual:
+            raise ValueError()
+        sys.exit(0)
+    declared = [p.get("host_ip") or "" for p in data["model"]["services"]["frontend"].get("ports") or []]
+    if len(declared) != 1 or data["container"]["running"] is not True:
+        raise ValueError()
+    if set(configured) != {"8080/tcp"} or set(actual) != {"8080/tcp"}:
+        raise ValueError()
+    if any(b.get("HostPort") != "443" or (b.get("HostIp") or "") != declared[0]
+           for b in configured["8080/tcp"]):
+        raise ValueError()
+    # Without a declared host_ip Docker binds its unspecified addresses.
+    addresses = {declared[0]} if declared[0] else {"0.0.0.0", "::"}
+    if any(b.get("HostPort") != "443" or b.get("HostIp") not in addresses
+           for b in actual["8080/tcp"]):
+        raise ValueError()
+    print(", ".join(sorted(("[%s]" if ":" in b["HostIp"] else "%s") % b["HostIp"] + ":443"
+                           for b in actual["8080/tcp"])))
+except Exception:
+    sys.exit(1)
+PYEOF
+
 # PostgreSQL identities (P6): provision, harden, verify.
 # Only expected SQL goes to these helpers; diagnostics are never emitted verbatim.
 psql_admin() {  # bootstrap administrator over the container's local socket
@@ -1331,6 +1401,7 @@ run_provision() {
     fail "minio-init exited with code ${code}; backend startup must not proceed."
   fi
   verify_container_images minio-init
+  verify_published_ports postgres minio minio-init
   log "PROVISION PROCESS CHECK: postgres ready, minio running, minio-init exited 0."
   log "MinIO policy/state correctness and safe re-execution require qualified initializer evidence; storage feature behavior is NOT verified."
   log "Provision authority reference: ${PROVISION_AUTHORIZATION}"
@@ -1521,6 +1592,7 @@ run_deploy() {
   "${COMPOSE[@]}" up -d --no-build --pull never --no-deps backend \
     || fail "Private backend startup failed."
   verify_container_images backend
+  verify_published_ports postgres minio minio-init backend
   stage_frontend
   wait_backend_health
   local migration_state
@@ -1539,6 +1611,7 @@ SQL
   "${COMPOSE[@]}" up -d --no-build --pull never --no-deps --wait --wait-timeout "${WAIT_TIMEOUT}" frontend \
     || fail "Frontend startup failed; stopping application services."
   verify_container_images frontend backend
+  verify_published_ports postgres minio minio-init backend frontend
   print_record
 }
 
@@ -1569,12 +1642,14 @@ print_record() {
   echo "Initializer qualification: ${INITIALIZER_QUALIFICATION:-not applicable} (operator-supplied reference)"
   echo "Deployment authority : ${DEPLOY_AUTHORIZATION:-not applicable} (operator-supplied reference)"
   echo "Public exposure authority: ${EXPOSURE_AUTHORIZATION:-not applicable} (operator-supplied reference)"
+  echo "Packet-filter evidence: ${PACKET_FILTER_VERIFICATION:-not applicable} (operator-supplied reference; not verified by this script)"
   echo "Provision authority  : ${PROVISION_AUTHORIZATION:-not applicable} (operator-supplied reference)"
   echo "Update authority    : ${UPDATE_AUTHORIZATION:-not an update} (declared by operator)"
   echo "Recovery preconditions: artifact=${RECOVERY_VERIFIED}, compatibility=${COMPATIBILITY_VERIFIED}, state=${PERSISTENT_STATE_PRESERVED} (operator attestations)"
   [[ -z "${ARCHIVE_SHA256}" ]] || echo "Archive SHA-256     : ${ARCHIVE_SHA256}"
   echo "Flyway success|fail : ${flyway}"
   echo "DB role separation  : ${DB_SEPARATION_RESULT}"
+  echo "Published ports     : ${PUBLISHED_PORTS_RESULT}"
   echo "--- verified image identities ---"
   for entry in "${EXPECT_IMAGES[@]}"; do echo "${entry}"; done
   echo "--- images in use ---"
@@ -1586,6 +1661,7 @@ print_record() {
   echo "SERVICE_HEALTH      : ${HEALTH_RESULT} (health alone proves no feature)"
   echo "FEATURE_BEHAVIOR    : NOT_VERIFIED (Auth, catalogue, TLS from outside: QA01/QA07/DP03)"
   echo "External access     : NOT_VERIFIED (requires independent outside-network check, DP03)"
+  echo "Host packet filtering: NOT_VERIFIED by this script (operator evidence above; DP03 outside scan)"
   echo "================================================================"
 }
 
