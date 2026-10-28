@@ -88,9 +88,16 @@ jobs:
           require_gate '--provision-authorization is required' provision "${common[@]}"
           require_gate 'must not be whitespace-only' provision "${common[@]}" \
             --provision-authorization '   '
+          # deploy re-provisions database roles and grants, so it needs the same
+          # provisioning authority as provision and all.
+          require_gate '--provision-authorization is required' deploy "${deploy_common[@]}"
+          deploy_common+=(--provision-authorization provisioning-record)
           require_gate '--deployment-authorization is required' deploy "${deploy_common[@]}"
           require_gate '--public-exposure-authorization is required' deploy "${deploy_common[@]}" \
             --deployment-authorization deployment-record
+          # With every reference present, input gates pass and validation moves on.
+          require_gate 'Env file not found or unreadable' deploy "${deploy_common[@]}" \
+            --deployment-authorization deployment-record --public-exposure-authorization exposure-record
       - name: Check offline Compose and provisioning safety guards
         shell: bash
         run: |

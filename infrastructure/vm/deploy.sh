@@ -106,10 +106,11 @@ provision / deploy / all:
   provision requires backend and frontend to already be stopped. Use `all` for
   a coordinated update that quiesces and then restarts the complete application.
 
-provision / all:
+provision / deploy / all:
   --provision-authorization REF
                                 Non-secret reference to the separate approved
-                                provisioning authority
+                                provisioning authority. deploy also creates
+                                missing roles and changes database grants.
 
 deploy / all:
   --deployment-authorization REF
@@ -197,8 +198,10 @@ require_inputs() {
       [[ -n "${INITIALIZER_QUALIFICATION}" ]] || fail "--initializer-qualification is required for ${SUBCOMMAND}."
       ;;
   esac
+  # deploy re-provisions database roles and grants (provision_db_roles,
+  # harden_after_migration), so it needs the same provisioning authority.
   case "${SUBCOMMAND}" in
-    (provision|all)
+    (provision|deploy|all)
       [[ -n "${PROVISION_AUTHORIZATION}" ]] || fail "--provision-authorization is required for ${SUBCOMMAND}."
       ;;
   esac
