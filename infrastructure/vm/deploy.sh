@@ -2,12 +2,12 @@
 # CodeMastery - infrastructure/vm/deploy.sh   (DP01, Interim scope)
 
 # Implements, for the one-VM Docker Compose deployment, the CT17 technical
-# policies and bindings recorded in docs/deployment.md 
+# policies and bindings recorded in docs/deployment.md
 # APPROVED_PENDING_PROTECTED_INTEGRATION).
 #
 # Covers : DP01.I-config (preflight), DP01.I-provision, DP01.I-deploy.
 # Excludes: DP01.F-deploy (PostgreSQL/MinIO backup, restore, rollback execution,
-#           certificate acquisition/renewal). 
+#           certificate acquisition/renewal).
 # Safety rules enforced by design:
 #   - never sources the env file (it is parsed as data);
 #   - never prints secrets or the rendered Compose configuration;
