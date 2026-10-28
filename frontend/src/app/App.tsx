@@ -58,6 +58,17 @@ function LearningRhythm() {
     const [hovered, setHovered] = useState<number | null>(null);
     const [tooltipOpen, setTooltipOpen] = useState(true);
     const buttons = useRef<Array<HTMLButtonElement | null>>([]);
+    const active = hovered ?? selected;
+    const tooltipVisible = tooltipOpen && active !== null;
+    useEffect(() => {
+        if (!tooltipVisible) return;
+        // Observe bubbling Escape without consuming input handlers or modal events.
+        const dismissOnEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setTooltipOpen(false);
+        };
+        document.addEventListener('keydown', dismissOnEscape);
+        return () => document.removeEventListener('keydown', dismissOnEscape);
+    }, [tooltipVisible]);
     useEffect(() => {
         const dismissOutside = (event: PointerEvent) => {
             const selectedButton = selected === null ? null : buttons.current[selected];
@@ -69,7 +80,6 @@ function LearningRhythm() {
         return () => document.removeEventListener('pointerdown', dismissOutside, true);
     }, [selected]);
     const tooltipId = useId();
-    const active = hovered ?? selected;
     const maximum = Math.max(...DEMO_WEEK.map((day) => day.minutes));
     return <Paper component="section" aria-labelledby="learning-rhythm-title" sx={{ p: 2.5, minWidth: 0 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1 }}>
@@ -99,7 +109,6 @@ function LearningRhythm() {
                         onClick={() => { setSelected(index); setTooltipOpen(true); }} onFocus={() => { setSelected(index); setHovered(null); setTooltipOpen(true); }}
                         onMouseEnter={() => { setHovered(index); setTooltipOpen(true); }}
                         onKeyDown={(event) => {
-                            if (event.key === 'Escape') { event.preventDefault(); setTooltipOpen(false); return; }
                             let next: number;
                             if (event.key === 'ArrowRight') next = (index + 1) % DEMO_WEEK.length;
                             else if (event.key === 'ArrowLeft') next = (index + DEMO_WEEK.length - 1) % DEMO_WEEK.length;

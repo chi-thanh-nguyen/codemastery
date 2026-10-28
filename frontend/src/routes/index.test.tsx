@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { BrowserRouter, useNavigate } from 'react-router';
@@ -168,6 +168,79 @@ describe('real declarative routing and Profile', () => {
         await act(async () => vi.advanceTimersByTime(400));
         expect(document.activeElement).toBe(search); expect(location.pathname).toBe('/preview'); expect(fetcher).not.toHaveBeenCalled();
     });
+    it.each(['heading', 'search'] as const)('dismisses a hover tooltip with Escape while focus stays on the %s', async (target) => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<StrictMode><App /></StrictMode>));
+        const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
+        const day = chart.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
+        const focus = host.querySelector<HTMLElement>(target === 'heading' ? 'main h1' : 'input[aria-label="Search sample lessons"]')!;
+        const selected = chart.querySelector('[aria-pressed="true"]');
+        await act(async () => focus.focus());
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        expect(document.activeElement).toBe(focus);
+        await act(async () => focus.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
+        expect(chart.querySelector('[aria-pressed="true"]')).toBe(selected);
+        expect(document.activeElement).toBe(focus);
+        await act(async () => vi.advanceTimersByTime(1000));
+        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        expect(chart.querySelector('[aria-pressed="true"]')).toBe(selected);
+        await act(async () => focus.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        await act(async () => day.focus());
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        expect(document.activeElement).toBe(day);
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('cleans up the chart Escape listener on dismissal, invisible hover state and unmount under StrictMode', async () => {
+        const add = vi.spyOn(document, 'addEventListener'), remove = vi.spyOn(document, 'removeEventListener');
+        const keyCalls = (spy: typeof add | typeof remove) => spy.mock.calls.filter(([type, , options]) => type === 'keydown' && options === undefined);
+        const activeCount = () => keyCalls(add).length - keyCalls(remove).length;
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<StrictMode><App /></StrictMode>));
+        expect(activeCount()).toBe(1);
+        const initial = keyCalls(add).at(-1)![1];
+        const heading = host.querySelector<HTMLElement>('main h1')!;
+        await act(async () => heading.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        expect(remove).toHaveBeenCalledWith('keydown', initial); expect(activeCount()).toBe(0);
+        const day = host.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
+        const outside = host.querySelector('#learning-rhythm-title')!;
+        await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        expect(activeCount()).toBe(1);
+        const hover = keyCalls(add).at(-1)![1];
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
+        expect(host.querySelector('[role="tooltip"]')).toBeNull();
+        expect(remove).toHaveBeenCalledWith('keydown', hover); expect(activeCount()).toBe(0);
+        await act(async () => day.focus()); expect(activeCount()).toBe(1);
+        const reopened = keyCalls(add).at(-1)![1];
+        await act(async () => root.render(null));
+        expect(remove).toHaveBeenCalledWith('keydown', reopened); expect(activeCount()).toBe(0);
+    });
+    it('observes Escape without consuming unrelated keys or overriding a handler that stops propagation', async () => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        const heading = host.querySelector<HTMLElement>('main h1')!, observer = vi.fn();
+        const stop = (event: Event) => event.stopPropagation();
+        document.addEventListener('keydown', observer);
+        try {
+            const other = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+            await act(async () => heading.dispatchEvent(other));
+            expect(other.defaultPrevented).toBe(false); expect(observer).toHaveBeenCalledTimes(1);
+            expect(host.querySelector('[role="tooltip"]')).not.toBeNull();
+            heading.addEventListener('keydown', stop);
+            await act(async () => heading.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+            expect(host.querySelector('[role="tooltip"]')).not.toBeNull(); expect(observer).toHaveBeenCalledTimes(1);
+            heading.removeEventListener('keydown', stop);
+            const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+            await act(async () => heading.dispatchEvent(escape));
+            expect(host.querySelector('[role="tooltip"]')).toBeNull();
+            expect(escape.defaultPrevented).toBe(false); expect(observer).toHaveBeenCalledTimes(2);
+        } finally { heading.removeEventListener('keydown', stop); document.removeEventListener('keydown', observer); }
+    });
     it('keeps sample-week arithmetic and keyboard day selection consistent in actual App', async () => {
         window.history.replaceState(null, '', '/preview');
         await act(async () => root.render(<App />));
@@ -182,6 +255,7 @@ describe('real declarative routing and Profile', () => {
         expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Fri · 40 min');
         await act(async () => days[4].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
         expect(chart.querySelector('[role="tooltip"]')).toBeNull(); expect(days[4].getAttribute('aria-describedby')).toBeNull();
+        expect(days[4].getAttribute('aria-pressed')).toBe('true');
         expect(days[4].getAttribute('aria-label')).toBe('Fri: 40 sample study minutes');
         await act(async () => days[4].dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })));
         expect(document.activeElement).toBe(days[0]);

@@ -5,6 +5,7 @@
 // not browser-to-backend integration. Normal mode verifies the deliberate malformed-ID
 // 400 responses; standalone mode retains its exact expected API 404 checks.
 // Append --test-api-errors to run only focused response/classifier browser regressions.
+// Append --test-chart-escape to run only focused chart Escape/lifecycle regressions.
 const {chromium,webkit} = require(process.argv[2] || 'playwright');
 // Optional engine argument uses an installed browser; never downloads one.
 const engine=process.argv[5] || 'chromium';
@@ -134,6 +135,70 @@ async function runApiErrorRegressions(context,check){
  }finally{await page.close();}
 }
 
+async function runChartEscapeRegressions(context,check){
+ const page=await context.newPage(),errors=[];
+ page.on('pageerror',error=>errors.push(String(error)));
+ await page.setViewportSize({width:320,height:844});
+ const overview=async()=>{await page.mouse.move(0,0);await page.goto(previewUrl,{waitUntil:'networkidle'})};
+ const chart=page.getByRole('group',{name:'Sample weekly study minutes'});
+ const day=name=>chart.getByRole('button',{name:new RegExp('^'+name+':')});
+ const selection=()=>chart.locator('[aria-pressed="true"]').getAttribute('aria-label');
+ try{
+  for(const target of ['heading','search'])await check('hover Escape preserves '+target+' focus, selection and stationary dismissal',async()=>{
+   await overview();
+   const focus=target==='heading'?page.getByRole('heading',{name:'Your learning, in focus.',exact:true}):page.getByRole('textbox',{name:'Search sample lessons',exact:true});
+   await focus.focus();if(target==='search')await focus.fill('variables');
+   const selected=await selection();await day('Wed').hover();
+   assert.equal(await chart.getByRole('tooltip').textContent(),'Wed · 25 min');
+   assert(await focus.evaluate(element=>element===document.activeElement));
+   await page.keyboard.press('Escape');
+   assert.equal(await chart.getByRole('tooltip').count(),0);assert.equal(await selection(),selected);
+   assert(await focus.evaluate(element=>element===document.activeElement));
+   if(target==='search')assert.equal(await focus.inputValue(),'','The search input still handles its own Escape');
+   await page.waitForTimeout(150);
+   assert(await day('Wed').evaluate(element=>element.matches(':hover')),'Pointer remains on the same day');
+   assert.equal(await chart.getByRole('tooltip').count(),0,'Stationary hover must not reopen the tooltip');
+   await page.mouse.move(0,0);await day('Tue').hover();
+   assert.equal(await chart.getByRole('tooltip').textContent(),'Tue · 45 min');assert.equal(await selection(),selected);
+   await page.keyboard.press('Escape');await day('Wed').focus();
+   assert.equal(await chart.getByRole('tooltip').textContent(),'Wed · 25 min');
+  });
+  await check('focused Escape retains selection and arrow/Home/End navigation',async()=>{
+   await overview();await day('Thu').focus();await page.keyboard.press('ArrowRight');
+   assert.equal(await chart.getByRole('tooltip').textContent(),'Fri · 40 min');
+   await page.keyboard.press('Escape');assert.equal(await chart.getByRole('tooltip').count(),0);
+   assert(await day('Fri').evaluate(element=>element===document.activeElement));
+   assert.equal(await day('Fri').getAttribute('aria-pressed'),'true');
+   await page.keyboard.press('Home');assert.equal(await chart.getByRole('tooltip').textContent(),'Mon · 30 min');
+   await page.keyboard.press('End');assert.equal(await chart.getByRole('tooltip').textContent(),'Sun · 25 min');
+   await page.keyboard.press('Escape');assert.equal(await chart.getByRole('tooltip').count(),0);
+   assert.equal(await day('Sun').getAttribute('aria-pressed'),'true');
+  });
+  await check('modal Escape closes only the dialog and restores its trigger',async()=>{
+   await overview();const selected=await selection();
+   const trigger=page.getByRole('button',{name:'Preview sample lesson',exact:true});await trigger.focus();await trigger.press('Enter');
+   const dialog=page.getByRole('dialog',{name:'Sample lesson preview',exact:true});await dialog.waitFor();
+   assert.equal(await page.locator('[aria-label="Sample weekly study minutes"] [role="tooltip"]').count(),1);
+   await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
+   assert(await trigger.evaluate(element=>element===document.activeElement));
+   assert.equal(await chart.getByRole('tooltip').count(),1,'Modal Escape must not reach the chart listener');
+   assert.equal(await selection(),selected);
+  });
+  await check('unmounted chart leaves Escape and heading focus untouched',async()=>{
+   await overview();const trigger=page.getByRole('button',{name:'Explore components',exact:true});await trigger.focus();await trigger.press('Enter');
+   assert.equal(await chart.count(),0);
+   const result=await page.evaluate(()=>{
+    const heading=document.querySelector('main h1');let received=0;
+    const observe=()=>received++;document.addEventListener('keydown',observe);
+    const event=new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true});
+    try{heading.dispatchEvent(event);return {received,prevented:event.defaultPrevented,focused:heading===document.activeElement};}
+    finally{document.removeEventListener('keydown',observe);}
+   });
+   assert.deepEqual(result,{received:1,prevented:false,focused:true});assert.deepEqual(errors,[]);
+  });
+ }finally{await page.close();}
+}
+
 let browser;
 (async()=>{
  assert(['chromium','webkit'].includes(engine),'Expected chromium or webkit');
@@ -147,6 +212,12 @@ let browser;
  page.on('console',recordConsole);
  const checks=[];
  async function check(name,fn){await fn();checks.push({name,passed:true});console.log('PASS',name)}
+ if(process.argv.includes('--test-chart-escape')){
+  await runChartEscapeRegressions(context,check);
+  const report={engine,browser:browser.version(),scope:'Focused chart Escape and event lifecycle; no visual matrix or live API integration',checks};
+  fs.writeFileSync(`${out}/chart-escape-regressions.json`,JSON.stringify(report,null,2));await browser.close();
+  console.log(JSON.stringify({passed:checks.length,browser:report.browser,report:`${out}/chart-escape-regressions.json`}));return;
+ }
  if(process.argv.includes('--test-api-errors')){
   await runApiErrorRegressions(context,check);
   const report={engine,browser:browser.version(),fixture:'Controlled HTTP responses; not live backend integration',checks};
