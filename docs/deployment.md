@@ -1041,3 +1041,233 @@ and [regional listing](https://docs.digitalocean.com/products/droplets/details/a
 [ACME challenge trade-offs](https://letsencrypt.org/docs/challenge-types/).
 These are vendor engineering/product facts, not CodeMastery resource ownership,
 account availability, risk acceptance or executed verification.
+
+## CT17 runtime database privileges and operation gates — 28 October 2026
+
+### Authority, baseline and classification
+
+**CT17-P6-PRIVILEGES-2026-10-28-r1: DELEGATED_TECHNICAL_APPROVAL;
+APPROVED_PENDING_PROTECTED_INTEGRATION** for checkpoints
+**CT17.I-runtime-privileges** and **CT17.I-operation-gates** below only. Authority is
+the Project Leader @chi-thanh-nguyen's explicit **“CodeMastery — PR #110: Delegated
+Technical Authority, Contract Approval & Complete Remediation”**, effective
+28 October 2026 (ICT). It delegates to Claude Code the selection and technical
+approval of individual PostgreSQL privileges and an engineering approval matrix for
+PR #110. It withholds real VM/provider selection, expenditure, infrastructure
+ownership, production credentials and secret custody, SSH/firewall access grants,
+production operations, public exposure, recovery-risk acceptance and protected
+merge approval. Those remain personal Leader decisions; this AI technical approval
+is not a CODEOWNER review.
+
+Baseline: remote main
+[`7ec2c43490aeac47a5774ed0c22b31485d607da7`](https://github.com/chi-thanh-nguyen/codemastery/commit/7ec2c43490aeac47a5774ed0c22b31485d607da7);
+[PR #110](https://github.com/chi-thanh-nguyen/codemastery/pull/110) head
+`16b33c5e8fe9b57ed990a49815173dae8e27f5f6`. Inspected: V001–V006, every backend
+persistence adapter, entity, service and the exposed security operations; ADR002
+CT20.I, CT03/CT21 catalogue and FE07 CT22.membership; data-model §11; CT17 P1–P10,
+F1/F2 and B1–B3. CT17-2026-10-24-r1 P1–P4, CT17-INTERIM-2026-10-24-r2 P5–P10,
+CT17-FINAL-2026-10-25-r1 F1/F2 and CT17-INTERIM-BINDINGS-2026-10-25-r1 B1–B3 are
+preserved byte-for-byte; only the clauses named under Supersession are refined.
+
+### CT17.I-runtime-privileges — approved runtime privilege matrix
+
+Consumer evidence at the baseline: the backend exposes only POST
+`/api/auth/register` and `/api/auth/login`, GET `/api/courses` and
+`/api/courses/{courseId}`, GET/PUT/DELETE `/api/courses/{courseId}/membership` and
+GET `/api/me/courses`; every other route is denied. Their persistence is Auth
+`UserRepositoryImpl` (JPA find by ID/email; registration `save` merges, so SELECT
+then INSERT) and Course `CourseJpaRepository`, `CourseContentRepositoryImpl` and
+`EnrollmentRepositoryImpl` (native SQL). Assessment, Adaptive, Interaction and
+Admin repositories are empty scaffolds. LessonProgress, LearnerSkillMastery and
+PathRecommendation entities exist only for Hibernate `validate`, which reads catalog
+metadata and needs no table privilege. V001–V006 create 23 tables and no sequence
+(application-supplied UUIDs), view, routine or trigger.
+
+| Relation (owner) | Approved runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `users` (auth) | SELECT, INSERT | Registration email check and insert; login; JWT current-account check; CT01.identity instructor names | GRANTED — CT01.core, CT01.identity |
+| `courses` (course) | SELECT; UPDATE (id) | Catalogue/search/detail `SELECT *`, access snapshots, My Courses join; UPDATE (id) only enables the membership `FOR UPDATE` row lock | GRANTED — CT03/CT21 catalogue, FE07 CT22.membership |
+| `chapters` (course) | SELECT | Published syllabus, canonical lesson order, access snapshots | GRANTED — CT03/CT21 |
+| `lessons` (course) | SELECT | Published syllabus (entity load), access snapshots | GRANTED — CT03/CT21 |
+| `learning_materials` (course) | SELECT (id, lesson_id, publication_status) | Membership access-snapshot join only; payload and object-key columns stay denied | GRANTED — CT03 |
+| `enrollments` (course) | SELECT, INSERT; UPDATE (status) | Membership find, first join, join/leave status transitions, My Courses, access snapshots | GRANTED — FE07 CT22.membership |
+| `lesson_progress` (course) | none | No consumer | DEFERRED — CT22.progress |
+| `skills` (adaptive) | none | No consumer | DEFERRED — Adaptive contracts |
+| `skill_prerequisites` (adaptive) | none | No consumer | DEFERRED — Adaptive contracts |
+| `lesson_skills` (adaptive) | none | No consumer | DEFERRED — Adaptive contracts |
+| `quizzes` (assessment) | none | No consumer | DEFERRED — Assessment contracts |
+| `questions` (assessment) | none | No consumer | DEFERRED — Assessment contracts |
+| `quiz_questions` (assessment) | none | No consumer | DEFERRED — Assessment contracts |
+| `attempts` (assessment) | none | No consumer | DEFERRED — Assessment contracts |
+| `attempt_answers` (assessment) | none | No consumer | DEFERRED — Assessment contracts |
+| `assignments` (assessment) | none | No consumer | DEFERRED — Assessment contracts |
+| `submissions` (assessment) | none | No consumer | DEFERRED — Assessment contracts, CT09 |
+| `learner_skill_masteries` (adaptive) | none | No consumer | DEFERRED — Adaptive contracts |
+| `path_recommendations` (adaptive) | none | No consumer | DEFERRED — Adaptive contracts |
+| `discussion_posts` (interaction) | none | No consumer | DEFERRED — Interaction contracts |
+| `notifications` (interaction) | none | No consumer | DEFERRED — Interaction contracts |
+| `content_reports` (interaction) | none | No consumer | DEFERRED — Interaction contracts |
+| `audit_logs` (admin) | none | No consumer | DEFERRED — CT12; UPDATE/DELETE permanently prohibited |
+| `flyway_schema_history` (migrator) | none | Migrator only | PROHIBITED — P6 |
+
+The runtime role additionally keeps only CONNECT on the application database and
+USAGE on `public` (P6). No sequence privilege is granted, because none exists. On
+every relation the runtime role never receives TRUNCATE, REFERENCES, TRIGGER or
+MAINTAIN, DDL, ownership, grant options or role membership. These are permanent
+prohibitions, not deferrals. The matrix is implemented verbatim as
+`RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh`, together with every
+reviewed column. CI checks that its privileges equal this table.
+
+**Course-root lock.** FE07 requires membership mutations to hold a PostgreSQL row
+lock on the published Course for the whole transaction. PostgreSQL 17 requires
+UPDATE on at least one column for every row-locking clause; this was verified on
+`postgres:17.11-bookworm`, and FOR KEY SHARE needs it too. The alternatives were
+rejected:
+
+- Table-level UPDATE would make publication, instructor ownership, content and
+  adaptive settings writable.
+- UPDATE on a business column grants that business capability.
+- Advisory locks or a weaker lock mode change the approved semantics, and still need
+  the privilege or no longer block publication changes. FE07 already rejected
+  per-member advisory locks.
+- A new SECURITY DEFINER migration adds a DDL object that runs with migrator rights.
+- Removing the lock reintroduces the race FE07 excludes.
+
+Selected: **column-level UPDATE (id) only**, with no application change. Every other
+`courses` column is denied (42501). Every V002–V004 child foreign key is
+`ON UPDATE NO ACTION`, so a Course with any chapter, enrollment, skill, quiz or
+assignment cannot be re-keyed (23503). The residual is recorded, not accepted on the
+Leader's behalf: a compromised runtime identity could rewrite the UUID of a Course
+that has no dependent row. That discloses no data and grants no capability, and it
+is smaller than any alternative that preserves the approved lock.
+
+### Fail-closed provisioning and verification
+
+Provisioning, post-migration hardening and the pre-ingress verification apply one
+policy:
+
+1. **Reconcile what the script owns.** In the role-policy transaction, revoke every
+   runtime privilege on every `public` relation, column grants included and without
+   CASCADE. Then grant exactly the matrix on reviewed tables that exist. Detected
+   excess is logged by object and privilege name before it is removed. Repeated
+   provisioning is idempotent.
+2. **Stop on anything else, before ingress.** Each of these stops the release and
+   requires explicit operator reconciliation:
+   - an unreviewed relation (table, partitioned table, view, materialized view,
+     foreign table or sequence), or a reviewed name of another kind;
+   - a changed reviewed column set, or a reviewed table missing after migration;
+   - any effective table- or column-level privilege that differs from the matrix,
+     whether from PUBLIC, another grantor or inheritance, including MAINTAIN;
+   - any routine in `public`;
+   - default privileges that would grant future tables or sequences to PUBLIC or to
+     the runtime role;
+   - any runtime role membership, INHERIT or SET;
+   - non-migrator ownership;
+   - a grant the runtime role passed on to another role.
+
+   A future migration therefore receives no runtime privilege automatically, and
+   cannot widen a table-level grant with a new column.
+3. **Verify effective state, not intended statements.** Before migration the script
+   checks existing objects; after Flyway it checks completeness. Rolled-back probes
+   confirm that the runtime role can take the Course row lock and cannot change
+   account roles or publication, delete memberships, read answer keys or material
+   payloads, or erase audit records. The deployment record states the verified
+   matrix identifier.
+
+Startup order is unchanged. On a fresh database, the backend starts after Flyway
+with no table grants. Hardening and verification then complete before the private
+TLS check and ingress.
+
+### Deferred privileges and extension procedure
+
+Deferred rows remain without privileges until all of the following hold:
+
+1. The release image contains an implemented consumer of an approved owning contract.
+2. The extension grants the least privilege that consumer exercises:
+   - table-level SELECT/INSERT only for whole-row access;
+   - UPDATE only on the columns that the approved transition changes;
+   - DELETE only where an approved contract defines deletion;
+   - sequence USAGE/SELECT/UPDATE only for sequences that are actually used.
+   Data-model §11 immutability, history and durability rules are never weakened by a
+   grant.
+3. A new dated revision of this record, `RUNTIME_PRIVILEGE_MATRIX`, its reviewed
+   columns and the CI consumer tests change together. CI applies the real V001+
+   migrations, so a new table or column fails until it is listed.
+4. The applicable owning-module, infrastructure and Leader CODEOWNER reviews and
+   protected integration are complete.
+5. On the target host, the pre-ingress verification equals the new matrix.
+
+### CT17.I-operation-gates — authority boundaries and ingress evidence
+
+| Subcommand | State changed | Required non-secret authority/evidence references |
+| --- | --- | --- |
+| `preflight` | None (read-only) | None |
+| `load` | Host image store only (release artifacts) | `--deployment-authorization` (**new**); the archive SHA-256 and identity are verified before loading |
+| `provision` | PostgreSQL roles/grants, PostgreSQL/MinIO containers, MinIO initializer state | `--provision-authorization`, `--initializer-qualification` |
+| `deploy` | Roles/grants again (provision and hardening), backend, frontend and public ingress | `--provision-authorization`, `--deployment-authorization`, `--public-exposure-authorization`, `--packet-filter-verification`, `--initializer-qualification` |
+| `all` | All of the above | The union of the above |
+
+On a host with existing project containers or volumes, every state-changing
+subcommand also requires the P9 update attestations and `--update-authorization`.
+`load` now requires the deployment reference because it is the first deployment
+step that changes the host. References record separately made Leader or operator
+decisions. The script cannot verify them and never treats them as approval.
+
+For B2, the script verifies from Docker Engine state that only the frontend
+publishes, exactly container `8080/tcp` to host 443, on the declared non-loopback
+address or all addresses, without publish-all or host/container network modes. The
+deployment record lists the actual bindings. Host packet filtering, including
+Docker's forwarding path, and SSH source restrictions are outside what the script
+can observe. They require the operator evidence reference and the DP03
+outside-network scan, and the record marks them NOT_VERIFIED. No address, firewall
+rule or SSH grant is selected here.
+
+### Supersession, exclusions and acceptance
+
+The following clauses are refined prospectively; the original text remains authentic
+history:
+
+- **P6 "selected tables/sequences' required DML privileges"** now means the matrix
+  above.
+- **P6 "Provision future required application DML grants … before feature
+  readiness"** now follows the extension procedure.
+- **P6 "Actual role names, credentials/access grants and provisioning authority are
+  Leader-reserved"** and **P2 "Actual identities, database grants, policies,
+  custody and provisioning remain unapproved inputs"** are narrowed only for the
+  technical grant policy, which the 28 October delegation expressly covers. Actual
+  role names, credentials, custody and the authority to execute provisioning on a
+  real database remain Leader-reserved.
+- **F1** already requires runtime grants to be provisioned "independently from
+  reviewed provisioning inputs". This matrix is that input, and a restored database
+  must pass the same reconciliation and verification.
+
+Exclusions:
+
+- P1–P4's statement that CT17 does not approve CT22 membership still holds. This
+  record approves no API, does not count CT22 as CT20.I evidence, and does not
+  authorize exposure. It provisions the DML required by the separately approved and
+  implemented FE07 producer.
+- CT20.I, CT01, CT03, CT21 and CT22, V001–V006, application code, MinIO policy and the
+  fail-closed backend health check are unchanged.
+- The known Auth `/actuator/health` HTTP 401 remains an Auth-owned blocker.
+
+Acceptance:
+
+- **Technical:** the PR #110 CI and local evidence covers exact effective grants on the
+  real Flyway schema, the denials, real Auth/catalogue/membership operations under
+  the matrix, the held Course-root lock, idempotency and every drift case above. That
+  evidence is not a deployment claim.
+- **Operational:** on the actual host, a separately authorized `deploy` must report
+  in its `DB runtime grants` record line that the exact
+  CT17-P6-PRIVILEGES-2026-10-28-r1 matrix was verified before ingress.
+
+**CT17.I-runtime-privileges** and **CT17.I-operation-gates** are
+APPROVED_PENDING_PROTECTED_INTEGRATION. Concrete bindings remain
+PENDING_LEADER_INPUT, and runtime verification is pending.
+`docs/deployment.md` and `.github/workflows/` have the Leader as sole CODEOWNER;
+`infrastructure/` adds @tihh647-ui. The existing sole-Leader CODEOWNER/authorship
+conflict is unchanged: eligible independent human review, last-push approval,
+required checks and protected merge remain mandatory. Claude Code (Anthropic)
+performed the investigation and authored this record, the implementation and its
+tests under the delegation. No provisioning, deployment, exposure or merge was
+performed or authorized.
