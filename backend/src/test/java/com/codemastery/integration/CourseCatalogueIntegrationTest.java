@@ -5,6 +5,7 @@ import com.codemastery.modules.auth.application.service.UserAccountService.Ident
 import com.codemastery.modules.auth.infrastructure.security.JwtAuthenticationFilter;
 import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import com.codemastery.modules.course.application.service.CourseCatalogueService;
 import com.codemastery.modules.course.domain.model.EnrollmentStatus;
 import com.codemastery.modules.course.domain.model.PublishStatus;
 import com.codemastery.modules.course.domain.repository.CourseRepository;
@@ -47,6 +48,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class CourseCatalogueIntegrationTest extends AbstractIntegrationTest {
     private static final ThreadLocal<List<String>> STATEMENTS = new ThreadLocal<>();
+    private static final ThreadLocal<Runnable> BEFORE_CATALOGUE_COUNT = new ThreadLocal<>();
+    private static final ThreadLocal<Runnable> BEFORE_SYLLABUS = new ThreadLocal<>();
     private static final String JWT_KEY = ephemeralKey();
 
     private static String ephemeralKey() {
@@ -65,6 +68,16 @@ class CourseCatalogueIntegrationTest extends AbstractIntegrationTest {
     public static class SnapshotStatementInspector implements StatementInspector {
         @Override
         public String inspect(String sql) {
+            Runnable concurrentChange = BEFORE_SYLLABUS.get();
+            if (concurrentChange != null && (sql.contains("public.chapters") || sql.contains("public.lessons"))) {
+                BEFORE_SYLLABUS.remove();
+                concurrentChange.run();
+            }
+            Runnable beforeCount = BEFORE_CATALOGUE_COUNT.get();
+            if (beforeCount != null && sql.contains("count(") && sql.contains("public.courses")) {
+                BEFORE_CATALOGUE_COUNT.remove();
+                beforeCount.run();
+            }
             List<String> statements = STATEMENTS.get();
             if (statements != null) statements.add(sql);
             return sql;
@@ -76,6 +89,7 @@ class CourseCatalogueIntegrationTest extends AbstractIntegrationTest {
     @Autowired DataSource dataSource;
     @Autowired UserAccountService identities;
     @Autowired CourseAccessService access;
+    @Autowired CourseCatalogueService catalogue;
     @Autowired JwtTokenProvider tokens;
     @Autowired FilterChainProxy security;
 
@@ -135,6 +149,8 @@ class CourseCatalogueIntegrationTest extends AbstractIntegrationTest {
         jdbc.update("DELETE FROM public.courses WHERE id IN (?,?)", course, otherCourse);
         jdbc.update("DELETE FROM public.users WHERE id IN (?,?,?,?)", owner, otherOwner, learner, outsider);
         STATEMENTS.remove();
+        BEFORE_SYLLABUS.remove();
+        BEFORE_CATALOGUE_COUNT.remove();
         SecurityContextHolder.clearContext();
     }
 
@@ -284,6 +300,72 @@ class CourseCatalogueIntegrationTest extends AbstractIntegrationTest {
         assertEquals(Optional.empty(), oneStatement(() -> repository.findCourseAccessSnapshot(
                 learner, UUID.randomUUID(), lesson, material)));
         assertEquals(Optional.empty(), oneStatement(() -> repository.findLessonAccessSnapshot(learner, UUID.randomUUID())));
+    }
+
+    @Test void filteredPageContentAndCountRetainOneSnapshotAcrossConcurrentPublicationChange() {
+        jdbc.update("UPDATE public.courses SET publication_status='published' WHERE id=?", otherCourse);
+        BEFORE_CATALOGUE_COUNT.set(() -> {
+            try (var writer = Executors.newSingleThreadExecutor()) {
+                writer.submit(() -> {
+                    try (Connection connection = dataSource.getConnection();
+                         var statement = connection.prepareStatement(
+                                 "UPDATE public.courses SET publication_status='hidden' WHERE id IN (?,?)")) {
+                        connection.setAutoCommit(false);
+                        statement.setObject(1, course); statement.setObject(2, otherCourse);
+                        assertEquals(2, statement.executeUpdate());
+                        connection.commit();
+                    }
+                    return null;
+                }).get(10, TimeUnit.SECONDS);
+            } catch (Exception failure) {
+                throw new AssertionError("Concurrent fixture change did not commit", failure);
+            }
+        });
+        try {
+            var page = catalogue.list(0, 1, "Description", "none");
+            assertNull(BEFORE_CATALOGUE_COUNT.get(), "The real filtered count must execute the concurrent change hook");
+            assertEquals(1, page.content().size());
+            assertEquals(2, page.totalElements()); assertEquals(2, page.totalPages());
+            assertEquals(0, catalogue.list(0, 1, "Description", "none").totalElements());
+        } finally {
+            BEFORE_CATALOGUE_COUNT.remove();
+        }
+    }
+
+    @Test void publicDetailRetainsOneSnapshotWhenCourseAndLessonsAreHiddenDuringAssembly() {
+        BEFORE_SYLLABUS.set(() -> {
+            try (var writer = Executors.newSingleThreadExecutor()) {
+                writer.submit(() -> {
+                    try (Connection connection = dataSource.getConnection()) {
+                        connection.setAutoCommit(false);
+                        try (var hideCourse = connection.prepareStatement(
+                                "UPDATE public.courses SET publication_status='hidden' WHERE id=?");
+                             var hideLesson = connection.prepareStatement(
+                                "UPDATE public.lessons SET publication_status='hidden' WHERE id=?")) {
+                            hideCourse.setObject(1, course);
+                            hideCourse.executeUpdate();
+                            hideLesson.setObject(1, lesson);
+                            hideLesson.executeUpdate();
+                            connection.commit();
+                        }
+                    }
+                    return null;
+                }).get(10, TimeUnit.SECONDS);
+            } catch (Exception failure) {
+                throw new AssertionError("Concurrent fixture change did not commit", failure);
+            }
+        });
+        try {
+            var detail = catalogue.detail(course);
+            assertEquals(1, detail.syllabus().size(), "An admitted published detail must retain its original syllabus snapshot");
+            assertEquals(lesson, detail.syllabus().getFirst().lessons().getFirst().id());
+            assertEquals("hidden", jdbc.queryForObject(
+                    "SELECT publication_status FROM public.courses WHERE id=?", String.class, course));
+            assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                    () -> catalogue.detail(course), "A subsequent request must observe the committed hide");
+        } finally {
+            BEFORE_SYLLABUS.remove();
+        }
     }
 
     @Test void concurrentAtomicChangesNeverProducePublishedActiveHybrid() throws Exception {

@@ -1,31 +1,13 @@
 package com.codemastery.modules.course.api.dto;
 
-import com.codemastery.modules.course.domain.model.Course;
-import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import java.util.List;
 import java.util.UUID;
 
-
-public record CourseSummaryResponse(
-        UUID id,
-        String title,
-        String description,
-        UUID instructorId
-) {
-
-    public CourseSummaryResponse {
-        Objects.requireNonNull(id, "id must not be null");
-        Objects.requireNonNull(title, "title must not be null");
-        Objects.requireNonNull(description, "description must not be null");
-        Objects.requireNonNull(instructorId, "instructorId must not be null");
-    }
-
-    public static CourseSummaryResponse from(Course course) {
-        Objects.requireNonNull(course, "course must not be null");
-        return new CourseSummaryResponse(
-                course.id(),
-                course.title(),
-                course.description(),
-                course.instructorId()
-        );
+public record CourseSummaryResponse(UUID id, String title, String description,
+                                    UUID instructorId, @JsonInclude(JsonInclude.Include.ALWAYS) String instructorDisplayName) {
+    public record CoursePage(List<CourseSummaryResponse> content, int page, int size,
+                             long totalElements, long totalPages) {
+        public CoursePage { content = List.copyOf(content); }
     }
 }
