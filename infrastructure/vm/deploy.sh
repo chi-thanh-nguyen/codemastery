@@ -49,6 +49,7 @@ EXPECT_IMAGES=()
 COMPOSE=()
 DB_SEPARATION_RESULT="not checked"
 HEALTH_RESULT="not checked"
+ENV_FILE_IDENTITY=""
 COMPOSE_MODEL=""
 RELEASE_IMAGES=""
 CONTAIN_ON_FAILURE="no"
@@ -254,14 +255,36 @@ validate_origin() {
 }
 
 validate_env_file() {
+  # CT17 B3 custody: the file Compose reads is a regular 0600 file with a single
+  # link, owned by the invoking user, in a 0700 directory that user owns. Resolve
+  # the directory physically and refuse a symlinked file, so the checked path is
+  # the read path. Every ancestor must belong to root or the invoking user and be
+  # unwritable by others (sticky directories excepted), or the 0700 directory
+  # could be renamed and replaced between checks.
+  [[ ! -L "${ENV_FILE}" ]] || fail "Env file must not be a symbolic link: ${ENV_FILE}"
   [[ -f "${ENV_FILE}" && -r "${ENV_FILE}" ]] || fail "Env file not found or unreadable: ${ENV_FILE}"
-  ENV_FILE="$(cd "$(dirname "${ENV_FILE}")" && pwd)/$(basename "${ENV_FILE}")"
-
-  local fmode dmode
-  fmode="$(stat -c '%a' "${ENV_FILE}")"
-  dmode="$(stat -c '%a' "$(dirname "${ENV_FILE}")")"
-  (( (8#${fmode} & 8#077) == 0 )) || fail "Env file must be owner-only (0600); found ${fmode}."
-  (( (8#${dmode} & 8#077) == 0 )) || fail "Env file directory must be owner-only (0700); found ${dmode}."
+  local dir uid ancestor owner mode identity
+  dir="$(cd -P -- "$(dirname -- "${ENV_FILE}")" && pwd -P)" || fail "Cannot resolve the env file directory."
+  ENV_FILE="${dir}/$(basename -- "${ENV_FILE}")"
+  [[ ! -L "${ENV_FILE}" && -f "${ENV_FILE}" ]] || fail "Env file must be a regular file, not a symbolic link."
+  uid="$(id -u)"
+  [[ "$(stat -c '%u:%a:%h' -- "${ENV_FILE}")" == "${uid}:600:1" ]] \
+    || fail "Env file must be mode 0600, owned by the invoking user and have no other hard link (CT17 B3)."
+  [[ "$(stat -c '%u:%a' -- "${dir}")" == "${uid}:700" ]] \
+    || fail "Env file directory must be mode 0700 and owned by the invoking user (CT17 B3)."
+  ancestor="${dir}"
+  while [[ "${ancestor}" != "/" ]]; do
+    ancestor="$(dirname -- "${ancestor}")"
+    IFS=: read -r owner mode <<<"$(stat -c '%u:%a' -- "${ancestor}")"
+    [[ "${owner}" == "0" || "${owner}" == "${uid}" ]] \
+      && (( (8#${mode} & 8#022) == 0 || (8#${mode} & 8#1000) != 0 )) \
+      || fail "Env file ancestor ${ancestor} is owned or writable by another user; the secret directory is not under operator control."
+  done
+  # Later re-validation must see the same file and bytes, not a replacement.
+  identity="$(stat -c '%d:%i' -- "${ENV_FILE}"):$(sha256sum < "${ENV_FILE}" | awk '{print $1}')"
+  [[ -z "${ENV_FILE_IDENTITY}" || "${ENV_FILE_IDENTITY}" == "${identity}" ]] \
+    || fail "Env file was replaced or changed since preflight; release stopped."
+  ENV_FILE_IDENTITY="${identity}"
 
   if tr -d '\r' < "${ENV_FILE}" | grep -Eq '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=.*<SET_ME'; then
     fail "An active <SET_ME...> placeholder remains in the env file."
