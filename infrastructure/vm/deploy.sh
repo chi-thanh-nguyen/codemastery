@@ -55,6 +55,7 @@ CONTAIN_ON_FAILURE="no"
 RELEASE_COMPLETE="no"
 STAGED_FRONTEND_CID=""
 HOST_PLATFORM=""
+IMAGE_STORE=""
 DOCKER_SERVER_VERSION=""
 DOCKER_COMPOSE_VERSION=""
 
@@ -85,7 +86,11 @@ load / deploy / all:
 
 Every state-changing command (including provision):
   --expect-image REF=sha256:ID  Verified artifact for EVERY effective service image
-                                (repeatable; no extra or duplicate references)
+                                (repeatable; no extra or duplicate references).
+                                ID is the Docker image ID on this host's image
+                                store: the OCI index/manifest digest with the
+                                containerd image store, otherwise the image
+                                config digest (`docker image inspect` .Id).
 
 provision / deploy / all:
   --wait-timeout SECONDS        Deadline for readiness waits (no default)
@@ -336,6 +341,7 @@ validate_host() {
   docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable for this user."
   daemon_os="$(docker info --format '{{.OSType}}' 2>/dev/null)" || fail "Cannot inspect Docker daemon platform."
   [[ "${daemon_os}" == "linux" ]] || fail "Docker daemon must be Linux; found ${daemon_os}."
+  detect_image_store
   DOCKER_SERVER_VERSION="$(docker version --format '{{.Server.Version}}' 2>/dev/null)" \
     || fail "Cannot record Docker Engine version."
   DOCKER_COMPOSE_VERSION="$(docker compose version --short 2>/dev/null)" \
@@ -346,6 +352,21 @@ validate_host() {
   command -v sha256sum >/dev/null 2>&1 || fail "sha256sum not found."
   command -v timeout >/dev/null 2>&1 || fail "timeout not found."
   command -v openssl >/dev/null 2>&1 || fail "openssl is required to validate certificate-only bind directories."
+}
+
+# Docker image IDs are store-specific. The containerd image store (the default
+# for fresh Docker Engine 29+ installs) reports the OCI index/manifest digest;
+# a classic graph driver reports the image config digest. Archive and image
+# checks must compare the same kind of digest.
+detect_image_store() {
+  local driver_type
+  driver_type="$(docker info --format '{{range .DriverStatus}}{{if eq (index . 0) "driver-type"}}{{index . 1}}{{end}}{{end}}' 2>/dev/null)" \
+    || fail "Cannot identify the Docker image store."
+  case "${driver_type}" in
+    (io.containerd.snapshotter.v1) IMAGE_STORE="containerd" ;;
+    ("") IMAGE_STORE="graphdriver" ;;
+    (*) fail "Unrecognized Docker image store; image identities cannot be verified." ;;
+  esac
 }
 
 build_compose_cmd() {
@@ -627,7 +648,7 @@ run_preflight() {
   build_compose_cmd
   validate_compose
   log "PREFLIGHT OK: inputs, env file, host and Compose policy checks passed."
-  log "HOST_PLATFORM: ${HOST_PLATFORM}; Docker Engine ${DOCKER_SERVER_VERSION}; Docker Compose ${DOCKER_COMPOSE_VERSION}"
+  log "HOST_PLATFORM: ${HOST_PLATFORM}; Docker Engine ${DOCKER_SERVER_VERSION}; Docker Compose ${DOCKER_COMPOSE_VERSION}; image store ${IMAGE_STORE}"
 }
 
 # Release archive and image identity (P3, P8)
@@ -709,21 +730,60 @@ verify_archive() {
   ARCHIVE_SHA256="$(printf '%s' "${ARCHIVE_SHA256}" | tr '[:upper:]' '[:lower:]')"
   local actual; actual="$(sha256sum "${ARCHIVE}" | awk '{print $1}')"
   [[ "${actual}" == "${ARCHIVE_SHA256}" ]] || fail "Archive SHA-256 mismatch; refusing release."
+  [[ "${IMAGE_STORE}" == "containerd" || "${IMAGE_STORE}" == "graphdriver" ]] \
+    || fail "Docker image store is unidentified; image identities cannot be verified."
   # Inspect Docker's native save manifest/configs without extracting the archive.
-  # Image IDs are hashes of the exact config bytes, not archive-supplied labels.
-  python3 - "${ARCHIVE}" "${EXPECT_IMAGES[@]}" <<'PY' || fail "Archive does not contain exactly the verified linux/amd64 release artifacts."
+  # Identities are hashes of exact config/OCI bytes, not archive-supplied labels,
+  # computed as the image ID this host's image store will report after load.
+  python3 - "${ARCHIVE}" "${IMAGE_STORE}" "${EXPECT_IMAGES[@]}" <<'PY' || fail "Archive does not contain exactly the verified linux/amd64 release artifacts."
 import hashlib, json, sys, tarfile
 try:
-    expected = dict(x.rsplit("=", 1) for x in sys.argv[2:])
+    store = sys.argv[2]
+    expected = dict(x.rsplit("=", 1) for x in sys.argv[3:])
     with tarfile.open(sys.argv[1], "r:*") as t:
         members = t.getmembers()
         if len({m.name for m in members}) != len(members):
             raise ValueError("duplicate archive entries")
+
+        def blob(digest):
+            # Every followed OCI descriptor must match its content-addressed bytes.
+            algorithm, _, hexdigest = digest.partition(":")
+            if algorithm != "sha256" or len(hexdigest) != 64:
+                raise ValueError("descriptor")
+            data = t.extractfile("blobs/sha256/" + hexdigest).read()
+            if hashlib.sha256(data).hexdigest() != hexdigest:
+                raise ValueError("blob digest")
+            return data
+
+        # containerd image IDs are the saved OCI index/manifest digests. Bind each
+        # to the single linux/amd64 image config it resolves to; attestation
+        # manifests are not runnable images and are ignored.
+        targets = {}
+        if store == "containerd":
+            for top in json.load(t.extractfile("index.json"))["manifests"]:
+                document = json.loads(blob(top["digest"]))
+                if "manifests" in document:
+                    images = [m for m in document["manifests"]
+                              if (m.get("annotations") or {}).get("vnd.docker.reference.type") != "attestation-manifest"]
+                    platform = (images[0].get("platform") or {}) if len(images) == 1 else {}
+                    if platform.get("os") != "linux" or platform.get("architecture") != "amd64":
+                        raise ValueError("platform")
+                    document = json.loads(blob(images[0]["digest"]))
+                if targets.setdefault(document["config"]["digest"], top["digest"]) != top["digest"]:
+                    raise ValueError("ambiguous image identity")
+        elif store != "graphdriver":
+            raise ValueError("image store")
+
         manifest = json.load(t.extractfile("manifest.json"))
         ids = set()
+        resolved = set()
         for item in manifest:
             data = t.extractfile(item["Config"]).read()
-            identity = "sha256:" + hashlib.sha256(data).hexdigest()
+            config_digest = "sha256:" + hashlib.sha256(data).hexdigest()
+            identity = targets.get(config_digest) if store == "containerd" else config_digest
+            if identity is None:
+                raise ValueError("image without a verified OCI identity")
+            resolved.add(config_digest)
             config = json.loads(data)
             if config.get("os") != "linux" or config.get("architecture") != "amd64":
                 raise ValueError("platform")
@@ -735,6 +795,8 @@ try:
                     raise ValueError("unapproved archive tag mapping")
         if ids != set(expected.values()):
             raise ValueError("missing artifact")
+        if store == "containerd" and set(targets) != resolved:
+            raise ValueError("unexpected archive image")
 except Exception:
     sys.exit(1)  # Do not print untrusted archive metadata or contents.
 PY
@@ -1300,7 +1362,8 @@ SQL
 }
 
 print_record() {
-  local dirty="clean" rev="unavailable" flyway
+  local dirty="clean" rev="unavailable" flyway entry identity_kind="image config digests"
+  [[ "${IMAGE_STORE}" != "containerd" ]] || identity_kind="OCI index/manifest digests"
   if git -C "${REPO_ROOT}" rev-parse HEAD >/dev/null 2>&1; then
     rev="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
     [[ -z "$(git -C "${REPO_ROOT}" status --porcelain 2>/dev/null)" ]] || dirty="DIRTY"
@@ -1318,6 +1381,7 @@ print_record() {
   echo "Host platform       : ${HOST_PLATFORM}"
   echo "Docker Engine       : ${DOCKER_SERVER_VERSION}"
   echo "Docker Compose      : ${DOCKER_COMPOSE_VERSION}"
+  echo "Image store         : ${IMAGE_STORE} (image IDs are ${identity_kind})"
   echo "Approved origin     : ${ORIGIN}"
   echo "Script checkout rev : ${rev} (${dirty})"
   echo "Image source rev    : ${SOURCE_REVISION} (declared by operator)"
@@ -1330,6 +1394,8 @@ print_record() {
   [[ -z "${ARCHIVE_SHA256}" ]] || echo "Archive SHA-256     : ${ARCHIVE_SHA256}"
   echo "Flyway success|fail : ${flyway}"
   echo "DB role separation  : ${DB_SEPARATION_RESULT}"
+  echo "--- verified image identities ---"
+  for entry in "${EXPECT_IMAGES[@]}"; do echo "${entry}"; done
   echo "--- images in use ---"
   "${COMPOSE[@]}" images 2>/dev/null || echo "(unavailable)"
   echo "--- containers ---"

@@ -296,3 +296,183 @@ jobs:
           networks:
             side: {}
           EOF
+      - name: Check release archive identity models
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          # Synthetic docker-save layouts: an OCI index per image (containerd
+          # image store) plus manifest.json, which both image stores emit.
+          python3 - "$work" <<'PY'
+          import hashlib, io, json, sys, tarfile
+
+          work = sys.argv[1]
+          digest = lambda data: "sha256:" + hashlib.sha256(data).hexdigest()
+          index_type = "application/vnd.oci.image.index.v1+json"
+          manifest_type = "application/vnd.oci.image.manifest.v1+json"
+
+          def image(n, arch="amd64", extra_platform=None, attestation=True):
+              blobs = {}
+              def put(document):
+                  data = json.dumps(document, sort_keys=True).encode()
+                  blobs[digest(data)] = data
+                  return digest(data), len(data)
+              def platform_manifest(architecture):
+                  config = put({"architecture": architecture, "os": "linux", "fixture": n,
+                                "config": {"Cmd": ["/payload"]}, "rootfs": {"type": "layers", "diff_ids": []}})
+                  manifest = put({"schemaVersion": 2, "mediaType": manifest_type, "layers": [],
+                                  "config": {"mediaType": "application/vnd.oci.image.config.v1+json",
+                                             "digest": config[0], "size": config[1]}})
+                  return config, manifest
+              config, manifest = platform_manifest(arch)
+              children = [{"mediaType": manifest_type, "digest": manifest[0], "size": manifest[1],
+                           "platform": {"os": "linux", "architecture": arch}}]
+              if extra_platform:
+                  _, other = platform_manifest(extra_platform)
+                  children.append({"mediaType": manifest_type, "digest": other[0], "size": other[1],
+                                   "platform": {"os": "linux", "architecture": extra_platform}})
+              if attestation:
+                  statement = put({"schemaVersion": 2, "mediaType": manifest_type, "layers": [],
+                                   "config": {"mediaType": "application/vnd.oci.empty.v1+json",
+                                              "digest": digest(b"{}"), "size": 2}})
+                  children.append({"mediaType": manifest_type, "digest": statement[0], "size": statement[1],
+                                   "platform": {"os": "unknown", "architecture": "unknown"},
+                                   "annotations": {"vnd.docker.reference.type": "attestation-manifest",
+                                                   "vnd.docker.reference.digest": manifest[0]}})
+              index = put({"schemaVersion": 2, "mediaType": index_type, "manifests": children})
+              return {"config": config[0], "index": index, "blobs": blobs}
+
+          def archive(name, entries, orphan=None, tamper=False, duplicate=False):
+              with tarfile.open(f"{work}/{name}.tar", "w") as t:
+                  def add(path, data):
+                      info = tarfile.TarInfo(path)
+                      info.size = len(data)
+                      t.addfile(info, io.BytesIO(data))
+                  blobs = {}
+                  for _, item in entries + ([("", orphan)] if orphan else []):
+                      blobs.update(item["blobs"])
+                  for key, data in sorted(blobs.items()):
+                      if tamper and key == entries[0][1]["index"][0]:
+                          data = data.replace(b'"schemaVersion": 2', b'"schemaVersion":  2')
+                      add("blobs/sha256/" + key[7:], data)
+                  if duplicate:
+                      add("blobs/sha256/" + entries[0][1]["config"][7:], blobs[entries[0][1]["config"]])
+                  add("index.json", json.dumps({"schemaVersion": 2, "mediaType": index_type, "manifests": [
+                      {"mediaType": index_type, "digest": item["index"][0], "size": item["index"][1]}
+                      for _, item in entries + ([("", orphan)] if orphan else [])]}).encode())
+                  add("manifest.json", json.dumps([
+                      {"Config": "blobs/sha256/" + item["config"][7:], "RepoTags": [tag], "Layers": []}
+                      for tag, item in entries]).encode())
+
+          backend, frontend, extra = image(1), image(2, attestation=False), image(3)
+          arm64, multi = image(4, arch="arm64"), image(5, extra_platform="arm64")
+          release = [("backend:r1", backend), ("frontend:r1", frontend)]
+          archive("valid", release)
+          archive("unexpected", release + [("extra:r1", extra)])
+          archive("orphan-index", release, orphan=extra)
+          archive("arm64", [("backend:r1", arm64), ("frontend:r1", frontend)])
+          archive("multi-platform", [("backend:r1", multi), ("frontend:r1", frontend)])
+          archive("tampered", release, tamper=True)
+          archive("duplicate", release, duplicate=True)
+          ids = {name: {"config": item["config"], "index": item["index"][0]}
+                 for name, item in (("backend", backend), ("frontend", frontend), ("extra", extra),
+                                    ("arm64", arm64), ("multi", multi))}
+          json.dump(ids, open(f"{work}/ids.json", "w"))
+          PY
+          id() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]][sys.argv[3]])' "$work/ids.json" "$1" "$2"; }
+          archive_check() {  # expected-result store archive [sha256|-] REF=ID...
+            local want="$1" store="$2" archive="$work/$3.tar" sha="$4" result=accepted
+            shift 4
+            [[ "$sha" != - ]] || sha="$(sha256sum "$archive" | awk '{print $1}')"
+            if ! bash -c '
+              source "$1"; IMAGE_STORE="$2"; ARCHIVE="$3"; ARCHIVE_SHA256="$4"; shift 4
+              EXPECT_IMAGES=("$@"); RELEASE_IMAGES="$(printf "%s\n" "${EXPECT_IMAGES[@]%%=*}")"
+              verify_archive' _ "$script" "$store" "$archive" "$sha" "$@" >/dev/null 2>&1; then
+              result=rejected
+            fi
+            echo "$result: $store $*"
+            [[ "$result" == "$want" ]] || { echo "Expected $want." >&2; exit 1; }
+          }
+          be_index="backend:r1=$(id backend index)"; fe_index="frontend:r1=$(id frontend index)"
+          be_config="backend:r1=$(id backend config)"; fe_config="frontend:r1=$(id frontend config)"
+          archive_check accepted containerd valid - "$be_index" "$fe_index"
+          archive_check accepted graphdriver valid - "$be_config" "$fe_config"
+          archive_check rejected containerd valid - "$be_config" "$fe_config"
+          archive_check rejected graphdriver valid - "$be_index" "$fe_index"
+          archive_check rejected containerd valid "$(printf '0%.0s' {1..64})" "$be_index" "$fe_index"
+          archive_check rejected containerd valid - "backend:r1=$(id extra index)" "$fe_index"
+          archive_check rejected containerd valid - "$be_index" "$fe_index" "extra:r1=$(id extra index)"
+          archive_check rejected containerd unexpected - "$be_index" "$fe_index"
+          archive_check rejected containerd orphan-index - "$be_index" "$fe_index"
+          archive_check rejected containerd valid - "backend:r1=$(id frontend index)" "frontend:r1=$(id backend index)"
+          archive_check rejected graphdriver valid - "backend:r1=$(id frontend config)" "frontend:r1=$(id backend config)"
+          archive_check rejected containerd tampered - "$be_index" "$fe_index"
+          archive_check rejected containerd duplicate - "$be_index" "$fe_index"
+          archive_check rejected "" valid - "$be_config" "$fe_config"
+          archive_check rejected containerd arm64 - "backend:r1=$(id arm64 index)" "$fe_index"
+          archive_check rejected graphdriver arm64 - "backend:r1=$(id arm64 config)" "$fe_config"
+          archive_check rejected containerd multi-platform - "backend:r1=$(id multi index)" "$fe_index"
+      - name: Check image identity through a real save/load round trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          prefix="codemastery-ci-fixture-${GITHUB_RUN_ID:-local}-$$"
+          cleanup() {
+            docker rm -f "$prefix-backend" "$prefix-frontend" >/dev/null 2>&1 || true
+            docker image rm -f "$prefix/backend:r1" "$prefix/frontend:r1" >/dev/null 2>&1 || true
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          printf 'fixture\n' > "$work/payload"
+          printf 'FROM scratch\nCOPY payload /payload\nCMD ["/payload"]\n' > "$work/backend.Dockerfile"
+          printf 'FROM scratch\nCOPY payload /payload\nHEALTHCHECK CMD ["/payload"]\nCMD ["/payload"]\n' > "$work/frontend.Dockerfile"
+          for service in backend frontend; do
+            docker build -q --platform linux/amd64 -f "$work/$service.Dockerfile" \
+              -t "$prefix/$service:r1" "$work" >/dev/null
+          done
+          bash -c '
+            set -euo pipefail
+            source "$1"; prefix="$2"; work="$3"
+            detect_image_store
+            echo "Docker image store: $IMAGE_STORE"
+            be="$prefix/backend:r1"; fe="$prefix/frontend:r1"
+            be_id="$(docker image inspect --format "{{.Id}}" "$be")"
+            fe_id="$(docker image inspect --format "{{.Id}}" "$fe")"
+            EXPECT_IMAGES=("$be=$be_id" "$fe=$fe_id")
+            RELEASE_IMAGES="$(printf "%s\n" "$be" "$fe")"
+            COMPOSE_MODEL="$(python3 -c "import json,sys; b,f=sys.argv[1:]; print(json.dumps({\"services\": {
+              \"postgres\": {\"image\": b}, \"minio\": {\"image\": b}, \"minio-init\": {\"image\": b},
+              \"backend\": {\"image\": b}, \"frontend\": {\"image\": f}}}))" "$be" "$fe")"
+            ARCHIVE="$work/release.tar"
+            docker save -o "$ARCHIVE" "$be" "$fe"
+            ARCHIVE_SHA256="$(sha256sum "$ARCHIVE" | awk "{print \$1}")"
+            verify_archive
+            docker image rm "$be" "$fe" >/dev/null
+            docker load -i "$ARCHIVE" >/dev/null
+            verify_images
+            docker create --name "$prefix-backend" "$be" >/dev/null
+            docker create --name "$prefix-frontend" "$fe" >/dev/null
+            be_cid="$(docker inspect --format "{{.Id}}" "$prefix-backend")"
+            fe_cid="$(docker inspect --format "{{.Id}}" "$prefix-frontend")"
+            verify_service_container backend "$be_cid"
+            verify_service_container frontend "$fe_cid"
+            echo "Archive, loaded image and container identities agree."
+            if (verify_service_container backend "$fe_cid") >/dev/null 2>&1; then
+              echo "A frontend container was accepted for the backend service." >&2; exit 1
+            fi
+            if (EXPECT_IMAGES=("$be=$fe_id" "$fe=$be_id"); verify_archive) >/dev/null 2>&1; then
+              echo "A swapped image mapping was accepted." >&2; exit 1
+            fi
+            if (EXPECT_IMAGES=("$be=sha256:$(printf "0%.0s" {1..64})" "$fe=$fe_id"); verify_images) >/dev/null 2>&1; then
+              echo "An incorrect image identity was accepted." >&2; exit 1
+            fi
+            other=containerd; [[ "$IMAGE_STORE" != containerd ]] || other=graphdriver
+            if (IMAGE_STORE="$other"; verify_archive) >/dev/null 2>&1; then
+              echo "Archive identities were accepted for the wrong image store." >&2; exit 1
+            fi
+            echo "Mismatched services, identities and image-store digest kinds are rejected."
+          ' _ "$script" "$prefix" "$work"
