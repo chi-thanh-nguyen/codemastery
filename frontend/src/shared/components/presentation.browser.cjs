@@ -163,6 +163,15 @@ async function runChartEscapeRegressions(context,check){
    await page.keyboard.press('Escape');await day('Wed').focus();
    assert.equal(await chart.getByRole('tooltip').textContent(),'Wed · 25 min');
   });
+  await check('Escape over the tooltip itself stays dismissed through stationary layout-generated hover',async()=>{
+   await overview();const heading=page.getByRole('heading',{name:'Your learning, in focus.',exact:true});await heading.focus();
+   const selected=await selection();await day('Wed').hover();await chart.getByRole('tooltip').hover();
+   assert.equal(await chart.getByRole('tooltip').textContent(),'Wed · 25 min');
+   await page.keyboard.press('Escape');await page.waitForTimeout(150);
+   assert.equal(await chart.getByRole('tooltip').count(),0);assert.equal(await selection(),selected);
+   assert(await heading.evaluate(element=>element===document.activeElement));
+   await day('Fri').hover();assert.equal(await chart.getByRole('tooltip').textContent(),'Fri · 40 min');
+  });
   await check('focused Escape retains selection and arrow/Home/End navigation',async()=>{
    await overview();await day('Thu').focus();await page.keyboard.press('ArrowRight');
    assert.equal(await chart.getByRole('tooltip').textContent(),'Fri · 40 min');

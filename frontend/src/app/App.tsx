@@ -58,13 +58,14 @@ function LearningRhythm() {
     const [hovered, setHovered] = useState<number | null>(null);
     const [tooltipOpen, setTooltipOpen] = useState(true);
     const buttons = useRef<Array<HTMLButtonElement | null>>([]);
+    const hoverDismissed = useRef(false);
     const active = hovered ?? selected;
     const tooltipVisible = tooltipOpen && active !== null;
     useEffect(() => {
         if (!tooltipVisible) return;
         // Observe bubbling Escape without consuming input handlers or modal events.
         const dismissOnEscape = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setTooltipOpen(false);
+            if (event.key === 'Escape') { hoverDismissed.current = true; setTooltipOpen(false); }
         };
         document.addEventListener('keydown', dismissOnEscape);
         return () => document.removeEventListener('keydown', dismissOnEscape);
@@ -106,8 +107,11 @@ function LearningRhythm() {
                         ref={(node: HTMLButtonElement | null) => { buttons.current[index] = node; }}
                         aria-label={`${day.day}: ${day.minutes} sample study minutes`} aria-pressed={selected === index}
                         aria-describedby={tooltipOpen && active === index ? tooltipId : undefined}
-                        onClick={() => { setSelected(index); setTooltipOpen(true); }} onFocus={() => { setSelected(index); setHovered(null); setTooltipOpen(true); }}
-                        onMouseEnter={() => { setHovered(index); setTooltipOpen(true); }}
+                        onClick={() => { hoverDismissed.current = false; setSelected(index); setTooltipOpen(true); }} onFocus={() => { hoverDismissed.current = false; setSelected(index); setHovered(null); setTooltipOpen(true); }}
+                        onMouseEnter={() => { if (!hoverDismissed.current) { setHovered(index); setTooltipOpen(true); } }}
+                        // WebKit can synthesize mouse-enter when the tooltip disappears under the pointer.
+                        // Require pointer movement or focus before reopening after Escape.
+                        onMouseMove={() => { if (hoverDismissed.current) { hoverDismissed.current = false; setHovered(index); setTooltipOpen(true); } }}
                         onKeyDown={(event) => {
                             let next: number;
                             if (event.key === 'ArrowRight') next = (index + 1) % DEMO_WEEK.length;

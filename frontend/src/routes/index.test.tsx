@@ -187,6 +187,8 @@ describe('real declarative routing and Profile', () => {
         expect(chart.querySelector('[role="tooltip"]')).toBeNull();
         await act(async () => day.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
         await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
+        await act(async () => day.dispatchEvent(new MouseEvent('mousemove', { bubbles: true })));
         expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
         expect(chart.querySelector('[aria-pressed="true"]')).toBe(selected);
         await act(async () => focus.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
@@ -210,6 +212,7 @@ describe('real declarative routing and Profile', () => {
         const outside = host.querySelector('#learning-rhythm-title')!;
         await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
         await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        await act(async () => day.dispatchEvent(new MouseEvent('mousemove', { bubbles: true })));
         expect(activeCount()).toBe(1);
         const hover = keyCalls(add).at(-1)![1];
         await act(async () => day.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
