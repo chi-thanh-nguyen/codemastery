@@ -2,7 +2,9 @@
 // No browser package is downloaded by this script. See the PR verification record.
 // Real Course routes require a configured VITE_API_BASE_URL. A standalone /api
 // setup with the optional sixth --standalone argument exercises API error views,
-// not browser-to-backend integration. Only its exact expected API 404s are exempt.
+// not browser-to-backend integration. Normal mode verifies the deliberate malformed-ID
+// 400 responses; standalone mode retains its exact expected API 404 checks.
+// Append --test-api-errors to run only focused response/classifier browser regressions.
 const {chromium,webkit} = require(process.argv[2] || 'playwright');
 // Optional engine argument uses an installed browser; never downloads one.
 const engine=process.argv[5] || 'chromium';
@@ -14,6 +16,124 @@ const {createHash}=require('node:crypto');
 const out=path.resolve(process.argv[3] || path.join(require('node:os').tmpdir(),'codemastery-fe01-evidence'));
 fs.mkdirSync(out,{recursive:true});
 const previewUrl=process.argv[4] || 'http://127.0.0.1:5173/';
+function isMalformedDetailRequest(request){
+ const url=new URL(request.url());
+ return request.method()==='GET'&&!request.isNavigationRequest()&&url.pathname==='/api/courses/sample'&&!url.search;
+}
+function createConsoleRecorder(standalone,previewUrl){
+ const consoleErrors=[],consoleWarnings=[],expectedApiConsoleErrors=[],verifiedMalformedIdResponses=[];
+ let malformedRead=null;
+ function recordConsole(message){
+  if(message.type()==='error'){
+   const location=message.location().url;
+   const url=location&&new URL(location);
+   const text=message.text();
+   // Defer only this read's exact 400 message until its HTTP responses are verified.
+   if(!standalone&&malformedRead&&message.page()===malformedRead.page&&url&&
+    url.pathname==='/api/courses/sample'&&!url.search&&
+    text==='Failed to load resource: the server responded with a status of 400 (Bad Request)'){
+    malformedRead.messages.push({url:location,message:text});return;
+   }
+   const expected=standalone&&url&&url.origin===new URL(previewUrl).origin&&
+    (url.pathname==='/api/courses/sample'&&!url.search||url.pathname==='/api/courses'&&url.search==='?page=0&size=20')&&
+    text==='Failed to load resource: the server responded with a status of 404 (Not Found)';
+   if(expected)expectedApiConsoleErrors.push({url:location,message:text});else consoleErrors.push(text);
+  }
+  if(message.type()==='warning')consoleWarnings.push(message.text());
+ }
+ async function readMalformedDetail(page,navigate){
+  if(standalone)return navigate();
+  assert.equal(malformedRead,null,'Malformed-ID checks must run sequentially');
+  const read={page,responses:[],messages:[]};malformedRead=read;
+  const recordResponse=response=>{if(isMalformedDetailRequest(response.request()))read.responses.push({url:response.url(),method:response.request().method(),status:response.status()})};
+  page.on('response',recordResponse);
+  try{
+   await Promise.all([page.waitForResponse(response=>isMalformedDetailRequest(response.request())),navigate()]);
+   assert(read.responses.length>0,'Observe the deliberate malformed-ID request');
+   const remaining=new Map();
+   for(const response of read.responses){
+    assert.equal(response.status,400,`${response.method} ${response.url}: malformed UUID must return HTTP 400`);
+    remaining.set(response.url,(remaining.get(response.url)||0)+1);
+   }
+   for(const message of read.messages){
+    const count=remaining.get(message.url)||0;
+    assert(count>0,`No matching HTTP 400 response for console message at ${message.url}`);
+    remaining.set(message.url,count-1);
+   }
+   verifiedMalformedIdResponses.push(...read.responses);expectedApiConsoleErrors.push(...read.messages);
+  }finally{page.off('response',recordResponse);malformedRead=null;}
+ }
+ return {consoleErrors,consoleWarnings,expectedApiConsoleErrors,verifiedMalformedIdResponses,recordConsole,readMalformedDetail};
+}
+
+async function runApiErrorRegressions(context,check){
+ const page=await context.newPage(),uncaught=[];
+ const endpoint=new URL('/api/courses/sample',previewUrl).href,statuses=new Map([[endpoint,400]]);
+ page.on('pageerror',error=>uncaught.push(String(error)));
+ await page.route(url=>url.origin===new URL(previewUrl).origin&&url.pathname.startsWith('/api/'),route=>{
+  const status=statuses.get(route.request().url())||400;
+  return route.fulfill({status,contentType:'application/problem+json',body:JSON.stringify({type:'about:blank',title:{200:'OK',400:'Bad Request',404:'Not Found',500:'Internal Server Error'}[status],status,detail:'The request is invalid.',instance:new URL(route.request().url()).pathname})});
+ });
+ const fetchResponse=async(url=endpoint,method='GET')=>{
+  const consoleMessage=(statuses.get(url)||400)>=400?page.waitForEvent('console',{predicate:message=>message.type()==='error'&&message.location().url===url}):Promise.resolve();
+  await Promise.all([consoleMessage,page.evaluate(async({url,method})=>{await(await fetch(url,{method})).text()},{url,method})]);
+ };
+ const withRecorder=async(mode,run)=>{
+  const recorder=createConsoleRecorder(mode,previewUrl);page.on('console',recorder.recordConsole);
+  try{await run(recorder);}finally{page.off('console',recorder.recordConsole);}
+ };
+ try{
+  await check('normal mode verifies the malformed-ID navigation and reload HTTP 400s',()=>withRecorder(false,async recorder=>{
+   await recorder.readMalformedDetail(page,()=>page.goto(new URL('/courses/sample',previewUrl).href,{waitUntil:'networkidle'}));
+   await recorder.readMalformedDetail(page,()=>page.reload({waitUntil:'networkidle'}));
+   assert(await page.getByRole('heading',{name:'Could not load course',exact:true}).isVisible());
+   assert(recorder.verifiedMalformedIdResponses.length>=2);assert(recorder.expectedApiConsoleErrors.length>=2);
+   assert(recorder.verifiedMalformedIdResponses.every(response=>response.method==='GET'&&response.url===endpoint&&response.status===400));
+   assert.deepEqual(recorder.consoleErrors,[]);
+  }));
+  for(const status of [400,404,500])await check(`normal mode retains unrelated HTTP ${status} during the expected read`,()=>withRecorder(false,async recorder=>{
+   const unrelated=new URL('/api/courses/unrelated',previewUrl).href;statuses.set(unrelated,status);
+   await recorder.readMalformedDetail(page,async()=>{await fetchResponse(unrelated);await fetchResponse();});
+   assert.equal(recorder.consoleErrors.length,1);assert.equal(recorder.expectedApiConsoleErrors.length,1);
+  }));
+  for(const status of [200,404,500])await check(`normal mode rejects HTTP ${status} for the malformed-ID request`,()=>withRecorder(false,async recorder=>{
+   statuses.set(endpoint,status);
+   try{await assert.rejects(recorder.readMalformedDetail(page,()=>fetchResponse()),/malformed UUID must return HTTP 400/);}
+   finally{statuses.set(endpoint,400);}
+   assert.equal(recorder.expectedApiConsoleErrors.length,0);
+  }));
+  await check('normal mode retains the same URL HTTP 400 outside the deliberate read',()=>withRecorder(false,async recorder=>{
+   await fetchResponse();assert.equal(recorder.consoleErrors.length,1);assert.equal(recorder.expectedApiConsoleErrors.length,0);
+  }));
+  await check('normal mode rejects an extra POST HTTP 400 at the same URL',()=>withRecorder(false,async recorder=>{
+   await assert.rejects(recorder.readMalformedDetail(page,async()=>{await fetchResponse(endpoint,'POST');await fetchResponse();}),/No matching HTTP 400 response/);
+  }));
+  await check('normal mode retains a query-bearing HTTP 400 at the same path',()=>withRecorder(false,async recorder=>{
+   await recorder.readMalformedDetail(page,async()=>{await fetchResponse(endpoint+'?unexpected=1');await fetchResponse();});
+   assert.equal(recorder.consoleErrors.length,1);
+  }));
+  await check('normal mode retains ordinary console errors during the expected read',()=>withRecorder(false,async recorder=>{
+   await recorder.readMalformedDetail(page,async()=>{await page.evaluate(()=>console.error('Unexpected classifier regression sentinel'));await fetchResponse();});
+   assert.deepEqual(recorder.consoleErrors,['Unexpected classifier regression sentinel']);
+  }));
+  await check('standalone mode preserves exactly two detail and one catalogue HTTP 404 exceptions',()=>withRecorder(true,async recorder=>{
+   const catalogue=new URL('/api/courses?page=0&size=20',previewUrl).href;statuses.set(endpoint,404);statuses.set(catalogue,404);
+   try{await recorder.readMalformedDetail(page,()=>fetchResponse());await recorder.readMalformedDetail(page,()=>fetchResponse());await fetchResponse(catalogue);}
+   finally{statuses.set(endpoint,400);}
+   assert.equal(recorder.expectedApiConsoleErrors.length,3);assert.deepEqual(recorder.consoleErrors,[]);assert.equal(recorder.verifiedMalformedIdResponses.length,0);
+  }));
+  for(const status of [400,404,500])await check(`standalone mode retains unrelated HTTP ${status}`,()=>withRecorder(true,async recorder=>{
+   const unrelated=new URL('/api/courses/unrelated',previewUrl).href;statuses.set(unrelated,status);await fetchResponse(unrelated);
+   assert.equal(recorder.consoleErrors.length,1);assert.equal(recorder.expectedApiConsoleErrors.length,0);
+  }));
+  for(const status of [400,500])await check(`standalone mode retains HTTP ${status} at the malformed-ID URL`,()=>withRecorder(true,async recorder=>{
+   statuses.set(endpoint,status);try{await fetchResponse();}finally{statuses.set(endpoint,400);}
+   assert.equal(recorder.consoleErrors.length,1);assert.equal(recorder.expectedApiConsoleErrors.length,0);
+  }));
+  await check('focused response/classifier regressions have no uncaught exceptions',async()=>assert.deepEqual(uncaught,[]));
+ }finally{await page.close();}
+}
+
 let browser;
 (async()=>{
  assert(['chromium','webkit'].includes(engine),'Expected chromium or webkit');
@@ -23,21 +143,16 @@ let browser;
  // Vite's MUI development graph can exceed the browser's default resource-timing buffer.
  await page.addInitScript(()=>performance.setResourceTimingBufferSize(4000));
  const errors=[];const origins=new Set();page.on('request',r=>origins.add(new URL(r.url()).origin));page.on('pageerror',e=>errors.push(String(e)));
- const consoleErrors=[],consoleWarnings=[],expectedApiConsoleErrors=[];
- function recordConsole(message){
-  if(message.type()==='error'){
-   const location=message.location().url;
-   const url=location&&new URL(location);
-   const expected=standalone&&url&&url.origin===new URL(previewUrl).origin&&
-    (url.pathname==='/api/courses/sample'&&!url.search||url.pathname==='/api/courses'&&url.search==='?page=0&size=20')&&
-    message.text()==='Failed to load resource: the server responded with a status of 404 (Not Found)';
-   if(expected)expectedApiConsoleErrors.push({url:location,message:message.text()});else consoleErrors.push(message.text());
-  }
-  if(message.type()==='warning')consoleWarnings.push(message.text());
- }
+ const {consoleErrors,consoleWarnings,expectedApiConsoleErrors,verifiedMalformedIdResponses,recordConsole,readMalformedDetail}=createConsoleRecorder(standalone,previewUrl);
  page.on('console',recordConsole);
  const checks=[];
  async function check(name,fn){await fn();checks.push({name,passed:true});console.log('PASS',name)}
+ if(process.argv.includes('--test-api-errors')){
+  await runApiErrorRegressions(context,check);
+  const report={engine,browser:browser.version(),fixture:'Controlled HTTP responses; not live backend integration',checks};
+  fs.writeFileSync(`${out}/api-error-regressions.json`,JSON.stringify(report,null,2));await browser.close();
+  console.log(JSON.stringify({passed:checks.length,browser:report.browser,report:`${out}/api-error-regressions.json`}));return;
+ }
  function contrast(a,b){const lum=s=>{const v=s.match(/[\d.]+/g).slice(0,3).map(Number).map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4});return v[0]*.2126+v[1]*.7152+v[2]*.0722};const [l,h]=[lum(a),lum(b)].sort((a,b)=>a-b);return(h+.05)/(l+.05)}
  async function colors(locator){return locator.evaluate(e=>{const s=getComputedStyle(e);return {color:s.color,background:s.backgroundColor,outline:s.outline,outlineWidth:s.outlineWidth,transition:s.transitionDuration}})}
  const canonicalArtwork=fs.readFileSync(path.resolve(__dirname,'../../../public/favicon.svg'));
@@ -417,8 +532,8 @@ let browser;
   }
  });
  await check('direct public deep links and the anonymous Profile guard remain intact',async()=>{
-  await page.goto(new URL('/courses/sample',previewUrl).href,{waitUntil:'networkidle'});await page.getByRole('heading',{name:'Course details',exact:true}).waitFor();
-  await page.reload({waitUntil:'networkidle'});assert(await page.getByRole('heading',{name:'Course details',exact:true}).isVisible());
+  await readMalformedDetail(page,()=>page.goto(new URL('/courses/sample',previewUrl).href,{waitUntil:'networkidle'}));await page.getByRole('heading',{name:'Course details',exact:true}).waitFor();
+  await readMalformedDetail(page,()=>page.reload({waitUntil:'networkidle'}));assert(await page.getByRole('heading',{name:'Course details',exact:true}).isVisible());
   if(standalone)assert(await page.getByRole('heading',{name:'Could not load course',exact:true}).isVisible(),'Standalone mode must exercise the real API error view');
   await page.goto(new URL('/profile',previewUrl).href,{waitUntil:'networkidle'});await page.getByRole('heading',{name:'Welcome back',exact:true}).waitFor();assert.equal(new URL(page.url()).pathname,'/login');
   assert.equal(await page.locator('dl').count(),0);
@@ -614,7 +729,7 @@ let browser;
   if(standalone)assert.equal(expectedApiConsoleErrors.length,3,'Only the two invalid detail reads and cold catalogue read may fail');
  });
  fs.writeFileSync(`${out}/studio-accessibility-tree.yml`,await page.locator('main').ariaSnapshot());
- const report={engine,standalone,expectedApiConsoleErrors,integration:'NOT_RUN: this presentation harness does not establish browser-to-REST-to-PostgreSQL behavior',browser:browser.version(),textFieldAudit,labelMotionAudit,motionAudit,assetLoading,branding,faviconCaching,typography,viewports:layouts,checks,networkOrigins:[...origins],contrast:{onFocus:{...onFocus,ratio:contrast(onFocus.color,onFocus.background)},atRest:{...atRest,ratio:contrast(atRest.color,atRest.background)},onHover:{...onHover,ratio:contrast(onHover.color,onHover.background)},badge:{...badgeColors,ratio:contrast(badgeColors.color,badgeColors.background)}},errors,consoleErrors,consoleWarnings,screenReader:'Not executed'};
+ const report={engine,standalone,expectedApiConsoleErrors,verifiedMalformedIdResponses,integration:'NOT_RUN: this presentation harness does not establish browser-to-REST-to-PostgreSQL behavior',browser:browser.version(),textFieldAudit,labelMotionAudit,motionAudit,assetLoading,branding,faviconCaching,typography,viewports:layouts,checks,networkOrigins:[...origins],contrast:{onFocus:{...onFocus,ratio:contrast(onFocus.color,onFocus.background)},atRest:{...atRest,ratio:contrast(atRest.color,atRest.background)},onHover:{...onHover,ratio:contrast(onHover.color,onHover.background)},badge:{...badgeColors,ratio:contrast(badgeColors.color,badgeColors.background)}},errors,consoleErrors,consoleWarnings,screenReader:'Not executed'};
  fs.writeFileSync(`${out}/browser-report.json`,JSON.stringify(report,null,2));await browser.close();
  console.log(JSON.stringify({passed:checks.length,browser:report.browser,report:`${out}/browser-report.json`}));
 })().catch(async e=>{console.error(e);if(browser)await browser.close();process.exitCode=1});
