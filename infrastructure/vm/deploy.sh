@@ -1649,6 +1649,7 @@ print_record() {
   [[ -z "${ARCHIVE_SHA256}" ]] || echo "Archive SHA-256     : ${ARCHIVE_SHA256}"
   echo "Flyway success|fail : ${flyway}"
   echo "DB role separation  : ${DB_SEPARATION_RESULT}"
+  echo "DB runtime grants   : SELECT/INSERT/UPDATE/DELETE on every migrator-owned public table; no approved per-object P6 matrix"
   echo "Published ports     : ${PUBLISHED_PORTS_RESULT}"
   echo "--- verified image identities ---"
   for entry in "${EXPECT_IMAGES[@]}"; do echo "${entry}"; done
