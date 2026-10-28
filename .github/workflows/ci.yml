@@ -145,4 +145,154 @@ jobs:
           )
           if result.returncode == 0 or "unapproved environment variables" not in result.stderr:
               raise SystemExit("Compose policy did not reject an unapproved environment variable")
+          network_problem = "the Compose default network contains unapproved network options"
+          for network, approved in (
+              ({"name": "codemastery_default", "ipam": {}}, True),
+              ({"name": "codemastery_default"}, True),
+              ({"name": "codemastery_default", "ipam": {"driver": "default"}}, False),
+              ({"name": "codemastery_default", "ipam": {"config": [{"subnet": "10.231.0.0/24"}]}}, False),
+              ({"name": "codemastery_default", "ipam": {"options": {"x": "y"}}}, False),
+              ({"name": "codemastery_default", "attachable": True}, False),
+          ):
+              config = {"services": {}, "networks": {"default": network}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              if (network_problem not in result.stderr) != approved:
+                  raise SystemExit(f"Default network policy mismatch for {network}")
           PY
+      - name: Check preflight against rendered Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infrastructure/vm/deploy.sh
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          mkdir -m 700 "$work/env" "$work/certs"
+          origin=https://deploy-ci.example.invalid
+          secret() { openssl rand -hex 16; }
+          # Synthetic CI-only inputs. This is not an approved release override.
+          cat > "$work/env/.env" <<EOF
+          POSTGRES_DB=codemastery
+          POSTGRES_USER=cm_bootstrap
+          POSTGRES_PASSWORD=$(secret)
+          DB_NAME=codemastery
+          DB_USER=cm_runtime
+          DB_PASSWORD=$(secret)
+          SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
+          SPRING_FLYWAY_USER=cm_migrator
+          SPRING_FLYWAY_PASSWORD=$(secret)
+          MINIO_ROOT_USER=ci-root
+          MINIO_ROOT_PASSWORD=$(secret)
+          STORAGE_ACCESS_KEY=ci-app
+          STORAGE_SECRET_KEY=$(secret)
+          JWT_SECRET=$(openssl rand -hex 32)
+          CORS_ALLOWED_ORIGINS=$origin
+          EOF
+          chmod 600 "$work/env/.env"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=deploy-ci.example.invalid \
+            -keyout "$work/certs/privkey.pem" -out "$work/certs/fullchain.pem" 2>/dev/null
+          chmod 400 "$work/certs/privkey.pem"
+          cat > "$work/release.yml" <<EOF
+          services:
+            postgres:
+              ports: !reset []
+              restart: unless-stopped
+            minio:
+              ports: !reset []
+              restart: unless-stopped
+            minio-init:
+              image: registry.invalid/codemastery/minio-init@sha256:$(printf 'a%.0s' {1..64})
+              entrypoint: !reset null
+              command: !reset null
+            backend:
+              image: registry.invalid/codemastery/backend:ci-fixture
+              ports: !reset []
+              restart: unless-stopped
+              environment:
+                CORS_ALLOWED_ORIGINS: \${CORS_ALLOWED_ORIGINS:?}
+                SPRING_FLYWAY_URL: \${SPRING_FLYWAY_URL:?}
+                SPRING_FLYWAY_USER: \${SPRING_FLYWAY_USER:?}
+                SPRING_FLYWAY_PASSWORD: \${SPRING_FLYWAY_PASSWORD:?}
+                SERVER_FORWARD_HEADERS_STRATEGY: NONE
+                SPRING_PROFILES_ACTIVE: prod
+            frontend:
+              image: registry.invalid/codemastery/frontend:ci-fixture
+              ports: !override
+                - "443:8080"
+              healthcheck: !reset null
+              restart: unless-stopped
+              volumes:
+                - type: bind
+                  source: $work/certs
+                  target: /etc/nginx/certs
+                  read_only: true
+          EOF
+          preflight() {
+            bash "$script" preflight --env-file "$work/env/.env" --origin "$origin" \
+              --compose-override "$work/release.yml" "$@"
+          }
+          docker compose --project-name codemastery --env-file "$work/env/.env" \
+            -f infrastructure/docker-compose.yml -f "$work/release.yml" config --format json \
+            | python3 -c 'import json,sys; print("Rendered default network keys:", sorted(json.load(sys.stdin)["networks"]["default"]))'
+          if ! output="$(preflight 2>&1)" || [[ "$output" != *"PREFLIGHT OK"* ]]; then
+            printf '%s\n' "$output" >&2
+            exit 1
+          fi
+          printf '%s\n' "$output" | grep 'HOST_PLATFORM'
+          reject() {
+            local expected="$1" name="$2" output
+            cat > "$work/$name.yml"
+            if output="$(preflight --compose-override "$work/$name.yml" 2>&1)"; then
+              echo "Preflight accepted the $name network override." >&2
+              exit 1
+            fi
+            if [[ "$output" != *"$expected"* ]]; then
+              echo "Unexpected preflight result for $name:" >&2
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+          }
+          reject 'unapproved network options' ipam-subnet <<'EOF'
+          networks:
+            default:
+              ipam:
+                config:
+                  - subnet: 10.231.0.0/24
+          EOF
+          reject 'unapproved network options' ipam-driver <<'EOF'
+          networks:
+            default:
+              ipam:
+                driver: default
+          EOF
+          reject 'unapproved network options' driver-options <<'EOF'
+          networks:
+            default:
+              driver_opts:
+                com.docker.network.bridge.enable_icc: "true"
+          EOF
+          reject 'unapproved network options' ipv6 <<'EOF'
+          networks:
+            default:
+              enable_ipv6: true
+          EOF
+          reject 'project-managed bridge' custom-driver <<'EOF'
+          networks:
+            default:
+              driver: macvlan
+          EOF
+          reject 'project-managed bridge' external <<'EOF'
+          networks:
+            default:
+              name: shared-host-network
+              external: true
+          EOF
+          reject "only the Compose project's default network" extra-network <<'EOF'
+          services:
+            backend:
+              networks: [default, side]
+          networks:
+            side: {}
+          EOF

@@ -418,7 +418,10 @@ else:
     default_network = networks["default"]
     if default_network.get("external") or default_network.get("driver") not in (None, "bridge"):
         problems.append("the Compose default network must be a project-managed bridge")
-    if set(default_network) - {"name", "driver", "internal"}:
+    # Compose renders an empty ipam mapping for its implicit default network.
+    # Any IPAM driver, subnet, range, gateway or option remains unapproved.
+    if (set(default_network) - {"name", "driver", "internal", "ipam"}
+            or default_network.get("ipam") not in (None, {})):
         problems.append("the Compose default network contains unapproved network options")
     if default_network.get("name") not in (None, "codemastery_default"):
         problems.append("the Compose default network must remain private to the codemastery project")
