@@ -145,12 +145,12 @@ describe('real Auth UI observable states', () => {
         await act(async () => work.resolve(json(null, 503))); expect(button.disabled).toBe(false); expect(host.querySelector('[role="progressbar"]')).toBeNull(); expect(fetcher).toHaveBeenCalledTimes(1);
     });
     it('associates safe server errors and focuses affected input', async () => {
-        await mount(<RegisterPage />); await fillRegister(); host.querySelector<HTMLButtonElement>('button[type="submit"]')!.focus(); fetcher.mockResolvedValueOnce(json({ type: 'about:blank', title: 'Bad Request', status: 400, detail: '<script>PRIVATE SENTINEL</script>', instance: '/api/auth/register', errors: [{ field: 'email', code: 'Email', message: 'PRIVATE SENTINEL' }] }, 400, 'application/problem+json')); await submit();
+        await mount(<RegisterPage />); await fillRegister(); await act(async () => host.querySelector<HTMLButtonElement>('button[type="submit"]')!.focus()); fetcher.mockResolvedValueOnce(json({ type: 'about:blank', title: 'Bad Request', status: 400, detail: '<script>PRIVATE SENTINEL</script>', instance: '/api/auth/register', errors: [{ field: 'email', code: 'Email', message: 'PRIVATE SENTINEL' }] }, 400, 'application/problem+json')); await submit();
         const input = host.querySelector<HTMLInputElement>('[name="email"]')!; expect(input.getAttribute('aria-invalid')).toBe('true'); expect(document.getElementById(input.getAttribute('aria-describedby')!)?.textContent).toBe('Please check this field.'); expect(document.activeElement).toBe(input); expect(host.innerHTML).not.toContain('PRIVATE SENTINEL'); expect(host.querySelector('script')).toBeNull();
     });
     it('focuses local validation and leaves focus alone for late errors', async () => {
         await mount(<LoginPage />); await submit(); expect(document.activeElement).toBe(host.querySelector('[name="email"]')); await change('email', payload.email);
-        const work = deferred(); fetcher.mockReturnValueOnce(work.promise); await submit(); const link = host.querySelector<HTMLAnchorElement>('a[href="/register"]')!; link.focus(); await act(async () => work.resolve(json(null, 401))); expect(document.activeElement).toBe(link);
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise); await submit(); const link = host.querySelector<HTMLAnchorElement>('a[href="/register"]')!; await act(async () => link.focus()); await act(async () => work.resolve(json(null, 401))); expect(document.activeElement).toBe(link);
     });
     it('renders local general fallback without leaking diagnostics/password or logging', async () => {
         const log = vi.spyOn(console, 'log'), error = vi.spyOn(console, 'error'); await mount(<LoginPage />); await change('email', payload.email); await change('password', payload.password);
@@ -165,7 +165,7 @@ describe('additional UI failure and lifecycle regressions', () => {
         if (kind === 'login') { await change('email', payload.email); await change('password', payload.password); } else await fillRegister();
         if (outcome === 'network') fetcher.mockRejectedValueOnce(new Error('PRIVATE SENTINEL'));
         else fetcher.mockResolvedValueOnce(json({ secret: 'PRIVATE SENTINEL' }, outcome as number, 'application/problem+json'));
-        host.querySelector<HTMLButtonElement>('button[type="submit"]')!.focus(); await submit();
+        await act(async () => host.querySelector<HTMLButtonElement>('button[type="submit"]')!.focus()); await submit();
         expect(host.querySelector('[role="alert"]')).not.toBeNull(); expect(host.innerHTML).not.toContain('PRIVATE SENTINEL'); expect(auth.user).toBeNull(); expect(fetcher).toHaveBeenCalledTimes(1);
         expect(document.activeElement).toBe(host.querySelector('[role="alert"]'));
     });

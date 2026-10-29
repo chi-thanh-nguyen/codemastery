@@ -572,8 +572,8 @@ class JwtTokenProviderTest {
 
         @Test
         void accountStateIsReadAgainOnTheNextRequest() throws Exception {
-            when(users.findById(USER_ID)).thenReturn(Optional.of(account(Role.INSTRUCTOR, AccountStatus.ACTIVE)),
-                    Optional.of(account(Role.INSTRUCTOR, AccountStatus.LOCKED)));
+            when(users.findById(USER_ID)).thenReturn(Optional.of(account(Role.INSTRUCTOR, AccountStatus.ACTIVE)))
+                    .thenReturn(Optional.of(account(Role.INSTRUCTOR, AccountStatus.LOCKED)));
             String token = token();
             mvc.perform(get("/api/review-only-unselected").header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());

@@ -145,7 +145,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     private static ValidationError validationError(String field, String code) {
-        String safeCode = VALIDATION_CODES.contains(code == null ? "" : code) ? code : "Invalid";
+        String safeCode = code != null && VALIDATION_CODES.contains(code) ? code : "Invalid";
         String message = switch (safeCode) {
             case "NotNull", "NotBlank", "NotEmpty" -> "This field is required.";
             case "Size" -> "This field has an invalid length.";

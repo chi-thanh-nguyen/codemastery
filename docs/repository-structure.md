@@ -76,6 +76,32 @@ remain pending. This does not retroactively satisfy pre-merge documentation
 timing, rewrite the immutable canonical tree, change ownership/hierarchy, approve
 unrelated CT14/CT37 scope or establish Issue #37 completion.
 
+## Bounded Course unit-test placement correction
+
+On 2026-10-26 (Asia/Ho_Chi_Minh), the Project Leader manually relocated
+`CourseServiceTest.java` to
+`backend/src/test/java/com/codemastery/modules/course/application/service/CourseServiceTest.java`
+and explicitly authorized verification and the corresponding documentation updates.
+The [ADR002 CT14.interim placement amendment](decisions/002-interim-delegated-contracts.md#ct14interim--delegated_approved)
+records the previous location, this bounded supersession and its rationale.
+
+This approved placement is included in the tree below. The directory matches the
+existing `com.codemastery.modules.course.application.service` package and retains
+the test's access to package-private Course assertions. The test contents and the
+existing Course test CODEOWNERS, @TamiaoNguyen and @chi-thanh-nguyen, are unchanged.
+The immutable canonical tree remains unchanged; this is an explicit placement
+exception, not a reinterpretation of its original inventory. Other test paths,
+contract decisions, test execution and protected review remain outside this
+correction.
+
+The Project Leader separately authorized retaining the existing
+`EnrollmentServiceTest.java` relocation on 2026-10-29 (Asia/Ho_Chi_Minh) during
+PR #114 remediation. [ADR002's Enrollment test placement amendment](decisions/002-interim-delegated-contracts.md#ct14interim--delegated_approved)
+records the exact instruction and supersession of its former `modules/course/`
+path by `modules/course/application/service/EnrollmentServiceTest.java`.
+Existing test responsibilities, package-private access and Course CODEOWNERS
+remain unchanged; no production behavior or other inventory change is approved.
+
 ```text
 codemastery/
 
@@ -857,7 +883,13 @@ codemastery/
 
 │           │           │   ├── course/
 
-│           │           │   │   ├── EnrollmentServiceTest.java
+│           │           │   │   ├── application/
+
+│           │           │   │   │   └── service/
+
+│           │           │   │   │       ├── CourseServiceTest.java
+
+│           │           │   │   │       └── EnrollmentServiceTest.java
 
 │           │           │   │   └── LessonProgressServiceTest.java
 

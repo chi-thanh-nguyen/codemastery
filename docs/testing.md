@@ -168,12 +168,22 @@ npm run build
 
 `npm ci` installs the locked dependency graph. `typecheck` checks source and
 Vite configuration without emitting files. The `build` script already runs
-`npm run typecheck` before `vite build`, so CI runs only install and build.
+`npm run typecheck` before `vite build`, so the CI build step also typechecks.
 Build output goes to `frontend/dist/`. Development-only Vitest `5.0.5` and jsdom
 `27.4.0` execute the bounded frontend suite through `npm test` (`vitest run`).
-No lint script is implemented. The required Frontend CI job still runs only
-installation and build; it does not run `npm test` or the browser harness.
+No lint script is implemented. The required Frontend CI job runs `npm ci`, `npm test`, then `npm run build`.
+The optional browser harness is separate and is not run by that job.
 Build success alone does not establish behavioral coverage or deployment readiness.
+
+For the existing optional `npm run test:browser` script, supply an installed
+Playwright module, artifact directory, preview URL and `chromium` or `webkit`.
+No browser is downloaded by this script. When validating a standalone frontend
+configured with the approved `/api` base and no API proxy, append `--standalone`.
+That mode verifies the Course error view and records exactly the two detail-read
+404s and one cold catalogue-read 404 separately from unexpected console errors.
+It does not establish real browser → REST → PostgreSQL integration. Backend
+connectivity/CORS, successful Auth/Course transactions and assistive-technology
+acceptance require their independent evidence.
 
 ### Bounded FE01 decisions and regression coverage
 
@@ -499,7 +509,7 @@ or editing any test still needs its separate implementation/file authorization.
 | Auth orchestration/password; Auth | `modules/auth/AuthServiceTest.java`; unit | CT01.core canonical email, learner-only registration, unchanged password input, Unicode/code-point and UTF-8 byte bounds, real BCrypt verification and safe failures. Mockito can isolate repositories, but cannot prove uniqueness races or persistence. Generate synthetic test secrets/password inputs locally; QA01 checks actual encoded storage and no disclosure. Internal password helper is initially covered through Auth behavior; no extra utility test file selected. |
 | JWT; Auth | `modules/auth/JwtTokenProviderTest.java`; unit | Effective CT01/CT38 fixed algorithm/issuer/audience/claims/expiry and malformed/missing/invalid inputs, including exact expiry boundary. Use explicit instants/inputs through approved callable shapes; do not add a clock API or weaken validation to make tests pass. Current-account lock/role enforcement additionally needs actual Auth data/security integration. |
 | Backend security and registration persistence; QA01/Auth | `integration/AuthorizationIntegrationTest.java`; integration | Real configured Auth security components and PostgreSQL, approved selected endpoints and role/resource rules, unauthenticated 401 versus role 403 versus concealed 404, locked or removed account, registration canonical-email conflict including concurrent inserts. Check CT18 safe problems and 401 headers. Prove no denied side effect. Mocked identity/security alone cannot establish this handoff. |
-| Catalogue service; Course | `modules/course/CourseServiceTest.java`; unit, **approved addition** | Effective CT03.catalogue/CT21.catalogue DTO/privacy and syllabus mapping/order, missing/hidden detail equivalence and validated pagination. Isolated repository doubles establish orchestration only; no Auth dependency is required for anonymous catalogue. |
+| Catalogue service; Course | `modules/course/application/service/CourseServiceTest.java`; unit, **approved addition** | Effective CT03.catalogue/CT21.catalogue DTO/privacy and syllabus mapping/order, missing/hidden detail equivalence and validated pagination. Isolated repository doubles establish orchestration only; no Auth dependency is required for anonymous catalogue. |
 | Catalogue REST/query composition; Course/QA02 | `integration/CourseCatalogueIntegrationTest.java`; integration, **approved addition** | Real PostgreSQL publication filtering before pagination/count, stable title/UUID order and canonical syllabus order, empty/beyond-last page, invalid/default/boundary sizes, unsupported parameters, safe 404 and no hidden fields/content/storage/settings. Exercise actual Course API/advice for REST claims; a repository-only test cannot prove serialization. |
 | Course mappings/constraints; QA02/Course | `integration/repository/CourseRepositoryIntegrationTest.java`; integration | V002/accepted scalar mappings, real FK/uniqueness/nullability and approved query predicates. Flush/clear or otherwise force database evaluation before claiming a round trip/constraint; setup and assertions must not merely return cached/in-memory representations. Coordinate catalogue assertions with the preceding row without duplicating identical tests. |
 | Local mastery; AD09 with independent CT36/QA14 reviewer | `modules/adaptive/mastery/MasteryCalculatorTest.java`, `modules/adaptive/mastery/MasteryStateClassifierTest.java`; unit | Only effective CT06.prototype/CT24.calculation and exact CT36.I-results table, including unknown versus zero successes, equality, alternate rational policy, invalid/null inputs and maximum-int multiplication. Pure in-memory evidence; no Spring, DB, clock, events, grading or production aggregation prerequisite. Reviewer independently checks arithmetic before accepting results; CT14 creates no new threshold/oracle. |
@@ -509,7 +519,7 @@ or editing any test still needs its separate implementation/file authorization.
 
 The remaining approved inventory is preserved, without selecting new behavior:
 
-- Course enrolment/progress: `modules/course/EnrollmentServiceTest.java` and
+- Course enrolment/progress: `modules/course/application/service/EnrollmentServiceTest.java` and
   `modules/course/LessonProgressServiceTest.java`; CT22 owns mutation/resume semantics.
 - Assessment: `modules/assessment/AttemptServiceTest.java`,
   `modules/assessment/QuizGradingServiceTest.java`,
@@ -710,8 +720,8 @@ router, new renderer, testing-library, request mock server or E2E runner is adde
   DOM tests cannot assert real browser navigation/TLS/network guarantees.
 
 Future execution uses existing npm test from frontend/ with the approved file
-filters; no command is executed by this documentation task. CI currently builds/
-typechecks frontend but does not run npm test. No new CI job, coverage percentage,
+filters; no command is executed by this documentation task. At the 24 October contract-selection baseline, CI built/typechecked frontend
+without npm test; the later FE03 implementation added npm test to CI (see below). No new CI job, coverage percentage,
 pass count, browser installation or success result is invented here.
 
 ### Existing Interim backend and independent evidence contracts
@@ -764,6 +774,18 @@ review, last-push approval, checks and exact-revision integration remain unresol
 non-owner review or another contributor's push alone cannot substitute. Issue #27
 checkboxes/whole-Issue completion remain unchanged.
 
+## Enrollment unit-test placement amendment — 29 October 2026
+
+During PR #114 review/remediation, the Project Leader explicitly authorized
+retaining the existing relocation and synchronizing documentation. The canonical
+file is now `backend/src/test/java/com/codemastery/modules/course/application/service/EnrollmentServiceTest.java`,
+matching its existing `com.codemastery.modules.course.application.service` package.
+[ADR002](decisions/002-interim-delegated-contracts.md#ct14interim--delegated_approved)
+records the exact authority and bounded location supersession. Existing test
+contents/responsibilities, package-private access and Course CODEOWNERS remain
+unchanged. This is placement approval, not approval of new CT22 behavior or an
+executed test result; only one canonical test class is retained.
+
 ## CT14 consolidation and bounded Final approvals — 25 October 2026
 
 ### Authority, predecessor and canonical scope
@@ -797,7 +819,7 @@ feasible boundaries, not authority or retrospective approval of its implementati
 
 | Exact repository-relative path | Layer, responsibility, owner and acceptance |
 | --- | --- |
-| backend/src/test/java/com/codemastery/modules/course/CourseServiceTest.java | Unit; Course @TamiaoNguyen and Leader CODEOWNERS. Cover all five public/two package-private approved assertions in their owning package context. Actual tests/Java package declarations may differ from directory names without adding or moving a file. Trusted-identity seams are labelled doubles, never security integration. |
+| backend/src/test/java/com/codemastery/modules/course/application/service/CourseServiceTest.java | Unit; Course @TamiaoNguyen and Leader CODEOWNERS. Cover all five public/two package-private approved assertions in their owning package context. The path matches the declared `com.codemastery.modules.course.application.service` package under the [Leader-authorized 26 October placement amendment](decisions/002-interim-delegated-contracts.md#ct14interim--delegated_approved); the former directory/package mismatch allowance is superseded for this file. Trusted-identity seams are labelled doubles, never security integration. |
 | backend/src/test/java/com/codemastery/modules/course/CourseRepositoryImplTest.java | Unit adapter; same Course/Leader ownership. Check parameter/fact mapping and failure propagation at the existing private Course boundary; mocks cannot establish SQL, isolation or coherent PostgreSQL behavior. No new public repository interface is authorized. |
 | backend/src/test/java/com/codemastery/integration/CourseCatalogueIntegrationTest.java | Real PostgreSQL/Flyway; the earlier bounded addition already permits repository/access/pagination coverage. Course is responsible and Leader coordinates integration review under ADR002; this exact file currently has **no matching CODEOWNERS rule**, which is not silently changed or reported as an assigned CODEOWNER. Preserve catalogue cases and add only distinct coherent-read/ancestry/publication/membership evidence; no duplicated mock assertions or fictitious REST endpoint. |
 

@@ -1,7 +1,7 @@
 import { SvgIcon } from '@mui/material';
 import type { SvgIconProps } from '@mui/material';
 
-export type PresentationIconName = 'grid' | 'book' | 'layers' | 'arrow' | 'menu' | 'check' | 'clock' | 'code' | 'chart' | 'search' | 'alert' | 'spark';
+export type PresentationIconName = 'grid' | 'book' | 'layers' | 'arrow' | 'menu' | 'check' | 'clock' | 'code' | 'chart' | 'search' | 'alert' | 'spark' | 'flame';
 
 // Original geometric outline glyphs; no external icon font or asset package.
 export function PresentationIcon({ name, ...props }: SvgIconProps & { name: PresentationIconName }) {
@@ -18,6 +18,7 @@ export function PresentationIcon({ name, ...props }: SvgIconProps & { name: Pres
         search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></>,
         alert: <><path d="M10 4a2.3 2.3 0 0 1 4 0l8 14a2 2 0 0 1-2 3H4a2 2 0 0 1-2-3Z" /><path d="M12 9v5m0 3h.01" /></>,
         spark: <><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z" /></>,
+        flame: <><path d="M13 2c1 5-4 6-4 10-2-1-3-3-3-3-1 2-2 4-2 6a8 8 0 0 0 16 0c0-5-4-9-7-13Z" /><path d="M12 13c0 3-3 3-3 6a3 3 0 0 0 6 0c0-2-2-4-3-6Z" /></>,
     };
     return <SvgIcon viewBox="0 0 24 24" {...props} sx={{ fill: 'none', stroke: 'currentColor', strokeWidth: 1.65, strokeLinecap: 'round', strokeLinejoin: 'round', ...props.sx }}>{paths[name]}</SvgIcon>;
 }

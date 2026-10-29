@@ -141,7 +141,33 @@ Deferred: Actual dataset/generator/loader implementation and independent fixture
 
 ### CT14.interim — DELEGATED_APPROVED
 
-Retain Boot-managed JUnit Jupiter6/Mockito, Maven Wrapper, existing disposable PostgreSQL test harness, rollback/explicit cleanup for committed HTTP/thread work. Auth unit tests in existing AuthServiceTest.java and JwtTokenProviderTest.java; extracted internal password utility covered through Auth service behavior initially, separate test files require approved path decision. Course service unit tests in backend/src/test/java/com/codemastery/modules/course/CourseServiceTest.java and repository/access/pagination PostgreSQL integration in backend/src/test/java/com/codemastery/integration/CourseCatalogueIntegrationTest.java; these two precise test-file additions within existing approved test subtrees are approved as B5 placement decisions for a later separately authorized implementation task; backend authorization in existing integration/AuthorizationIntegrationTest.java. Pure mastery tests in existing mastery/MasteryCalculatorTest.java and MasteryStateClassifierTest.java, no DB/event/clock. Existing feature unit tests plus approved integration harness support catalogue; do not put unrelated tests into EnrollmentServiceTest. QA07 independent browser protocol proves browser→REST→real PG and hidden course filtering; unit tests alone do not. Cover password15-codepoint/72-byte boundaries, Unicode, canonical-email races, invalid JWT claims/expiry/locked account, no token persistence,401/403, pagination1/100/invalid/end, hidden404, DTO privacy and exact mastery boundaries. No new framework, threshold coverage percentage or invented script.
+Retain Boot-managed JUnit Jupiter6/Mockito, Maven Wrapper, existing disposable PostgreSQL test harness, rollback/explicit cleanup for committed HTTP/thread work. Auth unit tests in existing AuthServiceTest.java and JwtTokenProviderTest.java; extracted internal password utility covered through Auth service behavior initially, separate test files require approved path decision. Course service unit tests in backend/src/test/java/com/codemastery/modules/course/application/service/CourseServiceTest.java and repository/access/pagination PostgreSQL integration in backend/src/test/java/com/codemastery/integration/CourseCatalogueIntegrationTest.java; these two precise test-file additions within existing approved test subtrees are approved as B5 placement decisions for a later separately authorized implementation task; backend authorization in existing integration/AuthorizationIntegrationTest.java. Pure mastery tests in existing mastery/MasteryCalculatorTest.java and MasteryStateClassifierTest.java, no DB/event/clock. Existing feature unit tests plus approved integration harness support catalogue; do not put unrelated tests into EnrollmentServiceTest. QA07 independent browser protocol proves browser→REST→real PG and hidden course filtering; unit tests alone do not. Cover password15-codepoint/72-byte boundaries, Unicode, canonical-email races, invalid JWT claims/expiry/locked account, no token persistence,401/403, pagination1/100/invalid/end, hidden404, DTO privacy and exact mastery boundaries. No new framework, threshold coverage percentage or invented script.
+
+**Placement amendment — 2026-10-26 (Asia/Ho_Chi_Minh).** The Project Leader
+manually relocated `CourseServiceTest.java` from
+`backend/src/test/java/com/codemastery/modules/course/CourseServiceTest.java` to
+`backend/src/test/java/com/codemastery/modules/course/application/service/CourseServiceTest.java`
+and explicitly instructed Codex to verify the new location and update the
+corresponding documentation. This instruction supersedes only the original
+CT14.interim location for this file and the directory/package mismatch allowance
+in the CT14 Final coverage record in [testing.md](../testing.md#f1--approved-course-access-regression-specification-for-final-consumers).
+The source path now matches its declared
+`com.codemastery.modules.course.application.service` package, preserving direct
+access to the two package-private Course assertions. The test contents are
+unchanged. Existing test responsibilities, production visibility, CODEOWNERS,
+other contract dispositions and protected review requirements remain unchanged;
+this placement correction establishes no test result or broader approval.
+
+**Enrollment test placement amendment — 2026-10-29 (Asia/Ho_Chi_Minh).** During
+“CodeMastery — Comprehensive Review, Remediation and Direct Update of PR #114”,
+the Project Leader explicitly instructed: “Retain the relocation; I authorize
+this bounded placement correction and matching documentation”. This authorizes
+`backend/src/test/java/com/codemastery/modules/course/application/service/EnrollmentServiceTest.java`
+in place of `backend/src/test/java/com/codemastery/modules/course/EnrollmentServiceTest.java`.
+Only this test's placement is superseded; its existing application-service package,
+package-private access, test responsibilities and Course CODEOWNERS are preserved.
+This approval grants no new enrolment policy, production visibility, dependency,
+verification result or waiver of protected review.
 
 Rationale: Layered evidence matches the approved test strategy and distinguishes local arithmetic from persistence/browser/deployment behavior. Test scope follows consumed capabilities, not whole-Issue blocking.
 

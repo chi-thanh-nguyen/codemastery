@@ -4,8 +4,6 @@ import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
 import com.codemastery.modules.auth.application.service.UserAccountService.IdentityRole;
-import com.codemastery.modules.course.application.service.CourseAccessService;
-import com.codemastery.modules.course.application.service.EnrollmentService;
 import com.codemastery.modules.course.domain.model.Enrollment;
 import com.codemastery.modules.course.domain.model.EnrollmentStatus;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository;

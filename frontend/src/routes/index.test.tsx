@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { BrowserRouter, useNavigate } from 'react-router';
@@ -70,7 +70,11 @@ describe('real declarative routing and Profile', () => {
         expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/auth/login')).toHaveLength(1); expect(host.textContent).not.toMatch(/email|permissions|password|accessToken/i);
     });
     it('renders hostile display names as plain text and preserves snapshot after leaving Profile', async () => {
-        await mount('/courses'); await login('<img src=x onerror=alert(1)>'); await go('/profile'); expect(host.querySelector('dd:nth-of-type(2)')?.textContent).toBe('<img src=x onerror=alert(1)>'); expect(host.querySelector('img')).toBeNull();
+        await mount('/courses'); await login('<img src=x onerror=alert(1)>'); await go('/profile');
+        const displayName = host.querySelector('dd:nth-of-type(2)')!;
+        expect(displayName.textContent).toBe('<img src=x onerror=alert(1)>'); expect(displayName.children).toHaveLength(0);
+        expect(host.querySelector('img[src="x"], [onerror]')).toBeNull();
+        expect([...host.querySelectorAll('img')].every((image) => image.getAttribute('src') === '/favicon.svg')).toBe(true);
         await go('/courses'); expect(auth.isAuthenticated).toBe(true); await go('/profile'); expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/auth/login')).toHaveLength(1);
     });
     it('successful same-UUID replacement removes A and renders only B without stealing focus', async () => {
@@ -104,6 +108,203 @@ describe('real declarative routing and Profile', () => {
         await click('Explore components'); expect(host.textContent).toContain('October 23, 2026'); expect(host.textContent).toContain('88.5%'); expect(host.textContent).toContain('1h 2m 5s'); expect(fetcher).not.toHaveBeenCalled();
         await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('main h1')?.textContent).toBe('Welcome back');
     });
+    it('keeps the hovered chart tooltip across column gaps without changing the selected day', async () => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
+        const day = (name: string) => chart.querySelector<HTMLButtonElement>(`button[aria-label^="${name}:"]`)!;
+        const sun = day('Sun'), tue = day('Tue'), wed = day('Wed'), plot = tue.parentElement!;
+        await act(async () => sun.click());
+        await act(async () => tue.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
+        await act(async () => tue.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: plot })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
+        expect(sun.getAttribute('aria-pressed')).toBe('true');
+        await act(async () => {
+            plot.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: wed }));
+            wed.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: plot }));
+        });
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        await act(async () => wed.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Sun · 25 min');
+        expect(sun.getAttribute('aria-pressed')).toBe('true'); expect(fetcher).not.toHaveBeenCalled();
+    });
+    it.each(['card heading', 'column gap', 'page heading'] as const)('clears chart selection when clicking the %s and supports selecting again', async (target) => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
+        const tue = chart.querySelector<HTMLButtonElement>('button[aria-label^="Tue:"]')!;
+        await act(async () => tue.click());
+        await act(async () => tue.querySelector('[data-study-bar]')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        expect(tue.getAttribute('aria-pressed')).toBe('true');
+        const outside = target === 'card heading' ? host.querySelector('#learning-rhythm-title')!
+            : target === 'column gap' ? tue.parentElement! : host.querySelector('main h1')!;
+        await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        expect(chart.querySelector('[aria-pressed="true"]')).toBeNull();
+        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
+        await act(async () => tue.click());
+        expect(tue.getAttribute('aria-pressed')).toBe('true');
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
+        await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        const wed = chart.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
+        await act(async () => wed.focus());
+        expect(wed.getAttribute('aria-pressed')).toBe('true');
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('focuses each local preview heading after its initiating control is removed, without changing routes', async () => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        await click('Explore components'); expect(document.activeElement).toBe(host.querySelector('main h1'));
+        const authPreview = [...host.querySelectorAll<HTMLElement>('[role="button"]')].find((node) => node.textContent === 'Auth layout preview')!;
+        expect(authPreview).toBeTruthy(); await act(async () => authPreview.click());
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
+        await click('Back to demo workspace'); expect(document.activeElement).toBe(host.querySelector('main h1'));
+        const search = host.querySelector<HTMLInputElement>('input[aria-label="Search sample lessons"]')!;
+        await act(async () => {
+            search.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'variables');
+            search.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await act(async () => vi.advanceTimersByTime(400));
+        expect(document.activeElement).toBe(search); expect(location.pathname).toBe('/preview'); expect(fetcher).not.toHaveBeenCalled();
+    });
+    it.each(['heading', 'search'] as const)('dismisses a hover tooltip with Escape while focus stays on the %s', async (target) => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<StrictMode><App /></StrictMode>));
+        const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
+        const day = chart.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
+        const focus = host.querySelector<HTMLElement>(target === 'heading' ? 'main h1' : 'input[aria-label="Search sample lessons"]')!;
+        const selected = chart.querySelector('[aria-pressed="true"]');
+        await act(async () => focus.focus());
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        expect(document.activeElement).toBe(focus);
+        await act(async () => focus.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
+        expect(chart.querySelector('[aria-pressed="true"]')).toBe(selected);
+        expect(document.activeElement).toBe(focus);
+        await act(async () => vi.advanceTimersByTime(1000));
+        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
+        await act(async () => day.dispatchEvent(new MouseEvent('mousemove', { bubbles: true })));
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        expect(chart.querySelector('[aria-pressed="true"]')).toBe(selected);
+        await act(async () => focus.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        await act(async () => day.focus());
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
+        expect(document.activeElement).toBe(day);
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('cleans up the chart Escape listener on dismissal, invisible hover state and unmount under StrictMode', async () => {
+        const add = vi.spyOn(document, 'addEventListener'), remove = vi.spyOn(document, 'removeEventListener');
+        const keyCalls = (spy: typeof add | typeof remove) => spy.mock.calls.filter(([type, , options]) => type === 'keydown' && options === undefined);
+        const activeCount = () => keyCalls(add).length - keyCalls(remove).length;
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<StrictMode><App /></StrictMode>));
+        expect(activeCount()).toBe(1);
+        const initial = keyCalls(add).at(-1)![1];
+        const heading = host.querySelector<HTMLElement>('main h1')!;
+        await act(async () => heading.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        expect(remove).toHaveBeenCalledWith('keydown', initial); expect(activeCount()).toBe(0);
+        const day = host.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
+        const outside = host.querySelector('#learning-rhythm-title')!;
+        await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
+        await act(async () => day.dispatchEvent(new MouseEvent('mousemove', { bubbles: true })));
+        expect(activeCount()).toBe(1);
+        const hover = keyCalls(add).at(-1)![1];
+        await act(async () => day.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
+        expect(host.querySelector('[role="tooltip"]')).toBeNull();
+        expect(remove).toHaveBeenCalledWith('keydown', hover); expect(activeCount()).toBe(0);
+        await act(async () => day.focus()); expect(activeCount()).toBe(1);
+        const reopened = keyCalls(add).at(-1)![1];
+        await act(async () => root.render(null));
+        expect(remove).toHaveBeenCalledWith('keydown', reopened); expect(activeCount()).toBe(0);
+    });
+    it('observes Escape without consuming unrelated keys or overriding a handler that stops propagation', async () => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        const heading = host.querySelector<HTMLElement>('main h1')!, observer = vi.fn();
+        const stop = (event: Event) => event.stopPropagation();
+        document.addEventListener('keydown', observer);
+        try {
+            const other = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+            await act(async () => heading.dispatchEvent(other));
+            expect(other.defaultPrevented).toBe(false); expect(observer).toHaveBeenCalledTimes(1);
+            expect(host.querySelector('[role="tooltip"]')).not.toBeNull();
+            heading.addEventListener('keydown', stop);
+            await act(async () => heading.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+            expect(host.querySelector('[role="tooltip"]')).not.toBeNull(); expect(observer).toHaveBeenCalledTimes(1);
+            heading.removeEventListener('keydown', stop);
+            const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+            await act(async () => heading.dispatchEvent(escape));
+            expect(host.querySelector('[role="tooltip"]')).toBeNull();
+            expect(escape.defaultPrevented).toBe(false); expect(observer).toHaveBeenCalledTimes(2);
+        } finally { heading.removeEventListener('keydown', stop); document.removeEventListener('keydown', observer); }
+    });
+    it('keeps sample-week arithmetic and keyboard day selection consistent in actual App', async () => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        const chart = host.querySelector('[role="group"][aria-label="Sample weekly study minutes"]')!;
+        const days = [...chart.querySelectorAll<HTMLButtonElement>('button')];
+        expect(days).toHaveLength(7);
+        expect(days.map((day) => day.getAttribute('aria-label'))).toEqual([30, 45, 25, 60, 40, 35, 25].map((minutes, i) => `${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i]}: ${minutes} sample study minutes`));
+        expect(host.textContent).toContain('4h 20m'); expect(host.textContent).toContain('260');
+        expect(days[3].getAttribute('aria-pressed')).toBe('true');
+        await act(async () => { days[3].focus(); days[3].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+        expect(document.activeElement).toBe(days[4]); expect(days[4].getAttribute('aria-pressed')).toBe('true');
+        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Fri · 40 min');
+        await act(async () => days[4].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        expect(chart.querySelector('[role="tooltip"]')).toBeNull(); expect(days[4].getAttribute('aria-describedby')).toBeNull();
+        expect(days[4].getAttribute('aria-pressed')).toBe('true');
+        expect(days[4].getAttribute('aria-label')).toBe('Fri: 40 sample study minutes');
+        await act(async () => days[4].dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })));
+        expect(document.activeElement).toBe(days[0]);
+        await act(async () => days[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+        expect(document.activeElement).toBe(days[6]);
+        await act(async () => days[6].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })));
+        expect(document.activeElement).toBe(days[6]); expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('shares one header search with debounced sample results, clear, Escape and empty recovery', async () => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        expect(host.querySelectorAll('input[aria-label="Search sample lessons"]')).toHaveLength(1);
+        const input = host.querySelector<HTMLInputElement>('input[aria-label="Search sample lessons"]')!;
+        const setQuery = async (value: string) => act(async () => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await setQuery('decisions');
+        expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
+        await act(async () => vi.advanceTimersByTime(399)); expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
+        await act(async () => vi.advanceTimersByTime(1)); expect(host.querySelectorAll('tbody tr')).toHaveLength(1);
+        expect(host.querySelector('tbody')?.textContent).toContain('Making decisions');
+        await act(async () => {
+            const clear = host.querySelector<HTMLButtonElement>('[aria-label="Clear sample lesson search"]')!;
+            clear.focus(); clear.click();
+        });
+        expect(document.activeElement).toBe(input);
+        expect(input.value).toBe(''); await act(async () => vi.advanceTimersByTime(400)); expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
+        await setQuery('no such lesson'); await act(async () => vi.advanceTimersByTime(400)); expect(host.textContent).toContain('No sample lessons match');
+        await click('Clear filters'); await act(async () => vi.advanceTimersByTime(400)); expect(input.value).toBe('');
+        await setQuery('variables'); await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        expect(input.value).toBe(''); expect(fetcher).not.toHaveBeenCalled();
+    });
+    it.each(['form submit', 'search button'])('%s focuses its local result section and static recommendations make no requests', async (trigger) => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        const section = host.querySelector<HTMLElement>('#sample-learning-path')!;
+        section.scrollIntoView = vi.fn();
+        await act(async () => {
+            if (trigger === 'search button') host.querySelector<HTMLButtonElement>('button[aria-label="Search sample lessons"]')!.click();
+            else host.querySelector('form[role="search"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        });
+        expect(document.activeElement).toBe(section); expect(section.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' });
+        expect(host.textContent).toContain('No live mastery calculation is performed.'); expect(fetcher).not.toHaveBeenCalled();
+        expect(location.pathname).toBe('/preview'); expect(localStorage.length + sessionStorage.length).toBe(0);
+    });
     it('composes the actual public catalogue/detail with current Auth navigation', async () => {
         await act(async () => root.render(<App />));
         expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Course Catalogue');
@@ -113,7 +314,22 @@ describe('real declarative routing and Profile', () => {
         await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('h1')?.textContent).toBe('Welcome back');
     });
 
+    it('associates the active sample filter tab with its result panel', async () => {
+        window.history.replaceState(null, '', '/preview');
+        await act(async () => root.render(<App />));
+        const panel = host.querySelector('[role="tabpanel"]')!;
+        for (const label of ['All lessons', 'Completed', 'To explore']) {
+            const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((node) => node.textContent === label)!;
+            await act(async () => tab.click());
+            expect(tab.getAttribute('aria-selected')).toBe('true');
+            expect(tab.getAttribute('aria-controls')).toBe(panel.id);
+            expect(panel.getAttribute('aria-labelledby')).toBe(tab.id);
+        }
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
 });
+
 
 it.each(['Instructor', 'Administrator'])('denies %s before mounting My Courses or issuing private requests', async (role) => {
     await mount('/courses'); await login('Role test', role); await go('/my-courses');
