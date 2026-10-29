@@ -36,7 +36,8 @@ export const CourseCataloguePage: React.FC<CourseCataloguePageProps> = ({
             <Box component="form" aria-label="Filter courses" onSubmit={(event) => { event.preventDefault(); applyFilters({ q: q.trim(), prerequisites }); }}
                 sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3, alignItems: 'center' }}>
                 <TextField label="Search courses" value={q} onChange={(event) => setQuery(event.target.value)} slotProps={{ htmlInput: { maxLength: 100 } }} sx={{ flex: '1 1 200px' }} />
-                <TextField select label="Prerequisites" value={prerequisites} onChange={(event) => setPrerequisites(event.target.value as typeof prerequisites)} sx={{ minWidth: 180 }}>
+                {/* Reserve the longest option so selecting it cannot resize the search field. */}
+                <TextField select label="Prerequisites" value={prerequisites} onChange={(event) => setPrerequisites(event.target.value as typeof prerequisites)} sx={{ flex: '0 0 13rem', maxWidth: '100%' }}>
                     <MenuItem value="any">Any prerequisites</MenuItem><MenuItem value="none">None specified</MenuItem><MenuItem value="described">Prerequisites described</MenuItem>
                 </TextField>
                 <Button type="submit" variant="outlined">Apply filters</Button>

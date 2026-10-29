@@ -70,6 +70,18 @@ describe('CT01 input predicates through FE03 boundaries', () => {
         expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ email: 'learner@example.com', password: payload.password, displayName: 'Learner' }); expect(fetcher.mock.calls[0][1].headers.has('Authorization')).toBe(false);
         expect(host.textContent).toContain('Your account was registered.'); expect(auth.user).toBeNull();
     });
+    it('blurs the connected registration input before success replaces the form inside its Auth layout', async () => {
+        await mount(<RegisterPage />); await fillRegister();
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        const input = host.querySelector<HTMLInputElement>('input[name="password"]')!;
+        const connected: boolean[] = [];
+        input.addEventListener('blur', () => connected.push(input.isConnected));
+        await act(async () => input.focus()); await submit();
+        expect(document.activeElement).toBe(input);
+        await act(async () => work.resolve(json(user(), 201)));
+        expect(connected).toEqual([true]); expect(host.querySelector('form')).toBeNull();
+        expect(host.textContent).toContain('Your account was registered.'); expect(auth.user).toBeNull();
+    });
     it('rejects registration 200 and never publishes success', async () => { await mount(<RegisterPage />); await fillRegister(); fetcher.mockResolvedValueOnce(json(user(), 200)); await submit(); expect(host.querySelector('[role="alert"]')?.textContent).toContain('invalid response'); expect(auth.user).toBeNull(); });
     it.each(['', 'short', '😀'.repeat(30)])('login forwards unsuitable credentials unchanged %#', async (password) => {
         await mount(<LoginPage />); await change('email', payload.email); await change('password', password); fetcher.mockResolvedValueOnce(json(null, 401)); await submit();

@@ -48,6 +48,34 @@ async function click(text: string) {
     const node = [...host.querySelectorAll<HTMLElement>('button,a')].find((element) => element.textContent === text)!; expect(node).toBeTruthy(); await act(async () => node.click());
 }
 describe('real declarative routing and Profile', () => {
+    it.each([['/login', 'email'], ['/login', 'password'], ['/register', 'displayName'], ['/register', 'email'], ['/register', 'password'], ['/register', 'confirmPassword']])('blurs %s %s while connected before Back removes its form', async (path, name) => {
+        vi.useRealTimers(); await mount('/courses'); await go(path);
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
+        const input = host.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
+        const blurredWhileConnected: boolean[] = [];
+        input.addEventListener('blur', () => blurredWhileConnected.push(input.isConnected));
+        await act(async () => input.focus());
+        async function travel(action: () => void) { await act(async () => { const popped = new Promise<void>((done) => window.addEventListener('popstate', () => done(), { once: true })); action(); await popped; }); }
+        await travel(() => window.history.back());
+        expect(blurredWhileConnected).toEqual([true]); expect(location.pathname).toBe('/courses');
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
+        await travel(() => window.history.forward());
+        expect(location.pathname).toBe(path); expect(document.activeElement).toBe(host.querySelector('main h1'));
+        const restored = host.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
+        restored.addEventListener('blur', () => blurredWhileConnected.push(restored.isConnected));
+        await act(async () => restored.focus()); await go('/courses');
+        expect(blurredWhileConnected).toEqual([true, true]);
+    });
+    it.each(['/login', '/register'])('blurs a focused password on pagehide without changing %s form contents', async (path) => {
+        await mount(path); await change('password', 'Local sample password');
+        const input = host.querySelector<HTMLInputElement>('input[name="password"]')!;
+        const blur = vi.fn(); input.addEventListener('blur', blur);
+        await act(async () => input.focus());
+        await act(async () => window.dispatchEvent(new Event('pagehide')));
+        expect(blur).toHaveBeenCalledTimes(1); expect(input.isConnected).toBe(true);
+        expect(input.value).toBe('Local sample password'); expect(document.activeElement).not.toBe(input);
+        expect(fetcher).not.toHaveBeenCalled();
+    });
     it.each([['/', '/courses', 'Course Catalogue'], ['/login', '/login', 'Welcome back'], ['/register', '/register', 'Create account'], ['/courses', '/courses', 'Course Catalogue'], ['/courses/course-one', '/courses/course-one', 'Course details'], ['/missing', '/missing', 'Page not found']])('direct entry %s', async (path, finalPath, title) => {
         await mount(path); expect(location.pathname).toBe(finalPath); expect(host.querySelector('main h1')?.textContent).toBe(title); expect(fetcher.mock.calls.every(([url]) => new URL(url).pathname.startsWith('/api/courses'))).toBe(true); expect(document.activeElement).toBe(host.querySelector('main h1'));
     });

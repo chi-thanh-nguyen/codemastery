@@ -15,13 +15,21 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
     const work = useRef<AbortController | null>(null), alive = useRef(true), focusError = useRef(false);
     useEffect(() => { alive.current = true; return () => { alive.current = false; work.current?.abort(); }; }, []);
     useLayoutEffect(() => {
+        const element = form.current;
+        return () => {
+            // Registration success removes this form while AuthLayout stays mounted.
+            const active = element?.ownerDocument.activeElement;
+            if (active instanceof HTMLInputElement && element?.contains(active)) active.blur();
+        };
+    }, []);
+    useLayoutEffect(() => {
         if (!failure || !focusError.current) return;
         focusError.current = false;
         const field = Object.keys(failure.fields)[0];
         const input = field ? form.current?.elements.namedItem(field) : null;
         if (input instanceof HTMLElement) input.focus(); else summary.current?.focus();
     }, [failure]);
-    return <Box component="form" ref={form} sx={{ '& :focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 } }} aria-label="Create account" aria-busy={loading} noValidate onSubmit={async (event) => {
+    return <Box component="form" ref={form} sx={{ '& :focus-visible:not(.MuiOutlinedInput-input)': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 } }} aria-label="Create account" aria-busy={loading} noValidate onSubmit={async (event) => {
         event.preventDefault(); if (loading) return;
         setFailure(null);
         try {

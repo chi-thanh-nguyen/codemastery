@@ -185,6 +185,22 @@ It does not establish real browser → REST → PostgreSQL integration. Backend
 connectivity/CORS, successful Auth/Course transactions and assistive-technology
 acceptance require their independent evidence.
 
+The optional `--test-catalogue-filter` harness mode measures search, prerequisite
+and apply-button bounds while menus open, options change and filters are applied.
+It covers empty and scrollable catalogue fixtures at 320, 390, 768, 900, 1024 and
+1440 pixels, plus keyboard selection and unchanged explicit-submit semantics.
+These controlled responses verify presentation and client criteria, not live API
+integration.
+
+The optional `--test-auth-focus` harness mode runs bounded Login/Register focus
+checks, including catalogue-to-Auth CSS insertion order, pointer/keyboard and
+validation focus, Back/Forward, persisted `pagehide`, and connected-input blur
+before route/form removal. Catalogue and registration responses in that mode
+are controlled fixtures. Unit regressions also cover StrictMode listener cleanup,
+ordinary rerenders and focus outside the owning layout. AutoComplete semantics
+remain enabled. Headless DOM/focus checks do not inspect native operating-system
+AutoFill/password-manager popup rendering; that requires separate manual evidence.
+
 ### Bounded FE01 decisions and regression coverage
 
 **Authority and timing.** Project Leader/Owner @chi-thanh-nguyen explicitly
