@@ -185,6 +185,13 @@ It does not establish real browser → REST → PostgreSQL integration. Backend
 connectivity/CORS, successful Auth/Course transactions and assistive-technology
 acceptance require their independent evidence.
 
+The optional `--test-catalogue-filter` harness mode measures search, prerequisite
+and apply-button bounds while menus open, options change and filters are applied.
+It covers empty and scrollable catalogue fixtures at 320, 390, 768, 900, 1024 and
+1440 pixels, plus keyboard selection and unchanged explicit-submit semantics.
+These controlled responses verify presentation and client criteria, not live API
+integration.
+
 The optional `--test-auth-focus` harness mode runs bounded Login/Register focus
 checks, including catalogue-to-Auth CSS insertion order, pointer/keyboard and
 validation focus, Back/Forward, persisted `pagehide`, and connected-input blur

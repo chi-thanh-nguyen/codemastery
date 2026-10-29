@@ -4,6 +4,7 @@
 // setup with the optional sixth --standalone argument exercises API error views,
 // not browser-to-backend integration. Normal mode verifies the deliberate malformed-ID
 // 400 responses; standalone mode retains its exact expected API 404 checks.
+// Append --test-catalogue-filter to verify stable search/filter geometry across choices and viewports.
 // Append --test-auth-focus to run only Auth outline and connected-input blur regressions.
 // Append --test-api-errors to run only focused response/classifier browser regressions.
 // Append --test-chart-escape to run only focused chart Escape/lifecycle regressions.
@@ -290,6 +291,62 @@ async function runAuthFocusRegressions(context,check){
  }finally{await page.close()}
 }
 
+async function runCatalogueFilterRegressions(context,check){
+ const page=await context.newPage(),errors=[],consoleErrors=[],requests=[],layouts=[];
+ let resultCount=0;
+ page.on('pageerror',error=>errors.push(String(error)));
+ page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text())});
+ await page.route(url=>url.origin===new URL(previewUrl).origin&&url.pathname==='/api/courses',route=>{
+  requests.push(new URL(route.request().url()));
+  const content=Array.from({length:resultCount},(_,i)=>({id:`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`,title:`Programming ${i+1}`,description:'Programming foundations',instructorId:'00000000-0000-4000-8000-000000000001',instructorDisplayName:'Local instructor'}));
+  return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({content,page:0,size:20,totalElements:resultCount,totalPages:resultCount?1:0})});
+ });
+ const form=page.locator('form[aria-label="Filter courses"]');
+ const search=form.locator('.MuiTextField-root').nth(0),select=form.locator('.MuiTextField-root').nth(1),apply=form.getByRole('button',{name:'Apply filters',exact:true,includeHidden:true});
+ const geometry=async()=>({search:await search.boundingBox(),select:await select.boundingBox(),apply:await apply.boundingBox()});
+ function stable(actual,expected,phase){
+  for(const control of ['search','select','apply'])for(const key of ['x','y','width','height'])assert(Math.abs(actual[control][key]-expected[control][key])<.5,`${phase}: ${control} ${key} changed from ${expected[control][key]} to ${actual[control][key]}`);
+ }
+ const load=async()=>{
+  await page.goto(new URL('/courses',previewUrl).href,{waitUntil:'networkidle'});await page.evaluate(()=>document.fonts.ready);
+ };
+ try{
+  await page.emulateMedia({reducedMotion:'reduce'});
+  for(const width of [1440,1024,900,768,390,320])for(const count of [0,20]){
+   await check(`Catalogue filter geometry stays stable at ${width} with ${count} results`,async()=>{
+    resultCount=count;await page.setViewportSize({width,height:900});await load();
+    const input=form.getByRole('textbox',{name:'Search courses',exact:true});await input.fill(' foundations ');
+    const before=await geometry();const states=[];
+    for(const [label,value]of [['None specified','none'],['Prerequisites described','described'],['Any prerequisites','any']]){
+     const previousRequests=requests.length;
+     await select.getByRole('combobox',{name:'Prerequisites',exact:true}).click();await page.getByRole('listbox').waitFor();
+     stable(await geometry(),before,`${label} menu open`);
+     await page.getByRole('option',{name:label,exact:true}).click();await page.getByRole('listbox').waitFor({state:'hidden'});
+     const selected=await geometry();stable(selected,before,`${label} selected`);states.push({label,...selected});
+     assert.equal(requests.length,previousRequests,'Choosing an option must not apply filters automatically');
+     assert(await select.getByRole('combobox').evaluate(e=>e.scrollWidth<=e.clientWidth+1),'Selected prerequisite text must fit');
+     const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/courses'&&(new URL(r.url()).searchParams.get('prerequisites')||'any')===value);
+     await apply.click();await response;await page.getByRole('progressbar',{name:'Loading available courses...'}).waitFor({state:'hidden'});
+     assert.equal(requests.at(-1).searchParams.get('q'),'foundations');assert.equal(requests.at(-1).searchParams.get('page'),'0');
+     stable(await geometry(),before,`${label} applied`);
+     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),'No horizontal page overflow');
+     if(count===0&&[320,1440].includes(width)&&value==='described')await page.screenshot({path:`${out}/catalogue-filter-${width}.png`,fullPage:true});
+    }
+    layouts.push({width,resultCount:count,before,states});
+   });
+  }
+  await check('Keyboard prerequisite selection preserves search geometry and focus',async()=>{
+   resultCount=0;await page.setViewportSize({width:1024,height:900});await page.emulateMedia({reducedMotion:'no-preference'});await load();
+   const before=await geometry(),control=select.getByRole('combobox',{name:'Prerequisites',exact:true});
+   await control.focus();await page.keyboard.press('ArrowDown');await page.keyboard.press('End');await page.keyboard.press('Enter');
+   await page.getByRole('listbox').waitFor({state:'hidden'});stable(await geometry(),before,'Keyboard selection');
+   assert((await control.textContent()).includes('Prerequisites described'));assert(await control.evaluate(e=>e===document.activeElement));
+  });
+  await check('Catalogue filter regressions have no uncaught exceptions or console errors',async()=>{assert.deepEqual(errors,[]);assert.deepEqual(consoleErrors,[])});
+  return layouts;
+ }finally{await page.close()}
+}
+
 let browser;
 (async()=>{
  assert(['chromium','webkit'].includes(engine),'Expected chromium or webkit');
@@ -303,6 +360,12 @@ let browser;
  page.on('console',recordConsole);
  const checks=[];
  async function check(name,fn){await fn();checks.push({name,passed:true});console.log('PASS',name)}
+ if(process.argv.includes('--test-catalogue-filter')){
+  const layouts=await runCatalogueFilterRegressions(context,check);
+  const report={engine,browser:browser.version(),scope:'Controlled catalogue fixtures; responsive filter geometry and criteria submission, not live API integration',checks,layouts};
+  fs.writeFileSync(`${out}/catalogue-filter-regressions.json`,JSON.stringify(report,null,2));await browser.close();
+  console.log(JSON.stringify({passed:checks.length,browser:report.browser,report:`${out}/catalogue-filter-regressions.json`}));return;
+ }
  if(process.argv.includes('--test-auth-focus')){
   await runAuthFocusRegressions(context,check);
   const report={engine,browser:browser.version(),scope:'Controlled catalogue/registration fixtures; focus styles and connected-input blur ordering. Native OS AutoFill popup appearance is not inspected.',checks};
