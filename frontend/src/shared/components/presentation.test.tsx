@@ -41,6 +41,32 @@ describe('FE01 presentation contracts', () => {
         expect(host.querySelector('img[alt="CodeMastery"]')?.getAttribute('src')).toBe('/favicon.svg');
         expect(host.textContent).toContain('Caller content'); expect(host.querySelector('h1')?.textContent).toBe('Welcome back');
     });
+    it.each(['input', 'textarea'])('blurs a connected Auth layout %s before unmount', async (tag) => {
+        await render(<AuthLayout>{tag === 'input' ? <input defaultValue="Local value" /> : <textarea defaultValue="Local value" />}</AuthLayout>);
+        const input = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(tag)!;
+        const connected: boolean[] = [];
+        input.addEventListener('blur', () => connected.push(input.isConnected));
+        await act(async () => input.focus()); await render(null);
+        expect(connected).toEqual([true]); expect(input.value).toBe('Local value');
+    });
+    it('preserves Auth input focus across rerenders and releases only its own pagehide listener', async () => {
+        const external = document.createElement('input'); document.body.append(external);
+        const add = vi.spyOn(window, 'addEventListener'), remove = vi.spyOn(window, 'removeEventListener');
+        try {
+            await render(<StrictMode><AuthLayout title="First"><input defaultValue="Local value" /></AuthLayout></StrictMode>);
+            const input = host.querySelector('input')!;
+            await act(async () => input.focus());
+            await render(<StrictMode><AuthLayout title="Second"><input defaultValue="Local value" /></AuthLayout></StrictMode>);
+            expect(document.activeElement).toBe(input);
+            const pagehide = add.mock.calls.filter(([type]) => type === 'pagehide').at(-1)?.[1];
+            expect(typeof pagehide).toBe('function');
+            await act(async () => window.dispatchEvent(new Event('pagehide')));
+            expect(document.activeElement).not.toBe(input); expect(input.value).toBe('Local value');
+            await act(async () => external.focus()); await render(null);
+            expect(document.activeElement).toBe(external);
+            expect(remove).toHaveBeenCalledWith('pagehide', pagehide);
+        } finally { external.remove(); add.mockRestore(); remove.mockRestore(); }
+    });
     it('exposes controlled current navigation and wraps zero badges', async () => {
         const onSelect = vi.fn(), onClose = vi.fn();
         const props = { items, mobileOpen: false, onSelect, onMobileClose: onClose };

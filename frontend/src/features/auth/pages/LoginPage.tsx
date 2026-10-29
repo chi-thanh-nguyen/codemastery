@@ -20,7 +20,7 @@ export function LoginPage() {
         if (input instanceof HTMLElement) input.focus(); else summary.current?.focus();
     }, [failure]);
     return <AuthLayout title="Welcome back" subtitle="Sign in to CodeMastery">
-        <Box component="form" ref={form} sx={{ '& :focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 } }} aria-label="Sign in" aria-busy={loading} noValidate onSubmit={async (event) => {
+        <Box component="form" ref={form} sx={{ '& :focus-visible:not(.MuiOutlinedInput-input)': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 3 } }} aria-label="Sign in" aria-busy={loading} noValidate onSubmit={async (event) => {
             event.preventDefault(); if (loading) return;
             setFailure(null);
             try { loginInput({ email, password }); }

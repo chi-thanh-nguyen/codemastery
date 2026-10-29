@@ -4,6 +4,7 @@
 // setup with the optional sixth --standalone argument exercises API error views,
 // not browser-to-backend integration. Normal mode verifies the deliberate malformed-ID
 // 400 responses; standalone mode retains its exact expected API 404 checks.
+// Append --test-auth-focus to run only Auth outline and connected-input blur regressions.
 // Append --test-api-errors to run only focused response/classifier browser regressions.
 // Append --test-chart-escape to run only focused chart Escape/lifecycle regressions.
 const {chromium,webkit} = require(process.argv[2] || 'playwright');
@@ -208,6 +209,87 @@ async function runChartEscapeRegressions(context,check){
  }finally{await page.close();}
 }
 
+async function runAuthFocusRegressions(context,check){
+ const page=await context.newPage(),errors=[],consoleErrors=[];
+ page.on('pageerror',error=>errors.push(String(error)));
+ page.on('console',message=>{if(message.type()==='error')consoleErrors.push(message.text())});
+ // Controlled public catalogue data warms the same TextField styles as the real route.
+ await page.route(url=>url.origin===new URL(previewUrl).origin&&url.pathname==='/api/courses',route=>route.fulfill({
+  status:200,contentType:'application/json',body:JSON.stringify({content:[],page:0,size:20,totalElements:0,totalPages:0})
+ }));
+ const heading=async()=>{
+  await page.waitForFunction(()=>document.querySelector('main h1')===document.activeElement);
+  const state=await page.locator('main h1').evaluate(e=>{const s=getComputedStyle(e);return{tabIndex:e.tabIndex,outline:s.outlineStyle,border:parseFloat(s.borderTopWidth),shadow:s.boxShadow}});
+  assert.deepEqual(state,{tabIndex:-1,outline:'none',border:0,shadow:'none'});
+ };
+ const field=async input=>{
+  const state=await input.evaluate(e=>{
+   const root=e.closest('.MuiOutlinedInput-root'),line=getComputedStyle(root.querySelector('fieldset'));
+   return{focused:e===document.activeElement,outline:getComputedStyle(e).outlineStyle,rootOutline:getComputedStyle(root).outlineStyle,border:parseFloat(line.borderTopWidth),style:line.borderTopStyle,color:line.borderTopColor};
+  });
+  assert(state.focused);assert.equal(state.outline,'none');assert.equal(state.rootOutline,'none');
+  assert.equal(state.border,2);assert.equal(state.style,'solid');assert.notEqual(state.color,'rgba(0, 0, 0, 0)');
+ };
+ const watchBlur=async input=>input.evaluate(e=>{
+  window.authBlurEvents=[];e.addEventListener('blur',()=>window.authBlurEvents.push({connected:e.isConnected}));
+ });
+ try{
+  for(const width of [320,1440])for(const route of ['/login','/register'])for(const entry of ['direct','catalogue']){
+   await check(`Auth focus styles: ${entry} ${route} at ${width}`,async()=>{
+    await page.setViewportSize({width,height:1000});
+    if(entry==='direct')await page.goto(new URL(route,previewUrl).href,{waitUntil:'networkidle'});
+    else{
+     await page.goto(new URL('/courses',previewUrl).href,{waitUntil:'networkidle'});
+     await page.getByRole('navigation',{name:'Account navigation'}).getByRole('link',{name:route==='/login'?'Sign in':'Register',exact:true}).click();
+    }
+    await heading();await page.evaluate(()=>document.fonts.ready);
+    for(const input of await page.locator('input').all()){
+     await input.click();await field(input);await page.keyboard.press('Tab');await page.keyboard.press('Shift+Tab');await field(input);
+    }
+    await page.keyboard.press('Tab');const submit=page.locator('button[type="submit"]');
+    assert(await submit.evaluate(e=>{const s=getComputedStyle(e);return e===document.activeElement&&s.outlineStyle==='solid'&&parseFloat(s.outlineWidth)>=2}),'Submit keeps its visible keyboard focus indicator');
+    await submit.click();assert(await page.locator('input[aria-invalid="true"]').count()>0);
+    await field(page.locator('input:focus'));
+   });
+  }
+  const fields=[['/login','email','email'],['/login','password','current-password'],['/register','displayName','name'],['/register','email','email'],['/register','password','new-password'],['/register','confirmPassword','new-password']];
+  for(const width of [390,1440])for(const [route,name,autocomplete]of fields){
+   await check(`Connected-input blur on history, pagehide and route change: ${route} ${name} at ${width}`,async()=>{
+    await page.setViewportSize({width,height:1000});await page.goto(previewUrl,{waitUntil:'networkidle'});
+    await page.getByRole('link',{name:route==='/login'?'Sign in':'Register',exact:true}).click();await heading();
+    const input=page.locator(`input[name="${name}"]`);assert.equal(await input.getAttribute('autocomplete'),autocomplete);
+    await input.focus();await watchBlur(input);await page.goBack();await heading();
+    assert.deepEqual(await page.evaluate(()=>window.authBlurEvents),[{connected:true}]);
+    await page.goForward();await heading();assert.equal(new URL(page.url()).pathname,route);
+    const restored=page.locator(`input[name="${name}"]`);await restored.fill('Local sample value');await watchBlur(restored);
+    await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true})));
+    assert.deepEqual(await page.evaluate(()=>window.authBlurEvents),[{connected:true}]);assert.equal(await restored.inputValue(),'Local sample value');
+    assert(await restored.evaluate(e=>e!==document.activeElement));
+    await restored.focus();await restored.fill('Updated local value');assert(await restored.evaluate(e=>e===document.activeElement),'Ordinary rerenders preserve input focus');
+    await page.getByRole('link',{name:route==='/login'?'Create an account':'Already registered? Sign in',exact:true}).evaluate(e=>e.click());await heading();
+    assert.deepEqual(await page.evaluate(()=>window.authBlurEvents),[{connected:true},{connected:true}]);
+   });
+  }
+  await check('registration success blurs the connected form input while its Auth layout remains mounted',async()=>{
+   let release;const gate=new Promise(resolve=>{release=resolve});
+   await page.route(url=>url.origin===new URL(previewUrl).origin&&url.pathname==='/api/auth/register',async route=>{
+    await gate;await route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({id:'00000000-0000-4000-8000-000000000001',displayName:'Local learner',role:'Learner'})});
+   });
+   try{
+    await page.goto(new URL('/register',previewUrl).href,{waitUntil:'networkidle'});
+    for(const [name,value]of [['displayName','Local learner'],['email','local@example.test'],['password','Local sample password'],['confirmPassword','Local sample password']])await page.locator(`input[name="${name}"]`).fill(value);
+    const input=page.locator('input[name="confirmPassword"]');await watchBlur(input);
+    await page.locator('form').evaluate(e=>e.requestSubmit());await page.getByRole('progressbar',{name:'Registering account…',exact:true}).waitFor();
+    assert(await input.evaluate(e=>e===document.activeElement));release();
+    await page.getByText('Your account was registered. Sign in to continue.',{exact:true}).waitFor();
+    assert.deepEqual(await page.evaluate(()=>window.authBlurEvents),[{connected:true}]);assert.equal(await page.locator('form').count(),0);
+    assert.equal(new URL(page.url()).pathname,'/register');
+   }finally{release()}
+  });
+  await check('Auth focus regressions have no uncaught exceptions or console errors',async()=>{assert.deepEqual(errors,[]);assert.deepEqual(consoleErrors,[])});
+ }finally{await page.close()}
+}
+
 let browser;
 (async()=>{
  assert(['chromium','webkit'].includes(engine),'Expected chromium or webkit');
@@ -221,6 +303,12 @@ let browser;
  page.on('console',recordConsole);
  const checks=[];
  async function check(name,fn){await fn();checks.push({name,passed:true});console.log('PASS',name)}
+ if(process.argv.includes('--test-auth-focus')){
+  await runAuthFocusRegressions(context,check);
+  const report={engine,browser:browser.version(),scope:'Controlled catalogue/registration fixtures; focus styles and connected-input blur ordering. Native OS AutoFill popup appearance is not inspected.',checks};
+  fs.writeFileSync(`${out}/auth-focus-regressions.json`,JSON.stringify(report,null,2));await browser.close();
+  console.log(JSON.stringify({passed:checks.length,browser:report.browser,report:`${out}/auth-focus-regressions.json`}));return;
+ }
  if(process.argv.includes('--test-chart-escape')){
   await runChartEscapeRegressions(context,check);
   const report={engine,browser:browser.version(),scope:'Focused chart Escape and event lifecycle; no visual matrix or live API integration',checks};
@@ -657,13 +745,15 @@ let browser;
    const css=getComputedStyle(e),r=getComputedStyle(root),border=getComputedStyle(root.querySelector('fieldset'));
    const l=label&&getComputedStyle(label),b=label?.getBoundingClientRect();
    return {id:e.id,state:null,value:e.value,focused:e===document.activeElement,font:parseFloat(css.fontSize),caret:css.caretColor,
-    outline:css.outlineStyle,rootOutline:r.outlineStyle,before:getComputedStyle(root,'::before').content,after:getComputedStyle(root,'::after').content,
+    outline:css.outlineStyle,inputBorder:parseFloat(css.borderTopWidth),inputShadow:css.boxShadow,rootBorder:parseFloat(r.borderTopWidth),rootShadow:r.boxShadow,rootOutline:r.outlineStyle,before:getComputedStyle(root,'::before').content,after:getComputedStyle(root,'::after').content,
     borderWidth:parseFloat(border.borderTopWidth),borderColor:border.borderTopColor,radius:r.borderRadius,
     label:label&&{font:parseFloat(l.fontSize),color:l.color,shrink:label.dataset.shrink==='true',width:b.width,height:b.height,transform:l.transform},
     legend:{font:parseFloat(getComputedStyle(legend).fontSize),width:legend.getBoundingClientRect().width},
     invalid:e.getAttribute('aria-invalid'),describedBy:e.getAttribute('aria-describedby'),overflow:document.documentElement.scrollWidth>innerWidth};
   });
   assert.equal(metrics.outline,'none',state);assert.equal(metrics.rootOutline,'none',state);
+  assert.equal(metrics.inputBorder,0,state);assert.equal(metrics.rootBorder,0,state);
+  assert.equal(metrics.inputShadow,'none',state);assert.equal(metrics.rootShadow,'none',state);
   assert.equal(metrics.before,'none',state);assert.equal(metrics.after,'none',state);assert.equal(metrics.overflow,false,state);
   assert.equal(metrics.radius,'10px');assert.equal(metrics.borderWidth,metrics.focused?2:1,state);
   assert.equal(metrics.label.font,metrics.font,state);assert.equal(metrics.label.shrink,shrink,state);
