@@ -291,7 +291,9 @@ then validates their checksums on later starts. These are implemented schema
 migrations, not empty placeholders. Never edit an applied migration or run repair
 to hide a mismatch; subsequent changes require NEW Flyway migrations. Hibernate
 retains `ddl-auto=validate`, but absent feature entities mean startup does not prove
-entity mappings. This foundation does not create sample users/courses.
+entity mappings. This foundation does not create sample users/courses; to load
+the synthetic local/test dataset into a disposable database, follow
+[sample-data/README.md](../sample-data/README.md).
 
 Frontend startup is independent of backend. Its health check uses the existing
 Nginx image's `wget` to probe `/`. Compose passes public `VITE_API_BASE_URL` as a

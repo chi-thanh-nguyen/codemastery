@@ -404,3 +404,247 @@ The existing router's injectable catalogue test seam remains supported. Local
 browser verification may use an isolated preview listener at localhost:5174 when
 5173 is occupied; its explicitly supplied test-only CORS origin does not change
 the committed origin/configuration defaults.
+
+
+## SD01/SD02 sample data completion — delegated approval, 30 October 2026
+
+Revision `CT15-SD-2026-10-30-r3` is **APPROVED_PENDING_PROTECTED_INTEGRATION**.
+Authorization: Project Leader @chi-thanh-nguyen's explicit “CodeMastery — Complete
+SD01 and SD02 Implementation with Delegated Technical Authority” task, 30 October
+2026 (ICT), delegates selection and technical approval of the decisions directly
+necessary to complete SD01 #59 and SD02 #60, including their CT15, CT09, CT14 and
+CT01 blockers, and authorizes their implementation and documentation. The
+delegated technical authority was exercised through AI-assisted development. This
+is a new approval: no clause below was
+effective earlier, and no CT15, CT09 or CT14 family is approved as a whole. It is
+not a CODEOWNER review, QA13 acceptance, Issue closure or protected merge. The
+Leader withheld production seeding (forbidden), real credentials, deployment,
+repository-protection changes and merge.
+
+**Revision history.** r1 was published on PR #116 at `dca2d11` on 30 October 2026.
+r2, the same day, follows the Leader's “Final SD01/SD02 Remediation and Direct PR
+#116 Update” instruction, which confirms permission to use and modify the sample
+slides. r2 replaces the M2 slide decision only; T1–T3, M1 and V1 are unchanged.
+r3, the same day, remediates an independent review of r2 (head `f79ff6f`): T1 adds
+the explicit READ COMMITTED requirement, and M2 corrects the slides' identifier
+explanation. T2, T3, M1 and V1 are unchanged; V1's file gains regression cases at
+its approved path.
+
+### Preserved baseline and clarifications
+
+CT15.I-data above is unchanged and remains the authority for the Users, Courses,
+Chapters and Lessons. Its unspecified fields are fixed as follows; these are
+clarifications, not changes:
+
+- The Course description and prerequisite text apply to all three Courses,
+  including the hidden draft, because V002 requires a description.
+- Only the two published Courses have the Chapter/Lesson structure. The hidden
+  draft has none.
+- Lesson `content_markdown` is NULL. Text materials carry the instructional text;
+  data-model.md already allows Markdown to be absent when materials supply content.
+- No V001/V002 column stores a timestamp, so the fixed-timestamp clause has no
+  consumer.
+- The committed SQL is the versioned generator output. IDs are precomputed UUIDv5
+  literals, because PostgreSQL computes SHA-1 UUIDv5 only through an extension and
+  none is added. The verification test re-derives every ID independently.
+
+`sample-data/seed/02-course-python-fundamentals.sql` is the approved inventory
+location; it does not rename the approved Courses. A Final Python Fundamentals
+Course coupled to SD03 skill mapping remains CT15.final scope.
+
+The unmerged `feature/course-sample-data` draft (`590836a`, no PR) was evaluated
+and not adopted. Its content is Vietnamese, its IDs are not CT15 UUIDv5 values, it
+skips conflicts silently with `ON CONFLICT DO NOTHING`, and its file row stores a
+repository path as an object key. Only its slide bytes are adopted (M2).
+
+### T1 — CT15.target-guard: trusted disposable-target verification
+
+**Selected.** Each seed checks two independent factors inside its transaction,
+before any lock, temporary table or write:
+
+1. **Expected cluster identity.** The operator supplies
+   `seed_target_system_identifier`, read out-of-band from the target server's
+   control file with `pg_controldata`, not over the seed's SQL connection. The seed
+   compares it with `pg_control_system().system_identifier` of the server it
+   reached. The 64-bit identifier is generated at cluster initialization and cannot
+   be set through SQL. A tunnel, stale `PGHOST`, wrong port or another developer's
+   database therefore mismatches.
+2. **Disposable-target attestation.** The database must store the database-wide
+   setting `codemastery.seed_target = 'disposable:<system identifier>'`, created
+   deliberately by its owner or a superuser when the disposable database is set
+   up. The seed reads `pg_db_role_setting` for the current database and role 0.
+   It does not read `current_setting()`, so `PGOPTIONS`, session or role-scoped
+   values cannot impersonate the attestation. Binding the identifier invalidates a
+   copied setting or a dump restored into another cluster.
+
+A missing, malformed, unavailable or mismatched identity, or a missing or
+mismatched attestation, stops psql with status 3 before the seed locks any table.
+The transaction never commits.
+
+**Transaction isolation (r3).** Each seed begins with `BEGIN ISOLATION LEVEL READ
+COMMITTED`. The guard runs the transaction's first query before the serialization
+lock. Under an inherited `REPEATABLE READ` or `SERIALIZABLE` default, that query
+fixed the snapshot, so a loader that waited on the lock kept reading pre-commit
+data and failed with a duplicate key or serialization error, although the other
+loader had committed identical rows. Under READ COMMITTED, every statement after
+the lock sees committed rows. The guard still precedes every lock and write, and no
+database, role or session default is changed. Later seed files must keep this order:
+explicit READ COMMITTED, then the guard, then locks, then reads and writes.
+
+**Operational prerequisites.** psql 15 or later (`\getenv`); local administrator
+access to read `pg_controldata` and run `ALTER DATABASE` on the disposable
+database. A shared, staging or production database must never receive the
+attestation; attesting one is a prohibited act, not a configuration choice. The
+CT17 deployment flow never creates it.
+
+**Alternatives rejected.** Database names, hosts, ports and environment labels are
+coincidental or spoofable; an SSH tunnel makes a remote server look local. An
+operator confirmation flag is an unsupported assertion. The system identifier alone
+identifies the cluster but does not show that it is disposable. The attestation
+alone shows disposability but not that the connection reached the intended server.
+A marker table or schema adds a relation that the CT17 drift checks would reject
+and that Flyway does not own. An application-side guard does not apply, because the
+seeds run through psql.
+
+**Residual risk.** A privileged operator who deliberately attests a non-disposable
+database defeats the control. The guard prevents accidental targeting, not
+intentional misuse by an administrator.
+
+### T2 — CT15.inputs: input delivery
+
+The PR #112 psql-variable inputs remain valid. When a variable is unset, `\getenv`
+reads `CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER`,
+`CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH` or
+`CODEMASTERY_SEED_LEARNER_PASSWORD_HASH`. The environment is the documented path:
+its values do not appear in process argument lists, and `docker compose exec -e
+NAME` forwards a value without a command-line copy. These are per-invocation
+operator inputs, not runtime configuration, so `.env.example` is unchanged.
+
+### T3 — CT01 provisioning: hash generation
+
+Hashes are generated with the backend's own Spring Security
+`BCryptPasswordEncoder($2B, 14)`, the library and version used by AuthService. The
+generator runs in JDK `jshell` on the backend runtime classpath, which the Maven
+Wrapper resolves into ignored `backend/target/`. The password is read without
+echo, passed through the environment and limited to CT01's 15 code points and
+72 UTF-8 bytes. No dependency, script file or committed secret is added.
+Alternatives: `htpasswd` emits `$2y$`; Python `bcrypt` adds a tool dependency;
+`pgcrypto` needs an extension, emits `$2a$` and sends the plaintext through SQL.
+
+### M1 — CT15.SD02-materials: relational text materials
+
+Additive text LearningMaterial rows use logical keys `<lesson-key>/material/<n>`
+in the same `interim-v1` namespace:
+
+| Logical key | ID | Title | Visibility |
+| --- | --- | --- | --- |
+| `course/intro/chapter/1/lesson/1/material/1` | `a1bb3d63-1519-5ab6-87dc-8a4468f82022` | What a Program Is | published |
+| `course/intro/chapter/1/lesson/2/material/1` | `7ca42bd5-0c62-53d6-9cb2-d614cb4a8a59` | Practice: Variables and Output | published |
+| `course/practice/chapter/1/lesson/1/material/1` | `8e74fd91-2b8e-5f74-ae12-32cb310de9c5` | Breaking a Problem into Steps | published |
+| `course/practice/chapter/1/lesson/2/material/1` | `05368d30-9616-575e-b680-9e1614e22566` | Practice: Trace and Fix Short Programs | published |
+| `course/practice/chapter/1/lesson/2/material/2` | `500fddc5-eed2-588c-b39a-f82adc3d24ca` | Instructor Notes | hidden |
+
+They need no storage. Their English text is original synthetic content written for
+this dataset with AI assistance under this delegation; it contains no third-party
+text. The hidden row under a published Lesson provides CT03 material-read
+concealment contrast. Materials have no position column; consumers must not infer
+an order beyond Lesson ancestry. The same exact-match, conflict-stop and
+no-overwrite loader rules as CT15.I-data apply.
+
+### M2 — CT15.SD02-slides and the CT09 file-material boundary
+
+**Permission.** On 30 October 2026 the Project Leader and the contributing team
+member confirmed that the sample slides were prepared for CodeMastery with AI
+assistance, and that using and modifying them is authorized for project use,
+adaptation, teaching demonstrations, testing and academic evaluation. No
+open-source licence, public-domain status or unrestricted third-party
+redistribution right is claimed.
+
+**r1, superseded.** r1 adopted the exact bytes of `348d2c2` (git author Nguyen Anh
+Tai, 24 October 2026; SHA-256 `d0a31377…6f7d8f`; 11 pages) without edits, and left
+the licensing statement and the title-slide instructor attribution open.
+
+**r2 decision: replace the PDF with a corrected revision.** A page-by-page review
+found these defects, which the confirmed permission allows the team to correct:
+
+- Both knowledge-check answer pages highlighted the wrong option: `user-profile-id`,
+  an invalid identifier, instead of `max_connection_timeout`, and `40` instead of
+  `15`.
+- The title slide named an instructor (“Mr Dam Vinh Hung”) and a course code
+  (“PY101”) without a verified basis.
+- Slide 3 described chained assignment as binding names to “the same immutable
+  object”, which contradicts the mutable-list example on slide 5. The quoted
+  unpacking error message did not match Python 3.12, and slide 2 said that
+  reassignment “creates a new object”.
+- A stray “SL” prefix appeared in four headers, the 11 pages carried “Slide n of 7”
+  numbering, and the footers were inconsistent.
+
+The revision, version 2026.2, keeps the contributor's lesson structure, titles,
+examples and visual design. It corrects the defects above, adds an explained answer
+page for each question and a suggested fix for the exercise, and attributes the
+material to the “CodeMastery Project Team” with an AI-assistance statement. Every
+Python claim was executed; the keyword count and error message were checked on
+Python 3.12.
+
+The r2 result had SHA-256
+`f9827139bf01b136430f727bc79773298414647df1a5ac49cb4e2e31710f381f`.
+
+**r3 correction.** Slide 4 listed the ASCII letters a–z and A–Z as Python's
+mandatory identifier characters. Python 3 identifiers also accept non-ASCII Unicode
+letters (PEP 3131). Version 2026.3 states the actual rule, with `café` and `naïve`
+as valid names, and moves the ASCII-only practice into the recommendations, citing
+PEP 8's requirement of ASCII identifiers in the standard library. Both examples and
+the leading-digit rule were checked on Python 3.12.16. Only slides 1 (the version
+label) and 4 changed; the other ten pages are pixel-identical to r2 at 90 dpi.
+
+Result: 12 pages of 960 × 540 pt, PDF 1.4, not encrypted, no forms or JavaScript,
+SHA-256 `c4b05622b87a9b45e46563a87fba220e27c7da6a89340cd0c3f409bcadb9935d`,
+document author “CodeMastery Project Team”. It embeds only Plus Jakarta Sans (SIL
+Open Font License 1.1, already used by the frontend) and PT Mono (ParaType Free
+Font License, which permits embedding in documents). It contains no third-party
+images, logos or text beyond the two cited Python Software Foundation references.
+The original contribution remains available in git history at `348d2c2` and its
+cherry-pick `4499ca8`.
+
+**No file-material row is seeded.** CT09 is deferred, the backend `FileStorage` and
+`S3FileStorage` are empty scaffolds, and the CT17 runtime matrix denies the
+learning-material payload columns. A row would therefore be an inaccessible
+reference even if the object were uploaded. The future row's identity is reserved:
+`course/intro/chapter/1/lesson/1/material/2` =
+`045fe941-10fd-5916-98ad-04f06a6edfc7`, type `file`, original filename
+`sample-slides.pdf`. Approved ordering rule: upload the object and verify its
+SHA-256 against the committed file first, then add the relational row in a later
+seed revision, never the reverse. Object-key format, bucket layout, access,
+lifecycle and delivery remain CT09 decisions.
+
+No external-video row is seeded. No approved URL exists: a `.test` URL would be a
+dangling reference, and a real third-party URL needs its own provenance and
+availability approval.
+
+### V1 — CT14 placement: seed verification test
+
+Approved addition:
+`backend/src/test/java/com/codemastery/integration/SampleDataSeedIntegrationTest.java`.
+It runs under Failsafe and the CI Backend job through the existing
+`AbstractIntegrationTest` harness. It executes the committed seeds with the real
+psql inside the Testcontainers PostgreSQL container, in fresh Flyway-migrated
+databases, and reads the result back through the Auth and catalogue REST consumers
+on the harness database, removing its rows afterwards. For this file only, it
+supersedes QA13's note that no dedicated seed verification test exists in the
+approved inventory. No CODEOWNERS rule matches the path, as for
+`CourseCatalogueIntegrationTest` and `EnrollmentIntegrationTest`; CODEOWNERS is
+not changed here.
+
+### Consumers, unchanged scope and remaining gates
+
+Consumers: SD01, SD02, QA13 (QA13.I-data), QA01/QA02/QA07 where their approved
+plans select this dataset, and DO01 guides. Unchanged: V001–V006, application code,
+CT01 policy, the CT17 privilege matrix, CODEOWNERS, `.env.example`, CT15.final
+(skills, questions, profiles, Final Course content) and every other disposition.
+
+Remaining gates: the CT09 file-material slice and actual MinIO provisioning; QA13
+execution on the team's verification environment; CODEOWNER reviews and protected
+merge.
+Execution evidence is recorded in
+[testing.md](../testing.md#sd01sd02-seed-verification--30-october-2026) and the
+operator procedure in [sample-data/README.md](../../sample-data/README.md).
