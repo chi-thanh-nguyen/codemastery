@@ -1632,3 +1632,16 @@ Existing CourseCatalogue API/page tests and routes/index.test.tsx cover the othe
 FE07 changes. e2e/tests/learner-flow.spec.ts is the existing browser-flow location;
 the external Playwright installation used for local execution is not a dependency
 or E2E pipeline change.
+
+
+### SD01/SD02 delegated test placement — 30 October 2026
+
+The Leader's explicit SD01/SD02 completion task authorizes the single test addition
+below within the existing integration directory (ADR002 `CT15-SD-2026-10-30-r1`,
+V1). It verifies the existing `sample-data/seed/` files; no seed, material,
+loader-script or helper path is added.
+
+- backend/src/test/java/com/codemastery/integration/SampleDataSeedIntegrationTest.java
+
+The approved `sample-data/` inventory is unchanged: `README.md`,
+`materials/sample-slides.pdf` and `seed/01`–`05` keep their existing paths.

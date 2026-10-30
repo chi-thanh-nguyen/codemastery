@@ -1416,3 +1416,66 @@ and result.json. Task-owned resources and ephemeral credentials were cleaned up;
 no dependencies or generated artifacts were added. These focused checks do not
 claim a comprehensive accessibility audit or replace protected review. Codex
 assisted this scoped accessibility correction and regression execution.
+
+
+## SD01/SD02 seed verification — 30 October 2026
+
+Authority: ADR002 `CT15-SD-2026-10-30-r1` (V1 placement, T1–T3, M1–M2). The
+operator procedure is [sample-data/README.md](../sample-data/README.md).
+
+### Automated test
+
+`backend/src/test/java/com/codemastery/integration/SampleDataSeedIntegrationTest.java`
+runs the committed `01-users.sql` and `02-course-python-fundamentals.sql` with the
+real psql 17 inside the existing Testcontainers PostgreSQL container. Each scenario
+uses its own new database migrated by Flyway from `classpath:db/migration`. The
+test reads the cluster identity from `pg_controldata`, as operators do, and
+generates synthetic passwords and `$2b$14$` hashes in memory. It never prints or
+commits them.
+
+| Case group | What is asserted |
+| --- | --- |
+| Fresh load | Exact Users, Courses, Chapters, Lessons and text materials, with every ID re-derived as UUIDv5 from its logical key; instructor references, publication states, positions, adaptive values and NULL Lesson Markdown; exclusive text payloads, no file or video rows, no draft Chapters; every other V001–V006 table empty |
+| Identical rerun | Environment and psql-variable inputs both succeed; row values and `xmin` row versions are unchanged |
+| Conflicts (9) | Learner email, changed hash, Course ID, Chapter position, Lesson ID, Lesson position, edited material, missing Instructor, Instructor with the wrong role. Each stops with status 3 and leaves the database byte-identical, including rows that sort before the conflict in the same transaction |
+| Invalid inputs (9) | Missing, empty or non-numeric target identifier; missing hashes; plaintext, `$2a$`, cost-12 and truncated hashes. Rejected before any write |
+| Untrusted targets (7) | Unattested database, wrong expected identifier, attestation for another cluster, unbound attestation, role-scoped attestation, `PGOPTIONS` session impersonation, and a non-superuser denied `pg_control_system()`. Both seeds are rejected while the test holds `ACCESS EXCLUSIVE` locks with a 5-second lock timeout, which proves verification precedes locking |
+| Concurrency | Two loaders of each file start while the test blocks the seed lock. Both reach the lock, then both succeed with exactly one dataset |
+| Consumers | On the harness database: POST `/api/auth/login` succeeds for both seeded accounts with their roles and display names and returns 401 for a wrong password; the catalogue lists exactly the two published Courses with “Instructor Demo”; detail returns the canonical syllabus; the hidden draft returns 404. Seeded rows and the attestation are removed afterwards |
+| Redaction | No output of any run contains a password, hash or salt |
+| Slides | `sample-slides.pdf` matches the recorded SHA-256 and has PDF header and trailer markers |
+
+### Executed commands and results
+
+Executed on 30 October 2026 (ICT) with OpenJDK 25.0.4.1 and Docker 29.8.1:
+
+- `cd backend && ./mvnw -B verify`: BUILD SUCCESS. 468 unit tests and 123
+  integration tests passed, including 30 `SampleDataSeedIntegrationTest` cases.
+- `./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false
+  -Dfailsafe.runOrder=reversealphabetical`: BUILD SUCCESS. With the seed test
+  ordered before `EnrollmentIntegrationTest` and `CourseCatalogueIntegrationTest`,
+  their exact catalogue totals still pass, which confirms that cleanup leaves the
+  harness database unchanged. This run preceded the identity-unavailable case,
+  which uses only its own new database.
+- Fault injection, reverted afterwards: reading the attestation through
+  `current_setting()`, locking before verification, and removing the SD01 table
+  lock each made the corresponding cases fail.
+
+The README procedure was also executed verbatim in zsh against an isolated Compose
+project built from this branch, with throwaway volumes. Flyway applied V001–V006 at
+backend startup, both seeds loaded, and the database check matched. HTTP sign-in
+succeeded for both accounts, with 401 for a wrong password. The catalogue returned
+the two published Courses, the draft returned 404, and a seed run after removing
+the attestation was refused. Earlier rehearsals of the identity, attestation, hash,
+load and rerun steps passed in both zsh and bash on fresh volumes whose migrations
+were applied by psql instead of the backend. Project containers, volumes, the image
+and the synthetic credentials were then removed.
+
+### Evidence boundaries
+
+These results establish SQL correctness, disposable PostgreSQL loading and actual
+Auth/catalogue consumption on local disposable databases. They do not establish
+QA13 acceptance on the team's verification environment, frontend sign-in,
+MinIO object provisioning, file-material delivery or the slides' licensing.
+Those gates remain open. Claude Code assisted this implementation and verification
+under the Leader's delegation.
