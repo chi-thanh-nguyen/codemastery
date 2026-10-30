@@ -37,6 +37,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -55,7 +56,7 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
     private static final Path SEED_DIR = Path.of("..", "sample-data", "seed");
     private static final Path SLIDES = Path.of("..", "sample-data", "materials", "sample-slides.pdf");
-    private static final String SLIDES_SHA256 = "d0a313773b9866031b33c2d153ed88a19d30b8c7ed26b7c202c3588d6f6f7d8f";
+    private static final String SLIDES_SHA256 = "f9827139bf01b136430f727bc79773298414647df1a5ac49cb4e2e31710f381f";
     private static final String USERS = "01-users.sql", COURSES = "02-course-python-fundamentals.sql";
     private static final String KEY = HexFormat.of().formatHex(randomBytes(32));
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder(BCryptPasswordEncoder.BCryptVersion.$2B, 14);
@@ -344,6 +345,9 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         assertEquals(SLIDES_SHA256, HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(pdf)));
         assertEquals("%PDF-", new String(pdf, 0, 5, StandardCharsets.US_ASCII));
         assertTrue(new String(pdf, pdf.length - 32, 32, StandardCharsets.US_ASCII).contains("%%EOF"));
+        String body = new String(pdf, StandardCharsets.ISO_8859_1);
+        assertEquals(12, Pattern.compile("/Type\\s*/Page(?![s\\w])").matcher(body).results().count(), "page objects");
+        assertTrue(body.contains("/Author (CodeMastery Project Team)"), "project attribution metadata");
     }
 
     private static String material(String key, String title, String status) {

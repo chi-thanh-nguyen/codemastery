@@ -2,6 +2,13 @@
 
 Synthetic English seed data for local development and disposable test databases.
 
+**Purpose and scope.** The dataset supports demonstration and verification of the
+implemented Learner slice: sign-in with synthetic accounts, the public course
+catalogue, course detail and course membership. It implements the Interim dataset
+approved as ADR002 CT15.I-data (SD01 Users, SD02 Courses and materials). Skill
+graphs, questions and adaptive learner profiles are Final-scope datasets and are
+not included.
+
 > **Local and test databases only.** Never load these files into a shared, staging
 > or production database; production seeding is forbidden. Each seed file refuses
 > to run unless the connected database passes the target verification in
@@ -24,7 +31,7 @@ Automated verification is described in
 | `seed/03-skill-graph-and-lesson-mapping.sql` | Skill graph | Empty; not part of this dataset |
 | `seed/04-questions-quizzes-assignments.sql` | Questions, quizzes, assignments | Empty; not part of this dataset |
 | `seed/05-learner-profiles.sql` | Adaptive learner profiles | Empty; not part of this dataset |
-| `materials/sample-slides.pdf` | Sample lecture slides | Repository file only; not uploaded to object storage or referenced by a seed row |
+| `materials/sample-slides.pdf` | Sample lesson slides (12 pages) | Repository file with recorded permission; not uploaded to object storage or referenced by a seed row |
 
 The 02 filename is its approved repository location. It does not rename the
 approved Courses below.
@@ -297,15 +304,43 @@ SQL
 
 ## Sample materials
 
-`materials/sample-slides.pdf` contains 11 pages of English slides,
-"Python Fundamentals — Lesson 1.1: Variable Declaration & Naming Conventions".
+`materials/sample-slides.pdf` is a 12-page English lesson deck, "Python
+Fundamentals — Lesson 1.1: Variable Declaration & Naming Conventions" (version
+2026.2). It covers object references, assignment syntax, identifier rules and PEP 8
+naming, common mistakes, two knowledge-check questions with explained answers, and
+a debugging exercise with a suggested fix.
 
 | Property | Value |
 | --- | --- |
-| SHA-256 | `d0a313773b9866031b33c2d153ed88a19d30b8c7ed26b7c202c3588d6f6f7d8f` |
-| Format | PDF 1.4, 960 × 540 pt pages, not encrypted, no forms or JavaScript |
-| Provenance | Prepared for this project as stated by the Project Leader; committed by Nguyen Anh Tai on 24 October 2026 (`348d2c2`) and integrated byte-for-byte |
-| Licensing | **Not yet recorded.** The Project Leader must add the permitted-use statement before these slides are presented as licensed sample material. |
+| SHA-256 | `f9827139bf01b136430f727bc79773298414647df1a5ac49cb4e2e31710f381f` |
+| Format | PDF 1.4, 12 pages of 960 × 540 pt, not encrypted, no forms or JavaScript; document author "CodeMastery Project Team" |
+| Fonts | Plus Jakarta Sans (SIL Open Font License 1.1) and PT Mono (ParaType Free Font License, which permits embedding in documents) |
+| Third-party content | No third-party images, logos or artwork. The deck cites PEP 8 and *The Python Language Reference* (Python Software Foundation) as references. |
+
+### Permitted use and provenance
+
+The sample slides were prepared for CodeMastery with AI assistance. The original
+deck was contributed by Nguyen Anh Tai (commit `348d2c2`, 24 October 2026). On
+30 October 2026 the Project Leader and the contributing team member confirmed that
+CodeMastery may use and modify the material for project use, adaptation, teaching
+demonstrations, testing and academic evaluation in CO3103.
+
+The current version adapts that contribution. Its structure, examples and visual
+design are kept, and the following changes were made with AI assistance under the
+Project Leader's authorization:
+
+- both knowledge-check answers are corrected;
+- inaccurate statements about chained assignment, reassignment and the unpacking
+  error are fixed;
+- an unverified instructor name and course code are replaced by "CodeMastery
+  Project Team";
+- explained answers are added.
+
+No open-source licence or public-domain status is claimed, and the confirmation
+does not grant redistribution rights outside the project. The original file remains
+in the repository history.
+
+### Storage boundary
 
 The slides are a repository file only. No seed row references them, and they are
 not uploaded to MinIO: object keys, upload, access control and delivery belong to
@@ -320,16 +355,20 @@ No external-video material is seeded, because no approved video URL exists.
 ## Content provenance
 
 All seeded text is original synthetic content written for CodeMastery. The text
-materials were drafted with AI assistance (Claude Code) under the Project Leader's
-delegated authorization on 30 October 2026, and they are subject to the normal
-CODEOWNER review. They contain no third-party text. The `.test` email addresses
-are reserved names that cannot reach a real mailbox.
+materials were drafted with AI assistance under the Project Leader's delegated
+authorization on 30 October 2026 and are subject to the normal CODEOWNER review.
+They contain no third-party text. The `.test` email addresses use a reserved
+domain and cannot reach a real mailbox.
 
-## What this guide does and does not establish
+## Current limitations
 
-- Successful SQL loading proves the rows exist and match the dataset. It does not
-  prove sign-in or catalogue behavior; check those through the application.
-- Verifying the seeds is a separate step from QA13 acceptance. The executed
-  automated evidence is recorded in [docs/testing.md](../docs/testing.md#sd01sd02-seed-verification--30-october-2026).
-- Nothing here provisions object storage, deploys an environment or authorizes
-  seeding outside your own disposable database.
+- **Verification scope.** Successful SQL loading proves that the rows exist and
+  match the dataset. Sign-in and catalogue behavior are verified separately through
+  the application. The automated evidence is recorded in
+  [docs/testing.md](../docs/testing.md#sd01sd02-seed-verification--30-october-2026).
+- **QA13.** QA13 acceptance on the team's verification environment is a separate,
+  pending step. This guide and its automated tests do not replace it.
+- **CT09 and MinIO.** The storage contract and backend storage adapter are not
+  implemented. No file-material row is seeded and no object is uploaded to MinIO.
+- **Environments.** Nothing here provisions object storage, deploys an environment
+  or authorizes seeding outside your own disposable database.

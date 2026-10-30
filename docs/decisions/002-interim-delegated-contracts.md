@@ -408,17 +408,23 @@ the committed origin/configuration defaults.
 
 ## SD01/SD02 sample data completion — delegated approval, 30 October 2026
 
-Revision `CT15-SD-2026-10-30-r1` is **APPROVED_PENDING_PROTECTED_INTEGRATION**.
+Revision `CT15-SD-2026-10-30-r2` is **APPROVED_PENDING_PROTECTED_INTEGRATION**.
 Authorization: Project Leader @chi-thanh-nguyen's explicit “CodeMastery — Complete
 SD01 and SD02 Implementation with Delegated Technical Authority” task, 30 October
 2026 (ICT), delegates selection and technical approval of the decisions directly
 necessary to complete SD01 #59 and SD02 #60, including their CT15, CT09, CT14 and
-CT01 blockers, and authorizes their implementation and documentation. Claude Code
-exercised that bounded delegation here. This is a new approval: no clause below was
+CT01 blockers, and authorizes their implementation and documentation. The
+delegated technical authority was exercised through AI-assisted development. This
+is a new approval: no clause below was
 effective earlier, and no CT15, CT09 or CT14 family is approved as a whole. It is
 not a CODEOWNER review, QA13 acceptance, Issue closure or protected merge. The
 Leader withheld production seeding (forbidden), real credentials, deployment,
 repository-protection changes and merge.
+
+**Revision history.** r1 was published on PR #116 at `dca2d11` on 30 October 2026.
+r2, the same day, follows the Leader's “Final SD01/SD02 Remediation and Direct PR
+#116 Update” instruction, which confirms permission to use and modify the sample
+slides. r2 replaces the M2 slide decision only; T1–T3, M1 and V1 are unchanged.
 
 ### Preserved baseline and clarifications
 
@@ -533,20 +539,47 @@ no-overwrite loader rules as CT15.I-data apply.
 
 ### M2 — CT15.SD02-slides and the CT09 file-material boundary
 
-The slides at `sample-data/materials/sample-slides.pdf` are the exact bytes of
-`348d2c2` (git author Nguyen Anh Tai, 24 October 2026), cherry-picked with
-authorship preserved. SHA-256
-`d0a313773b9866031b33c2d153ed88a19d30b8c7ed26b7c202c3588d6f6f7d8f`; PDF 1.4,
-11 pages of 960 × 540 pt, not encrypted, no forms or JavaScript; English
-“Python Fundamentals — Lesson 1.1: Variable Declaration & Naming Conventions”. The
-Leader stated on 30 October 2026 that the Leader prepared these slides.
-The slide content is not edited.
+**Permission.** On 30 October 2026 the Project Leader and the contributing team
+member confirmed that the sample slides were prepared for CodeMastery with AI
+assistance, and that using and modifying them is authorized for project use,
+adaptation, teaching demonstrations, testing and academic evaluation. No
+open-source licence, public-domain status or unrestricted third-party
+redistribution right is claimed.
 
-No license or permitted-use statement is recorded in the file or the repository.
-That statement is an external fact for the Leader to supply, so SD02's licensing
-criterion stays open. The title slide also names an instructor (“Mr Dam Vinh
-Hung”), which needs Leader confirmation, because CT15.I-data excludes real persons
-from seeded records.
+**r1, superseded.** r1 adopted the exact bytes of `348d2c2` (git author Nguyen Anh
+Tai, 24 October 2026; SHA-256 `d0a31377…6f7d8f`; 11 pages) without edits, and left
+the licensing statement and the title-slide instructor attribution open.
+
+**r2 decision: replace the PDF with a corrected revision.** A page-by-page review
+found these defects, which the confirmed permission allows the team to correct:
+
+- Both knowledge-check answer pages highlighted the wrong option: `user-profile-id`,
+  an invalid identifier, instead of `max_connection_timeout`, and `40` instead of
+  `15`.
+- The title slide named an instructor (“Mr Dam Vinh Hung”) and a course code
+  (“PY101”) without a verified basis.
+- Slide 3 described chained assignment as binding names to “the same immutable
+  object”, which contradicts the mutable-list example on slide 5. The quoted
+  unpacking error message did not match Python 3.12, and slide 2 said that
+  reassignment “creates a new object”.
+- A stray “SL” prefix appeared in four headers, the 11 pages carried “Slide n of 7”
+  numbering, and the footers were inconsistent.
+
+The revision, version 2026.2, keeps the contributor's lesson structure, titles,
+examples and visual design. It corrects the defects above, adds an explained answer
+page for each question and a suggested fix for the exercise, and attributes the
+material to the “CodeMastery Project Team” with an AI-assistance statement. Every
+Python claim was executed; the keyword count and error message were checked on
+Python 3.12.
+
+Result: 12 pages of 960 × 540 pt, PDF 1.4, not encrypted, no forms or JavaScript,
+SHA-256 `f9827139bf01b136430f727bc79773298414647df1a5ac49cb4e2e31710f381f`,
+document author “CodeMastery Project Team”. It embeds only Plus Jakarta Sans (SIL
+Open Font License 1.1, already used by the frontend) and PT Mono (ParaType Free
+Font License, which permits embedding in documents). It contains no third-party
+images, logos or text beyond the two cited Python Software Foundation references.
+The original contribution remains available in git history at `348d2c2` and its
+cherry-pick `4499ca8`.
 
 **No file-material row is seeded.** CT09 is deferred, the backend `FileStorage` and
 `S3FileStorage` are empty scaffolds, and the CT17 runtime matrix denies the
@@ -584,9 +617,9 @@ plans select this dataset, and DO01 guides. Unchanged: V001–V006, application 
 CT01 policy, the CT17 privilege matrix, CODEOWNERS, `.env.example`, CT15.final
 (skills, questions, profiles, Final Course content) and every other disposition.
 
-Remaining gates: the slides' permitted-use statement and real-person confirmation;
-the CT09 file-material slice and actual MinIO provisioning; QA13 execution on the
-team's verification environment; CODEOWNER reviews and protected merge.
+Remaining gates: the CT09 file-material slice and actual MinIO provisioning; QA13
+execution on the team's verification environment; CODEOWNER reviews and protected
+merge.
 Execution evidence is recorded in
 [testing.md](../testing.md#sd01sd02-seed-verification--30-october-2026) and the
 operator procedure in [sample-data/README.md](../../sample-data/README.md).

@@ -1420,7 +1420,7 @@ assisted this scoped accessibility correction and regression execution.
 
 ## SD01/SD02 seed verification — 30 October 2026
 
-Authority: ADR002 `CT15-SD-2026-10-30-r1` (V1 placement, T1–T3, M1–M2). The
+Authority: ADR002 `CT15-SD-2026-10-30-r2` (V1 placement, T1–T3, M1–M2). The
 operator procedure is [sample-data/README.md](../sample-data/README.md).
 
 ### Automated test
@@ -1443,11 +1443,12 @@ commits them.
 | Concurrency | Two loaders of each file start while the test blocks the seed lock. Both reach the lock, then both succeed with exactly one dataset |
 | Consumers | On the harness database: POST `/api/auth/login` succeeds for both seeded accounts with their roles and display names and returns 401 for a wrong password; the catalogue lists exactly the two published Courses with “Instructor Demo”; detail returns the canonical syllabus; the hidden draft returns 404. Seeded rows and the attestation are removed afterwards |
 | Redaction | No output of any run contains a password, hash or salt |
-| Slides | `sample-slides.pdf` matches the recorded SHA-256 and has PDF header and trailer markers |
+| Slides | `sample-slides.pdf` matches the recorded SHA-256, has PDF header and trailer markers, contains 12 page objects and records the author “CodeMastery Project Team” |
 
 ### Executed commands and results
 
-Executed on 30 October 2026 (ICT) with OpenJDK 25.0.4.1 and Docker 29.8.1:
+Executed on 30 October 2026 (ICT) with OpenJDK 25.0.4.1, Docker 29.8.1 and
+Node.js 24.21.0, on the revision that contains the corrected slides (ADR002 r2):
 
 - `cd backend && ./mvnw -B verify`: BUILD SUCCESS. 468 unit tests and 123
   integration tests passed, including 30 `SampleDataSeedIntegrationTest` cases.
@@ -1455,27 +1456,37 @@ Executed on 30 October 2026 (ICT) with OpenJDK 25.0.4.1 and Docker 29.8.1:
   -Dfailsafe.runOrder=reversealphabetical`: BUILD SUCCESS. With the seed test
   ordered before `EnrollmentIntegrationTest` and `CourseCatalogueIntegrationTest`,
   their exact catalogue totals still pass, which confirms that cleanup leaves the
-  harness database unchanged. This run preceded the identity-unavailable case,
-  which uses only its own new database.
-- Fault injection, reverted afterwards: reading the attestation through
-  `current_setting()`, locking before verification, and removing the SD01 table
-  lock each made the corresponding cases fail.
+  harness database unchanged.
+- `cd frontend && npm ci && npm test && npm run build`: all succeeded, with 390
+  tests in 11 files. The frontend is unchanged; this confirms the commands
+  documented in the root README.
+- Fault injection on the r1 revision, reverted afterwards: reading the attestation
+  through `current_setting()`, locking before verification, and removing the SD01
+  table lock each made the corresponding cases fail. The seed files have not
+  changed since.
 
-The README procedure was also executed verbatim in zsh against an isolated Compose
-project built from this branch, with throwaway volumes. Flyway applied V001–V006 at
-backend startup, both seeds loaded, and the database check matched. HTTP sign-in
-succeeded for both accounts, with 401 for a wrong password. The catalogue returned
-the two published Courses, the draft returned 404, and a seed run after removing
-the attestation was refused. Earlier rehearsals of the identity, attestation, hash,
-load and rerun steps passed in both zsh and bash on fresh volumes whose migrations
-were applied by psql instead of the backend. Project containers, volumes, the image
-and the synthetic credentials were then removed.
+The README procedure was executed verbatim in zsh on the r1 revision, against an
+isolated Compose project built from this branch with throwaway volumes. Flyway
+applied V001–V006 at backend startup, both seeds loaded, and the database check
+matched. HTTP sign-in succeeded for both accounts, with 401 for a wrong password.
+The catalogue returned the two published Courses, the draft returned 404, and a
+seed run after removing the attestation was refused. Earlier rehearsals of the
+identity, attestation, hash, load and rerun steps passed in both zsh and bash on
+fresh volumes whose migrations were applied by psql instead of the backend. The
+seeds and procedure are unchanged in r2. Project containers, volumes, the image and
+the synthetic credentials were then removed.
+
+The revised slides were inspected page by page as rendered images and checked with
+`pdfinfo`, `pdffonts`, `pdfimages` and `pdftotext`: 12 pages, PDF 1.4, no
+encryption, forms or JavaScript, only the two declared fonts and no extraction
+errors. Every Python statement on the slides was executed; the keyword count and
+error message were checked on Python 3.12.16.
 
 ### Evidence boundaries
 
 These results establish SQL correctness, disposable PostgreSQL loading and actual
 Auth/catalogue consumption on local disposable databases. They do not establish
-QA13 acceptance on the team's verification environment, frontend sign-in,
-MinIO object provisioning, file-material delivery or the slides' licensing.
-Those gates remain open. Claude Code assisted this implementation and verification
-under the Leader's delegation.
+QA13 acceptance on the team's verification environment, frontend sign-in, MinIO
+object provisioning or file-material delivery. Those gates remain open. This
+implementation and its verification were AI-assisted under the Leader's
+delegation; review remains with the CODEOWNERs.
