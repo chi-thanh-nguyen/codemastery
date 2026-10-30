@@ -332,6 +332,56 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         assertSafeEquals(loaded, snapshot(db), "row values and row versions after reruns at inherited " + isolation);
     }
 
+    @Test void psqlVariablesKeepCredentialsOutOfProcessArguments() throws Exception {
+        String db = attested(freshDatabase());
+        var pool = Executors.newSingleThreadExecutor();
+        // Inspect inside the container: raw argv must never reach an assertion or a process-output log.
+        String inspect = """
+                set -eu
+                matches=0
+                disclosed=0
+                for process in /proc/[0-9]*; do
+                    case "$(readlink "$process/exe" 2>/dev/null)" in */psql) ;; *) continue ;; esac
+                    argv="$(tr '\\000' '\\n' < "$process/cmdline" 2>/dev/null)" || continue
+                    printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_DB" >/dev/null || continue
+                    printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_FILE" >/dev/null || continue
+                    matches=$((matches + 1))
+                    while IFS= read -r sensitive; do
+                        [ -n "$sensitive" ] || continue
+                        case "$argv" in *"$sensitive"*) disclosed=1 ;; esac
+                    done <<ARGV_INPUTS
+                $ARGV_INPUTS
+                ARGV_INPUTS
+                done
+                printf '%s %s\\n' "$matches" "$disclosed"
+                """;
+        try {
+            for (var step : List.of(Map.entry(USERS, "users"), Map.entry(COURSES, "courses"))) {
+                try (Connection holder = connect(db)) {
+                    holder.setAutoCommit(false);
+                    holder.createStatement().execute("LOCK TABLE public." + step.getValue() + " IN SHARE ROW EXCLUSIVE MODE");
+                    Future<Run> loader = pool.submit(() -> psqlWithVariables(db, step.getKey()));
+                    try {
+                        awaitWaiters(holder, step.getValue(), 1);
+                        ExecResult inspection = POSTGRES.execInContainer(ExecConfig.builder()
+                                .command(new String[] {"sh", "-c", inspect})
+                                .envVars(Map.of("ARGV_DB", db, "ARGV_FILE", "/seed/" + step.getKey(),
+                                        "ARGV_INPUTS", String.join("\n", SECRETS)))
+                                .build());
+                        assertSucceeded(new Run(inspection.getExitCode(), inspection.getStdout(), inspection.getStderr()));
+                        assertEquals("1 0", inspection.getStdout().trim(),
+                                "one blocked psql; no password, hash, salt or checksum in its actual argv");
+                    } finally {
+                        holder.rollback();
+                        assertSucceeded(loader.get(2, TimeUnit.MINUTES));
+                    }
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     @Test void failedComparisonsNeverDiscloseCredentials() {
         String password = secret("sentinel-" + password()), hash = secret(BCRYPT.encode(password));
         String otherHash = secret(BCRYPT.encode(password + "-other"));
@@ -461,16 +511,21 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
-     * Seed inputs as psql variables. The shell expands them from neutrally named environment variables, so the
-     * values reach psql's {@code -v} options without appearing in the command that Testcontainers can log, and
-     * the seed files' own environment fallback cannot supply them instead.
+     * Populate psql variables from RUN_* before reading the seed, without putting values in process arguments.
+     * Invalid seed-environment fallbacks prove that the explicitly populated variables take precedence.
      */
     private static Run psqlWithVariables(String db, String file) throws Exception {
-        String script = "exec psql -X -q -U \"$RUN_USER\" -d \"$RUN_DB\" -v seed_target_system_identifier=\"$RUN_TARGET\""
-                + " -v instructor_password_hash=\"$RUN_INSTRUCTOR\" -v learner_password_hash=\"$RUN_LEARNER\" -f \"/seed/$RUN_FILE\"";
-        Map<String, String> environment = Map.of("RUN_USER", POSTGRES.getUsername(), "RUN_DB", db, "RUN_FILE", file,
-                "RUN_TARGET", systemIdentifier, "RUN_INSTRUCTOR", INSTRUCTOR_HASH, "RUN_LEARNER", LEARNER_HASH);
-        ExecResult result = POSTGRES.execInContainer(ExecConfig.builder().command(new String[] {"sh", "-c", script}).envVars(environment).build());
+        String[] command = {"psql", "-X", "-q", "-U", POSTGRES.getUsername(), "-d", db,
+                "-c", "\\getenv seed_target_system_identifier RUN_TARGET",
+                "-c", "\\getenv instructor_password_hash RUN_INSTRUCTOR",
+                "-c", "\\getenv learner_password_hash RUN_LEARNER",
+                "-f", "/seed/" + file};
+        Map<String, String> environment = Map.of(
+                "RUN_TARGET", systemIdentifier, "RUN_INSTRUCTOR", INSTRUCTOR_HASH, "RUN_LEARNER", LEARNER_HASH,
+                "CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER", "invalid",
+                "CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", "invalid",
+                "CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", "invalid");
+        ExecResult result = POSTGRES.execInContainer(ExecConfig.builder().command(command).envVars(environment).build());
         return new Run(result.getExitCode(), result.getStdout(), result.getStderr());
     }
 
