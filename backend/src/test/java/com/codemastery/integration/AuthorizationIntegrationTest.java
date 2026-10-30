@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -49,7 +50,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
-/** Actual registration, persistence and canonical-email behavior over the configured Auth stack. */
+/** Actual registration, login rejection and persistence over the configured Auth stack. */
 class AuthorizationIntegrationTest extends AbstractIntegrationTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -136,17 +137,17 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     @ValueSource(strings = {"short-password", "invalid-email", "blank-display-name"})
     void invalidRegistrationReturnsSafeProblemAndDoesNotPersist(String invalidField) throws Exception {
         String email = newEmail();
-        testEmails.add(email);
         String password = syntheticPassword();
         String displayName = "QA01 Synthetic Learner";
         String submittedEmail = email;
 
         switch (invalidField) {
             case "short-password" -> password = "a".repeat(14);
-            case "invalid-email" -> submittedEmail = "not-an-email";
+            case "invalid-email" -> submittedEmail = "qa01-invalid-" + UUID.randomUUID();
             case "blank-display-name" -> displayName = "   ";
             default -> throw new IllegalArgumentException("Unexpected test case");
         }
+        testEmails.add(submittedEmail);
 
         MvcResult result = register(Map.of(
                 "email", submittedEmail,
@@ -162,25 +163,73 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                 .andReturn();
 
         assertFalse(result.getResponse().getContentAsString().contains(password));
-        assertEquals(0L, userCount(email));
+        assertEquals(0L, userCount(submittedEmail));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"role", "accountStatus"})
-    void registrationRejectsCallerSuppliedRoleOrStatus(String forbiddenProperty) throws Exception {
+    @CsvSource({"role,admin", "accountStatus,active", "accountStatus,locked"})
+    void registrationRejectsCallerSuppliedRoleOrStatus(String forbiddenProperty, String suppliedValue)
+            throws Exception {
         String email = newEmail();
         testEmails.add(email);
         Map<String, String> request = new HashMap<>(Map.of(
                 "email", email,
                 "password", syntheticPassword(),
                 "displayName", "QA01 Synthetic Learner"));
-        request.put(forbiddenProperty, "admin");
+        request.put(forbiddenProperty, suppliedValue);
 
         register(request)
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.status").value(400));
         assertEquals(0L, userCount(email));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"wrong-password", "unknown-user"})
+    void invalidCredentialsReturnGeneric401WithoutChangingAccounts(String scenario) throws Exception {
+        String email = newEmail();
+        String password = syntheticPassword();
+        String submittedPassword = syntheticPassword();
+        testEmails.add(email);
+        assertNotEquals(password, submittedPassword);
+
+        if ("wrong-password".equals(scenario)) {
+            register(Map.of("email", email, "password", password, "displayName", "QA01 Login Learner"))
+                    .andExpect(status().isCreated());
+        }
+        List<Map<String, Object>> before = jdbc.queryForList(
+                "SELECT id, email, password_hash, display_name, role, account_status "
+                        + "FROM public.users WHERE email = ?", email);
+        assertEquals("wrong-password".equals(scenario) ? 1 : 0, before.size());
+        if ("wrong-password".equals(scenario)) {
+            assertEquals("active", before.getFirst().get("account_status"));
+            assertTrue(PASSWORDS.matches(password, (String) before.getFirst().get("password_hash")));
+        }
+
+        MvcResult result = mvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("email", email, "password", submittedPassword))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("WWW-Authenticate", "Bearer"))
+                .andExpect(jsonPath("$.type").value("about:blank"))
+                .andExpect(jsonPath("$.title").value("Unauthorized"))
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.detail").value("Authentication failed."))
+                .andExpect(jsonPath("$.instance").value("/api/auth/login"))
+                .andReturn();
+
+        String body = result.getResponse().getContentAsString();
+        assertEquals(Set.of("type", "title", "status", "detail", "instance"),
+                Set.copyOf(JSON.readTree(body).propertyNames()));
+        assertFalse(body.contains(email));
+        assertFalse(body.contains(password));
+        assertFalse(body.contains(submittedPassword));
+        assertEquals(before, jdbc.queryForList(
+                "SELECT id, email, password_hash, display_name, role, account_status "
+                        + "FROM public.users WHERE email = ?", email));
     }
 
     @Test
