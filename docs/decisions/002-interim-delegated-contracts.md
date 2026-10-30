@@ -408,7 +408,7 @@ the committed origin/configuration defaults.
 
 ## SD01/SD02 sample data completion — delegated approval, 30 October 2026
 
-Revision `CT15-SD-2026-10-30-r2` is **APPROVED_PENDING_PROTECTED_INTEGRATION**.
+Revision `CT15-SD-2026-10-30-r3` is **APPROVED_PENDING_PROTECTED_INTEGRATION**.
 Authorization: Project Leader @chi-thanh-nguyen's explicit “CodeMastery — Complete
 SD01 and SD02 Implementation with Delegated Technical Authority” task, 30 October
 2026 (ICT), delegates selection and technical approval of the decisions directly
@@ -425,6 +425,10 @@ repository-protection changes and merge.
 r2, the same day, follows the Leader's “Final SD01/SD02 Remediation and Direct PR
 #116 Update” instruction, which confirms permission to use and modify the sample
 slides. r2 replaces the M2 slide decision only; T1–T3, M1 and V1 are unchanged.
+r3, the same day, remediates an independent review of r2 (head `f79ff6f`): T1 adds
+the explicit READ COMMITTED requirement, and M2 corrects the slides' identifier
+explanation. T2, T3, M1 and V1 are unchanged; V1's file gains regression cases at
+its approved path.
 
 ### Preserved baseline and clarifications
 
@@ -476,6 +480,16 @@ before any lock, temporary table or write:
 A missing, malformed, unavailable or mismatched identity, or a missing or
 mismatched attestation, stops psql with status 3 before the seed locks any table.
 The transaction never commits.
+
+**Transaction isolation (r3).** Each seed begins with `BEGIN ISOLATION LEVEL READ
+COMMITTED`. The guard runs the transaction's first query before the serialization
+lock. Under an inherited `REPEATABLE READ` or `SERIALIZABLE` default, that query
+fixed the snapshot, so a loader that waited on the lock kept reading pre-commit
+data and failed with a duplicate key or serialization error, although the other
+loader had committed identical rows. Under READ COMMITTED, every statement after
+the lock sees committed rows. The guard still precedes every lock and write, and no
+database, role or session default is changed. Later seed files must keep this order:
+explicit READ COMMITTED, then the guard, then locks, then reads and writes.
 
 **Operational prerequisites.** psql 15 or later (`\getenv`); local administrator
 access to read `pg_controldata` and run `ALTER DATABASE` on the disposable
@@ -572,8 +586,19 @@ material to the “CodeMastery Project Team” with an AI-assistance statement. 
 Python claim was executed; the keyword count and error message were checked on
 Python 3.12.
 
+The r2 result had SHA-256
+`f9827139bf01b136430f727bc79773298414647df1a5ac49cb4e2e31710f381f`.
+
+**r3 correction.** Slide 4 listed the ASCII letters a–z and A–Z as Python's
+mandatory identifier characters. Python 3 identifiers also accept non-ASCII Unicode
+letters (PEP 3131). Version 2026.3 states the actual rule, with `café` and `naïve`
+as valid names, and moves the ASCII-only practice into the recommendations, citing
+PEP 8's requirement of ASCII identifiers in the standard library. Both examples and
+the leading-digit rule were checked on Python 3.12.16. Only slides 1 (the version
+label) and 4 changed; the other ten pages are pixel-identical to r2 at 90 dpi.
+
 Result: 12 pages of 960 × 540 pt, PDF 1.4, not encrypted, no forms or JavaScript,
-SHA-256 `f9827139bf01b136430f727bc79773298414647df1a5ac49cb4e2e31710f381f`,
+SHA-256 `c4b05622b87a9b45e46563a87fba220e27c7da6a89340cd0c3f409bcadb9935d`,
 document author “CodeMastery Project Team”. It embeds only Plus Jakarta Sans (SIL
 Open Font License 1.1, already used by the frontend) and PT Mono (ParaType Free
 Font License, which permits embedding in documents). It contains no third-party

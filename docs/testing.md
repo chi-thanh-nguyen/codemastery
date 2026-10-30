@@ -1420,7 +1420,7 @@ assisted this scoped accessibility correction and regression execution.
 
 ## SD01/SD02 seed verification — 30 October 2026
 
-Authority: ADR002 `CT15-SD-2026-10-30-r2` (V1 placement, T1–T3, M1–M2). The
+Authority: ADR002 `CT15-SD-2026-10-30-r3` (V1 placement, T1–T3, M1–M2). The
 operator procedure is [sample-data/README.md](../sample-data/README.md).
 
 ### Automated test
@@ -1439,31 +1439,41 @@ commits them.
 | Identical rerun | Environment and psql-variable inputs both succeed; row values and `xmin` row versions are unchanged |
 | Conflicts (9) | Learner email, changed hash, Course ID, Chapter position, Lesson ID, Lesson position, edited material, missing Instructor, Instructor with the wrong role. Each stops with status 3 and leaves the database byte-identical, including rows that sort before the conflict in the same transaction |
 | Invalid inputs (9) | Missing, empty or non-numeric target identifier; missing hashes; plaintext, `$2a$`, cost-12 and truncated hashes. Rejected before any write |
-| Untrusted targets (7) | Unattested database, wrong expected identifier, attestation for another cluster, unbound attestation, role-scoped attestation, `PGOPTIONS` session impersonation, and a non-superuser denied `pg_control_system()`. Both seeds are rejected while the test holds `ACCESS EXCLUSIVE` locks with a 5-second lock timeout, which proves verification precedes locking |
-| Concurrency | Two loaders of each file start while the test blocks the seed lock. Both reach the lock, then both succeed with exactly one dataset |
+| Untrusted targets (14) | Unattested database, wrong expected identifier, attestation for another cluster, unbound attestation, role-scoped attestation, `PGOPTIONS` session impersonation, and a non-superuser denied `pg_control_system()`, each with an inherited READ COMMITTED and REPEATABLE READ default. Both seeds are rejected while the test holds `ACCESS EXCLUSIVE` locks with a 5-second lock timeout, which proves verification precedes locking |
+| Concurrency (3) | With an inherited READ COMMITTED, REPEATABLE READ and SERIALIZABLE database default (confirmed in effect for new sessions), two loaders of each file start while the test blocks the seed lock. Both reach the lock after running the guard, then both succeed with exactly one dataset; reruns leave row values and `xmin` versions unchanged |
 | Consumers | On the harness database: POST `/api/auth/login` succeeds for both seeded accounts with their roles and display names and returns 401 for a wrong password; the catalogue lists exactly the two published Courses with “Instructor Demo”; detail returns the canonical syllabus; the hidden draft returns 404. Seeded rows and the attestation are removed afterwards |
 | Redaction | No output of any run contains a password, hash or salt |
+| Failure diagnostics (3) | With sentinel passwords and BCrypt hashes, failed row and snapshot comparisons and failed process checks (wrong exit code, missing error, leaking output) throw errors whose message, string form, stack trace and attached values contain no sentinel, salt, checksum or BCrypt-shaped text, while still naming the context and the differing row |
 | Slides | `sample-slides.pdf` matches the recorded SHA-256, has PDF header and trailer markers, contains 12 page objects and records the author “CodeMastery Project Team” |
 
 ### Executed commands and results
 
-Executed on 30 October 2026 (ICT) with OpenJDK 25.0.4.1, Docker 29.8.1 and
-Node.js 24.21.0, on the revision that contains the corrected slides (ADR002 r2):
+Executed on 30 October 2026 (ICT) with OpenJDK 25.0.4.1 and Docker 29.8.1, on the
+ADR002 r3 revision:
 
-- `cd backend && ./mvnw -B verify`: BUILD SUCCESS. 468 unit tests and 123
-  integration tests passed, including 30 `SampleDataSeedIntegrationTest` cases.
+- `cd backend && ./mvnw -B verify`: BUILD SUCCESS. 468 unit tests and 135
+  integration tests passed, including 42 `SampleDataSeedIntegrationTest` cases.
 - `./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false
   -Dfailsafe.runOrder=reversealphabetical`: BUILD SUCCESS. With the seed test
   ordered before `EnrollmentIntegrationTest` and `CourseCatalogueIntegrationTest`,
   their exact catalogue totals still pass, which confirms that cleanup leaves the
   harness database unchanged.
-- `cd frontend && npm ci && npm test && npm run build`: all succeeded, with 390
-  tests in 11 files. The frontend is unchanged; this confirms the commands
-  documented in the root README.
-- Fault injection on the r1 revision, reverted afterwards: reading the attestation
-  through `current_setting()`, locking before verification, and removing the SD01
-  table lock each made the corresponding cases fail. The seed files have not
-  changed since.
+- The three concurrency cases were repeated three further times; all passed. No
+  test container remained afterwards.
+- Before the r3 seed fix, the same new test failed under an inherited REPEATABLE
+  READ default (`duplicate key value violates unique constraint "pk_users"`) and
+  under SERIALIZABLE (`could not serialize access`); READ COMMITTED passed.
+  After the one-line fix in each seed, all three pass.
+- Disclosure check: with the Learner display name changed temporarily in
+  `01-users.sql`, the r2 test's failure report contained two complete BCrypt
+  hashes. The r3 test's report for the same defect contained no BCrypt-shaped text
+  and showed redaction markers instead. The seed was restored afterwards.
+
+On the r2 revision, `cd frontend && npm ci && npm test && npm run build` succeeded
+with 390 tests in 11 files; r3 does not change the frontend. Fault injection on the
+r1 revision, reverted afterwards, showed that reading the attestation through
+`current_setting()`, locking before verification and removing the SD01 table lock
+each made the corresponding cases fail.
 
 The README procedure was executed verbatim in zsh on the r1 revision, against an
 isolated Compose project built from this branch with throwaway volumes. Flyway
@@ -1473,14 +1483,18 @@ The catalogue returned the two published Courses, the draft returned 404, and a
 seed run after removing the attestation was refused. Earlier rehearsals of the
 identity, attestation, hash, load and rerun steps passed in both zsh and bash on
 fresh volumes whose migrations were applied by psql instead of the backend. The
-seeds and procedure are unchanged in r2. Project containers, volumes, the image and
-the synthetic credentials were then removed.
+procedure's commands are unchanged since; r3 changes only each seed's `BEGIN`
+statement, which the automated tests above execute with the same psql 17. The
+Compose walkthrough was not repeated on r3. Project containers, volumes, the image
+and the synthetic credentials were removed after the walkthrough.
 
-The revised slides were inspected page by page as rendered images and checked with
-`pdfinfo`, `pdffonts`, `pdfimages` and `pdftotext`: 12 pages, PDF 1.4, no
-encryption, forms or JavaScript, only the two declared fonts and no extraction
-errors. Every Python statement on the slides was executed; the keyword count and
-error message were checked on Python 3.12.16.
+The r2 slides were inspected page by page as rendered images and checked with
+`pdfinfo`, `pdffonts`, `pdfimages` and `pdftotext`. For r3, slides 1 and 4 were
+inspected as rendered images, the other ten were confirmed pixel-identical to r2 at
+90 dpi, and the same tools report 12 pages, PDF 1.4, no encryption, forms or
+JavaScript, only the two declared fonts and no extraction errors. The Unicode
+identifier examples, the leading-digit rule and the keyword count were checked on
+Python 3.12.16.
 
 ### Evidence boundaries
 
