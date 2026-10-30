@@ -5,7 +5,10 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.opentest4j.AssertionFailedError;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -17,6 +20,8 @@ import org.testcontainers.containers.Container.ExecResult;
 import org.testcontainers.containers.ExecConfig;
 import org.testcontainers.utility.MountableFile;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -32,12 +37,15 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -63,7 +71,14 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
     private static final String INSTRUCTOR_PASSWORD = password(), LEARNER_PASSWORD = password();
     private static final String INSTRUCTOR_HASH = BCRYPT.encode(INSTRUCTOR_PASSWORD), LEARNER_HASH = BCRYPT.encode(LEARNER_PASSWORD);
     private static final String OTHER_HASH = BCRYPT.encode(password());
-    private static final List<String> SECRETS = List.of(INSTRUCTOR_PASSWORD, LEARNER_PASSWORD, INSTRUCTOR_HASH, LEARNER_HASH, OTHER_HASH);
+    /** Passwords and hashes, with each hash's salt and checksum, that no diagnostic may contain. */
+    private static final List<String> SECRETS = new CopyOnWriteArrayList<>();
+    /** Any BCrypt-shaped text, including truncated or re-prefixed hashes that are not registered. */
+    private static final Pattern BCRYPT_TEXT = Pattern.compile("\\$2[abxy]?\\$\\d{2}\\$[./A-Za-z0-9]+");
+
+    static {
+        for (String secret : List.of(INSTRUCTOR_PASSWORD, LEARNER_PASSWORD, INSTRUCTOR_HASH, LEARNER_HASH, OTHER_HASH)) secret(secret);
+    }
     private static final AtomicInteger DATABASES = new AtomicInteger();
     private static final List<String> CREATED = new ArrayList<>();
     private static String systemIdentifier;
@@ -80,7 +95,7 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         POSTGRES.copyFileToContainer(MountableFile.forHostPath(SEED_DIR.resolve(COURSES)), "/seed/" + COURSES);
         // Read the control file directly, independently of any SQL connection, as operators do.
         ExecResult control = POSTGRES.execInContainerWithUser("postgres", "pg_controldata");
-        assertEquals(0, control.getExitCode(), control.getStderr());
+        assertEquals(0, control.getExitCode(), "pg_controldata failed: " + redact(control.getStderr()));
         systemIdentifier = control.getStdout().lines().filter(line -> line.startsWith("Database system identifier:"))
                 .map(line -> line.substring(line.indexOf(':') + 1).trim()).findFirst().orElseThrow();
         assertTrue(systemIdentifier.matches("[1-9][0-9]{0,19}"));
@@ -98,10 +113,11 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         assertLoaded(db, USERS);
         assertLoaded(db, COURSES);
 
-        assertEquals(List.of(
+        assertSafeEquals(List.of(
                 INSTRUCTOR + "|instructor@example.test|Instructor Demo|instructor|active|" + INSTRUCTOR_HASH,
                 LEARNER + "|learner@example.test|Learner Demo|learner|active|" + LEARNER_HASH),
-                rows(db, "SELECT id, email, display_name, role, account_status, password_hash FROM public.users ORDER BY email"));
+                rows(db, "SELECT id, email, display_name, role, account_status, password_hash FROM public.users ORDER BY email"),
+                "seeded Users");
         String course = "|" + INSTRUCTOR + "|%s|Demo course for the Interim catalogue|No prerequisites|%s|false|NULL";
         assertEquals(List.of(DRAFT + course.formatted("Instructor Draft", "hidden"),
                         INTRO + course.formatted("Introduction to Programming", "published"),
@@ -142,11 +158,9 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         String before = snapshot(db);
         assertLoaded(db, USERS);
         assertLoaded(db, COURSES);
-        var variables = List.of("-v", "seed_target_system_identifier=" + systemIdentifier,
-                "-v", "instructor_password_hash=" + INSTRUCTOR_HASH, "-v", "learner_password_hash=" + LEARNER_HASH);
-        assertSucceeded(psql(db, USERS, Map.of(), variables));
-        assertSucceeded(psql(db, COURSES, Map.of(), variables));
-        assertEquals(before, snapshot(db), "row values and row versions are unchanged");
+        assertSucceeded(psqlWithVariables(db, USERS));
+        assertSucceeded(psqlWithVariables(db, COURSES));
+        assertSafeEquals(before, snapshot(db), "row values and row versions after identical reruns");
     }
 
     @ParameterizedTest
@@ -203,8 +217,8 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
             default -> throw new IllegalArgumentException(conflict);
         }
         String before = snapshot(db);
-        assertRejected(psql(db, file, environment, List.of()), message);
-        assertEquals(before, snapshot(db), "the failed transaction left no partial write");
+        assertRejected(psql(db, file, environment), message);
+        assertSafeEquals(before, snapshot(db), "database after the failed transaction (no partial write)");
     }
 
     @ParameterizedTest
@@ -222,24 +236,30 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
             case "missing-learner-hash" -> { environment.remove("CODEMASTERY_SEED_LEARNER_PASSWORD_HASH"); message = "Required psql variable learner_password_hash is missing."; }
             case "plaintext-hash" -> environment.put("CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", INSTRUCTOR_PASSWORD);
             case "2a-hash" -> environment.put("CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", INSTRUCTOR_HASH.replace("$2b$", "$2a$"));
-            case "cost-12-hash" -> environment.put("CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", new BCryptPasswordEncoder(BCryptPasswordEncoder.BCryptVersion.$2B, 12).encode(INSTRUCTOR_PASSWORD));
+            case "cost-12-hash" -> environment.put("CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH",
+                    secret(new BCryptPasswordEncoder(BCryptPasswordEncoder.BCryptVersion.$2B, 12).encode(INSTRUCTOR_PASSWORD)));
             case "truncated-hash" -> environment.put("CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", LEARNER_HASH.substring(0, 59));
             default -> throw new IllegalArgumentException(input);
         }
         String before = snapshot(db);
-        assertRejected(psql(db, USERS, environment, List.of()), message);
-        assertEquals(before, snapshot(db));
+        assertRejected(psql(db, USERS, environment), message);
+        assertSafeEquals(before, snapshot(db), "database after the rejected SD01 run");
         if (input.endsWith("target")) {
-            assertRejected(psql(db, COURSES, environment, List.of()), message.replace("SD01", "SD02"));
-            assertEquals(before, snapshot(db));
+            assertRejected(psql(db, COURSES, environment), message.replace("SD01", "SD02"));
+            assertSafeEquals(before, snapshot(db), "database after the rejected SD02 run");
         }
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"unattested", "wrong-expected-identifier", "attested-for-another-cluster",
-            "unbound-attestation", "role-scoped-attestation", "session-impersonation", "identity-unavailable"})
-    void untrustedTargetsAreRejectedBeforeAnyLockOrWrite(String target) throws Exception {
-        String db = freshDatabase();
+    static Stream<Arguments> untrustedTargetsUnderEachIsolationLevel() {
+        return Stream.of("unattested", "wrong-expected-identifier", "attested-for-another-cluster", "unbound-attestation",
+                        "role-scoped-attestation", "session-impersonation", "identity-unavailable")
+                .flatMap(target -> Stream.of("read committed", "repeatable read").map(isolation -> Arguments.of(target, isolation)));
+    }
+
+    @ParameterizedTest(name = "{0} with inherited {1}")
+    @MethodSource("untrustedTargetsUnderEachIsolationLevel")
+    void untrustedTargetsAreRejectedBeforeAnyLockOrWrite(String target, String isolation) throws Exception {
+        String db = inheritIsolation(freshDatabase(), isolation);
         Map<String, String> environment = seedEnvironment();
         String message = "target verification failed: database is not attested as a disposable seed target";
         // A loader that locked before verifying would hit this timeout instead of the expected error.
@@ -271,23 +291,30 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         try (Connection holder = connect(db)) {
             holder.setAutoCommit(false);
             holder.createStatement().execute("LOCK TABLE public.users, public.courses IN ACCESS EXCLUSIVE MODE");
-            assertRejected(psql(db, USERS, environment, List.of()), "SD01 " + message);
-            assertRejected(psql(db, COURSES, environment, List.of()), "SD02 " + message);
+            assertRejected(psql(db, USERS, environment), "SD01 " + message);
+            assertRejected(psql(db, COURSES, environment), "SD02 " + message);
             holder.rollback();
         }
-        assertEquals(before, snapshot(db));
+        assertSafeEquals(before, snapshot(db), "database after the rejected runs");
     }
 
-    @Test void concurrentLoadersStartedTogetherConvergeOnOneDataset() throws Exception {
-        String db = attested(freshDatabase());
+    /**
+     * Both loaders run the target guard, which takes the transaction's first snapshot, and then wait on the seed
+     * lock. Under an inherited REPEATABLE READ or SERIALIZABLE default, the second loader would keep that stale
+     * snapshot after the first commits; the seeds' explicit READ COMMITTED makes it see the committed rows.
+     */
+    @ParameterizedTest(name = "inherited {0}")
+    @ValueSource(strings = {"read committed", "repeatable read", "serializable"})
+    void concurrentLoadersConvergeWhateverTheInheritedIsolationLevel(String isolation) throws Exception {
+        String db = inheritIsolation(attested(freshDatabase()), isolation);
         var pool = Executors.newFixedThreadPool(2);
         try {
             for (var step : List.of(Map.entry(USERS, "users"), Map.entry(COURSES, "courses"))) {
-                List<Future<ExecResult>> loaders = new ArrayList<>();
+                List<Future<Run>> loaders = new ArrayList<>();
                 try (Connection holder = connect(db)) {
                     holder.setAutoCommit(false);
                     holder.createStatement().execute("LOCK TABLE public." + step.getValue() + " IN SHARE ROW EXCLUSIVE MODE");
-                    for (int i = 0; i < 2; i++) loaders.add(pool.submit(() -> psql(db, step.getKey(), seedEnvironment(), List.of())));
+                    for (int i = 0; i < 2; i++) loaders.add(pool.submit(() -> psql(db, step.getKey(), seedEnvironment())));
                     // Both loaders have verified the target and read nothing yet: they wait on the seed lock.
                     awaitWaiters(holder, step.getValue(), 2);
                     holder.rollback();
@@ -299,6 +326,58 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         }
         assertEquals(List.of("2|3|2|4|5"), rows(db, "SELECT (SELECT count(*) FROM public.users), (SELECT count(*) FROM public.courses), "
                 + "(SELECT count(*) FROM public.chapters), (SELECT count(*) FROM public.lessons), (SELECT count(*) FROM public.learning_materials)"));
+        String loaded = snapshot(db);
+        assertLoaded(db, USERS);
+        assertLoaded(db, COURSES);
+        assertSafeEquals(loaded, snapshot(db), "row values and row versions after reruns at inherited " + isolation);
+    }
+
+    @Test void failedComparisonsNeverDiscloseCredentials() {
+        String password = secret("sentinel-" + password()), hash = secret(BCRYPT.encode(password));
+        String otherHash = secret(BCRYPT.encode(password + "-other"));
+        List<String> sentinels = List.of(password, hash, otherHash);
+
+        AssertionError rows = assertThrows(AssertionError.class, () -> assertSafeEquals(
+                List.of(INSTRUCTOR + "|Instructor Demo|" + hash), List.of(INSTRUCTOR + "|Instructor Demo|" + otherHash), "seeded Users"));
+        assertNoDisclosure(rows, sentinels);
+        assertThat(rows.getMessage(), containsString("seeded Users"));
+        assertThat(rows.getMessage(), containsString(INSTRUCTOR.toString()));
+
+        // Fragments that are not registered secrets themselves: a truncated hash, a re-prefixed hash, a bare salt.
+        AssertionError fragments = assertThrows(AssertionError.class, () -> assertSafeEquals(
+                hash.substring(0, 40) + " " + hash.replace("$2b$", "$2a$"), hash.substring(7, 29) + " " + password, "fragments"));
+        assertNoDisclosure(fragments, sentinels);
+    }
+
+    @Test void failedProcessChecksNeverDiscloseCredentials() {
+        String password = secret("sentinel-" + password()), hash = secret(BCRYPT.encode(password));
+        List<String> sentinels = List.of(password, hash);
+        String leakingOutput = "psql:/seed/01-users.sql:1: ERROR:  failing row contains " + hash + " for " + password;
+
+        assertNoDisclosure(assertThrows(AssertionError.class, () -> assertSucceeded(new Run(3, "", leakingOutput))), sentinels);
+        assertNoDisclosure(assertThrows(AssertionError.class, () -> assertSucceeded(new Run(0, leakingOutput, ""))), sentinels);
+        assertNoDisclosure(assertThrows(AssertionError.class, () -> assertRejected(new Run(0, "", leakingOutput), "expected error")), sentinels);
+        assertNoDisclosure(assertThrows(AssertionError.class, () -> assertRejected(new Run(3, "", leakingOutput), "expected error")), sentinels);
+        assertNoDisclosure(assertThrows(AssertionError.class, () -> assertRejected(
+                new Run(3, "", "ERROR:  expected error\n" + leakingOutput), "expected error")), sentinels);
+        assertFalse(new Run(3, leakingOutput, leakingOutput).toString().contains(hash), "Run.toString must omit process output");
+    }
+
+    @Test void failedSnapshotComparisonsNeverDiscloseStoredHashes() throws Exception {
+        String instructorPassword = secret("sentinel-" + password()), learnerPassword = secret("sentinel-" + password());
+        String instructorHash = secret(BCRYPT.encode(instructorPassword)), learnerHash = secret(BCRYPT.encode(learnerPassword));
+        String db = attested(freshDatabase());
+        Map<String, String> environment = seedEnvironment();
+        environment.put("CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", instructorHash);
+        environment.put("CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", learnerHash);
+        assertSucceeded(psql(db, USERS, environment));
+        String before = snapshot(db);
+        assertTrue(before.contains(instructorHash) && before.contains(learnerHash), "the snapshot carries the stored hashes");
+
+        execute(db, "UPDATE public.users SET display_name = 'Changed Name' WHERE id = '" + LEARNER + "'");
+        AssertionError failure = assertThrows(AssertionError.class, () -> assertSafeEquals(before, snapshot(db), "Users snapshot"));
+        assertNoDisclosure(failure, List.of(instructorPassword, learnerPassword, instructorHash, learnerHash));
+        assertThat(failure.getMessage(), containsString("Changed Name"));
     }
 
     @Test void seededRecordsAreServedByTheAuthAndCatalogueConsumers() throws Exception {
@@ -368,31 +447,93 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
                 "CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", INSTRUCTOR_HASH, "CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", LEARNER_HASH));
     }
 
-    private static ExecResult psql(String db, String file, Map<String, String> environment, List<String> variables) throws Exception {
+    /** One psql run. {@code toString()} deliberately omits the output, which could carry credentials. */
+    record Run(int exitCode, String stdout, String stderr) {
+        @Override public String toString() { return "psql run with exit code " + exitCode; }
+    }
+
+    /** Seed inputs as environment variables; the command line carries no credential. */
+    private static Run psql(String db, String file, Map<String, String> environment) throws Exception {
         String user = environment.getOrDefault("PGUSER", POSTGRES.getUsername());
-        List<String> command = new ArrayList<>(List.of("psql", "-X", "-q", "-U", user, "-d", db));
-        command.addAll(variables);
-        command.addAll(List.of("-f", "/seed/" + file));
-        return POSTGRES.execInContainer(ExecConfig.builder().command(command.toArray(String[]::new)).envVars(environment).build());
+        String[] command = {"psql", "-X", "-q", "-U", user, "-d", db, "-f", "/seed/" + file};
+        ExecResult result = POSTGRES.execInContainer(ExecConfig.builder().command(command).envVars(environment).build());
+        return new Run(result.getExitCode(), result.getStdout(), result.getStderr());
     }
 
-    private static void assertLoaded(String db, String file) throws Exception { assertSucceeded(psql(db, file, seedEnvironment(), List.of())); }
-
-    private static void assertSucceeded(ExecResult result) {
-        assertEquals(0, result.getExitCode(), result.getStderr());
-        assertRedacted(result);
+    /**
+     * Seed inputs as psql variables. The shell expands them from neutrally named environment variables, so the
+     * values reach psql's {@code -v} options without appearing in the command that Testcontainers can log, and
+     * the seed files' own environment fallback cannot supply them instead.
+     */
+    private static Run psqlWithVariables(String db, String file) throws Exception {
+        String script = "exec psql -X -q -U \"$RUN_USER\" -d \"$RUN_DB\" -v seed_target_system_identifier=\"$RUN_TARGET\""
+                + " -v instructor_password_hash=\"$RUN_INSTRUCTOR\" -v learner_password_hash=\"$RUN_LEARNER\" -f \"/seed/$RUN_FILE\"";
+        Map<String, String> environment = Map.of("RUN_USER", POSTGRES.getUsername(), "RUN_DB", db, "RUN_FILE", file,
+                "RUN_TARGET", systemIdentifier, "RUN_INSTRUCTOR", INSTRUCTOR_HASH, "RUN_LEARNER", LEARNER_HASH);
+        ExecResult result = POSTGRES.execInContainer(ExecConfig.builder().command(new String[] {"sh", "-c", script}).envVars(environment).build());
+        return new Run(result.getExitCode(), result.getStdout(), result.getStderr());
     }
 
-    private static void assertRejected(ExecResult result, String message) {
-        assertEquals(3, result.getExitCode(), "psql must stop on the script error");
-        assertThat(result.getStderr(), containsString("ERROR:  " + message));
-        assertRedacted(result);
+    private static void assertLoaded(String db, String file) throws Exception { assertSucceeded(psql(db, file, seedEnvironment())); }
+
+    // Every failure message below is built from redacted text only, and no assertion is given raw output to print.
+
+    private static void assertSucceeded(Run run) {
+        assertRedacted(run);
+        if (run.exitCode() != 0) fail("psql exited with " + run.exitCode() + "; stderr: " + redact(run.stderr()));
     }
 
-    private static void assertRedacted(ExecResult result) {
-        String output = result.getStdout() + result.getStderr();
-        for (String secret : SECRETS) assertFalse(output.contains(secret), "seed output must not disclose credentials or hashes");
-        assertFalse(output.contains("$2b$14$" + INSTRUCTOR_HASH.substring(7, 29)), "no salt disclosure");
+    private static void assertRejected(Run run, String message) {
+        assertRedacted(run);
+        if (run.exitCode() != 3) fail("psql must stop on the script error but exited with " + run.exitCode() + "; stderr: " + redact(run.stderr()));
+        if (!run.stderr().contains("ERROR:  " + message)) fail("expected the error \"" + message + "\"; stderr: " + redact(run.stderr()));
+    }
+
+    private static void assertRedacted(Run run) {
+        if (discloses(run.stdout() + run.stderr())) fail("seed output disclosed a credential, hash or salt (output withheld)");
+    }
+
+    /** Exact comparison; on a mismatch, reports only redacted values and attaches no expected/actual objects. */
+    private static void assertSafeEquals(Object expected, Object actual, String context) {
+        if (!Objects.equals(expected, actual)) {
+            fail(context + " differs (credentials redacted)\nexpected: " + redact(String.valueOf(expected))
+                    + "\nactual:   " + redact(String.valueOf(actual)));
+        }
+    }
+
+    private static String secret(String value) {
+        SECRETS.add(value);
+        if (value.startsWith("$2")) {
+            SECRETS.add(value.substring(7, 29));
+            SECRETS.add(value.substring(29));
+        }
+        return value;
+    }
+
+    /** Masks whole BCrypt-shaped text first, so a partly registered hash cannot leave fragments behind. */
+    private static String redact(String text) {
+        String safe = BCRYPT_TEXT.matcher(text).replaceAll("<bcrypt-hash>");
+        for (String secret : SECRETS) safe = safe.replace(secret, "<redacted>");
+        return safe;
+    }
+
+    private static boolean discloses(String text) {
+        return SECRETS.stream().anyMatch(text::contains) || BCRYPT_TEXT.matcher(text).find();
+    }
+
+    /** Checks everything a test report can show for a failure: message, string form, stack trace and attached values. */
+    private static void assertNoDisclosure(AssertionError failure, List<String> sentinels) {
+        var trace = new StringWriter();
+        failure.printStackTrace(new PrintWriter(trace));
+        String rendered = failure + "\n" + trace;
+        if (failure instanceof AssertionFailedError detailed) rendered += "\n" + detailed.getExpected() + "\n" + detailed.getActual();
+        for (String sentinel : sentinels) {
+            List<String> parts = sentinel.startsWith("$2") ? List.of(sentinel, sentinel.substring(7, 29), sentinel.substring(29)) : List.of(sentinel);
+            for (String part : parts) if (rendered.contains(part)) fail("a failure diagnostic disclosed a sentinel credential (diagnostic withheld)");
+        }
+        if (BCRYPT_TEXT.matcher(rendered).find()) fail("a failure diagnostic contains BCrypt-shaped text (diagnostic withheld)");
+        assertTrue(rendered.contains("<redacted>") || rendered.contains("<bcrypt-hash>") || rendered.contains("withheld"),
+                "the diagnostic shows that redaction happened");
     }
 
     private static String freshDatabase() throws SQLException {
@@ -404,6 +545,15 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
     }
 
     private static String attested(String db) throws SQLException { attest(db, "disposable:" + systemIdentifier); return db; }
+
+    /** Sets the database default that new sessions, including psql loaders, inherit; confirms it is in effect. */
+    private static String inheritIsolation(String db, String isolation) throws Exception {
+        execute(db, "ALTER DATABASE " + db + " SET default_transaction_isolation = '" + isolation + "'");
+        ExecResult shown = POSTGRES.execInContainer("psql", "-X", "-At", "-U", POSTGRES.getUsername(), "-d", db,
+                "-c", "SHOW default_transaction_isolation");
+        assertEquals(isolation, shown.getStdout().trim(), "new sessions inherit the database default");
+        return db;
+    }
 
     private static void attest(String db, String value) throws SQLException {
         execute(db, "ALTER DATABASE " + db + " SET codemastery.seed_target = '" + value + "'");
