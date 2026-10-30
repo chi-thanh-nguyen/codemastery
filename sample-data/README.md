@@ -307,13 +307,13 @@ SQL
 
 `materials/sample-slides.pdf` is a 12-page English lesson deck, "Python
 Fundamentals — Lesson 1.1: Variable Declaration & Naming Conventions" (version
-2026.2). It covers object references, assignment syntax, identifier rules and PEP 8
+2026.3). It covers object references, assignment syntax, identifier rules and PEP 8
 naming, common mistakes, two knowledge-check questions with explained answers, and
 a debugging exercise with a suggested fix.
 
 | Property | Value |
 | --- | --- |
-| SHA-256 | `f9827139bf01b136430f727bc79773298414647df1a5ac49cb4e2e31710f381f` |
+| SHA-256 | `c4b05622b87a9b45e46563a87fba220e27c7da6a89340cd0c3f409bcadb9935d` |
 | Format | PDF 1.4, 12 pages of 960 × 540 pt, not encrypted, no forms or JavaScript; document author "CodeMastery Project Team" |
 | Fonts | Plus Jakarta Sans (SIL Open Font License 1.1) and PT Mono (ParaType Free Font License, which permits embedding in documents) |
 | Third-party content | No third-party images, logos or artwork. The deck cites PEP 8 and *The Python Language Reference* (Python Software Foundation) as references. |
@@ -333,6 +333,8 @@ Project Leader's authorization:
 - both knowledge-check answers are corrected;
 - inaccurate statements about chained assignment, reassignment and the unpacking
   error are fixed;
+- the identifier rules now state that Python 3 accepts Unicode letters, and present
+  ASCII-only names as the recommended practice;
 - an unverified instructor name and course code are replaced by "CodeMastery
   Project Team";
 - explained answers are added.

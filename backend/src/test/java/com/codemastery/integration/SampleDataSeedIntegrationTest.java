@@ -64,7 +64,7 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
     private static final Path SEED_DIR = Path.of("..", "sample-data", "seed");
     private static final Path SLIDES = Path.of("..", "sample-data", "materials", "sample-slides.pdf");
-    private static final String SLIDES_SHA256 = "f9827139bf01b136430f727bc79773298414647df1a5ac49cb4e2e31710f381f";
+    private static final String SLIDES_SHA256 = "c4b05622b87a9b45e46563a87fba220e27c7da6a89340cd0c3f409bcadb9935d";
     private static final String USERS = "01-users.sql", COURSES = "02-course-python-fundamentals.sql";
     private static final String KEY = HexFormat.of().formatHex(randomBytes(32));
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder(BCryptPasswordEncoder.BCryptVersion.$2B, 14);
