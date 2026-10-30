@@ -32,7 +32,11 @@ END;
 $sd02_input$;
 \endif
 
-BEGIN;
+-- READ COMMITTED regardless of the database default: the guard below runs the
+-- transaction's first query, so under REPEATABLE READ or SERIALIZABLE a loader
+-- that then waits on the lock would keep a snapshot taken before an earlier
+-- loader committed, and would conflict instead of skipping its rows.
+BEGIN ISOLATION LEVEL READ COMMITTED;
 
 -- Verify the target before taking any lock: the connected cluster must have the
 -- independently obtained system identifier, and this database must carry the

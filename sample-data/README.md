@@ -215,8 +215,9 @@ compose exec -T -e CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER postgres \
 ```
 
 `-e NAME` without a value passes your shell's value to the container without
-placing it on a command line. Each file runs in one transaction, prints nothing on
-success and exits with status 0. On any error psql stops with status 3 and the
+placing it on a command line. Each file runs in one READ COMMITTED transaction,
+whatever the database's default isolation level, prints nothing on success and
+exits with status 0. On any error psql stops with status 3 and the
 transaction is rolled back.
 
 The files also accept psql variables (`-v seed_target_system_identifier=...`,
