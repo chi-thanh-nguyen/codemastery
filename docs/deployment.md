@@ -1051,7 +1051,7 @@ APPROVED_PENDING_PROTECTED_INTEGRATION** for checkpoints
 **CT17.I-runtime-privileges** and **CT17.I-operation-gates** below only. Authority is
 the Project Leader @chi-thanh-nguyen's explicit **“CodeMastery — PR #110: Delegated
 Technical Authority, Contract Approval & Complete Remediation”**, effective
-28 October 2026 (ICT). It delegates to Claude Code the selection and technical
+28 October 2026 (ICT). It delegates to AI-assisted development the selection and technical
 approval of individual PostgreSQL privileges and an engineering approval matrix for
 PR #110. It withholds real VM/provider selection, expenditure, infrastructure
 ownership, production credentials and secret custody, SSH/firewall access grants,
@@ -1267,7 +1267,7 @@ PENDING_LEADER_INPUT, and runtime verification is pending.
 `docs/deployment.md` and `.github/workflows/` have the Leader as sole CODEOWNER;
 `infrastructure/` adds @tihh647-ui. The existing sole-Leader CODEOWNER/authorship
 conflict is unchanged: eligible independent human review, last-push approval,
-required checks and protected merge remain mandatory. Claude Code (Anthropic)
-performed the investigation and authored this record, the implementation and its
-tests under the delegation. No provisioning, deployment, exposure or merge was
+required checks and protected merge remain mandatory. The investigation, this
+record, the implementation and its tests were produced through AI-assisted
+development under the delegation. No provisioning, deployment, exposure or merge was
 performed or authorized.
