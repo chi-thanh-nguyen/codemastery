@@ -2003,11 +2003,23 @@ jobs:
           request /api/json
           expect "API JSON content type" "$TYPE" application/json
 
+          # Path parameters are checked on the raw request target, which is what is
+          # forwarded. Nginx normalization can drop a "..;" segment from the $uri it
+          # routes on, and can route a target that starts elsewhere into /api.
           request '/api/echo?q=a%3Bb'
           contains "an encoded ';' in the query is proxied" "$BODY" "reached uri=/api/echo?q=a%3Bb"
-          for path in '/api/..;/actuator/health' '/api/echo;jsessionid=x' '/api/echo%3Bx'; do
+          request '/api/echo?q=a;b&r=c%3bd'
+          contains "a literal ';' in the query is proxied" "$BODY" "reached uri=/api/echo?q=a;b&r=c%3bd"
+          request '/api?q=a;b'
+          contains "a ';' in the exact /api query is proxied" "$BODY" "reached uri=/api?q=a;b"
+          for path in '/api/..;/actuator/health' '/api/echo;jsessionid=x' '/api/echo%3Bx' '/api/echo%3bx' \
+                      '/api/x/..;/../actuator/health' '/api/x/%2e%2e;/../actuator/health' \
+                      '/api/x/..%3b/../actuator/health' '/api/x/..%3B/../actuator/health' \
+                      '/api/x/..;jsessionid=1/../actuator/health' '/api/x/y/..;/..;/../../actuator/health' \
+                      '/x;/../api' '/x%3B/../api/echo' '/api;/../api/echo'; do
             request "$path" --path-as-is
             expect "';' path parameter $path rejected at the ingress" "$STATUS" 400
+            expect "$path rejection is Nginx's own response" "$TYPE" text/html
             lacks "$path never reaches the backend" "$BODY" reached
           done
 
@@ -2182,12 +2194,19 @@ jobs:
             lacks "$path is not served by the backend" "$BODY" '"status"'
             lacks "$path exposes no OpenAPI document" "$BODY" '"openapi"'
           done
-          # Tomcat path parameters must not turn an /api request into a management path.
-          for path in '/api/..;/actuator/health' '/api/courses/..;/..;/actuator/health' '/api/..;/v3/api-docs'; do
+          # Tomcat path parameters must not turn an /api request into a management path,
+          # including "..;" segments that Nginx normalization removes before routing.
+          for path in '/api/..;/actuator/health' '/api/courses/..;/..;/actuator/health' '/api/..;/v3/api-docs' \
+                      '/api/x/..;/../actuator/health' '/api/x/%2e%2e;/../actuator/health' \
+                      '/api/x/..%3b/../actuator/health' '/api/x/..%3B/../v3/api-docs' \
+                      '/api/x/..;jsessionid=1/../actuator/health' '/x;/../api/courses'; do
             request GET "$path" --path-as-is
             expect "$path rejected at the ingress" "$STATUS" 400
-            lacks "$path is not a backend response" "$TYPE" problem
+            expect "$path rejection is Nginx's own response" "$TYPE" text/html
           done
+          request GET '/api/courses?page=0&size=20&q=a;b'
+          expect "a ';' in the query reaches the real catalogue" "$STATUS" 200
+          expect "query ';' keeps the catalogue representation" "$TYPE" application/json
 
           echo "== informational: deploy.sh private backend health probe (Auth-owned gate)"
           probe="$(docker exec "$prefix-frontend" wget -S -O /dev/null http://backend:8080/actuator/health 2>&1 | grep -Eo 'HTTP/[0-9.]+ [0-9]{3}' | tail -1 || true)"

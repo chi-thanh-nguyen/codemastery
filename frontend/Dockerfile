@@ -71,14 +71,21 @@ server {
     # REST: exact /api and the /api/ subtree, before any SPA fallback. With no
     # URI part, proxy_pass forwards the original path and query unchanged, and
     # backend statuses, content types and headers are passed through.
+    #
+    # Tomcat drops ";" path parameters, so "..;" acts as ".." behind this proxy.
+    # Locations match the normalized $uri, which can lose such a segment
+    # ("/api/x/..;/../actuator" becomes "/api/x/actuator"), while the raw target
+    # is what gets forwarded. So the raw path, $request_uri up to the first "?",
+    # must hold no ";" or "%3B" in any case. REST paths never contain one; the
+    # query string is not checked.
     location = /api {
+        if ($request_uri ~* "^[^?]*(;|%3b)") {
+            return 400;
+        }
         proxy_pass $backend;
     }
     location ^~ /api/ {
-        # Tomcat drops ";" path parameters, so "/api/..;/x" would resolve
-        # outside /api behind this proxy. REST paths never contain one; the
-        # query string is not checked.
-        if ($uri ~ ";") {
+        if ($request_uri ~* "^[^?]*(;|%3b)") {
             return 400;
         }
         proxy_pass $backend;

@@ -1281,8 +1281,9 @@ HTTPS Integration”**, 31 October 2026 (ICT), authorizes the repository-side HT
 integration, its tests and a pull request. This change implements already-approved
 CT17 policy (P1, P5–P8, B1–B3 and the 28 October operation gates). It approves no
 new contract and changes no VM, firewall rule, certificate, credential or Project
-record. It does not complete DP01 #71 or DP03 #72. Baseline: `main`
-`08f66fc99ed5bbe72c2a9aa76ed2edd8e528ec5d`.
+record. It does not complete DP01 #71 or DP03 #72. It was first prepared against
+`main` `08f66fc99ed5bbe72c2a9aa76ed2edd8e528ec5d`. On 31 October it was synchronized
+onto `main` `1e5553e1adb76a3551f7e82ecc6887ce19c79b49` for final review.
 
 The Leader reports these observed infrastructure inputs. They are not authority for
 public exposure, credential use or operational changes:
@@ -1352,11 +1353,19 @@ entrypoint/command. Merging alone would not remove them.
 - **Exposure.** Nothing else reaches the backend: Actuator, `/v3/api-docs` and
   Swagger paths are served by the SPA or as 404. No backend, PostgreSQL, MinIO API
   or MinIO Console host port remains.
-- **Path parameters.** An `/api/` path containing `;` is rejected with 400 at the
-  ingress. Tomcat drops `;` path parameters, so `/api/..;/actuator/health`
-  resolves outside `/api`. With the real backend, such requests currently reach
-  default-deny (401). The ingress rule keeps that true even if a private health
-  endpoint is later permitted. Query strings are unaffected.
+- **Path parameters.** Both `/api` locations reject, with Nginx's own 400 before
+  proxying, any request whose raw path contains `;` or `%3B` in any case. The raw
+  path is the request target up to its first `?`. Tomcat drops `;` path
+  parameters, so `..;` acts as `..` there. Nginx selects locations on its
+  normalized URI but forwards the raw target. The check therefore reads the raw
+  target (`$request_uri`), not the normalized `$uri`. Normalization can remove a
+  `..;` segment, for example routing `/api/x/..;/../actuator/health` as
+  `/api/x/actuator/health`. It can also route `/x;/../api` into `/api`. A check on
+  `$uri` would miss both. Today the backend also rejects `;` in request paths: such
+  requests reach only its error dispatch, which answers 401. The ingress rule keeps
+  these paths from reaching the backend even if a private health endpoint is
+  later permitted. Semicolons in the query string, literal or encoded, are
+  proxied unchanged.
 - **Forwarding (P7).** Nginx cannot remove a header family by name prefix, so a
   denylist would still pass any unlisted `X-Forwarded-*` name. The `/api` proxy
   therefore passes no client header except this allowlist: `Authorization`,
@@ -1535,6 +1544,10 @@ backend image, then exercises:
   reach the backend, while forged forwarding, routing, method-override, cookie and
   proxy-credential headers, including an unanticipated `X-Forwarded-*` name, do
   not, and cannot change the real backend's paths, methods or ProblemDetail;
+- path-parameter rejection on the raw request target: literal, `%3b` and `%3B`
+  semicolons, `;jsessionid=` segments and `..;` segments that normalization
+  removes. Each variant receives Nginx's 400 without reaching the stub or the
+  real backend. Query-string semicolons still reach both;
 - the release image's CA store against the public certificate chain below;
 - negative release builds;
 - `deploy.sh`'s Compose and image policies on the committed override;
