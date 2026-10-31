@@ -2333,15 +2333,27 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - name: Pull the digest-pinned MinIO server and client
+      - name: Pull the digest-pinned MinIO servers and client
+        id: pull
         shell: bash
         run: |
           set -euo pipefail
-          # Local-only Community pins: the server stands in for the still
-          # unqualified release server; the client is the initializer's base.
+          # Local-only Community pins: the golithus server is the local baseline;
+          # the client is the initializer's base.
           mapfile -t pins < <(sed -n 's/^    image: \(ghcr\.io\/golithus\/.*\)$/\1/p' infrastructure/docker-compose.yml)
           [[ ${#pins[@]} -eq 2 ]] || { echo "Unexpected MinIO image pins." >&2; exit 1; }
-          for ref in "${pins[@]}"; do docker pull -q --platform linux/amd64 "$ref" >/dev/null; done
-      - name: Build the initializer image and run it against disposable MinIO servers
+          # The Chainguard release-server candidate, pinned by digest in the suite.
+          mapfile -t candidate < <(sed -n "s/^CHAINGUARD_SERVER_IMAGE='\(cgr\.dev\/chainguard\/minio@sha256:[0-9a-f]\{64\}\)'$/\1/p" infrastructure/minio/test-minio-init.sh)
+          [[ ${#candidate[@]} -eq 1 ]] || { echo "Unexpected Chainguard MinIO pin." >&2; exit 1; }
+          for ref in "${pins[@]}" "${candidate[@]}"; do docker pull -q --platform linux/amd64 "$ref" >/dev/null; done
+      # One job keeps the required check name; both servers run the same suite.
+      - name: Build the initializer image and run it against disposable golithus MinIO servers
         shell: bash
+        run: infrastructure/minio/test-minio-init.sh
+      - name: Run the same suite against disposable Chainguard MinIO candidate servers
+        # Also reported when the golithus run fails; the job still fails.
+        if: ${{ !cancelled() && steps.pull.outcome == 'success' }}
+        shell: bash
+        env:
+          MINIO_INIT_TEST_SERVER: chainguard
         run: infrastructure/minio/test-minio-init.sh

@@ -356,7 +356,7 @@ and eight independent jobs on `ubuntu-24.04`:
 | VM runtime privileges with the real backend (`deployment-script-runtime`) | Builds the backend image and exercises real Auth, catalogue and membership under the approved privilege matrix |
 | VM deployment containerd image store (`deployment-script-containerd`) | Release-archive verification through real `docker save`/`load` round trips with the containerd image store |
 | VM HTTPS ingress (`deployment-ingress`) | Builds the release and local frontend images; exercises the HTTPS ingress against a stub and the real backend; runs `deploy.sh preflight` with the committed override |
-| VM MinIO initializer qualification (`minio-initializer`) | Pulls the digest-pinned MinIO server and `mc` images, builds `infrastructure/minio` for linux/amd64 and runs `infrastructure/minio/test-minio-init.sh` against disposable MinIO servers and the effective VM Compose model ([record](deployment.md#dp01-minio-community-initializer--31-october-2026)) |
+| VM MinIO initializer qualification (`minio-initializer`) | Pulls the digest-pinned Golithus server, `mc` and Chainguard candidate server images, builds `infrastructure/minio` for linux/amd64 and runs `infrastructure/minio/test-minio-init.sh` against disposable MinIO servers and the effective VM Compose model, first with the Golithus server and then with `MINIO_INIT_TEST_SERVER=chainguard` ([record](deployment.md#dp01-minio-community-initializer--31-october-2026), [candidate](deployment.md#dp01-chainguard-minio-release-server-candidate--1-november-2026)) |
 
 The Java setup enables Maven caching using `backend/pom.xml` and
 `backend/.mvn/wrapper/maven-wrapper.properties` as dependency inputs. The Node
@@ -365,8 +365,9 @@ replace installation or validation. CodeQL code scanning runs separately through
 GitHub's default setup, with no workflow file in this repository.
 
 The `main-quality-gates` repository ruleset requires `CodeQL` and every job above
-except “VM MinIO initializer qualification” to pass before merging into `main`
-(as read from the GitHub API on 1 November 2026). The VM jobs run only on the
+to pass before merging into `main`. A later read of the GitHub API on 1 November
+2026 lists “VM MinIO initializer qualification” as required too; an earlier read
+that day did not. That job therefore keeps its single check name. The VM jobs run only on the
 CI runner: they deploy nothing and do not reach the real VM. No job starts the
 full local Compose stack. The VM jobs start their containers with `docker run`;
 only the MinIO initializer job uses Compose, starting just the `minio` and
