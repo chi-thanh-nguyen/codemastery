@@ -1633,3 +1633,517 @@ jobs:
             done
             echo "Wrong identities, store kind, swapped mapping, missing amd64 manifest and altered referrers are rejected."
           ' _ "$script" "$work" "${refs[@]}"
+
+  deployment-ingress:
+    name: VM HTTPS ingress
+    runs-on: ubuntu-24.04
+    env:
+      FRONTEND_RELEASE_IMAGE: codemastery-ci/frontend:release
+      FRONTEND_LOCAL_IMAGE: codemastery-ci/frontend:local
+      BACKEND_IMAGE: codemastery-ci/backend:ingress-test
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the release and local images; reject invalid release origins
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -q --target release --build-arg PUBLIC_ORIGIN=https://ingress.codemastery.test \
+            -t "$FRONTEND_RELEASE_IMAGE" frontend >/dev/null
+          docker build -q -t "$FRONTEND_LOCAL_IMAGE" frontend >/dev/null
+          docker build -q -t "$BACKEND_IMAGE" backend >/dev/null
+          docker image inspect --format 'release frontend: user {{.Config.User}}, healthcheck {{json .Config.Healthcheck.Test}}' \
+            "$FRONTEND_RELEASE_IMAGE"
+          # The release target fails closed without exactly one valid public origin.
+          reject_origin() {  # expected-message [build args...]
+            local want="$1" output; shift
+            if output="$(docker build --progress=plain --target release "$@" frontend 2>&1)"; then
+              echo "Release build accepted: ${*:-no PUBLIC_ORIGIN}" >&2; exit 1
+            fi
+            # Match the step's output line, not the echoed RUN text.
+            printf '%s\n' "$output" | grep -E '^#[0-9]+ [0-9.]+ PUBLIC_ORIGIN must' | grep -qF "$want" \
+              || { echo "Unexpected failure for ${*:-no PUBLIC_ORIGIN}:" >&2; printf '%s\n' "$output" | tail -5 >&2; exit 1; }
+            echo "rejected: ${*:-no PUBLIC_ORIGIN}"
+          }
+          reject_origin 'bare https://hostname'
+          for origin in http://ingress.codemastery.test https://ingress.codemastery.test/ \
+                        https://ingress.codemastery.test:8443 'https://*.codemastery.test' https://Ingress.codemastery.test; do
+            reject_origin 'bare https://hostname' --build-arg PUBLIC_ORIGIN="$origin"
+          done
+          reject_origin 'not an IP address' --build-arg PUBLIC_ORIGIN=https://203.0.113.10
+          reject_origin 'must not be localhost' --build-arg PUBLIC_ORIGIN=https://localhost.codemastery.test
+      - name: Exercise the HTTPS ingress against a stub backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The frontend release image's HTTPS ingress against a stub backend.
+          fe_image="$FRONTEND_RELEASE_IMAGE"; local_image="$FRONTEND_LOCAL_IMAGE"
+          host=ingress.codemastery.test
+          work="$(mktemp -d)"
+          prefix="codemastery-ingress-${GITHUB_RUN_ID:-local}-$$"
+          net="$prefix-net"
+          cleanup() {
+            docker rm -f "$prefix-backend" "$prefix-frontend" "$prefix-wronghost" "$prefix-local" >/dev/null 2>&1 || true
+            docker network rm "$net" >/dev/null 2>&1 || true
+            if [[ "$(uname -s)" == Linux ]]; then sudo rm -rf "$work"; else rm -rf "$work"; fi
+          }
+          trap cleanup EXIT
+
+          # Synthetic PKI shaped like the real one: root -> intermediate -> ECDSA P-256
+          # leaf; fullchain = leaf + intermediate; "EC PRIVATE KEY" as written by acme.sh.
+          pki="$work/pki"; mkdir -p "$pki"
+          openssl ecparam -name prime256v1 -genkey -noout -out "$pki/root.key"
+          openssl req -x509 -new -key "$pki/root.key" -sha256 -days 2 -subj '/CN=CodeMastery CI root' \
+            -addext 'basicConstraints=critical,CA:true' -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+            -out "$pki/root.pem" 2>/dev/null
+          openssl ecparam -name prime256v1 -genkey -noout -out "$pki/int.key"
+          openssl req -new -key "$pki/int.key" -subj '/CN=CodeMastery CI intermediate' -out "$pki/int.csr" 2>/dev/null
+          printf 'basicConstraints=critical,CA:true,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n' > "$pki/int.ext"
+          openssl x509 -req -in "$pki/int.csr" -CA "$pki/root.pem" -CAkey "$pki/root.key" -CAcreateserial \
+            -days 2 -sha256 -extfile "$pki/int.ext" -out "$pki/int.pem" 2>/dev/null
+          issue() {  # directory hostname: a serving directory laid out like /etc/codemastery/tls
+            local dir="$1" name="$2"
+            mkdir -m 700 "$dir"
+            openssl ecparam -name prime256v1 -genkey -noout -out "$dir/privkey.pem"
+            openssl req -new -key "$dir/privkey.pem" -subj "/CN=$name" -out "$pki/$name.csr" 2>/dev/null
+            printf 'subjectAltName=DNS:%s\nbasicConstraints=CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n' \
+              "$name" > "$pki/$name.ext"
+            openssl x509 -req -in "$pki/$name.csr" -CA "$pki/int.pem" -CAkey "$pki/int.key" -CAcreateserial \
+              -days 2 -sha256 -extfile "$pki/$name.ext" -out "$pki/$name.pem" 2>/dev/null
+            cat "$pki/$name.pem" "$pki/int.pem" > "$dir/fullchain.pem"
+            chmod 644 "$dir/fullchain.pem"; chmod 400 "$dir/privkey.pem"
+            # Real layout: directory and key owned by the Nginx UID 101, chain by root.
+            if [[ "$(uname -s)" == Linux ]]; then
+              sudo chown 0:0 "$dir/fullchain.pem"; sudo chown 101:101 "$dir" "$dir/privkey.pem"
+            fi
+          }
+          issue "$work/tls" "$host"
+          issue "$work/tls-wrong" other.codemastery.test
+          mkdir -p "$work/trust"; cp "$pki/root.pem" "$work/trust/root.pem"; chmod 644 "$work/trust/root.pem"
+
+          # Stub backend: echoes what reaches it and returns fixed API outcomes.
+          mkdir -p "$work/stub"
+          cat > "$work/stub/default.conf" <<'NGINX'
+          server {
+              listen 8080;
+              default_type text/plain;
+              location = /api { return 200 "reached uri=$request_uri\n"; }
+              location /api/echo {
+                  return 200 "reached uri=$request_uri method=$request_method host=$http_host auth=$http_authorization origin=$http_origin forwarded=$http_forwarded xff=$http_x_forwarded_for xfh=$http_x_forwarded_host xfproto=$http_x_forwarded_proto xfport=$http_x_forwarded_port xfprefix=$http_x_forwarded_prefix xfserver=$http_x_forwarded_server xfssl=$http_x_forwarded_ssl xrealip=$http_x_real_ip end\n";
+              }
+              location = /api/problem-401 {
+                  default_type application/problem+json;
+                  add_header WWW-Authenticate 'Bearer' always;
+                  add_header Cache-Control 'no-store' always;
+                  return 401 '{"type":"about:blank","status":401}';
+              }
+              location = /api/problem-404 { default_type application/problem+json; return 404 '{"type":"about:blank","status":404}'; }
+              location = /api/server-error { default_type application/problem+json; return 500 '{"type":"about:blank","status":500}'; }
+              location = /api/json { default_type application/json; return 200 '{"ok":true}'; }
+              location / { return 200 "reached backend-non-api uri=$request_uri\n"; }
+          }
+          NGINX
+          chmod 755 "$work/stub"; chmod 644 "$work/stub/default.conf"
+
+          docker network create "$net" >/dev/null
+          start_stub() {
+            docker run -d --name "$prefix-backend" --network "$net" --network-alias backend \
+              -v "$work/stub/default.conf:/etc/nginx/conf.d/default.conf:ro" "$local_image" >/dev/null
+          }
+          start_stub
+          # The release image exactly as deploy.sh runs it: no command, entrypoint or
+          # environment override; read-only directory bind. Only the test trust anchor is
+          # added, through curl's CA-bundle variable, because the PKI is synthetic.
+          docker run -d --name "$prefix-frontend" --network "$net" --network-alias "$host" \
+            -v "$work/tls:/etc/nginx/tls:ro" -v "$work/trust:/trust:ro" -e CURL_CA_BUNDLE=/trust/root.pem \
+            "$fe_image" >/dev/null
+
+          fail() { echo "FAIL: $*" >&2; docker logs "$prefix-frontend" 2>&1 | tail -20 >&2; exit 1; }
+          pass() { printf '  ok: %s\n' "$*"; }
+          client() {  # curl from a separate container of the same image on the private network
+            docker run --rm --network "$net" -v "$work/trust:/trust:ro" --entrypoint curl "$fe_image" \
+              --silent --show-error --cacert /trust/root.pem "$@"
+          }
+          request() {  # path [curl args...] -> STATUS, TYPE, BODY, HEADERS
+            local path="$1" out; shift
+            out="$(client --dump-header - --write-out '\n%{http_code} %{content_type}' "$@" "https://$host:8080$path" 2>&1)" \
+              || fail "request $path failed: $out"
+            STATUS="$(printf '%s\n' "$out" | tail -1 | cut -d' ' -f1)"
+            TYPE="$(printf '%s\n' "$out" | tail -1 | cut -d' ' -f2- | cut -d';' -f1)"
+            HEADERS="$(printf '%s\n' "$out" | tr -d '\r' | sed -n '1,/^$/p')"
+            BODY="$(printf '%s\n' "$out" | tr -d '\r' | sed '1,/^$/d' | sed '$d')"
+          }
+          expect() { [[ "$2" == "$3" ]] || fail "$1: expected '$3', got '$2'"; pass "$1 ($2)"; }
+          contains() { [[ "$2" == *"$3"* ]] || fail "$1: '$3' not found in: $2"; pass "$1"; }
+          lacks() { [[ "$2" != *"$3"* ]] || fail "$1: unexpected '$3' in: $2"; pass "$1"; }
+          spa_marker='<div id="root">'
+
+          echo "== image configuration and startup"
+          docker exec "$prefix-frontend" nginx -t >/dev/null 2>&1 || fail "nginx -t"
+          pass "nginx -t with the mounted serving directory"
+          health=""
+          for _ in $(seq 1 60); do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "$prefix-frontend")"
+            [[ "$health" == starting ]] || break
+            sleep 1
+          done
+          expect "baked HTTPS healthcheck with a trusted chain" "$health" healthy
+          docker exec -e CURL_CA_BUNDLE= "$prefix-frontend" /usr/local/bin/codemastery-https-healthcheck >/dev/null 2>&1 \
+            && fail "healthcheck accepted a certificate outside the image CA store"
+          pass "healthcheck rejects an untrusted chain (image CA store only)"
+          docker run -d --name "$prefix-wronghost" --network "$net" \
+            -v "$work/tls-wrong:/etc/nginx/tls:ro" -v "$work/trust:/trust:ro" -e CURL_CA_BUNDLE=/trust/root.pem \
+            "$fe_image" >/dev/null
+          sleep 2
+          docker exec "$prefix-wronghost" /usr/local/bin/codemastery-https-healthcheck >/dev/null 2>&1 \
+            && fail "healthcheck accepted a trusted certificate for another hostname"
+          pass "healthcheck rejects a trusted certificate for another hostname"
+          docker rm -f "$prefix-wronghost" >/dev/null
+
+          echo "== TLS listener: protocols, SNI and Host"
+          for version in 1.2 1.3; do
+            request / --tlsv"$version" --tls-max "$version"
+            expect "TLS $version handshake and SPA response" "$STATUS" 200
+          done
+          out="$(client --tlsv1.1 --tls-max 1.1 --ciphers 'DEFAULT:@SECLEVEL=0' -o /dev/null "https://$host:8080/" 2>&1 || true)"
+          contains "TLS 1.1 refused by the server" "$out" "alert protocol version"
+          out="$(client -o /dev/null "https://$(docker inspect --format "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" "$prefix-frontend"):8080/" 2>&1 || true)"
+          contains "no SNI (IP address): handshake refused" "$out" "unrecognized name"
+          out="$(client -o /dev/null --resolve "other.codemastery.test:8080:$(docker inspect --format "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" "$prefix-frontend")" \
+            https://other.codemastery.test:8080/ 2>&1 || true)"
+          contains "unexpected SNI: handshake refused" "$out" "unrecognized name"
+          request /api/echo -H 'Host: evil.example'
+          expect "unexpected Host after a valid handshake" "$STATUS" 421
+          lacks "unexpected Host never reaches the backend" "$BODY" reached
+          request / -H 'Host: 203.0.113.10'
+          expect "IP-literal Host" "$STATUS" 421
+          out="$(client -o - --write-out ' %{http_code}' "http://$host:8080/api/echo" 2>&1 || true)"
+          contains "plaintext HTTP on the TLS port is rejected" "$out" " 400"
+          lacks "plaintext HTTP never reaches the backend" "$out" reached
+
+          echo "== SPA and static files"
+          request /
+          expect "/ status" "$STATUS" 200; expect "/ content type" "$TYPE" text/html; contains "/ is the SPA shell" "$BODY" "$spa_marker"
+          request /courses/3f1d2c4b-0000-4000-8000-000000000001
+          expect "client deep link" "$STATUS" 200; contains "deep link loads the SPA" "$BODY" "$spa_marker"
+          request /profile
+          expect "nested client route" "$STATUS" 200
+          request /assets/does-not-exist.js
+          expect "missing build asset" "$STATUS" 404; lacks "missing asset is not the SPA" "$BODY" "$spa_marker"
+          request /missing-image.png
+          expect "missing root static file" "$STATUS" 404
+          request /favicon.svg
+          expect "existing public file" "$STATUS" 200
+          asset="$(docker exec "$prefix-frontend" sh -c 'ls /usr/share/nginx/html/assets | head -1')"
+          request "/assets/$asset"
+          expect "existing build asset" "$STATUS" 200
+
+          echo "== /api proxy: prefix, query, statuses, content types and headers"
+          request '/api'
+          expect "exact /api" "$STATUS" 200; expect "exact /api forwarded unchanged" "$BODY" "reached uri=/api"
+          request '/api?probe=1'
+          expect "exact /api with query" "$BODY" "reached uri=/api?probe=1"
+          request '/api/echo/a%2Fb?q=caf%C3%A9&page=0&size=20&prerequisites=any'
+          contains "/api/ prefix and raw query preserved" "$BODY" "reached uri=/api/echo/a%2Fb?q=caf%C3%A9&page=0&size=20&prerequisites=any"
+          request /api/echo -X POST -H 'Authorization: Bearer test-token' -H "Origin: https://$host" \
+            -H 'Forwarded: for=198.51.100.7;proto=http;host=evil.example' -H 'X-Forwarded-For: 198.51.100.7' \
+            -H 'X-Forwarded-Host: evil.example' -H 'X-Forwarded-Proto: http' -H 'X-Forwarded-Port: 80' \
+            -H 'X-Forwarded-Prefix: /evil' -H 'X-Forwarded-Server: evil' -H 'X-Forwarded-Ssl: off' -H 'X-Real-IP: 198.51.100.7'
+          contains "method preserved" "$BODY" "method=POST"
+          contains "Authorization forwarded to the private backend" "$BODY" "auth=Bearer test-token"
+          contains "Origin forwarded for backend CORS" "$BODY" "origin=https://$host"
+          contains "Host to the backend is the private upstream" "$BODY" "host=backend:8080"
+          for header in forwarded xff xfh xfproto xfport xfprefix xfserver xfssl xrealip; do
+            contains "caller-supplied $header dropped" "$BODY" " $header= "
+          done
+          request /api/problem-401
+          expect "API 401 status" "$STATUS" 401; expect "API 401 content type" "$TYPE" application/problem+json
+          contains "WWW-Authenticate preserved" "$HEADERS" "WWW-Authenticate: Bearer"
+          contains "Cache-Control preserved" "$HEADERS" "Cache-Control: no-store"
+          request /api/problem-404
+          expect "API 404 status" "$STATUS" 404; expect "API 404 content type" "$TYPE" application/problem+json
+          lacks "API 404 is not the SPA" "$BODY" "$spa_marker"
+          request /api/server-error
+          expect "API 500 status" "$STATUS" 500; lacks "API 500 is not the SPA" "$BODY" "$spa_marker"
+          request /api/json
+          expect "API JSON content type" "$TYPE" application/json
+
+          request '/api/echo?q=a%3Bb'
+          contains "an encoded ';' in the query is proxied" "$BODY" "reached uri=/api/echo?q=a%3Bb"
+          for path in '/api/..;/actuator/health' '/api/echo;jsessionid=x' '/api/echo%3Bx'; do
+            request "$path" --path-as-is
+            expect "';' path parameter $path rejected at the ingress" "$STATUS" 400
+            lacks "$path never reaches the backend" "$BODY" reached
+          done
+
+          echo "== private backend surfaces are not proxied"
+          for path in /actuator/health /actuator/info /actuator/metrics /v3/api-docs /swagger-ui/index.html /swagger-ui.html /apiextra; do
+            request "$path"
+            lacks "$path does not reach the backend" "$BODY" reached
+          done
+
+          echo "== upstream failure stays an HTTP failure; recovery without ingress restart"
+          docker rm -f "$prefix-backend" >/dev/null
+          request /api/echo
+          expect "backend unavailable" "$STATUS" 502; lacks "502 is not the SPA" "$BODY" "$spa_marker"
+          start_stub
+          for _ in $(seq 1 30); do request /api/echo; [[ "$STATUS" == 200 ]] && break; sleep 1; done
+          expect "backend recreated: proxied again without restarting the ingress" "$STATUS" 200
+
+          echo "== local development image (default target) is unchanged"
+          docker run -d --name "$prefix-local" --network "$net" "$local_image" >/dev/null
+          sleep 1
+          out="$(docker run --rm --network "$net" --entrypoint curl "$fe_image" -s -o /dev/null -w '%{http_code}' "http://$prefix-local:8080/courses/x")"
+          expect "local image serves the SPA over plain HTTP on 8080" "$out" 200
+          out="$(docker run --rm --network "$net" --entrypoint curl "$fe_image" -s -o /dev/null -w '%{http_code}' "http://$prefix-local:8080/assets/missing.js")"
+          expect "local image missing asset" "$out" 404
+          expect "local image has no baked healthcheck (Compose supplies the HTTP probe)" \
+            "$(docker image inspect --format '{{json .Config.Healthcheck}}' "$local_image")" null
+          echo "INGRESS_STUB_TESTS_PASS"
+      - name: Exercise the HTTPS ingress with the real backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The real backend behind the HTTPS ingress: same-origin browser semantics,
+          # exact-origin CORS, ProblemDetail paths and Auth headers through the proxy.
+          # Database privilege separation is exercised by the runtime-privilege job.
+          fe_image="$FRONTEND_RELEASE_IMAGE"; be_image="$BACKEND_IMAGE"
+          host=ingress.codemastery.test
+          origin="https://$host"
+          work="$(mktemp -d)"
+          prefix="codemastery-ingress-be-${GITHUB_RUN_ID:-local}-$$"
+          net="$prefix-net"
+          cleanup() {
+            docker rm -f "$prefix-postgres" "$prefix-backend" "$prefix-frontend" >/dev/null 2>&1 || true
+            docker network rm "$net" >/dev/null 2>&1 || true
+            if [[ "$(uname -s)" == Linux ]]; then sudo rm -rf "$work"; else rm -rf "$work"; fi
+          }
+          trap cleanup EXIT
+          chmod 700 "$work"
+
+          pki="$work/pki"; tls="$work/tls"; mkdir -p "$pki" "$work/trust"; mkdir -m 700 "$tls"
+          openssl ecparam -name prime256v1 -genkey -noout -out "$pki/root.key"
+          openssl req -x509 -new -key "$pki/root.key" -sha256 -days 2 -subj '/CN=CodeMastery CI root' \
+            -addext 'basicConstraints=critical,CA:true' -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+            -out "$work/trust/root.pem" 2>/dev/null
+          openssl ecparam -name prime256v1 -genkey -noout -out "$tls/privkey.pem"
+          openssl req -new -key "$tls/privkey.pem" -subj "/CN=$host" -out "$pki/leaf.csr" 2>/dev/null
+          printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\n' "$host" > "$pki/leaf.ext"
+          openssl x509 -req -in "$pki/leaf.csr" -CA "$work/trust/root.pem" -CAkey "$pki/root.key" -CAcreateserial \
+            -days 2 -sha256 -extfile "$pki/leaf.ext" -out "$tls/fullchain.pem" 2>/dev/null
+          chmod 644 "$tls/fullchain.pem" "$work/trust/root.pem"; chmod 755 "$work/trust"; chmod 400 "$tls/privkey.pem"
+          if [[ "$(uname -s)" == Linux ]]; then
+            sudo chown 0:0 "$tls/fullchain.pem"; sudo chown 101:101 "$tls" "$tls/privkey.pem"
+          fi
+
+          password="$(openssl rand -hex 16)"
+          { printf 'DB_HOST=postgres\nDB_PORT=5432\nDB_NAME=codemastery\nDB_USER=cm_ci\nDB_PASSWORD=%s\n' "$password"
+            printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=%s\n' "$(openssl rand -hex 32)" "$origin"
+            printf 'SPRING_PROFILES_ACTIVE=prod\nSERVER_FORWARD_HEADERS_STRATEGY=NONE\n'
+            printf 'STORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\n'
+          } > "$work/backend.env"
+          chmod 600 "$work/backend.env"
+
+          docker network create "$net" >/dev/null
+          docker run -d --name "$prefix-postgres" --network "$net" --network-alias postgres \
+            --tmpfs /var/lib/postgresql/data:rw,size=256m \
+            -e POSTGRES_DB=codemastery -e POSTGRES_USER=cm_ci -e POSTGRES_PASSWORD="$password" \
+            postgres:17.11-bookworm >/dev/null
+          for _ in $(seq 1 60); do
+            docker exec "$prefix-postgres" pg_isready -U cm_ci -d codemastery >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker run -d --name "$prefix-backend" --network "$net" --network-alias backend \
+            --env-file "$work/backend.env" "$be_image" >/dev/null
+          docker run -d --name "$prefix-frontend" --network "$net" --network-alias "$host" \
+            -v "$tls:/etc/nginx/tls:ro" "$fe_image" >/dev/null
+          for _ in $(seq 1 180); do
+            docker logs "$prefix-backend" 2>&1 | grep -q 'Started CodeMasteryApplication' && break
+            [[ "$(docker inspect -f '{{.State.Running}}' "$prefix-backend")" == true ]] \
+              || { docker logs "$prefix-backend" 2>&1 | tail -30 >&2; echo "backend exited" >&2; exit 1; }
+            sleep 1
+          done
+          docker logs "$prefix-backend" 2>&1 | grep -q 'Started CodeMasteryApplication' || { echo "backend did not start" >&2; exit 1; }
+
+          fail() { echo "FAIL: $*" >&2; docker logs "$prefix-backend" 2>&1 | tail -15 >&2; exit 1; }
+          pass() { printf '  ok: %s\n' "$*"; }
+          request() {  # method path [curl args...] -> STATUS TYPE HEADERS BODY
+            local method="$1" path="$2" out; shift 2
+            out="$(docker run --rm --network "$net" -v "$work/trust:/trust:ro" --entrypoint curl "$fe_image" \
+              --silent --show-error --cacert /trust/root.pem --dump-header - \
+              --write-out '\n%{http_code} %{content_type}' -X "$method" "$@" "$origin:8080$path" 2>&1)" \
+              || fail "request $method $path failed: $out"
+            STATUS="$(printf '%s\n' "$out" | tail -1 | cut -d' ' -f1)"
+            TYPE="$(printf '%s\n' "$out" | tail -1 | cut -d' ' -f2- | cut -d';' -f1)"
+            HEADERS="$(printf '%s\n' "$out" | tr -d '\r' | sed -n '1,/^$/p')"
+            BODY="$(printf '%s\n' "$out" | tr -d '\r' | sed '1,/^$/d' | sed '$d')"
+          }
+          expect() { [[ "$2" == "$3" ]] || fail "$1: expected '$3', got '$2'"; pass "$1 ($2)"; }
+          contains() { [[ "$2" == *"$3"* ]] || fail "$1: '$3' not found in: $2"; pass "$1"; }
+          lacks() { [[ "$2" != *"$3"* ]] || fail "$1: unexpected '$3' in: $2"; pass "$1"; }
+          json='Content-Type: application/json'
+          credentials='{"email":"ingress.learner@example.test","password":"Correct-Horse-Battery-2026"}'
+
+          echo "== same-origin browser writes carry Origin; CORS is bound to the exact HTTPS origin"
+          request POST /api/auth/register -H "$json" -H "Origin: $origin" \
+            --data '{"email":"ingress.learner@example.test","password":"Correct-Horse-Battery-2026","displayName":"Ingress Learner"}'
+          expect "register through the ingress (approved Origin)" "$STATUS" 201
+          request POST /api/auth/register -H "$json" -H 'Origin: https://evil.example' \
+            --data '{"email":"other.learner@example.test","password":"Correct-Horse-Battery-2026","displayName":"Other"}'
+          expect "register from a foreign Origin is refused by backend CORS" "$STATUS" 403
+          request POST /api/auth/login -H "$json" -H "Origin: $origin" --data "$credentials"
+          expect "login through the ingress" "$STATUS" 200
+          expect "login content type" "$TYPE" application/json
+          contains "login Cache-Control preserved" "$HEADERS" "Cache-Control: no-store"
+          token="$(printf '%s' "$BODY" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
+          [[ -n "$token" ]] || fail "no access token in the login response"
+          pass "bearer token issued"
+
+          echo "== REST through the ingress keeps the /api prefix in paths and ProblemDetail"
+          request GET '/api/courses?page=0&size=20'
+          expect "public catalogue" "$STATUS" 200; expect "catalogue content type" "$TYPE" application/json
+          missing=3f1d2c4b-0000-4000-8000-0000000000ff
+          request GET "/api/courses/$missing"
+          expect "missing Course" "$STATUS" 404; expect "missing Course content type" "$TYPE" application/problem+json
+          contains "ProblemDetail instance is the original /api path" "$BODY" "\"instance\":\"/api/courses/$missing\""
+          request GET /api/me/courses
+          expect "protected route without a token" "$STATUS" 401
+          expect "401 content type" "$TYPE" application/problem+json
+          contains "WWW-Authenticate preserved" "$HEADERS" "WWW-Authenticate: Bearer"
+          request GET /api/me/courses -H "Authorization: Bearer $token"
+          expect "protected route with the bearer token" "$STATUS" 200
+          request GET /api/not-an-endpoint
+          expect "unknown API path stays a backend failure" "$STATUS" 401
+          lacks "unknown API path is not the SPA" "$BODY" '<div id="root">'
+
+          echo "== management and API documentation are not reachable through the ingress"
+          for path in /actuator/health /actuator/metrics /v3/api-docs; do
+            request GET "$path"
+            lacks "$path is not served by the backend" "$BODY" '"status"'
+            lacks "$path exposes no OpenAPI document" "$BODY" '"openapi"'
+          done
+          # Tomcat path parameters must not turn an /api request into a management path.
+          for path in '/api/..;/actuator/health' '/api/courses/..;/..;/actuator/health' '/api/..;/v3/api-docs'; do
+            request GET "$path" --path-as-is
+            expect "$path rejected at the ingress" "$STATUS" 400
+            lacks "$path is not a backend response" "$TYPE" problem
+          done
+
+          echo "== informational: deploy.sh private backend health probe (Auth-owned gate)"
+          probe="$(docker exec "$prefix-frontend" wget -S -O /dev/null http://backend:8080/actuator/health 2>&1 | grep -Eo 'HTTP/[0-9.]+ [0-9]{3}' | tail -1 || true)"
+          echo "  private /actuator/health from the frontend container: ${probe:-no response}"
+          echo "INGRESS_BACKEND_TESTS_PASS"
+      - name: Run DP01 preflight with the committed override and certificate layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          # DP01 preflight with the committed override on a disposable Ubuntu 24.04 host.
+          # It recreates the reported certificate layout with synthetic material:
+          # /etc/codemastery root 0700, tls/ UID 101 0700, privkey UID 101 0400,
+          # fullchain root 0644. Not a VM preflight and not a release.
+          script="$PWD/infrastructure/vm/deploy.sh"
+          override="$PWD/infrastructure/vm/docker-compose.vm.yml"
+          origin=https://ingress.codemastery.test
+          tls=/etc/codemastery/tls
+          root_env_dir=/root/codemastery-preflight-ci
+          [[ ! -e /etc/codemastery ]] || { echo "/etc/codemastery already exists; refusing to modify it." >&2; exit 1; }
+          work="$(mktemp -d)"
+          cleanup() { sudo rm -rf /etc/codemastery "$root_env_dir" "$work"; }
+          trap cleanup EXIT
+          chmod 700 "$work"
+
+          openssl ecparam -name prime256v1 -genkey -noout -out "$work/privkey.pem"
+          openssl req -x509 -new -key "$work/privkey.pem" -sha256 -days 1 -subj "/CN=${origin#https://}" \
+            -addext "subjectAltName=DNS:${origin#https://}" -out "$work/fullchain.pem" 2>/dev/null
+          sudo install -d -m 700 -o root -g root /etc/codemastery
+          sudo install -d -m 700 -o 101 -g 101 "$tls"
+          sudo install -m 400 -o 101 -g 101 "$work/privkey.pem" "$tls/privkey.pem"
+          sudo install -m 644 -o root -g root "$work/fullchain.pem" "$tls/fullchain.pem"
+          rm "$work/privkey.pem"
+
+          secret() { openssl rand -hex 16; }
+          cat > "$work/env" <<EOF
+          POSTGRES_DB=codemastery
+          POSTGRES_USER=cm_bootstrap
+          POSTGRES_PASSWORD=$(secret)
+          DB_NAME=codemastery
+          DB_USER=cm_runtime
+          DB_PASSWORD=$(secret)
+          SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
+          SPRING_FLYWAY_USER=cm_migrator
+          SPRING_FLYWAY_PASSWORD=$(secret)
+          MINIO_ROOT_USER=ci-root
+          MINIO_ROOT_PASSWORD=$(secret)
+          STORAGE_ACCESS_KEY=ci-app
+          STORAGE_SECRET_KEY=$(secret)
+          JWT_SECRET=$(openssl rand -hex 32)
+          CORS_ALLOWED_ORIGINS=$origin
+          EOF
+          # Non-root operator custody: user-owned 0600 file in a user-owned 0700 directory.
+          mkdir -m 700 "$work/operator"; install -m 600 "$work/env" "$work/operator/.env"
+          # Root custody: root-owned 0600 file in a root-owned 0700 directory.
+          sudo install -d -m 700 -o root -g root "$root_env_dir"
+          sudo install -m 600 -o root -g root "$work/env" "$root_env_dir/.env"
+          rm "$work/env"
+
+          run() {  # expected-fragment label [sudo]: preflight must print the fragment
+            local want="$1" label="$2" output runner=(); shift 2
+            [[ "${1:-}" != sudo ]] || { runner=(sudo); shift; }
+            local env="$work/operator/.env"
+            [[ ${#runner[@]} -eq 0 ]] || env="$root_env_dir/.env"
+            output="$("${runner[@]}" bash "$script" preflight --env-file "$env" --origin "$origin" \
+              --compose-override "$override" "$@" 2>&1 || true)"
+            [[ "$output" == *"$want"* ]] || { echo "Preflight case '$label' expected '$want'; received:" >&2; printf '%s\n' "$output" >&2; exit 1; }
+            echo "ok: $label"
+          }
+
+          docker info >/dev/null 2>&1 || { echo "This check needs Docker access for the non-root user." >&2; exit 1; }
+          # Even with Docker access, a non-root operator cannot traverse the root-only
+          # /etc/codemastery parent, so the certificate checks cannot pass.
+          run 'frontend certificate directory must be owner-restricted' 'non-root operator with Docker access'
+          run 'PREFLIGHT OK' 'root operator with root-custody env file (committed override)' sudo
+
+          # The mounted directory must keep exactly the serving pair (renewal constraint).
+          sudo install -m 400 -o 101 -g 101 /dev/null "$tls/privkey.pem.bak"
+          sudo sh -c "cat '$tls/privkey.pem' > '$tls/privkey.pem.bak'"
+          run 'exactly one certificate matching its single private key' 'backup key left in the mounted directory' sudo
+          sudo rm "$tls/privkey.pem.bak"
+          sudo chmod 600 "$tls/privkey.pem"
+          run 'owner-restricted' 'private key mode 0600 after a renewal install' sudo
+          sudo chmod 400 "$tls/privkey.pem"
+          sudo chown 0 "$tls/privkey.pem"
+          run 'owner-restricted' 'private key ownership reset to root after a renewal install' sudo
+          sudo chown 101 "$tls/privkey.pem"
+          run 'PREFLIGHT OK' 'restored layout' sudo
+          run 'CORS_ALLOWED_ORIGINS must equal --origin' 'origin differs from the bound CORS origin' sudo \
+            --origin https://other.codemastery.test
+
+          # Requirements that deploy.sh does not itself enforce, on the same effective model.
+          model="$(docker compose --project-name codemastery --env-file "$work/operator/.env" \
+            -f infrastructure/docker-compose.yml -f "$override" config --format json)"
+          printf '%s' "$model" | python3 -c '
+          import json, sys
+          svc = json.load(sys.stdin)["services"]
+          fe, be = svc["frontend"], svc["backend"]
+          assert all("golithus" not in s["image"] and "build" not in s for s in svc.values()), "local-only image or build"
+          assert fe["ports"] == [{"mode": "ingress", "host_ip": "0.0.0.0", "target": 8080, "published": "443", "protocol": "tcp"}], fe["ports"]
+          (volume,) = fe["volumes"]
+          # Older Compose omits the false create_host_path value; newer renders it.
+          assert not volume.pop("bind", {}).get("create_host_path"), fe["volumes"]
+          assert volume == {"type": "bind", "source": "/etc/codemastery/tls", "target": "/etc/nginx/tls",
+                            "read_only": True}, fe["volumes"]
+          assert be["environment"]["JWT_EXPIRATION"] == "PT15M"
+          assert svc["minio-init"].get("restart") is None and svc["minio-init"]["entrypoint"] is None
+          print("ok: effective model: no local-only images or builds, IPv4 443 only, certificate bind, PT15M")'
+          # Image-level policy (verify_images) for the release images built in this job.
+          images() {
+            bash -c 'source "$1"; COMPOSE_MODEL="$2"; shift 2
+                     while [[ $# -gt 0 ]]; do verify_image_configuration "$1" "$2"; shift 2; done' \
+              _ "$script" "$model" "$@"
+          }
+          images frontend "$FRONTEND_RELEASE_IMAGE" backend "$BACKEND_IMAGE"
+          echo "ok: deploy.sh image policy accepts the release frontend and backend images"
+          if (images frontend "$FRONTEND_LOCAL_IMAGE") >/dev/null 2>&1; then
+            echo "The local frontend image (no baked TLS healthcheck) was accepted as a release image." >&2; exit 1
+          fi
+          echo "ok: deploy.sh image policy rejects the local frontend image as a release image"
+          echo "INGRESS_PREFLIGHT_TESTS_PASS"
