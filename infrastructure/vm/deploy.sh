@@ -1588,8 +1588,16 @@ require_application_stopped() {
 
 # Deploy: backend + frontend, private health, deployment record
 guard_update() {
-  local existing volumes project_volumes names name persisted="no"
+  local existing oneoffs volumes project_volumes names name persisted="no"
   existing="$("${COMPOSE[@]}" ps -a -q 2>/dev/null)" || fail "Recovery inventory failed; no state-changing operation is permitted."
+  # Compose counts `run` one-off containers among a service's containers (ps -a).
+  # One left by an interrupted release, such as the private frontend probe, would
+  # fail the post-change inventory checks after ingress opened. Stop before any
+  # change and never remove it automatically.
+  oneoffs="$(docker ps -a -q --filter label=com.docker.compose.project=codemastery --filter label=com.docker.compose.oneoff=True 2>/dev/null)" \
+    || fail "One-off container inventory failed; no state-changing operation is permitted."
+  [[ -z "${oneoffs}" ]] \
+    || fail "A codemastery one-off container exists (for example a private frontend probe left by an interrupted release). Inspect and remove it under operator authority; no changes were made."
   volumes="$(docker volume ls --format '{{.Name}}' 2>/dev/null)" || fail "Persistent-volume inventory failed; no state-changing operation is permitted."
   project_volumes="$(docker volume ls --filter label=com.docker.compose.project=codemastery --format '{{.Name}}' 2>/dev/null)" \
     || fail "Project-volume inventory failed; no state-changing operation is permitted."
@@ -1723,6 +1731,28 @@ except Exception:
   log "Private HTTPS handshake and ingress response verified."
 }
 
+# The probe is a one-off of the frontend service, so ps -a lists it beside the
+# public container. Remove it before ingress starts; the service checks then see
+# only the public frontend, and the probe never coexists with public ingress.
+retire_staged_frontend() {
+  local deadline remaining
+  [[ -n "${STAGED_FRONTEND_CID}" ]] || return 0
+  docker stop --time "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
+    || fail "Could not stop the private frontend probe; ingress remains closed."
+  deadline=$(( SECONDS + WAIT_TIMEOUT ))
+  while :; do
+    # The probe runs with --rm: the daemon removes it once it has stopped.
+    remaining="$(docker ps -a -q --no-trunc --filter "id=${STAGED_FRONTEND_CID}" 2>/dev/null)" \
+      || fail "Cannot confirm removal of the private frontend probe; ingress remains closed."
+    [[ -n "${remaining}" ]] || break
+    (( SECONDS < deadline )) \
+      || fail "The private frontend probe was not removed within ${WAIT_TIMEOUT}s; ingress remains closed."
+    sleep "${POLL_INTERVAL_SECONDS}"
+  done
+  STAGED_FRONTEND_CID=""
+  log "Private frontend probe removed before ingress."
+}
+
 wait_backend_health() {
   local deadline out code remaining
   deadline=$(( SECONDS + WAIT_TIMEOUT ))
@@ -1775,6 +1805,7 @@ SQL
   verify_images
   assert_release_configuration
   verify_private_tls
+  retire_staged_frontend
   log "Private release checks passed. Starting the sole HTTPS ingress."
   "${COMPOSE[@]}" up -d --no-build --pull never --no-deps --wait --wait-timeout "${WAIT_TIMEOUT}" frontend \
     || fail "Frontend startup failed; stopping application services."
