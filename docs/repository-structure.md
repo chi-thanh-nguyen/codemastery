@@ -117,6 +117,23 @@ covers it and is unchanged. The immutable canonical tree remains unchanged; this
 an explicit addition, not a reinterpretation of its original inventory. No other
 file, host path, deployment, exposure or protected-review requirement is approved.
 
+## Bounded DP01 MinIO initializer addition
+
+On 2026-10-31 (Asia/Ho_Chi_Minh), the Project Leader @chi-thanh-nguyen directed
+that the DP01 MinIO initializer executable and Dockerfile be placed under
+`infrastructure/minio/`. The directory holds exactly `Dockerfile`, the image's
+`minio-init.sh` executable and its `test-minio-init.sh` qualification suite.
+[The DP01 MinIO record](deployment.md#dp01-minio-community-initializer--31-october-2026)
+preserves the authority, behavior and exclusions.
+
+These files are shown in the infrastructure inventory below. The existing
+`/infrastructure/` CODEOWNERS rule (@tihh647-ui and @chi-thanh-nguyen) covers them
+and is unchanged. The service Dockerfile rule for the backend and frontend is
+unaffected: this image is storage provisioning infrastructure, not an application
+service. The immutable canonical tree remains unchanged; this is an explicit
+addition, not a reinterpretation of its original inventory. No release artifact,
+storage technology change, deployment or protected-review exception is approved.
+
 ```text
 codemastery/
 
@@ -1535,6 +1552,14 @@ codemastery/
 ├── infrastructure/
 
 │   ├── docker-compose.yml
+
+│   ├── minio/
+
+│   │   ├── Dockerfile
+
+│   │   ├── minio-init.sh
+
+│   │   └── test-minio-init.sh
 
 │   └── vm/
 

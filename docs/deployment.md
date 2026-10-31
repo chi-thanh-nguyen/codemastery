@@ -1412,6 +1412,9 @@ entrypoint/command. Merging alone would not remove them.
   the bucket-scoped least-privilege policy, refusal of group inheritance and of
   other policy bindings, verification of the application identity, and safe
   repeat runs. These properties are evidenced through `--initializer-qualification`.
+  The initializer source, image definition and qualification suite now exist; see
+  [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026).
+  No release-tagged storage artifact exists.
 
 ### Release build outside the VM
 
@@ -1428,6 +1431,8 @@ docker build --platform linux/amd64 --target release \
 # A registry image holds only the build host's platform until amd64 is fetched.
 docker pull --platform linux/amd64 postgres:17.11-bookworm
 # minio and minio-init: only qualified artifacts may be tagged with these names.
+# The initializer is built from infrastructure/minio under a non-release tag and
+# qualified there first; no MinIO server artifact is qualified (release blocker 2).
 docker save --platform linux/amd64 -o release.tar postgres:17.11-bookworm \
   codemastery.invalid/minio:release codemastery.invalid/minio-init:release \
   codemastery.invalid/backend:release codemastery.invalid/frontend:release
@@ -1581,7 +1586,10 @@ Release blockers remain:
    status for information. `deploy` therefore stops before ingress, as recorded
    on 28 October.
 2. **Storage artifacts.** No production-qualified MinIO server or initializer
-   artifact exists, nor does initializer qualification evidence.
+   artifact exists. The initializer image definition and its qualification suite
+   exist, but no release initializer has been admitted, and the pinned server has
+   unresolved vulnerability and maintenance findings; see
+   [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026).
 3. **Release logistics.** Release archive transfer, custody and image admission
    review (P8), including the non-slim Nginx variant.
 4. **Operator custody.** The operator identity and env-file custody above.
@@ -1600,3 +1608,172 @@ last-push approval, required checks and protected merge remain mandatory.
 The implementation, this record and its tests were produced through AI-assisted
 development (Anthropic Claude Code) under the Leader's task; no AI service or new
 infrastructure technology is introduced into CodeMastery.
+
+## DP01 MinIO Community initializer — 31 October 2026
+
+### Authority and boundary
+
+The Project Leader @chi-thanh-nguyen's 31 October 2026 (ICT) task on branch
+`feat/dp01-minio-release` directs a MinIO Community initializer image under
+`infrastructure/minio/`, real qualification tests and a review of the existing
+server artifact. It keeps the storage technology and the digest-pinned Community
+server and client. Migration to MinIO AIStor is excluded. The task approves no
+new contract or credential, and no change to any VM, DNS, TLS or production data.
+It creates no `codemastery.invalid/*:release` tag and does not close DP01 #71. The
+[repository structure](repository-structure.md#bounded-dp01-minio-initializer-addition)
+records the path addition.
+
+### Implementation
+
+| File | Responsibility |
+| --- | --- |
+| `infrastructure/minio/minio-init.sh` (new) | Initializer executable |
+| `infrastructure/minio/Dockerfile` (new) | Image `FROM` the existing `mc` pin; runs as UID/GID 65532:65532, with the executable as its own entrypoint |
+| `infrastructure/minio/test-minio-init.sh` (new) | Qualification suite against disposable MinIO servers |
+| `.github/workflows/ci.yml` | New “VM MinIO initializer qualification” job; runs the suite on linux/amd64 |
+
+The image reads only the six variables the VM model admits. The endpoint is
+fixed at `http://minio:9000`, and the readiness deadline stays 120 seconds. The
+policy name stays `codemastery-local-storage`, so state created by the local
+initializer is accepted unchanged. The local base Compose file and its inline
+initializer are unchanged. The VM override already resets that inline
+entrypoint and command, so the image's own entrypoint runs. The override,
+`deploy.sh` and the Compose contract are unchanged.
+
+### Initializer behavior
+
+Retained from the local initializer:
+
+- A distinct application identity.
+- The bucket-scoped `s3:GetBucketLocation`/`s3:ListBucket` and
+  `s3:GetObject`/`s3:PutObject`/`s3:DeleteObject` policy.
+- Refusal of group membership and of other policy bindings.
+- Verification of the application credentials.
+- A non-zero exit on any failure.
+
+Strengthened:
+
+- **Inspect before any change.** All existing state is read before anything is
+  changed. A conflict stops the run and leaves the server as found.
+- **Fail closed on unexpected state.** The run stops when:
+  - a policy with the approved name has any other content (no overwrite);
+  - the policy is bound to any other user or group;
+  - the identity is disabled (it is not re-enabled);
+  - the identity has service accounts;
+  - the bucket allows anonymous access;
+  - the identity exists but rejects `STORAGE_SECRET_KEY` (its secret is not
+    reset).
+- **Policy compared by content.** The stored document must equal the approved
+  one exactly. The only exception is the member order of `Action`/`Resource`
+  arrays: MinIO returns these sets in a different order on each read.
+- **Only absent resources are created.** A repeat run on initialized state makes
+  no change and reports `changes: 0`.
+- **Credentials exercised.** The application must authenticate, list its bucket
+  and be refused administration.
+- **Stricter input validation.** Bucket names follow the S3 rules. The access key
+  must be 3–20 characters from `A-Z a-z 0-9 . _ @ + = -`. The region is
+  restricted to letters, digits, `_` and `-`. The application secret must differ
+  from the root password. Control characters are rejected.
+- **Secrets stay out of argv and output.** `mc` reads credentials from a private
+  0700 temporary config file, and the new user's secret from stdin. Secrets never
+  reach argv, which is visible in host process listings. `mc` output is never
+  printed, because `user add` echoes the secret.
+- **Exit status and JSON status both checked.** Some `mc --json` commands exit 0
+  after reporting an error.
+
+The local inline initializer remains as it was. These defects in it were
+observed on the pinned server:
+
+- `mc admin policy create` silently replaces an existing policy with the same
+  name.
+- `mc admin user add` resets an existing identity's secret and re-enables it.
+- Root and application secrets appear in `mc` argv.
+
+It is local development only and the release model does not run it. Aligning it
+with the image needs a separate decision.
+
+### Qualification suite and recorded results
+
+Run `infrastructure/minio/test-minio-init.sh` to build and test the image. Pass
+an image reference or ID as its argument to test an existing image instead. It
+needs Docker with Compose v2.24+ and python3, and the two pinned images already
+pulled. Twenty checks cover:
+
+- **Static checks:** the digest pins and image configuration; UID 65532 with all
+  capability sets zero; a read-only executable; no setuid/setgid files.
+- **Input validation:** rejection of invalid input before MinIO is contacted.
+- **First run:** the exact resulting state, plus least privilege. The
+  application can put, get, list and delete in its bucket. It cannot read, list
+  or write another bucket. It cannot create or delete buckets, change anonymous
+  access or administer.
+- **Repeat runs:** an unchanged snapshot, including the policy `UpdateDate`.
+- **Wrong credentials:** wrong root credentials, and an existing identity with
+  another secret.
+- **Conflicts:** a same-named broad policy; an anonymous bucket; an extra policy;
+  group membership; a foreign binding; a disabled identity; service accounts.
+  Each conflict is left as found. An equivalent policy with reordered members is
+  accepted unchanged.
+- **Unreachable server:** failure after the 120-second deadline.
+- **Effective VM Compose model:** base, VM override and test images.
+  - The image entrypoint runs with only the six variables.
+  - The image accepts state created by the local inline initializer unchanged.
+  - A later conflict yields exit 1 and the dependent service is not started.
+
+Local run on 31 October 2026, on an Apple Silicon host: linux/amd64 under
+emulation, Docker Engine 29.8.1, Compose v5.5.1, host bash 3.2. All 20 checks
+passed. Two deliberately broken builds were rejected: one overwrote a conflicting
+policy, the other reset an existing secret. The CI job has not yet run on GitHub
+and is not one of the protected required checks. A test-built image is not the
+release artifact: image IDs differ per build.
+
+### MinIO artifact review (as of 31 October 2026)
+
+| Aspect | Evidence | Finding |
+| --- | --- | --- |
+| Architecture | Both pins are OCI indexes with linux/amd64 and linux/arm64 manifests. Server amd64: `sha256:186184b0b9fcf9743c20c114adecb3411b46c9b71d88e4ca854f6da79ec3440a`; `mc` amd64: `sha256:3a7b97e9b7bb78ee00343dd2100f07948dcdce4b224decbc3a52935fd2c17eb0` | The amd64 variants run in the suite. B1 capacity remains unmeasured |
+| Source correspondence | The server binary reports `DEVELOPMENT.2025-10-15T17-29-55Z`, commit `9e49d5e7a648`, go1.24.9. `mc` reports `RELEASE.2025-08-13T08-35-41Z`, commit `7394ce0dd2a8`, go1.24.10. Both commits equal the upstream release tags | Self-reported build metadata; not a reproduced build |
+| Build provenance | `golithus/minio-builds` (third party; repository license NOASSERTION). It clones upstream by **mutable tag**, uses floating Go `1.24.x` and actions by major version, and copies the pre-built binary into the image. BuildKit provenance is `min` with incomplete materials; no SBOM packages; no signatures. The repository was last pushed on 2025-11-06 | Weak provenance: binaries cannot be traced to source by attestation |
+| Runtime security, server | Scratch image with only `/minio`; runs as **root**; Docker default capabilities. The Compose contract forbids `user`, `cap_drop` and `security_opt`. The console on `:9001` is enabled by the approved command; unpublished, but reachable on the private network | Hardening needs a derived image and contract change; not approved |
+| Runtime security, initializer | UBI 9 micro 9.6 base with `mc`. Runs as 65532 with zero capability sets; one-shot, no ports, volumes or restart | Meets this task's runtime requirements |
+| License | Server and `mc` are AGPL-3.0 (labels and `--version`). Base image under the Red Hat UBI EULA. Used unmodified | No legal determination is made here |
+| Maintenance | `minio/minio` and `minio/mc` are **archived** on GitHub. Their latest community releases are exactly the pinned versions. The Go 1.24 toolchain is outside the Go project's support window | No upstream Community fixes can be expected |
+| MinIO advisories after the pin | Fixed only in MinIO AIStor releases: CVE-2026-41145 and CVE-2026-40344 (high; unauthenticated object writes that need a valid write-capable access key); CVE-2026-39414 (high; S3 Select memory exhaustion); CVE-2026-34204 (high; SSE metadata injection by authenticated users); CVE-2026-42600 (medium) | Unpatched in the pinned server |
+| Go vulnerabilities | `govulncheck` v1.1.4, go1.26.10, vuln.go.dev, binary mode. Server: 106 reachable findings in 13 modules and the standard library. `mc`: 87 in 6 modules and the standard library | Symbol reachability, not demonstrated exploitability; MinIO's own advisories are not in this database |
+
+**Verdict: the pinned MinIO server is not production-qualified.** Its private
+placement reduces exposure. It has no host port, and the advisories above need
+network reach to `minio:9000` plus a known write-capable access key. Every
+container on the project network has that reach, including the public-facing
+frontend. Reduced exposure is not risk acceptance.
+
+The initializer's behavior is qualified by the suite for the tested build. The
+image is still not admitted: it carries the `mc` findings above, and its OS
+packages have not been scanned.
+
+### Remaining qualification blockers and Leader decisions
+
+1. **Server artifact.** The Leader must decide the server artifact. Options:
+   accept the documented risk for Interim with these compensating controls, or
+   select another Community-compatible source through a separate dependency
+   decision. AIStor is excluded by this task.
+2. **Missing review evidence:** an OS-package vulnerability scan of both images,
+   independent binary reproduction or signed provenance, and a license
+   assessment for the course context. None was performed here.
+3. **Release initializer admission.** Build the initializer from the reviewed
+   revision and run `test-minio-init.sh IMAGE` against that exact artifact.
+   Record that evidence as the `--initializer-qualification` reference. Only
+   then tag it, after CODEOWNER review.
+4. **CI.** A green GitHub run of the new job is still needed. Making it a
+   required check is a Leader decision.
+5. **Operational limits.**
+   - The initializer assumes no concurrent IAM administration during its run.
+   - Secret rotation for an existing identity needs a separate authorized
+     procedure.
+   - Server-wide grants outside this identity are not inspected: other users'
+     global policies, LDAP/OIDC, replication, versioning, lifecycle or
+     notifications.
+
+The implementation, this record and its tests were produced through AI-assisted
+development (Anthropic Claude Code) under the Leader's task. `govulncheck` and
+the Go vulnerability database were used only for this review. No AI service or
+new infrastructure technology is introduced into CodeMastery.
