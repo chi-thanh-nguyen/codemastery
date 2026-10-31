@@ -2,16 +2,21 @@
 # CodeMastery - infrastructure/minio/test-minio-init.sh   (DP01 initializer qualification)
 #
 # Integration tests for the MinIO initializer image against disposable MinIO
-# Community servers (the pinned local server image). Each scenario uses its own
-# private Docker network and server; everything created is labelled and removed.
+# servers. Each scenario uses its own private Docker network and server;
+# everything created is labelled and removed.
 #
 #   infrastructure/minio/test-minio-init.sh            build infrastructure/minio and test it
 #   infrastructure/minio/test-minio-init.sh IMAGE      test an existing image reference or ID
 #
+# MINIO_INIT_TEST_SERVER selects the server under test:
+#   golithus    (default) the digest-pinned local Community server from the base Compose file
+#   chainguard  the digest-pinned DP01 release-server candidate below (not admitted)
+# An unset variable selects golithus; any other value, including an empty one, fails.
+#
 # The built image is tagged codemastery-test/minio-init:qualification, never a
 # codemastery.invalid/*:release name. MINIO_INIT_TEST_PLATFORM (default
 # linux/amd64, the VM platform) selects the platform. Requires Docker with
-# Compose v2.24+ and python3. The pinned server image must already be present;
+# Compose v2.24+ and python3. The selected server image must already be present;
 # Docker pulls the digest-pinned mc image on demand if it is missing.
 set -Eeuo pipefail
 
@@ -25,8 +30,14 @@ PROJECTS=()
 BASE_COMPOSE="${ROOT}/infrastructure/docker-compose.yml"
 VM_COMPOSE="${ROOT}/infrastructure/vm/docker-compose.vm.yml"
 # The approved local pins are the single source of truth for both images.
-SERVER_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/minio:.*\)$/\1/p' "${BASE_COMPOSE}")"
+LOCAL_SERVER_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/minio:.*\)$/\1/p' "${BASE_COMPOSE}")"
 MC_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/mc:.*\)$/\1/p' "${BASE_COMPOSE}")"
+# DP01 release-server candidate: Chainguard's build of the chainguard-forks/minio
+# fork, selected only by this immutable index digest (docs/deployment.md).
+CHAINGUARD_SERVER_IMAGE='cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82'
+# The base Compose server command; the Chainguard image has no default command.
+SERVER_CMD=(server /data --console-address :9001)
+SERVER="${MINIO_INIT_TEST_SERVER-golithus}"
 
 ROOT_USER="cm-root-admin"
 ROOT_PASS='root pass/with:"odd"\chars é'
@@ -51,6 +62,8 @@ cleanup() {
   [[ -z "${ids}" ]] || docker rm -fv ${ids} >/dev/null 2>&1 || true
   ids="$(docker network ls -q --filter "label=${LABEL}")"
   [[ -z "${ids}" ]] || docker network rm ${ids} >/dev/null 2>&1 || true
+  ids="$(docker volume ls -q --filter "label=${LABEL}")"
+  [[ -z "${ids}" ]] || docker volume rm ${ids} >/dev/null 2>&1 || true
   rm -rf "${WORK}"
 }
 trap cleanup EXIT
@@ -59,7 +72,25 @@ die() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 pass() { passed=$((passed + 1)); printf 'ok %d - %s\n' "${passed}" "$1"; }
 section() { printf '\n== %s\n' "$1"; }
 
-[[ -n "${SERVER_IMAGE}" && -n "${MC_IMAGE}" ]] || die "Cannot read the pinned MinIO images from ${BASE_COMPOSE}."
+[[ -n "${LOCAL_SERVER_IMAGE}" && -n "${MC_IMAGE}" ]] || die "Cannot read the pinned MinIO images from ${BASE_COMPOSE}."
+
+# Expected container defaults (user|entrypoint|command), binary version and
+# owner of the server's data directory, per supported server.
+case "${SERVER}" in
+  golithus)
+    SERVER_IMAGE="${LOCAL_SERVER_IMAGE}"
+    SERVER_CONFIG='|["/minio"]|["server","/data","--console-address",":9001"]'
+    SERVER_VERSION='minio version DEVELOPMENT.2025-10-15T17-29-55Z (commit-id=9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a)'
+    SERVER_DATA_UID=0
+    ;;
+  chainguard)
+    SERVER_IMAGE="${CHAINGUARD_SERVER_IMAGE}"
+    SERVER_CONFIG='65532|["/usr/bin/minio"]|null'
+    SERVER_VERSION='minio version RELEASE.2026-10-23T20-06-51Z (commit-id=76c06ff1d2cc844050fdeb1d54bf8fa70db72278)'
+    SERVER_DATA_UID=65532
+    ;;
+  *) die "MINIO_INIT_TEST_SERVER must be golithus or chainguard, not '${SERVER}'." ;;
+esac
 
 # ------------------------------------------------------------------ helpers
 
@@ -96,17 +127,23 @@ expect_denied() {  # description output
 expect_eq() { [[ "$2" == "$3" ]] || die "$1:"$'\n'"  expected: $3"$'\n'"  actual:   $2"; }
 expect_contains() { [[ "$2" == *"$3"* ]] || die "$1: missing '$3' in: ${2:0:400}"; }
 
+# Runs the selected server with the base Compose command and waits until ready.
+run_server() {  # network container-name [docker run options...]
+  local net="$1" name="$2"; shift 2
+  docker run -d --platform "${PLATFORM}" \
+    --name "${name}" --label "${LABEL}" --network "${net}" --network-alias minio \
+    -e MINIO_ROOT_USER="${ROOT_USER}" -e MINIO_ROOT_PASSWORD="${ROOT_PASS}" \
+    "$@" "${SERVER_IMAGE}" "${SERVER_CMD[@]}" >/dev/null
+  local out
+  out="$(CM_TIMEOUT=60 admin "${net}" ready t)"
+  [[ "${out}" == *'"healthy":true'* ]] || die "MinIO test server ${name} did not become ready."
+}
+
 # Starts a fresh server on a new private network; prints the network name.
 start_server() {  # name
   local net="cm-${RUN_ID}-$1"
   docker network create --label "${LABEL}" "${net}" >/dev/null
-  docker run -d --platform "${PLATFORM}" \
-    --name "${net}-minio" --label "${LABEL}" --network "${net}" --network-alias minio \
-    -e MINIO_ROOT_USER="${ROOT_USER}" -e MINIO_ROOT_PASSWORD="${ROOT_PASS}" \
-    "${SERVER_IMAGE}" >/dev/null
-  local out
-  out="$(CM_TIMEOUT=60 admin "${net}" ready t)"
-  [[ "${out}" == *'"healthy":true'* ]] || die "MinIO test server $1 did not become ready."
+  run_server "${net}" "${net}-minio"
   printf '%s' "${net}"
 }
 
@@ -222,7 +259,7 @@ else
 fi
 IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${IMAGE}")"
 printf 'image under test: %s (%s)\n' "${IMAGE}" "${IMAGE_ID}"
-printf 'server image: %s\nmc image: %s\n' "${SERVER_IMAGE}" "${MC_IMAGE}"
+printf 'server under test: %s (%s)\nmc image: %s\n' "${SERVER}" "${SERVER_IMAGE}" "${MC_IMAGE}"
 docker image inspect "${SERVER_IMAGE}" >/dev/null 2>&1 \
   || die "Pull the pinned server image first: docker pull --platform ${PLATFORM} ${SERVER_IMAGE}"
 
@@ -232,9 +269,21 @@ pass "shell syntax"
 
 from="$(sed -n 's/^FROM //p' "${ROOT}/infrastructure/minio/Dockerfile")"
 expect_eq "Dockerfile base is the approved local mc pin" "${from}" "${MC_IMAGE}"
-expect_contains "server pin" "${SERVER_IMAGE}" "@sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40"
+expect_contains "server pin" "${LOCAL_SERVER_IMAGE}" "@sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40"
 expect_contains "mc pin" "${MC_IMAGE}" "@sha256:dde55ccc0bc9e65dc582c8e652d652eea1438c6e60d774524f4da15d7b26a900"
+[[ "${SERVER_IMAGE}" =~ @sha256:[0-9a-f]{64}$ ]] || die "server under test is not digest-pinned: ${SERVER_IMAGE}"
 pass "server and mc images keep the approved digest pins"
+
+# The selected server must be exactly the expected artifact for this platform.
+cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "${SERVER_IMAGE}")"
+scfg="$(docker inspect --format '{{.Config.User}}|{{json .Config.Entrypoint}}|{{json .Config.Cmd}}' "${cid}")"
+# -v: the golithus image declares VOLUME /data, so create made an anonymous volume.
+docker rm -v "${cid}" >/dev/null
+expect_eq "${SERVER} server image configuration" "${scfg}" "${SERVER_CONFIG}"
+version="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LABEL}" "${SERVER_IMAGE}" --version 2>&1)"
+expect_contains "${SERVER} server version" "${version}" "${SERVER_VERSION}"
+expect_contains "${SERVER} server platform" "${version}" " ${PLATFORM}"
+pass "${SERVER} server has the expected user, entrypoint, default command and binary version for ${PLATFORM}"
 
 cfg="$(docker image inspect --format '{{.Config.User}}|{{json .Config.Entrypoint}}|{{json .Config.Cmd}}|{{json .Config.Env}}|{{json .Config.ExposedPorts}}|{{json .Config.Volumes}}|{{json .Config.Healthcheck}}|{{.Os}}/{{.Architecture}}' "${IMAGE}")"
 expect_eq "image configuration" "${cfg}" \
@@ -338,6 +387,35 @@ out="$(app "${net}" rm "t/${BUCKET}/lessons/a.txt" </dev/null)"; expect_ok "app 
 expect_contains "deleted" "$(admin "${net}" stat "t/${BUCKET}/lessons/a.txt")" "Object does not exist"
 pass "repeat runs change nothing (policy UpdateDate unchanged); application can delete its objects"
 stop_server "${net}"
+
+# ------------------------------------------------------------------ persistence
+
+# A clean first-time volume only; no existing data volume is migrated here.
+section "Named-volume persistence across container recreation"
+net="cm-${RUN_ID}-persist"
+vol="cm-${RUN_ID}-persist-data"
+docker network create --label "${LABEL}" "${net}" >/dev/null
+docker volume create --label "${LABEL}" "${vol}" >/dev/null
+run_server "${net}" "${net}-minio" -v "${vol}:/data"
+run_init "${net}"
+expect_init_ok "persistence first run"
+expect_contains "persistence first run" "${INIT_OUT}" "initialized (changes: 4)"
+payload="persist-${RUN_ID}-$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+expect_ok "persistence put" "$(printf '%s' "${payload}" | app "${net}" pipe "t/${BUCKET}/persist/object.txt")"
+docker rm -f "${net}-minio" >/dev/null
+expect_eq "named volume kept after container removal" "$(docker volume inspect --format '{{.Name}}' "${vol}")" "${vol}"
+run_server "${net}" "${net}-minio" -v "${vol}:/data"
+expect_eq "object after recreation" "$(app "${net}" cat "t/${BUCKET}/persist/object.txt" </dev/null)" "${payload}"
+run_init "${net}"
+expect_init_ok "persistence after recreation"
+expect_contains "persistence after recreation" "${INIT_OUT}" "initialized (changes: 0)"
+expect_initialized_state "persistence after recreation" "${net}"
+owner="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LABEL}" -v "${vol}:/data:ro" \
+  --entrypoint /bin/bash "${MC_IMAGE}" -c 'stat -c %u /data/.minio.sys')"
+expect_eq "data directory owner" "${owner}" "${SERVER_DATA_UID}"
+stop_server "${net}"
+docker volume rm "${vol}" >/dev/null
+pass "object and IAM state survive container removal and recreation on a named volume written as UID ${SERVER_DATA_UID}"
 
 # ------------------------------------------------------------------ credentials
 
@@ -494,11 +572,14 @@ export MINIO_ROOT_USER="${ROOT_USER}" MINIO_ROOT_PASSWORD="${ROOT_PASS}"
 export STORAGE_ACCESS_KEY="${APP_KEY}" STORAGE_SECRET_KEY="${APP_SECRET}"
 export STORAGE_BUCKET="${BUCKET}" STORAGE_REGION="${REGION}"
 export DOCKER_DEFAULT_PLATFORM="${PLATFORM}"
-# Test-only images: no qualified server exists (the pinned local server stands in),
+# Test-only images: no admitted server exists (the selected server stands in),
 # and a sleeping placeholder stands in for the backend that waits on minio-init.
+# The local stack uses the same server, so its volume is never handed from one
+# server build to another.
 cat > "${WORK}/local-ports.yml" <<EOF
 services:
   minio:
+    image: ${SERVER_IMAGE}
     ports: !reset []
 EOF
 cat > "${WORK}/release-images.yml" <<EOF
@@ -533,6 +614,28 @@ assert init.get("restart") in (None, "no")
 ' "${IMAGE}"
 pass "effective VM model runs the image entrypoint with only the six approved variables"
 
+# The override keeps its abstract server name, inherits the base command and the
+# named data volume, and sets the approved restart policy. The test images then
+# run that model unchanged with the selected server.
+check_minio_model() {  # expected-image compose-command...
+  local want="$1"; shift
+  "$@" config --format json | python3 -c '
+import json, sys
+minio = json.load(sys.stdin)["services"]["minio"]
+assert minio["image"] == sys.argv[1], minio["image"]
+assert minio.get("command") == sys.argv[2:], minio.get("command")
+for key in ("entrypoint", "user", "ports", "cap_add", "privileged", "build"):
+    assert not minio.get(key), key
+volumes = [(v.get("type"), v.get("source"), v.get("target")) for v in minio.get("volumes", [])]
+assert volumes == [("volume", "minio-data", "/data")], minio.get("volumes")
+assert minio.get("restart") == "unless-stopped", minio.get("restart")
+' "${want}" "${SERVER_CMD[@]}"
+}
+check_minio_model codemastery.invalid/minio:release \
+  docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" -f "${VM_COMPOSE}"
+check_minio_model "${SERVER_IMAGE}" "${vm_compose[@]}"
+pass "effective VM model keeps codemastery.invalid/minio:release, the base command, the named minio-data volume and restart unless-stopped"
+
 # State created by the existing local inline initializer must be accepted as-is.
 "${local_compose[@]}" up -d --no-build --pull never minio-init >"${WORK}/local-up.log" 2>&1 \
   || die "local stack failed to start: $(tail -5 "${WORK}/local-up.log")"
@@ -559,4 +662,5 @@ expect_eq "minio-init exit" "$(docker inspect --format '{{.State.Status}}:{{.Sta
 expect_eq "backend not started" "$("${vm_compose[@]}" ps --format '{{.State}}' backend)" ""
 pass "initializer failure propagates: non-zero exit and the dependent service is not started"
 
-printf '\nAll %d MinIO initializer checks passed for %s (%s).\n' "${passed}" "${IMAGE}" "${IMAGE_ID}"
+printf '\nAll %d MinIO initializer checks passed for %s (%s) against the %s server %s.\n' \
+  "${passed}" "${IMAGE}" "${IMAGE_ID}" "${SERVER}" "${SERVER_IMAGE}"
