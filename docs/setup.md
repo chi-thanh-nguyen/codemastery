@@ -488,6 +488,15 @@ return HTTP 404 instead of the HTML fallback. No API proxy, TLS, authentication,
 custom caching, or project-specific security-header policy is configured. The
 internal port is distinct from a host-published port and Vite's development port.
 
+This local image is the Dockerfile's default (last) target. A separate
+`release` target exists only for the one-VM HTTPS deployment: it builds the
+bundle with `VITE_API_BASE_URL=/api`, uses the non-slim
+`nginxinc/nginx-unprivileged:1.30.5-alpine` variant, serves TLS on `8080`,
+proxies `/api`, and bakes an HTTPS healthcheck. It requires the public
+`PUBLIC_ORIGIN` build argument and a mounted certificate directory; see
+[DP01 HTTPS ingress integration](deployment.md#dp01-https-ingress-integration--31-october-2026).
+Local builds and Compose are unaffected.
+
 ### Optional Frontend Build Configuration
 
 `VITE_API_BASE_URL` is an optional public Docker build argument, made available
@@ -512,7 +521,8 @@ The local Compose workflow above coordinates PostgreSQL, MinIO provisioning,
 backend startup, and frontend serving. Successful startup/migration and MC storage
 checks do not prove the unimplemented backend S3 adapter, JPA mappings, feature
 logic, browser API integration, or production deployment. Compose has PostgreSQL
-and frontend health checks; neither Dockerfile adds a HEALTHCHECK.
+and frontend health checks; the backend image and the default local frontend
+target add no HEALTHCHECK. Only the frontend `release` target bakes one.
 
 ## Initial CI
 

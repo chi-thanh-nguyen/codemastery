@@ -102,6 +102,21 @@ path by `modules/course/application/service/EnrollmentServiceTest.java`.
 Existing test responsibilities, package-private access and Course CODEOWNERS
 remain unchanged; no production behavior or other inventory change is approved.
 
+## Bounded DP01 VM Compose override addition
+
+On 2026-10-31 (Asia/Ho_Chi_Minh), the Project Leader/Owner explicitly approved
+`infrastructure/vm/docker-compose.vm.yml` as the DP01 Interim release override,
+together with the read-only `/etc/codemastery/tls` → `/etc/nginx/tls` certificate
+directory bind it declares. `infrastructure/vm/deploy.sh` applies the override
+on top of the unchanged local `infrastructure/docker-compose.yml`. [The DP01 record](deployment.md#leader-approved-path-bindings--31-october-2026)
+preserves the exact authority and exclusions.
+
+This single addition is shown in the infrastructure inventory below. The existing
+`/infrastructure/` CODEOWNERS rule (@tihh647-ui and @chi-thanh-nguyen) already
+covers it and is unchanged. The immutable canonical tree remains unchanged; this is
+an explicit addition, not a reinterpretation of its original inventory. No other
+file, host path, deployment, exposure or protected-review requirement is approved.
+
 ```text
 codemastery/
 
@@ -1523,7 +1538,9 @@ codemastery/
 
 │   └── vm/
 
-│       └── deploy.sh
+│       ├── deploy.sh
+
+│       └── docker-compose.vm.yml
 
 ├── sample-data/
 
