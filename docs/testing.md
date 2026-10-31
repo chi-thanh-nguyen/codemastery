@@ -35,7 +35,7 @@ verification is separate work.
 
 | Suite | Added by | What it exercises |
 | --- | --- | --- |
-| `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. Uses an ephemeral JWT secret. |
+| `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). Uses an ephemeral JWT secret. |
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
 | `EnrollmentIntegrationTest` | FE07, PR #101 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods |
@@ -394,8 +394,8 @@ test-count or coverage-percentage claim is made for them.
   standalone FE07 script, are recorded in the dated sections below; QA07 and DP02
   acceptance are open.
 - **Deployment.** No test reaches the real VM or checks outside-network access
-  (DP01 #71, DP03 #72). The private `/actuator/health` probe answers 401
-  ([deployment blocker 1](deployment.md#verification-and-remaining-gates)).
+  (DP01 #71, DP03 #72). The private `/actuator/health` probe is verified only
+  locally and in CI ([record](#dp01-private-health-probe-verification--1-november-2026)).
 - **Object storage.** No backend storage adapter exists, so no test covers file
   upload or delivery (CT09).
 - **Assistive technology.** No test establishes actual screen-reader output.
@@ -1583,3 +1583,23 @@ QA13 acceptance on the team's verification environment, frontend sign-in, MinIO
 object provisioning or file-material delivery. Those gates remain open. This
 implementation and its verification were AI-assisted under the Leader's
 delegation; review remains with the CODEOWNERs.
+
+## DP01 private health probe verification — 1 November 2026
+
+Scope: the change in
+[DP01 private health probe remediation](deployment.md#dp01-private-health-probe-remediation--1-november-2026).
+Run on macOS arm64 with Docker Engine 29.8.1 and OpenJDK 25.0.4.1, from the
+`fix/dp01-release-readiness` working tree based on `main` at `204483c`.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Reproduction before the change | Prod-profile backend image from `204483c` with PostgreSQL 17.11 on a private network; `wget -S -O - http://backend:8080/actuator/health` from `nginx-unprivileged:1.30.5-alpine` | 401 `application/problem+json`, `WWW-Authenticate: Bearer`, from `RestSecurityErrorHandler` |
+| Focused suite | `./mvnw -Dtest=AuthorizationIntegrationTest test` | 28 tests, 0 failures |
+| Regression detection | The same two health tests with the new rule removed | Both fail: 401 instead of 200/503 |
+| Full backend | `./mvnw -B verify` | BUILD SUCCESS; 468 + 167 tests, 0 failures, errors or skips |
+| Real HTTP after the change | Same topology, image built from the change | Probe 200 `{"groups":["liveness","readiness"],"status":"UP"}`; 401 for `/actuator`, `/actuator/health/`, `liveness`, `readiness`, `db`, `info`, `metrics`, `/v3/api-docs`; 403 for `POST /actuator/health`; 401 for a malformed JWT on `/api/me/courses`; 200 for the public catalogue |
+| Unhealthy dependency | PostgreSQL stopped, then probed | 503 after about 30 s, not `UP`; `UP` again after restart |
+| CI gate logic | The new probe assertions of job **VM HTTPS ingress**, run against the same local stack | All assertions passed |
+
+Not covered: the real VM, a linux/amd64 release backend, `deploy.sh deploy` and
+outside-network access.

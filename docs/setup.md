@@ -29,7 +29,7 @@ Issues remain open.
 | --- | --- | --- |
 | Auth | Registration and login (`POST /api/auth/register`, `/api/auth/login`), BCrypt password storage, stateless JWT bearer authentication with Learner/Instructor/Administrator role claims (registration creates Learners only) and locked-account rejection | Logout endpoint, password reset, account administration |
 | Course | Public published-course catalogue with search, prerequisite filter and pagination (`GET /api/courses`); published course detail (`GET /api/courses/{courseId}`); Learner membership (`GET`/`PUT`/`DELETE /api/courses/{courseId}/membership`) and My Courses (`GET /api/me/courses`) | Course authoring, lesson content delivery, lesson progress |
-| Security | Every other route, including `/actuator/**`, `/v3/api-docs` and Swagger UI, is denied by Spring Security | — |
+| Security | Anonymous `GET /actuator/health` (nondetailed, for the private probe); every other route, including the rest of `/actuator/**`, `/v3/api-docs` and Swagger UI, is denied by Spring Security | — |
 | Adaptive | Pure mastery calculator and state classifier (no database, events or API) | Skill graph, mastery persistence, routing, recommendations |
 | Assessment, Interaction, Admin | — | Source files are empty scaffolds |
 | Object storage | Local MinIO and its least-privilege initializer | Backend storage adapter and file delivery (CT09) |
@@ -303,7 +303,7 @@ All published ports bind only to `127.0.0.1`.
 | Service | Local address | Container address / purpose |
 | --- | --- | --- |
 | frontend | http://localhost:5173 | Nginx on 8080; the built single-page application, calling the backend at the build-time `VITE_API_BASE_URL` |
-| backend | http://localhost:8080 | Spring Boot on 8080; the REST API under `/api`. `/actuator/health` answers HTTP 401 (see below) |
+| backend | http://localhost:8080 | Spring Boot on 8080; the REST API under `/api`. `/actuator/health` answers nondetailed `UP`/`DOWN` (see below) |
 | postgres | localhost:5432 | `postgres:5432`; local relational database |
 | minio | http://localhost:9000 | `minio:9000`; S3-compatible API |
 | MinIO Console | http://localhost:9001 | MinIO administration; use local root credentials |
@@ -340,11 +340,12 @@ The backend environment explicitly supplies Docker-internal DB/storage addresses
 required application credentials, the shared bucket/region, `SERVER_PORT=8080`,
 and `CORS_ALLOWED_ORIGINS=http://localhost:5173`. Other valid Spring defaults are
 left absent from Compose. Optional values set only in `.env` are not automatically
-forwarded. Compose has no backend health check. Spring Security denies every
-route outside the public Auth and catalogue operations, so
-`http://localhost:8080/actuator/health` answers HTTP 401; this is the known
-Auth-owned issue recorded as release blocker 1 in
-[deployment.md](deployment.md#verification-and-remaining-gates). To check a local
+forwarded. Compose has no backend health check. Spring Security permits only
+the public Auth and catalogue operations and anonymous `GET /actuator/health`,
+which answers 200
+`{"groups":["liveness","readiness"],"status":"UP"}` or 503 `DOWN` without details
+([deployment.md](deployment.md#dp01-private-health-probe-remediation--1-november-2026)).
+Health alone proves no feature. To check a local
 backend, run the Compose `ps -a` and `logs backend` subcommands with the same
 `--env-file`/`-f` options as above, and call a public operation, for example
 `curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/courses`,

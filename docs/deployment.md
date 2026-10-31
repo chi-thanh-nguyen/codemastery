@@ -8,6 +8,12 @@ approves nothing. Approvals, authority boundaries and evidence are in the dated
 records below, which keep the wording of their date. Changes in open pull
 requests are not described here.
 
+The 1 November repository integration below combines the Chainguard MinIO
+qualification and the private health-probe remediation. MinIO is functionally
+qualified but not production-admitted; the backend probe is fixed and tested in
+the repository/CI, but not yet verified on the Azure VM. The dated records retain
+their original evidence and limitations; DP01 remains incomplete.
+
 ### What exists and what has been shown
 
 | Level | Status | Evidence |
@@ -96,8 +102,11 @@ Each step requires its own authority; this guide grants none.
 - PostgreSQL must report healthy before `deploy` starts the backend.
 - The backend has no Compose healthcheck. `deploy` probes
   `http://backend:8080/actuator/health` privately and requires HTTP 200 with
-  `"status":"UP"`. **Today the backend answers 401, so `deploy` stops here, before
-  ingress** (release blocker 1, Auth-owned).
+  `"status":"UP"`. Spring Security permits only that exact anonymous `GET`; it
+  answers 200 with `{"groups":["liveness","readiness"],"status":"UP"}`, or 503 with
+  `DOWN` when a dependency such as PostgreSQL is down, and the probe then waits
+  until its deadline and stops before ingress. Other Actuator paths stay denied
+  ([remediation](#dp01-private-health-probe-remediation--1-november-2026)).
 - The frontend `release` image's healthcheck verifies the served certificate chain,
   expiry and hostname over loopback.
 - Any failed check stops the release. Nothing is retried or reset. Backup,
@@ -107,7 +116,8 @@ Each step requires its own authority; this guide grants none.
 ### Release blockers
 
 The [current list](#verification-and-remaining-gates) has seven blockers: the
-private health probe (401), production-qualified MinIO server and initializer
+private health probe (fixed in the repository, not yet observed on the VM),
+production-qualified MinIO server and initializer
 artifacts, release transfer and admission (P8), operator and env-file custody,
 certificate renewal, authority references, and evidence (B1 capacity, QA01, QA02,
 QA07, DP03). Until they are resolved, no lecturer-accessible deployment can be
@@ -1679,6 +1689,9 @@ backend image, then exercises:
 - `deploy.sh`'s Compose and image policies on the committed override;
 - a real `deploy.sh preflight` with the reported certificate layout, as root and as
   a non-root operator, including renewal-time layout errors;
+- `deploy.sh`'s exact private health probe against the real backend: 200/`UP`
+  without details, 401 for probe groups and other Actuator paths, and 503 after
+  PostgreSQL stops;
 - local-image regressions.
 
 Results belong to the pull request. No VM preflight, load, provision, deploy or
@@ -1702,15 +1715,17 @@ check.
 
 Release blockers remain:
 
-1. **Private health probe (Auth-owned).** The backend answers `deploy.sh`'s private
-   `/actuator/health` probe with HTTP 401. The real-backend test prints this
-   status for information. `deploy` therefore stops before ingress, as recorded
-   on 28 October.
-2. **Storage artifacts.** No production-qualified MinIO server or initializer
-   artifact exists. The initializer image definition and its qualification suite
-   exist, but no release initializer has been admitted, and the pinned server has
-   unresolved vulnerability and maintenance findings; see
-   [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026).
+1. **Private health probe (Auth-owned).** Fixed in the repository on 1 November:
+   the probe gets 200/`UP` without a JWT and the real-backend CI step now enforces
+   it ([remediation](#dp01-private-health-probe-remediation--1-november-2026)).
+   It stays open until a release backend built from the merged revision answers
+   `deploy.sh` on the VM.
+2. **Storage artifacts.** The Chainguard server candidate is functionally
+   qualified, and the initializer image definition and qualification suite exist,
+   but neither production artifact has been admitted. Security and maintenance
+   limitations and the admission gates remain; see
+   [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026)
+   and [Chainguard candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026).
 3. **Release logistics.** Release archive transfer, custody and image admission
    review (P8), including the non-slim Nginx variant.
 4. **Operator custody.** The operator identity and env-file custody above.
@@ -2070,3 +2085,74 @@ This record and its test changes were produced through AI-assisted development
 databases, and the Sigstore public-good transparency log, were used only for
 this review. No AI service or new infrastructure technology is introduced into
 CodeMastery's runtime.
+
+## DP01 private health probe remediation — 1 November 2026
+
+### Authority and boundary
+
+Under the Leader's “DP01 Deployment Blocker Remediation” task, this change
+implements the existing contract: P4 nondetailed health, checked privately by the
+operator, and CT17.I-access's existing `/actuator/health` without details. It adds
+no public health route, probe group, endpoint, ingress rule or `deploy.sh`
+behavior. It replaces only the 401 observation recorded under
+[Supersession, exclusions and acceptance](#supersession-exclusions-and-acceptance).
+The Security change needs Auth CODEOWNER review.
+
+### Root cause
+
+`SecurityConfig` had no rule for `/actuator/health`, so the request fell through to
+`anyRequest().denyAll()`. For a caller without a token, Spring Security sends that
+denial to the authentication entry point. `RestSecurityErrorHandler` then answered
+401 `application/problem+json` with `WWW-Authenticate: Bearer`. Nginx was not in
+the path, and the image was not stale. The same response came from a prod-profile
+backend built from `main` at `204483c`, probed by the exact `deploy.sh` `wget`
+command over a private Docker network.
+
+### Change
+
+One rule, `requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()`, placed
+after the public operations. Path matching is exact, so `/actuator/health/` and
+`/actuator/health/{group}` still fall to default-deny. Health stays
+`show-details: never`. The release Nginx still does not proxy `/actuator`, which CI
+already checks through the ingress. Protected operations, role rules, JWT
+validation and CORS are unchanged.
+
+### Verification
+
+- **Integration tests** in `AuthorizationIntegrationTest` cover:
+  - anonymous UP with only `status` and the probe group names;
+  - DOWN as 503 without diagnostics;
+  - 401 for anonymous callers and 403 for authenticated callers on other Actuator
+    and API-documentation paths;
+  - 403 for non-GET health requests;
+  - 401 for a missing, malformed, tampered, unknown-account or locked-account JWT;
+  - 403 for Instructor and Administrator on a Learner-only operation.
+
+  The two health tests fail with 401 when the rule is removed.
+- **Real HTTP, local.** On a prod-profile backend image built from this change
+  (arm64 build host), the exact probe returned
+  `200 {"groups":["liveness","readiness"],"status":"UP"}`. After PostgreSQL was
+  stopped it returned 503 within about 30 seconds. Other Actuator paths, probe
+  groups and `/v3/api-docs` returned 401, and `POST /actuator/health` returned 403.
+- **CI.** The real-backend step of job **VM HTTPS ingress** now asserts these
+  results instead of printing the status for information.
+
+### Limits
+
+Nothing was built, loaded or run on the VM, and no release image was produced or
+admitted. Blocker 1 closes only when a release backend from the merged revision
+passes `deploy.sh`'s probe on the VM. Blockers 2–7 are unchanged.
+
+**Image scan for admission review (blocker 3).** Trivy 0.58.1 scanned the local
+arm64 backend image and `postgres:17.11-bookworm` for HIGH and CRITICAL
+vulnerabilities, using its database as of 1 November.
+
+- **Backend:** 4 CRITICAL in `tomcat-embed-core` 11.0.24, all fixed in 11.0.25.
+  10 HIGH in Jackson 2.21.5 and 3.1.5 core/databind.
+- **PostgreSQL:** 4 CRITICAL and 94 HIGH, in Debian 12.15 packages (most without a
+  fix) and in `gosu`'s Go 1.24.6 standard library.
+
+These library versions are managed by Spring Boot 4.1.1. Overriding them, or
+changing the PostgreSQL image, needs a separate dependency decision; this change
+makes neither. Reachability was not assessed, and a linux/amd64 release artifact
+still needs its own scan.
