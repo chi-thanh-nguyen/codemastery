@@ -1,0 +1,66 @@
+# CodeMastery - one-VM HTTPS release override (DP01, Interim scope).
+#
+# Applied on top of infrastructure/docker-compose.yml by infrastructure/vm/deploy.sh:
+#   deploy.sh <subcommand> --compose-override infrastructure/vm/docker-compose.vm.yml ...
+# The local base file stays the development workflow; this file alone is not a
+# runnable stack. See docs/deployment.md, "DP01 HTTPS ingress integration".
+#
+# Release images are never built or pulled on the VM. The `.invalid` names
+# cannot resolve to any registry; each is bound only by `docker load` of the
+# reviewed archive and pinned by deploy.sh --expect-image content identity.
+# The storage images are deliberately NOT the local-only golithus pins: a
+# production-qualified MinIO server and initializer artifact must be admitted
+# separately before these names can be bound (release blocker).
+
+services:
+  postgres:
+    ports: !reset []
+    restart: unless-stopped
+
+  minio:
+    image: codemastery.invalid/minio:release
+    ports: !reset []
+    restart: unless-stopped
+
+  minio-init:
+    # The qualified initializer image supplies its own executable; the local
+    # inline entrypoint/command are not deployed. It must keep the local
+    # initializer's behavior: distinct application identity, valid bucket name,
+    # bucket-scoped least-privilege policy, refusal of group inheritance and of
+    # other policy bindings, and safe repeat runs (--initializer-qualification).
+    image: codemastery.invalid/minio-init:release
+    entrypoint: !reset null
+    command: !reset null
+
+  backend:
+    image: codemastery.invalid/backend:release
+    build: !reset null
+    ports: !reset []
+    restart: unless-stopped
+    environment:
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?Set CORS_ALLOWED_ORIGINS to the approved HTTPS origin}
+      SPRING_FLYWAY_URL: ${SPRING_FLYWAY_URL:?Set SPRING_FLYWAY_URL for the migrator identity}
+      SPRING_FLYWAY_USER: ${SPRING_FLYWAY_USER:?Set SPRING_FLYWAY_USER for the migrator identity}
+      SPRING_FLYWAY_PASSWORD: ${SPRING_FLYWAY_PASSWORD:?Set SPRING_FLYWAY_PASSWORD for the migrator identity}
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_FORWARD_HEADERS_STRATEGY: NONE
+      JWT_EXPIRATION: PT15M
+
+  frontend:
+    # Built with --target release: TLS ingress, /api proxy and HTTPS healthcheck.
+    image: codemastery.invalid/frontend:release
+    build: !reset null
+    # Sole public ingress: host TCP 443 (IPv4) to the container's TLS listener.
+    ports: !override
+      - "0.0.0.0:443:8080"
+    # The verified image's HTTPS healthcheck replaces the local HTTP probe.
+    healthcheck: !reset null
+    restart: unless-stopped
+    volumes:
+      # Serving chain and private key only (CT17 B3); create nothing if absent.
+      - type: bind
+        source: /etc/codemastery/tls
+        target: /etc/nginx/tls
+        read_only: true
+        bind:
+          create_host_path: false

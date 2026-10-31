@@ -1271,3 +1271,232 @@ required checks and protected merge remain mandatory. The investigation, this
 record, the implementation and its tests were produced through AI-assisted
 development under the delegation. No provisioning, deployment, exposure or merge was
 performed or authorized.
+
+## DP01 HTTPS ingress integration — 31 October 2026
+
+### Authority, inputs and boundary
+
+The Project Leader @chi-thanh-nguyen's explicit **“CodeMastery — DP01 Interim Azure
+HTTPS Integration”**, 31 October 2026 (ICT), authorizes the repository-side HTTPS
+integration, its tests and a pull request. This change implements already-approved
+CT17 policy (P1, P5–P8, B1–B3 and the 28 October operation gates). It approves no
+new contract and changes no VM, firewall rule, certificate, credential or Project
+record. It does not complete DP01 #71 or DP03 #72. Baseline: `main`
+`08f66fc99ed5bbe72c2a9aa76ed2edd8e528ec5d`.
+
+The Leader reports these observed infrastructure inputs. They are not authority for
+public exposure, credential use or operational changes:
+
+- Ubuntu 24.04 LTS, linux/amd64, 2 vCPU and 8 GiB RAM; Docker Engine 29.9.2 and
+  Docker Compose 5.6.1. Docker administration currently uses `sudo docker`.
+- Intended origin `https://codemastery.eastasia.cloudapp.azure.com`, with a public
+  A record. Inbound TCP 443 is permitted, and SSH is restricted to the operator.
+- A publicly trusted Let's Encrypt ECDSA P-256 certificate, issued through
+  TLS-ALPN-01 with acme.sh. `/etc/codemastery` is root-owned 0700. `tls/` is
+  owned by UID 101 with mode 0700. `privkey.pem` is UID 101, 0400, and
+  `fullchain.pem` is root-owned 0644. Renewal is not configured.
+
+### Implementation
+
+| Changed file | Responsibility |
+| --- | --- |
+| `infrastructure/vm/docker-compose.vm.yml` (new; proposed path) | Release override applied by `deploy.sh --compose-override` on top of the unchanged local base |
+| `frontend/Dockerfile` | New `release` target; the default local target is unchanged |
+| `.env.example`, `docs/setup.md`, `README.md` | Template, guide and AI-disclosure synchronization |
+| `.github/workflows/ci.yml` | New “VM HTTPS ingress” job |
+
+The effective deployment model keeps exactly the five services, the `codemastery`
+project, its private default network and the `postgres-data`/`minio-data` named
+volumes. Compose `!reset`/`!override` removes the local host ports, the local frontend
+HTTP healthcheck, both `build` sections and the initializer's inline
+entrypoint/command. Merging alone would not remove them.
+
+- **Ingress.** The existing frontend Nginx is the only public ingress, published as
+  `0.0.0.0:443` to container `8080`. IPv4 only is published: no AAAA record exists
+  and IPv6 is untested (B2). It terminates TLS 1.2/1.3 from the read-only
+  `/etc/codemastery/tls` → `/etc/nginx/tls` directory bind, using
+  `create_host_path: false`, so a missing directory fails instead of being created.
+- **Host validation.** A handshake without SNI or with another name is refused
+  (`ssl_reject_handshake`), so IP-address scans get no certificate. A request whose
+  Host differs from the approved name receives HTTP 421. Plaintext HTTP on the TLS
+  port receives Nginx's 400.
+- **Routing.** Exact `/api` and the `/api/` subtree match before the SPA. They are
+  proxied to `backend:8080` with the original path and query unchanged, and
+  backend status, content type and headers pass through. Error interception and
+  caching are disabled. Client routes load `index.html`. A missing `/assets/`
+  file, or any missing path ending in an extension, is a real 404. An unavailable
+  backend is an HTTP 502, not the SPA.
+- **Exposure.** Nothing else reaches the backend: Actuator, `/v3/api-docs` and
+  Swagger paths are served by the SPA or as 404. No backend, PostgreSQL, MinIO API
+  or MinIO Console host port remains.
+- **Path parameters.** An `/api/` path containing `;` is rejected with 400 at the
+  ingress. Tomcat drops `;` path parameters, so `/api/..;/actuator/health`
+  resolves outside `/api`. With the real backend, such requests currently reach
+  default-deny (401). The ingress rule keeps that true even if a private health
+  endpoint is later permitted. Query strings are unaffected.
+- **Forwarding (P7).** Caller-supplied `Forwarded`, `X-Forwarded-For/-Host/-Port/
+  -Prefix/-Proto/-Server/-Ssl` and `X-Real-IP` are dropped, and none are added. The
+  backend runs with `SERVER_FORWARD_HEADERS_STRATEGY=NONE`. Its upstream `Host` is
+  the private `backend:8080`. No trusted-proxy range is configured.
+- **Backend runtime.** The override sets `SPRING_PROFILES_ACTIVE=prod` and
+  `JWT_EXPIRATION=PT15M`. `CORS_ALLOWED_ORIGINS` and the
+  `SPRING_FLYWAY_URL/USER/PASSWORD` triple come from the env file, which `deploy.sh`
+  validates as distinct bootstrap, migrator and runtime identities. Application
+  security, JWT and the P6 privilege matrix are unchanged.
+- **Frontend `release` target.** It builds with `VITE_API_BASE_URL=/api`. It
+  renders the Nginx server and the healthcheck from the public `PUBLIC_ORIGIN`
+  build argument. That argument has no default and uses `deploy.sh`'s origin
+  rules, so no hostname is committed. Both files are root-owned and read-only to
+  the Nginx user.
+- **Healthcheck.** The baked check runs `curl` over loopback with
+  `--resolve <host>:8080:127.0.0.1`. It verifies the served chain against the
+  image CA store, expiry and the hostname, and never disables verification. The
+  slim image's BusyBox `wget` cannot keep the approved SNI/hostname while
+  connecting to loopback. The release stage therefore uses the non-slim
+  `nginxinc/nginx-unprivileged:1.30.5-alpine` variant: same publisher and Nginx
+  version, adding `curl` and keeping the `wget` that `deploy.sh`'s private backend
+  probe uses. Timings reuse the local Compose healthcheck values.
+- **Release images.** Images are never built or pulled on the VM. The override's
+  `codemastery.invalid/*:release` names cannot resolve to any registry. They are
+  bound only by `docker load` of the reviewed archive and pinned by
+  `--expect-image`. PostgreSQL keeps its existing `postgres:17.11-bookworm`
+  reference.
+- **Storage images.** Neither MinIO image keeps the local-only golithus pin, so
+  deploying the override cannot silently promote it. The initializer must provide
+  its executable from the qualified image. That image must preserve the local
+  initializer's behavior: a distinct application identity, a valid bucket name,
+  the bucket-scoped least-privilege policy, refusal of group inheritance and of
+  other policy bindings, verification of the application identity, and safe
+  repeat runs. These properties are evidenced through `--initializer-qualification`.
+
+### Release build outside the VM
+
+The required tags are fixed by the override. Build for linux/amd64 (B1), save one
+archive, record its SHA-256 and each image identity for `--expect-image`. Recording
+follows `deploy.sh`'s store-specific rules: the VM's default containerd store
+reports OCI index/manifest digests.
+
+```bash
+docker build --platform linux/amd64 -t codemastery.invalid/backend:release ./backend
+docker build --platform linux/amd64 --target release \
+  --build-arg PUBLIC_ORIGIN=https://codemastery.eastasia.cloudapp.azure.com \
+  -t codemastery.invalid/frontend:release ./frontend
+# minio and minio-init: only qualified artifacts may be tagged with these names.
+docker save -o release.tar postgres:17.11-bookworm \
+  codemastery.invalid/minio:release codemastery.invalid/minio-init:release \
+  codemastery.invalid/backend:release codemastery.invalid/frontend:release
+```
+
+The transfer channel, archive custody and artifact admission review remain P8
+inputs. This record selects none of them.
+
+### Operator identity and env-file custody (proposal; Leader decision)
+
+`deploy.sh` reads the certificate directory itself during preflight. With the
+reported layout, only root or UID 101 can traverse `/etc/codemastery` and read the
+key. A non-root operator, even with Docker access, therefore fails with "frontend
+certificate directory must be owner-restricted", while root passes. The CI job
+below checks both cases. The env file must be owned by the invoking
+user, mode 0600 with one link, inside a 0700 directory that user owns, with only
+root- or user-owned, non-writable ancestors. Because `azureuser` uses `sudo docker`,
+running `deploy.sh` as `azureuser` stops at Docker reachability.
+
+**Proposed compatible arrangement:**
+
+- Run `sudo infrastructure/vm/deploy.sh …`.
+- Keep the env file root-owned, 0600, in a root-owned 0700 directory that the
+  Leader names. No path is selected here.
+- Root executes the checkout's `deploy.sh`, so the checkout must be the reviewed
+  revision and not writable by other accounts.
+- If the checkout is owned by another user, Git's ownership check makes the
+  record's "Script checkout rev" read `unavailable`. Record the reviewed revision
+  through `--source-revision` and the change record. Do not change global Git
+  configuration without authority.
+
+Rejected alternatives:
+
+- Docker-group membership: root-equivalent daemon access without sudo
+  accountability, and not authorized.
+- Loosening `/etc/codemastery` or key permissions: violates B3.
+- Copying key material to another location for the check: invents a secret
+  location.
+
+None of this is configured or authorized here.
+
+### Certificate renewal (proposed procedure; not implemented)
+
+Status: **unattended renewal is not configured and is not claimed.** acme.sh was
+installed with `--no-cron`. Its standalone TLS-ALPN-01 needs host TCP 443, which the
+running frontend holds. Customer DNS-01 records are unavailable for an
+Azure-managed `cloudapp.azure.com` name. HTTP-01 would need a separately approved
+port-80 listener. The operator should record the served certificate's `notAfter`.
+It was not observed in this change. A 90-day certificate issued in late October
+would outlive the 13 December Final deadline, but only the recorded date
+establishes that.
+
+Proposed separately authorized procedure, outside evaluation and demo windows:
+
+1. Record the served certificate fingerprint and expiry.
+2. Stop only `frontend`. `restart: unless-stopped` keeps it stopped.
+3. Renew through TLS-ALPN-01. Install into a root-only staging directory outside
+   `/etc/codemastery/tls`.
+4. Verify the staged pair:
+   - the key matches the leaf;
+   - the chain is complete;
+   - the SAN is the approved host;
+   - the validity period is correct.
+5. Set the staged files' owner and mode: key UID 101 0400, chain root 0644, one
+   link each.
+6. Keep the previous pair in a root-only backup directory outside the mounted
+   directory. A backup key left inside it fails preflight.
+7. Rename each file into the mounted directory on the same filesystem. The
+   directory bind exposes the new inodes; a single-file bind would pin the old one.
+8. Start `frontend`, run `nginx -t`, and wait for the baked healthcheck.
+9. Rerun `deploy.sh preflight` and verify the newly served certificate from
+   outside.
+10. On any failure, restore the backup pair, restart, and preserve the evidence.
+
+A zero-downtime `nginx -t` then `nginx -s reload` path becomes possible only with a
+renewal method that does not need host 443, and requires its own approval. A failed
+reload keeps serving the old certificate. No timer, hook, port-80 exposure or
+certificate change is made here.
+
+### Verification and remaining gates
+
+CI job **VM HTTPS ingress** builds the release and local frontend images and the
+backend image, then exercises:
+
+- the ingress behaviors above against a stub backend and the real backend
+  (including exact-origin CORS, ProblemDetail `instance` paths and 401 headers);
+- negative release builds;
+- `deploy.sh`'s Compose and image policies on the committed override;
+- a real `deploy.sh preflight` with the reported certificate layout, as root and as
+  a non-root operator, including renewal-time layout errors;
+- local-image regressions.
+
+Results belong to the pull request. No VM preflight, load, provision, deploy or
+external verification was run.
+
+Release blockers remain:
+
+1. **Private health probe (Auth-owned).** The backend answers `deploy.sh`'s private
+   `/actuator/health` probe with HTTP 401. The real-backend test prints this
+   status for information. `deploy` therefore stops before ingress, as recorded
+   on 28 October.
+2. **Storage artifacts.** No production-qualified MinIO server or initializer
+   artifact exists, nor does initializer qualification evidence.
+3. **Release logistics.** Release archive transfer, custody and image admission
+   review (P8), including the non-slim Nginx variant.
+4. **Operator custody.** The operator identity and env-file custody above.
+5. **Renewal.** The renewal lifecycle above.
+6. **Authority references.** Provision, deployment, public-exposure,
+   packet-filter, initializer and P9 update references.
+7. **Evidence.** B1 capacity qualification, QA01/QA02/QA07 evidence and DP03
+   outside-network verification.
+8. **Governance.** Leader governance for the new override path in
+   `docs/repository-structure.md` and its CODEOWNERS coverage. The path is already
+   under `/infrastructure/`.
+
+The implementation, this record and its tests were produced through AI-assisted
+development (Anthropic Claude Code) under the Leader's task; no AI service or new
+infrastructure technology is introduced into CodeMastery.

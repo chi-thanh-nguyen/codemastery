@@ -215,10 +215,11 @@ the standalone container-build/Nginx foundation, the initial PostgreSQL
 schema/Flyway foundation, and the local Compose/provisioning foundation during
 development.** AI-assisted development was also used for the Interim
 deployment-privilege work and for the sample datasets, their verification and
-documentation, and the revised sample slides; the team reviews this work through
-the normal pull-request process. This disclosure describes
-development assistance; CodeMastery's approved adaptive engine is rule-based
-and uses no AI/ML service.
+documentation, and the revised sample slides; Anthropic Claude Code assisted with
+the DP01 HTTPS ingress integration, its tests and its deployment documentation.
+The team reviews this work through the normal pull-request process. This
+disclosure describes development assistance; CodeMastery's approved adaptive
+engine is rule-based and uses no AI/ML service.
 
 Backend third-party libraries and their configured purposes are recorded in
 `pom.xml`; frontend dependencies are recorded in `frontend/package.json` and its
