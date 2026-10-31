@@ -51,19 +51,22 @@ server {
     resolver 127.0.0.11 valid=10s ipv6=off;
     set $backend http://backend:8080;
 
-    # The backend ignores forwarding headers (forward-headers-strategy NONE);
-    # caller-supplied values are dropped, none are added (CT17 P7).
+    # CT17 P7: no caller-supplied Forwarded/X-Forwarded-* or other identity or
+    # routing claim reaches the backend, which also ignores forwarding headers
+    # (forward-headers-strategy NONE); none are added. Nginx cannot drop a
+    # header family by prefix, so client headers are not passed at all except
+    # this allowlist: the bearer credential, representation, and the CORS
+    # inputs the backend checks. Nginx itself sets Host (the private upstream)
+    # and the body framing.
     proxy_http_version 1.1;
-    proxy_set_header Connection         "";
-    proxy_set_header Forwarded          "";
-    proxy_set_header X-Forwarded-For    "";
-    proxy_set_header X-Forwarded-Host   "";
-    proxy_set_header X-Forwarded-Port   "";
-    proxy_set_header X-Forwarded-Prefix "";
-    proxy_set_header X-Forwarded-Proto  "";
-    proxy_set_header X-Forwarded-Server "";
-    proxy_set_header X-Forwarded-Ssl    "";
-    proxy_set_header X-Real-IP          "";
+    proxy_pass_request_headers off;
+    proxy_set_header Connection                     "";
+    proxy_set_header Authorization                  $http_authorization;
+    proxy_set_header Accept                         $http_accept;
+    proxy_set_header Content-Type                   $content_type;
+    proxy_set_header Origin                         $http_origin;
+    proxy_set_header Access-Control-Request-Method  $http_access_control_request_method;
+    proxy_set_header Access-Control-Request-Headers $http_access_control_request_headers;
 
     # REST: exact /api and the /api/ subtree, before any SPA fallback. With no
     # URI part, proxy_pass forwards the original path and query unchanged, and
