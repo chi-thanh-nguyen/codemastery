@@ -1,22 +1,131 @@
 # CodeMastery Deployment Preparation
 
-## Status and scope
+## Current status and reproduction summary
+
+Status as inspected on 31 October 2026 at `main`
+`614f3260a2df640dcfa47c166e4a5325f56bd1a7`. This summary describes what exists; it
+approves nothing. Approvals, authority boundaries and evidence are in the dated
+records below, which keep the wording of their date. Changes in open pull
+requests are not described here.
+
+### What exists and what has been shown
+
+| Level | Status | Evidence |
+| --- | --- | --- |
+| Approved architecture | One VM running the existing five-service Docker Compose application, with the frontend Nginx as the only public HTTPS ingress | CT17 records below; [DP01 HTTPS ingress integration](#dp01-https-ingress-integration--31-october-2026) |
+| Deployment tooling | Implemented and merged | `infrastructure/vm/deploy.sh` (PR #110), `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` target (PR #118) |
+| Tested configuration | The tooling passes its CI jobs on the GitHub runner, against real containers but not the VM | Five `VM …` jobs, see [testing.md](testing.md#ci); passed on `614f326` in [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079) |
+| Actual deployment | **None recorded.** No `preflight`, `load`, `provision` or `deploy` on the VM is recorded in this repository | — |
+| External / lecturer access | **Not verified.** No independently verified public URL exists | DP03 #72 is open |
+
+The Leader has reported a provisioned Azure VM, an intended origin and a TLS
+certificate layout ([inputs](#authority-inputs-and-boundary)). They are reported
+inputs, not verified results, and do not authorize public exposure.
+
+### Deployment artifacts
+
+| Path | Responsibility |
+| --- | --- |
+| `infrastructure/docker-compose.yml` | The local base file, used as is; `deploy.sh` always applies it first |
+| `infrastructure/vm/docker-compose.vm.yml` | Release override: removes local ports and builds, publishes only the frontend on 443, mounts the TLS directory read-only, sets the backend release environment and fixes the `codemastery.invalid/*:release` image names |
+| `frontend/Dockerfile`, `release` target | Builds the bundle with `VITE_API_BASE_URL=/api`, terminates TLS, proxies `/api` to the backend and bakes an HTTPS healthcheck. Requires the `PUBLIC_ORIGIN` build argument |
+| `infrastructure/vm/deploy.sh` | Operator script with the subcommands `preflight`, `load`, `provision`, `deploy` and `all`. It verifies inputs, images and grants, provisions the PostgreSQL roles and the runtime privilege matrix, starts services in order and prints a deployment record without secrets |
+| `.env.example` | Lists the VM-only entries (`SPRING_FLYWAY_*` migrator identity, single `CORS_ALLOWED_ORIGINS` origin) |
+
+### Operator inputs
+
+`deploy.sh` has no defaults for these. `infrastructure/vm/deploy.sh --help` prints
+its usage without changing anything.
+
+- `--env-file`: the real runtime env file, owned by the invoking user, mode 0600,
+  in a 0700 directory. Its location and custody are a Leader decision
+  ([proposal](#operator-identity-and-env-file-custody-proposal-leader-decision)).
+- `--origin`: the single approved `https://` origin, equal to the env file's
+  `CORS_ALLOWED_ORIGINS` and to the frontend image's `PUBLIC_ORIGIN`.
+- `--compose-override infrastructure/vm/docker-compose.vm.yml`.
+- `--archive` and `--archive-sha256`: the reviewed `docker save` release archive,
+  built outside the VM ([release build](#release-build-outside-the-vm)).
+- `--expect-image REF=sha256:…` for every service image.
+- `--wait-timeout` and, for `deploy`/`all`, `--source-revision`.
+- Non-secret references to separately made decisions:
+  `--deployment-authorization`, `--provision-authorization`,
+  `--public-exposure-authorization`, `--packet-filter-verification` and
+  `--initializer-qualification`; on a host with existing state, also the four
+  update attestations ([operation gates](#ct17i-operation-gates--authority-boundaries-and-ingress-evidence)).
+  The script records these references; it cannot check them and never treats them
+  as approval.
+- The TLS directory `/etc/codemastery/tls` with the owner and mode layout in
+  [the path bindings](#leader-approved-path-bindings--31-october-2026).
+
+### Intended procedure
+
+Each step requires its own authority; this guide grants none.
+
+1. Build the linux/amd64 release images and the archive outside the VM, and
+   compute the archive SHA-256 and image identities
+   ([recipe](#release-build-outside-the-vm)).
+2. Transfer the archive to the VM. The channel and custody are not yet selected
+   (P8, release blocker 3).
+3. Run `deploy.sh preflight`. It changes nothing. It checks the origin, the env
+   file, the host and Docker, and the effective Compose model, including the image
+   and TLS-directory policies.
+4. Run `deploy.sh load` to verify the archive and load it into the host image store.
+5. Run `deploy.sh provision`, then `deploy.sh deploy`, or `all` for load,
+   provision and deploy as one coordinated update. `deploy` requires a healthy
+   PostgreSQL, starts the backend privately and waits for its health probe. It
+   then checks Flyway history, hardens and verifies the runtime grants, and checks
+   the private HTTPS handshake. Only then does it start the public frontend.
+6. Keep the printed DEPLOYMENT RECORD. It marks feature behavior, external access
+   and host packet filtering `NOT_VERIFIED`. Those need QA01/QA07 and the DP03
+   outside-network check.
+
+### Health checks and stop conditions
+
+- PostgreSQL must report healthy before `deploy` starts the backend.
+- The backend has no Compose healthcheck. `deploy` probes
+  `http://backend:8080/actuator/health` privately and requires HTTP 200 with
+  `"status":"UP"`. **Today the backend answers 401, so `deploy` stops here, before
+  ingress** (release blocker 1, Auth-owned).
+- The frontend `release` image's healthcheck verifies the served certificate chain,
+  expiry and hostname over loopback.
+- Any failed check stops the release. Nothing is retried or reset. Backup,
+  restore, rollback and certificate renewal are outside the script (DP01.F-deploy
+  and [renewal](#certificate-renewal-proposed-procedure-not-implemented)).
+
+### Release blockers
+
+The [current list](#verification-and-remaining-gates) has seven blockers: the
+private health probe (401), production-qualified MinIO server and initializer
+artifacts, release transfer and admission (P8), operator and env-file custody,
+certificate renewal, authority references, and evidence (B1 capacity, QA01, QA02,
+QA07, DP03). Until they are resolved, no lecturer-accessible deployment can be
+claimed.
+
+## Original Interim deployment methodology — 11 October 2026 record
+
+> **Dated record.** The four subsections below were written with ADR002 on
+> 11 October 2026, before any deployment tooling existed. Their statements about
+> missing scripts and pending checks describe that date; the summary above is
+> current. Their methodology for runtime secrets, external verification and
+> evidence remains applicable.
+
+### Status and scope
 
 Planning and verification methodology under [ADR002](decisions/002-interim-delegated-contracts.md), CT17.I-scope/CT17.I-access. No actual deployment, paid service, public exposure, credentials or production access approved or performed. Retain approved one-VM Docker Compose architecture and existing infrastructure. Selected externally demonstrated capabilities are real Auth and Course catalogue/detail; local mastery results remain separately reproducible. The official lecturer-accessible prototype remains mandatory.
 
-## Preconditions and local validation
+### Preconditions and local validation
 
 Merge reviewed contracts, obtain separate implementation and deployment authority, implement/test selected features and provide real non-secret endpoint/configuration choices. Follow existing [setup](setup.md) and [testing](testing.md) commands; do not invent deployment scripts. Existing repository checks include backend Maven Wrapper verification, frontend npm run build and the documented Compose configuration validation. Local bindings remain loopback. This task did not run application deployment or these feature-validation commands.
 
-## Runtime and health
+### Runtime and health
 
 Runtime secret values are supplied out of band; no secrets in documentation or VITE_* variables. Use existing /actuator/health without detail exposure, then exercise actual feature APIs/browser. Health alone does not demonstrate implementation or correct database access. Production TLS/origins/provider/access policy and rollback authorization require Leader decisions.
 
-## External verification and evidence
+### External verification and evidence
 
 An independent tester outside the developer LAN verifies the actual approved HTTPS URL, Auth/roles and browser→REST→PostgreSQL catalogue/detail, hidden404 behavior, English data and no secret disclosure. Record real URL, revision/build, UTC/ICT time, browser, tester identity, role and redacted expected/observed results. Stop on TLS/origin failure, data exposure, wrong authorization, placeholders or local-only access. Preserve failures and corrective evidence. Actual accounts/endpoints and lecturer instructions are external inputs, not invented values.
 
-## Recovery and submission
+### Recovery and submission
 
 Record actual deployment steps, backups/rollback procedures and responsible operator when separately authorized. Do not reset data or publish credentials. Link verified prototype and local mastery evidence to the English Interim report, contributions and submission documentation. No academic submission is authorized here.
 

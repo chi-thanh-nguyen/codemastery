@@ -6,35 +6,66 @@ This document describes CodeMastery's current testing contract, based on
 [the backend build](../backend/pom.xml), [the frontend manifest](../frontend/package.json),
 and [the CI workflow](../.github/workflows/ci.yml).
 
-The reusable backend integration-test foundation and initial CI configuration
-are implemented. CourseFixtures provides representation-only Course construction,
-with CourseFixturesTest as its pure structural consumer. Course business/service
-and PostgreSQL integration test scaffolds remain empty. SH01 has executable
-shared-infrastructure unit and Spring MVC
-integration tests. Frontend typechecking
-and build validation exist; bounded FE01 automated regressions are implemented,
-while integrated E2E remains planned.
-Successful compilation or builds do not establish tested business behavior.
+The sections from [Test Layers and Evidence](#test-layers-and-evidence) through
+[Remaining Gaps](#remaining-gaps) describe the current repository. The later dated
+sections, from [Authorized Interim verification contracts](#authorized-interim-verification-contracts)
+onward, are decision and execution records. They keep the wording of their date.
 
-## Backend Test Layers
+Backend unit tests, Testcontainers PostgreSQL integration tests and frontend
+Vitest/jsdom tests exist for the implemented Auth, Course catalogue and
+membership, sample-data and shared REST slices, and run in CI. Integrated
+Playwright E2E is not set up. A passing test establishes only what that test
+exercises. It is not acceptance of a verification Issue: QA01 #61, QA02 #62,
+QA07 #63, QA13 #64, QA14 #65 and DP02 #66 remain open, and their independent
+verification is separate work.
 
-- **Unit tests:** isolated business logic and deterministic adaptive rules,
-  using Mockito where appropriate. Maven Surefire executes eligible tests
-  outside the integration path.
-- **Integration tests:** Spring configuration, persistence, transactions, and
-  approved module interactions. Maven Failsafe executes concrete tests under
-  the integration path. The foundation exists; feature suites are unimplemented.
-- **Future E2E tests:** Playwright will exercise main user flows through the
-  frontend and backend. Files under `e2e/` remain empty scaffolds and define no
-  executable E2E commands or CI job.
+## Test Layers and Evidence
+
+| Layer | Tool and location | Runs in CI | What a pass establishes | What it does not establish |
+| --- | --- | --- | --- | --- |
+| Backend unit | JUnit Jupiter 6, Mockito; Maven Surefire; module test packages outside `integration/` | Yes (`Backend`) | Isolated service, mapper, adapter, validation, JWT, settings and pure mastery logic | Real PostgreSQL behavior, Spring Security wiring or HTTP serialization |
+| Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency; Spring MVC with the production security chain through MockMvc | A running server, real browser, network/CORS from a browser, deployment |
+| Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
+| Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`) with an externally supplied Playwright module | No | Chromium layout, focus, contrast and accessibility-tree checks of presentation components | Live API integration |
+| Standalone browser script | `e2e/tests/learner-flow.spec.ts`, run with an externally supplied Playwright module against a running frontend and backend ([record](#pr-101-full-fe07-verification--27-october-2026)) | No | When executed and recorded: the FE07 browser → REST → PostgreSQL learner flow on that environment | Repository E2E setup: `e2e/package.json` and `playwright.config.ts` are empty and no E2E job exists |
+| VM deployment tests | Five `VM …` CI jobs exercising `deploy.sh`, the VM override and the frontend `release` image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity and HTTPS ingress behavior on the runner | Any deployment, the real VM or outside-network access |
+| Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
+
+### Backend integration suites
+
+| Suite | Added by | What it exercises |
+| --- | --- | --- |
+| `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. Uses an ephemeral JWT secret. |
+| `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations |
+| `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
+| `EnrollmentIntegrationTest` | FE07, PR #101 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods |
+| `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
+| `SharedRestInfrastructureIntegrationTest` | SH01, PR #78 | Spring MVC ProblemDetail, validation and paging with test-only routes; it does not start PostgreSQL or the security chain |
+
+`AdaptiveLearningFlowIntegrationTest.java` and
+`MasteryProgressTransactionIntegrationTest.java` are empty scaffolds.
+
+Merged test code does not complete QA01 or QA02: each Issue's own acceptance
+criteria, independent review and any environment-specific evidence remain open.
+
+### Latest recorded results
+
+| Date (ICT) | Revision | Where | Command | Result |
+| --- | --- | --- | --- | --- |
+| 31 October 2026 | `main` `614f326` | GitHub Actions CI [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079); CodeQL [run 41191742751](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191742751) | All CI jobs; CodeQL default setup | All seven CI jobs and CodeQL passed. Backend: Surefire 468 tests, Failsafe 150 tests, 0 failures, errors or skips. Frontend: 390 tests in 11 files, then a successful build |
+| 31 October 2026 | `main` `614f326` | Local, macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1, Node 24.21.0, npm 11.19.0 | `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 468, Failsafe 150, 0 failures, errors or skips |
+| 31 October 2026 | `main` `614f326` | Same machine | `cd frontend && npm ci && npm test && npm run build` | 390 tests in 11 files passed; build succeeded |
+
+The two local runs were made for the DO01 documentation update. They confirm that
+the documented commands work on that machine; they are not independent QA
+verification. No coverage percentage is claimed.
 
 ## JUnit / Mockito Baseline
 
 Backend tests use JUnit Jupiter 6. Its exact version is managed by Spring Boot
 4.1.1 and currently resolves to 6.0.3. Do not override the managed JUnit version
 without a separately approved dependency decision. Mockito remains the backend
-mocking tool where appropriate. This selected toolchain does not imply that
-feature tests have been implemented.
+mocking tool where appropriate.
 
 ## Unit-Test Lifecycle
 
@@ -49,8 +80,11 @@ The command compiles application and test sources and executes eligible Surefire
 tests. Surefire uses its standard `Test*`, `*Test`, `*Tests`, and `*TestCase`
 naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
-SH01 unit tests execute from the existing shared support test package. The
-integration base class is compiled but is not initialized by this unit-test lifecycle.
+Current unit suites are under `modules/auth/`, `modules/course/` (including
+`application/service/`), `modules/adaptive/mastery/` and the shared `support/`
+package. The other module test files are empty scaffolds. The integration base
+class is compiled but is not initialized by this unit-test lifecycle, so
+`./mvnw test` needs no Docker.
 
 [CourseFixturesTest](../backend/src/test/java/com/codemastery/modules/course/CourseFixturesTest.java)
 is the authorized FT01 structural consumer of the accepted CO01 records and enums.
@@ -85,17 +119,19 @@ An inherited `@DynamicPropertySource` registers `spring.datasource.url`,
 `spring.datasource.username`, and `spring.datasource.password` from the running
 container. No fixed host port or developer-local database credentials are used.
 The profile only sets `codemastery.scheduling.enabled: false`; scheduler
-implementation is still pending. No JWT or storage consumer is currently
-implemented, so the profile supplies no fake secrets or storage services.
+implementation is still pending. The profile supplies no secrets or storage
+services. Suites that need the JWT provider register their own ephemeral
+64-hex-character `JWT_SECRET` through `@DynamicPropertySource`; no secret is
+committed. No storage consumer exists.
 
 The normal application Flyway settings remain enabled against this datasource,
 using `classpath:db/migration`. Hibernate retains `ddl-auto: validate`, and
 does not generate a test schema. V001–V006 now implement the approved initial
 23-table PostgreSQL schema. Migration execution, checksum/restart validation, and
 constraint checks are part of persistence/integration validation on disposable
-databases. Accepted Course/Adaptive scalar entity mappings now exist, but concrete
-PostgreSQL feature suites remain empty. Successful schema migration alone proves
-neither an entity round trip nor feature behavior.
+databases. Every suite that extends the base runs against this migrated schema;
+see [Backend integration suites](#backend-integration-suites). Successful schema
+migration alone proves neither an entity round trip nor feature behavior.
 
 Concrete integration tests belong under
 `backend/src/test/java/com/codemastery/integration/`, including its approved
@@ -111,9 +147,9 @@ Run broader verification from `backend/`:
 
 This includes compilation, unit tests, application packaging/repackaging,
 Failsafe integration-test execution and verification, and JaCoCo reporting when
-execution data exists. Docker and access to the test image are required once
-concrete tests initialize the Testcontainers foundation. Compose and a manually
-provisioned PostgreSQL service are not required for that foundation.
+execution data exists. Because concrete suites initialize the Testcontainers
+foundation, a running Docker Engine and access to `postgres:17.11-bookworm` are
+required. Compose and a manually provisioned PostgreSQL service are not required.
 
 To skip integration-test execution while retaining the other verification work:
 
@@ -124,11 +160,11 @@ To skip integration-test execution while retaining the other verification work:
 This still compiles integration-test sources and runs eligible unit tests, but
 skips Failsafe execution. It is not the CI validation command.
 
-The abstract harness contains no executable tests, and its concrete feature
-test scaffolds remain empty. The SH01 MVC integration test executes a real Spring
-web context and dispatcher, but does not initialize this PostgreSQL harness or
-prove database integration.
-Runtime validation requires an actual concrete test that initializes the base.
+The abstract harness itself contains no tests. The SH01 MVC integration test
+executes a real Spring web context and dispatcher, but does not extend the base,
+so it neither starts PostgreSQL nor proves database integration. MockMvc-based
+suites dispatch through the real filter chain without a listening server; they
+do not exercise Tomcat, a browser or a reverse proxy.
 
 ## Test Isolation
 
@@ -142,17 +178,19 @@ Reuse Spring contexts where configuration is identical. The base class does
 not impose a transaction on every test. Suitable future persistence tests can
 use Spring test transactions with automatic rollback. Tests that commit, use
 independent transactions, perform HTTP work, or execute work in other threads
-must explicitly clean up changes that rollback does not cover. No generic
-truncation or schema reset infrastructure is implemented. CourseFixtures only
+must explicitly clean up changes that rollback does not cover. The current suites
+do this themselves, for example by deleting the rows they committed after each
+test; `SampleDataSeedIntegrationTest` creates a separate database per scenario.
+No generic truncation or schema reset infrastructure is implemented. CourseFixtures only
 constructs in-memory representations; it does not load or reset a database.
 
 ## JaCoCo
 
 JaCoCo 0.8.15 is configured to attach its agent during Maven initialization and
 generate a report at `verify` when execution data is available. No coverage
-threshold or coverage enforcement goal is configured. SH01 coverage reports
-concern shared infrastructure; meaningful feature coverage is not established.
-A successful build or report goal alone is not evidence of feature coverage.
+threshold or coverage enforcement goal is configured, and no coverage percentage
+is recorded or claimed. A successful build or report goal alone is not evidence of
+feature coverage.
 
 ## Frontend Validation
 
@@ -289,46 +327,69 @@ before binding, documentation integration and both FE01 checkpoint/Issue #37
 acceptance remain distinct from implementation merge and test success. Broader
 CT14/CT37 approval and frontend/backend integration are not implied.
 
-## Initial CI
+## CI
 
 The `CI` GitHub Actions workflow runs on pull requests targeting `main`, pushes
 to `main`, and manual `workflow_dispatch`. It uses `contents: read` permissions
-and two independent jobs on `ubuntu-24.04`:
+and seven independent jobs on `ubuntu-24.04`:
 
-| Job ID / display name | Setup | Commands and working directory |
-| --- | --- | --- |
-| `backend` / `Backend` | `actions/checkout@v7`, `actions/setup-java@v6`, Temurin 25 | `./mvnw verify` from `backend/` |
-| `frontend` / `Frontend` | `actions/checkout@v7`, `actions/setup-node@v7`, Node 22 | `npm ci`, then `npm run build` from `frontend/` |
+| Job display name (ID) | What it runs |
+| --- | --- |
+| Backend (`backend`) | Temurin 25; `./mvnw verify` from `backend/`, including the Testcontainers integration tests on the runner's Docker |
+| Frontend (`frontend`) | Node 22; `npm ci`, `npm test`, then `npm run build` from `frontend/` |
+| VM deployment script (`deployment-script`) | Checks of `infrastructure/vm/deploy.sh` without starting the application: shell syntax, authorization gates, Compose and provisioning guards, the runtime privilege matrix, env-file custody, preflight against rendered Compose, release-archive identity models and image identity through a real `docker save`/`load` round trip |
+| VM deployment PostgreSQL and containment tests (`deployment-script-postgres`) | The runtime privilege matrix on the real migrated schema, failure containment and published-port verification against real containers |
+| VM runtime privileges with the real backend (`deployment-script-runtime`) | Builds the backend image and exercises real Auth, catalogue and membership under the approved privilege matrix |
+| VM deployment containerd image store (`deployment-script-containerd`) | Release-archive verification through real `docker save`/`load` round trips with the containerd image store |
+| VM HTTPS ingress (`deployment-ingress`) | Builds the release and local frontend images; exercises the HTTPS ingress against a stub and the real backend; runs `deploy.sh preflight` with the committed override |
 
 The Java setup enables Maven caching using `backend/pom.xml` and
 `backend/.mvn/wrapper/maven-wrapper.properties` as dependency inputs. The Node
 setup enables npm caching keyed by `frontend/package-lock.json`. Caches do not
-replace installation or validation. The backend runs directly on the hosted
-runner, whose Docker support is needed when concrete Testcontainers tests exist.
+replace installation or validation. CodeQL code scanning runs separately through
+GitHub's default setup, with no workflow file in this repository.
 
-CI currently validates build foundations and prepares the future test lifecycle;
-it does not validate backend business behavior or exercise PostgreSQL through
-the abstract harness alone. There is no E2E job, Compose invocation, deployment,
-Docker image build, or artifact upload. No remote branch-protection settings or
-required status-check names are defined here. Workflow configuration does not
-prove a successful remote run; actual GitHub Actions results must be reported
-from executed runs.
+The `main-quality-gates` repository ruleset requires all seven job names and
+`CodeQL` to pass before merging into `main` (as read from the GitHub API on
+31 October 2026). The VM jobs run only on the CI runner: they deploy nothing and
+do not reach the real VM. No job starts the local Compose stack (the VM jobs
+start their containers with `docker run`), and there is no E2E job or artifact
+upload. Workflow configuration does not prove a successful run; see
+[Latest recorded results](#latest-recorded-results).
 
-## Planned Testing
+## Remaining Gaps
 
-The following remain planned, with no test-count or coverage-percentage claim:
+The following are not covered by any executable test in the repository. No
+test-count or coverage-percentage claim is made for them.
 
-- Feature unit tests, including deterministic adaptive-learning cases.
-- Feature integration tests for persistence, transactions, configuration, and
-  approved module interactions.
-- Frontend automated tests if a framework is later approved.
-- Playwright E2E flows and fixtures.
-- E2E CI.
+- **Empty scaffolds.** Assessment, Interaction and Admin unit tests; Adaptive
+  decision, evaluation, listener, settings, mastery-update, placement and skill-graph
+  tests; `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
+  `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
+  `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
+  their features and approved contracts.
+- **E2E.** No Playwright package, configuration, fixtures or CI job. The
+  standalone FE07 browser script needs an external Playwright installation and a
+  running stack, and is run manually.
+- **Real-browser and runtime integration.** No CI job drives a real browser
+  against a running backend and PostgreSQL. Manual local runs, including the
+  standalone FE07 script, are recorded in the dated sections below; QA07 and DP02
+  acceptance are open.
+- **Deployment.** No test reaches the real VM or checks outside-network access
+  (DP01 #71, DP03 #72). The private `/actuator/health` probe answers 401
+  ([deployment blocker 1](deployment.md#verification-and-remaining-gates)).
+- **Object storage.** No backend storage adapter exists, so no test covers file
+  upload or delivery (CT09).
+- **Assistive technology.** No test establishes actual screen-reader output.
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
 
 ## Authorized Interim verification contracts
+
+> **Dated records.** This section and those after it keep the wording of their
+> date. Statements in them such as "scaffolds remain empty" or "CI runs install
+> and build only" describe that date. The current state is in the sections above.
 
 [ADR002](decisions/002-interim-delegated-contracts.md) remains authoritative for
 `CT14.interim`, `CT36.I-results` and `NC-EVIDENCE-MODE`. The detailed placement,
