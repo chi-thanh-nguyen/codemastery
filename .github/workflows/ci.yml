@@ -2327,3 +2327,21 @@ jobs:
           fi
           echo "ok: deploy.sh image policy rejects the local frontend image as a release image"
           echo "INGRESS_PREFLIGHT_TESTS_PASS"
+
+  minio-initializer:
+    name: VM MinIO initializer qualification
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Pull the digest-pinned MinIO server and client
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Local-only Community pins: the server stands in for the still
+          # unqualified release server; the client is the initializer's base.
+          mapfile -t pins < <(sed -n 's/^    image: \(ghcr\.io\/golithus\/.*\)$/\1/p' infrastructure/docker-compose.yml)
+          [[ ${#pins[@]} -eq 2 ]] || { echo "Unexpected MinIO image pins." >&2; exit 1; }
+          for ref in "${pins[@]}"; do docker pull -q --platform linux/amd64 "$ref" >/dev/null; done
+      - name: Build the initializer image and run it against disposable MinIO servers
+        shell: bash
+        run: infrastructure/minio/test-minio-init.sh

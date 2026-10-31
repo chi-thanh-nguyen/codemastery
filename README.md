@@ -32,7 +32,7 @@ tests), **Partial** (some approved capabilities implemented), **Planned**
 | Frontend | Partial | React Router application with sign-in, registration, profile, course catalogue and detail, My Courses and the dashboard layout, with Vitest regression tests. Instructor, administrator, assessment and Mastery Map pages are planned. |
 | Sample data | Partial | Synthetic Users, Courses, Lessons and text materials (SD01/SD02) with database-target protection, and one sample slide deck; see [sample-data/README.md](sample-data/README.md). Skill-graph, question and learner-profile datasets are planned. |
 | Testing | Partial | Backend unit tests for Auth, Course, mastery calculation and shared REST; Testcontainers PostgreSQL integration tests for the catalogue, membership (including REST sign-in), shared REST and sample data; frontend Vitest suites. A Playwright learner-flow specification exists, but the `e2e/` package and configuration are not yet committed; see [docs/testing.md](docs/testing.md). |
-| CI | Implemented | GitHub Actions runs the Backend (`./mvnw verify`), Frontend (`npm ci`, `npm test`, `npm run build`) and VM deployment-script jobs; CodeQL code scanning also runs on pull requests. |
+| CI | Implemented | GitHub Actions runs the Backend (`./mvnw verify`), Frontend (`npm ci`, `npm test`, `npm run build`), VM deployment-script and MinIO initializer qualification jobs; CodeQL code scanning also runs on pull requests. |
 | Local runtime and deployment | Partial | Docker Compose runs PostgreSQL, MinIO, the backend and the frontend locally ([setup](docs/setup.md#local-docker-compose-runtime)). An Interim VM deployment script and its decisions exist ([deployment](docs/deployment.md)); no public deployment has been performed or verified. |
 
 Empty files reserve approved locations and responsibilities; they do not define
@@ -216,7 +216,9 @@ schema/Flyway foundation, and the local Compose/provisioning foundation during
 development.** AI-assisted development was also used for the Interim
 deployment-privilege work and for the sample datasets, their verification and
 documentation, and the revised sample slides; Anthropic Claude Code assisted with
-the DP01 HTTPS ingress integration, its tests and its deployment documentation.
+the DP01 HTTPS ingress integration, its tests and its deployment documentation,
+and with the DP01 MinIO initializer, its qualification tests and the MinIO artifact
+review.
 The team reviews this work through the normal pull-request process. This
 disclosure describes development assistance; CodeMastery's approved adaptive
 engine is rule-based and uses no AI/ML service.
@@ -225,7 +227,9 @@ Backend third-party libraries and their configured purposes are recorded in
 `pom.xml`; frontend dependencies are recorded in `frontend/package.json` and its
 lockfile. Local PostgreSQL/MinIO infrastructure uses the images identified in
 [setup](docs/setup.md#services-and-local-urls), including the approved third-party
-Golithus builds for local MinIO server/client use. No production hosting provider,
+Golithus builds for local MinIO server/client use; the release initializer image
+in `infrastructure/minio/` is built on the same pinned client image. No production
+hosting provider,
 public deployment, or external video host is identified as already in use.
 Contributors must record further actual tools,
 services, uses, and content sources in the final project documentation without
