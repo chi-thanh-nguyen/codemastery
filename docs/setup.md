@@ -8,18 +8,39 @@ This document describes the current development setup contract, based on
 [`frontend/package.json`](../frontend/package.json), and
 [`docker-compose.yml`](../infrastructure/docker-compose.yml). It covers local
 Compose startup/provisioning, variable scopes, configuration loading, and
-foundation validation. Production deployment and E2E remain pending.
+local build and test commands. The one-VM release deployment is documented
+separately in [deployment.md](deployment.md); test suites and their evidence are
+in [testing.md](testing.md).
 
-The frontend build, custom MUI presentation foundation, demonstration dashboard
-and bounded FE01 unit/component regressions are implemented.
-The backend integration-test foundation and initial CI workflow are implemented;
-integrated frontend features and browser API integration remain pending. Standalone
-multi-stage Docker image builds and frontend Nginx static serving configuration
-are implemented, with non-root runtimes. The local Compose foundation defines
-PostgreSQL, MinIO, a one-shot storage initializer, backend, and frontend. V001–V006
-implement the approved initial PostgreSQL schema. This runtime foundation does
-not implement feature APIs, authentication, JPA mappings, the backend storage
-adapter, or browser API integration. E2E and deployment remain empty scaffolds.
+The sections from [Prerequisites](#prerequisites) through
+[CI](#ci) describe the current repository. The later dated sections, from
+[Authorized Interim configuration targets](#authorized-interim-configuration-targets-implementation-pending)
+onward, are decision and implementation records. They keep the wording of their
+date and are not rewritten when the implementation changes.
+
+### Implemented capabilities on `main`
+
+Status as inspected on 31 October 2026 at `main`
+`614f3260a2df640dcfa47c166e4a5325f56bd1a7`. Implemented code and passing tests are
+not acceptance: QA01, QA02, QA07, QA13, DP01–DP03 and the other verification
+Issues remain open.
+
+| Area | Implemented in the repository | Not implemented |
+| --- | --- | --- |
+| Auth | Registration and login (`POST /api/auth/register`, `/api/auth/login`), BCrypt password storage, stateless JWT bearer authentication with Learner/Instructor/Administrator role claims (registration creates Learners only) and locked-account rejection | Logout endpoint, password reset, account administration |
+| Course | Public published-course catalogue with search, prerequisite filter and pagination (`GET /api/courses`); published course detail (`GET /api/courses/{courseId}`); Learner membership (`GET`/`PUT`/`DELETE /api/courses/{courseId}/membership`) and My Courses (`GET /api/me/courses`) | Course authoring, lesson content delivery, lesson progress |
+| Security | Every other route, including `/actuator/**`, `/v3/api-docs` and Swagger UI, is denied by Spring Security | — |
+| Adaptive | Pure mastery calculator and state classifier (no database, events or API) | Skill graph, mastery persistence, routing, recommendations |
+| Assessment, Interaction, Admin | — | Source files are empty scaffolds |
+| Object storage | Local MinIO and its least-privilege initializer | Backend storage adapter and file delivery (CT09) |
+| Frontend | Router with `/courses`, `/courses/:courseId`, `/login`, `/register`, Learner-only `/my-courses`, authenticated `/profile` and the illustrative dashboard at `/preview`; shared HTTP client; memory-only session | React Flow Mastery Map, Instructor/Administrator pages |
+| Sample data | SD01 Users and SD02 Courses in `sample-data/seed/01-…` and `02-…`, with a disposable-target loader procedure in [sample-data/README.md](../sample-data/README.md) | Seeds 03–05 are empty; no object is uploaded to MinIO |
+| Runtime | Local Docker Compose stack (this guide) and the one-VM release tooling `infrastructure/vm/deploy.sh`, `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` image target ([deployment.md](deployment.md)) | No deployment has been performed |
+| E2E | `e2e/tests/learner-flow.spec.ts`, a standalone browser script run with an externally supplied Playwright installation ([testing.md](testing.md#test-layers-and-evidence)) | The `e2e/` package, Playwright configuration, fixtures and an E2E CI job are empty or absent |
+
+Exact request and response shapes are in [the OpenAPI document](api/openapi.yaml);
+approved behavior is in [ADR002](decisions/002-interim-delegated-contracts.md) and
+[ADR001](decisions/001-modular-monolith-module-boundaries.md).
 
 ## Prerequisites
 
@@ -33,10 +54,11 @@ adapter, or browser API integration. E2E and deployment remain empty scaffolds.
   and ports 5432, 9000, 9001, 8080, and 5173 must be free on loopback. Compose
   supplies PostgreSQL and MinIO; no host installations of those services are needed.
 - Docker is required for standalone image builds and container smoke checks,
-  and when concrete PostgreSQL Testcontainers integration tests execute. The
-  abstract harness alone does not start a container during Maven validation.
-  No exact Docker version is specified. Host Java/Node are needed only for host
-  development commands, not for the Compose multi-stage image builds.
+  and for `./mvnw verify`: its concrete integration tests start a PostgreSQL
+  Testcontainer (see [Backend Validation](#backend-validation)). `./mvnw test`
+  does not need Docker. No exact Docker version is specified. Host Java/Node are
+  needed only for host development commands, not for the Compose multi-stage
+  image builds.
 - For host frontend development, Node.js satisfying `^22.12.0 || ^24.0.0`, as declared in
   `frontend/package.json`, with npm as the package manager. No npm engine
   requirement is declared.
@@ -44,10 +66,11 @@ adapter, or browser API integration. E2E and deployment remain empty scaffolds.
 React, TypeScript, Vite, Material UI, and React Flow dependencies are pinned in
 the frontend manifest and tracked `frontend/package-lock.json`. React Flow
 feature usage remains pending. Vitest `5.0.5` and jsdom `27.4.0` are development-only
-FE01 test dependencies. Repository E2E Playwright setup remains pending; the empty
-E2E package files define no executable commands. The optional FE01 browser harness
-instead requires an explicitly supplied existing Playwright module and installed
-Chromium browser; frontend `npm ci` does not provide them.
+frontend test dependencies. Repository E2E Playwright setup remains pending; the
+empty E2E package files define no executable commands. The optional frontend
+browser harness and the standalone `e2e/tests/learner-flow.spec.ts` script instead
+require an explicitly supplied existing Playwright module and installed Chromium
+browser; frontend `npm ci` does not provide them.
 
 ## Environment File
 
@@ -65,8 +88,11 @@ cp .env.example .env
 
 Replace every active placeholder before startup: PostgreSQL initialization
 database/user/password, matching backend database/user/password, MinIO root
-user/password, a separate application storage user/secret, and a JWT secret with
-at least 256 random bits. Use non-production local credentials. Uncomment optional
+user/password, a separate application storage user/secret, and a JWT secret of
+exactly 64 hexadecimal characters (32 random bytes, for example from the
+`openssl rand -hex 32` command below). The backend's JWT provider rejects any
+other secret format and any `JWT_EXPIRATION` other than `PT15M`, so the backend
+does not start with them. Use non-production local credentials. Uncomment optional
 settings only when needed; Compose forwards only its explicit allowlist.
 `VITE_API_BASE_URL` remains optional public build-time configuration. E2E entries
 remain commented until their configuration is implemented.
@@ -133,10 +159,14 @@ Production values are embedded at build time; changing an environment variable
 after building does not reconfigure the static bundle. Restart the development
 server after changing environment files.
 
-The foundation runs and builds without this variable or an environment file.
-There is no fallback URL, API client, or network request in the bootstrap. Its
-standalone build has no URL default; Compose supplies `http://localhost:8080`.
-Never put backend secrets or other sensitive values in `VITE_*` variables.
+The shared HTTP client (`src/shared/api/httpClient.ts`) sends every API request to
+this value. It accepts only `/api` (same origin, used by the VM `release` image),
+or an `https://` origin, or an `http://` origin on `localhost`, `127.0.0.1` or
+`[::1]`, with no path. The application builds without the variable, but every API
+request then fails with "The API address is not configured correctly." There is
+no fallback URL. The standalone Docker build has no default; Compose supplies
+`http://localhost:8080`. Never put backend secrets or other sensitive values in
+`VITE_*` variables.
 
 ## Variable Scopes
 
@@ -151,8 +181,9 @@ The approved Option A contract uses these names:
 | Backend security/CORS | `JWT_SECRET`, `JWT_EXPIRATION`, `PASSWORD_RESET_TOKEN_TTL`, `CORS_ALLOWED_ORIGINS` | Referenced by backend security configuration. |
 | Backend runtime/operations | `SERVER_PORT`, `MAX_UPLOAD_SIZE`, `LOG_LEVEL_ROOT`, `LOG_LEVEL_APP`, `SCHEDULING_ENABLED`, `ATTEMPT_AUTO_SUBMIT_DELAY`, `DEADLINE_REMINDER_DELAY`, `DEADLINE_REMINDER_LEAD_TIME` | Referenced by backend runtime configuration. |
 | Spring profile selection | `SPRING_PROFILES_ACTIVE` | Supported through Spring profile selection, rather than a `${...}` placeholder in `application.yml`. |
-| Frontend | `VITE_API_BASE_URL` | Optional public build-time configuration; Compose passes a build ARG defaulting to http://localhost:8080. No API consumer yet. |
-| E2E | `E2E_BASE_URL`, `E2E_USERNAME`, `E2E_PASSWORD` | Pending Playwright/E2E configuration; accounts and authentication flow are undefined. |
+| Frontend | `VITE_API_BASE_URL` | Public build-time API address read by the shared HTTP client; Compose passes a build ARG defaulting to http://localhost:8080. Required for any API request. |
+| VM deployment only | `SPRING_FLYWAY_URL`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` | Separate Flyway migrator identity required by `deploy.sh` and the VM override. Local Compose ignores them; see [deployment.md](deployment.md#current-status-and-reproduction-summary). |
+| E2E | `E2E_BASE_URL`, `E2E_USERNAME`, `E2E_PASSWORD` | Pending Playwright/E2E configuration; no consumer reads these names. |
 
 PostgreSQL initialization credentials and backend datasource credentials are
 conceptually distinct and are not implicitly interchangeable. The backend does
@@ -204,7 +235,9 @@ validate the schema rather than create it.
 For host development, use the reachable host addresses from the template and
 supply backend credentials explicitly. The local Compose workflow provides the
 approved dependencies, but Compose's backend uses Docker DNS rather than host
-addresses. Feature persistence and storage adapter behavior remain unimplemented.
+addresses. Auth and Course persistence are implemented through JPA and native
+SQL repositories. The backend object-storage adapter is not implemented: no
+backend Java code reads the `storage` properties that the `STORAGE_*` values feed.
 
 ## Local Docker Compose Runtime
 
@@ -213,11 +246,24 @@ and replace every required placeholder. The Compose project is `codemastery`;
 there are five services on its default network, with no source bind mounts,
 custom networks, fixed container names, or explicit restart policies.
 
-The foundation has been validated locally: both image builds, PostgreSQL
-authentication/Flyway checksums, idempotent MinIO provisioning and application-key
-object operations, backend Actuator UP, frontend serving, and named-volume
-persistence across `down`/`up`. These checks establish runtime infrastructure,
-not feature behavior or completed backend storage/browser integrations.
+This file is the **local development** runtime only. It publishes every port on
+loopback and builds the images locally. The one-VM release reuses it as a base,
+but only through `infrastructure/vm/deploy.sh` and the
+`infrastructure/vm/docker-compose.vm.yml` override, which remove the local ports
+and builds and add HTTPS ingress. Do not start the override by hand; see
+[deployment.md](deployment.md#current-status-and-reproduction-summary).
+
+The runtime foundation was validated locally before Auth was integrated: both
+image builds, PostgreSQL authentication/Flyway checksums, idempotent MinIO
+provisioning and application-key object operations, backend Actuator UP, frontend
+serving, and named-volume persistence across `down`/`up`. The Actuator result no
+longer applies; see [Initialization and Startup Ordering](#initialization-and-startup-ordering).
+On 30 October 2026 the
+[sample-data procedure](../sample-data/README.md) was also run against an isolated
+Compose project: Flyway applied V001–V006, both seeds loaded, sign-in succeeded
+and the catalogue hid the draft Course
+([record](testing.md#sd01sd02-seed-verification--30-october-2026)). None of these
+local runs is QA07, QA13 or DP02 acceptance.
 
 ```bash
 docker compose --env-file .env \
@@ -238,14 +284,26 @@ builds use the existing backend/frontend Dockerfiles and relative contexts
 `../backend` and `../frontend`. Both runtimes remain non-root. Downloads require
 registry/package access; host Java/Maven/Node/npm are unnecessary for this workflow.
 
+After startup, the stack has no users or courses. To use the application:
+
+1. Load the synthetic dataset into the local database by following
+   [sample-data/README.md](../sample-data/README.md) (Steps 1–5). It includes a
+   database check and a `curl` catalogue check.
+2. Open http://localhost:5173/courses. Sign in at `/login` with
+   `learner@example.test` or `instructor@example.test` and the synthetic password
+   you chose for the hash. As the Learner, join a Course from its detail page and
+   open `/my-courses`.
+
+The frontend keeps the session in memory only; reloading the page signs you out.
+
 ### Services and Local URLs
 
 All published ports bind only to `127.0.0.1`.
 
 | Service | Local address | Container address / purpose |
 | --- | --- | --- |
-| frontend | http://localhost:5173 | Nginx on 8080; built presentation-only demo |
-| backend | http://localhost:8080 | Spring Boot on 8080; Actuator health at `/actuator/health` |
+| frontend | http://localhost:5173 | Nginx on 8080; the built single-page application, calling the backend at the build-time `VITE_API_BASE_URL` |
+| backend | http://localhost:8080 | Spring Boot on 8080; the REST API under `/api`. `/actuator/health` answers HTTP 401 (see below) |
 | postgres | localhost:5432 | `postgres:5432`; local relational database |
 | minio | http://localhost:9000 | `minio:9000`; S3-compatible API |
 | MinIO Console | http://localhost:9001 | MinIO administration; use local root credentials |
@@ -282,16 +340,25 @@ The backend environment explicitly supplies Docker-internal DB/storage addresses
 required application credentials, the shared bucket/region, `SERVER_PORT=8080`,
 and `CORS_ALLOWED_ORIGINS=http://localhost:5173`. Other valid Spring defaults are
 left absent from Compose. Optional values set only in `.env` are not automatically
-forwarded. Compose has no backend health check; inspect container state and probe
-`http://localhost:8080/actuator/health` for the current scaffold. Future application
-retry/resilience remains necessary; startup ordering does not replace it.
+forwarded. Compose has no backend health check. Spring Security denies every
+route outside the public Auth and catalogue operations, so
+`http://localhost:8080/actuator/health` answers HTTP 401; this is the known
+Auth-owned issue recorded as release blocker 1 in
+[deployment.md](deployment.md#verification-and-remaining-gates). To check a local
+backend, run the Compose `ps -a` and `logs backend` subcommands with the same
+`--env-file`/`-f` options as above, and call a public operation, for example
+`curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/courses`,
+which returns `200`. Future application retry/resilience remains necessary;
+startup ordering does not replace it.
 
 Flyway remains enabled and normally applies V001–V006 on first backend startup,
 then validates their checksums on later starts. These are implemented schema
 migrations, not empty placeholders. Never edit an applied migration or run repair
 to hide a mismatch; subsequent changes require NEW Flyway migrations. Hibernate
-retains `ddl-auto=validate`, but absent feature entities mean startup does not prove
-entity mappings. This foundation does not create sample users/courses; to load
+retains `ddl-auto=validate`, so startup checks the existing Auth, Course and
+Adaptive entity mappings against the migrated schema. The empty Assessment,
+Interaction and Admin modules have no entities to check. Startup does not create
+sample users/courses; to load
 the synthetic local/test dataset into a disposable database, follow
 [sample-data/README.md](../sample-data/README.md).
 
@@ -299,8 +366,13 @@ Frontend startup is independent of backend. Its health check uses the existing
 Nginx image's `wget` to probe `/`. Compose passes public `VITE_API_BASE_URL` as a
 build ARG, defaulting to `http://localhost:8080`; browser code cannot resolve
 `http://backend:8080`. Changing this value requires rebuilding the frontend image.
-No runtime Nginx environment substitution exists. The frontend currently makes no
-API calls, and configured CORS origins do not prove implemented CORS handling.
+No runtime Nginx environment substitution exists. The browser calls the backend
+directly at that origin, so the backend's CORS configuration must admit the
+frontend origin. Compose sets `CORS_ALLOWED_ORIGINS=http://localhost:5173` as a
+literal value in the backend service of `infrastructure/docker-compose.yml`; it is
+not forwarded from `.env`, so a `CORS_ALLOWED_ORIGINS` entry in `.env` affects
+only a backend started on the host. Serving the containerised frontend from
+another origin requires a different value in that Compose file.
 
 ### Persistence, Shutdown, and Reset
 
@@ -334,7 +406,8 @@ docker compose --env-file .env \
 ```
 
 The next startup initializes fresh volumes using the current `.env` inputs.
-This is a local development workflow; production deployment remains undefined.
+This is a local development workflow. The VM release deployment, its persistent
+state and its recovery prerequisites are documented in [deployment.md](deployment.md).
 
 ## Frontend Setup and Validation
 
@@ -351,7 +424,7 @@ Run the following commands from `frontend/`:
 | --- | --- |
 | `npm run dev` | Start the Vite development server. |
 | `npm run typecheck` | Check application source and Vite configuration without emitting files. |
-| `npm test` | Run FE01 and the approved FE03 HTTP/provider/router regressions with Vitest/jsdom. |
+| `npm test` | Run the Vitest/jsdom suite: FE01 utilities and presentation, FE03 HTTP client, Auth provider and router, and FE07 catalogue, detail and My Courses (11 files). |
 | `npm run build` | Run type-checking and build production assets in `frontend/dist/`. |
 | `npm run preview` | Preview an existing production build locally; run after building. |
 | `npm run test:browser -- "<installed-playwright-module>" "<evidence-directory>" "<preview-url>"` | Run optional Chromium presentation checks against a running frontend, with actual prerequisite paths and URL substituted. |
@@ -361,25 +434,32 @@ and `frontend/dist/` are generated, ignored local state. No lint script is decla
 For browser prerequisites, outputs, timezone cases and bounded authority, see
 [the FE01 testing record](testing.md#bounded-fe01-decisions-and-regression-coverage).
 Use the actual URL printed by Vite; the harness's fallback port is not a project
-configuration decision. Required Frontend CI still runs install and build only,
-not either regression command. Build success does not establish behavioral
-coverage, frontend/backend integration or deployment readiness.
+configuration decision. The required Frontend CI job runs `npm ci`, `npm test`
+and `npm run build`; it does not run `test:browser`. Passing unit/component tests
+and a successful build do not establish frontend/backend integration in a real
+browser or deployment readiness.
 
 The custom light MUI theme and `presentationTokens` live in
-`frontend/src/app/theme/theme.ts`: primary `#1F6BE8`, light accent `#52A5F7`, canvas
-`#F9FAFC`, white surfaces, text `#101418`/`#4A5458`, warm `#996F1F` and restrained
-green/orange/pink tints. Muted `#A8A6AF` is decorative only. The foundation uses
-8px spacing, 12px cards, 8px controls, a 224px sidebar and 64px header; primary
-actions are near-black and selected navigation uses light gray with dark text.
-Inter is used only when locally available, with system fallbacks and no font CDN.
+`frontend/src/app/theme/theme.ts`: primary `#1F6BE8`, light accent `#52A5F7`, page
+background `#F8F9FA`, white surfaces, text `#101418`/`#4A5458`, warm `#996F1F` and
+restrained blue/green/orange/violet/pink tints. Muted `#A8A6AF` is decorative only.
+The foundation uses 8px spacing, 12px cards, 10px controls, a 248px sidebar and a
+72px header; contained primary buttons use the primary blue and selected
+navigation uses a light blue background. The bundled Plus Jakarta Sans variable
+font (`src/app/theme/plus-jakarta-sans-latin-wght.woff2`, SIL Open Font License
+1.1, licence text in `public/plus-jakarta-sans-OFL.txt`) is served from the
+application with system fallbacks; no font CDN is used.
 `PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
 
-`App.tsx` is an explicitly labelled, local presentation showcase with overview,
-component and Auth-layout previews. Search, tabs, retry and confirmation controls
-operate only on demonstration state; fixtures are not production metrics or
-learner data. Routing/guards, authentication/session UI, role-driven navigation,
-HTTP/API integration, feature pages and the React Flow Mastery Map remain outside
-this implementation. The Auth-layout preview does not implement sign-in.
+`src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
+in `src/routes/index.tsx`, listed in
+[Implemented capabilities on `main`](#implemented-capabilities-on-main). `/`
+redirects to `/courses`. `App.tsx` also defines the explicitly labelled,
+illustrative dashboard that is served only at `/preview`. Its search, tabs, retry
+and confirmation controls operate on demonstration state; its fixtures are not
+production metrics or learner data, and its Auth-layout preview does not sign in.
+Role-driven Instructor/Administrator navigation and the React Flow Mastery Map
+are not implemented.
 
 **Visual inspiration:** [LMS Admin Dashboard UI/UX Design for EdTech SaaS Platforms —
 Rakibul Ism / Panze UX Design Studio](https://dribbble.com/shots/27183809-LMS-Admin-Dashboard-UI-UX-Design-for-EdTech-SaaS-Platforms).
@@ -426,15 +506,17 @@ not select the deployed PostgreSQL version. No local database credentials are
 required by this wiring. The profile only disables the scheduling setting;
 Flyway and Hibernate validation retain the normal application configuration.
 
-Auth, catalogue and local mastery test scaffolds are empty on this baseline.
-Concrete SH01 local/MVC tests and CourseFixturesTest exist, but do not initialize
-the PostgreSQL harness. These commands alone therefore do not establish real
-feature/PostgreSQL integration. Docker and access to the test image are required
-when a concrete test initializes the harness; Compose is not required for it.
-See [the CT14 placement and isolation proposal](testing.md#ct14-coverage-and-isolation-reconciliation--proposal)
-for exact approved paths, feature-specific configuration gates and separate
-execution/independent-verification prerequisites. No harness/profile or runtime
-configuration is changed by that proposal.
+Concrete integration tests for Auth, Course catalogue and membership, Course
+persistence, the sample-data seeds and the shared REST infrastructure now exist.
+All except `SharedRestInfrastructureIntegrationTest` initialize the PostgreSQL
+harness, so `./mvnw verify` needs a running Docker Engine and access to the
+`postgres:17.11-bookworm` image; Compose is not required.
+`SampleDataSeedIntegrationTest` also runs the image's own `psql` 17 inside that
+container, so no host `psql` is needed. `./mvnw test` runs
+only unit tests and needs no Docker. See
+[testing.md](testing.md#test-layers-and-evidence) for the suite inventory, what
+each suite establishes and the latest recorded results. No harness, profile or
+runtime configuration is changed by that inventory.
 
 ## Standalone Container Builds
 
@@ -500,8 +582,9 @@ Local builds and Compose are unaffected.
 ### Optional Frontend Build Configuration
 
 `VITE_API_BASE_URL` is an optional public Docker build argument, made available
-to Vite during `npm run build` when supplied. There is no default URL, and the
-foundation builds without the argument. The root `.env` is outside both service
+to Vite during `npm run build` when supplied. There is no default URL. The image
+builds without the argument, but its API requests then fail (see
+[Current Frontend Loading Behavior](#current-frontend-loading-behavior)). The root `.env` is outside both service
 build contexts; `.dockerignore` also excludes local environment files, generated
 output, host dependencies, and Git/IDE/OS metadata where applicable.
 
@@ -519,25 +602,34 @@ independently; backend packaging can be checked without starting Spring Boot.
 
 The local Compose workflow above coordinates PostgreSQL, MinIO provisioning,
 backend startup, and frontend serving. Successful startup/migration and MC storage
-checks do not prove the unimplemented backend S3 adapter, JPA mappings, feature
-logic, browser API integration, or production deployment. Compose has PostgreSQL
+checks do not prove the unimplemented backend S3 adapter, feature behavior,
+browser API integration or the VM release deployment. Compose has PostgreSQL
 and frontend health checks; the backend image and the default local frontend
 target add no HEALTHCHECK. Only the frontend `release` target bakes one.
 
-## Initial CI
+## CI
 
-[The GitHub Actions workflow](../.github/workflows/ci.yml) now defines separate
-Backend and Frontend jobs on `ubuntu-24.04`, triggered by pull requests targeting
-`main`, pushes to `main`, and manual dispatch. Backend uses Temurin 25 and runs
-`./mvnw verify` from `backend/`; frontend uses Node 22 and runs `npm ci` followed
-by `npm run build` from `frontend/`. Build already includes frontend typechecking.
-Both jobs cache package-manager downloads using the committed build inputs.
+[The GitHub Actions workflow](../.github/workflows/ci.yml) runs on pull requests
+targeting `main`, pushes to `main`, and manual dispatch, on `ubuntu-24.04`.
+Backend uses Temurin 25 and runs `./mvnw verify` from `backend/`, including the
+Testcontainers integration tests. Frontend uses Node 22 and runs `npm ci`,
+`npm test` and `npm run build` from `frontend/`. Both jobs cache package-manager
+downloads using the committed build inputs. Five further jobs test
+`infrastructure/vm/deploy.sh`, the VM override and the frontend `release` image
+against real containers on the runner; they do not deploy anywhere. CodeQL code
+scanning runs through GitHub's default setup, which has no workflow file in this
+repository.
 
-This workflow configuration does not establish successful remote CI execution or
-backend feature-test coverage. CI does not run Compose. E2E and deployment
-commands remain pending until their configuration is implemented.
+The job list, the required checks and the latest recorded results are in
+[testing.md](testing.md#ci). A workflow definition alone does not establish a
+successful run. CI does not start the local Compose stack and has no E2E job.
 
 ## Authorized Interim configuration targets (implementation pending)
+
+> **Dated record.** This heading and the sections below keep the wording of
+> their date. For example, the JWT, CORS and datasource settings named here are
+> now consumed by the implemented Auth and Course code. The current setup is
+> described in the sections above.
 
 See [ADR002](decisions/002-interim-delegated-contracts.md) for CT38.core/CT01.core. SH01 now defaults JWT_EXPIRATION to PT15M. AppConfig validates active datasource settings and exposes lazy, typed JWT/CORS/scheduler settings. Consuming JwtSettings requires a runtime64-hex-character JWT_SECRET, the fixed issuer/audience and exactly15-minute lifetime; an eager consumer fails initialization for invalid settings. Keep local host/Compose addresses as currently documented; only VITE_API_BASE_URL is public frontend configuration. Consumed secrets have no defaults and fail validation if absent/placeholder. Optional unused integrations are not made prerequisites for a pure local calculator. Generate test secrets ephemerally. Production origins/credentials require separate authority.
 
