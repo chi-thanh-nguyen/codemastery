@@ -1906,7 +1906,9 @@ packages have not been scanned.
    Record that evidence as the `--initializer-qualification` reference. Only
    then tag it, after CODEOWNER review.
 4. **CI.** The new job runs on every pull request but is not a required check.
-   Making it one is a Leader decision.
+   Making it one is a Leader decision. *(Superseded as current state on
+   1 November 2026: the job is now required; see
+   [Current required-check status](#dp01-chainguard-minio-release-server-candidate--1-november-2026).)*
 5. **Operational limits.**
    - The initializer assumes no concurrent IAM administration during its run.
    - Secret rotation for an existing identity needs a separate authorized
@@ -1955,7 +1957,8 @@ infrastructure/minio/test-minio-init.sh                                  # golit
 MINIO_INIT_TEST_SERVER=chainguard infrastructure/minio/test-minio-init.sh
 ```
 
-Any other value fails before testing. Each server is fixed by digest in the suite
+An unset variable selects Golithus; any other value, including an empty one,
+fails before testing. Each server is fixed by digest in the suite
 and must match its expected user, entrypoint, default command and `--version`
 output for the platform. Servers start with the base Compose command. The 21
 existing checks are unchanged. Three checks are added for both servers:
@@ -1968,9 +1971,10 @@ existing checks are unchanged. Three checks are added for both servers:
   run reports `changes: 0` with unchanged IAM state, and the data directory
   owner is checked (0 for Golithus, 65532 for Chainguard).
 - **Effective VM `minio` model:** base plus VM override keeps
-  `codemastery.invalid/minio:release` and inherits the base command; with the
-  test images the selected server runs it, with the `/data` volume and no
-  entrypoint, user or port overrides.
+  `codemastery.invalid/minio:release`, inherits the base command, mounts the
+  Docker named volume `minio-data` at `/data` (a bind mount or another volume
+  name fails) and restarts `unless-stopped`; with the test images the selected
+  server runs it, with no entrypoint, user or port overrides.
 
 The local inline initializer in the Compose checks runs against the selected
 server too, so no data volume passes between server builds. **Migration of an
@@ -1982,12 +1986,13 @@ deployment is qualified.
 Local run on 1 November 2026, on an Apple Silicon host: linux/amd64 under
 emulation, Docker Engine 29.8.1, Compose v5.5.1, host bash 3.2. On the final
 suite source, Golithus passed 24/24 checks (287 s) and Chainguard passed 24/24
-(291 s). Three deliberately wrong
-configurations were rejected with exit 1:
+(286 s). Deliberately wrong configurations were rejected with exit 1:
 
-- an unknown server name;
+- an unknown or an empty server name;
 - the Chainguard selector bound to another image (configuration mismatch);
-- a mutable tag (not digest-pinned).
+- a mutable tag (not digest-pinned);
+- a VM `minio` override using a bind mount, a differently named volume or restart
+  policy `no` (each failed the effective-model check).
 
 Labelled containers, networks and volumes were removed, and pre-existing Docker
 volumes were unchanged.
@@ -1998,6 +2003,17 @@ reported even when the first fails; either failure fails the job. One job keeps
 the check name, which the `main-quality-gates` ruleset requires (read from the
 GitHub API on 1 November 2026); a matrix would rename it. Results belong to the
 pull request.
+
+**Current required-check status (1 November 2026).** `VM MinIO initializer
+qualification` is now a required GitHub status check: the `main-quality-gates`
+ruleset, read through the GitHub API on 1 November 2026, lists it among the
+required checks. This supersedes, as current state, the statements in the
+[31 October record](#dp01-minio-community-initializer--31-october-2026) that the
+job is not a required check and that making it one is a Leader decision
+(blocker 4); those dated statements are kept unchanged as that day's record. This
+record does not say who changed the ruleset or when. A pull request therefore
+cannot merge while either server suite fails, and the required job now also
+depends on pulling the Chainguard candidate from `cgr.dev`.
 
 ### Artifact review (as of 1 November 2026)
 

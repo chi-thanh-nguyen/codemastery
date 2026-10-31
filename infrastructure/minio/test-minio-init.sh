@@ -11,6 +11,7 @@
 # MINIO_INIT_TEST_SERVER selects the server under test:
 #   golithus    (default) the digest-pinned local Community server from the base Compose file
 #   chainguard  the digest-pinned DP01 release-server candidate below (not admitted)
+# An unset variable selects golithus; any other value, including an empty one, fails.
 #
 # The built image is tagged codemastery-test/minio-init:qualification, never a
 # codemastery.invalid/*:release name. MINIO_INIT_TEST_PLATFORM (default
@@ -36,7 +37,7 @@ MC_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/mc:.*\)$/\1/p' "${BASE_C
 CHAINGUARD_SERVER_IMAGE='cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82'
 # The base Compose server command; the Chainguard image has no default command.
 SERVER_CMD=(server /data --console-address :9001)
-SERVER="${MINIO_INIT_TEST_SERVER:-golithus}"
+SERVER="${MINIO_INIT_TEST_SERVER-golithus}"
 
 ROOT_USER="cm-root-admin"
 ROOT_PASS='root pass/with:"odd"\chars é'
@@ -613,8 +614,9 @@ assert init.get("restart") in (None, "no")
 ' "${IMAGE}"
 pass "effective VM model runs the image entrypoint with only the six approved variables"
 
-# The override keeps its abstract server name and inherits the base command,
-# which the test images then run unchanged with the selected server.
+# The override keeps its abstract server name, inherits the base command and the
+# named data volume, and sets the approved restart policy. The test images then
+# run that model unchanged with the selected server.
 check_minio_model() {  # expected-image compose-command...
   local want="$1"; shift
   "$@" config --format json | python3 -c '
@@ -624,13 +626,15 @@ assert minio["image"] == sys.argv[1], minio["image"]
 assert minio.get("command") == sys.argv[2:], minio.get("command")
 for key in ("entrypoint", "user", "ports", "cap_add", "privileged", "build"):
     assert not minio.get(key), key
-assert [v["target"] for v in minio.get("volumes", [])] == ["/data"], minio.get("volumes")
+volumes = [(v.get("type"), v.get("source"), v.get("target")) for v in minio.get("volumes", [])]
+assert volumes == [("volume", "minio-data", "/data")], minio.get("volumes")
+assert minio.get("restart") == "unless-stopped", minio.get("restart")
 ' "${want}" "${SERVER_CMD[@]}"
 }
 check_minio_model codemastery.invalid/minio:release \
   docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" -f "${VM_COMPOSE}"
 check_minio_model "${SERVER_IMAGE}" "${vm_compose[@]}"
-pass "effective VM model keeps codemastery.invalid/minio:release and runs the selected server with the inherited base command"
+pass "effective VM model keeps codemastery.invalid/minio:release, the base command, the named minio-data volume and restart unless-stopped"
 
 # State created by the existing local inline initializer must be accepted as-is.
 "${local_compose[@]}" up -d --no-build --pull never minio-init >"${WORK}/local-up.log" 2>&1 \
