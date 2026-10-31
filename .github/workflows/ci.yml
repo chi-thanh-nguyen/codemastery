@@ -2208,9 +2208,24 @@ jobs:
           expect "a ';' in the query reaches the real catalogue" "$STATUS" 200
           expect "query ';' keeps the catalogue representation" "$TYPE" application/json
 
-          echo "== informational: deploy.sh private backend health probe (Auth-owned gate)"
-          probe="$(docker exec "$prefix-frontend" wget -S -O /dev/null http://backend:8080/actuator/health 2>&1 | grep -Eo 'HTTP/[0-9.]+ [0-9]{3}' | tail -1 || true)"
-          echo "  private /actuator/health from the frontend container: ${probe:-no response}"
+          echo "== deploy.sh private backend health probe (exact command from wait_backend_health)"
+          probe() {  # path -> PROBE_CODE PROBE_OUT, over the private Compose network
+            PROBE_OUT="$(timeout 90 docker exec "$prefix-frontend" wget -S -O - "http://backend:8080$1" 2>&1 </dev/null || true)"
+            PROBE_CODE="$(printf '%s\n' "$PROBE_OUT" | grep -Eo 'HTTP/[0-9.]+ [0-9]{3}' | tail -1 | awk '{print $2}' || true)"
+          }
+          probe /actuator/health
+          expect "private health probe without a JWT" "$PROBE_CODE" 200
+          contains "health probe reports the token deploy.sh requires" "$PROBE_OUT" '"status":"UP"'
+          lacks "health probe exposes no components" "$PROBE_OUT" components
+          lacks "health probe exposes no details" "$PROBE_OUT" details
+          for path in /actuator/health/liveness /actuator/health/readiness /actuator/health/db /actuator/info /actuator/metrics /actuator; do
+            probe "$path"
+            expect "private $path keeps default-deny" "$PROBE_CODE" 401
+          done
+          docker stop "$prefix-postgres" >/dev/null
+          probe /actuator/health
+          expect "private health probe reports a stopped PostgreSQL" "$PROBE_CODE" 503
+          lacks "unhealthy dependency is not reported UP" "$PROBE_OUT" '"status":"UP"'
           echo "INGRESS_BACKEND_TESTS_PASS"
       - name: Run DP01 preflight with the committed override and certificate layout
         shell: bash

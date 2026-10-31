@@ -6,7 +6,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.health.contributor.Health;
+import org.springframework.boot.health.contributor.HealthIndicator;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -36,6 +43,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
@@ -44,19 +52,32 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
 /** Actual registration, login rejection and persistence over the configured Auth stack. */
+@Import(AuthorizationIntegrationTest.RequiredDependencyHealth.class)
 class AuthorizationIntegrationTest extends AbstractIntegrationTest {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final BCryptPasswordEncoder PASSWORDS =
             new BCryptPasswordEncoder(BCryptPasswordEncoder.BCryptVersion.$2B, 14);
     private static final String JWT_SECRET = ephemeralJwtSecret();
+    /** Test-only contributor proving a DOWN dependency is aggregated, not concealed, by the probe. */
+    private static final AtomicReference<Health> REQUIRED_DEPENDENCY = new AtomicReference<>(Health.up().build());
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class RequiredDependencyHealth {
+        @Bean
+        HealthIndicator requiredDependencyHealthIndicator() {
+            return REQUIRED_DEPENDENCY::get;
+        }
+    }
 
     @Autowired
     private WebApplicationContext context;
@@ -65,6 +86,9 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private JwtTokenProvider tokens;
 
     private final Set<String> testEmails = ConcurrentHashMap.newKeySet();
 
@@ -92,6 +116,7 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             jdbc.update("DELETE FROM public.users WHERE email = ?", email);
         }
         testEmails.clear();
+        REQUIRED_DEPENDENCY.set(Health.up().build());
         SecurityContextHolder.clearContext();
     }
 
@@ -299,6 +324,97 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS), "Registration workers should terminate");
         }
+    }
+
+    @Test
+    void anonymousPrivateHealthProbeReturnsNondetailedUp() throws Exception {
+        String body = mvc.perform(get("/actuator/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"))
+                .andReturn().getResponse().getContentAsString();
+
+        // deploy.sh wait_backend_health accepts only HTTP 200 containing this exact compact token.
+        assertTrue(body.contains("\"status\":\"UP\""), body);
+        assertNondetailedHealth(body);
+    }
+
+    @Test
+    void privateHealthProbeReportsDownDependencyAs503WithoutDetails() throws Exception {
+        REQUIRED_DEPENDENCY.set(Health.down().withDetail("cause", "synthetic-dependency-diagnostic").build());
+
+        String body = mvc.perform(get("/actuator/health"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value("DOWN"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertNondetailedHealth(body);
+        assertFalse(body.contains("synthetic-dependency-diagnostic"));
+        assertFalse(body.contains("\"status\":\"UP\""));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/actuator", "/actuator/health/", "/actuator/health/liveness",
+            "/actuator/health/readiness", "/actuator/health/db", "/actuator/info", "/actuator/metrics",
+            "/v3/api-docs", "/swagger-ui.html"})
+    void otherManagementAndDocumentationSurfacesStayDenied(String path) throws Exception {
+        mvc.perform(get(path))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("WWW-Authenticate", "Bearer"));
+        mvc.perform(get(path).header("Authorization", "Bearer " + tokens.createToken(insertUser("learner", "active"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"POST", "PUT", "DELETE"})
+    void healthPermitIsLimitedToGet(String method) throws Exception {
+        String body = mvc.perform(request(HttpMethod.valueOf(method), "/actuator/health"))
+                .andExpect(status().isForbidden())
+                .andReturn().getResponse().getContentAsString();
+        assertFalse(body.contains("\"status\":\"UP\""));
+    }
+
+    @Test
+    void protectedOperationStillRequiresValidBearerForActiveAccount() throws Exception {
+        String valid = tokens.createToken(insertUser("learner", "active"));
+        String tampered = valid.substring(0, valid.length() - 2) + (valid.endsWith("AA") ? "BB" : "AA");
+        List<String> rejected = List.of("not-a-jwt", tampered,
+                tokens.createToken(UUID.randomUUID()), tokens.createToken(insertUser("learner", "locked")));
+
+        mvc.perform(get("/api/me/courses"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("WWW-Authenticate", "Bearer"));
+        for (String token : rejected) {
+            mvc.perform(get("/api/me/courses").header("Authorization", "Bearer " + token))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+        }
+        mvc.perform(get("/api/me/courses").header("Authorization", "Bearer " + valid))
+                .andExpect(status().isOk());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"instructor", "admin"})
+    void learnerOnlyOperationRejectsOtherRolesWith403(String role) throws Exception {
+        mvc.perform(get("/api/me/courses")
+                        .header("Authorization", "Bearer " + tokens.createToken(insertUser(role, "active"))))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    /** Only the aggregate status and probe group names; no components, details or diagnostics. */
+    private static void assertNondetailedHealth(String body) {
+        JsonNode health = JSON.readTree(body);
+        assertEquals(Set.of("status", "groups"), Set.copyOf(health.propertyNames()));
+        assertEquals("[\"liveness\",\"readiness\"]", health.get("groups").toString());
+    }
+
+    private UUID insertUser(String role, String accountStatus) {
+        UUID id = UUID.randomUUID();
+        String email = newEmail();
+        testEmails.add(email);
+        jdbc.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) "
+                + "VALUES (?,?,'not-an-authentication-fixture','QA01 Role Fixture',?,?)", id, email, role, accountStatus);
+        return id;
     }
 
     private Callable<Integer> concurrentRegistration(CountDownLatch ready, CountDownLatch start, String body) {
