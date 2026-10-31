@@ -12,7 +12,7 @@ requests are not described here.
 
 | Level | Status | Evidence |
 | --- | --- | --- |
-| Approved architecture | One VM running the existing five-service Docker Compose application, with the frontend Nginx as the only public HTTPS ingress | CT17 records below; [DP01 HTTPS ingress integration](#dp01-https-ingress-integration--31-october-2026) |
+| Design and approval status | The one-VM Docker Compose deployment is approved (ADR002 CT17.I-scope and the approved architecture). The frontend Nginx as the only public HTTPS ingress, and the TLS bindings, are recorded in the dated CT17 records as `APPROVED_PENDING_PROTECTED_INTEGRATION`. Provider, VM, TLS/DNS, secrets, production origin and public access remain Leader-reserved (ADR002 CT17.I-runtime is `PROPOSED_LEADER_RESERVED`) | [B2](#b2--approved-engineering-ingressconnection-bindings), [DP01 HTTPS ingress integration](#dp01-https-ingress-integration--31-october-2026) |
 | Deployment tooling | Implemented and merged | `infrastructure/vm/deploy.sh` (PR #110), `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` target (PR #118) |
 | Tested configuration | The tooling passes its CI jobs on the GitHub runner, against real containers but not the VM | Five `VM …` jobs, see [testing.md](testing.md#ci); passed on `614f326` in [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079) |
 | Actual deployment | **None recorded.** No `preflight`, `load`, `provision` or `deploy` on the VM is recorded in this repository | — |
@@ -40,8 +40,13 @@ its usage without changing anything.
 - `--env-file`: the real runtime env file, owned by the invoking user, mode 0600,
   in a 0700 directory. Its location and custody are a Leader decision
   ([proposal](#operator-identity-and-env-file-custody-proposal-leader-decision)).
-- `--origin`: the single approved `https://` origin, equal to the env file's
-  `CORS_ALLOWED_ORIGINS` and to the frontend image's `PUBLIC_ORIGIN`.
+- `--origin`: the single approved `https://` origin. `deploy.sh` fails unless the
+  env file's `CORS_ALLOWED_ORIGINS` equals it exactly. The frontend image's
+  `PUBLIC_ORIGIN` build argument must carry the same value, but the script does
+  not read or compare it; the Dockerfile validates only its form. Matching it is
+  the operator's responsibility. A different hostname would be expected to fail
+  the later private HTTPS check against `--origin`, but that is not a check of
+  `PUBLIC_ORIGIN`.
 - `--compose-override infrastructure/vm/docker-compose.vm.yml`.
 - `--archive` and `--archive-sha256`: the reviewed `docker save` release archive,
   built outside the VM ([release build](#release-build-outside-the-vm)).
@@ -54,8 +59,15 @@ its usage without changing anything.
   update attestations ([operation gates](#ct17i-operation-gates--authority-boundaries-and-ingress-evidence)).
   The script records these references; it cannot check them and never treats them
   as approval.
-- The TLS directory `/etc/codemastery/tls` with the owner and mode layout in
-  [the path bindings](#leader-approved-path-bindings--31-october-2026).
+- The TLS directory. The source `/etc/codemastery/tls`, its read-only bind to
+  `/etc/nginx/tls` and the override path are Leader-approved
+  ([path bindings](#leader-approved-path-bindings--31-october-2026)). B3 selects a
+  private key of mode 0400 owned by the Nginx UID
+  ([B3](#b3--approved-secret-delivery-and-certificate-replacement-conventions)).
+  The actual owner and mode layout on the VM is a Leader-reported input, not an
+  approved binding, and filesystem ownership and custody remain reserved
+  ([inputs](#authority-inputs-and-boundary)). `deploy.sh preflight` rejects a
+  layout that does not meet its checks.
 
 ### Intended procedure
 

@@ -368,8 +368,11 @@ build ARG, defaulting to `http://localhost:8080`; browser code cannot resolve
 `http://backend:8080`. Changing this value requires rebuilding the frontend image.
 No runtime Nginx environment substitution exists. The browser calls the backend
 directly at that origin, so the backend's CORS configuration must admit the
-frontend origin: Compose sets `CORS_ALLOWED_ORIGINS=http://localhost:5173`. If you
-serve the frontend from another origin, change both values.
+frontend origin. Compose sets `CORS_ALLOWED_ORIGINS=http://localhost:5173` as a
+literal value in the backend service of `infrastructure/docker-compose.yml`; it is
+not forwarded from `.env`, so a `CORS_ALLOWED_ORIGINS` entry in `.env` affects
+only a backend started on the host. Serving the containerised frontend from
+another origin requires a different value in that Compose file.
 
 ### Persistence, Shutdown, and Reset
 

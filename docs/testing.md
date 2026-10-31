@@ -24,7 +24,7 @@ verification is separate work.
 | Layer | Tool and location | Runs in CI | What a pass establishes | What it does not establish |
 | --- | --- | --- | --- | --- |
 | Backend unit | JUnit Jupiter 6, Mockito; Maven Surefire; module test packages outside `integration/` | Yes (`Backend`) | Isolated service, mapper, adapter, validation, JWT, settings and pure mastery logic | Real PostgreSQL behavior, Spring Security wiring or HTTP serialization |
-| Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency; Spring MVC with the production security chain through MockMvc | A running server, real browser, network/CORS from a browser, deployment |
+| Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency. Auth, Enrollment and sample-data suites dispatch through MockMvc with the configured Spring Security chain; the other suites do not (see [Integration-Test Lifecycle](#integration-test-lifecycle)) | A running server, real browser, network/CORS from a browser, deployment |
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`) with an externally supplied Playwright module | No | Chromium layout, focus, contrast and accessibility-tree checks of presentation components | Live API integration |
 | Standalone browser script | `e2e/tests/learner-flow.spec.ts`, run with an externally supplied Playwright module against a running frontend and backend ([record](#pr-101-full-fe07-verification--27-october-2026)) | No | When executed and recorded: the FE07 browser → REST → PostgreSQL learner flow on that environment | Repository E2E setup: `e2e/package.json` and `playwright.config.ts` are empty and no E2E job exists |
@@ -162,9 +162,23 @@ skips Failsafe execution. It is not the CI validation command.
 
 The abstract harness itself contains no tests. The SH01 MVC integration test
 executes a real Spring web context and dispatcher, but does not extend the base,
-so it neither starts PostgreSQL nor proves database integration. MockMvc-based
-suites dispatch through the real filter chain without a listening server; they
-do not exercise Tomcat, a browser or a reverse proxy.
+so it neither starts PostgreSQL nor proves database integration. The suites
+exercise the Spring Security chain differently:
+
+- `AuthorizationIntegrationTest` (`DelegatingFilterProxy` on
+  `springSecurityFilterChain`), `EnrollmentIntegrationTest` and the consumer case
+  of `SampleDataSeedIntegrationTest` (`springSecurity()`) send requests through
+  MockMvc with the configured chain.
+- `CourseCatalogueIntegrationTest` uses no MockMvc. It takes the configured
+  chain's `JwtAuthenticationFilter` from `FilterChainProxy`, calls it directly
+  with a mock request, and runs its Course assertions inside the filter callback.
+- `repository/CourseRepositoryIntegrationTest` sends no HTTP request and uses no
+  security chain.
+- `SharedRestInfrastructureIntegrationTest` uses MockMvc with only
+  `CorrelationIdFilter`, so no security chain.
+
+None of them uses a listening server, so none exercises Tomcat, a browser or a
+reverse proxy.
 
 ## Test Isolation
 
