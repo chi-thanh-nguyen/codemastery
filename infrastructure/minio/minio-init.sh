@@ -70,10 +70,19 @@ export -n MINIO_ROOT_USER MINIO_ROOT_PASSWORD STORAGE_ACCESS_KEY STORAGE_SECRET_
   || fail "Application storage identity must differ from MinIO root identity."
 [[ "${app_secret}" != "${root_password}" ]] \
   || fail "STORAGE_SECRET_KEY must differ from MINIO_ROOT_PASSWORD."
-# MinIO accepts 3-20 character user access keys. This character set needs no
-# JSON escaping, so the identity can be matched exactly in server responses.
-[[ "${app_key}" =~ ^[A-Za-z0-9._@+=-]{3,20}$ ]] \
-  || fail "STORAGE_ACCESS_KEY must be 3-20 characters from A-Z a-z 0-9 . _ @ + = -."
+# MinIO rejects user secrets shorter than 8 bytes, but only when it creates the
+# identity, after the bucket and policy exist; check before any change.
+byte_length() {  # value -> REPLY
+  local LC_ALL=C
+  REPLY=${#1}
+}
+byte_length "${app_secret}"
+(( REPLY >= 8 )) || fail "STORAGE_SECRET_KEY must be at least 8 bytes long."
+# MinIO accepts 3-20 character user access keys and rejects '=' and ','. This
+# character set needs no JSON escaping, so the identity can be matched exactly
+# in server responses.
+[[ "${app_key}" =~ ^[A-Za-z0-9._@+-]{3,20}$ ]] \
+  || fail "STORAGE_ACCESS_KEY must be 3-20 characters from A-Z a-z 0-9 . _ @ + -."
 # S3 bucket naming; it also keeps the name safe to embed in the policy JSON.
 if [[ ! "${bucket}" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] \
    || [[ "${bucket}" == *..* || "${bucket}" == *.-* || "${bucket}" == *-.* ]] \

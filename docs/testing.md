@@ -28,7 +28,7 @@ verification is separate work.
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`) with an externally supplied Playwright module | No | Chromium layout, focus, contrast and accessibility-tree checks of presentation components | Live API integration |
 | Standalone browser script | `e2e/tests/learner-flow.spec.ts`, run with an externally supplied Playwright module against a running frontend and backend ([record](#pr-101-full-fe07-verification--27-october-2026)) | No | When executed and recorded: the FE07 browser → REST → PostgreSQL learner flow on that environment | Repository E2E setup: `e2e/package.json` and `playwright.config.ts` are empty and no E2E job exists |
-| VM deployment tests | Five `VM …` CI jobs exercising `deploy.sh`, the VM override and the frontend `release` image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity and HTTPS ingress behavior on the runner | Any deployment, the real VM or outside-network access |
+| VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
 
 ### Backend integration suites
@@ -345,7 +345,7 @@ CT14/CT37 approval and frontend/backend integration are not implied.
 
 The `CI` GitHub Actions workflow runs on pull requests targeting `main`, pushes
 to `main`, and manual `workflow_dispatch`. It uses `contents: read` permissions
-and seven independent jobs on `ubuntu-24.04`:
+and eight independent jobs on `ubuntu-24.04`:
 
 | Job display name (ID) | What it runs |
 | --- | --- |
@@ -356,6 +356,7 @@ and seven independent jobs on `ubuntu-24.04`:
 | VM runtime privileges with the real backend (`deployment-script-runtime`) | Builds the backend image and exercises real Auth, catalogue and membership under the approved privilege matrix |
 | VM deployment containerd image store (`deployment-script-containerd`) | Release-archive verification through real `docker save`/`load` round trips with the containerd image store |
 | VM HTTPS ingress (`deployment-ingress`) | Builds the release and local frontend images; exercises the HTTPS ingress against a stub and the real backend; runs `deploy.sh preflight` with the committed override |
+| VM MinIO initializer qualification (`minio-initializer`) | Pulls the digest-pinned MinIO server and `mc` images, builds `infrastructure/minio` for linux/amd64 and runs `infrastructure/minio/test-minio-init.sh` against disposable MinIO servers and the effective VM Compose model ([record](deployment.md#dp01-minio-community-initializer--31-october-2026)) |
 
 The Java setup enables Maven caching using `backend/pom.xml` and
 `backend/.mvn/wrapper/maven-wrapper.properties` as dependency inputs. The Node
@@ -363,12 +364,14 @@ setup enables npm caching keyed by `frontend/package-lock.json`. Caches do not
 replace installation or validation. CodeQL code scanning runs separately through
 GitHub's default setup, with no workflow file in this repository.
 
-The `main-quality-gates` repository ruleset requires all seven job names and
-`CodeQL` to pass before merging into `main` (as read from the GitHub API on
-31 October 2026). The VM jobs run only on the CI runner: they deploy nothing and
-do not reach the real VM. No job starts the local Compose stack (the VM jobs
-start their containers with `docker run`), and there is no E2E job or artifact
-upload. Workflow configuration does not prove a successful run; see
+The `main-quality-gates` repository ruleset requires `CodeQL` and every job above
+except “VM MinIO initializer qualification” to pass before merging into `main`
+(as read from the GitHub API on 1 November 2026). The VM jobs run only on the
+CI runner: they deploy nothing and do not reach the real VM. No job starts the
+full local Compose stack. The VM jobs start their containers with `docker run`;
+only the MinIO initializer job uses Compose, starting just the `minio` and
+`minio-init` services (and a placeholder backend under the VM override) in
+disposable projects. There is no E2E job or artifact upload. Workflow configuration does not prove a successful run; see
 [Latest recorded results](#latest-recorded-results).
 
 ## Remaining Gaps

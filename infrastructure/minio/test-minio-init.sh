@@ -11,7 +11,8 @@
 # The built image is tagged codemastery-test/minio-init:qualification, never a
 # codemastery.invalid/*:release name. MINIO_INIT_TEST_PLATFORM (default
 # linux/amd64, the VM platform) selects the platform. Requires Docker with
-# Compose v2.24+ and python3. Images are not pulled implicitly.
+# Compose v2.24+ and python3. The pinned server image must already be present;
+# Docker pulls the digest-pinned mc image on demand if it is missing.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -282,9 +283,10 @@ for b in ab UPPER a..b -abc abc- 192.168.1.10 'bad"name' a.-b a-.b 'with space' 
          "$(printf 'a%.0s' {1..64})"; do
   check_rejected "bucket '${b}'" "valid S3 bucket name" "STORAGE_BUCKET=${b}"
 done
-for k in ab 'has space' 'quo"te' 'back\slash' 'abcdefghijklmnopqrstu'; do
+for k in ab 'has space' 'quo"te' 'back\slash' 'abcdefghijklmnopqrstu' 'cm=storage' 'cm,storage'; do
   check_rejected "access key '${k}'" "STORAGE_ACCESS_KEY must be 3-20" "STORAGE_ACCESS_KEY=${k}"
 done
+check_rejected "7-byte secret" "STORAGE_SECRET_KEY must be at least 8 bytes" "STORAGE_SECRET_KEY=short7x"
 check_rejected "region with space" "STORAGE_REGION must contain" "STORAGE_REGION=us east"
 check_rejected "secret with newline" "must not contain control characters" $'STORAGE_SECRET_KEY=line1\nline2'
 pass "invalid configuration fails closed before contacting MinIO"
@@ -360,6 +362,22 @@ expect_eq "identity left unbound" "$(admin "${net}" admin user info t "${APP_KEY
 expect_code "no policy created" XMinioAdminNoSuchPolicy "$(admin "${net}" admin policy info t "${POLICY_NAME}")"
 expect_code "no bucket created" NoSuchBucket "$(admin "${net}" anonymous get "t/${BUCKET}")"
 pass "existing application identity with another secret is not reset; nothing is changed"
+stop_server "${net}"
+
+# MinIO itself rejects these only when creating the identity, after the bucket
+# and policy exist; the initializer must refuse them before any change.
+net="$(start_server invalid-app)"
+run_init "${net}" "STORAGE_ACCESS_KEY=cm=storage"
+expect_init_fail "access key with '='" "STORAGE_ACCESS_KEY must be 3-20"
+expect_nothing_created "access key with '='" "${net}"
+run_init "${net}" "STORAGE_SECRET_KEY=short7x"
+expect_init_fail "7-byte secret" "STORAGE_SECRET_KEY must be at least 8 bytes"
+expect_nothing_created "7-byte secret" "${net}"
+# MinIO counts bytes: seven characters encoded as eight UTF-8 bytes is accepted.
+run_init "${net}" "STORAGE_SECRET_KEY=abcdefé"
+expect_init_ok "8-byte secret"
+expect_initialized_state "8-byte secret" "${net}"
+pass "invalid application access key or short secret is refused on a live server with nothing changed; an 8-byte secret is accepted"
 stop_server "${net}"
 
 # ------------------------------------------------------------------ conflicts

@@ -14,7 +14,7 @@ requests are not described here.
 | --- | --- | --- |
 | Design and approval status | The one-VM Docker Compose deployment is approved (ADR002 CT17.I-scope and the approved architecture). The frontend Nginx as the only public HTTPS ingress, and the TLS bindings, are recorded in the dated CT17 records as `APPROVED_PENDING_PROTECTED_INTEGRATION`. Provider, VM, TLS/DNS, secrets, production origin and public access remain Leader-reserved (ADR002 CT17.I-runtime is `PROPOSED_LEADER_RESERVED`) | [B2](#b2--approved-engineering-ingressconnection-bindings), [DP01 HTTPS ingress integration](#dp01-https-ingress-integration--31-october-2026) |
 | Deployment tooling | Implemented and merged | `infrastructure/vm/deploy.sh` (PR #110), `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` target (PR #118) |
-| Tested configuration | The tooling passes its CI jobs on the GitHub runner, against real containers but not the VM | Five `VM …` jobs, see [testing.md](testing.md#ci); passed on `614f326` in [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079) |
+| Tested configuration | The tooling passes its CI jobs on the GitHub runner, against real containers but not the VM | Six `VM …` jobs, see [testing.md](testing.md#ci). The five deployment-script and ingress jobs passed on `614f326` in [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079); the MinIO initializer job is described in [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026) |
 | Actual deployment | **None recorded.** No `preflight`, `load`, `provision` or `deploy` on the VM is recorded in this repository | — |
 | External / lecturer access | **Not verified.** No independently verified public URL exists | DP03 #72 is open |
 
@@ -1791,10 +1791,13 @@ Strengthened:
   no change and reports `changes: 0`.
 - **Credentials exercised.** The application must authenticate, list its bucket
   and be refused administration.
-- **Stricter input validation.** Bucket names follow the S3 rules. The access key
-  must be 3–20 characters from `A-Z a-z 0-9 . _ @ + = -`. The region is
-  restricted to letters, digits, `_` and `-`. The application secret must differ
-  from the root password. Control characters are rejected.
+- **Stricter input validation, before any change.** Bucket names follow the S3
+  rules. The access key must be 3–20 characters from `A-Z a-z 0-9 . _ @ + -`;
+  MinIO rejects `=` and `,`. The application secret must be at least 8 bytes
+  (MinIO's minimum) and differ from the root password. The region is restricted
+  to letters, digits, `_` and `-`. Control characters are rejected. MinIO itself
+  reports an invalid access key or short secret only when it creates the
+  identity, after the bucket and policy exist, so these are checked first.
 - **Secrets stay out of argv and output.** `mc` reads credentials from a private
   0700 temporary config file, and the new user's secret from stdin. Secrets never
   reach argv, which is visible in host process listings. `mc` output is never
@@ -1817,12 +1820,17 @@ with the image needs a separate decision.
 
 Run `infrastructure/minio/test-minio-init.sh` to build and test the image. Pass
 an image reference or ID as its argument to test an existing image instead. It
-needs Docker with Compose v2.24+ and python3, and the two pinned images already
-pulled. Twenty checks cover:
+needs Docker with Compose v2.24+ and python3. The pinned server image must
+already be present locally; Docker pulls the digest-pinned `mc` image on demand
+if it is missing. Twenty-one checks cover:
 
-- **Static checks:** the digest pins and image configuration; UID 65532 with all
-  capability sets zero; a read-only executable; no setuid/setgid files.
-- **Input validation:** rejection of invalid input before MinIO is contacted.
+- **Static checks:** the digest pins and image configuration; UID 65532 with
+  zero inheritable, permitted, effective and ambient capability sets (the
+  bounding set remains Docker's default and `no_new_privs` is unset, because the
+  contract forbids `cap_drop` and `security_opt`); a read-only executable; no
+  setuid/setgid files.
+- **Input validation:** rejection of invalid input before MinIO is contacted,
+  including an access key containing `=` or `,` and a 7-byte secret.
 - **First run:** the exact resulting state, plus least privilege. The
   application can put, get, list and delete in its bucket. It cannot read, list
   or write another bucket. It cannot create or delete buckets, change anonymous
@@ -1830,6 +1838,10 @@ pulled. Twenty checks cover:
 - **Repeat runs:** an unchanged snapshot, including the policy `UpdateDate`.
 - **Wrong credentials:** wrong root credentials, and an existing identity with
   another secret.
+- **Invalid application credentials on a live server:** an access key with `=`
+  and a 7-byte secret are refused and leave no bucket, policy or identity. A
+  secret of seven characters encoded as eight UTF-8 bytes is accepted, matching
+  MinIO's byte count.
 - **Conflicts:** a same-named broad policy; an anonymous bucket; an extra policy;
   group membership; a foreign binding; a disabled identity; service accounts.
   Each conflict is left as found. An equivalent policy with reordered members is
@@ -1843,9 +1855,18 @@ pulled. Twenty checks cover:
 Local run on 31 October 2026, on an Apple Silicon host: linux/amd64 under
 emulation, Docker Engine 29.8.1, Compose v5.5.1, host bash 3.2. All 20 checks
 passed. Two deliberately broken builds were rejected: one overwrote a conflicting
-policy, the other reset an existing secret. The CI job has not yet run on GitHub
-and is not one of the protected required checks. A test-built image is not the
+policy, the other reset an existing secret. A test-built image is not the
 release artifact: image IDs differ per build.
+
+Local run on 1 November 2026 after the credential-validation fix, on the same
+host type and versions: all 21 checks passed. The same suite failed against an
+image built from the earlier `6589ad6` source. That earlier initializer accepted
+an access key containing `=` and left a bucket and policy behind when MinIO then
+rejected the identity.
+
+On GitHub, the “VM MinIO initializer qualification” job passed all 20 checks at
+`6589ad6` in [run 41214541688](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41214541688).
+It is not one of the protected required checks.
 
 ### MinIO artifact review (as of 31 October 2026)
 
@@ -1855,7 +1876,7 @@ release artifact: image IDs differ per build.
 | Source correspondence | The server binary reports `DEVELOPMENT.2025-10-15T17-29-55Z`, commit `9e49d5e7a648`, go1.24.9. `mc` reports `RELEASE.2025-08-13T08-35-41Z`, commit `7394ce0dd2a8`, go1.24.10. Both commits equal the upstream release tags | Self-reported build metadata; not a reproduced build |
 | Build provenance | `golithus/minio-builds` (third party; repository license NOASSERTION). It clones upstream by **mutable tag**, uses floating Go `1.24.x` and actions by major version, and copies the pre-built binary into the image. BuildKit provenance is `min` with incomplete materials; no SBOM packages; no signatures. The repository was last pushed on 2025-11-06 | Weak provenance: binaries cannot be traced to source by attestation |
 | Runtime security, server | Scratch image with only `/minio`; runs as **root**; Docker default capabilities. The Compose contract forbids `user`, `cap_drop` and `security_opt`. The console on `:9001` is enabled by the approved command; unpublished, but reachable on the private network | Hardening needs a derived image and contract change; not approved |
-| Runtime security, initializer | UBI 9 micro 9.6 base with `mc`. Runs as 65532 with zero capability sets; one-shot, no ports, volumes or restart | Meets this task's runtime requirements |
+| Runtime security, initializer | UBI 9 micro 9.6 base with `mc`. Runs as 65532 with zero inheritable, permitted, effective and ambient capability sets (Docker's default bounding set); one-shot, no ports, volumes or restart | Meets this task's runtime requirements |
 | License | Server and `mc` are AGPL-3.0 (labels and `--version`). Base image under the Red Hat UBI EULA. Used unmodified | No legal determination is made here |
 | Maintenance | `minio/minio` and `minio/mc` are **archived** on GitHub. Their latest community releases are exactly the pinned versions. The Go 1.24 toolchain is outside the Go project's support window | No upstream Community fixes can be expected |
 | MinIO advisories after the pin | Fixed only in MinIO AIStor releases: CVE-2026-41145 and CVE-2026-40344 (high; unauthenticated object writes that need a valid write-capable access key); CVE-2026-39414 (high; S3 Select memory exhaustion); CVE-2026-34204 (high; SSE metadata injection by authenticated users); CVE-2026-42600 (medium) | Unpatched in the pinned server |
@@ -1884,8 +1905,8 @@ packages have not been scanned.
    revision and run `test-minio-init.sh IMAGE` against that exact artifact.
    Record that evidence as the `--initializer-qualification` reference. Only
    then tag it, after CODEOWNER review.
-4. **CI.** A green GitHub run of the new job is still needed. Making it a
-   required check is a Leader decision.
+4. **CI.** The new job runs on every pull request but is not a required check.
+   Making it one is a Leader decision.
 5. **Operational limits.**
    - The initializer assumes no concurrent IAM administration during its run.
    - Secret rotation for an existing identity needs a separate authorized

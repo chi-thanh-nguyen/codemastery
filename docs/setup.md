@@ -614,15 +614,17 @@ targeting `main`, pushes to `main`, and manual dispatch, on `ubuntu-24.04`.
 Backend uses Temurin 25 and runs `./mvnw verify` from `backend/`, including the
 Testcontainers integration tests. Frontend uses Node 22 and runs `npm ci`,
 `npm test` and `npm run build` from `frontend/`. Both jobs cache package-manager
-downloads using the committed build inputs. Five further jobs test
-`infrastructure/vm/deploy.sh`, the VM override and the frontend `release` image
-against real containers on the runner; they do not deploy anywhere. CodeQL code
+downloads using the committed build inputs. Six further jobs test
+`infrastructure/vm/deploy.sh`, the VM override, the frontend `release` image and
+the MinIO initializer image against real containers on the runner; they do not
+deploy anywhere. CodeQL code
 scanning runs through GitHub's default setup, which has no workflow file in this
 repository.
 
 The job list, the required checks and the latest recorded results are in
 [testing.md](testing.md#ci). A workflow definition alone does not establish a
-successful run. CI does not start the local Compose stack and has no E2E job.
+successful run. CI does not start the full local Compose stack and has no E2E
+job.
 
 ## Authorized Interim configuration targets (implementation pending)
 
