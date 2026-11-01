@@ -1562,9 +1562,10 @@ docker build --platform linux/amd64 --target release \
   -t codemastery.invalid/frontend:release ./frontend
 # A registry image holds only the build host's platform until amd64 is fetched.
 docker pull --platform linux/amd64 postgres:17.11-bookworm
-# minio and minio-init: only qualified artifacts may be tagged with these names.
-# The initializer is built from infrastructure/minio under a non-release tag and
-# qualified there first; no MinIO server artifact is qualified (release blocker 2).
+# minio and minio-init: only qualified and admitted artifacts may be tagged with
+# these names. The initializer (built from infrastructure/minio under a
+# non-release tag) and the Chainguard and minimal server candidates passed
+# functional qualification; none has production security admission (blocker 2).
 docker save --platform linux/amd64 -o release.tar postgres:17.11-bookworm \
   codemastery.invalid/minio:release codemastery.invalid/minio-init:release \
   codemastery.invalid/backend:release codemastery.invalid/frontend:release
@@ -2186,15 +2187,16 @@ The negative cases each failed with exit 1:
 - a mutable Chainguard reference and a wrong Golithus version, both still rejected.
 
 Labelled containers, networks and volumes were removed, and other Docker
-resources were unchanged. **Remote CI has not run this change.**
+resources were unchanged. These are local results, not GitHub Actions results; CI
+results belong to the pull request.
 
 Earlier evidence from the Leader's terminal, before this change and not repeated
 here: a no-cache rebuild of the Dockerfile produced a different image ID and some
 different layers. All 27 examined filesystem entries matched in content and
 checked metadata apart from modification times, and the binary SHA-256 matched.
 **Bit-for-bit reproducibility is not established**, and image IDs are not
-compared between builds. The candidate's identity for release would be its
-`docker save` archive digest, as for every release image.
+compared between builds. For a release, its identity would come from the release
+archive through `--expect-image`, as for every release image.
 
 ### Not established and remaining gates
 
@@ -2213,9 +2215,10 @@ security admission, not release approval and not a production deployment.
   storage blocker: it carries the `mc` findings in the
   [31 October review](#minio-artifact-review-as-of-31-october-2026) and is not
   admitted. This change does not alter or remediate it.
-- **Deployment.** Nothing was built, loaded or run on the Azure VM. Release
-  blockers 2–7 in [Verification and remaining gates](#verification-and-remaining-gates)
-  stand. Remote CI, CODEOWNER review and protected merge are still required.
+- **Deployment.** Nothing was built, loaded or run on the Azure VM. All seven
+  release blockers in [Verification and remaining gates](#verification-and-remaining-gates)
+  remain open; this change updates only the description of blocker 2. CI on the
+  pull request, CODEOWNER review and protected merge are still required.
 
 This record and its test changes were produced through AI-assisted development
 (Anthropic Claude Code) under the Leader's task. No AI service or new
