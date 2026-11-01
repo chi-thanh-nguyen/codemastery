@@ -262,7 +262,10 @@ for scenario in stop_failure removal_failure inventory_error initial_inventory_e
       ;;
     inventory_error|initial_inventory_error|inventory_timeout) message='Cannot verify private frontend probe inventory' ;;
     ambiguous|truncated|duplicate_inventory) message='Private frontend probe inventory is inconsistent' ;;
-    invalid_identity) message='Private frontend probe identity is not a full container ID' ;;
+    invalid_identity)
+      message='Private frontend probe identity is not a full container ID'
+      if grep -Fxq PROBE_STOP "$events"; then test_fail "Containment stopped an invalid/prefix identity"; fi
+      ;;
     *) message='Release stopped' ;;
   esac
   if [[ "$scenario" != interrupt && "$scenario" != terminate ]]; then

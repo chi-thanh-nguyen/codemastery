@@ -1631,7 +1631,8 @@ contain_failure() {
     fi
   fi
   if [[ -n "${STAGED_FRONTEND_CID}" ]]; then
-    timeout --signal=KILL "${WAIT_TIMEOUT}" docker stop --timeout "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
+    [[ "${STAGED_FRONTEND_CID}" =~ ^[0-9a-f]{64}$ ]] \
+      && timeout --signal=KILL "${WAIT_TIMEOUT}" docker stop --timeout "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
       || { printf 'ERROR: Private frontend probe cleanup failed; inspect the one-off container.\n' >&2; rc=1; }
   fi
   exit "${rc}"
