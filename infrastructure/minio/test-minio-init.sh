@@ -391,7 +391,7 @@ expect_contains "mc pin" "${MC_IMAGE}" "@sha256:dde55ccc0bc9e65dc582c8e652d652ee
 if [[ "${SERVER}" == minimal ]]; then
   # A local build has no registry digest; its only source must be the Chainguard pin.
   expect_eq "minimal server Dockerfile stages" "$(sed -n 's/^FROM //p' "${MINIMAL_DOCKERFILE}")" \
-    "${CHAINGUARD_SERVER_IMAGE} AS source"$'\n'"scratch"
+    "${CHAINGUARD_SERVER_IMAGE} AS source"$'\n'"scratch AS layout"$'\n'"scratch"
   pass "server and mc images keep the approved digest pins; the minimal server is built only from the Chainguard pin"
 else
   [[ "${SERVER_IMAGE}" =~ @sha256:[0-9a-f]{64}$ ]] || die "server under test is not digest-pinned: ${SERVER_IMAGE}"

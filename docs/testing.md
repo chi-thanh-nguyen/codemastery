@@ -1633,5 +1633,18 @@ MINIO_INIT_TEST_SERVER=minimal infrastructure/minio/test-minio-init.sh
 | Suite constants (scratch copy, tracked file unchanged) | A mutable Chainguard reference; a wrong expected binary hash; a wrong Golithus version | Exit 1: not digest-pinned (Chainguard) or Dockerfile pin mismatch (minimal); binary mismatch; version mismatch (Golithus) |
 | Cleanup | Containers, networks and volumes compared before and after | Unchanged apart from the removed test resources |
 
-Not covered: a GitHub Actions run of this change, any vulnerability scan or
+The rows above tested the original two-stage Dockerfile. Its first native run in
+GitHub Actions ([run 41306581519](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41306581519),
+`bfa06f9`) failed the minimal suite at check 3: `/data` and `/tmp` were `0755` on
+the runner's builder. Golithus and Chainguard passed 24/24 natively there. After
+the [staging-stage correction](deployment.md#native-ci):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Shell syntax | `bash -n infrastructure/minio/test-minio-init.sh` | Passed |
+| Minimal, corrected Dockerfile, local | The CI build command, then `MINIO_INIT_TEST_SERVER=minimal …` | Build succeeded; 24/24 checks passed, including `/data` and `/tmp` at `0700 65532:65532` |
+| Root directory | Layers of the corrected image, read from `docker save` | No layer has an entry for `/` |
+
+Not covered: a native GitHub Actions pass of the corrected Dockerfile (see
+[Native CI](deployment.md#native-ci)), any vulnerability scan or
 security admission of the minimal image, a release archive, and the Azure VM.

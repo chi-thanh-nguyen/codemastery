@@ -5,6 +5,13 @@
 
 FROM cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82 AS source
 
+# Some BuildKit versions do not apply --chmod to the directory a COPY creates,
+# only to what it copies. Staging /data and /tmp under one parent makes them
+# copied entries, so their owner and mode are set on every builder.
+FROM scratch AS layout
+COPY --from=source /data /layout/data
+COPY --from=source /tmp /layout/tmp
+
 FROM scratch
 
 COPY --from=source /usr/bin/minio /usr/bin/minio
@@ -12,8 +19,7 @@ COPY --from=source /etc/ssl/certs /etc/ssl/certs
 COPY --from=source /etc/passwd /etc/passwd
 COPY --from=source /etc/group /etc/group
 
-COPY --from=source --chown=65532:65532 --chmod=0700 /data /data
-COPY --from=source --chown=65532:65532 --chmod=0700 /tmp /tmp
+COPY --from=layout --chown=65532:65532 --chmod=0700 /layout/ /
 
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
