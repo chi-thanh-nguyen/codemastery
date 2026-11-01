@@ -2361,7 +2361,7 @@ jobs:
           mapfile -t candidate < <(sed -n "s/^CHAINGUARD_SERVER_IMAGE='\(cgr\.dev\/chainguard\/minio@sha256:[0-9a-f]\{64\}\)'$/\1/p" infrastructure/minio/test-minio-init.sh)
           [[ ${#candidate[@]} -eq 1 ]] || { echo "Unexpected Chainguard MinIO pin." >&2; exit 1; }
           for ref in "${pins[@]}" "${candidate[@]}"; do docker pull -q --platform linux/amd64 "$ref" >/dev/null; done
-      # One job keeps the required check name; both servers run the same suite.
+      # One job keeps the required check name; all three servers run the same suite.
       - name: Build the initializer image and run it against disposable golithus MinIO servers
         shell: bash
         run: infrastructure/minio/test-minio-init.sh
@@ -2371,4 +2371,18 @@ jobs:
         shell: bash
         env:
           MINIO_INIT_TEST_SERVER: chainguard
+        run: infrastructure/minio/test-minio-init.sh
+      - name: Build the minimal MinIO server candidate from the Chainguard pin
+        id: minimal
+        # Built and run even when an earlier suite fails; the job still fails.
+        if: ${{ !cancelled() && steps.pull.outcome == 'success' }}
+        shell: bash
+        # No build context: the Dockerfile copies only from its pinned source stage.
+        # Local non-release tag, never pushed.
+        run: docker build --platform linux/amd64 -t codemastery-test/minio-server:qualification - < infrastructure/vm/Dockerfile.minio-server
+      - name: Run the same suite against disposable minimal MinIO candidate servers
+        if: ${{ !cancelled() && steps.minimal.outcome == 'success' }}
+        shell: bash
+        env:
+          MINIO_INIT_TEST_SERVER: minimal
         run: infrastructure/minio/test-minio-init.sh

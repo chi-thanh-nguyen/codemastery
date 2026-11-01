@@ -11,13 +11,18 @@
 # MINIO_INIT_TEST_SERVER selects the server under test:
 #   golithus    (default) the digest-pinned local Community server from the base Compose file
 #   chainguard  the digest-pinned DP01 release-server candidate below (not admitted)
+#   minimal     infrastructure/vm/Dockerfile.minio-server, built beforehand from that
+#               Chainguard pin under a non-release tag (not admitted; linux/amd64 only):
+#                 docker build --platform linux/amd64 \
+#                   -t codemastery-test/minio-server:qualification - < infrastructure/vm/Dockerfile.minio-server
 # An unset variable selects golithus; any other value, including an empty one, fails.
 #
 # The built image is tagged codemastery-test/minio-init:qualification, never a
 # codemastery.invalid/*:release name. MINIO_INIT_TEST_PLATFORM (default
 # linux/amd64, the VM platform) selects the platform. Requires Docker with
-# Compose v2.24+ and python3. The selected server image must already be present;
-# Docker pulls the digest-pinned mc image on demand if it is missing.
+# Compose v2.24+ and python3. The selected server image must already be present
+# (and, for minimal, the Chainguard pin it is built from); Docker pulls the
+# digest-pinned mc image on demand if it is missing.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -35,6 +40,12 @@ MC_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/mc:.*\)$/\1/p' "${BASE_C
 # DP01 release-server candidate: Chainguard's build of the chainguard-forks/minio
 # fork, selected only by this immutable index digest (docs/deployment.md).
 CHAINGUARD_SERVER_IMAGE='cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82'
+# DP01 minimal server candidate: a local build with no registry digest, so it is
+# identified by its content, checked against the Chainguard pin it copies from.
+MINIMAL_SERVER_IMAGE='codemastery-test/minio-server:qualification'
+MINIMAL_DOCKERFILE="${ROOT}/infrastructure/vm/Dockerfile.minio-server"
+# /usr/bin/minio of the pin's linux/amd64 manifest, which the image copies unchanged.
+MINIMAL_SERVER_BINARY_SHA256='3c3d615241314c531e15e57485c053e60dc1af04e87b20424d2db8bdec8a49b2'
 # The base Compose server command; the Chainguard image has no default command.
 SERVER_CMD=(server /data --console-address :9001)
 SERVER="${MINIO_INIT_TEST_SERVER-golithus}"
@@ -89,7 +100,15 @@ case "${SERVER}" in
     SERVER_VERSION='minio version RELEASE.2026-10-23T20-06-51Z (commit-id=76c06ff1d2cc844050fdeb1d54bf8fa70db72278)'
     SERVER_DATA_UID=65532
     ;;
-  *) die "MINIO_INIT_TEST_SERVER must be golithus or chainguard, not '${SERVER}'." ;;
+  minimal)
+    [[ "${PLATFORM}" == linux/amd64 ]] || die "The minimal server is qualified for linux/amd64 only, not ${PLATFORM}."
+    SERVER_IMAGE="${MINIMAL_SERVER_IMAGE}"
+    SERVER_CONFIG='65532:65532|["/usr/bin/minio"]|null'
+    # The Chainguard binary, copied unchanged.
+    SERVER_VERSION='minio version RELEASE.2026-10-23T20-06-51Z (commit-id=76c06ff1d2cc844050fdeb1d54bf8fa70db72278)'
+    SERVER_DATA_UID=65532
+    ;;
+  *) die "MINIO_INIT_TEST_SERVER must be golithus, chainguard or minimal, not '${SERVER}'." ;;
 esac
 
 # ------------------------------------------------------------------ helpers
@@ -247,6 +266,95 @@ expect_nothing_created() {  # description network
   expect_code "$1: bucket absent" NoSuchBucket "$(admin "$2" anonymous get "t/${BUCKET}")"
 }
 
+# Minimal server only. Its expected contents follow Dockerfile.minio-server; Docker
+# adds the runtime entries skipped below to every container. Modification times
+# and build metadata differ between builds and are not compared.
+MINIMAL_INVENTORY='d 0700 65532:65532 data
+d 0700 65532:65532 data/.minio.sys
+d 0700 65532:65532 data/.minio.sys/buckets
+d 0700 65532:65532 data/.minio.sys/config
+d 0700 65532:65532 data/.minio.sys/multipart
+d 0700 65532:65532 data/.minio.sys/tmp
+d 0700 65532:65532 data/.minio.sys/tmp-old
+d 0700 65532:65532 data/.minio.sys/tmp/.trash
+d 0755 0:0 etc
+f 0644 0:0 etc/group
+f 0644 0:0 etc/passwd
+d 0755 0:0 etc/ssl
+d 0755 0:0 etc/ssl/certs
+f 0444 0:0 etc/ssl/certs/.ca-certificates.crt.sha256
+l 0777 0:0 etc/ssl/certs/ca-bundle.crt -> ca-certificates.crt
+f 0644 0:0 etc/ssl/certs/ca-certificates.crt
+d 0700 65532:65532 tmp
+d 0755 0:0 usr
+d 0755 0:0 usr/bin
+f 0755 0:0 usr/bin/minio'
+
+binary_sha256() {  # image -> SHA-256 of its /usr/bin/minio
+  local cid
+  cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "$1")"
+  docker cp "${cid}:/usr/bin/minio" - | python3 -c '
+import hashlib, sys, tarfile
+with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as t:
+    m = next(iter(t))
+    assert m.isreg() and m.name == "minio", (m.name, m.type)
+    print(hashlib.sha256(t.extractfile(m).read()).hexdigest())'
+  docker rm "${cid}" >/dev/null
+}
+
+verify_minimal_server() {
+  docker image inspect "${SERVER_IMAGE}" | python3 -c '
+import json, sys
+image = json.load(sys.stdin)[0]
+c = image["Config"]
+assert (image["Os"], image["Architecture"]) == ("linux", "amd64"), (image["Os"], image["Architecture"])
+assert c.get("User") == "65532:65532", c.get("User")
+assert c.get("Entrypoint") == ["/usr/bin/minio"], c.get("Entrypoint")
+default_path = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+env = [e for e in c.get("Env") or [] if e != default_path]
+assert env == ["SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"], c.get("Env")
+for key in ("Cmd", "ExposedPorts", "Volumes", "Healthcheck", "OnBuild", "Labels", "Shell"):
+    assert not c.get(key), (key, c[key])
+' || die "minimal server image configuration differs from ${MINIMAL_DOCKERFILE}"
+
+  local cid inventory
+  cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "${SERVER_IMAGE}")"
+  inventory="$(docker export "${cid}" | python3 -c '
+import sys, tarfile
+runtime = {".dockerenv", "dev", "proc", "sys", "etc/hostname", "etc/hosts", "etc/mtab", "etc/resolv.conf"}
+rows = []
+with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as t:
+    for m in t:
+        name = m.name[2:] if m.name.startswith("./") else m.name
+        name = name.strip("/")
+        if not name or name in runtime or name.startswith("dev/"):
+            continue
+        kind = "d" if m.isdir() else "l" if m.issym() else "f" if m.isreg() else "?" + m.type.decode()
+        link = " -> " + m.linkname if m.issym() or m.islnk() else ""
+        rows.append("%s %04o %d:%d %s%s" % (kind, m.mode & 0o7777, m.uid, m.gid, name, link))
+print("\n".join(sorted(rows, key=lambda r: r.split(" ", 3)[3])))')"
+  docker rm "${cid}" >/dev/null
+  # Exact contents: no shell, mc or other tool, no setuid/setgid bit; private data and tmp.
+  expect_eq "minimal server filesystem" "${inventory}" "${MINIMAL_INVENTORY}"
+
+  # The pin is trusted by digest; the local build only by matching it.
+  expect_eq "Chainguard pin binary" "$(binary_sha256 "${CHAINGUARD_SERVER_IMAGE}")" "${MINIMAL_SERVER_BINARY_SHA256}"
+  expect_eq "minimal server binary" "$(binary_sha256 "${SERVER_IMAGE}")" "${MINIMAL_SERVER_BINARY_SHA256}"
+
+  # The image has no shell: read the running server's status from a sidecar
+  # in its PID namespace.
+  local name="cm-${RUN_ID}-minimal-process" status
+  docker run -d --platform "${PLATFORM}" --name "${name}" --label "${LABEL}" --network none \
+    -e MINIO_ROOT_USER="${ROOT_USER}" -e MINIO_ROOT_PASSWORD="${ROOT_PASS}" \
+    "${SERVER_IMAGE}" "${SERVER_CMD[@]}" >/dev/null
+  status="$(docker run --rm --platform "${PLATFORM}" --pid "container:${name}" --network none \
+    --label "${LABEL}" --entrypoint /bin/bash "${MC_IMAGE}" -c '
+    while read -r k v; do case "$k" in Uid:|Gid:|Groups:|CapInh:|CapPrm:|CapEff:|CapAmb:) echo $k $v;; esac; done </proc/1/status' 2>&1)"
+  docker rm -fv "${name}" >/dev/null
+  expect_eq "minimal server process identity and capabilities" "${status}" \
+    $'Uid: 65532 65532 65532 65532\nGid: 65532 65532 65532 65532\nGroups: 65532\nCapInh: 0000000000000000\nCapPrm: 0000000000000000\nCapEff: 0000000000000000\nCapAmb: 0000000000000000'
+}
+
 # ------------------------------------------------------------------ image
 
 section "Image build and static properties (${PLATFORM})"
@@ -260,8 +368,17 @@ fi
 IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${IMAGE}")"
 printf 'image under test: %s (%s)\n' "${IMAGE}" "${IMAGE_ID}"
 printf 'server under test: %s (%s)\nmc image: %s\n' "${SERVER}" "${SERVER_IMAGE}" "${MC_IMAGE}"
-docker image inspect "${SERVER_IMAGE}" >/dev/null 2>&1 \
-  || die "Pull the pinned server image first: docker pull --platform ${PLATFORM} ${SERVER_IMAGE}"
+if [[ "${SERVER}" == minimal ]]; then
+  # Never pulled or substituted: a missing candidate fails.
+  docker image inspect "${SERVER_IMAGE}" >/dev/null 2>&1 \
+    || die "Build the minimal server first: docker build --platform ${PLATFORM} -t ${SERVER_IMAGE} - < infrastructure/vm/Dockerfile.minio-server"
+  docker image inspect "${CHAINGUARD_SERVER_IMAGE}" >/dev/null 2>&1 \
+    || die "Pull its pinned source image first: docker pull --platform ${PLATFORM} ${CHAINGUARD_SERVER_IMAGE}"
+  printf 'minimal server image ID: %s\n' "$(docker image inspect --format '{{.Id}}' "${SERVER_IMAGE}")"
+else
+  docker image inspect "${SERVER_IMAGE}" >/dev/null 2>&1 \
+    || die "Pull the pinned server image first: docker pull --platform ${PLATFORM} ${SERVER_IMAGE}"
+fi
 
 bash -n "${ROOT}/infrastructure/minio/minio-init.sh"
 bash -n "${BASH_SOURCE[0]}"
@@ -271,8 +388,15 @@ from="$(sed -n 's/^FROM //p' "${ROOT}/infrastructure/minio/Dockerfile")"
 expect_eq "Dockerfile base is the approved local mc pin" "${from}" "${MC_IMAGE}"
 expect_contains "server pin" "${LOCAL_SERVER_IMAGE}" "@sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40"
 expect_contains "mc pin" "${MC_IMAGE}" "@sha256:dde55ccc0bc9e65dc582c8e652d652eea1438c6e60d774524f4da15d7b26a900"
-[[ "${SERVER_IMAGE}" =~ @sha256:[0-9a-f]{64}$ ]] || die "server under test is not digest-pinned: ${SERVER_IMAGE}"
-pass "server and mc images keep the approved digest pins"
+if [[ "${SERVER}" == minimal ]]; then
+  # A local build has no registry digest; its only source must be the Chainguard pin.
+  expect_eq "minimal server Dockerfile stages" "$(sed -n 's/^FROM //p' "${MINIMAL_DOCKERFILE}")" \
+    "${CHAINGUARD_SERVER_IMAGE} AS source"$'\n'"scratch AS layout"$'\n'"scratch"
+  pass "server and mc images keep the approved digest pins; the minimal server is built only from the Chainguard pin"
+else
+  [[ "${SERVER_IMAGE}" =~ @sha256:[0-9a-f]{64}$ ]] || die "server under test is not digest-pinned: ${SERVER_IMAGE}"
+  pass "server and mc images keep the approved digest pins"
+fi
 
 # The selected server must be exactly the expected artifact for this platform.
 cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "${SERVER_IMAGE}")"
@@ -283,7 +407,12 @@ expect_eq "${SERVER} server image configuration" "${scfg}" "${SERVER_CONFIG}"
 version="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LABEL}" "${SERVER_IMAGE}" --version 2>&1)"
 expect_contains "${SERVER} server version" "${version}" "${SERVER_VERSION}"
 expect_contains "${SERVER} server platform" "${version}" " ${PLATFORM}"
-pass "${SERVER} server has the expected user, entrypoint, default command and binary version for ${PLATFORM}"
+if [[ "${SERVER}" == minimal ]]; then
+  verify_minimal_server
+  pass "minimal server has the expected configuration, exact filesystem, the pin's binary, and runs as UID 65532 with no capabilities"
+else
+  pass "${SERVER} server has the expected user, entrypoint, default command and binary version for ${PLATFORM}"
+fi
 
 cfg="$(docker image inspect --format '{{.Config.User}}|{{json .Config.Entrypoint}}|{{json .Config.Cmd}}|{{json .Config.Env}}|{{json .Config.ExposedPorts}}|{{json .Config.Volumes}}|{{json .Config.Healthcheck}}|{{.Os}}/{{.Architecture}}' "${IMAGE}")"
 expect_eq "image configuration" "${cfg}" \

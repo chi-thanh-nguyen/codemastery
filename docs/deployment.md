@@ -20,7 +20,7 @@ their original evidence and limitations; DP01 remains incomplete.
 | --- | --- | --- |
 | Design and approval status | The one-VM Docker Compose deployment is approved (ADR002 CT17.I-scope and the approved architecture). The frontend Nginx as the only public HTTPS ingress, and the TLS bindings, are recorded in the dated CT17 records as `APPROVED_PENDING_PROTECTED_INTEGRATION`. Provider, VM, TLS/DNS, secrets, production origin and public access remain Leader-reserved (ADR002 CT17.I-runtime is `PROPOSED_LEADER_RESERVED`) | [B2](#b2--approved-engineering-ingressconnection-bindings), [DP01 HTTPS ingress integration](#dp01-https-ingress-integration--31-october-2026) |
 | Deployment tooling | Implemented and merged | `infrastructure/vm/deploy.sh` (PR #110), `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` target (PR #118) |
-| Tested configuration | The tooling passes its CI jobs on the GitHub runner, against real containers but not the VM | Six `VM …` jobs, see [testing.md](testing.md#ci). The five deployment-script and ingress jobs passed on `614f326` in [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079); the MinIO initializer job is described in [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026) and [DP01 Chainguard MinIO release-server candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026) |
+| Tested configuration | The tooling passes its CI jobs on the GitHub runner, against real containers but not the VM | Six `VM …` jobs, see [testing.md](testing.md#ci). The five deployment-script and ingress jobs passed on `614f326` in [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079); the MinIO initializer job is described in [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026), [DP01 Chainguard MinIO release-server candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026) and [DP01 minimal MinIO server candidate](#dp01-minimal-minio-server-candidate--1-november-2026) |
 | Actual deployment | **None recorded.** No `preflight`, `load`, `provision` or `deploy` on the VM is recorded in this repository | — |
 | External / lecturer access | **Not verified.** No independently verified public URL exists | DP03 #72 is open |
 
@@ -35,6 +35,7 @@ inputs, not verified results, and do not authorize public exposure.
 | `infrastructure/docker-compose.yml` | The local base file, used as is; `deploy.sh` always applies it first |
 | `infrastructure/vm/docker-compose.vm.yml` | Release override: removes local ports and builds, publishes only the frontend on 443, mounts the TLS directory read-only, sets the backend release environment and fixes the `codemastery.invalid/*:release` image names |
 | `frontend/Dockerfile`, `release` target | Builds the bundle with `VITE_API_BASE_URL=/api`, terminates TLS, proxies `/api` to the backend and bakes an HTTPS healthcheck. Requires the `PUBLIC_ORIGIN` build argument |
+| `infrastructure/vm/Dockerfile.minio-server` | Experimental minimal MinIO server built from the Chainguard candidate pin. Qualified locally under linux/amd64 emulation; its first native CI run failed on directory modes, and the corrected definition awaits native CI qualification. Not admitted, and not referenced by the override or `deploy.sh` ([record](#dp01-minimal-minio-server-candidate--1-november-2026)) |
 | `infrastructure/vm/deploy.sh` | Operator script with the subcommands `preflight`, `load`, `provision`, `deploy` and `all`. It verifies inputs, images and grants, provisions the PostgreSQL roles and the runtime privilege matrix, starts services in order and prints a deployment record without secrets |
 | `.env.example` | Lists the VM-only entries (`SPRING_FLYWAY_*` migrator identity, single `CORS_ALLOWED_ORIGINS` origin) |
 
@@ -1561,9 +1562,11 @@ docker build --platform linux/amd64 --target release \
   -t codemastery.invalid/frontend:release ./frontend
 # A registry image holds only the build host's platform until amd64 is fetched.
 docker pull --platform linux/amd64 postgres:17.11-bookworm
-# minio and minio-init: only qualified artifacts may be tagged with these names.
-# The initializer is built from infrastructure/minio under a non-release tag and
-# qualified there first; no MinIO server artifact is qualified (release blocker 2).
+# minio and minio-init: only qualified and admitted artifacts may be tagged with
+# these names. The initializer (built from infrastructure/minio under a
+# non-release tag) and the Chainguard server candidate passed functional
+# qualification; the minimal server candidate passed only locally so far. None
+# has production security admission (blocker 2).
 docker save --platform linux/amd64 -o release.tar postgres:17.11-bookworm \
   codemastery.invalid/minio:release codemastery.invalid/minio-init:release \
   codemastery.invalid/backend:release codemastery.invalid/frontend:release
@@ -1721,11 +1724,14 @@ Release blockers remain:
    It stays open until a release backend built from the merged revision answers
    `deploy.sh` on the VM.
 2. **Storage artifacts.** The Chainguard server candidate is functionally
-   qualified, and the initializer image definition and qualification suite exist,
-   but neither production artifact has been admitted. Security and maintenance
-   limitations and the admission gates remain; see
-   [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026)
-   and [Chainguard candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026).
+   qualified. The minimal server built from it is qualified only locally under
+   emulation, pending native CI qualification. The initializer image definition
+   and qualification suite exist. No production server or initializer artifact
+   has been admitted. Security and maintenance limitations and the admission gates
+   remain; see
+   [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026),
+   [Chainguard candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026)
+   and [minimal candidate](#dp01-minimal-minio-server-candidate--1-november-2026).
 3. **Release logistics.** Release archive transfer, custody and image admission
    review (P8), including the non-slim Nginx variant.
 4. **Operator custody.** The operator identity and env-file custody above.
@@ -2085,6 +2091,164 @@ This record and its test changes were produced through AI-assisted development
 databases, and the Sigstore public-good transparency log, were used only for
 this review. No AI service or new infrastructure technology is introduced into
 CodeMastery's runtime.
+
+## DP01 minimal MinIO server candidate — 1 November 2026
+
+### Boundary
+
+Under the Project Leader's 1 November 2026 (ICT) "Package 1: Minimal MinIO Server
+CI Integration" task on branch `chore/dp01-minio-server-minimal`, the suite and
+the required CI job also qualify `infrastructure/vm/Dockerfile.minio-server`
+(commit `8db0473`). This is functional qualification only. It does not admit the
+image, approve it for production, create a `codemastery.invalid/minio:release`
+tag, choose it over the [Chainguard candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026),
+deploy anything or close DP01 #71. The VM override, `deploy.sh`, the base Compose
+file, the initializer and its Dockerfile are unchanged.
+
+### Image definition
+
+The source stage is the Chainguard candidate, by the same index digest. A
+`scratch` staging stage places the source's `/data` and `/tmp` under one parent
+directory. The final `FROM scratch` stage copies only `/usr/bin/minio`, the CA
+certificates, `/etc/passwd` and `/etc/group`, plus that parent's contents into
+`/` with `--chown=65532:65532 --chmod=0700`. `/data` and `/tmp` are therefore
+copied entries, owned by `65532:65532` with mode 0700. The staging stage was
+added after the first native CI run (see [Native CI](#native-ci)). It sets `SSL_CERT_FILE`, `USER 65532:65532` and
+entrypoint `/usr/bin/minio`, with no command, `EXPOSE`, `VOLUME` or healthcheck.
+Unlike the Chainguard image, it has no shell, no `mc` client and no world-writable
+`/data`. The base Compose command supplies `server /data --console-address :9001`,
+as for the Chainguard image.
+
+### Qualification
+
+```bash
+docker pull --platform linux/amd64 cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82
+docker build --platform linux/amd64 -t codemastery-test/minio-server:qualification - < infrastructure/vm/Dockerfile.minio-server
+MINIO_INIT_TEST_SERVER=minimal infrastructure/minio/test-minio-init.sh
+```
+
+The build has no context: the Dockerfile copies only from its source stage.
+`codemastery-test/minio-server:qualification` is a local non-release tag. The
+suite never builds, pulls or substitutes it: if it is missing, or the Chainguard
+pin is missing, the run fails before testing. The mode accepts only linux/amd64.
+`golithus` (the default when unset) and `chainguard` behave as before, and an
+empty or unknown value still fails.
+
+A local build has no registry digest, so the suite identifies the candidate by its
+contents. Expected values are fixed in the suite, never read from the candidate
+itself. They are checked inside the existing 24 checks, so every server still
+reports 24:
+
+- **Pin:** the Dockerfile's stages are exactly the Chainguard digest `AS source`,
+  `scratch AS layout` and `scratch`.
+- **Configuration:** linux/amd64, user `65532:65532`, entrypoint
+  `/usr/bin/minio`, no command, ports, volumes, healthcheck, labels or `ONBUILD`.
+  The environment holds only `SSL_CERT_FILE` and BuildKit's default `PATH`.
+- **Filesystem:** the exact list of entries with type, mode, owner and link
+  target, apart from entries that Docker adds to every container. Any shell, `mc`
+  or other added file, setuid/setgid bit, or change in ownership or mode fails.
+- **Binary:** SHA-256 of `/usr/bin/minio` is
+  `3c3d615241314c531e15e57485c053e60dc1af04e87b20424d2db8bdec8a49b2`, both in the
+  digest-pinned Chainguard image and in the candidate. `--version` reports
+  `RELEASE.2026-10-23T20-06-51Z`, commit `76c06ff`, linux/amd64.
+- **Process:** a running server, read through a sidecar in its PID namespace
+  because the image has no shell. Its UID/GID and groups are 65532, and its
+  inheritable, permitted, effective and ambient capability sets are empty.
+  Docker's default bounding set and the console on `:9001` are unchanged from the
+  Chainguard candidate.
+
+All other checks run unchanged: input validation, first and repeat runs, least
+privilege, conflicting state, readiness failure, named-volume persistence
+(`.minio.sys` owned by 65532), and the effective VM Compose model with failure
+propagation. As before, only clean first-time volumes are qualified.
+
+CI job **VM MinIO initializer qualification** keeps its single job and check name.
+After the Golithus and Chainguard suites, it builds the candidate with the
+command above and runs the suite with `MINIO_INIT_TEST_SERVER=minimal`. The build
+and the minimal suite also run when an earlier suite fails. Any failed build or
+suite fails the job. The image is not pushed and no artifact is published.
+
+### Evidence (1 November 2026)
+
+Local runs of the original two-stage Dockerfile, on branch
+`chore/dp01-minio-server-minimal` at `8db0473` plus the suite change: macOS 27.2 on Apple Silicon (linux/amd64 under
+emulation), Docker Engine 29.8.1, Compose v5.5.1, host bash 3.2.57. The CI steps
+were run as local commands. The commands and the negative cases are in
+[testing.md](testing.md#dp01-minimal-minio-server-qualification--1-november-2026).
+
+| Server | Result |
+| --- | --- |
+| Golithus (variable unset) | 24/24 checks passed (288 s) |
+| Chainguard | 24/24 checks passed (291 s) |
+| Minimal, built with the CI command (image ID `e5b79330af4c…`) | 24/24 checks passed (294 s) |
+
+The negative cases each failed with exit 1:
+
+- an empty, unknown or non-amd64 selection;
+- a missing candidate, which was not pulled or replaced;
+- the Chainguard image or a variant with an added `/bin/sh` under the candidate tag;
+- a suite whose Chainguard pin no longer matched the Dockerfile;
+- a wrong expected binary hash;
+- a mutable Chainguard reference and a wrong Golithus version, both still rejected.
+
+Labelled containers, networks and volumes were removed, and other Docker
+resources were unchanged. These are local results, not GitHub Actions results; CI
+results belong to the pull request.
+
+#### Native CI
+
+The first native linux/amd64 run of the required job on PR #126 failed: GitHub
+Actions [run 41306581519](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41306581519),
+job 124848097864, at `bfa06f9`. Golithus and Chainguard passed 24/24 and the
+minimal image built. The minimal suite then stopped at check 3: on the runner's
+builder, `/data` and `/tmp` were `0755`, not `0700`. Their contents had the
+expected mode and every other entry matched. On that builder, `COPY --chmod`
+set the mode of copied entries but not of the directory that the `COPY` itself
+created. The local Docker Desktop builder (BuildKit v0.33.0) set both. The
+two-stage image was therefore not reproducible across builders.
+
+The staging stage above makes both directories copied entries. No image layer
+contains an entry for `/`, so the final `COPY` does not change the root
+directory. The correction changes no test assertion other than the expected
+stage list.
+
+Locally, the corrected Dockerfile built with the CI command passed the minimal
+suite 24/24 under emulation. **Native CI qualification of the corrected
+definition is pending; it is not claimed here.**
+
+Earlier evidence from the Leader's terminal, before this change and not repeated
+here: a no-cache rebuild of the Dockerfile produced a different image ID and some
+different layers. All 27 examined filesystem entries matched in content and
+checked metadata apart from modification times, and the binary SHA-256 matched.
+**Bit-for-bit reproducibility is not established**, and image IDs are not
+compared between builds. For a release, its identity would come from the release
+archive through `--expect-image`, as for every release image.
+
+### Not established and remaining gates
+
+Functional qualification PASS is not a vulnerability-free artifact, not a
+security admission, not release approval and not a production deployment.
+
+- **No security review of this image.** It was not scanned and has no signature,
+  SBOM attestation or provenance of its own. The [Chainguard review](#artifact-review-as-of-1-november-2026)
+  applies to the source image; the binary is byte-identical to it, but the
+  findings about that binary (self-reported source, `+dirty`, CVE-2026-39414
+  NOT_VERIFIED) apply here unchanged.
+- **Admission.** The Leader decides whether to admit this image, the Chainguard
+  candidate or neither. Release packaging of a locally built server is not
+  defined.
+- **Initializer.** The initializer image (Golithus `mc` base) remains a separate
+  storage blocker: it carries the `mc` findings in the
+  [31 October review](#minio-artifact-review-as-of-31-october-2026) and is not
+  admitted. This change does not alter or remediate it.
+- **Deployment.** Nothing was built, loaded or run on the Azure VM. All seven
+  release blockers in [Verification and remaining gates](#verification-and-remaining-gates)
+  remain open; this change updates only the description of blocker 2. CI on the
+  pull request, CODEOWNER review and protected merge are still required.
+
+This record and its test changes were produced through AI-assisted development
+(Anthropic Claude Code) under the Leader's task. No AI service or new
+infrastructure technology is introduced into CodeMastery's runtime.
 
 ## DP01 private health probe remediation — 1 November 2026
 
