@@ -22,7 +22,7 @@
 # linux/amd64, the VM platform) selects the platform. Requires Docker with
 # Compose v2.24+ and python3. The selected server image must already be present
 # (and, for minimal, the Chainguard pin it is built from); Docker pulls the
-# digest-pinned mc image on demand if it is missing.
+# digest-pinned initializer base and test-client mc images on demand.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -34,9 +34,29 @@ PROJECTS=()
 
 BASE_COMPOSE="${ROOT}/infrastructure/docker-compose.yml"
 VM_COMPOSE="${ROOT}/infrastructure/vm/docker-compose.vm.yml"
-# The approved local pins are the single source of truth for both images.
+# The approved local pins are the single source of truth for both images. The
+# local mc image is the suite's independent test client, not the initializer base.
 LOCAL_SERVER_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/minio:.*\)$/\1/p' "${BASE_COMPOSE}")"
 MC_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/mc:.*\)$/\1/p' "${BASE_COMPOSE}")"
+# Initializer base: Chainguard's mc build, selected only by this index digest.
+# Its mc --version carries no release, so the image's package record identifies it.
+INIT_BASE_IMAGE='cgr.dev/chainguard/minio-client@sha256:3b67177c0e12f44f646a5cf21b20fc5a79dd2d7a6b4db632b436f0b9e2e46717'
+INIT_MC_PACKAGE='0.20250813.083541-r27'
+# The base's linux/amd64 identity, from its immutable image configuration: the
+# RootFS layer diff IDs and the SHA-256 of its /usr/bin/mc. The initializer must
+# be exactly these layers plus one layer holding only the reviewed script.
+INIT_BASE_DIFF_IDS='sha256:ecb8a3a0b5d6c085899d9370c0792ea856f6bb5a3c6932e4700b7e086133d421
+sha256:e0b29eecf1630223a78b94a8b4fe356436a0992973c7e7d30e00f98a5b8fc7bf
+sha256:d49b2a0ee2c4068dd94bb5c503224023adb31d8371a9780eff2a477fe3f4324b
+sha256:4c28d7f9b70feecf0f42d5f70e21b522bb4a4af67afa320e46f7c2c1de1ee932
+sha256:43269dcf6e0c956aa8449d8c03ee11dc6a1c6ba346fccd4c62941a08a54e60f7
+sha256:ecaa8a7c2d5bc3a81ded232f0d9ef96bc61583eb5283df980c1b858aaa82304b
+sha256:cf8652f933d60f590ac714d600863f58f45de00c1395bac22ae84c45bb7cbfdf
+sha256:0796987ef9b42d9a5ca931a96505aeb93034dc4178fea694a47a24ed315185fb
+sha256:3a66f55cf0203c4b4be7a55e9b3ea078adc381d5c3d7b072bfd7d705885ac54e
+sha256:c5f8425833dd54e0bf6e04024b7512ca2221294dae27aeb5302e0004783c0b41
+sha256:468205ce088d063fd17bf59b048256dc9812d741b7fcb6fc813d355425332cdd'
+INIT_MC_SHA256='8842390a4419ff18ec9c43aa71b41beb69030ea56df4f449c03b9623af0bc34a'
 # DP01 release-server candidate: Chainguard's build of the chainguard-forks/minio
 # fork, selected only by this immutable index digest (docs/deployment.md).
 CHAINGUARD_SERVER_IMAGE='cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82'
@@ -290,16 +310,66 @@ d 0755 0:0 usr
 d 0755 0:0 usr/bin
 f 0755 0:0 usr/bin/minio'
 
-binary_sha256() {  # image -> SHA-256 of its /usr/bin/minio
+binary_sha256() {  # image path -> SHA-256 of that regular file in the image
   local cid
   cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "$1")"
-  docker cp "${cid}:/usr/bin/minio" - | python3 -c '
-import hashlib, sys, tarfile
+  docker cp "${cid}:$2" - | python3 -c '
+import hashlib, os, sys, tarfile
 with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as t:
     m = next(iter(t))
-    assert m.isreg() and m.name == "minio", (m.name, m.type)
-    print(hashlib.sha256(t.extractfile(m).read()).hexdigest())'
+    assert m.isreg() and m.name == os.path.basename(sys.argv[1]), (m.name, m.type)
+    print(hashlib.sha256(t.extractfile(m).read()).hexdigest())' "$2"
   docker rm "${cid}" >/dev/null
+}
+
+# The initializer image itself, built here or supplied as IMAGE, against its
+# trusted identity. Package metadata, Dockerfile text and layer counts are not
+# proof: every layer is re-hashed, the base layers must be exactly the pin's, and
+# the one added layer may hold only the reviewed script and its directories.
+verify_initializer_artifact() {
+  [[ "${PLATFORM}" == linux/amd64 ]] \
+    || die "Initializer artifact identity is recorded for linux/amd64 only, not ${PLATFORM}."
+  docker save -o "${WORK}/initializer.tar" "${IMAGE}" || die "Cannot export ${IMAGE} for verification."
+  python3 - "${WORK}/initializer.tar" "${ROOT}/infrastructure/minio/minio-init.sh" "${INIT_BASE_DIFF_IDS}" <<'PY' \
+    || die "${IMAGE} is not the approved initializer base plus the reviewed script."
+import gzip, hashlib, io, json, sys, tarfile
+archive, script, base = sys.argv[1], sys.argv[2], sys.argv[3].split()
+with open(script, "rb") as f:
+    script_sha = hashlib.sha256(f.read()).hexdigest()
+with tarfile.open(archive) as o:
+    manifest = json.load(o.extractfile("manifest.json"))
+    assert len(manifest) == 1, "expected one image in the archive, found %d" % len(manifest)
+    config = json.load(o.extractfile(manifest[0]["Config"]))
+    assert (config.get("os"), config.get("architecture")) == ("linux", "amd64"), (config.get("os"), config.get("architecture"))
+    diff_ids, layers = config["rootfs"]["diff_ids"], manifest[0]["Layers"]
+    assert diff_ids[:-1] == base and len(diff_ids) == len(base) + 1, \
+        "RootFS is not the pinned base plus one layer: %s" % diff_ids
+    assert len(layers) == len(diff_ids), (len(layers), len(diff_ids))
+    for path, diff_id in zip(layers, diff_ids):
+        data = o.extractfile(path).read()
+        if data[:2] == b"\x1f\x8b":
+            data = gzip.decompress(data)
+        assert "sha256:" + hashlib.sha256(data).hexdigest() == diff_id, "layer %s does not match %s" % (path, diff_id)
+top = tarfile.open(fileobj=io.BytesIO(data))
+entries = {}
+for m in top.getmembers():
+    name = m.name[2:] if m.name.startswith("./") else m.name
+    entries[name.strip("/")] = m
+script_path = "usr/local/bin/codemastery-minio-init"
+assert set(entries) == {"usr", "usr/local", "usr/local/bin", script_path}, sorted(entries)
+for name in ("usr", "usr/local", "usr/local/bin"):
+    m = entries[name]
+    # Directory modes vary by builder; they must be root-owned and not writable by others.
+    assert m.isdir() and (m.uid, m.gid) == (0, 0) and not m.mode & 0o022, (name, m.type, m.uid, m.gid, oct(m.mode))
+m = entries[script_path]
+assert m.isreg() and (m.uid, m.gid, m.mode & 0o7777) == (0, 0, 0o555), (m.type, m.uid, m.gid, oct(m.mode))
+assert hashlib.sha256(top.extractfile(m).read()).hexdigest() == script_sha, \
+    "initializer script differs from infrastructure/minio/minio-init.sh"
+PY
+  rm -f "${WORK}/initializer.tar"
+  # docker create pulls the pin by digest if it is missing; an unavailable pin fails.
+  expect_eq "pinned initializer base mc binary" "$(binary_sha256 "${INIT_BASE_IMAGE}" /usr/bin/mc)" "${INIT_MC_SHA256}"
+  expect_eq "initializer mc binary" "$(binary_sha256 "${IMAGE}" /usr/bin/mc)" "${INIT_MC_SHA256}"
 }
 
 verify_minimal_server() {
@@ -338,8 +408,8 @@ print("\n".join(sorted(rows, key=lambda r: r.split(" ", 3)[3])))')"
   expect_eq "minimal server filesystem" "${inventory}" "${MINIMAL_INVENTORY}"
 
   # The pin is trusted by digest; the local build only by matching it.
-  expect_eq "Chainguard pin binary" "$(binary_sha256 "${CHAINGUARD_SERVER_IMAGE}")" "${MINIMAL_SERVER_BINARY_SHA256}"
-  expect_eq "minimal server binary" "$(binary_sha256 "${SERVER_IMAGE}")" "${MINIMAL_SERVER_BINARY_SHA256}"
+  expect_eq "Chainguard pin binary" "$(binary_sha256 "${CHAINGUARD_SERVER_IMAGE}" /usr/bin/minio)" "${MINIMAL_SERVER_BINARY_SHA256}"
+  expect_eq "minimal server binary" "$(binary_sha256 "${SERVER_IMAGE}" /usr/bin/minio)" "${MINIMAL_SERVER_BINARY_SHA256}"
 
   # The image has no shell: read the running server's status from a sidecar
   # in its PID namespace.
@@ -385,7 +455,8 @@ bash -n "${BASH_SOURCE[0]}"
 pass "shell syntax"
 
 from="$(sed -n 's/^FROM //p' "${ROOT}/infrastructure/minio/Dockerfile")"
-expect_eq "Dockerfile base is the approved local mc pin" "${from}" "${MC_IMAGE}"
+expect_eq "Dockerfile base is the approved initializer base pin" "${from}" "${INIT_BASE_IMAGE}"
+[[ "${INIT_BASE_IMAGE}" =~ @sha256:[0-9a-f]{64}$ ]] || die "initializer base is not digest-pinned: ${INIT_BASE_IMAGE}"
 expect_contains "server pin" "${LOCAL_SERVER_IMAGE}" "@sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40"
 expect_contains "mc pin" "${MC_IMAGE}" "@sha256:dde55ccc0bc9e65dc582c8e652d652eea1438c6e60d774524f4da15d7b26a900"
 if [[ "${SERVER}" == minimal ]]; then
@@ -416,8 +487,9 @@ fi
 
 cfg="$(docker image inspect --format '{{.Config.User}}|{{json .Config.Entrypoint}}|{{json .Config.Cmd}}|{{json .Config.Env}}|{{json .Config.ExposedPorts}}|{{json .Config.Volumes}}|{{json .Config.Healthcheck}}|{{.Os}}/{{.Architecture}}' "${IMAGE}")"
 expect_eq "image configuration" "${cfg}" \
-  '65532:65532|["/usr/local/bin/codemastery-minio-init"]|null|["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]|null|null|null|'"${PLATFORM}"
-pass "non-root user, own entrypoint, no command, secrets, ports, volumes or healthcheck"
+  '65532:65532|["/usr/local/bin/codemastery-minio-init"]|null|["PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin","SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"]|null|null|null|'"${PLATFORM}"
+verify_initializer_artifact
+pass "non-root user, own entrypoint, no command, secrets, ports, volumes or healthcheck; pinned base layers plus only the reviewed script; base mc binary"
 
 runtime="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LABEL}" --entrypoint /bin/bash "${IMAGE}" -c '
   printf "uid=%s gid=%s\n" "$(id -u)" "$(id -g)"
@@ -425,10 +497,11 @@ runtime="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LA
   [ -w /usr/local/bin/codemastery-minio-init ] && echo "entrypoint writable"
   [ -w / ] && echo "root writable"
   [ -w /tmp ] || echo "tmp not writable"
+  while IFS= read -r l; do case "$l" in P:*) p="${l#P:}";; V:*) [ "$p" = mc ] && echo "mc package ${l#V:}";; esac; done </usr/lib/apk/db/installed
   true')"
-expect_eq "runtime identity and capabilities" "${runtime}" \
-  $'uid=65532 gid=65532\nCapInh:0000000000000000\nCapPrm:0000000000000000\nCapEff:0000000000000000\nCapAmb:0000000000000000'
-pass "runs as UID 65532 with no effective, permitted or ambient capabilities"
+expect_eq "runtime identity, capabilities and mc package" "${runtime}" \
+  $'uid=65532 gid=65532\nCapInh:0000000000000000\nCapPrm:0000000000000000\nCapEff:0000000000000000\nCapAmb:0000000000000000\n'"mc package ${INIT_MC_PACKAGE}"
+pass "runs as UID 65532 with no effective, permitted or ambient capabilities; packages the expected mc release"
 
 list_setid() {  # reads `tar -tv` lines; prints entries with a setuid/setgid bit
   local mode rest
