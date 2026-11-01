@@ -2344,6 +2344,26 @@ initializer base is a separate suite constant.
 - Check 4 expects the base's environment (`PATH` and `SSL_CERT_FILE`).
 - Check 5 now also requires the image's package record to name `mc
   0.20250813.083541-r27`.
+- Check 4 also verifies the artifact itself. This applies to an image built by
+  the suite and to one supplied as `IMAGE`, for linux/amd64 only:
+  - **Layers.** The suite exports the image with `docker save` and re-hashes every
+    layer against its RootFS diff ID. The diff IDs must be exactly the pinned
+    base's 11, recorded in the suite from the base's immutable configuration,
+    plus one layer.
+  - **Added layer.** That layer may contain only `usr`, `usr/local`,
+    `usr/local/bin` (root-owned, not group- or world-writable) and
+    `usr/local/bin/codemastery-minio-init`. That file must be root-owned, mode
+    0555, and byte-identical to `infrastructure/minio/minio-init.sh`.
+  - **Binary.** SHA-256 of `/usr/bin/mc` must be
+    `8842390a4419ff18ec9c43aa71b41beb69030ea56df4f449c03b9623af0bc34a`, both in
+    the digest-pinned base (pulled by digest when missing) and in the image under
+    test.
+  - **Fail closed.** A missing manifest, configuration or file, or an unavailable
+    base, fails the check.
+
+  This replaces an earlier version of the suite that relied on package metadata
+  and Dockerfile text; review showed it accepted wrongly sourced images (see the
+  bypass results below).
 
 Every server still reports 24 checks. CI builds the initializer through the suite
 as before; the workflow is unchanged.
@@ -2368,6 +2388,29 @@ Each of these failed with exit 1:
 
 No initializer output disclosed a secret. Labelled test resources were removed.
 These are local results; native CI results belong to the pull request.
+
+**Artifact identity bypasses (review remediation, 1 November 2026).** Three
+deliberately mis-sourced, test-only images were run as `IMAGE`:
+
+- **A1:** the Golithus `/usr/bin/mc` copied over the base's in a separate layer,
+  package record kept.
+- **A1b:** the same substitution and the script in one added layer, so the layer
+  count matches.
+- **A2b:** the unchanged Dockerfile on a different Chainguard `minio-client`
+  digest (`:latest-dev`, `sha256:8419d1a4…`) with the same `mc` package record.
+
+The earlier suite (PR head `2c87571`) passed all three 24/24. The current suite
+fails each at check 4: A1 and A2b on the RootFS diff IDs (A2b has the same layer
+count), A1b on the extra `usr/bin/mc` entry in the added layer. With the layer
+verification disabled in a test-only copy, A1b still fails on the `mc` SHA-256
+(Golithus `6c79b743…`), and a wrong expected hash fails on the pinned base itself.
+Legitimate runs with the current suite: Golithus 24/24 (328 s), Chainguard 24/24
+(343 s), minimal 24/24 (335 s), locally under emulation.
+
+An older Chainguard digest (`sha256:a8a0480c…`) with the same `mc` package
+version also failed functionally under the earlier suite, at check 8 after it had
+created the bucket, policy and identity. This is a further sign that package
+metadata does not identify behavior.
 
 ### Not established and remaining gates
 

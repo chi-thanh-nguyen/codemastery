@@ -1677,5 +1677,18 @@ based on `main` at `36c2b98`. The reproduction commands are unchanged from
 | Supply chain | cosign v3.1.4 `verify` and `verify-attestation` | Signatures, SPDX SBOM and SLSA v1 provenance verified for the candidate |
 | Cleanup | Labelled containers, networks and volumes | Removed; other resources untouched |
 
+The rows above used the suite at PR #127 head `2c87571`. Review found that it
+accepted mis-sourced initializer images. After the
+[artifact identity remediation](deployment.md#dp01-minio-initializer-base-remediation--1-november-2026):
+
+| Check | Command | Earlier suite | Current suite |
+| --- | --- | --- | --- |
+| A1: Golithus `mc` copied over `/usr/bin/mc`, package record kept | `test-minio-init.sh <image>` | 24/24 passed | Exit 1 at check 4: not the base plus one layer |
+| A1b: the same substitution and the script in one added layer | Same | 24/24 passed | Exit 1 at check 4: `usr/bin/mc` in the added layer |
+| A2b: unchanged Dockerfile on the `:latest-dev` digest, same package record | Same | 24/24 passed | Exit 1 at check 4: base diff IDs differ |
+| `mc` hash alone | A1b with layer verification disabled in a test-only copy | — | Exit 1 at check 4: `mc` SHA-256 is Golithus `6c79b743…` |
+| Stale constant | Wrong expected `mc` hash in a test-only copy | — | Exit 1 at check 4 on the pinned base |
+| Golithus, Chainguard, minimal | As above, with the current suite | — | 24/24 each (328 s, 343 s, 335 s) |
+
 Not covered: a GitHub Actions run of this change (results belong to the pull
 request), `govulncheck`, security admission, a release artifact and the Azure VM.
