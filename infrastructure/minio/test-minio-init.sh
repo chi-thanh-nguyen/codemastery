@@ -22,7 +22,7 @@
 # linux/amd64, the VM platform) selects the platform. Requires Docker with
 # Compose v2.24+ and python3. The selected server image must already be present
 # (and, for minimal, the Chainguard pin it is built from); Docker pulls the
-# digest-pinned mc image on demand if it is missing.
+# digest-pinned initializer base and test-client mc images on demand.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -34,9 +34,14 @@ PROJECTS=()
 
 BASE_COMPOSE="${ROOT}/infrastructure/docker-compose.yml"
 VM_COMPOSE="${ROOT}/infrastructure/vm/docker-compose.vm.yml"
-# The approved local pins are the single source of truth for both images.
+# The approved local pins are the single source of truth for both images. The
+# local mc image is the suite's independent test client, not the initializer base.
 LOCAL_SERVER_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/minio:.*\)$/\1/p' "${BASE_COMPOSE}")"
 MC_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/mc:.*\)$/\1/p' "${BASE_COMPOSE}")"
+# Initializer base: Chainguard's mc build, selected only by this index digest.
+# Its mc --version carries no release, so the image's package record identifies it.
+INIT_BASE_IMAGE='cgr.dev/chainguard/minio-client@sha256:3b67177c0e12f44f646a5cf21b20fc5a79dd2d7a6b4db632b436f0b9e2e46717'
+INIT_MC_PACKAGE='0.20250813.083541-r27'
 # DP01 release-server candidate: Chainguard's build of the chainguard-forks/minio
 # fork, selected only by this immutable index digest (docs/deployment.md).
 CHAINGUARD_SERVER_IMAGE='cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82'
@@ -385,7 +390,8 @@ bash -n "${BASH_SOURCE[0]}"
 pass "shell syntax"
 
 from="$(sed -n 's/^FROM //p' "${ROOT}/infrastructure/minio/Dockerfile")"
-expect_eq "Dockerfile base is the approved local mc pin" "${from}" "${MC_IMAGE}"
+expect_eq "Dockerfile base is the approved initializer base pin" "${from}" "${INIT_BASE_IMAGE}"
+[[ "${INIT_BASE_IMAGE}" =~ @sha256:[0-9a-f]{64}$ ]] || die "initializer base is not digest-pinned: ${INIT_BASE_IMAGE}"
 expect_contains "server pin" "${LOCAL_SERVER_IMAGE}" "@sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40"
 expect_contains "mc pin" "${MC_IMAGE}" "@sha256:dde55ccc0bc9e65dc582c8e652d652eea1438c6e60d774524f4da15d7b26a900"
 if [[ "${SERVER}" == minimal ]]; then
@@ -416,7 +422,7 @@ fi
 
 cfg="$(docker image inspect --format '{{.Config.User}}|{{json .Config.Entrypoint}}|{{json .Config.Cmd}}|{{json .Config.Env}}|{{json .Config.ExposedPorts}}|{{json .Config.Volumes}}|{{json .Config.Healthcheck}}|{{.Os}}/{{.Architecture}}' "${IMAGE}")"
 expect_eq "image configuration" "${cfg}" \
-  '65532:65532|["/usr/local/bin/codemastery-minio-init"]|null|["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]|null|null|null|'"${PLATFORM}"
+  '65532:65532|["/usr/local/bin/codemastery-minio-init"]|null|["PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin","SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"]|null|null|null|'"${PLATFORM}"
 pass "non-root user, own entrypoint, no command, secrets, ports, volumes or healthcheck"
 
 runtime="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LABEL}" --entrypoint /bin/bash "${IMAGE}" -c '
@@ -425,10 +431,11 @@ runtime="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LA
   [ -w /usr/local/bin/codemastery-minio-init ] && echo "entrypoint writable"
   [ -w / ] && echo "root writable"
   [ -w /tmp ] || echo "tmp not writable"
+  while IFS= read -r l; do case "$l" in P:*) p="${l#P:}";; V:*) [ "$p" = mc ] && echo "mc package ${l#V:}";; esac; done </usr/lib/apk/db/installed
   true')"
-expect_eq "runtime identity and capabilities" "${runtime}" \
-  $'uid=65532 gid=65532\nCapInh:0000000000000000\nCapPrm:0000000000000000\nCapEff:0000000000000000\nCapAmb:0000000000000000'
-pass "runs as UID 65532 with no effective, permitted or ambient capabilities"
+expect_eq "runtime identity, capabilities and mc package" "${runtime}" \
+  $'uid=65532 gid=65532\nCapInh:0000000000000000\nCapPrm:0000000000000000\nCapEff:0000000000000000\nCapAmb:0000000000000000\n'"mc package ${INIT_MC_PACKAGE}"
+pass "runs as UID 65532 with no effective, permitted or ambient capabilities; packages the expected mc release"
 
 list_setid() {  # reads `tar -tv` lines; prints entries with a setuid/setgid bit
   local mode rest

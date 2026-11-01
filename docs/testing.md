@@ -356,7 +356,7 @@ and eight independent jobs on `ubuntu-24.04`:
 | VM runtime privileges with the real backend (`deployment-script-runtime`) | Builds the backend image and exercises real Auth, catalogue and membership under the approved privilege matrix |
 | VM deployment containerd image store (`deployment-script-containerd`) | Release-archive verification through real `docker save`/`load` round trips with the containerd image store |
 | VM HTTPS ingress (`deployment-ingress`) | Builds the release and local frontend images; exercises the HTTPS ingress against a stub and the real backend; runs `deploy.sh preflight` with the committed override |
-| VM MinIO initializer qualification (`minio-initializer`) | Pulls the digest-pinned Golithus server, `mc` and Chainguard candidate server images, builds `infrastructure/minio` for linux/amd64 and runs `infrastructure/minio/test-minio-init.sh` against disposable MinIO servers and the effective VM Compose model, first with the Golithus server and then with `MINIO_INIT_TEST_SERVER=chainguard`. It then builds `infrastructure/vm/Dockerfile.minio-server` for linux/amd64 as the local non-release tag `codemastery-test/minio-server:qualification`, without pushing it, and runs the suite with `MINIO_INIT_TEST_SERVER=minimal`. The later suites run even when an earlier suite fails, provided the pull, and for the minimal suite its build, succeeded; any failure fails the job ([record](deployment.md#dp01-minio-community-initializer--31-october-2026), [candidate](deployment.md#dp01-chainguard-minio-release-server-candidate--1-november-2026), [minimal](deployment.md#dp01-minimal-minio-server-candidate--1-november-2026)) |
+| VM MinIO initializer qualification (`minio-initializer`) | Pulls the digest-pinned Golithus server, `mc` (the suite's test client) and Chainguard candidate server images, builds `infrastructure/minio` for linux/amd64 on its digest-pinned Chainguard `minio-client` base (pulled by the build) and runs `infrastructure/minio/test-minio-init.sh` against disposable MinIO servers and the effective VM Compose model, first with the Golithus server and then with `MINIO_INIT_TEST_SERVER=chainguard`. It then builds `infrastructure/vm/Dockerfile.minio-server` for linux/amd64 as the local non-release tag `codemastery-test/minio-server:qualification`, without pushing it, and runs the suite with `MINIO_INIT_TEST_SERVER=minimal`. The later suites run even when an earlier suite fails, provided the pull, and for the minimal suite its build, succeeded; any failure fails the job ([record](deployment.md#dp01-minio-community-initializer--31-october-2026), [candidate](deployment.md#dp01-chainguard-minio-release-server-candidate--1-november-2026), [minimal](deployment.md#dp01-minimal-minio-server-candidate--1-november-2026)) |
 
 The Java setup enables Maven caching using `backend/pom.xml` and
 `backend/.mvn/wrapper/maven-wrapper.properties` as dependency inputs. The Node
@@ -1653,3 +1653,29 @@ repeated natively.
 
 Not covered: any vulnerability scan or security admission of the minimal image,
 a release archive, and the Azure VM.
+
+## DP01 MinIO initializer base qualification — 1 November 2026
+
+Scope: the initializer base change in
+[DP01 MinIO initializer base remediation](deployment.md#dp01-minio-initializer-base-remediation--1-november-2026).
+Run on macOS 27.2 arm64 (linux/amd64 under emulation) with Docker Engine 29.8.1,
+Compose v5.5.1 and host bash 3.2.57, on branch `chore/dp01-minio-init-security`
+based on `main` at `36c2b98`. The reproduction commands are unchanged from
+[DP01 minimal MinIO server qualification](#dp01-minimal-minio-server-qualification--1-november-2026).
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Shell syntax | `bash -n` on `minio-init.sh` and `test-minio-init.sh` | Passed |
+| Golithus, variable unset | `infrastructure/minio/test-minio-init.sh` | 24/24 checks passed (301 s) |
+| Chainguard | `MINIO_INIT_TEST_SERVER=chainguard …` | 24/24 checks passed (304 s) |
+| Minimal | CI build command, then `MINIO_INIT_TEST_SERVER=minimal …` | Build succeeded; 24/24 checks passed (384 s) |
+| Selection | `MINIO_INIT_TEST_SERVER=` (empty) or `other` | Exit 1 before testing |
+| Base pin | Scratch copy of the suite expecting another `FROM` | Exit 1 at check 2 |
+| Previous image | The Golithus-based initializer as `IMAGE` | Exit 1 at check 4 (configuration) |
+| `mc` identity | A test-only candidate copy whose package record names another `mc` release, as `IMAGE` | Exit 1 at check 5 |
+| Vulnerability comparison | Grype 0.121.0, one database snapshot, both initializer archives | Golithus base 151 matches (4 critical, 41 high); candidate 0 |
+| Supply chain | cosign v3.1.4 `verify` and `verify-attestation` | Signatures, SPDX SBOM and SLSA v1 provenance verified for the candidate |
+| Cleanup | Labelled containers, networks and volumes | Removed; other resources untouched |
+
+Not covered: a GitHub Actions run of this change (results belong to the pull
+request), `govulncheck`, security admission, a release artifact and the Azure VM.

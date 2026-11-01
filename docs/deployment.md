@@ -1563,9 +1563,11 @@ docker build --platform linux/amd64 --target release \
 # A registry image holds only the build host's platform until amd64 is fetched.
 docker pull --platform linux/amd64 postgres:17.11-bookworm
 # minio and minio-init: only qualified and admitted artifacts may be tagged with
-# these names. The initializer (built from infrastructure/minio under a
-# non-release tag) and the Chainguard and minimal server candidates passed
-# functional qualification; none has production security admission (blocker 2).
+# these names. The Chainguard and minimal server candidates and the initializer
+# (built from infrastructure/minio under a non-release tag) passed functional
+# qualification; the initializer's Chainguard minio-client base is new and its
+# native CI result belongs to its pull request. None has production security
+# admission (blocker 2).
 docker save --platform linux/amd64 -o release.tar postgres:17.11-bookworm \
   codemastery.invalid/minio:release codemastery.invalid/minio-init:release \
   codemastery.invalid/backend:release codemastery.invalid/frontend:release
@@ -1723,13 +1725,15 @@ Release blockers remain:
    It stays open until a release backend built from the merged revision answers
    `deploy.sh` on the VM.
 2. **Storage artifacts.** The Chainguard server candidate and the minimal server
-   built from it are functionally qualified, natively in CI. The initializer image
-   definition and qualification suite exist. No production server or initializer artifact
-   has been admitted. Security and maintenance limitations and the admission gates
-   remain; see
+   built from it are functionally qualified, natively in CI. The initializer now
+   builds on Chainguard's `minio-client` image instead of the Golithus `mc` image;
+   its CRITICAL/HIGH scanner findings went from 45 to 0 under the same scanner and
+   database. No production server or initializer artifact has been admitted.
+   Security and maintenance limitations and the admission gates remain; see
    [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026),
-   [Chainguard candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026)
-   and [minimal candidate](#dp01-minimal-minio-server-candidate--1-november-2026).
+   [Chainguard candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026),
+   [minimal candidate](#dp01-minimal-minio-server-candidate--1-november-2026)
+   and [initializer base remediation](#dp01-minio-initializer-base-remediation--1-november-2026).
 3. **Release logistics.** Release archive transfer, custody and image admission
    review (P8), including the non-slim Nginx variant.
 4. **Operator custody.** The operator identity and env-file custody above.
@@ -2258,6 +2262,134 @@ security admission, not release approval and not a production deployment.
 This record and its test changes were produced through AI-assisted development
 (Anthropic Claude Code) under the Leader's task. No AI service or new
 infrastructure technology is introduced into CodeMastery's runtime.
+
+## DP01 MinIO initializer base remediation — 1 November 2026
+
+### Boundary
+
+The Project Leader's 1 November 2026 (ICT) "Package 2: MinIO Initializer
+Security Remediation" task on branch `chore/dp01-minio-init-security` replaces
+the base of the initializer image. It does not admit the image, approve a new
+security contract, create a `codemastery.invalid/minio-init:release` tag, deploy
+anything or close DP01 #71.
+
+- **Changed:** only the `FROM` line and its base labels in `infrastructure/minio/Dockerfile`.
+- **Unchanged:**
+  - `minio-init.sh`, its entrypoint, the six variables, the bucket-scoped policy,
+    the one-shot lifecycle and UID/GID `65532:65532`;
+  - the local Compose pins and inline initializer;
+  - the VM override, `deploy.sh` and the release image names;
+  - the servers.
+
+### Selected base
+
+`cgr.dev/chainguard/minio-client@sha256:3b67177c0e12f44f646a5cf21b20fc5a79dd2d7a6b4db632b436f0b9e2e46717`
+(OCI index; linux/amd64 manifest
+`sha256:5ec4d9fc1c4ebe66d7fd9532c885b14924d9b134b9d162da690575002aee4e29`).
+It was the public `:latest` tag on 1 November and is selected only by digest. The
+`:latest-dev` variant (with busybox) was not needed.
+
+| Aspect | Evidence | Finding |
+| --- | --- | --- |
+| Contents | Image created 2026-11-01T05:21:18Z. User `65532`; `/bin` links to `/usr/bin`; bash 5.3, GNU coreutils 9.12 (`timeout`, `mktemp`, `mkdir`, `rm`), `mc`; `/tmp` mode 1777; no setuid/setgid files. 21 Wolfi packages, including glibc 2.44 and OpenSSL 4.0 `libcrypto` | Provides everything `minio-init.sh` uses without a script change (its shebang is `#!/bin/bash`). Smaller than the Golithus UBI base: no `/bin/sh`, `sed`, busybox, package manager, `curl` or `wget` |
+| Source correspondence | Package `mc 0.20250813.083541-r27`. Its SPDX record names `minio/mc@RELEASE.2025-08-13T08-35-41Z`, commit `7394ce0dd2a80935aded936b09fa12cbb3cb8096` (the Golithus `mc` commit), built by `chainguard-dev/stereo` `mc.yaml` at `4b2ea14`. Go build info: `github.com/minio/mc v0.0.0-20250813083541-7394ce0dd2a8+dirty`, go1.27.3 | Same `mc` source with updated Go dependencies (`+dirty`). `mc --version` reports `DEVELOPMENT.GOGET`, so the suite identifies the release by the image's package record. Self-reported, not a reproduced build |
+| Signatures and provenance | cosign v3.1.4: keyless signatures on the index and the amd64 manifest verified, identity `https://github.com/chainguard-images/images/.github/workflows/release.yaml@refs/heads/main`, workflow SHA `e33e1d775a88d0d9773dce5b03fff028f9d1abbd`. Signed SPDX attestation (209 packages) and signed SLSA v1 provenance (apko build type, no resolved dependencies) | Signed image assembly. The Golithus base had none. The provenance does not trace the `mc` binary to source |
+| License | `mc` AGPL-3.0-or-later (SBOM); other packages carry their own licenses | No legal determination. Chainguard's image terms are NOT_VERIFIED |
+| Maintenance | `minio/mc` is archived upstream; this image rebuilds the archived release with current dependencies and toolchain | Continued availability of this digest and of free Chainguard images is NOT_VERIFIED. A release archive would keep the bytes |
+
+### Vulnerability comparison
+
+Both initializer images were built for linux/amd64 from the same `minio-init.sh`
+and scanned as `docker save` archives with Grype 0.121.0 (`anchore/grype`
+`sha256:621d56d1d68106b787022c81546f7e0a36202a25d1239f0c20195fab8c16f7ea`) and
+one database snapshot (schema v6.1.10, built 2026-11-01T06:20:12Z). Default
+policy; nothing was ignored or suppressed.
+
+| Initializer base | Catalogued packages | Critical | High | Medium | Low | Total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Golithus `mc` (UBI 9 micro) | 100 Go modules, 22 RPM | 4 | 41 | 82 | 24 | 151 |
+| Chainguard `minio-client` | 102 Go modules, 21 apk | 0 | 0 | 0 | 0 | 0 |
+
+The 45 previous CRITICAL/HIGH findings all had published fixes:
+
+| Package | Count | Example identifiers |
+| --- | ---: | --- |
+| Go stdlib | 25 | GO-2026-4337, GO-2026-6612 (critical); GO-2025-4155 |
+| `golang.org/x/net` | 5 | GO-2026-6612 (critical), GO-2026-5026 |
+| `google.golang.org/grpc` | 4 | GHSA-p77j-4mvh-x3m3 (critical) |
+| `github.com/prometheus/prometheus` | 2 | GHSA-8rm2-7qqf-34qm |
+| `golang.org/x/text` | 1 | GO-2026-5970 |
+| RPM `pcre2`, `pcre2-syntax`, `libcap`, `libacl` | 8 | CVE-2026-103111, CVE-2026-4878, CVE-2026-54369 |
+
+The candidate carries those modules at or above the fixed versions: Go
+1.24.10 → 1.27.3, `x/net` v0.42.0 → v0.60.0, `grpc` v1.71.0 → v1.83.2,
+`prometheus` v0.303.0 → v0.311.3, `x/text` v0.27.0 → v0.42.0.
+
+Limits:
+
+- Zero matches is not vulnerability-free. Grype matches known advisories to the
+  packages it catalogues; it does not cover MinIO's own advisories or show
+  reachability.
+- `govulncheck` was NOT_VERIFIED for the candidate.
+- The result is specific to this digest and database date. Admission requires a
+  re-scan with recorded versions.
+
+### Qualification
+
+`infrastructure/minio/test-minio-init.sh` keeps the Golithus `mc` from the base
+Compose file as its independent test client and checks its pin as before. The
+initializer base is a separate suite constant.
+
+- Check 2 requires the Dockerfile's `FROM` to equal that digest-pinned constant.
+- Check 4 expects the base's environment (`PATH` and `SSL_CERT_FILE`).
+- Check 5 now also requires the image's package record to name `mc
+  0.20250813.083541-r27`.
+
+Every server still reports 24 checks. CI builds the initializer through the suite
+as before; the workflow is unchanged.
+
+Local runs on 1 November 2026 under linux/amd64 emulation (macOS 27.2 on Apple
+Silicon, Docker Engine 29.8.1, Compose v5.5.1), with the CI command for the
+minimal server:
+
+| Server | Result |
+| --- | --- |
+| Golithus | 24/24 checks passed (301 s) |
+| Chainguard | 24/24 checks passed (304 s) |
+| Minimal | 24/24 checks passed (384 s) |
+
+Each of these failed with exit 1:
+
+- an empty or unknown server selection;
+- a `FROM` that differs from the approved base;
+- the previous Golithus-based initializer as `IMAGE` (configuration mismatch);
+- a test-only copy of the candidate whose package record names another `mc`
+  release.
+
+No initializer output disclosed a secret. Labelled test resources were removed.
+These are local results; native CI results belong to the pull request.
+
+### Not established and remaining gates
+
+Functional qualification and a lower scanner count are not security admission,
+release approval or production deployment.
+
+- **Admission.** The Leader decides whether to admit this base and the resulting
+  initializer, or to reject them. Re-verify the signature and re-scan at
+  admission.
+- **Release.** Build the release initializer from the reviewed revision, run
+  `test-minio-init.sh IMAGE` against that exact artifact and record it as the
+  `--initializer-qualification` reference. Tag only after CODEOWNER review. Not
+  done here.
+- **Server and DP01.** The server admission decision and release blockers 1 and
+  3–7 in [Verification and remaining gates](#verification-and-remaining-gates)
+  are unchanged. Nothing was built, loaded or run on the Azure VM.
+
+This record and its changes were produced through AI-assisted development
+(Anthropic Claude Code) under the Leader's task. Grype, cosign and their
+databases, and the Sigstore public-good transparency log, were used only for
+this review. No AI service or new infrastructure technology is introduced into
+CodeMastery's runtime.
 
 ## DP01 private health probe remediation — 1 November 2026
 
