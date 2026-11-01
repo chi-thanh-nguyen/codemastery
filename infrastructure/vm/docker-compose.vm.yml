@@ -21,6 +21,10 @@ services:
     image: codemastery.invalid/minio:release
     ports: !reset []
     restart: unless-stopped
+    environment:
+      # Release only: no embedded Console listener. The base command's
+      # --console-address is then unused; the private S3 API on 9000 is unchanged.
+      MINIO_BROWSER: "off"
 
   minio-init:
     # The qualified initializer image supplies its own executable; the local

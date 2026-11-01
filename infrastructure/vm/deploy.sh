@@ -463,7 +463,7 @@ def env_of(s):
 
 allowed_environment = {
     "postgres": {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"},
-    "minio": {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"},
+    "minio": {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_BROWSER"},
     "minio-init": {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "STORAGE_ACCESS_KEY",
                    "STORAGE_SECRET_KEY", "STORAGE_BUCKET", "STORAGE_REGION"},
     "backend": {"DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
@@ -550,8 +550,11 @@ for n, s in svc.items():
 minio = svc.get("minio", {})
 if minio.get("entrypoint") is not None or minio.get("command") != ["server", "/data", "--console-address", ":9001"]:
     problems.append("minio must use the approved server command and image entrypoint")
-if set(env_of(minio)) - {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"}:
+if set(env_of(minio)) - {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_BROWSER"}:
     problems.append("minio contains unapproved environment bindings")
+# The release disables the embedded Console; only the exact value is accepted.
+if env_of(minio).get("MINIO_BROWSER") != "off":
+    problems.append("minio must disable the embedded Console with MINIO_BROWSER=off")
 
 # P2/B2: only the frontend ingress is published; data/backend stay private.
 for n in ("postgres", "minio", "minio-init", "backend"):
@@ -825,6 +828,10 @@ try:
                 raise ValueError()
             if key.startswith(('SPRING_', 'SERVER_', 'CODEMASTERY_', 'HIBERNATE_')) and key not in expected:
                 raise ValueError()
+    # A baked MINIO_* default (for example MINIO_CONFIG_ENV_FILE) could re-enable
+    # the Console or replace the configured credentials behind the Compose model.
+    if service == 'minio' and any(key.startswith('MINIO_') for key in environment):
+        raise ValueError()
     if not image.get('Entrypoint') and not image.get('Cmd'):
         raise ValueError()
     if service == 'frontend':
@@ -1043,6 +1050,8 @@ expected = cfg["services"][sys.argv[1]].get("environment",{})
 if any(actual.get(k) != str(v) for k,v in expected.items()):
     sys.exit(1)
 if sys.argv[1] == "backend" and any(forbidden_backend_key(k) or (k.startswith(("SPRING_", "SERVER_", "CODEMASTERY_", "HIBERNATE_")) and k not in expected) for k in actual):
+    sys.exit(1)
+if sys.argv[1] == "minio" and {k for k in actual if k.startswith("MINIO_")} != {k for k in expected if k.startswith("MINIO_")}:
     sys.exit(1)
 if sys.argv[1] in ("backend", "postgres", "minio", "minio-init", "frontend"):
     service = cfg["services"][sys.argv[1]]
