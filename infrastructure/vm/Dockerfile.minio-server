@@ -1,0 +1,21 @@
+# CodeMastery DP01 - experimental minimal MinIO server.
+# Source: qualified Chainguard MinIO candidate, pinned by OCI digest.
+# No MinIO Client (mc) is included in the runtime image.
+# Production admission requires independent security and release review.
+
+FROM cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82 AS source
+
+FROM scratch
+
+COPY --from=source /usr/bin/minio /usr/bin/minio
+COPY --from=source /etc/ssl/certs /etc/ssl/certs
+COPY --from=source /etc/passwd /etc/passwd
+COPY --from=source /etc/group /etc/group
+
+COPY --from=source --chown=65532:65532 --chmod=0700 /data /data
+COPY --from=source --chown=65532:65532 --chmod=0700 /tmp /tmp
+
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+USER 65532:65532
+ENTRYPOINT ["/usr/bin/minio"]
