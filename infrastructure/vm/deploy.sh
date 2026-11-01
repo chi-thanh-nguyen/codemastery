@@ -1631,7 +1631,8 @@ contain_failure() {
     fi
   fi
   if [[ -n "${STAGED_FRONTEND_CID}" ]]; then
-    docker stop --time "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
+    [[ "${STAGED_FRONTEND_CID}" =~ ^[0-9a-f]{64}$ ]] \
+      && timeout --signal=KILL "${WAIT_TIMEOUT}" docker stop --timeout "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
       || { printf 'ERROR: Private frontend probe cleanup failed; inspect the one-off container.\n' >&2; rc=1; }
   fi
   exit "${rc}"
@@ -1758,6 +1759,40 @@ wait_backend_health() {
   log "SERVICE_HEALTH: ${HEALTH_RESULT}"
 }
 
+staged_frontend_present() {
+  local inventory
+  # A successful empty inventory proves absence; a failed inspect does not.
+  # Full IDs avoid prefix matches, and unexpected/multiple results fail closed.
+  inventory="$(timeout --signal=KILL "$1" docker container ls --all --quiet --no-trunc \
+    --filter "id=${STAGED_FRONTEND_CID}" 2>/dev/null)" \
+    || fail "Cannot verify private frontend probe inventory; ingress remains closed."
+  [[ -n "${inventory}" ]] || return 1
+  [[ "${inventory}" == "${STAGED_FRONTEND_CID}" ]] \
+    || fail "Private frontend probe inventory is inconsistent; ingress remains closed."
+}
+
+remove_staged_frontend() {
+  [[ "${STAGED_FRONTEND_CID}" =~ ^[0-9a-f]{64}$ ]] \
+    || fail "Private frontend probe identity is not a full container ID."
+  # Each phase is bounded by the existing operator-supplied readiness timeout:
+  # initial inventory, stop request, then the entire auto-removal polling window.
+  if staged_frontend_present "${WAIT_TIMEOUT}"; then
+    timeout --signal=KILL "${WAIT_TIMEOUT}" docker stop --timeout "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
+      || fail "Could not stop private frontend probe; ingress remains closed."
+    local deadline=$(( SECONDS + WAIT_TIMEOUT )) remaining
+    while :; do
+      remaining=$(( deadline - SECONDS ))
+      (( remaining > 0 )) \
+        || fail "Private frontend probe was not removed; ingress remains closed."
+      if ! staged_frontend_present "${remaining}"; then
+        break
+      fi
+      sleep 1
+    done
+  fi
+  STAGED_FRONTEND_CID=""
+}
+
 run_deploy() {
   verify_images
   verify_private_dependencies
@@ -1784,6 +1819,8 @@ SQL
   verify_images
   assert_release_configuration
   verify_private_tls
+  log "Removing private frontend probe before public ingress."
+  remove_staged_frontend
   log "Private release checks passed. Starting the sole HTTPS ingress."
   "${COMPOSE[@]}" up -d --no-build --pull never --no-deps --wait --wait-timeout "${WAIT_TIMEOUT}" frontend \
     || fail "Frontend startup failed; stopping application services."

@@ -57,6 +57,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: Check frontend staging cleanup regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n infrastructure/vm/tests/test-frontend-stage-cleanup.sh
+          bash infrastructure/vm/tests/test-frontend-stage-cleanup.sh
       - name: Check shell syntax and authorization gates
         shell: bash
         run: |
