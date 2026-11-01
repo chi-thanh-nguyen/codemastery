@@ -1784,6 +1784,22 @@ SQL
   verify_images
   assert_release_configuration
   verify_private_tls
+  log "Removing private frontend probe before public ingress."
+  [[ -n "${STAGED_FRONTEND_CID}" ]] \
+    || fail "Private frontend probe identity is missing."
+  docker stop --timeout "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null \
+    || fail "Could not stop private frontend probe; ingress remains closed."
+  local probe_removed="no" attempt
+  for ((attempt=1; attempt<=10; attempt++)); do
+    if ! docker container inspect "${STAGED_FRONTEND_CID}" >/dev/null 2>&1; then
+      probe_removed="yes"
+      break
+    fi
+    sleep 1
+  done
+  [[ "${probe_removed}" == "yes" ]] \
+    || fail "Private frontend probe was not removed; ingress remains closed."
+  STAGED_FRONTEND_CID=""
   log "Private release checks passed. Starting the sole HTTPS ingress."
   "${COMPOSE[@]}" up -d --no-build --pull never --no-deps --wait --wait-timeout "${WAIT_TIMEOUT}" frontend \
     || fail "Frontend startup failed; stopping application services."
