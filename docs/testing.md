@@ -1643,8 +1643,13 @@ the [staging-stage correction](deployment.md#native-ci):
 | --- | --- | --- |
 | Shell syntax | `bash -n infrastructure/minio/test-minio-init.sh` | Passed |
 | Minimal, corrected Dockerfile, local | The CI build command, then `MINIO_INIT_TEST_SERVER=minimal …` | Build succeeded; 24/24 checks passed, including `/data` and `/tmp` at `0700 65532:65532` |
-| Root directory | Layers of the corrected image, read from `docker save` | No layer has an entry for `/` |
+| Root directory | Layers of the corrected image, read from `docker save` on the local builder only | No layer has an entry for `/` |
 
-Not covered: a native GitHub Actions pass of the corrected Dockerfile (see
-[Native CI](deployment.md#native-ci)), any vulnerability scan or
-security admission of the minimal image, a release archive, and the Azure VM.
+Native result: on PR #126 head `a23436b`, GitHub Actions
+[run 41308772749](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41308772749)
+(job 124854577665, native linux/amd64) passed Golithus, Chainguard and minimal
+24/24 each ([Native CI](deployment.md#native-ci)). The root-directory row was not
+repeated natively.
+
+Not covered: any vulnerability scan or security admission of the minimal image,
+a release archive, and the Azure VM.
