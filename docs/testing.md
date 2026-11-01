@@ -1692,3 +1692,31 @@ accepted mis-sourced initializer images. After the
 
 Not covered: a GitHub Actions run of this change (results belong to the pull
 request), `govulncheck`, security admission, a release artifact and the Azure VM.
+
+## DP01 MinIO Console hardening verification — 2 November 2026
+
+Scope: the release-only Console setting in
+[DP01 MinIO Console hardening](deployment.md#dp01-minio-console-hardening--2-november-2026).
+Run on macOS 27.2 arm64 (linux/amd64 under emulation) with Docker Engine 29.8.1
+and Compose v5.5.1, on branch `fix/dp01-pre-release-hardening` based on `main` at
+`902cd89`. The suite now has 26 checks per server: check 12 is a control showing
+the Console listener with the base command, check 13 runs the initializer and
+application S3 access against a server with `MINIO_BROWSER=off`, and checks 24–25
+cover the release Compose model and its running server.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Shell syntax | `bash -n` on `deploy.sh` and `test-minio-init.sh`; `git diff --check` | Passed |
+| Compose models | `docker compose … config --format json` with and without the VM override | Local: Console on, `127.0.0.1:9000` and `:9001`. VM: `MINIO_BROWSER=off`, only the frontend publishes (443) |
+| Minimal | CI build command, then `MINIO_INIT_TEST_SERVER=minimal infrastructure/minio/test-minio-init.sh` | 26/26 checks passed |
+| Golithus, variable unset | `infrastructure/minio/test-minio-init.sh` | 26/26 checks passed (307 s) |
+| Chainguard | `MINIO_INIT_TEST_SERVER=chainguard …` | 26/26 checks passed (311 s) |
+| Console behavior | Minimal image with the base command and `MINIO_BROWSER` unset, `on`, `off`, `maybe` | Ports 9000+9001, 9000+9001, 9000 only, and exit 1 respectively |
+| CVE-2026-97731 probe | Presigned PUT plus unsigned `x-amz-copy-source` against the minimal image with `MINIO_BROWSER=off` | HTTP 400 `AccessDenied`; nothing copied |
+| Policy cases | The CI steps "Check offline Compose and provisioning safety guards" and "Check image identity through a real save/load round trip", run locally | Passed. Against `deploy.sh` from `main` both fail on the new cases, as expected |
+| Preflight cases | The Compose policy on the rendered CI fixture and its new `minio-*` overrides, run locally | Fixture accepted apart from certificates (not created locally); `MINIO_BROWSER: "on"`, a missing setting and `MINIO_CONFIG_ENV_FILE` rejected with the expected messages |
+| Cleanup | Labelled containers, networks and volumes | Removed |
+
+Not covered locally: `deploy.sh preflight` itself (it requires the Ubuntu 24.04
+linux/amd64 host; CI runs it), GitHub Actions results (they belong to the pull
+request), a release artifact and the Azure VM.

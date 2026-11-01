@@ -169,6 +169,51 @@ jobs:
           )
           if result.returncode == 0 or "unapproved environment variables" not in result.stderr:
               raise SystemExit("Compose policy did not reject an unapproved environment variable")
+          # The release MinIO server must run with exactly MINIO_BROWSER=off.
+          console_problem = "minio must disable the embedded Console with MINIO_BROWSER=off"
+          for environment, accepted in (
+              ({"MINIO_BROWSER": "off"}, True),
+              ({}, False),
+              ({"MINIO_BROWSER": "on"}, False),
+              ({"MINIO_BROWSER": "OFF"}, False),
+              ({"MINIO_BROWSER": "false"}, False),
+              ({"MINIO_BROWSER": ""}, False),
+          ):
+              config = {"services": {"minio": {"image": "minio:reviewed", "environment": environment}}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              if result.returncode == 0 or (console_problem not in result.stderr) != accepted:
+                  raise SystemExit(f"MinIO Console policy mismatch for {environment}")
+          # A config env file, credential files or Console settings could undo it.
+          for key in ("MINIO_CONFIG_ENV_FILE", "MINIO_ROOT_PASSWORD_FILE", "MINIO_BROWSER_REDIRECT_URL"):
+              config = {"services": {"minio": {"image": "minio:reviewed",
+                                               "environment": {"MINIO_BROWSER": "off", key: "/data/x"}}}}
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps(config), text=True, capture_output=True, check=False,
+              )
+              if (result.returncode == 0
+                      or "service 'minio' contains unapproved environment variables" not in result.stderr
+                      or "minio contains unapproved environment bindings" not in result.stderr):
+                  raise SystemExit(f"Compose policy did not reject MinIO environment {key}")
+          image_marker = "read -r -d '' PY_IMAGE_POLICY <<'PYEOF' || true\n"
+          image_policy = env_policy + "\n" + source.split(image_marker, 1)[1].split("\nPYEOF", 1)[0]
+          release_minio_env = {"MINIO_ROOT_USER": "x", "MINIO_ROOT_PASSWORD": "y", "MINIO_BROWSER": "off"}
+          for baked, accepted in (
+              ([], True),
+              (["MINIO_CONFIG_ENV_FILE=/etc/minio/config.env"], False),
+              (["MINIO_BROWSER=on"], False),
+              (["MINIO_ROOT_USER_FILE=access_key"], False),
+          ):
+              data = {"model": {"services": {"minio": {"environment": release_minio_env}}},
+                      "image": {"Entrypoint": ["/usr/bin/minio"],
+                                "Env": ["PATH=/usr/bin", "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"] + baked}}
+              result = subprocess.run([sys.executable, "-c", image_policy, "minio"],
+                                      input=json.dumps(data), text=True, capture_output=True, check=False)
+              if (result.returncode == 0) != accepted:
+                  raise SystemExit(f"MinIO image environment policy mismatch for {baked}")
           for option, value in (
               ("pre_start", [{"command": ["sh", "-c", "true"]}]),
               ("post_start", [{"command": ["sh", "-c", "true"], "privileged": True}]),
@@ -470,6 +515,8 @@ jobs:
             minio:
               ports: !reset []
               restart: unless-stopped
+              environment:
+                MINIO_BROWSER: "off"
             minio-init:
               image: registry.invalid/codemastery/minio-init@sha256:$(printf 'a%.0s' {1..64})
               entrypoint: !reset null
@@ -600,6 +647,25 @@ jobs:
           services:
             minio:
               secrets: [synthetic]
+          EOF
+          reject 'MINIO_BROWSER=off' minio-console-enabled <<'EOF'
+          services:
+            minio:
+              environment:
+                MINIO_BROWSER: "on"
+          EOF
+          reject 'MINIO_BROWSER=off' minio-console-default <<'EOF'
+          services:
+            minio:
+              environment: !override
+                MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+                MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+          EOF
+          reject "service 'minio' contains unapproved environment variables" minio-config-env-file <<'EOF'
+          services:
+            minio:
+              environment:
+                MINIO_CONFIG_ENV_FILE: /data/.minio.env
           EOF
           reject_certificate() {
             local expected="$1" name="$2" output
@@ -871,7 +937,7 @@ jobs:
           work="$(mktemp -d)"
           prefix="codemastery-ci-fixture-${GITHUB_RUN_ID:-local}-$$"
           cleanup() {
-            docker rm -f "$prefix-backend" "$prefix-frontend" >/dev/null 2>&1 || true
+            docker rm -f "$prefix-backend" "$prefix-frontend" "$prefix-minio" >/dev/null 2>&1 || true
             docker image rm -f "$prefix/backend:r1" "$prefix/frontend:r1" >/dev/null 2>&1 || true
             rm -rf "$work"
           }
@@ -924,6 +990,22 @@ jobs:
               echo "Archive identities were accepted for the wrong image store." >&2; exit 1
             fi
             echo "Mismatched services, identities and image-store digest kinds are rejected."
+            # A MinIO container must carry exactly the modelled MINIO_* settings.
+            COMPOSE_MODEL="$(python3 -c "import json,sys; print(json.dumps({\"services\": {\"minio\": {\"image\": sys.argv[1],
+              \"environment\": {\"MINIO_ROOT_USER\": \"ci-root\", \"MINIO_ROOT_PASSWORD\": \"ci-pass\", \"MINIO_BROWSER\": \"off\"}}}}))" "$be")"
+            minio_container() {  # accepted|rejected docker-create-options...
+              local want="$1" result=accepted; shift
+              docker create --name "$prefix-minio" "$@" "$be" >/dev/null
+              (verify_service_container minio "$(docker inspect --format "{{.Id}}" "$prefix-minio")") >/dev/null 2>&1 || result=rejected
+              docker rm "$prefix-minio" >/dev/null
+              [[ "$result" == "$want" ]] || { echo "MinIO container unexpectedly $result: $*" >&2; exit 1; }
+            }
+            root=(-e MINIO_ROOT_USER=ci-root -e MINIO_ROOT_PASSWORD=ci-pass)
+            minio_container accepted "${root[@]}" -e MINIO_BROWSER=off
+            minio_container rejected "${root[@]}"
+            minio_container rejected "${root[@]}" -e MINIO_BROWSER=on
+            minio_container rejected "${root[@]}" -e MINIO_BROWSER=off -e MINIO_CONFIG_ENV_FILE=/data/.minio.env
+            echo "MinIO containers without MINIO_BROWSER=off or with extra MINIO_* settings are rejected."
           ' _ "$script" "$prefix" "$work"
 
   deployment-script-postgres:
@@ -2328,7 +2410,10 @@ jobs:
                             "read_only": True}, fe["volumes"]
           assert be["environment"]["JWT_EXPIRATION"] == "PT15M"
           assert svc["minio-init"].get("restart") is None and svc["minio-init"]["entrypoint"] is None
-          print("ok: effective model: no local-only images or builds, IPv4 443 only, certificate bind, PT15M")'
+          minio_env = svc["minio"]["environment"]
+          assert sorted(minio_env) == ["MINIO_BROWSER", "MINIO_ROOT_PASSWORD", "MINIO_ROOT_USER"], sorted(minio_env)
+          assert minio_env["MINIO_BROWSER"] == "off", minio_env["MINIO_BROWSER"]
+          print("ok: effective model: no local-only images or builds, IPv4 443 only, certificate bind, PT15M, MinIO Console off")'
           # Image-level policy (verify_images) for the release images built in this job.
           images() {
             bash -c 'source "$1"; COMPOSE_MODEL="$2"; shift 2

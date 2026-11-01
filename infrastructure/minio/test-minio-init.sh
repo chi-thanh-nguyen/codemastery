@@ -179,14 +179,47 @@ run_server() {  # network container-name [docker run options...]
 }
 
 # Starts a fresh server on a new private network; prints the network name.
-start_server() {  # name
+start_server() {  # name [docker run options...]
   local net="cm-${RUN_ID}-$1"
   docker network create --label "${LABEL}" "${net}" >/dev/null
-  run_server "${net}" "${net}-minio"
+  run_server "${net}" "${net}-minio" "${@:2}"
   printf '%s' "${net}"
 }
 
 stop_server() { docker rm -fv "$1-minio" >/dev/null 2>&1 || true; docker network rm "$1" >/dev/null 2>&1 || true; }
+
+# TCP ports a server container listens on, read by a sidecar in its network
+# namespace (the server images have no shell). Docker's embedded DNS listener on
+# 127.0.0.11 belongs to the network, not the server, and is left out.
+listening_ports() {  # container
+  docker run --rm --platform "${PLATFORM}" --network "container:$1" --label "${LABEL}" \
+    --entrypoint /bin/bash "${MC_IMAGE}" -c '
+    for f in /proc/net/tcp /proc/net/tcp6; do
+      [ -r "$f" ] || continue
+      while read -r _ addr _ state _; do
+        [ "${state}" = 0A ] && [ "${addr%%:*}" != 0B00007F ] && printf "%d\n" "0x${addr##*:}"
+      done < <(tail -n +2 "$f")
+    done | sort -nu | paste -sd " " -'
+}
+
+# Waits up to 30 seconds for the listening ports to equal the expected list.
+expect_listening() {  # description container expected
+  local i got=""
+  for i in $(seq 1 30); do
+    got="$(listening_ports "$2")"
+    [[ "${got}" != "$3" ]] || break
+    sleep 1
+  done
+  expect_eq "$1" "${got}" "$3"
+}
+
+# A plain TCP connection to minio:PORT from the private network: open or refused.
+tcp_probe() {  # network port
+  docker run --rm --platform "${PLATFORM}" --network "$1" --label "${LABEL}" \
+    --entrypoint /bin/bash "${MC_IMAGE}" -c \
+    'if timeout 5 bash -c "exec 3<>/dev/tcp/minio/$1" 2>/dev/null; then echo open; else echo refused; fi' \
+    tcp-probe "$2"
+}
 
 INIT_OUT=""
 INIT_RC=0
@@ -588,6 +621,29 @@ expect_eq "object kept" "$(app "${net}" cat "t/${BUCKET}/lessons/a.txt" </dev/nu
 out="$(app "${net}" rm "t/${BUCKET}/lessons/a.txt" </dev/null)"; expect_ok "app delete" "${out}"
 expect_contains "deleted" "$(admin "${net}" stat "t/${BUCKET}/lessons/a.txt")" "Object does not exist"
 pass "repeat runs change nothing (policy UpdateDate unchanged); application can delete its objects"
+# Control for the Console checks below: the base command alone serves it.
+expect_listening "listeners with the base command" "${net}-minio" "9000 9001"
+expect_eq "Console port with the base command" "$(tcp_probe "${net}" 9001)" "open"
+pass "with the base command alone the server listens on the S3 API (9000) and the Console (9001)"
+stop_server "${net}"
+
+# ------------------------------------------------------------------ Console
+
+# The VM release override adds MINIO_BROWSER=off to the same command.
+section "Console disabled (VM release environment)"
+net="$(start_server console-off -e MINIO_BROWSER=off)"
+run_init "${net}"
+expect_init_ok "first run, Console disabled"
+expect_contains "first run, Console disabled" "${INIT_OUT}" "initialized (changes: 4)"
+expect_initialized_state "Console disabled" "${net}"
+out="$(printf 'payload\n' | app "${net}" pipe "t/${BUCKET}/lessons/b.txt")"; expect_ok "app put" "${out}"
+expect_eq "app get" "$(app "${net}" cat "t/${BUCKET}/lessons/b.txt" </dev/null)" "payload"
+expect_contains "app list" "$(app "${net}" ls --recursive "t/${BUCKET}" </dev/null)" '"key":"lessons/b.txt"'
+out="$(app "${net}" rm "t/${BUCKET}/lessons/b.txt" </dev/null)"; expect_ok "app delete" "${out}"
+expect_eq "listeners with MINIO_BROWSER=off" "$(listening_ports "${net}-minio")" "9000"
+expect_eq "Console port with MINIO_BROWSER=off" "$(tcp_probe "${net}" 9001)" "refused"
+expect_eq "S3 API port with MINIO_BROWSER=off" "$(tcp_probe "${net}" 9000)" "open"
+pass "MINIO_BROWSER=off: no Console listener; initializer, identity, policy and application S3 access unchanged"
 stop_server "${net}"
 
 # ------------------------------------------------------------------ persistence
@@ -831,18 +887,31 @@ for key in ("entrypoint", "user", "ports", "cap_add", "privileged", "build"):
 volumes = [(v.get("type"), v.get("source"), v.get("target")) for v in minio.get("volumes", [])]
 assert volumes == [("volume", "minio-data", "/data")], minio.get("volumes")
 assert minio.get("restart") == "unless-stopped", minio.get("restart")
+environment = minio.get("environment", {})
+assert sorted(environment) == ["MINIO_BROWSER", "MINIO_ROOT_PASSWORD", "MINIO_ROOT_USER"], sorted(environment)
+assert environment["MINIO_BROWSER"] == "off", environment["MINIO_BROWSER"]
 ' "${want}" "${SERVER_CMD[@]}"
 }
 check_minio_model codemastery.invalid/minio:release \
   docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" -f "${VM_COMPOSE}"
 check_minio_model "${SERVER_IMAGE}" "${vm_compose[@]}"
-pass "effective VM model keeps codemastery.invalid/minio:release, the base command, the named minio-data volume and restart unless-stopped"
+# Local development keeps the Console, published on loopback only.
+docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" config --format json | python3 -c '
+import json, sys
+minio = json.load(sys.stdin)["services"]["minio"]
+assert sorted(minio.get("environment", {})) == ["MINIO_ROOT_PASSWORD", "MINIO_ROOT_USER"], sorted(minio.get("environment", {}))
+assert minio.get("command") == sys.argv[1:], minio.get("command")
+ports = sorted((p.get("host_ip"), p.get("published"), p.get("target")) for p in minio.get("ports", []))
+assert ports == [("127.0.0.1", "9000", 9000), ("127.0.0.1", "9001", 9001)], ports
+' "${SERVER_CMD[@]}"
+pass "effective VM model keeps codemastery.invalid/minio:release, the base command, the named minio-data volume and restart unless-stopped, and adds only MINIO_BROWSER=off; the local model is unchanged"
 
 # State created by the existing local inline initializer must be accepted as-is.
 "${local_compose[@]}" up -d --no-build --pull never minio-init >"${WORK}/local-up.log" 2>&1 \
   || die "local stack failed to start: $(tail -5 "${WORK}/local-up.log")"
 cid="$("${local_compose[@]}" ps -a -q minio-init)"
 expect_eq "local inline initializer exit" "$(docker wait "${cid}")" "0"
+expect_listening "local server listeners" "$("${local_compose[@]}" ps -q minio)" "9000 9001"
 "${vm_compose[@]}" up -d --no-build --pull never backend >"${WORK}/up.log" 2>&1 \
   || die "release initializer path failed: $(tail -5 "${WORK}/up.log")"
 cid="$("${vm_compose[@]}" ps -a -q minio-init)"
@@ -850,7 +919,14 @@ expect_eq "minio-init exit" "$(docker inspect --format '{{.State.Status}}:{{.Sta
 expect_contains "release run on local state" "$(docker logs "${cid}" 2>&1)" "initialized (changes: 0)"
 expect_eq "backend placeholder" "$("${vm_compose[@]}" ps --format '{{.State}}' backend)" "running"
 expect_initialized_state "local-then-release" "${project}_default"
-pass "release image accepts local-initializer state unchanged and releases the dependent service"
+# Compose recreated the server with the release environment on the same volume.
+cid="$("${vm_compose[@]}" ps -q minio)"
+expect_eq "release server Console setting" "$(docker inspect --format '{{json .Config.Env}}' "${cid}" \
+  | python3 -c 'import json, sys; print(" ".join(e for e in json.load(sys.stdin) if e.startswith("MINIO_BROWSER=")))')" \
+  "MINIO_BROWSER=off"
+expect_eq "release server listeners" "$(listening_ports "${cid}")" "9000"
+expect_eq "release Console port" "$(tcp_probe "${project}_default" 9001)" "refused"
+pass "release image accepts local-initializer state unchanged and releases the dependent service; the release server has no Console listener"
 
 # A conflict introduced later must stop the initializer and keep the dependent down.
 "${vm_compose[@]}" rm -sf backend minio-init >/dev/null 2>&1

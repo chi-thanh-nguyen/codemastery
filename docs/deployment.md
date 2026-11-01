@@ -11,7 +11,10 @@ requests are not described here.
 The 1 November repository integration below combines the Chainguard MinIO
 qualification and the private health-probe remediation. MinIO is functionally
 qualified but not production-admitted; the backend probe is fixed and tested in
-the repository/CI, but not yet verified on the Azure VM. The dated records retain
+the repository/CI, but not yet verified on the Azure VM. The 2 November
+[Console hardening](#dp01-minio-console-hardening--2-november-2026) disables the
+embedded MinIO Console in the release override only; its residual-risk acceptance
+is `PENDING_LEADER_APPROVAL`. The dated records retain
 their original evidence and limitations; DP01 remains incomplete.
 
 ### What exists and what has been shown
@@ -33,7 +36,7 @@ inputs, not verified results, and do not authorize public exposure.
 | Path | Responsibility |
 | --- | --- |
 | `infrastructure/docker-compose.yml` | The local base file, used as is; `deploy.sh` always applies it first |
-| `infrastructure/vm/docker-compose.vm.yml` | Release override: removes local ports and builds, publishes only the frontend on 443, mounts the TLS directory read-only, sets the backend release environment and fixes the `codemastery.invalid/*:release` image names |
+| `infrastructure/vm/docker-compose.vm.yml` | Release override: removes local ports and builds, publishes only the frontend on 443, mounts the TLS directory read-only, sets the backend release environment, disables the MinIO Console (`MINIO_BROWSER=off`) and fixes the `codemastery.invalid/*:release` image names |
 | `frontend/Dockerfile`, `release` target | Builds the bundle with `VITE_API_BASE_URL=/api`, terminates TLS, proxies `/api` to the backend and bakes an HTTPS healthcheck. Requires the `PUBLIC_ORIGIN` build argument |
 | `infrastructure/vm/Dockerfile.minio-server` | Experimental minimal MinIO server built from the Chainguard candidate pin. Functionally qualified natively in CI ([run 41308772749](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41308772749)) after a first native run failed on directory modes. Not admitted, and not referenced by the override or `deploy.sh` ([record](#dp01-minimal-minio-server-candidate--1-november-2026)) |
 | `infrastructure/vm/deploy.sh` | Operator script with the subcommands `preflight`, `load`, `provision`, `deploy` and `all`. It verifies inputs, images and grants, provisions the PostgreSQL roles and the runtime privilege matrix, starts services in order and prints a deployment record without secrets |
@@ -1734,6 +1737,8 @@ Release blockers remain:
    [Chainguard candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026),
    [minimal candidate](#dp01-minimal-minio-server-candidate--1-november-2026)
    and [initializer base remediation](#dp01-minio-initializer-base-remediation--1-november-2026).
+   The release override disables the Console; the proposed residual-risk
+   acceptance is pending ([Console hardening](#dp01-minio-console-hardening--2-november-2026)).
 3. **Release logistics.** Release archive transfer, custody and image admission
    review (P8), including the non-slim Nginx variant.
 4. **Operator custody.** The operator identity and env-file custody above.
@@ -2504,3 +2509,146 @@ These library versions are managed by Spring Boot 4.1.1. Overriding them, or
 changing the PostgreSQL image, needs a separate dependency decision; this change
 makes neither. Reachability was not assessed, and a linux/amd64 release artifact
 still needs its own scan.
+
+## DP01 MinIO Console hardening — 2 November 2026
+
+### Boundary
+
+Pre-release hardening of the VM release configuration. It changes the release
+override, `deploy.sh`'s MinIO environment checks and their tests. The base Compose
+file and local development (Console on `127.0.0.1:9001`), the private S3 API on
+`minio:9000`, the initializer, the `codemastery.invalid/*:release` names and the
+published ports are unchanged. The `minio` service keeps its image name, command,
+volume and network; one environment entry is added (CT17.I-scope). It removes an
+administrative interface and grants no access; access decisions remain
+Leader-reserved (CT17.I-runtime). Nothing was admitted, packaged, tagged or
+deployed.
+
+### Change
+
+| File | Change |
+| --- | --- |
+| `infrastructure/vm/docker-compose.vm.yml` | `minio` gets `MINIO_BROWSER: "off"`. The inherited command still names `--console-address :9001`; MinIO ignores it when the Console is off |
+| `infrastructure/vm/deploy.sh` | Compose policy: `minio` may carry only `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` and `MINIO_BROWSER`, and `MINIO_BROWSER` must be exactly `off`. Image policy: the `minio` image may not bake any `MINIO_*` variable. Container check: the `minio` container's `MINIO_*` variables must be exactly the modelled ones |
+| `infrastructure/minio/test-minio-init.sh` | Console checks for every server (26 checks instead of 24) |
+| `.github/workflows/ci.yml` | Fail-closed cases for the three checks; the synthetic preflight override carries the setting; the committed-override step asserts it |
+
+The image and container checks exist because MinIO loads the file named by
+`MINIO_CONFIG_ENV_FILE` at startup and sets every variable in it
+(`cmd/common-main.go` at fork commit `76c06ff`). A baked or injected variable
+could otherwise re-enable the Console or replace credentials behind an unchanged
+Compose model.
+
+### Behavior of `MINIO_BROWSER=off`
+
+At `76c06ff`, MinIO parses `MINIO_BROWSER` before startup (default `on`; an
+invalid value is fatal). The Console server starts only when it is enabled, and
+only that path calls `minioConfigToConsoleFeatures`, which sets the Console's
+PBKDF salt and passphrase to the deployment ID.
+
+Observed on the minimal image built from `Dockerfile.minio-server` (image ID
+`sha256:684e55a2…`, binary `3c3d6152…`) with the base command. Docker's embedded
+DNS listener on `127.0.0.11` is excluded.
+
+| `MINIO_BROWSER` | Server | Listening TCP ports | Startup log |
+| --- | --- | --- | --- |
+| unset | Running | 9000, 9001 | `WebUI: …:9001` |
+| `on` | Running | 9000, 9001 | `WebUI: …:9001` |
+| `off` | Running; 9001 refuses connections | 9000 | No `WebUI` line |
+| `maybe` | Exit 1 | — | `FATAL Invalid MINIO_BROWSER value` |
+
+### Vulnerability re-check
+
+Sources: NVD and GitHub advisory records retrieved on 2 November 2026, the fork's
+commit history and the pinned binary. This corrects the
+[1 November artifact review](#artifact-review-as-of-1-november-2026). That review
+listed CVE-2026-33814 as a MinIO fix; it is a Go HTTP/2 advisory (GO-2026-4918),
+which Grype's Go module matching covers and did not report. The review also
+missed CVE-2026-97731, which has no package mapping, and CVE-2026-113466.
+
+An NVD keyword search for advisories published between 1 October 2025 and
+1 November 2026 found 10 MinIO server CVEs:
+
+| CVE | Severity | Status at `76c06ff` |
+| --- | --- | --- |
+| CVE-2025-62506 | High | Upstream fix `c1a49490c` in ancestry |
+| CVE-2026-33322 | Critical | Fix `54da56a8d` in ancestry |
+| CVE-2026-33419 | Critical | `8478a2086` (LDAP rate limiting) matches the description; LDAP is not configured |
+| CVE-2026-34204 | High | Fix `624d9a21f` in ancestry |
+| CVE-2026-39414 | High | `8bd18fa6d` matches the description |
+| CVE-2026-40344 | High | Fix `68719216d` in ancestry |
+| CVE-2026-41145 | High | Fix `b94db7d78` and test `d3015c5af` in ancestry |
+| CVE-2026-97731 | High (7.1) | Fix `df34868a8` and three regression tests in ancestry. **Verified on the binary** (below) |
+| CVE-2026-42600 | Medium | Fixes `a611cd0d1`, `d43fb3476` in ancestry |
+| CVE-2026-113466 | Medium (NVD 5.3, CNA VulDB; status Deferred) | **Not fixed** |
+
+"In ancestry" means the commit is an ancestor of `76c06ff`. Except for
+CVE-2026-97731, presence in the binary is not verified (`vcs.modified=true`, and
+the build recipe is not public).
+
+**CVE-2026-97731 (GHSA-r7wh-x6rf-8g63).** A presigned PUT replayed with an
+unsigned `x-amz-copy-source` header received HTTP 400 `AccessDenied` from the
+minimal image with `MINIO_BROWSER=off`, and no object was copied (2 November).
+On 1 November the same probe copied a private object through the Golithus server,
+so the probe detects the flaw.
+
+**CVE-2026-113466 (GHSA-q95x-chg5-qwqh, no patched version).** At `76c06ff` the
+Console key is still derived from the deployment ID (`cmd/common-main.go`
+lines 121–122), and S3 errors still expose that ID as `HostID`
+(`cmd/object-handlers.go` lines 251, 270 and 3596). The fork's commits after the
+tag, up to its last push on 31 October, are dependency updates. With the Console
+off, the release server does not run the affected component and has no Console
+listener, even on the private network. **The weakness stays in the binary and is
+not patched.** Re-enabling the Console would restore the exposure; `deploy.sh`
+now refuses that configuration.
+
+### Release-readiness checks
+
+| Item | Result |
+| --- | --- |
+| Image identities | Unchanged. The server pin, the minimal binary SHA-256 and the initializer base diff IDs are checked on every suite run |
+| Runtime privileges | Unchanged. The minimal server runs as UID 65532 with no effective, permitted or ambient capabilities; neither image has setuid/setgid files or file capabilities |
+| Private ports | The VM model publishes only the frontend on 443; `deploy.sh` rejects published `minio` ports; the release server listens only on 9000 |
+| Initializer compatibility | With the Console off: first run, application put/get/list/delete, and the release Compose path on local-initializer state |
+| Release artifacts | None built, tagged or loaded. The archive and `--expect-image` requirements in [Release build outside the VM](#release-build-outside-the-vm) are unchanged |
+
+### Qualification, admission and deployment
+
+- **Functional qualification:** the three candidate servers and the initializer
+  pass the suite locally ([testing.md](testing.md#dp01-minio-console-hardening-verification--2-november-2026)).
+  GitHub Actions results belong to the pull request.
+- **Security admission:** not granted. No MinIO server or initializer artifact
+  is admitted.
+- **Production deployment authorization:** not granted. Deployment, public
+  exposure and the release blockers in
+  [Verification and remaining gates](#verification-and-remaining-gates) are
+  unchanged.
+
+### Proposed residual-risk acceptance — `PENDING_LEADER_APPROVAL`
+
+These dispositions are proposals for the Leader's admission decision. None is
+accepted.
+
+| Risk | Control | Proposed disposition |
+| --- | --- | --- |
+| CVE-2026-113466 unpatched in the binary | Console off and enforced; root credentials only in `minio` and `minio-init`; no published MinIO ports; private bucket | `PENDING_LEADER_APPROVAL` |
+| Binary provenance: `+dirty` build, non-public build recipe; fixes other than CVE-2026-97731 checked only in source | Signed upstream image; minimal binary byte-identical to the pin | `PENDING_LEADER_APPROVAL` |
+| Locally built images are unsigned | Archive SHA-256, `--expect-image` and the suite's identity checks | `PENDING_LEADER_APPROVAL` |
+| AGPL-3.0-or-later `minio` and `mc` | Used unmodified, as separate private services; neither image carries the license text; complete corresponding source for the `+dirty` build is not public | `PENDING_LEADER_APPROVAL`. Legal judgment is needed before the images or archive are given to anyone else, and on whether copying the binary into the minimal image counts as modification |
+| Docker default bounding capabilities | Non-root with no effective capabilities; no setuid/setgid files or file capabilities | `PENDING_LEADER_APPROVAL` |
+| Existing MinIO data volume | Not enforced by `deploy.sh`; the operator confirms none exists before the first deployment | `PENDING_LEADER_APPROVAL` (operational) |
+
+### Remaining gates
+
+- **Admission.** The Leader decides admission of the server and initializer
+  artifacts and the dispositions above. Re-verify signatures and re-scan at
+  admission.
+- **Packaging.** Build the release images from the merged revision, run
+  `test-minio-init.sh IMAGE` against that exact initializer and record it as the
+  `--initializer-qualification` reference. Not done here.
+- **DP01.** Release blockers 1 and 3–7 are unchanged. Nothing was built, loaded or
+  run on the Azure VM.
+
+This record and its changes were produced through AI-assisted development
+(Anthropic Claude Code) under the Leader's task. No AI service or new
+infrastructure technology is introduced into CodeMastery's runtime.
