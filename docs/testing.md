@@ -356,7 +356,7 @@ and eight independent jobs on `ubuntu-24.04`:
 | VM runtime privileges with the real backend (`deployment-script-runtime`) | Builds the backend image and exercises real Auth, catalogue and membership under the approved privilege matrix |
 | VM deployment containerd image store (`deployment-script-containerd`) | Release-archive verification through real `docker save`/`load` round trips with the containerd image store |
 | VM HTTPS ingress (`deployment-ingress`) | Builds the release and local frontend images; exercises the HTTPS ingress against a stub and the real backend; runs `deploy.sh preflight` with the committed override |
-| VM MinIO initializer qualification (`minio-initializer`) | Pulls the digest-pinned Golithus server, `mc` and Chainguard candidate server images, builds `infrastructure/minio` for linux/amd64 and runs `infrastructure/minio/test-minio-init.sh` against disposable MinIO servers and the effective VM Compose model, first with the Golithus server and then with `MINIO_INIT_TEST_SERVER=chainguard` ([record](deployment.md#dp01-minio-community-initializer--31-october-2026), [candidate](deployment.md#dp01-chainguard-minio-release-server-candidate--1-november-2026)) |
+| VM MinIO initializer qualification (`minio-initializer`) | Pulls the digest-pinned Golithus server, `mc` and Chainguard candidate server images, builds `infrastructure/minio` for linux/amd64 and runs `infrastructure/minio/test-minio-init.sh` against disposable MinIO servers and the effective VM Compose model, first with the Golithus server and then with `MINIO_INIT_TEST_SERVER=chainguard`. It then builds `infrastructure/vm/Dockerfile.minio-server` for linux/amd64 as the local non-release tag `codemastery-test/minio-server:qualification`, without pushing it, and runs the suite with `MINIO_INIT_TEST_SERVER=minimal`. The later suites run even when an earlier suite fails, provided the pull, and for the minimal suite its build, succeeded; any failure fails the job ([record](deployment.md#dp01-minio-community-initializer--31-october-2026), [candidate](deployment.md#dp01-chainguard-minio-release-server-candidate--1-november-2026), [minimal](deployment.md#dp01-minimal-minio-server-candidate--1-november-2026)) |
 
 The Java setup enables Maven caching using `backend/pom.xml` and
 `backend/.mvn/wrapper/maven-wrapper.properties` as dependency inputs. The Node
@@ -1603,3 +1603,35 @@ Run on macOS arm64 with Docker Engine 29.8.1 and OpenJDK 25.0.4.1, from the
 
 Not covered: the real VM, a linux/amd64 release backend, `deploy.sh deploy` and
 outside-network access.
+
+## DP01 minimal MinIO server qualification — 1 November 2026
+
+Scope: the `minimal` server mode of `infrastructure/minio/test-minio-init.sh` and
+its CI steps, described in
+[DP01 minimal MinIO server candidate](deployment.md#dp01-minimal-minio-server-candidate--1-november-2026).
+Run on macOS 27.2 arm64 (linux/amd64 under emulation) with Docker Engine 29.8.1,
+Compose v5.5.1 and host bash 3.2.57, on branch `chore/dp01-minio-server-minimal`
+at `8db0473` plus this change. To reproduce, pull the three pins as the CI job does, then:
+
+```bash
+infrastructure/minio/test-minio-init.sh
+MINIO_INIT_TEST_SERVER=chainguard infrastructure/minio/test-minio-init.sh
+docker build --platform linux/amd64 -t codemastery-test/minio-server:qualification - < infrastructure/vm/Dockerfile.minio-server
+MINIO_INIT_TEST_SERVER=minimal infrastructure/minio/test-minio-init.sh
+```
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Shell syntax | `bash -n infrastructure/minio/test-minio-init.sh` | Passed |
+| Workflow structure | Parsed with Ruby's YAML library and compared with the previous revision | Trigger, permissions and the other seven jobs unchanged. Job `minio-initializer` keeps its name and runner; its three existing steps are unchanged; two steps were added |
+| Golithus, variable unset | `infrastructure/minio/test-minio-init.sh` | 24/24 checks passed (288 s) |
+| Chainguard | `MINIO_INIT_TEST_SERVER=chainguard …` | 24/24 checks passed (291 s) |
+| Minimal | The CI build command above, then `MINIO_INIT_TEST_SERVER=minimal …` | Build succeeded; 24/24 checks passed (294 s) |
+| Selection | `MINIO_INIT_TEST_SERVER=` (empty), `Minimal`, or `minimal` with `MINIO_INIT_TEST_PLATFORM=linux/arm64` | Each failed with exit 1 before testing |
+| Missing candidate | `minimal` with the tag removed | Exit 1 with the build instruction; nothing was pulled |
+| Wrong candidate | The Chainguard image, or a variant with `/bin/sh` added, under the candidate tag | Exit 1: configuration mismatch or filesystem mismatch |
+| Suite constants (scratch copy, tracked file unchanged) | A mutable Chainguard reference; a wrong expected binary hash; a wrong Golithus version | Exit 1: not digest-pinned (Chainguard) or Dockerfile pin mismatch (minimal); binary mismatch; version mismatch (Golithus) |
+| Cleanup | Containers, networks and volumes compared before and after | Unchanged apart from the removed test resources |
+
+Not covered: a GitHub Actions run of this change, any vulnerability scan or
+security admission of the minimal image, a release archive, and the Azure VM.
