@@ -75,6 +75,41 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
     private static final List<String> SECRETS = new CopyOnWriteArrayList<>();
     /** Any BCrypt-shaped text, including truncated or re-prefixed hashes that are not registered. */
     private static final Pattern BCRYPT_TEXT = Pattern.compile("\\$2[abxy]?\\$\\d{2}\\$[./A-Za-z0-9]+");
+    /**
+     * Inspects every process in the container for the blocked psql: raw argv must never reach an
+     * assertion or a process-output log. {@code comm} narrows candidates first, since it stays
+     * readable regardless of OS user or the executing architecture. {@code /proc/<pid>/exe} is then
+     * used as a strong, non-spoofable identity check when the kernel allows reading it, but a process
+     * started under a different OS user than the inspector (ptrace_may_access denies cross-UID access
+     * to /proc/<pid>/exe without CAP_SYS_PTRACE, which containers drop by default) or under
+     * architecture emulation (the symlink can resolve to the emulator rather than the real binary)
+     * legitimately makes it unreadable. In that case detection falls back to the exact comm plus argv
+     * match alone, which is not spoofable in practice: ARGV_DB is a per-test random database name no
+     * unrelated process could already know.
+     */
+    private static final String INSPECT_BLOCKED_PSQL = """
+            set -eu
+            matches=0
+            disclosed=0
+            for process in /proc/[0-9]*; do
+                [ "$(cat "$process/comm" 2>/dev/null)" = psql ] || continue
+                case "$(readlink "$process/exe" 2>/dev/null)" in
+                    */psql|"") ;;
+                    *) continue ;;
+                esac
+                argv="$(tr '\\000' '\\n' < "$process/cmdline" 2>/dev/null)" || continue
+                printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_DB" >/dev/null || continue
+                printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_FILE" >/dev/null || continue
+                matches=$((matches + 1))
+                while IFS= read -r sensitive; do
+                    [ -n "$sensitive" ] || continue
+                    case "$argv" in *"$sensitive"*) disclosed=1 ;; esac
+                done <<ARGV_INPUTS
+            $ARGV_INPUTS
+            ARGV_INPUTS
+            done
+            printf '%s %s\\n' "$matches" "$disclosed"
+            """;
 
     static {
         for (String secret : List.of(INSTRUCTOR_PASSWORD, LEARNER_PASSWORD, INSTRUCTOR_HASH, LEARNER_HASH, OTHER_HASH)) secret(secret);
@@ -335,26 +370,6 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
     @Test void psqlVariablesKeepCredentialsOutOfProcessArguments() throws Exception {
         String db = attested(freshDatabase());
         var pool = Executors.newSingleThreadExecutor();
-        // Inspect inside the container: raw argv must never reach an assertion or a process-output log.
-        String inspect = """
-                set -eu
-                matches=0
-                disclosed=0
-                for process in /proc/[0-9]*; do
-                    case "$(readlink "$process/exe" 2>/dev/null)" in */psql) ;; *) continue ;; esac
-                    argv="$(tr '\\000' '\\n' < "$process/cmdline" 2>/dev/null)" || continue
-                    printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_DB" >/dev/null || continue
-                    printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_FILE" >/dev/null || continue
-                    matches=$((matches + 1))
-                    while IFS= read -r sensitive; do
-                        [ -n "$sensitive" ] || continue
-                        case "$argv" in *"$sensitive"*) disclosed=1 ;; esac
-                    done <<ARGV_INPUTS
-                $ARGV_INPUTS
-                ARGV_INPUTS
-                done
-                printf '%s %s\\n' "$matches" "$disclosed"
-                """;
         try {
             for (var step : List.of(Map.entry(USERS, "users"), Map.entry(COURSES, "courses"))) {
                 try (Connection holder = connect(db)) {
@@ -364,7 +379,7 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
                     try {
                         awaitWaiters(holder, step.getValue(), 1);
                         ExecResult inspection = POSTGRES.execInContainer(ExecConfig.builder()
-                                .command(new String[] {"sh", "-c", inspect})
+                                .command(new String[] {"sh", "-c", INSPECT_BLOCKED_PSQL})
                                 .envVars(Map.of("ARGV_DB", db, "ARGV_FILE", "/seed/" + step.getKey(),
                                         "ARGV_INPUTS", String.join("\n", SECRETS)))
                                 .build());
@@ -380,6 +395,75 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    /**
+     * Regression test for the detection gap found while qualifying a PostgreSQL image migration:
+     * a process inspector running as a different OS user than the blocked psql client cannot read
+     * {@code /proc/<pid>/exe} for it (the kernel's ptrace_may_access denies cross-UID access without
+     * CAP_SYS_PTRACE, which Docker containers drop by default), even though {@code comm} and
+     * {@code cmdline} stay readable. Confirms both the precondition (cross-user exe really is denied,
+     * so this test exercises the real fallback and not a no-op) and that detection still finds exactly
+     * the one blocked psql with no disclosure.
+     */
+    @Test void psqlVariablesDetectionSurvivesUnreadableExeAcrossOsUsers() throws Exception {
+        String db = attested(freshDatabase());
+        var pool = Executors.newSingleThreadExecutor();
+        try (Connection holder = connect(db)) {
+            holder.setAutoCommit(false);
+            holder.createStatement().execute("LOCK TABLE public.users IN SHARE ROW EXCLUSIVE MODE");
+            Future<Run> loader = pool.submit(() -> psqlWithVariables(db, USERS));
+            try {
+                awaitWaiters(holder, "users", 1);
+                int pid = findBlockedPsqlProcessId(db, "/seed/" + USERS);
+
+                ExecResult crossUserExe = POSTGRES.execInContainer(ExecConfig.builder()
+                        .command(new String[] {"readlink", "/proc/" + pid + "/exe"})
+                        .user("postgres")
+                        .build());
+                assertEquals("", crossUserExe.getStdout().trim(),
+                        "precondition: a different OS user must not be able to read another user's "
+                                + "/proc/<pid>/exe, or this regression is not exercising the fallback");
+
+                ExecResult inspection = POSTGRES.execInContainer(ExecConfig.builder()
+                        .command(new String[] {"sh", "-c", INSPECT_BLOCKED_PSQL})
+                        .user("postgres")
+                        .envVars(Map.of("ARGV_DB", db, "ARGV_FILE", "/seed/" + USERS,
+                                "ARGV_INPUTS", String.join("\n", SECRETS)))
+                        .build());
+                assertSucceeded(new Run(inspection.getExitCode(), inspection.getStdout(), inspection.getStderr()));
+                assertEquals("1 0", inspection.getStdout().trim(),
+                        "the comm-based fallback must still find exactly the one blocked psql, with no "
+                                + "disclosure, when /proc/<pid>/exe is unreadable across OS users");
+            } finally {
+                holder.rollback();
+                assertSucceeded(loader.get(2, TimeUnit.MINUTES));
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** Finds the single process with the given comm and exact argv match, without reading /proc/<pid>/exe. */
+    private static int findBlockedPsqlProcessId(String db, String file) throws Exception {
+        String find = """
+                set -eu
+                for process in /proc/[0-9]*; do
+                    [ "$(cat "$process/comm" 2>/dev/null)" = psql ] || continue
+                    argv="$(tr '\\000' '\\n' < "$process/cmdline" 2>/dev/null)" || continue
+                    printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_DB" >/dev/null || continue
+                    printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_FILE" >/dev/null || continue
+                    basename "$process"
+                done
+                """;
+        ExecResult result = POSTGRES.execInContainer(ExecConfig.builder()
+                .command(new String[] {"sh", "-c", find})
+                .envVars(Map.of("ARGV_DB", db, "ARGV_FILE", file))
+                .build());
+        assertSucceeded(new Run(result.getExitCode(), result.getStdout(), result.getStderr()));
+        String[] pids = result.getStdout().trim().split("\\R+");
+        assertEquals(1, pids.length, "exactly one process matched comm and argv; found: " + Arrays.toString(pids));
+        return Integer.parseInt(pids[0]);
     }
 
     @Test void failedComparisonsNeverDiscloseCredentials() {

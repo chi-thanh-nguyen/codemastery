@@ -110,10 +110,14 @@ provides `@SpringBootTest` with `CodeMasteryApplication`, a mock web environment
 without a listening HTTP server, and `@ActiveProfiles("test")`.
 
 It manually starts one singleton PostgreSQL Testcontainer before Spring
-initializes its datasource. The approved image is `postgres:17.11-bookworm`;
-this selects an integration-test database only, not the production/deployment
-PostgreSQL version. No persistent container reuse is enabled. The singleton is
-not managed by per-class `@Container` callbacks.
+initializes its datasource. The approved image is built from
+`infrastructure/postgres/Dockerfile` (PostgreSQL 17.11 Alpine 3.24 with
+`su-exec` replacing `gosu`; see [ADR003](decisions/003-postgresql-alpine-su-exec-image.md)
+and [deployment.md](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026))
+through Testcontainers' `ImageFromDockerfile`, so no developer-specific local
+tag is required; this selects an integration-test database only, not the
+production/deployment PostgreSQL version. No persistent container reuse is
+enabled. The singleton is not managed by per-class `@Container` callbacks.
 
 An inherited `@DynamicPropertySource` registers `spring.datasource.url`,
 `spring.datasource.username`, and `spring.datasource.password` from the running
@@ -148,8 +152,9 @@ Run broader verification from `backend/`:
 This includes compilation, unit tests, application packaging/repackaging,
 Failsafe integration-test execution and verification, and JaCoCo reporting when
 execution data exists. Because concrete suites initialize the Testcontainers
-foundation, a running Docker Engine and access to `postgres:17.11-bookworm` are
-required. Compose and a manually provisioned PostgreSQL service are not required.
+foundation, a running Docker Engine able to build
+`infrastructure/postgres/Dockerfile` is required. Compose and a manually
+provisioned PostgreSQL service are not required.
 
 To skip integration-test execution while retaining the other verification work:
 
@@ -1720,3 +1725,32 @@ cover the release Compose model and its running server.
 Not covered locally: `deploy.sh preflight` itself (it requires the Ubuntu 24.04
 linux/amd64 host; CI runs it), GitHub Actions results (they belong to the pull
 request), a release artifact and the Azure VM.
+
+## DP01 PostgreSQL Alpine/su-exec image qualification — 2 November 2026
+
+Scope: [ADR003](decisions/003-postgresql-alpine-su-exec-image.md) and
+[deployment.md, "DP01 PostgreSQL Alpine/su-exec image hardening"](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026).
+Run on macOS 27.2 arm64 (Docker Desktop, native arm64 and `linux/amd64` under
+emulation as noted), Docker Engine 29.8.1, Trivy 0.76.1, Maven Wrapper,
+OpenJDK 25.0.4.1, on `main` at `808457c`.
+
+| Check | Command/method | Result |
+| --- | --- | --- |
+| Base digest verification | `docker build --platform linux/amd64 infrastructure/postgres` | Resolved and pinned `postgres:17.11-alpine3.24@sha256:266d3c2575…c917e7b`, matching the Dockerfile |
+| PostgreSQL version | `postgres --version` in the built image | `postgres (PostgreSQL) 17.11` |
+| gosu → su-exec | `readlink /usr/local/bin/gosu`; `gosu postgres id` | `/sbin/su-exec`; `uid=70(postgres) gid=70(postgres)` |
+| Trivy, final filesystem | `trivy image --scanners vuln codemastery-test/postgres:qualification` | 0 vulnerabilities at every severity; 0 language-specific files |
+| OCI layer inspection | `docker save`, extract, `tar -tzf` each layer blob | Original `usr/local/bin/gosu` present in the base layer; the `rm` layer is a whiteout (`.wh.gosu`), not a deletion; the `ln -s` layer adds an unrelated 176-byte symlink entry. Residual risk documented, not resolved |
+| Fresh init, auth, SQL, restart, shutdown | Disposable container + named volume: `pg_isready`, `CREATE TABLE`/`INSERT`/`SELECT`, `docker stop`/`start`, re-query | All passed; data persisted across restart; main process ran as `postgres` (non-root) |
+| CodeMastery role provisioning | `deploy.sh`'s `provision_db_roles`, `harden_after_migration`, `verify_role_separation` against this image with the real `V001`–`V006` migrations, plus one approved and one denied SQL probe | All passed, including idempotent re-provisioning |
+| Locale/collation | `SELECT datcollate, datctype FROM pg_database` on a fresh cluster, bookworm vs. this image | Both report `en_US.utf8`; Alpine/musl does not implement distinct named locales, so this label does not guarantee glibc-equivalent sort order. Existing-volume migration not tested; treated as unresolved, not safe |
+| Integration-test root cause | Raw `docker exec` as a different OS user (`postgres`) vs. the default exec user; `readlink /proc/<pid>/exe` of the other user's process | Empty (`ptrace_may_access` denies cross-UID `/proc/<pid>/exe` without `CAP_SYS_PTRACE`, dropped by default in Docker); `comm`/`cmdline` stayed readable. Reproduced identically under `linux/amd64` emulation on this host (both bookworm and Alpine resolved `/proc/<pid>/exe` to the Rosetta translator, not the real binary) |
+| Backend suite | `cd backend && ./mvnw verify` | BUILD SUCCESS. 429 tests, 0 failures, 0 errors, including the fixed `psqlVariablesKeepCredentialsOutOfProcessArguments` and the new `psqlVariablesDetectionSurvivesUnreadableExeAcrossOsUsers` regression test |
+| Local Compose | `docker compose -f infrastructure/docker-compose.yml config` and `up -d --build postgres` under a throwaway project name | Config resolves `postgres.build.context` to `infrastructure/postgres`; build and healthy startup succeeded (verified without colliding with the developer's own running `codemastery` stack, left untouched) |
+| VM Compose override | Same, with `--compose-override infrastructure/vm/docker-compose.vm.yml` | Resolves `postgres.image: codemastery.invalid/postgres:release` with no `build` key |
+| `deploy.sh preflight` | Real Ubuntu 24.04 `linux/amd64` container (Docker socket passed through), `--compose-override infrastructure/vm/docker-compose.vm.yml`, a throwaway env file and a self-signed TLS pair | `PREFLIGHT OK: inputs, env file, host and Compose policy checks passed.` |
+
+Not covered locally: GitHub Actions results (the **backend** job picks up the
+new image automatically through Testcontainers; no other job was changed —
+see deployment.md for which `postgres:17.11-bookworm` references were
+deliberately left as-is and why), a release archive, and the Azure VM.

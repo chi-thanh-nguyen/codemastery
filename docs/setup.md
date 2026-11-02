@@ -308,7 +308,10 @@ All published ports bind only to `127.0.0.1`.
 | minio | http://localhost:9000 | `minio:9000`; S3-compatible API |
 | MinIO Console | http://localhost:9001 | MinIO administration; use local root credentials |
 
-PostgreSQL uses `postgres:17.11-bookworm` for LOCAL development only. MinIO uses
+PostgreSQL is built locally from `infrastructure/postgres/Dockerfile`
+(`postgres:17.11-alpine3.24` with `su-exec` replacing `gosu`; see
+[ADR003](decisions/003-postgresql-alpine-su-exec-image.md)) for LOCAL
+development only. MinIO uses
 `ghcr.io/golithus/minio:RELEASE.2025-10-15T17-29-55Z`, a third-party build of tagged
 upstream Community source. The initializer uses
 `ghcr.io/golithus/mc:RELEASE.2025-08-13T08-35-41Z`. Both MinIO images are pinned to
@@ -501,7 +504,8 @@ in `IntegrationTest.java`, matching the current Failsafe selection.
 
 The reusable `AbstractIntegrationTest` loads `CodeMasteryApplication` in a mock
 web environment with the `test` profile. When initialized by a concrete test,
-it starts a singleton `postgres:17.11-bookworm` container and supplies datasource
+it starts a singleton container, built from `infrastructure/postgres/Dockerfile`
+through Testcontainers' `ImageFromDockerfile`, and supplies datasource
 properties dynamically. This image is for integration testing only; it does
 not select the deployed PostgreSQL version. No local database credentials are
 required by this wiring. The profile only disables the scheduling setting;
@@ -510,8 +514,8 @@ Flyway and Hibernate validation retain the normal application configuration.
 Concrete integration tests for Auth, Course catalogue and membership, Course
 persistence, the sample-data seeds and the shared REST infrastructure now exist.
 All except `SharedRestInfrastructureIntegrationTest` initialize the PostgreSQL
-harness, so `./mvnw verify` needs a running Docker Engine and access to the
-`postgres:17.11-bookworm` image; Compose is not required.
+harness, so `./mvnw verify` needs a running Docker Engine able to build
+`infrastructure/postgres/Dockerfile`; Compose is not required.
 `SampleDataSeedIntegrationTest` also runs the image's own `psql` 17 inside that
 container, so no host `psql` is needed. `./mvnw test` runs
 only unit tests and needs no Docker. See

@@ -483,7 +483,7 @@ if set(svc) != names:
 # model closed to hooks, deploy extensions, log sinks, tmpfs mounts, secrets,
 # configs, and future options that could change execution or security policy.
 allowed_service_options = {
-    "postgres": {"command", "depends_on", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"},
+    "postgres": {"build", "command", "depends_on", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"},
     "minio": {"command", "entrypoint", "environment", "image", "networks", "ports", "restart", "volumes"},
     "minio-init": {"command", "depends_on", "entrypoint", "environment", "image", "networks", "restart"},
     "backend": {"build", "command", "depends_on", "entrypoint", "environment", "image", "networks", "ports", "restart"},
