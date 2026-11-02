@@ -127,7 +127,14 @@ RUN set -eu; \
 
 # The non-slim variant of the same Nginx image supplies curl, which can probe
 # the listener by hostname over loopback with full certificate verification.
-FROM nginxinc/nginx-unprivileged:1.30.5-alpine AS release
+# Pinned by digest to the Nginx 1.30.6 Alpine index (linux/amd64 is deployed).
+# Nginx and its modules are pinned by the image, so apk upgrade patches only
+# the Alpine runtime packages; the base's non-root UID 101 is then restored.
+FROM nginxinc/nginx-unprivileged@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03 AS release
+
+USER root
+RUN apk upgrade --no-cache
+USER 101
 
 COPY --from=release-build /app/dist/ /usr/share/nginx/html/
 COPY --from=release-config --chown=root:root --chmod=0444 \

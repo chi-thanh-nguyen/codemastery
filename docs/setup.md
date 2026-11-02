@@ -574,7 +574,8 @@ internal port is distinct from a host-published port and Vite's development port
 This local image is the Dockerfile's default (last) target. A separate
 `release` target exists only for the one-VM HTTPS deployment: it builds the
 bundle with `VITE_API_BASE_URL=/api`, uses the non-slim
-`nginxinc/nginx-unprivileged:1.30.5-alpine` variant, serves TLS on `8080`,
+`nginxinc/nginx-unprivileged` Alpine variant pinned by digest to Nginx 1.30.6
+with Alpine security updates applied, serves TLS on `8080`,
 proxies `/api`, and bakes an HTTPS healthcheck. It requires the public
 `PUBLIC_ORIGIN` build argument and a mounted certificate directory; see
 [DP01 HTTPS ingress integration](deployment.md#dp01-https-ingress-integration--31-october-2026).
