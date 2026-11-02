@@ -1565,23 +1565,26 @@ docker build --platform linux/amd64 -t codemastery.invalid/backend:release ./bac
 docker build --platform linux/amd64 --target release \
   --build-arg PUBLIC_ORIGIN=https://codemastery.eastasia.cloudapp.azure.com \
   -t codemastery.invalid/frontend:release ./frontend
-# A registry image holds only the build host's platform until amd64 is fetched.
-docker pull --platform linux/amd64 postgres:17.11-bookworm
+# DP01 hardened PostgreSQL: postgres:17.11-alpine3.24 with su-exec replacing
+# gosu (zero CRITICAL/HIGH in Trivy's merged view). See "DP01 PostgreSQL
+# Alpine/su-exec image hardening" below.
+docker build --platform linux/amd64 -t codemastery.invalid/postgres:release \
+  ./infrastructure/postgres
 # minio and minio-init: only qualified and admitted artifacts may be tagged with
 # these names. The Chainguard and minimal server candidates and the initializer
 # (built from infrastructure/minio under a non-release tag) passed functional
 # qualification; the initializer's Chainguard minio-client base is new and its
 # native CI result belongs to its pull request. None has production security
 # admission (blocker 2).
-docker save --platform linux/amd64 -o release.tar postgres:17.11-bookworm \
+docker save --platform linux/amd64 -o release.tar \
+  codemastery.invalid/postgres:release \
   codemastery.invalid/minio:release codemastery.invalid/minio-init:release \
   codemastery.invalid/backend:release codemastery.invalid/frontend:release
 shasum -a 256 release.tar   # --archive-sha256 (sha256sum on Linux)
 ```
 
-Without the pull, an Apple Silicon build host saves only its arm64 PostgreSQL
-variant. Without `--platform`, `docker save` writes whichever platforms the host
-holds. `deploy.sh` rejects such an archive: "Archive does not contain exactly the
+Without `--platform`, `docker save` writes whichever platforms the host holds.
+`deploy.sh` rejects such an archive: "Archive does not contain exactly the
 verified linux/amd64 release artifacts".
 
 Take the `--expect-image` identities from the archive, not from `docker image
@@ -2654,3 +2657,237 @@ accepted.
 This record and its changes were produced through AI-assisted development
 (Anthropic Claude Code) under the Leader's task. No AI service or new
 infrastructure technology is introduced into CodeMastery's runtime.
+
+## DP01 PostgreSQL Alpine/su-exec image hardening — 2 November 2026
+
+### Decision and boundary
+
+The Project Leader @chi-thanh-nguyen's 2 November 2026 (ICT) task authorizes
+replacing `postgres:17.11-bookworm` with a locally built hardened image —
+`postgres:17.11-alpine3.24` with `su-exec` replacing the vulnerable `gosu`
+executable — as the PostgreSQL image used by local Compose, Testcontainers and
+the VM release ([ADR003](decisions/003-postgresql-alpine-su-exec-image.md)).
+This follows up the unresolved dependency decision noted in
+[Image scan for admission review (blocker 3)](#dp01-private-health-probe-remediation--1-november-2026):
+"changing the PostgreSQL image needs a separate dependency decision; this
+change makes neither." It is that separate decision. Technical authorization
+does not accept the residual risks below; that acceptance is pending.
+
+Unchanged: PostgreSQL major version 17, database names, environment variable
+contracts, `/var/lib/postgresql/data` persistence, the healthcheck, Flyway
+migrations and schema, runtime role/grant separation, private networking (no
+published PostgreSQL port), and the backend/MinIO/frontend service boundaries.
+
+New file: `infrastructure/postgres/Dockerfile`, selected only by this immutable
+base digest:
+
+`postgres:17.11-alpine3.24@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b`
+
+It installs `su-exec=0.3-r0`, removes `/usr/local/bin/gosu` and links that path
+to `su-exec` in three separate `RUN` layers, labels the image without an empty or
+invented version/revision, and adds a data-volume boundary (below). The
+separate removal layer matters to Trivy, not to the bytes: removal writes a
+whiteout (`usr/local/bin/.wh.gosu`), and Trivy drops a lower layer's findings
+only for a whiteout. Combined into one `rm … && ln -s …` layer, the symlink
+replaces the file without a whiteout, and Trivy still reports the base layer's
+`gosu` (1 CRITICAL, 25 HIGH), although the runtime view is identical.
+
+### Qualification
+
+Recorded on 2 November 2026 on macOS 27.2 arm64, Docker Desktop with Engine
+29.8.1, Trivy 0.76.1 (database updated 2026-11-01 19:08 UTC, not refreshed
+during the scans). Sources: the audit remediation measured on the tree
+committed as `cc5cb95`, and the `su-exec` pin measured on `55902cc` plus that
+pin. Artifact: a local `docker build --no-cache --platform linux/amd64
+infrastructure/postgres` with the pin, image ID
+`sha256:f7cccf3d0c3f03268d18d1ca519bb1c23170cb65239b7ddad62972739af359bd`
+(14 layers).
+
+- `postgres --version` → `postgres (PostgreSQL) 17.11`; `/usr/local/bin/gosu`
+  → `/sbin/su-exec`; `gosu postgres id` → `uid=70(postgres) gid=70(postgres)`;
+  the server runs as `postgres`.
+
+**`su-exec` package.** Alpine v3.24/main offers exactly `0.3-r0` (aports commit
+`3fd3d4a8594debe3a34527c531dec7c791bc0ec9`). `apk-tools` 3.0.8 installs the
+pinned version and fails when the index does not offer it. Both packages
+pass `apk verify` against the Alpine developer keys shipped in the pinned base:
+
+| Architecture | Index checksum (`C:`) | Package SHA-256 | Signing key | Installed `/sbin/su-exec` SHA-256 |
+| --- | --- | --- | --- | --- |
+| x86_64 (deployed) | `Q1qSe5GhOmAg5kGDr0aUxb07P589Q=` | `4003163f58cd4a75df79973171d25e4912df4284d8bac9850ac267b58b969be5` (3,775 bytes) | `alpine-devel@lists.alpinelinux.org-6165ee59` | `725e4e701f4b05fae05e2121a088ac3efe18768ffde9d542f3a310f5853eb574` |
+| aarch64 | `Q1+O7B2wiWhg5VbXFCiAnyDcfnpmg=` | `e40ecb44d07d25686f0e0836f4990e7c47d5d44d8956bcb523f5cab9108dd156` (4,062 bytes) | `alpine-devel@lists.alpinelinux.org-616ae350` | `d8210266a508d301fe0a5111e2486af823c5a9a57629ca5c1d53f5e91ed4951e` |
+
+**Reproducibility.** The build is not bit-for-bit reproducible. A second
+`--no-cache` build gave image ID `sha256:58156baf…6f76f`: layers 0–9 (the
+pinned base) are identical; in layers 10–13 the only content difference is
+`var/log/apk.log`, and the rest differ in file modification times only. The
+installed `su-exec` binary is identical. Image identity for a release
+therefore comes from the reviewed archive and `--expect-image`, not from a
+rebuild.
+
+**Trivy, CRITICAL/HIGH** (`docker save --platform …`, `trivy image --input`):
+
+| Image | CRITICAL | HIGH | Of which `gosu` |
+| --- | --- | --- | --- |
+| `postgres:17.11-bookworm` (`sha256:839fbb5a…57a5`), `linux/amd64` and `linux/arm64` | 4 | 88 | 1 / 25 |
+| `postgres:17.11-trixie` (`sha256:3b0cda93…84e1`), `linux/amd64` | 2 | 88 | 26 combined |
+| `postgres:17.11-alpine3.24` base, `linux/amd64` | 1 | 25 | 1 / 25 |
+| Single combined `rm && ln` layer variant | 1 | 25 | 1 / 25 |
+| This image | 0 | 0 | 0 (no findings at any severity) |
+
+The [1 November record](#dp01-private-health-probe-remediation--1-november-2026)
+reports 4 CRITICAL / 94 HIGH for Bookworm from Trivy 0.58.1 on the arm64 image.
+That figure could not be reproduced with the scanner and database above; 4/88
+is the verified baseline. The 1 November record itself is unchanged.
+
+**OCI layers** (saved `linux/amd64` image, each layer tar read directly):
+
+- Layer 2 (inherited base) still holds `usr/local/bin/gosu`, the original
+  1,769,900-byte Go binary.
+- Layer 10 holds the `su-exec` package; layer 11 only the whiteout
+  `usr/local/bin/.wh.gosu`; layer 12 the `usr/local/bin/gosu` → `/sbin/su-exec`
+  symlink; layer 13 the data-volume boundary scripts.
+
+The zero-finding result is therefore Trivy's merged, whiteout-applied view. The
+vulnerable bytes are still distributed in the base layer blob, and a scanner
+that reads layer blobs individually finds them. They are not reachable through
+the container's merged filesystem. This residual risk is **pending explicit
+Leader acceptance**; it is not accepted by this record or by ADR003.
+
+**Byte-clean alternative (disposable experiment, not adopted).** A two-stage
+build that copies the qualified image's merged filesystem into `FROM scratch`
+and restates its configuration (environment without `GOSU_VERSION`, volume,
+`SIGINT` stop signal, port, entrypoint and command) produced a one-layer
+`linux/amd64` image. No layer blob in it contains the 1,769,900-byte `gosu` or
+any fragment of it, compared with layer 2 of the qualified image. Trivy reported
+0 findings, the CI data-volume boundary step passed against it (exit 78 and
+unchanged volume, fresh initialization, marker, restart), and `gosu postgres id`
+resolved to `su-exec` as `uid=70`. Adopting it would discard the base image's
+layer identities, so the base digest could no longer be checked layer by layer;
+every upstream configuration change would have to be mirrored by hand; and the
+release image would need full requalification. It is recorded as evidence for
+a Leader decision and is not part of `infrastructure/postgres/Dockerfile`.
+
+**PostgreSQL runtime** (disposable containers and volumes): fresh
+initialization, `pg_isready`, SQL write/read, restart with the same volume
+(data persisted) and non-root server process all passed.
+
+### Existing data volumes (glibc/musl)
+
+A fresh cluster on this image reports `datcollate` `en_US.utf8`, the same label
+as Bookworm, but musl does not sort like glibc. Reproduced on a disposable
+volume: a Bookworm cluster (`datcollversion` 2.36) with an index on
+`('a','B','b','A','c','C')`, mounted into the image at `b4c36bb`, **started
+without any error**; an index scan returned `a A b B c C` while a sequential
+scan and sort returned `A B C a b c`, and `bt_index_check` reported
+`item order invariant violated`. PostgreSQL only warns per connection that the
+collation version is missing.
+
+The image now starts the server only on an empty data directory or on one
+carrying `codemastery-cluster-libc` (written by
+`/docker-entrypoint-initdb.d/00-codemastery-cluster-libc.sh` after `initdb`).
+Otherwise its entrypoint exits 78 with `codemastery-postgres: refusing to
+start` before `docker-entrypoint.sh` runs; other commands, such as client
+tools, pass through. Verified:
+
+| Case | Result |
+| --- | --- |
+| Bookworm-initialized volume | Exit 78; content fingerprint of all 1,002 entries unchanged |
+| Volume initialized by the image at `b4c36bb` (no marker) | Exit 78 |
+| `docker compose up --wait postgres` on a Bookworm-initialized volume (throwaway project) | Container exits 78; `compose down` keeps the volume |
+| `psql --version` against the refused volume | Runs |
+| Fresh volume | Initialized, marker `musl`, restart keeps data |
+| [Documented migration](setup.md#existing-postgresql-volumes) of a Bookworm volume with 600 indexed rows | `pg_dump` / byte copy verified; restore exit 0; md5 of all rows identical; `bt_index_check` clean; index-scan order equals sort order |
+
+The VM is outside this verification. Whether its volume was initialized by
+Bookworm was not checked. `deploy.sh` already refuses to change existing
+persistent state without operator-attested compatibility and recovery (P9),
+and this image refuses a foreign cluster. A VM migration still needs its own
+reviewed procedure and authorization.
+
+### Backend integration and the credential-inspection fix
+
+`AbstractIntegrationTest` builds this image through Testcontainers'
+`ImageFromDockerfile` under a tag unique to each JVM
+(`localhost/codemastery/postgres-it:<UUID>`, removed at the end of the session).
+The former shared `codemastery/postgres:latest` tag let parallel checkouts or
+JVMs start one another's builds.
+
+`SampleDataSeedIntegrationTest.psqlVariablesKeepCredentialsOutOfProcessArguments`
+must find the blocked `psql` and prove no credential is in its argv. Measured on
+this host: under Rosetta (`linux/amd64`), `/proc/<pid>/exe` is
+`/run/rosetta/rosetta` for every process; across OS users it is unreadable
+(no `CAP_SYS_PTRACE`); and `comm` belongs to any executable named `psql` (a
+shell script decoy reports `comm` `psql` natively). The heuristic at `b4c36bb`
+accepted `exe` `*/psql` or empty after a `comm` match, so it returned `0 0` for
+a real clean `psql` under Rosetta, and `1 0` (found, no leak) when a decoy run
+by another user stood beside a real leaking client whose exe and comm were not
+`psql`.
+
+The client is now identified by correlation: a launcher records its own PID
+and `exec`s `psql` in place, the waiting session carries a per-run
+`application_name`, and the argv of every process in the container is checked
+for registered credentials. Five tests cover the same-user, cross-user and
+translated-executable (musl loader) positives, and a synthetic leak and a
+cross-user decoy as negatives. The two negatives fail against the old
+heuristic (`0 0` and `1 0`); under real Rosetta the new inspection returns
+`1 0` for a clean and `1 1` for a leaking client, as root and as `postgres`.
+
+`cd backend && ./mvnw verify`: BUILD SUCCESS, 468 unit and 171 integration
+tests, 0 failures, 0 errors; no `postgres-it` image remained afterwards.
+
+### Integration
+
+- **Local Compose:** `infrastructure/docker-compose.yml`'s `postgres` service
+  builds `infrastructure/postgres` instead of pulling
+  `postgres:17.11-bookworm`.
+- **VM release:** `infrastructure/vm/docker-compose.vm.yml`'s `postgres`
+  service sets `image: codemastery.invalid/postgres:release` and
+  `build: !reset null`; the [release build](#release-build-outside-the-vm)
+  builds this image.
+- **`deploy.sh`:** unchanged from `main`. `postgres` admits no `build` option,
+  so preflight rejects any build configuration on it, including a remote Git
+  context, `privileged`, `network: host` and `security.insecure`
+  entitlements. Verified on Ubuntu 24.04 `linux/amd64` with the committed
+  override: `PREFLIGHT OK`, and all four mutations rejected (`unsupported
+  Compose options: build`); at `b4c36bb` all four were accepted.
+- **CI:** job **VM deployment script** (preflight fixture resets the PostgreSQL
+  build; five rejection cases), job **VM deployment containerd image store**
+  (PostgreSQL built from its Dockerfile; MinIO carries the multi-platform
+  checks), and job **VM deployment PostgreSQL and containment tests** (new
+  volume-boundary step, which fails within 60 seconds against the image at
+  `b4c36bb`). Other `postgres:17.11-bookworm` references in CI start disposable
+  databases for `deploy.sh`'s SQL and port logic and are unchanged. Trivy
+  scanning remains manual.
+
+### Qualification, admission and deployment
+
+- **Functional qualification:** PASS locally, as recorded above. GitHub Actions
+  results for this revision are not part of this record.
+- **Security scan:** 0 CRITICAL, 0 HIGH in Trivy's merged view; the inherited
+  `gosu` layer bytes are a disclosed residual risk pending acceptance.
+- **Technical authorization:** the Leader's 2 November 2026 instruction
+  (ADR003). **Risk acceptance:** not recorded.
+- **Production deployment authorization:** not granted. No image was built,
+  loaded or run on the Azure VM; release blockers 2 and 4–7 are unchanged.
+
+### Remaining gates
+
+- **Risk acceptance.** The Leader explicitly accepts or rejects the inherited
+  `gosu` layer bytes and the treatment of pre-existing volumes.
+- **Byte-clean image.** Adopting the flattened alternative above, or keeping
+  the layered image, is a Leader decision.
+- **Packaging.** Build `codemastery.invalid/postgres:release` from the merged
+  revision and include it in the release archive alongside the other four
+  images. Not done here.
+- **VM data.** Establish whether the VM volume exists and how it was
+  initialized before any release with this image.
+- **DP01.** Release blockers 2 and 4–7 are unchanged.
+
+This record and its changes were produced through AI-assisted development
+(Anthropic Claude Code) under the Leader's tasks; the audit findings it
+remediates came from an independent Codex audit. No AI service is introduced
+into CodeMastery's runtime. `su-exec` is a runtime component of the PostgreSQL
+image: the entrypoint uses it to drop from root to the `postgres` user before
+starting the server. Trivy is a security scanner used manually for
+qualification; it is not part of any image or CI job.

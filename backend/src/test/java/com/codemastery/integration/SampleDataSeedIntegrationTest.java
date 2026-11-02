@@ -50,6 +50,7 @@ import java.util.stream.Stream;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -75,6 +76,40 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
     private static final List<String> SECRETS = new CopyOnWriteArrayList<>();
     /** Any BCrypt-shaped text, including truncated or re-prefixed hashes that are not registered. */
     private static final Pattern BCRYPT_TEXT = Pattern.compile("\\$2[abxy]?\\$\\d{2}\\$[./A-Za-z0-9]+");
+    /**
+     * Starts psql through a shell that records its own PID and then execs psql in place, so the
+     * recorded PID is the client this test started. Neither {@code /proc/<pid>/exe} (the translator
+     * under Rosetta or QEMU, and unreadable across OS users without CAP_SYS_PTRACE) nor {@code comm}
+     * (taken by any executable named psql) can tell which process that is.
+     */
+    private static final String RECORD_PID_THEN_EXEC = "printf '%s' \"$$\" > \"$1\"; shift; exec \"$@\"";
+    /**
+     * Prints {@code <launched> <disclosed>}; raw argv must never reach an assertion or a process-output
+     * log. {@code launched} is 1 when the recorded PID runs with the expected database and seed file
+     * arguments and no longer with the launcher's own (which name the PID file). {@code disclosed} is 1
+     * when the argv of any process in the container holds a registered password, hash, salt or checksum.
+     */
+    private static final String INSPECT_LAUNCHED_PSQL = """
+            set -eu
+            launched=0
+            disclosed=0
+            if argv="$(tr '\\000' '\\n' < "/proc/$ARGV_PID/cmdline" 2>/dev/null)" \\
+                    && printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_DB" >/dev/null \\
+                    && printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_FILE" >/dev/null \\
+                    && ! printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_PID_FILE" >/dev/null; then
+                launched=1
+            fi
+            for process in /proc/[0-9]*; do
+                argv="$(tr '\\000' '\\n' < "$process/cmdline" 2>/dev/null)" || continue
+                while IFS= read -r sensitive; do
+                    [ -n "$sensitive" ] || continue
+                    case "$argv" in *"$sensitive"*) disclosed=1 ;; esac
+                done <<ARGV_INPUTS
+            $ARGV_INPUTS
+            ARGV_INPUTS
+            done
+            printf '%s %s\\n' "$launched" "$disclosed"
+            """;
 
     static {
         for (String secret : List.of(INSTRUCTOR_PASSWORD, LEARNER_PASSWORD, INSTRUCTOR_HASH, LEARNER_HASH, OTHER_HASH)) secret(secret);
@@ -334,52 +369,183 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
 
     @Test void psqlVariablesKeepCredentialsOutOfProcessArguments() throws Exception {
         String db = attested(freshDatabase());
-        var pool = Executors.newSingleThreadExecutor();
-        // Inspect inside the container: raw argv must never reach an assertion or a process-output log.
-        String inspect = """
+        for (var step : List.of(Map.entry(USERS, "users"), Map.entry(COURSES, "courses"))) {
+            whileLaunchedPsqlIsBlocked(db, step.getKey(), step.getValue(), PSQL, List.of(), (launch, pid) ->
+                    assertEquals("1 0", inspect(db, step.getKey(), launch, pid, null),
+                            "the launched psql is found; no password, hash, salt or checksum in any process argv"));
+        }
+    }
+
+    /**
+     * A different OS user cannot read {@code /proc/<pid>/exe} (ptrace_may_access, without the
+     * CAP_SYS_PTRACE that containers drop by default), while {@code cmdline} stays readable. The
+     * precondition proves the inspector really runs without exe; detection must still succeed.
+     */
+    @Test void psqlVariablesDetectionSurvivesUnreadableExeAcrossOsUsers() throws Exception {
+        String db = attested(freshDatabase());
+        whileLaunchedPsqlIsBlocked(db, USERS, "users", PSQL, List.of(), (launch, pid) -> {
+            assertEquals("", output("postgres", "readlink", "/proc/" + pid + "/exe"),
+                    "precondition: another OS user cannot read the client's /proc/<pid>/exe");
+            assertEquals("1 0", inspect(db, USERS, launch, pid, "postgres"),
+                    "found across OS users, with no credential in any process argv");
+        });
+    }
+
+    /**
+     * Under Rosetta or QEMU, {@code /proc/<pid>/exe} names the translator for every process. Starting
+     * the real psql through the musl dynamic loader reproduces that deterministically on any host:
+     * neither exe nor comm names psql, yet detection must still find the launched client.
+     */
+    @Test void psqlVariablesDetectionSurvivesATranslatedExecutable() throws Exception {
+        String db = attested(freshDatabase());
+        whileLaunchedPsqlIsBlocked(db, USERS, "users", translatedPsql(), List.of(), (launch, pid) -> {
+            assertThat("precondition: exe names the loader, not psql",
+                    output(null, "readlink", "/proc/" + pid + "/exe"), not(endsWith("/psql")));
+            assertNotEquals("psql", inContainer(null, "cat", "/proc/" + pid + "/comm"), "precondition: comm is not psql");
+            assertEquals("1 0", inspect(db, USERS, launch, pid, null),
+                    "found through correlation alone, with no credential in any process argv");
+        });
+    }
+
+    /** The detector is not vacuous: a credential in the launched client's argv is reported, by either OS user. */
+    @Test void psqlVariablesDetectionReportsACredentialInProcessArguments() throws Exception {
+        String db = attested(freshDatabase());
+        String leak = "codemastery_leak_probe=" + secret("leak-" + password());
+        whileLaunchedPsqlIsBlocked(db, USERS, "users", PSQL, List.of("-v", leak), (launch, pid) -> {
+            assertEquals("1 1", inspect(db, USERS, launch, pid, null), "the leak is reported to the same OS user");
+            assertEquals("1 1", inspect(db, USERS, launch, pid, "postgres"), "the leak is reported across OS users");
+        });
+    }
+
+    /**
+     * A decoy executable named psql, run by another OS user with the same database and seed file
+     * arguments, meets every check of a comm/exe heuristic (comm psql, unreadable exe, exact argv),
+     * while the real, leaking client is translated and meets none. Detection must follow the launched
+     * client and report its leak instead of accepting the decoy.
+     */
+    @Test void psqlVariablesDetectionIsNotDeceivedByAProcessImpersonatingPsql() throws Exception {
+        String db = attested(freshDatabase());
+        String leak = "codemastery_leak_probe=" + secret("leak-" + password());
+        // The decoy outlives this exec, so the postmaster (PID 1) adopts it. Any child that does not exit
+        // with status 0 or 1 makes the postmaster restart every server process, so it exits 0 on TERM.
+        String[] decoy = inContainer(null, "sh", "-c", """
                 set -eu
-                matches=0
-                disclosed=0
-                for process in /proc/[0-9]*; do
-                    case "$(readlink "$process/exe" 2>/dev/null)" in */psql) ;; *) continue ;; esac
-                    argv="$(tr '\\000' '\\n' < "$process/cmdline" 2>/dev/null)" || continue
-                    printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_DB" >/dev/null || continue
-                    printf '%s\\n' "$argv" | grep -Fx -- "$ARGV_FILE" >/dev/null || continue
-                    matches=$((matches + 1))
-                    while IFS= read -r sensitive; do
-                        [ -n "$sensitive" ] || continue
-                        case "$argv" in *"$sensitive"*) disclosed=1 ;; esac
-                    done <<ARGV_INPUTS
-                $ARGV_INPUTS
-                ARGV_INPUTS
-                done
-                printf '%s %s\\n' "$matches" "$disclosed"
-                """;
+                directory="$(mktemp -d)"
+                printf '#!/bin/sh\\ntrap "exit 0" TERM\\nwhile :; do sleep 1; done\\n' > "$directory/psql"
+                chmod 755 "$directory" "$directory/psql"
+                su-exec postgres "$directory/psql" "$1" "$2" >/dev/null 2>&1 &
+                printf '%s %s' "$!" "$directory"
+                """, "decoy", db, "/seed/" + USERS).split(" ");
         try {
-            for (var step : List.of(Map.entry(USERS, "users"), Map.entry(COURSES, "courses"))) {
-                try (Connection holder = connect(db)) {
-                    holder.setAutoCommit(false);
-                    holder.createStatement().execute("LOCK TABLE public." + step.getValue() + " IN SHARE ROW EXCLUSIVE MODE");
-                    Future<Run> loader = pool.submit(() -> psqlWithVariables(db, step.getKey()));
-                    try {
-                        awaitWaiters(holder, step.getValue(), 1);
-                        ExecResult inspection = POSTGRES.execInContainer(ExecConfig.builder()
-                                .command(new String[] {"sh", "-c", inspect})
-                                .envVars(Map.of("ARGV_DB", db, "ARGV_FILE", "/seed/" + step.getKey(),
-                                        "ARGV_INPUTS", String.join("\n", SECRETS)))
-                                .build());
-                        assertSucceeded(new Run(inspection.getExitCode(), inspection.getStdout(), inspection.getStderr()));
-                        assertEquals("1 0", inspection.getStdout().trim(),
-                                "one blocked psql; no password, hash, salt or checksum in its actual argv");
-                    } finally {
-                        holder.rollback();
-                        assertSucceeded(loader.get(2, TimeUnit.MINUTES));
-                    }
-                }
+            assumeTrue("psql".equals(inContainer(null, "cat", "/proc/" + decoy[0] + "/comm")),
+                    "a translated shell script does not report its own name as comm; the decoy needs a native host");
+            assertEquals("", output(null, "readlink", "/proc/" + decoy[0] + "/exe"),
+                    "precondition: the decoy's exe is unreadable to the inspector");
+            whileLaunchedPsqlIsBlocked(db, USERS, "users", translatedPsql(), List.of("-v", leak), (launch, pid) ->
+                    assertEquals("1 1", inspect(db, USERS, launch, pid, null),
+                            "the launched, leaking client is found and reported despite the decoy"));
+        } finally {
+            // Signal the PID only while it is still this decoy: a reused PID could be a server process.
+            String cleanup = inContainer(null, "sh", "-c", """
+                    if [ "$(cat "/proc/$1/comm" 2>/dev/null)" = psql ] \\
+                            && tr '\\000' '\\n' < "/proc/$1/cmdline" 2>/dev/null | grep -Fx -- "$2/psql" >/dev/null; then
+                        kill "$1"; echo alive
+                    else
+                        echo gone
+                    fi
+                    rm -rf "$2"
+                    """, "cleanup", decoy[0], decoy[1]);
+            assertEquals("alive", cleanup, "the decoy must outlive the inspection it is meant to deceive");
+        }
+    }
+
+    private static final List<String> PSQL = List.of("psql");
+
+    /** psql run by the musl dynamic loader, so the process's exe and comm name the loader (as a translator would). */
+    private static List<String> translatedPsql() throws Exception {
+        return List.of(inContainer(null, "sh", "-c", "ls /lib/ld-musl-*.so.1"), "/usr/local/bin/psql");
+    }
+
+    @FunctionalInterface interface BlockedCheck { void check(Launch launch, int pid) throws Exception; }
+
+    /**
+     * A psql client started by this test. Its launcher writes the client's PID to {@code pidFile}, and its
+     * session carries {@code applicationName}, so the blocked session and the process are both its own.
+     */
+    record Launch(String pidFile, String applicationName) {
+        static Launch create() {
+            String id = UUID.randomUUID().toString();
+            return new Launch("/tmp/codemastery-psql-" + id + ".pid", "codemastery-it-" + id);
+        }
+    }
+
+    /** Launches one variables-mode loader blocked on the table's seed lock, runs the check, then lets it finish. */
+    private static void whileLaunchedPsqlIsBlocked(String db, String file, String table, List<String> program,
+                                                   List<String> extraArguments, BlockedCheck check) throws Exception {
+        var pool = Executors.newSingleThreadExecutor();
+        Launch launch = Launch.create();
+        try (Connection holder = connect(db)) {
+            holder.setAutoCommit(false);
+            holder.createStatement().execute("LOCK TABLE public." + table + " IN SHARE ROW EXCLUSIVE MODE");
+            Future<Run> loader = pool.submit(() -> launchPsqlWithVariables(db, file, launch, program, extraArguments));
+            try {
+                awaitWaiters(holder, table, 1);
+                awaitLaunchedSession(holder, launch);
+                check.check(launch, Integer.parseInt(inContainer(null, "cat", launch.pidFile())));
+            } finally {
+                holder.rollback();
+                assertSucceeded(loader.get(2, TimeUnit.MINUTES));
             }
         } finally {
             pool.shutdownNow();
+            inContainer(null, "rm", "-f", launch.pidFile());
         }
+    }
+
+    /** The one waiting session is the launched client's own, identified by its application name. */
+    private static void awaitLaunchedSession(Connection holder, Launch launch) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(1);
+        try (var query = holder.prepareStatement(
+                "SELECT count(*) FROM pg_stat_activity WHERE application_name = ? AND wait_event_type = 'Lock'")) {
+            query.setString(1, launch.applicationName());
+            while (System.nanoTime() < deadline) {
+                try (var result = query.executeQuery()) { result.next(); if (result.getInt(1) == 1) return; }
+                Thread.sleep(50);
+            }
+        }
+        fail("the launched psql session did not reach the seed lock");
+    }
+
+    /** Runs {@link #INSPECT_LAUNCHED_PSQL} as {@code user} (null: the default exec user). */
+    private static String inspect(String db, String file, Launch launch, int pid, String user) throws Exception {
+        var config = ExecConfig.builder().command(new String[] {"sh", "-c", INSPECT_LAUNCHED_PSQL})
+                .envVars(Map.of("ARGV_PID", Integer.toString(pid), "ARGV_DB", db, "ARGV_FILE", "/seed/" + file,
+                        "ARGV_PID_FILE", launch.pidFile(), "ARGV_INPUTS", String.join("\n", SECRETS)));
+        if (user != null) config.user(user);
+        ExecResult inspection = POSTGRES.execInContainer(config.build());
+        assertSucceeded(new Run(inspection.getExitCode(), inspection.getStdout(), inspection.getStderr()));
+        return inspection.getStdout().trim();
+    }
+
+    /** A credential-free command in the container that must succeed; returns trimmed stdout. */
+    private static String inContainer(String user, String... command) throws Exception {
+        Run run = exec(user, command);
+        assertSucceeded(run);
+        return run.stdout().trim();
+    }
+
+    /** Trimmed stdout of a probe whose failure is an expected answer, such as readlink of an unreadable exe. */
+    private static String output(String user, String... command) throws Exception {
+        Run run = exec(user, command);
+        assertRedacted(run);
+        return run.stdout().trim();
+    }
+
+    private static Run exec(String user, String... command) throws Exception {
+        var config = ExecConfig.builder().command(command);
+        if (user != null) config.user(user);
+        ExecResult result = POSTGRES.execInContainer(config.build());
+        return new Run(result.getExitCode(), result.getStdout(), result.getStderr());
     }
 
     @Test void failedComparisonsNeverDiscloseCredentials() {
@@ -515,17 +681,34 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
      * Invalid seed-environment fallbacks prove that the explicitly populated variables take precedence.
      */
     private static Run psqlWithVariables(String db, String file) throws Exception {
-        String[] command = {"psql", "-X", "-q", "-U", POSTGRES.getUsername(), "-d", db,
+        return runPsqlWithVariables(db, file, List.of(), PSQL, List.of(), Map.of());
+    }
+
+    /** {@link #psqlWithVariables} started through {@link #RECORD_PID_THEN_EXEC}, as {@code program}, with extra arguments. */
+    private static Run launchPsqlWithVariables(String db, String file, Launch launch, List<String> program,
+                                               List<String> extraArguments) throws Exception {
+        return runPsqlWithVariables(db, file, List.of("sh", "-c", RECORD_PID_THEN_EXEC, "codemastery-psql-launcher",
+                launch.pidFile()), program, extraArguments, Map.of("PGAPPNAME", launch.applicationName()));
+    }
+
+    private static Run runPsqlWithVariables(String db, String file, List<String> launcher, List<String> program,
+                                            List<String> extraArguments, Map<String, String> extraEnvironment) throws Exception {
+        List<String> command = new ArrayList<>(launcher);
+        command.addAll(program);
+        command.addAll(List.of("-X", "-q", "-U", POSTGRES.getUsername(), "-d", db,
                 "-c", "\\getenv seed_target_system_identifier RUN_TARGET",
                 "-c", "\\getenv instructor_password_hash RUN_INSTRUCTOR",
-                "-c", "\\getenv learner_password_hash RUN_LEARNER",
-                "-f", "/seed/" + file};
-        Map<String, String> environment = Map.of(
+                "-c", "\\getenv learner_password_hash RUN_LEARNER"));
+        command.addAll(extraArguments);
+        command.addAll(List.of("-f", "/seed/" + file));
+        Map<String, String> environment = new HashMap<>(Map.of(
                 "RUN_TARGET", systemIdentifier, "RUN_INSTRUCTOR", INSTRUCTOR_HASH, "RUN_LEARNER", LEARNER_HASH,
                 "CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER", "invalid",
                 "CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", "invalid",
-                "CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", "invalid");
-        ExecResult result = POSTGRES.execInContainer(ExecConfig.builder().command(command).envVars(environment).build());
+                "CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", "invalid"));
+        environment.putAll(extraEnvironment);
+        ExecResult result = POSTGRES.execInContainer(ExecConfig.builder()
+                .command(command.toArray(String[]::new)).envVars(environment).build());
         return new Run(result.getExitCode(), result.getStdout(), result.getStderr());
     }
 

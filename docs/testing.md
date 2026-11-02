@@ -110,10 +110,14 @@ provides `@SpringBootTest` with `CodeMasteryApplication`, a mock web environment
 without a listening HTTP server, and `@ActiveProfiles("test")`.
 
 It manually starts one singleton PostgreSQL Testcontainer before Spring
-initializes its datasource. The approved image is `postgres:17.11-bookworm`;
-this selects an integration-test database only, not the production/deployment
-PostgreSQL version. No persistent container reuse is enabled. The singleton is
-not managed by per-class `@Container` callbacks.
+initializes its datasource. The approved image is built from
+`infrastructure/postgres/Dockerfile` (PostgreSQL 17.11 Alpine 3.24 with
+`su-exec` replacing `gosu`; see [ADR003](decisions/003-postgresql-alpine-su-exec-image.md)
+and [deployment.md](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026))
+through Testcontainers' `ImageFromDockerfile`, so no developer-specific local
+tag is required; this selects an integration-test database only, not the
+production/deployment PostgreSQL version. No persistent container reuse is
+enabled. The singleton is not managed by per-class `@Container` callbacks.
 
 An inherited `@DynamicPropertySource` registers `spring.datasource.url`,
 `spring.datasource.username`, and `spring.datasource.password` from the running
@@ -148,8 +152,9 @@ Run broader verification from `backend/`:
 This includes compilation, unit tests, application packaging/repackaging,
 Failsafe integration-test execution and verification, and JaCoCo reporting when
 execution data exists. Because concrete suites initialize the Testcontainers
-foundation, a running Docker Engine and access to `postgres:17.11-bookworm` are
-required. Compose and a manually provisioned PostgreSQL service are not required.
+foundation, a running Docker Engine able to build
+`infrastructure/postgres/Dockerfile` is required. Compose and a manually
+provisioned PostgreSQL service are not required.
 
 To skip integration-test execution while retaining the other verification work:
 
@@ -1720,3 +1725,34 @@ cover the release Compose model and its running server.
 Not covered locally: `deploy.sh preflight` itself (it requires the Ubuntu 24.04
 linux/amd64 host; CI runs it), GitHub Actions results (they belong to the pull
 request), a release artifact and the Azure VM.
+
+## DP01 PostgreSQL Alpine/su-exec image qualification — 2 November 2026
+
+Scope: [ADR003](decisions/003-postgresql-alpine-su-exec-image.md) and
+[deployment.md, "DP01 PostgreSQL Alpine/su-exec image hardening"](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026),
+which holds the measured details. Run on 2 November 2026 on macOS 27.2 arm64
+(Docker Desktop, Engine 29.8.1; `linux/amd64` runs use Rosetta), Trivy 0.76.1
+(database 2026-11-01), Maven Wrapper, OpenJDK 25.0.4.1. Sources: the audit
+remediation measured on the tree committed as `cc5cb95`; the `su-exec` pin rows
+on `55902cc` plus that pin. Artifact: local `linux/amd64` `--no-cache` build with
+the pin, image ID
+`sha256:f7cccf3d0c3f03268d18d1ca519bb1c23170cb65239b7ddad62972739af359bd`.
+
+| Check | Command/method | Result |
+| --- | --- | --- |
+| Image identity | `postgres --version`; `readlink /usr/local/bin/gosu`; `gosu postgres id` | `17.11`; `/sbin/su-exec`; `uid=70(postgres)` |
+| Trivy | `docker save --platform linux/amd64`, `trivy image --input` | This image (with and without the pin) 0 findings; Bookworm 4 CRITICAL / 88 HIGH (amd64 and arm64); Alpine base 1 / 25, all `gosu` |
+| OCI layers | Each layer tar of the saved image | Base layer 2 keeps the 1,769,900-byte `gosu`; layer 11 is its whiteout; layer 12 the symlink; layer 13 the volume boundary. Residual risk pending acceptance |
+| `su-exec` pin | `apk policy`, `apk fetch`, `apk verify`, APKINDEX entry, `apk add su-exec=0.3-r0` (amd64 and arm64) | Only `0.3-r0` offered; signatures verify; checksums recorded in deployment.md; an absent version fails the build |
+| Reproducibility | Two `--no-cache` builds, layer-by-layer comparison | Different image IDs; base layers identical; ours differ only in `var/log/apk.log` and mtimes; `su-exec` binary identical. Not bit-for-bit reproducible |
+| Byte-clean experiment (not adopted) | Flattened `FROM scratch` copy; every layer blob searched for `gosu`; Trivy; volume-boundary CI step | No `gosu` bytes; 0 findings; step passes. Awaiting a Leader decision |
+| Foreign data volume | Bookworm-initialized and pre-marker volumes, direct `docker run` and `docker compose up --wait` | Exit 78, `refusing to start`, volume content unchanged; reproduced the silent start and `amcheck` failure at `b4c36bb` first |
+| Fresh volume | Init, marker, write, restart | Marker `musl`; data kept |
+| Local migration | [setup.md procedure](setup.md#existing-postgresql-volumes) on a throwaway project with 600 indexed rows | All rows identical by md5; `bt_index_check` clean; index and sort order agree |
+| `deploy.sh preflight` | Ubuntu 24.04 `linux/amd64` container, committed override, synthetic env and TLS pair | `PREFLIGHT OK`; remote Git context, privileged, host-network and insecure-entitlement PostgreSQL builds rejected (all accepted at `b4c36bb`) |
+| CI steps, run locally | Preflight against rendered Compose; containerd round trip (isolated `linux/amd64` Engine 29.8.1); new volume-boundary step | Pass. Containerd ran with the PostgreSQL image built on the host and `--provenance=false` fixtures, because emulated BuildKit cannot run `RUN` and Engine 29 adds attestations that Engine 28 on the runner does not. The volume-boundary step fails against the `b4c36bb` image |
+| Credential inspection | Five `psqlVariables*` tests; mutation run with the old heuristic; real Rosetta run | Pass; old heuristic fails the translated (`0 0`) and decoy (`1 0`) cases; Rosetta: `1 0` clean, `1 1` leaking, as root and `postgres` |
+| Backend suite | `cd backend && ./mvnw verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures, 0 errors; no per-run `postgres-it` image left |
+
+Not covered: GitHub Actions results for this revision, a release archive, and
+the Azure VM.

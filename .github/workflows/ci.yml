@@ -516,6 +516,8 @@ jobs:
           cat > "$work/release.yml" <<EOF
           services:
             postgres:
+              image: registry.invalid/codemastery/postgres:ci-fixture
+              build: !reset null
               ports: !reset []
               restart: unless-stopped
             minio:
@@ -672,6 +674,42 @@ jobs:
             minio:
               environment:
                 MINIO_CONFIG_ENV_FILE: /data/.minio.env
+          EOF
+          # The PostgreSQL release image is only ever loaded from the reviewed archive:
+          # any build configuration, local or hostile, is outside the release model.
+          postgres_build="service 'postgres' contains unsupported Compose options: build"
+          reject "$postgres_build" postgres-local-build <<'EOF'
+          services:
+            postgres:
+              build:
+                context: postgres
+          EOF
+          reject "$postgres_build" postgres-remote-git-context <<'EOF'
+          services:
+            postgres:
+              build:
+                context: https://github.com/attacker.invalid/payload.git#main
+          EOF
+          reject "$postgres_build" postgres-privileged-build <<'EOF'
+          services:
+            postgres:
+              build:
+                context: postgres
+                privileged: true
+          EOF
+          reject "$postgres_build" postgres-host-network-build <<'EOF'
+          services:
+            postgres:
+              build:
+                context: postgres
+                network: host
+          EOF
+          reject "$postgres_build" postgres-insecure-entitlements <<'EOF'
+          services:
+            postgres:
+              build:
+                context: postgres
+                entitlements: [network.host, security.insecure]
           EOF
           reject_certificate() {
             local expected="$1" name="$2" output
@@ -1357,6 +1395,59 @@ jobs:
             echo "Recorded evidence: $PUBLISHED_PORTS_RESULT"
             [[ "$PUBLISHED_PORTS_RESULT" == *"0.0.0.0:443"* ]]
           ' _ "$script" "$prefix"
+      - name: Check the PostgreSQL image refuses a data volume it did not initialize
+        shell: bash
+        run: |
+          set -euo pipefail
+          # infrastructure/postgres starts only on an empty volume or one it initialized:
+          # a glibc (Bookworm) cluster's indexes would be misread by musl without any error.
+          image=codemastery-ci/postgres:volume-guard
+          prefix="codemastery-ci-pg-guard-${GITHUB_RUN_ID:-local}-$$"
+          cleanup() {
+            docker rm -f "$prefix-glibc" "$prefix-refused" "$prefix-fresh" >/dev/null 2>&1 || true
+            docker volume rm "$prefix-glibc" "$prefix-fresh" >/dev/null 2>&1 || true
+            docker image rm "$image" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker build -q -t "$image" infrastructure/postgres >/dev/null
+          ready() {  # container: the final server, never the entrypoint's initdb-time one
+            # The temporary initialization server listens only on the Unix socket
+            # (listen_addresses=''), so TCP readiness identifies the final server; the
+            # socket check then covers the path the assertions connect through.
+            for _ in $(seq 1 60); do
+              docker exec "$1" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 \
+                && docker exec "$1" pg_isready -U postgres >/dev/null 2>&1 && return 0
+              sleep 1
+            done
+            docker logs "$1" 2>&1 | tail -20 >&2; return 1
+          }
+          fingerprint() {  # volume: every file's path and content
+            docker run --rm -v "$1:/data:ro" --entrypoint sh "$image" -c \
+              'cd /data && find . -type f -exec sha256sum {} + | sort | sha256sum'
+          }
+          docker run -d --name "$prefix-glibc" -e POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+            -v "$prefix-glibc:/var/lib/postgresql/data" postgres:17.11-bookworm >/dev/null
+          ready "$prefix-glibc"
+          docker stop "$prefix-glibc" >/dev/null
+          before="$(fingerprint "$prefix-glibc")"
+          docker run -d --name "$prefix-refused" -v "$prefix-glibc:/var/lib/postgresql/data" "$image" >/dev/null
+          status="$(timeout 60 docker wait "$prefix-refused")" \
+            || { echo "PostgreSQL kept running on a glibc-initialized volume." >&2; exit 1; }
+          [[ "$status" == 78 ]] || { echo "Expected exit 78 on a glibc volume, got $status." >&2; exit 1; }
+          [[ "$(docker logs "$prefix-refused" 2>&1)" == *"codemastery-postgres: refusing to start"* ]]
+          [[ "$(fingerprint "$prefix-glibc")" == "$before" ]] || { echo "The refused volume was changed." >&2; exit 1; }
+          echo "ok: a Bookworm-initialized volume is refused with exit 78 and left unchanged"
+          docker run --rm -v "$prefix-glibc:/var/lib/postgresql/data" "$image" psql --version >/dev/null
+          echo "ok: client tools still run against the refused volume"
+          docker run -d --name "$prefix-fresh" -e POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+            -v "$prefix-fresh:/var/lib/postgresql/data" "$image" >/dev/null
+          ready "$prefix-fresh"
+          [[ "$(docker exec "$prefix-fresh" cat /var/lib/postgresql/data/codemastery-cluster-libc)" == musl ]]
+          docker exec "$prefix-fresh" psql -X -q -U postgres -c 'CREATE TABLE kept(v text)' -c "INSERT INTO kept VALUES ('kept')"
+          docker restart "$prefix-fresh" >/dev/null
+          ready "$prefix-fresh"
+          [[ "$(docker exec "$prefix-fresh" psql -X -At -U postgres -c 'SELECT v FROM kept')" == kept ]]
+          echo "ok: a fresh volume is initialized, marked and restarted with its data"
 
   deployment-script-runtime:
     name: VM runtime privileges with the real backend
@@ -1585,12 +1676,12 @@ jobs:
             rm -rf "$work"
           }
           trap cleanup EXIT
-          # The base Compose file's registry images: official multi-platform
-          # PostgreSQL and the digest-pinned MinIO server and client. They remain
-          # local-only pins; this exercises their real registry index and
-          # attestation structure, not their production admission.
+          # The base Compose file's registry images: the digest-pinned multi-platform
+          # MinIO server and client. They remain local-only pins; this exercises
+          # their real registry index and attestation structure, not their
+          # production admission. PostgreSQL is built locally from its Dockerfile.
           mapfile -t registry < <(sed -n 's/^    image: //p' infrastructure/docker-compose.yml)
-          [[ ${#registry[@]} -eq 3 ]] || { echo "Unexpected base Compose image list." >&2; exit 1; }
+          [[ ${#registry[@]} -eq 2 ]] || { echo "Unexpected base Compose image list." >&2; exit 1; }
           for ref in "${registry[@]}"; do docker pull -q "$ref" >/dev/null; done
           printf 'fixture\n' > "$work/payload"
           printf 'FROM scratch\nCOPY payload /payload\nCMD ["/payload"]\n' > "$work/backend.Dockerfile"
@@ -1599,10 +1690,11 @@ jobs:
             docker build -q --platform linux/amd64 -f "$work/$service.Dockerfile" -t "$prefix/$service:r1" "$work" >/dev/null
           done
           # Disposable names, so removing and reloading exercises the real store.
-          refs=()
-          for i in 0 1 2; do
-            service=(postgres minio minio-init); refs+=("$prefix/${service[$i]}:r1")
-            docker tag "${registry[$i]}" "${refs[$i]}"
+          refs=("$prefix/postgres:r1")
+          docker build -q --platform linux/amd64 -t "${refs[0]}" infrastructure/postgres >/dev/null
+          for i in 0 1; do
+            service=(minio minio-init); refs+=("$prefix/${service[$i]}:r1")
+            docker tag "${registry[$i]}" "${refs[$((i + 1))]}"
           done
           refs+=("$prefix/backend:r1" "$prefix/frontend:r1")
           cat > "$work/structure.py" <<'PY'
@@ -1612,13 +1704,13 @@ jobs:
           tops = json.load(t.extractfile("index.json"))["manifests"]
           if mode == "default":
               index = next(m for m in tops if m["mediaType"].endswith("image.index.v1+json")
-                           and "postgres" in (m.get("annotations") or {}).get("io.containerd.image.name", ""))
+                           and "/minio:" in (m.get("annotations") or {}).get("io.containerd.image.name", ""))
               children = json.loads(t.extractfile("blobs/sha256/" + index["digest"][7:]).read())["manifests"]
               runnable = [c for c in children
                           if (c.get("annotations") or {}).get("vnd.docker.reference.type") != "attestation-manifest"]
               absent = [c for c in runnable if "blobs/sha256/" + c["digest"][7:] not in names]
-              assert len(runnable) > 1 and absent, "PostgreSQL index is not a partial multi-platform save"
-              print(f"PostgreSQL index: {len(runnable)} platforms listed, {len(absent)} absent from the archive")
+              assert len(runnable) > 1 and absent, "MinIO index is not a partial multi-platform save"
+              print(f"MinIO index: {len(runnable)} platforms listed, {len(absent)} absent from the archive")
           else:
               # Docker 29 writes attestations as top-level referrers; Docker 28
               # does not. Both layouts are valid; synthetic fixtures cover both.
@@ -1636,14 +1728,14 @@ jobs:
           PY
           cat > "$work/mutate.py" <<'PY'
           import io, json, sys, tarfile
-          # Real-archive mutations: drop PostgreSQL's amd64 manifest, or alter a referrer.
+          # Real-archive mutations: drop MinIO's amd64 manifest, or alter a referrer.
           source, target, mode = sys.argv[1:]
           NAME, SUBJECT = "io.containerd.image.name", "io.containerd.manifest.subject"
           with tarfile.open(source) as t:
               index = json.load(t.extractfile("index.json"))
               skip = set()
               if mode == "drop-amd64":
-                  top = next(m for m in index["manifests"] if "postgres" in (m.get("annotations") or {}).get(NAME, ""))
+                  top = next(m for m in index["manifests"] if "/minio:" in (m.get("annotations") or {}).get(NAME, ""))
                   children = json.loads(t.extractfile("blobs/sha256/" + top["digest"][7:]).read())["manifests"]
                   amd64 = next(c for c in children if (c.get("platform") or {}).get("architecture") == "amd64")
                   skip.add("blobs/sha256/" + amd64["digest"][7:])
