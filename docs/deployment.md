@@ -1532,9 +1532,11 @@ entrypoint/command. Merging alone would not remove them.
   image CA store, expiry and the hostname, and never disables verification. The
   slim image's BusyBox `wget` cannot keep the approved SNI/hostname while
   connecting to loopback. The release stage therefore uses the non-slim
-  `nginxinc/nginx-unprivileged:1.30.5-alpine` variant: same publisher and Nginx
-  version, adding `curl` and keeping the `wget` that `deploy.sh`'s private backend
-  probe uses. Timings reuse the local Compose healthcheck values.
+  `nginxinc/nginx-unprivileged` Alpine variant, pinned by digest to Nginx 1.30.6,
+  adding `curl` and keeping the `wget` that `deploy.sh`'s private backend probe
+  uses. It runs `apk upgrade --no-cache` for Alpine security updates (Nginx stays
+  pinned by the image) and restores the non-root UID 101. Timings reuse the local
+  Compose healthcheck values.
 - **Release images.** Images are never built or pulled on the VM. The override's
   `codemastery.invalid/*:release` names cannot resolve to any registry. They are
   bound only by `docker load` of the reviewed archive and pinned by
