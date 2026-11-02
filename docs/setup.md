@@ -318,6 +318,52 @@ upstream Community source. The initializer uses
 verified immutable multi-platform index digests in Compose and support amd64 and
 arm64. These choices establish no production database/storage infrastructure.
 
+### Existing PostgreSQL Volumes
+
+The PostgreSQL image starts only on an empty data volume or on one it initialized
+itself (it writes `codemastery-cluster-libc` into the data directory after
+`initdb`). A volume created by the earlier `postgres:17.11-bookworm` image, or by
+an earlier build of this image, is refused with exit code 78 and the message
+`codemastery-postgres: refusing to start`. Nothing in the volume is changed.
+glibc and Alpine's musl order text differently, so such a cluster's indexes would
+otherwise return inconsistent results without any error.
+
+Keep the old volume and migrate it by logical backup and restore. Use your `.env`
+values for `<POSTGRES_USER>` and `<POSTGRES_DB>`; no port is published.
+
+```bash
+# 1. Stop the stack, keeping every volume (never use `down -v`).
+docker compose --env-file .env -f infrastructure/docker-compose.yml down
+
+# 2. Back up with the image that initialized the volume, then stop it.
+docker run -d --name codemastery-pg-bookworm \
+  -v codemastery_postgres-data:/var/lib/postgresql/data postgres:17.11-bookworm
+docker exec codemastery-pg-bookworm pg_isready -U <POSTGRES_USER> -d <POSTGRES_DB>  # repeat until accepting
+docker exec codemastery-pg-bookworm \
+  pg_dump -U <POSTGRES_USER> -d <POSTGRES_DB> -Fc > codemastery-postgres.dump
+docker stop codemastery-pg-bookworm && docker rm codemastery-pg-bookworm
+pg_restore --list codemastery-postgres.dump | head  # or run it inside any postgres image
+
+# 3. Keep a byte-for-byte copy of the old volume.
+docker volume create codemastery_postgres-data-bookworm-backup
+docker run --rm -v codemastery_postgres-data:/from:ro \
+  -v codemastery_postgres-data-bookworm-backup:/to alpine:3.24 cp -a /from/. /to/
+
+# 4. Only after checking the backup and the copy, remove the original yourself.
+docker volume rm codemastery_postgres-data
+
+# 5. Initialize a fresh volume with this image and restore into it.
+docker compose --env-file .env -f infrastructure/docker-compose.yml up -d --wait postgres
+docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T postgres \
+  pg_restore -U <POSTGRES_USER> -d <POSTGRES_DB> --no-owner --exit-on-error < codemastery-postgres.dump
+```
+
+Restoring rebuilds every index under musl. Text ordering that relies on the
+database's default collation may change; the catalogue's explicit `COLLATE C`
+ordering does not. Delete the dump and the backup volume only when you no longer
+need them. The VM release is out of scope here: an existing VM volume is never
+migrated by an image swap (see [deployment.md](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026)).
+
 ### Initialization and Startup Ordering
 
 PostgreSQL initializes `POSTGRES_*` values only on an empty named volume and uses

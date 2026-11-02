@@ -16,7 +16,7 @@ services:
   postgres:
     # DP01 hardened candidate: postgres:17.11-alpine3.24 with su-exec replacing
     # gosu, built from infrastructure/postgres/Dockerfile. See docs/deployment.md,
-    # "DP01 PostgreSQL Alpine/su-exec candidate".
+    # "DP01 PostgreSQL Alpine/su-exec image hardening".
     image: codemastery.invalid/postgres:release
     build: !reset null
     ports: !reset []

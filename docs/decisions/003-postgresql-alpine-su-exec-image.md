@@ -2,12 +2,17 @@
 
 ## Status and authority
 
-LEADER_APPROVED. The Project Leader @chi-thanh-nguyen explicitly authorized this
-decision on 2 November 2026 (Asia/Ho_Chi_Minh), directly in the authorizing task,
-after reviewing the vulnerability investigation summarized below. This ADR
-records that authorization; it does not retroactively authorize any other
-pending or deferred decision in this repository, and it does not grant
-production deployment authorization (see Scope).
+LEADER_APPROVED for the technical decision. The Project Leader @chi-thanh-nguyen
+explicitly authorized this decision on 2 November 2026 (Asia/Ho_Chi_Minh),
+directly in the authorizing task, after reviewing the vulnerability investigation
+summarized below. This ADR records that technical authorization; it does not
+retroactively authorize any other pending or deferred decision in this
+repository, and it does not grant production deployment authorization (see
+Scope).
+
+Technical authorization is not risk acceptance. The residual risks in Scope
+(inherited `gosu` layer bytes; glibc/musl collation) are **PENDING_LEADER_RISK_ACCEPTANCE**:
+no record of an explicit acceptance exists, and this ADR does not supply one.
 
 Sources: AGENTS.md; the approved architecture's PostgreSQL + Flyway selection
 (unaffected by this decision); [docs/deployment.md, "DP01 PostgreSQL
@@ -30,15 +35,20 @@ networking (no published PostgreSQL port) are unchanged.
 
 ## Rationale
 
-The prior image, `postgres:17.11-bookworm`, scanned (Trivy, 1 November 2026)
-at 4 CRITICAL and 94 HIGH findings: Debian 12 OS packages mostly without an
-available fix, and `gosu`'s embedded Go 1.24.6 standard library (26 of those
-findings, including CRITICAL CVE-2025-68121). `postgres:17.11-alpine3.24` has
-zero CRITICAL/HIGH findings in its Alpine OS packages; only `gosu` remained.
-`su-exec` (Alpine's own minimal C program, ~60 lines) performs the same
-`setuid`/`setgid` handoff the upstream entrypoint's `gosu postgres` invocation
-expects, with no embedded language runtime to carry its own CVEs. The final
-image scans at 0 CRITICAL, 0 HIGH, 0 at any severity.
+The prior image, `postgres:17.11-bookworm`, scans (Trivy 0.76.1, database of
+1 November 2026, `linux/amd64` and `linux/arm64` alike) at 4 CRITICAL and
+88 HIGH findings: Debian 12 OS packages mostly without an available fix, and
+`gosu`'s embedded Go 1.24.6 standard library (1 CRITICAL, including
+CVE-2025-68121, and 25 HIGH of those findings). The 4 CRITICAL / 94 HIGH figure
+in the earlier 1 November record came from Trivy 0.58.1 on the arm64 image and
+could not be reproduced; 4/88 is the verified baseline.
+`postgres:17.11-alpine3.24` scans at 1 CRITICAL and 25 HIGH, all of them
+`gosu`'s; its Alpine OS packages have none. `su-exec`, Alpine's minimal C
+program, performs the same `setuid`/`setgid` handoff the upstream entrypoint's
+`gosu postgres` invocation expects, with no embedded language runtime to carry
+its own CVEs. The final image scans at 0 findings at any severity in Trivy's
+merged-filesystem view; the original `gosu` bytes remain in an inherited layer
+(see Scope).
 
 ## Alternatives considered
 
@@ -46,8 +56,8 @@ image scans at 0 CRITICAL, 0 HIGH, 0 at any severity.
   (`libsqlite3-0`, `libxml2`, `zlib1g`) have no newer candidate in the
   configured Bookworm repositories; only three other packages were
   upgradable. This does not address the `gosu` findings at all.
-- **`postgres:17.11-trixie`.** Rejected: still 2 CRITICAL, 88 HIGH (same
-  `gosu` problem; a newer Debian base does not remove it).
+- **`postgres:17.11-trixie`.** Rejected: still 2 CRITICAL, 88 HIGH (26 of them
+  `gosu`'s; a newer Debian base does not remove it).
 - **A from-scratch/scratch-rebuilt PostgreSQL image** (as
   `infrastructure/vm/Dockerfile.minio-server` attempts for MinIO). Rejected
   for this decision: PostgreSQL's runtime has materially more files (locale
@@ -58,9 +68,10 @@ image scans at 0 CRITICAL, 0 HIGH, 0 at any severity.
 ## Scope
 
 **Approved:** the Dockerfile and its build; local Compose, Testcontainers and
-VM-release Compose-override wiring to this image; the corresponding
-`deploy.sh` preflight policy update (`postgres`'s `allowed_service_options`
-now also permits `build`).
+VM-release Compose-override wiring to this image. The release model loads this
+image only from the reviewed archive, so `deploy.sh` keeps `build` outside
+`postgres`'s `allowed_service_options` and the VM override resets it (see
+Amendment).
 
 **Not approved by this ADR:**
 
@@ -68,19 +79,22 @@ now also permits `build`).
   there. Packaging the release archive with this image remains a separate
   release-readiness step.
 - Migration of an existing PostgreSQL data volume from a Bookworm (glibc)
-  deployment to this Alpine (musl) image. No such volume currently exists (no
-  release has run on the VM). Alpine/musl does not implement distinct named
-  locales the way glibc does; a fresh cluster reports the same `en_US.utf8`
-  label as Debian but sorts by byte order, and mounting an existing
-  glibc-initialized volume into this image is not verified safe. Should a
-  real migration ever be needed, it requires a separately reviewed
-  backup/restore (`pg_dump`/`pg_restore`) procedure, never a direct volume
-  mount across this change.
-- A byte-level-clean OCI artifact. The original `gosu` binary remains present
-  (inert, not runtime-reachable) in the image's inherited OCI layers, hidden
-  from the merged filesystem view by a whiteout rather than erased; see the
-  deployment.md record for the layer-by-layer evidence. Accepted as a known
-  residual risk for this decision.
+  deployment to this Alpine (musl) image. Whether such a volume exists on the
+  VM was not verified; the VM was not inspected. A glibc-initialized volume
+  mounted into this image has been shown to start silently and return
+  inconsistent index-scan and sequential-scan orderings, and `amcheck` reports
+  its index ordering invalid. The image therefore refuses to start the server on
+  any non-empty data directory it did not initialize (see Amendment). Local
+  developers migrate by the logical backup and restore in
+  [setup.md](../setup.md#existing-postgresql-volumes); any VM migration still
+  needs its own reviewed procedure and authorization.
+- A byte-level-clean OCI artifact. The original `gosu` binary remains in the
+  image's inherited base layer, hidden from the merged filesystem view by a
+  whiteout rather than erased; a scanner that reads layer blobs individually
+  finds it. See the deployment.md record for the layer-by-layer evidence.
+- Acceptance of either residual risk above (`gosu` layer bytes; collation of
+  pre-existing data). Both are **PENDING_LEADER_RISK_ACCEPTANCE**; the
+  technical authorization in Status does not imply it.
 - A Trivy CI job. Trivy scanning of this image remains a manual step,
   consistent with this repository's existing practice; no Trivy automation
   exists in `.github/workflows/ci.yml` today, and adding it is a separate,
@@ -100,10 +114,32 @@ and [docs/testing.md](../testing.md), not duplicated here.
 
 Owner: Leader @chi-thanh-nguyen. Consumers: `infrastructure/postgres/`,
 `infrastructure/docker-compose.yml`, `infrastructure/vm/docker-compose.vm.yml`,
-`infrastructure/vm/deploy.sh`, `backend/src/test/java/com/codemastery/integration/AbstractIntegrationTest.java`.
+`infrastructure/vm/deploy.sh`, `backend/src/test/java/com/codemastery/integration/AbstractIntegrationTest.java`,
+`.github/workflows/ci.yml`.
+
+## Amendment — 2 November 2026 audit remediation
+
+Authority: the Leader's 2 November 2026 (ICT) task directing remediation of
+the independent audit of PR #131 (verdict CHANGES_REQUIRED, reviewed head
+`b4c36bb`). It supersedes only the statements below; the technical decision
+and its authorization are unchanged.
+
+- **Preflight scope.** The original Scope approved permitting `build` for
+  `postgres` in `deploy.sh`. That permission let preflight accept a remote Git
+  build context, privileged builds, host-network builds and insecure
+  entitlements on the release model. It is withdrawn; `postgres` admits no
+  build configuration, and CI proves those mutations are rejected.
+- **Data-volume boundary.** Added to the image: the server starts only on an
+  empty data directory or one carrying the `codemastery-cluster-libc` marker
+  written after `initdb`; otherwise it exits 78 without changing the volume.
+- **Corrected facts.** The verified Bookworm baseline is 4 CRITICAL / 88 HIGH,
+  not 4/94; the original "no release has run on the VM" statement was not
+  verified; the residual risks were recorded as accepted without an acceptance
+  record and are now pending (see Status).
 
 ## Deferred
 
-Production packaging and VM deployment of this image; any future existing-
-volume migration procedure; a from-scratch PostgreSQL rebuild eliminating the
-inherited `gosu` layer entirely; Trivy CI automation.
+Production packaging and VM deployment of this image; any VM volume migration
+procedure; explicit acceptance or rejection of the residual risks; a
+from-scratch PostgreSQL rebuild eliminating the inherited `gosu` layer
+entirely; Trivy CI automation.

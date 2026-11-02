@@ -1729,28 +1729,26 @@ request), a release artifact and the Azure VM.
 ## DP01 PostgreSQL Alpine/su-exec image qualification — 2 November 2026
 
 Scope: [ADR003](decisions/003-postgresql-alpine-su-exec-image.md) and
-[deployment.md, "DP01 PostgreSQL Alpine/su-exec image hardening"](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026).
-Run on macOS 27.2 arm64 (Docker Desktop, native arm64 and `linux/amd64` under
-emulation as noted), Docker Engine 29.8.1, Trivy 0.76.1, Maven Wrapper,
-OpenJDK 25.0.4.1, on `main` at `808457c`.
+[deployment.md, "DP01 PostgreSQL Alpine/su-exec image hardening"](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026),
+which holds the measured details. Run on 2 November 2026 on macOS 27.2 arm64
+(Docker Desktop, Engine 29.8.1; `linux/amd64` runs use Rosetta), Trivy 0.76.1
+(database 2026-11-01), Maven Wrapper, OpenJDK 25.0.4.1. Source: branch
+`fix/dp01-postgres-alpine-su-exec` at `b4c36bb` plus the uncommitted audit
+remediation. Artifact: local `linux/amd64` build, image ID
+`sha256:4507d6a0cff2a3fb7502e55ee2e200561eaaa79a8f44207528492fd5796ef6eb`.
 
 | Check | Command/method | Result |
 | --- | --- | --- |
-| Base digest verification | `docker build --platform linux/amd64 infrastructure/postgres` | Resolved and pinned `postgres:17.11-alpine3.24@sha256:266d3c2575…c917e7b`, matching the Dockerfile |
-| PostgreSQL version | `postgres --version` in the built image | `postgres (PostgreSQL) 17.11` |
-| gosu → su-exec | `readlink /usr/local/bin/gosu`; `gosu postgres id` | `/sbin/su-exec`; `uid=70(postgres) gid=70(postgres)` |
-| Trivy, final filesystem | `trivy image --scanners vuln codemastery-test/postgres:qualification` | 0 vulnerabilities at every severity; 0 language-specific files |
-| OCI layer inspection | `docker save`, extract, `tar -tzf` each layer blob | Original `usr/local/bin/gosu` present in the base layer; the `rm` layer is a whiteout (`.wh.gosu`), not a deletion; the `ln -s` layer adds an unrelated 176-byte symlink entry. Residual risk documented, not resolved |
-| Fresh init, auth, SQL, restart, shutdown | Disposable container + named volume: `pg_isready`, `CREATE TABLE`/`INSERT`/`SELECT`, `docker stop`/`start`, re-query | All passed; data persisted across restart; main process ran as `postgres` (non-root) |
-| CodeMastery role provisioning | `deploy.sh`'s `provision_db_roles`, `harden_after_migration`, `verify_role_separation` against this image with the real `V001`–`V006` migrations, plus one approved and one denied SQL probe | All passed, including idempotent re-provisioning |
-| Locale/collation | `SELECT datcollate, datctype FROM pg_database` on a fresh cluster, bookworm vs. this image | Both report `en_US.utf8`; Alpine/musl does not implement distinct named locales, so this label does not guarantee glibc-equivalent sort order. Existing-volume migration not tested; treated as unresolved, not safe |
-| Integration-test root cause | Raw `docker exec` as a different OS user (`postgres`) vs. the default exec user; `readlink /proc/<pid>/exe` of the other user's process | Empty (`ptrace_may_access` denies cross-UID `/proc/<pid>/exe` without `CAP_SYS_PTRACE`, dropped by default in Docker); `comm`/`cmdline` stayed readable. Reproduced identically under `linux/amd64` emulation on this host (both bookworm and Alpine resolved `/proc/<pid>/exe` to the Rosetta translator, not the real binary) |
-| Backend suite | `cd backend && ./mvnw verify` | BUILD SUCCESS. 429 tests, 0 failures, 0 errors, including the fixed `psqlVariablesKeepCredentialsOutOfProcessArguments` and the new `psqlVariablesDetectionSurvivesUnreadableExeAcrossOsUsers` regression test |
-| Local Compose | `docker compose -f infrastructure/docker-compose.yml config` and `up -d --build postgres` under a throwaway project name | Config resolves `postgres.build.context` to `infrastructure/postgres`; build and healthy startup succeeded (verified without colliding with the developer's own running `codemastery` stack, left untouched) |
-| VM Compose override | Same, with `--compose-override infrastructure/vm/docker-compose.vm.yml` | Resolves `postgres.image: codemastery.invalid/postgres:release` with no `build` key |
-| `deploy.sh preflight` | Real Ubuntu 24.04 `linux/amd64` container (Docker socket passed through), `--compose-override infrastructure/vm/docker-compose.vm.yml`, a throwaway env file and a self-signed TLS pair | `PREFLIGHT OK: inputs, env file, host and Compose policy checks passed.` |
+| Image identity | `postgres --version`; `readlink /usr/local/bin/gosu`; `gosu postgres id` | `17.11`; `/sbin/su-exec`; `uid=70(postgres)` |
+| Trivy | `docker save --platform linux/amd64`, `trivy image --input` | This image 0 findings; Bookworm 4 CRITICAL / 88 HIGH (amd64 and arm64); Alpine base 1 / 25, all `gosu` |
+| OCI layers | Each layer tar of the saved image | Base layer 2 keeps the 1,769,900-byte `gosu`; layer 11 is its whiteout; layer 12 the symlink. Residual risk pending acceptance |
+| Foreign data volume | Bookworm-initialized and pre-marker volumes, direct `docker run` and `docker compose up --wait` | Exit 78, `refusing to start`, volume content unchanged; reproduced the silent start and `amcheck` failure at `b4c36bb` first |
+| Fresh volume | Init, marker, write, restart | Marker `musl`; data kept |
+| Local migration | [setup.md procedure](setup.md#existing-postgresql-volumes) on a throwaway project with 600 indexed rows | All rows identical by md5; `bt_index_check` clean; index and sort order agree |
+| `deploy.sh preflight` | Ubuntu 24.04 `linux/amd64` container, committed override, synthetic env and TLS pair | `PREFLIGHT OK`; remote Git context, privileged, host-network and insecure-entitlement PostgreSQL builds rejected (all accepted at `b4c36bb`) |
+| CI steps, run locally | Preflight against rendered Compose; containerd round trip (isolated `linux/amd64` Engine 29.8.1); new volume-boundary step | Pass. Containerd ran with the PostgreSQL image built on the host and `--provenance=false` fixtures, because emulated BuildKit cannot run `RUN` and Engine 29 adds attestations that Engine 28 on the runner does not. The volume-boundary step fails against the `b4c36bb` image |
+| Credential inspection | Five `psqlVariables*` tests; mutation run with the old heuristic; real Rosetta run | Pass; old heuristic fails the translated (`0 0`) and decoy (`1 0`) cases; Rosetta: `1 0` clean, `1 1` leaking, as root and `postgres` |
+| Backend suite | `cd backend && ./mvnw verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures, 0 errors; no per-run `postgres-it` image left |
 
-Not covered locally: GitHub Actions results (the **backend** job picks up the
-new image automatically through Testcontainers; no other job was changed —
-see deployment.md for which `postgres:17.11-bookworm` references were
-deliberately left as-is and why), a release archive, and the Azure VM.
+Not covered: GitHub Actions results for this revision, a release archive, and
+the Azure VM.

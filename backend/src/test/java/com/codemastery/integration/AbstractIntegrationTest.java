@@ -10,6 +10,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.nio.file.Path;
+import java.util.UUID;
 
 /**
  * Shared Spring Boot and PostgreSQL foundation for concrete integration tests.
@@ -27,12 +28,13 @@ public abstract class AbstractIntegrationTest {
     /**
      * Built from infrastructure/postgres/Dockerfile (DP01 hardened PostgreSQL) rather than a plain
      * image reference, so Testcontainers always exercises the same su-exec-patched image used by
-     * local Compose and the VM release, not an unpatched upstream tag. Built once per JVM and cached
-     * by Testcontainers under its own generated tag; no developer-specific local tag is required.
+     * local Compose and the VM release, not an unpatched upstream tag. Built once per JVM under a
+     * tag unique to that JVM, so parallel checkouts or JVMs never start each other's build, and
+     * removed by Testcontainers when the session ends.
      */
     protected static final PostgreSQLContainer POSTGRES =
             new PostgreSQLContainer(DockerImageName
-                    .parse(new ImageFromDockerfile("codemastery/postgres", false)
+                    .parse(new ImageFromDockerfile("localhost/codemastery/postgres-it:" + UUID.randomUUID(), true)
                             .withFileFromPath(".", Path.of("..", "infrastructure", "postgres"))
                             .get())
                     .asCompatibleSubstituteFor("postgres"))
