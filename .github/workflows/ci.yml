@@ -516,6 +516,7 @@ jobs:
           cat > "$work/release.yml" <<EOF
           services:
             postgres:
+              image: registry.invalid/codemastery/postgres:ci-fixture
               ports: !reset []
               restart: unless-stopped
             minio:
@@ -1585,12 +1586,12 @@ jobs:
             rm -rf "$work"
           }
           trap cleanup EXIT
-          # The base Compose file's registry images: official multi-platform
-          # PostgreSQL and the digest-pinned MinIO server and client. They remain
-          # local-only pins; this exercises their real registry index and
-          # attestation structure, not their production admission.
+          # The base Compose file's registry images: the digest-pinned multi-platform
+          # MinIO server and client. They remain local-only pins; this exercises
+          # their real registry index and attestation structure, not their
+          # production admission. PostgreSQL is built locally from its Dockerfile.
           mapfile -t registry < <(sed -n 's/^    image: //p' infrastructure/docker-compose.yml)
-          [[ ${#registry[@]} -eq 3 ]] || { echo "Unexpected base Compose image list." >&2; exit 1; }
+          [[ ${#registry[@]} -eq 2 ]] || { echo "Unexpected base Compose image list." >&2; exit 1; }
           for ref in "${registry[@]}"; do docker pull -q "$ref" >/dev/null; done
           printf 'fixture\n' > "$work/payload"
           printf 'FROM scratch\nCOPY payload /payload\nCMD ["/payload"]\n' > "$work/backend.Dockerfile"
@@ -1599,10 +1600,11 @@ jobs:
             docker build -q --platform linux/amd64 -f "$work/$service.Dockerfile" -t "$prefix/$service:r1" "$work" >/dev/null
           done
           # Disposable names, so removing and reloading exercises the real store.
-          refs=()
-          for i in 0 1 2; do
-            service=(postgres minio minio-init); refs+=("$prefix/${service[$i]}:r1")
-            docker tag "${registry[$i]}" "${refs[$i]}"
+          refs=("$prefix/postgres:r1")
+          docker build -q --platform linux/amd64 -t "${refs[0]}" infrastructure/postgres >/dev/null
+          for i in 0 1; do
+            service=(minio minio-init); refs+=("$prefix/${service[$i]}:r1")
+            docker tag "${registry[$i]}" "${refs[$((i + 1))]}"
           done
           refs+=("$prefix/backend:r1" "$prefix/frontend:r1")
           cat > "$work/structure.py" <<'PY'
@@ -1612,13 +1614,13 @@ jobs:
           tops = json.load(t.extractfile("index.json"))["manifests"]
           if mode == "default":
               index = next(m for m in tops if m["mediaType"].endswith("image.index.v1+json")
-                           and "postgres" in (m.get("annotations") or {}).get("io.containerd.image.name", ""))
+                           and "/minio:" in (m.get("annotations") or {}).get("io.containerd.image.name", ""))
               children = json.loads(t.extractfile("blobs/sha256/" + index["digest"][7:]).read())["manifests"]
               runnable = [c for c in children
                           if (c.get("annotations") or {}).get("vnd.docker.reference.type") != "attestation-manifest"]
               absent = [c for c in runnable if "blobs/sha256/" + c["digest"][7:] not in names]
-              assert len(runnable) > 1 and absent, "PostgreSQL index is not a partial multi-platform save"
-              print(f"PostgreSQL index: {len(runnable)} platforms listed, {len(absent)} absent from the archive")
+              assert len(runnable) > 1 and absent, "MinIO index is not a partial multi-platform save"
+              print(f"MinIO index: {len(runnable)} platforms listed, {len(absent)} absent from the archive")
           else:
               # Docker 29 writes attestations as top-level referrers; Docker 28
               # does not. Both layouts are valid; synthetic fixtures cover both.
@@ -1636,14 +1638,14 @@ jobs:
           PY
           cat > "$work/mutate.py" <<'PY'
           import io, json, sys, tarfile
-          # Real-archive mutations: drop PostgreSQL's amd64 manifest, or alter a referrer.
+          # Real-archive mutations: drop MinIO's amd64 manifest, or alter a referrer.
           source, target, mode = sys.argv[1:]
           NAME, SUBJECT = "io.containerd.image.name", "io.containerd.manifest.subject"
           with tarfile.open(source) as t:
               index = json.load(t.extractfile("index.json"))
               skip = set()
               if mode == "drop-amd64":
-                  top = next(m for m in index["manifests"] if "postgres" in (m.get("annotations") or {}).get(NAME, ""))
+                  top = next(m for m in index["manifests"] if "/minio:" in (m.get("annotations") or {}).get(NAME, ""))
                   children = json.loads(t.extractfile("blobs/sha256/" + top["digest"][7:]).read())["manifests"]
                   amd64 = next(c for c in children if (c.get("platform") or {}).get("architecture") == "amd64")
                   skip.add("blobs/sha256/" + amd64["digest"][7:])
