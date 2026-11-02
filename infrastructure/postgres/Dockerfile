@@ -28,7 +28,11 @@ LABEL org.opencontainers.image.title="CodeMastery PostgreSQL" \
       org.opencontainers.image.base.name="postgres:17.11-alpine3.24" \
       org.opencontainers.image.base.digest="sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b"
 
-RUN apk add --no-cache su-exec
+# Pinned to the reviewed package from Alpine v3.24/main (aports 3fd3d4a8), verified
+# by apk against the signing keys in the pinned base. x86_64: index checksum
+# Q1qSe5GhOmAg5kGDr0aUxb07P589Q=, package sha256 4003163f…69be5. The build fails if
+# the index no longer offers exactly this version.
+RUN apk add --no-cache su-exec=0.3-r0
 
 RUN rm /usr/local/bin/gosu
 

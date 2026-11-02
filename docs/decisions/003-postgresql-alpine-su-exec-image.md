@@ -26,7 +26,10 @@ Testcontainers, and the VM release with a locally built image:
 `postgres:17.11-alpine3.24` (pinned by OCI digest
 `sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b`),
 with the Debian/Bookworm image's vulnerable `gosu` executable replaced by
-`su-exec`, built from the new `infrastructure/postgres/Dockerfile`.
+`su-exec` (pinned to the signed Alpine v3.24/main package `0.3-r0`), built from
+the new `infrastructure/postgres/Dockerfile`. `su-exec` is a runtime
+privilege-switching utility in the image; Trivy, used to qualify it, is a
+security scanner outside the image.
 
 PostgreSQL major version (17), database names, environment variable
 contracts, the `/var/lib/postgresql/data` volume layout, the healthcheck,
@@ -140,6 +143,8 @@ and its authorization are unchanged.
 ## Deferred
 
 Production packaging and VM deployment of this image; any VM volume migration
-procedure; explicit acceptance or rejection of the residual risks; a
-from-scratch PostgreSQL rebuild eliminating the inherited `gosu` layer
-entirely; Trivy CI automation.
+procedure; explicit acceptance or rejection of the residual risks; Trivy CI
+automation; adoption of a byte-clean image without the inherited `gosu` layer.
+A disposable flattened (`FROM scratch`) experiment removed every copy of the
+`gosu` bytes and passed the scan and data-volume checks; deployment.md records
+it and its trade-offs. It is not adopted and needs a Leader decision.

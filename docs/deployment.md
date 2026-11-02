@@ -2683,8 +2683,8 @@ base digest:
 
 `postgres:17.11-alpine3.24@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b`
 
-It installs `su-exec`, removes `/usr/local/bin/gosu` and links that path to
-`su-exec` in three separate `RUN` layers, labels the image without an empty or
+It installs `su-exec=0.3-r0`, removes `/usr/local/bin/gosu` and links that path
+to `su-exec` in three separate `RUN` layers, labels the image without an empty or
 invented version/revision, and adds a data-volume boundary (below). The
 separate removal layer matters to Trivy, not to the bytes: removal writes a
 whiteout (`usr/local/bin/.wh.gosu`), and Trivy drops a lower layer's findings
@@ -2696,16 +2696,34 @@ replaces the file without a whiteout, and Trivy still reports the base layer's
 
 Recorded on 2 November 2026 on macOS 27.2 arm64, Docker Desktop with Engine
 29.8.1, Trivy 0.76.1 (database updated 2026-11-01 19:08 UTC, not refreshed
-during the scans). Source: branch `fix/dp01-postgres-alpine-su-exec` at
-`b4c36bb` plus the uncommitted audit remediation recorded here. Artifact: a
-local `docker build --platform linux/amd64 infrastructure/postgres`, image ID
-`sha256:4507d6a0cff2a3fb7502e55ee2e200561eaaa79a8f44207528492fd5796ef6eb`
-(14 layers). A rebuild resolves `su-exec` from the Alpine index at build time
-and gets a different ID; only the base is digest-pinned.
+during the scans). Sources: the audit remediation measured on the tree
+committed as `cc5cb95`, and the `su-exec` pin measured on `55902cc` plus that
+pin. Artifact: a local `docker build --no-cache --platform linux/amd64
+infrastructure/postgres` with the pin, image ID
+`sha256:f7cccf3d0c3f03268d18d1ca519bb1c23170cb65239b7ddad62972739af359bd`
+(14 layers).
 
 - `postgres --version` → `postgres (PostgreSQL) 17.11`; `/usr/local/bin/gosu`
   → `/sbin/su-exec`; `gosu postgres id` → `uid=70(postgres) gid=70(postgres)`;
   the server runs as `postgres`.
+
+**`su-exec` package.** Alpine v3.24/main offers exactly `0.3-r0` (aports commit
+`3fd3d4a8594debe3a34527c531dec7c791bc0ec9`). `apk-tools` 3.0.8 installs the
+pinned version and fails when the index does not offer it. Both packages
+pass `apk verify` against the Alpine developer keys shipped in the pinned base:
+
+| Architecture | Index checksum (`C:`) | Package SHA-256 | Signing key | Installed `/sbin/su-exec` SHA-256 |
+| --- | --- | --- | --- | --- |
+| x86_64 (deployed) | `Q1qSe5GhOmAg5kGDr0aUxb07P589Q=` | `4003163f58cd4a75df79973171d25e4912df4284d8bac9850ac267b58b969be5` (3,775 bytes) | `alpine-devel@lists.alpinelinux.org-6165ee59` | `725e4e701f4b05fae05e2121a088ac3efe18768ffde9d542f3a310f5853eb574` |
+| aarch64 | `Q1+O7B2wiWhg5VbXFCiAnyDcfnpmg=` | `e40ecb44d07d25686f0e0836f4990e7c47d5d44d8956bcb523f5cab9108dd156` (4,062 bytes) | `alpine-devel@lists.alpinelinux.org-616ae350` | `d8210266a508d301fe0a5111e2486af823c5a9a57629ca5c1d53f5e91ed4951e` |
+
+**Reproducibility.** The build is not bit-for-bit reproducible. A second
+`--no-cache` build gave image ID `sha256:58156baf…6f76f`: layers 0–9 (the
+pinned base) are identical; in layers 10–13 the only content difference is
+`var/log/apk.log`, and the rest differ in file modification times only. The
+installed `su-exec` binary is identical. Image identity for a release
+therefore comes from the reviewed archive and `--expect-image`, not from a
+rebuild.
 
 **Trivy, CRITICAL/HIGH** (`docker save --platform …`, `trivy image --input`):
 
@@ -2726,16 +2744,29 @@ is the verified baseline. The 1 November record itself is unchanged.
 
 - Layer 2 (inherited base) still holds `usr/local/bin/gosu`, the original
   1,769,900-byte Go binary.
-- Layer 11 holds only the whiteout `usr/local/bin/.wh.gosu`.
-- Layer 12 holds the `usr/local/bin/gosu` → `/sbin/su-exec` symlink.
+- Layer 10 holds the `su-exec` package; layer 11 only the whiteout
+  `usr/local/bin/.wh.gosu`; layer 12 the `usr/local/bin/gosu` → `/sbin/su-exec`
+  symlink; layer 13 the data-volume boundary scripts.
 
 The zero-finding result is therefore Trivy's merged, whiteout-applied view. The
 vulnerable bytes are still distributed in the base layer blob, and a scanner
 that reads layer blobs individually finds them. They are not reachable through
-the container's merged filesystem. A byte-clean artifact would need a rebuild
-that discards the upstream layers, which is out of this decision's scope. This
-residual risk is **pending explicit Leader acceptance**; it is not accepted by
-this record or by ADR003.
+the container's merged filesystem. This residual risk is **pending explicit
+Leader acceptance**; it is not accepted by this record or by ADR003.
+
+**Byte-clean alternative (disposable experiment, not adopted).** A two-stage
+build that copies the qualified image's merged filesystem into `FROM scratch`
+and restates its configuration (environment without `GOSU_VERSION`, volume,
+`SIGINT` stop signal, port, entrypoint and command) produced a one-layer
+`linux/amd64` image. No layer blob in it contains the 1,769,900-byte `gosu` or
+any fragment of it, compared with layer 2 of the qualified image. Trivy reported
+0 findings, the CI data-volume boundary step passed against it (exit 78 and
+unchanged volume, fresh initialization, marker, restart), and `gosu postgres id`
+resolved to `su-exec` as `uid=70`. Adopting it would discard the base image's
+layer identities, so the base digest could no longer be checked layer by layer;
+every upstream configuration change would have to be mirrored by hand; and the
+release image would need full requalification. It is recorded as evidence for
+a Leader decision and is not part of `infrastructure/postgres/Dockerfile`.
 
 **PostgreSQL runtime** (disposable containers and volumes): fresh
 initialization, `pg_isready`, SQL write/read, restart with the same volume
@@ -2844,6 +2875,8 @@ tests, 0 failures, 0 errors; no `postgres-it` image remained afterwards.
 
 - **Risk acceptance.** The Leader explicitly accepts or rejects the inherited
   `gosu` layer bytes and the treatment of pre-existing volumes.
+- **Byte-clean image.** Adopting the flattened alternative above, or keeping
+  the layered image, is a Leader decision.
 - **Packaging.** Build `codemastery.invalid/postgres:release` from the merged
   revision and include it in the release archive alongside the other four
   images. Not done here.
@@ -2854,5 +2887,7 @@ tests, 0 failures, 0 errors; no `postgres-it` image remained afterwards.
 This record and its changes were produced through AI-assisted development
 (Anthropic Claude Code) under the Leader's tasks; the audit findings it
 remediates came from an independent Codex audit. No AI service is introduced
-into CodeMastery's runtime; `su-exec` and Trivy are the only additions, both
-build-time/scanning tools, not application dependencies.
+into CodeMastery's runtime. `su-exec` is a runtime component of the PostgreSQL
+image: the entrypoint uses it to drop from root to the `postgres` user before
+starting the server. Trivy is a security scanner used manually for
+qualification; it is not part of any image or CI job.
