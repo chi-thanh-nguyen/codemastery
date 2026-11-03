@@ -869,8 +869,10 @@ assert set(init.get("environment", {})) == expected_env, sorted(init.get("enviro
 for key in ("user", "volumes", "ports", "cap_add", "privileged", "build"):
     assert not init.get(key), key
 assert init.get("restart") in (None, "no")
+assert init.get("read_only") is True and init.get("tmpfs") == ["/tmp"], (init.get("read_only"), init.get("tmpfs"))
+assert init.get("cap_drop") == ["ALL"] and init.get("security_opt") == ["no-new-privileges:true"]
 ' "${IMAGE}"
-pass "effective VM model runs the image entrypoint with only the six approved variables"
+pass "effective VM model runs the image entrypoint with only the six approved variables, read-only with /tmp, no capabilities and no-new-privileges"
 
 # The override keeps its abstract server name, inherits the base command and the
 # named data volume, and sets the approved restart policy. The test images then
@@ -890,6 +892,8 @@ assert minio.get("restart") == "unless-stopped", minio.get("restart")
 environment = minio.get("environment", {})
 assert sorted(environment) == ["MINIO_BROWSER", "MINIO_ROOT_PASSWORD", "MINIO_ROOT_USER"], sorted(environment)
 assert environment["MINIO_BROWSER"] == "off", environment["MINIO_BROWSER"]
+assert minio.get("read_only") is True and not minio.get("tmpfs"), (minio.get("read_only"), minio.get("tmpfs"))
+assert minio.get("cap_drop") == ["ALL"] and minio.get("security_opt") == ["no-new-privileges:true"]
 ' "${want}" "${SERVER_CMD[@]}"
 }
 check_minio_model codemastery.invalid/minio:release \
@@ -904,7 +908,7 @@ assert minio.get("command") == sys.argv[1:], minio.get("command")
 ports = sorted((p.get("host_ip"), p.get("published"), p.get("target")) for p in minio.get("ports", []))
 assert ports == [("127.0.0.1", "9000", 9000), ("127.0.0.1", "9001", 9001)], ports
 ' "${SERVER_CMD[@]}"
-pass "effective VM model keeps codemastery.invalid/minio:release, the base command, the named minio-data volume and restart unless-stopped, and adds only MINIO_BROWSER=off; the local model is unchanged"
+pass "effective VM model keeps codemastery.invalid/minio:release, the base command, the named minio-data volume and restart unless-stopped, and adds only MINIO_BROWSER=off and the runtime hardening; the local model is unchanged"
 
 # State created by the existing local inline initializer must be accepted as-is.
 "${local_compose[@]}" up -d --no-build --pull never minio-init >"${WORK}/local-up.log" 2>&1 \
@@ -917,6 +921,12 @@ expect_listening "local server listeners" "$("${local_compose[@]}" ps -q minio)"
 cid="$("${vm_compose[@]}" ps -a -q minio-init)"
 expect_eq "minio-init exit" "$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "${cid}")" "exited:0"
 expect_contains "release run on local state" "$(docker logs "${cid}" 2>&1)" "initialized (changes: 0)"
+# The release containers really run with the modelled restrictions.
+for service in minio minio-init; do
+  expect_eq "release ${service} runtime restrictions" \
+    "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}} {{json .HostConfig.SecurityOpt}}' "$("${vm_compose[@]}" ps -a -q "${service}")")" \
+    'true ["ALL"] null ["no-new-privileges:true"]'
+done
 expect_eq "backend placeholder" "$("${vm_compose[@]}" ps --format '{{.State}}' backend)" "running"
 expect_initialized_state "local-then-release" "${project}_default"
 # Compose recreated the server with the release environment on the same volume.

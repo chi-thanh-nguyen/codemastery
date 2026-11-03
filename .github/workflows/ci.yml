@@ -313,6 +313,54 @@ jobs:
           if ports("frontend", {"PortBindings": {"8080/tcp": unspecified}}, {"8080/tcp": dual_stack}).stdout.strip() \
                   != "0.0.0.0:443, [::]:443":
               raise SystemExit("Published-port evidence summary is not recorded")
+          # Runtime hardening: exactly the reviewed values per service, nothing
+          # broader, and nothing missing.
+          pg_caps = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
+          reviewed = {
+              "postgres": {"cap_add": pg_caps, "tmpfs": ["/var/run/postgresql"]},
+              "minio": {},
+              "minio-init": {"tmpfs": ["/tmp"]},
+              "backend": {"tmpfs": ["/tmp"]},
+              "frontend": {"tmpfs": ["/tmp"]},
+          }
+          hardening_problems = ("must run with exactly no-new-privileges", "unapproved privilege",
+                                "unsupported Compose options")
+          def hardening(service, **changes):
+              s = {"image": "reviewed:image", "read_only": True, "cap_drop": ["ALL"],
+                   "security_opt": ["no-new-privileges:true"], **reviewed[service]}
+              for key, value in changes.items():
+                  if value is None:
+                      s.pop(key, None)
+                  else:
+                      s[key] = value
+              result = subprocess.run(
+                  [sys.executable, "-c", policy, "https://example.invalid", "/dev/null"],
+                  input=json.dumps({"services": {service: s}}), text=True, capture_output=True, check=False,
+              )
+              return [p for p in hardening_problems if f"service '{service}' " in result.stderr and p in result.stderr]
+          for service in reviewed:
+              if hardening(service):
+                  raise SystemExit(f"Reviewed runtime hardening rejected for {service}")
+          for name, service, changes in (
+              ("missing no-new-privileges", "backend", {"security_opt": None}),
+              ("no-new-privileges disabled", "minio-init", {"security_opt": ["no-new-privileges:false"]}),
+              ("unconfined seccomp added", "frontend", {"security_opt": ["no-new-privileges:true", "seccomp=unconfined"]}),
+              ("unconfined AppArmor added", "minio", {"security_opt": ["no-new-privileges:true", "apparmor=unconfined"]}),
+              ("missing cap_drop", "minio", {"cap_drop": None}),
+              ("partial cap_drop", "frontend", {"cap_drop": ["NET_RAW"]}),
+              ("cap_add outside PostgreSQL", "backend", {"cap_add": ["NET_BIND_SERVICE"]}),
+              ("extra PostgreSQL capability", "postgres", {"cap_add": pg_caps + ["SYS_ADMIN"]}),
+              ("missing PostgreSQL capability", "postgres", {"cap_add": ["CHOWN", "FOWNER", "SETGID", "SETUID"]}),
+              ("writable root filesystem", "postgres", {"read_only": False}),
+              ("missing read_only", "backend", {"read_only": None}),
+              ("extra tmpfs path", "backend", {"tmpfs": ["/tmp", "/run"]}),
+              ("tmpfs with exec", "frontend", {"tmpfs": ["/tmp:exec"]}),
+              ("missing tmpfs", "minio-init", {"tmpfs": None}),
+              ("tmpfs on MinIO", "minio", {"tmpfs": ["/tmp"]}),
+              ("tmpfs over PostgreSQL data", "postgres", {"tmpfs": ["/var/run/postgresql", "/var/lib/postgresql/data"]}),
+          ):
+              if not hardening(service, **changes):
+                  raise SystemExit(f"Compose policy accepted runtime hardening change: {name}")
           PY
       - name: Check the runtime privilege matrix and its contract record
         shell: bash
@@ -520,15 +568,27 @@ jobs:
               build: !reset null
               ports: !reset []
               restart: unless-stopped
+              read_only: true
+              tmpfs: [/var/run/postgresql]
+              cap_drop: [ALL]
+              cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+              security_opt: ["no-new-privileges:true"]
             minio:
               ports: !reset []
               restart: unless-stopped
               environment:
                 MINIO_BROWSER: "off"
+              read_only: true
+              cap_drop: [ALL]
+              security_opt: ["no-new-privileges:true"]
             minio-init:
               image: registry.invalid/codemastery/minio-init@sha256:$(printf 'a%.0s' {1..64})
               entrypoint: !reset null
               command: !reset null
+              read_only: true
+              tmpfs: [/tmp]
+              cap_drop: [ALL]
+              security_opt: ["no-new-privileges:true"]
             backend:
               image: registry.invalid/codemastery/backend:ci-fixture
               ports: !reset []
@@ -540,12 +600,20 @@ jobs:
                 SPRING_FLYWAY_PASSWORD: \${SPRING_FLYWAY_PASSWORD:?}
                 SERVER_FORWARD_HEADERS_STRATEGY: NONE
                 SPRING_PROFILES_ACTIVE: prod
+              read_only: true
+              tmpfs: [/tmp]
+              cap_drop: [ALL]
+              security_opt: ["no-new-privileges:true"]
             frontend:
               image: registry.invalid/codemastery/frontend:ci-fixture
               ports: !override
                 - "443:8080"
               healthcheck: !reset null
               restart: unless-stopped
+              read_only: true
+              tmpfs: [/tmp]
+              cap_drop: [ALL]
+              security_opt: ["no-new-privileges:true"]
               volumes:
                 - type: bind
                   source: $work/certs
@@ -577,6 +645,41 @@ jobs:
               exit 1
             fi
           }
+          reject 'must run with exactly no-new-privileges' no-new-privileges-removed <<'EOF'
+          services:
+            backend:
+              security_opt: !reset []
+          EOF
+          reject 'unapproved privilege' seccomp-unconfined <<'EOF'
+          services:
+            frontend:
+              security_opt: ["seccomp=unconfined"]
+          EOF
+          reject 'unapproved privilege' backend-cap-add <<'EOF'
+          services:
+            backend:
+              cap_add: [NET_ADMIN]
+          EOF
+          reject 'unapproved privilege' postgres-sys-admin <<'EOF'
+          services:
+            postgres:
+              cap_add: [SYS_ADMIN]
+          EOF
+          reject 'must run with exactly no-new-privileges' minio-capabilities-kept <<'EOF'
+          services:
+            minio:
+              cap_drop: !reset []
+          EOF
+          reject 'must run with exactly no-new-privileges' postgres-writable-root <<'EOF'
+          services:
+            postgres:
+              read_only: false
+          EOF
+          reject 'tmpfs must be exactly /tmp' backend-extra-tmpfs <<'EOF'
+          services:
+            backend:
+              tmpfs: [/run]
+          EOF
           reject 'unapproved network options' ipam-subnet <<'EOF'
           networks:
             default:
@@ -2528,7 +2631,16 @@ jobs:
           minio_env = svc["minio"]["environment"]
           assert sorted(minio_env) == ["MINIO_BROWSER", "MINIO_ROOT_PASSWORD", "MINIO_ROOT_USER"], sorted(minio_env)
           assert minio_env["MINIO_BROWSER"] == "off", minio_env["MINIO_BROWSER"]
-          print("ok: effective model: no local-only images or builds, IPv4 443 only, certificate bind, PT15M, MinIO Console off")'
+          writable = {"postgres": ["/var/run/postgresql"], "minio": [], "minio-init": ["/tmp"],
+                      "backend": ["/tmp"], "frontend": ["/tmp"]}
+          for name, s in svc.items():
+              assert s.get("read_only") is True, name
+              assert s.get("security_opt") == ["no-new-privileges:true"], (name, s.get("security_opt"))
+              assert s.get("cap_drop") == ["ALL"], (name, s.get("cap_drop"))
+              assert sorted(s.get("cap_add") or []) == (["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
+                                                        if name == "postgres" else []), (name, s.get("cap_add"))
+              assert sorted(s.get("tmpfs") or []) == writable[name], (name, s.get("tmpfs"))
+          print("ok: effective model: no local-only images or builds, IPv4 443 only, certificate bind, PT15M, MinIO Console off, runtime hardening")'
           # Image-level policy (verify_images) for the release images built in this job.
           images() {
             bash -c 'source "$1"; COMPOSE_MODEL="$2"; shift 2
