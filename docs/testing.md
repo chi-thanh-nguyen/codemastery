@@ -1756,3 +1756,206 @@ the pin, image ID
 
 Not covered: GitHub Actions results for this revision, a release archive, and
 the Azure VM.
+
+## DP01 pre-release security hardening verification — 2 November 2026
+
+Scope: [deployment.md, "DP01 pre-release security hardening"](deployment.md#dp01-pre-release-security-hardening--2-november-2026),
+which holds the scan details. Run on 2–3 November 2026 on macOS 27.2 arm64 with
+Docker Engine 29.8.1 (containerd image store; `linux/amd64` under emulation),
+OpenJDK 25.0.4.1, Trivy 0.76.1 (database 2026-11-01 19:08 UTC), govulncheck
+v1.9.0 and cosign v3.1.4, on branch `fix/pre-release-security-hardening` based on
+`main` at `b2984a1`. Candidates used `codemastery-candidate/*` tags, never a
+`codemastery.invalid/*:release` name. `deploy.sh` code paths ran in disposable
+Ubuntu 24.04 `linux/amd64` or Alpine tool containers on the host Docker daemon,
+because macOS has bash 3.2 and `deploy.sh` enforces the B1 host.
+
+| Check | Command/method | Result |
+| --- | --- | --- |
+| Images and scans | `docker build --platform linux/amd64`; `docker save --platform linux/amd64`; `trivy image --input --scanners vuln`, default and `--detection-priority comprehensive` | Release frontend 0/0 (base: 1 CRITICAL, 2 HIGH); backend 0 CRITICAL/HIGH, 24 MEDIUM unfixable; PostgreSQL 0 (merged view); minimal MinIO GO-2026-5932 only |
+| Pinned Alpine set | Sorted `apk list -I` versus the `main` recipe on the same day | Identical |
+| govulncheck | `-mode=binary` on `mc`, `minio`, the inherited `gosu`, a stripped and unstripped control binary | As recorded; the stripped control reproduces the `openpgp/*` wildcard without `openpgp` |
+| Upstream signatures | `cosign verify`, Chainguard release workflow identity | Initializer base and server pins verify |
+| Image CI checks | Nginx ownership and setuid/setgid assertions | Fail on `main` images, pass on the candidates |
+| Compose policy, offline | CI step "Check offline Compose and provisioning safety guards" | Passes; its new hardening cases fail against `main`'s `deploy.sh` |
+| Compose policy, rendered | 21 override mutations of the committed model through `deploy.sh`'s policy code | Committed model accepted; every mutation rejected (a tmpfs over the PostgreSQL data volume is refused by Compose itself) |
+| Preflight, rendered fixture | CI step "Check preflight against rendered Compose" (Ubuntu 24.04 amd64 container) | `PREFLIGHT OK`, all rejection cases including the 7 new ones; `main`'s `deploy.sh` rejects the hardened fixture |
+| Preflight, committed override | CI step "Run DP01 preflight with the committed override and certificate layout" (non-root operator with `sudo`) | Passes, including the new hardening assertions |
+| Archive identity | CI steps "Check release archive identity models" and "Check image identity through a real save/load round trip" | Pass |
+| Five-image release path | Real `deploy.sh` `run_provision`/`run_deploy` on the hardened model with candidate images; archive, image-identity, port and host-TLS checks stubbed (no release archive; macOS cannot reach container addresses) | Completed: role provisioning and privilege matrix, initializer, private backend health, Flyway V001–V006, role separation, staged `nginx -t`, frontend healthy. Containers: read-only, `NoNewPrivs` 1, `CapBnd` 0 (PostgreSQL `0xcb`) |
+| Behavior on that stack | HTTPS through the frontend | SPA 200; register 201 (approved origin) / 403 (foreign); login; `/api/me/courses` 401/200; `/actuator/health` is the SPA HTML, not proxied |
+| Restart and recovery | Stop all, start in order, rerun initializer, log in again | Healthy; initializer `changes: 0`; account persisted |
+| Foreign volume, hardened | PostgreSQL with the release restrictions on a non-empty unmarked volume | Exit 78; volume unchanged |
+| Initializer writability | Release restrictions, UID 65532 | Only `/tmp` writable |
+| MinIO initializer suite | `test-minio-init.sh` for `golithus`, `chainguard`, `minimal` (after the CI build of `Dockerfile.minio-server`) | 26/26 each. First round 321/355/441 s; second round, with the hardening checks, 372/364 s; the minimal run's elapsed time is not meaningful because the host slept during it |
+| Ingress job | Its steps run locally with native images (CA store with an OpenSSL 3.5 container) | Build/origin rejection, CA store, stub and real-backend ingress passed |
+| PostgreSQL volume boundary | CI step on the committed image | Passes |
+| Backend suite | `cd backend && ./mvnw verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures |
+| Frontend | `npm ci`, `npm test`, `npm run typecheck`, `npm run build`, `npm audit` in `node:22.23.3-bookworm-slim` (pinned) | 390 tests; typecheck and build passed; 0 vulnerabilities |
+| F1 Option B experiment | Disposable build; three builds compared; test-only suite copy (identity assertions retargeted) | `mc` bit-identical in all three; 26/26 against all three servers; not adopted |
+| F4 flattened experiment | Disposable build; layer search; volume-boundary step; `./mvnw verify` with it as the Testcontainers Dockerfile; hardened five-image release path | No `gosu` bytes; merged filesystem identical; all pass; not adopted |
+| Whitespace | `git diff --check` | Passed |
+
+Not run: Playwright end-to-end tests (not available), the CI containerd registry
+step (GitHub Actions runs it), a release archive with the
+`codemastery.invalid/*:release` names, and the Azure VM. GitHub Actions results
+belong to the pull request.
+
+## DP01 final security remediation verification — 3 November 2026
+
+Scope: [deployment.md, "DP01 final security remediation"](deployment.md#dp01-final-security-remediation--3-november-2026).
+Run on 3 November 2026 on macOS 27.2 arm64 with Docker Engine 29.8.1 (containerd
+image store; `linux/amd64` under emulation), OpenJDK 25.0.4.1 on the host,
+Trivy 0.76.1 (database 2026-11-03 01:30 UTC), govulncheck v1.9.0 (database
+2026-11-02T22:01:43Z) and cosign v3.1.4, on `fix/pre-release-security-hardening`
+at `72e4786` plus the changes recorded there. Candidates used
+`codemastery-candidate/*` tags; `test-minio-init.sh` used its own
+`codemastery-test/minio-init:qualification` tag. `deploy.sh` code ran in
+disposable Ubuntu 24.04 `linux/amd64` tool containers.
+
+| Check | Command/method | Result |
+| --- | --- | --- |
+| Trivy, five candidates | `docker save --platform linux/amd64`; `trivy image --input --scanners vuln`, default and comprehensive | Initializer 0/0 (2 November image: 1 HIGH and 3 UNKNOWN distinct, comprehensive); PostgreSQL 0/0; backend 0 CRITICAL/HIGH, 24 MEDIUM and 4 LOW without a fix (unchanged); frontend 0/0 (2 November candidate with today's database: 2 HIGH, 1 MEDIUM, 1 UNKNOWN in `libexpat`); minimal MinIO GO-2026-5932 only |
+| govulncheck | `-mode=binary` on both `mc` binaries | Project-built: none; Chainguard: GO-2026-5841 (package), GO-2026-5932, GO-2026-6107, GO-2026-6860, GO-2026-6866 (module) |
+| `mc` reproducibility | BuildKit build (arm64 builder, cross-compiled); offline rebuild from the exported archive with its README command in an emulated `linux/amd64` Go container; the source archive from two separate BuildKit builds | `mc` `025691d4…` and archive `ed6f972e…` identical each time |
+| `x/crypto` fix version | `diff -r` of the `v0.58.0` and `v0.58.1-0.20261009181718-2f1f834330b2` module trees | Only the `openpgp` directory differs (removed) |
+| Initializer identity model | `test-minio-init.sh IMAGE` on the 2 November image, the Option B experiment and three mutated builds | All rejected with the expected assertion |
+| MinIO initializer suite | `test-minio-init.sh` for `golithus`, `chainguard`, `minimal` | 27/27 each (474, 364 and 360 s) |
+| Local initializer argv | Base Compose initializer with an argument-logging `mc` wrapper; `main`'s file and this branch's | `main`: both secrets in `mc` arguments; branch: neither, initialization succeeds; a secret with a tab is refused before any `mc` call |
+| PostgreSQL equivalence | New CI step "Check the PostgreSQL image is byte-clean and equivalent to its layered build"; also against a classic-builder build | Passes: configuration equal except the two variables, 3,887 entries equal, one layer, no `gosu` |
+| PostgreSQL volume boundary | CI step on the byte-clean image | Passes |
+| Backend suite | `cd backend && ./mvnw -B verify` (Testcontainers builds the byte-clean image) | BUILD SUCCESS: 468 unit, 171 integration, 0 failures |
+| Frontend | `npm ci`, `npm test`, `npm run typecheck`, `npm run build`, `npm audit` in `node:22.23.3-bookworm-slim` (pinned) | Typecheck, build and audit (0 vulnerabilities) passed. `npm test`: first run 389/390 with one failure while the host ran two Docker suites (failing test name not captured); rerun 390/390. The frontend source is unchanged by this branch |
+| Frontend package set | `apk info -v` of the candidate versus `apk upgrade` on the pinned base the same day | Identical |
+| Ingress job | Its first four steps locally with native images (CA store with an OpenSSL 3.5 container) | Build and origin rejection with the Nginx ownership and setuid/setgid checks (backend on Temurin 25.0.5), CA store, stub ingress, real backend: all passed |
+| Deployment-script job | Shell syntax and authorization gates; offline Compose guards; runtime privilege matrix; env-file custody and committed-override preflight (non-root operator with `sudo`); rendered preflight; archive identity models | All passed |
+| Five-image release path | Real `deploy.sh` `run_provision`/`run_deploy` on the hardened model with the five candidates; archive, image-identity, port and host-TLS checks stubbed | Completed. Read-only roots, `cap_drop` ALL, `no-new-privileges`; `NoNewPrivs` 1; `CapBnd` 0 (PostgreSQL `0xcb`); initializer `changes: 4`; PostgreSQL 1 layer, marker `musl`, server as `postgres`; backend on Java 25.0.5 |
+| Behavior on that stack | HTTPS through the frontend | SPA 200; register 201 (approved origin) / 403 (foreign); login token; `/api/me/courses` 401 without, 200 with it; `/actuator/health` is the SPA HTML, not proxied |
+| Restart | Stop all; start PostgreSQL and MinIO, rerun the initializer, start backend and frontend | Initializer `changes: 0`; frontend healthy; the account logs in again |
+| tmpfs usage | `df`/`du` in the running containers | Backend `/tmp` 32 KiB, frontend 4 KiB, PostgreSQL socket directory 4 KiB; 3.9 GiB available each |
+| Signatures and provenance | `cosign verify` of the Chainguard initializer base; BuildKit provenance of the Go, Alpine and Temurin pins | Signature verifies; provenance read, unsigned |
+| SBOM evidence | `trivy image --format spdx-json` for the five candidates | Generated (not committed) |
+| Whitespace | `git diff --check` | Passed |
+
+Not run: Playwright end-to-end tests (not available); the CI steps "Exercise
+the runtime privilege matrix on the real schema and failure containment",
+"Exercise published-port verification against real containers", "Exercise
+real Auth, catalogue and membership under the approved matrix" and the
+containerd registry step (GitHub Actions runs them); a release archive with the
+`codemastery.invalid/*:release` names; the Azure VM. GitHub Actions results
+belong to the pull request.
+
+## DP01 final qualification, second pass — 3 November 2026
+
+Scope: the second task recorded in
+[deployment.md, "DP01 final security remediation"](deployment.md#dp01-final-security-remediation--3-november-2026).
+Same host and tools as the section above (Trivy database 2026-11-03 01:30 UTC,
+govulncheck database 2026-11-02T22:01:43Z). The five candidates were built from
+this branch's final files, all `linux/amd64`:
+
+| Image | Candidate | Image ID | Layers |
+| --- | --- | --- | --- |
+| PostgreSQL | `codemastery-candidate/postgres:r5` | `sha256:d2780e42…` | 1 |
+| Minimal MinIO server | `codemastery-candidate/minio-server:r5` | `sha256:fe27b3c4…` | 5 |
+| MinIO initializer | `codemastery-candidate/minio-init:r5` | `sha256:fffa4d57…` | 4 |
+| Backend | `codemastery-candidate/backend:r5` | `sha256:587ad4ad…` | 8 |
+| Frontend (release) | `codemastery-candidate/frontend:r5` | `sha256:fdf3e288…` | 13 |
+
+**Test-host correction.** In the first pass, the operator-container runs of the
+env-file custody and committed-override preflight steps began with
+`sudo chmod 666` on the Docker socket the container saw. On Docker Desktop that
+path is the VM's `/run/host-services/docker.proxy.sock`; its change time matched
+that run, and every other socket Docker Desktop created in the same directory at
+the same boot is `0660 root:root`. It was set back to `0660` (owner and group
+unchanged, the VM's own `/run/docker.sock` was never touched). The host CLI and
+root containers still work, a container user without group 0 is refused, and the
+operator image's user, which has supplementary group 0, works without any
+permission change. Both steps were rerun that way. No repository file contains
+the `chmod`; it was only in the local command line.
+
+| Check | Method | Result |
+| --- | --- | --- |
+| Trivy, exact set | `docker save --platform linux/amd64`, default and comprehensive | PostgreSQL 0/0; initializer 0/0; frontend 0/0; backend 0 CRITICAL/HIGH, 24 MEDIUM and 4 LOW without a fix; minimal server GO-2026-5932 (UNKNOWN) only |
+| govulncheck | `-mode=binary` | `mc`: none. `minio`: GO-2026-5932 at symbol level, the stripped-binary artifact shown with a control binary on 2 November |
+| JDK trust store | OpenJDK `CheckCerts.java` compiled with the pinned JDK, run on Temurin 25.0.4.1+1, 25.0.5+8 and the candidate | Two, one and no listed roots; the build-time assertion fails on both unpatched stores |
+| `mc` Corresponding Source | Exported archive versus the suite's hash and the image's `SOURCE`; archived Dockerfile versus the committed one; offline rebuild with the README command in an emulated `linux/amd64` Go container | All equal; rebuilt `mc` `025691d4…` |
+| MinIO initializer suite | `test-minio-init.sh` for `golithus`, `chainguard`, and `minimal` with the `r5` server tagged as the suite's qualification image (tags restored afterwards) | 27/27 each (427, 505 and 369 s) |
+| CI-equivalent steps | The deployment-script, PostgreSQL and ingress job steps listed in the first-pass section, plus "Run DP01 preflight with the committed override and certificate layout" after the ingress build; operator steps without any socket change | All 13 passed |
+| Five-image release path | Real `deploy.sh` `run_provision`/`run_deploy` with the five `r5` images; archive, image-identity, port and host-TLS checks stubbed | Completed; privileges and roles as in the first pass; containers read-only, `cap_drop` ALL, `no-new-privileges`; PostgreSQL 1 layer, marker `musl`, server as `postgres`, `CapBnd` `0xcb`; initializer `changes: 4`; backend Java 25.0.5 |
+| Behavior on that stack | HTTPS through the frontend | SPA 200; register 201 / 403 (foreign origin); login token; `/api/me/courses` 401 / 200; `/actuator/health` not proxied; a 2 MB body 413, a 0.9 MB body reaches the backend (400) |
+| Restart | Stop all, start in order, rerun the initializer | Initializer `changes: 0`; frontend healthy; login 200 |
+| tmpfs | `df`/`du` in the running containers; `nginx -T` | 32 KiB / 4 KiB / 4 KiB used; Nginx temp paths under `/tmp`, `worker_processes auto`, 1,024 connections |
+| PostgreSQL capability sets | Fresh volume, restart with data, refused Bookworm volume, under the release restrictions | As tabulated in deployment.md |
+| Backend suite | `cd backend && ./mvnw -B verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures |
+| Whitespace | `git diff --check` | Passed |
+
+Not run: Playwright end-to-end tests (not available); the CI steps for the
+runtime privilege matrix with failure containment, published-port verification,
+real-backend Auth/catalogue/membership and the containerd registry (GitHub
+Actions runs them); a release archive with the `codemastery.invalid/*:release`
+names; the Azure VM. The frontend source is unchanged and its tests were not
+rerun in this pass.
+
+## DP01 independent-review remediation verification — 3 November 2026
+
+Scope: the two P2 defects in the independent review of PR #132 at `d6a4eeb`,
+corrected under the Leader's remediation task. See the
+[implementation and corrected claims](deployment.md#dp01-independent-review-remediation--3-november-2026).
+Earlier results above remain historical; successful old certificate-inventory
+checks did not prove that inspection failures stopped the build, and ordinary
+stdin credentials did not prove long-value preservation.
+
+Local environment: macOS arm64, Docker Engine 29.8.1, Compose v5.5.1;
+linux/amd64 containers run under emulation. Maven uses host Temurin 25.0.4.1;
+the actual backend image remains pinned Temurin 25.0.5+8. All test state is
+synthetic and disposable. No Docker socket permission was changed, production
+resource accessed, or release tag created.
+
+| Check | Exact command or method | Actual result |
+| --- | --- | --- |
+| Baseline F10 reproduction | Actual local Compose initializer, 5,000-byte synthetic secret; authenticate through private JSON aliases with full and truncated values | Before: exit 0, full value rejected with `SignatureDoesNotMatch`, 4,096-byte prefix accepted; server control accepts intact 5,000 bytes |
+| Baseline F11 reproduction | Actual old negated pipeline with `keytool` returning 42 | Before: guard exits 0 |
+| Corrected backend build | `docker build --platform linux/amd64 -t codemastery-pr132-remediation/backend:f11 backend` | PASS; 117 complete X.509 trust entries, no prohibited root |
+| Trust-store build regressions | `bash infrastructure/vm/tests/test-java-truststore.sh codemastery-pr132-remediation/backend:f11` | PASS, 13 uncached build cases: published store rejected; final store accepted; all four introduced real roots rejected; keytool error, malformed/incomplete successful output, validator error, invalid and unreadable stores rejected; unrelated same-CN certificate accepted |
+| Backend tests | `cd backend && ./mvnw -B verify` | BUILD SUCCESS; 468 unit and 171 integration tests, zero failures/errors/skips |
+| Runtime restrictions and build-only files | Read-only backend with `/tmp` tmpfs, `cap_drop ALL`, `no-new-privileges`; inspect runtime and verifier/inventory paths | PASS: Temurin 25.0.5+8, UID 999, effective/bounding capabilities zero, NoNewPrivs 1; helper class and temporary inventory absent |
+| Syntax/whitespace | `bash -n infrastructure/minio/minio-init.sh infrastructure/minio/test-minio-init.sh infrastructure/vm/tests/test-java-truststore.sh`; `git diff --check` | PASS |
+| MinIO image and three-server qualification | Commands below, supplied candidate image | PASS, 28/28 for each of Golithus, Chainguard and minimal; the suite-build form additionally checks the unchanged Corresponding Source archive |
+| Deployment/HTTPS regression checks | Existing CI-derived scripts; limitations below | PASS: cleanup, authorization, offline Compose, 24-relation matrix sync, archive fixtures and rendered Compose mutations; 65 real-backend HTTPS assertions |
+
+The MinIO suite adds actual local Compose cases at 4,095/4,096 bytes and
+repeats them against the existing identity. Full-value authentication must
+succeed and a shortened value must fail. At 4,097/5,000 bytes, each credential
+field is rejected before any `mc` call; server inspection must find no bucket,
+policy or application identity. UTF-8 cases distinguish bytes from characters.
+Control characters remain rejected. A wrapper records every `mc` argument list,
+and initializer logs are checked for credential disclosure. Existing bucket
+permissions, server Console checks, persistence, release conflict refusal and
+idempotency remain in the same suite. The release additionally proves its
+4,096-byte application-secret boundary, early overflow refusal and continued
+5,000-byte root-password support through JSON.
+
+Commands:
+
+```bash
+docker build --platform linux/amd64 \
+  -t codemastery-pr132-remediation/minio-init:f10 infrastructure/minio
+MINIO_INIT_TEST_SERVER=golithus bash infrastructure/minio/test-minio-init.sh codemastery-pr132-remediation/minio-init:f10
+MINIO_INIT_TEST_SERVER=chainguard bash infrastructure/minio/test-minio-init.sh codemastery-pr132-remediation/minio-init:f10
+MINIO_INIT_TEST_SERVER=minimal bash infrastructure/minio/test-minio-init.sh codemastery-pr132-remediation/minio-init:f10
+```
+
+The existing deployment CI steps are executed against this worktree for shell
+and authorization gates, frontend cleanup, offline Compose guards, runtime
+privilege-matrix synchronization and archive identity fixtures. Rendered Compose
+mutation checks execute the actual policy but omit Linux-only host/env-custody
+gates on macOS; they are not a full host preflight. The real-backend HTTPS CI
+script uses the corrected backend, unchanged frontend/PostgreSQL candidates,
+private synthetic PKI and the approved runtime restrictions. Its disposable
+PostgreSQL probe waits for the final TCP server rather than the temporary
+initialization socket.
+
+GitHub CI on the published HEAD is recorded on PR #132 separately from these
+local executions. Not independently repeated here: Linux host/env-custody gates,
+archive save/load/containerd round trips, Playwright, vulnerability rescans or
+upstream signatures. No Azure deployment or production admission is tested or
+authorized by these corrections.

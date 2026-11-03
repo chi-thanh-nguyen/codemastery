@@ -1,4 +1,4 @@
-FROM node:22.23.3-bookworm-slim AS dependencies
+FROM node:22.23.3-bookworm-slim@sha256:3ed98443660ff48413b5af19ecefce3b9d50845a901a43420d47cc63a9fddbe9 AS dependencies
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -20,7 +20,7 @@ RUN VITE_API_BASE_URL=/api npm run build
 
 # Renders the ingress for exactly one origin. PUBLIC_ORIGIN is public build
 # input (https://hostname, as passed to deploy.sh --origin); it has no default.
-FROM node:22.23.3-bookworm-slim AS release-config
+FROM node:22.23.3-bookworm-slim@sha256:3ed98443660ff48413b5af19ecefce3b9d50845a901a43420d47cc63a9fddbe9 AS release-config
 ARG PUBLIC_ORIGIN
 COPY <<'NGINX' /render/default.conf
 # HTTPS ingress for the single approved origin (CT17 P1/P7, B2/B3).
@@ -128,12 +128,29 @@ RUN set -eu; \
 # The non-slim variant of the same Nginx image supplies curl, which can probe
 # the listener by hostname over loopback with full certificate verification.
 # Pinned by digest to the Nginx 1.30.6 Alpine index (linux/amd64 is deployed).
-# Nginx and its modules are pinned by the image, so apk upgrade patches only
-# the Alpine runtime packages; the base's non-root UID 101 is then restored.
+# Nginx and its modules are pinned by the image. The Alpine runtime packages
+# are raised to exactly the reviewed 3.24 security updates (2 November 2026:
+# they clear the base's CRITICAL brotli and HIGH curl findings; 3 November:
+# libexpat 2.10.0 for two further HIGH findings), which apk
+# verifies against the signing keys in the pinned base. Unlike an unbounded
+# `apk upgrade`, the build fails if the index no longer offers one of these
+# versions; re-scan and update the list instead (docs/deployment.md, "DP01
+# pre-release security hardening").
+# The base leaves /etc/nginx owned by UID 101 and group-writable, so the
+# runtime user could rewrite nginx.conf or replace conf.d entries. Nginx only
+# writes /var/cache/nginx and /tmp, which stay as the base sets them. The
+# base's non-root UID 101 is then restored.
 FROM nginxinc/nginx-unprivileged@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03 AS release
 
 USER root
-RUN apk upgrade --no-cache
+RUN set -eu; \
+    apk add --no-cache \
+        alpine-release=3.24.3-r0 brotli-libs=1.2.1-r0 c-ares=1.34.9-r0 \
+        ca-certificates=20261020-r0 ca-certificates-bundle=20261020-r0 \
+        curl=8.23.0-r0 libcurl=8.23.0-r0 libexpat=2.10.0-r0 musl=1.2.6-r3 \
+        musl-utils=1.2.6-r3 zlib=1.3.2-r1; \
+    chown -R -h root:root /etc/nginx; \
+    chmod -R go-w /etc/nginx
 USER 101
 
 COPY --from=release-build /app/dist/ /usr/share/nginx/html/

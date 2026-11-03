@@ -148,3 +148,62 @@ automation; adoption of a byte-clean image without the inherited `gosu` layer.
 A disposable flattened (`FROM scratch`) experiment removed every copy of the
 `gosu` bytes and passed the scan and data-volume checks; deployment.md records
 it and its trade-offs. It is not adopted and needs a Leader decision.
+
+## Amendment — 3 November 2026: byte-clean image
+
+Authority: the Project Leader's task of 3 November 2026 (ICT), "PR #132 Final
+Security Remediation and Delegated Technical Authorization", item F4. It
+authorizes adopting a qualified byte-clean PostgreSQL image in place of the
+layered artifact, if it preserves the approved PostgreSQL contract and the
+data-safety properties, and this narrowly scoped amendment recording it. This
+amendment records that technical decision only. It has not been independently
+reviewed or merged at the time of writing, and it supersedes only the
+statements named below; the rest of this ADR, including the 2 November
+amendment, is unchanged.
+
+**Decision.** `infrastructure/postgres/Dockerfile` keeps the approved changes
+above as its `layered` stage (same base digest, `su-exec` pin, symlink and
+data-volume boundary). Its final stage, `FROM scratch` with
+`COPY --from=layered / /`, ships that stage's complete merged filesystem as one
+layer, and restates its configuration: user, entrypoint, command, volume, port,
+working directory, `STOPSIGNAL SIGINT`, labels and environment. Only
+`GOSU_VERSION` and the upstream build-time `DOCKER_PG_LLVM_DEPS` are dropped;
+they describe nothing left in the image. No file list is maintained by hand.
+
+- Previous artifact: 14 layers; layer 2 (inherited from the base) still holds
+  the 1,769,900-byte upstream `gosu` (SHA-256 `52c8749d…`, go1.24.6), hidden by
+  a whiteout.
+- Replacement: 1 layer; no file in it is that binary or contains its module
+  path, and no whiteout is needed.
+
+**Alternatives.** Keeping the layered image and accepting the layer bytes
+(rejected: the Leader preferred removal, and removal preserves the contract);
+rebuilding the filesystem from a hand-maintained file list (rejected:
+an incomplete list could silently drop locale, library or initialization files);
+`docker build --squash` or `docker export`/`import` (rejected: classic-builder
+only or configuration-losing, and not reproducible in CI and Testcontainers).
+
+**Qualification.** Recorded in
+[docs/deployment.md, "DP01 final security remediation", F4](../deployment.md#f4-3-november--byte-clean-postgresql-adopted):
+merged filesystem and configuration equal to the layered stage (BuildKit and
+the classic builder Testcontainers uses); Trivy 0 in both detection modes; the
+exit-78 refusal of a glibc volume and the fresh-volume marker, restart and
+persistence checks; `./mvnw verify` through Testcontainers; and the hardened
+five-image deployment path. A CI step now fails the build if the configuration
+or merged filesystem drifts from the layered stage, if the image has more than
+one layer, or if any layer holds `gosu`.
+
+**Superseded statements.** In Scope, "Not approved by this ADR: A byte-level-clean
+OCI artifact"; in Deferred, "adoption of a byte-clean image without the
+inherited `gosu` layer". The residual risk "inherited `gosu` layer bytes" no
+longer describes the image this Dockerfile builds.
+
+**Trade-offs.** The shipped image no longer exposes the base's layer identities,
+so its relation to the pinned base is established by the build and the CI
+equivalence check rather than by shared layers. Its image ID differs from the
+layered artifact's and needs its own qualification and admission.
+
+**Still separately controlled.** Production deployment and release packaging;
+any migration of an existing (for example glibc-initialized) data volume; the
+glibc/musl collation residual risk, which stays
+**PENDING_LEADER_RISK_ACCEPTANCE**; and security admission of the image.

@@ -14,7 +14,13 @@ qualified but not production-admitted; the backend probe is fixed and tested in
 the repository/CI, but not yet verified on the Azure VM. The 2 November
 [Console hardening](#dp01-minio-console-hardening--2-november-2026) disables the
 embedded MinIO Console in the release override only; its residual-risk acceptance
-is `PENDING_LEADER_APPROVAL`. The dated records retain
+is `PENDING_LEADER_APPROVAL`. The 2 November
+[pre-release security hardening](#dp01-pre-release-security-hardening--2-november-2026)
+pins the frontend and backend base images and Alpine updates, makes the release
+Nginx configuration read-only to its runtime user, removes the backend's
+setuid/setgid programs, and runs every release service read-only with
+`no-new-privileges` and dropped capabilities, enforced by `deploy.sh`. Its MinIO,
+PostgreSQL and JDK findings remain `PENDING_LEADER_APPROVAL`; nothing is admitted. The dated records retain
 their original evidence and limitations; DP01 remains incomplete.
 
 ### What exists and what has been shown
@@ -36,7 +42,7 @@ inputs, not verified results, and do not authorize public exposure.
 | Path | Responsibility |
 | --- | --- |
 | `infrastructure/docker-compose.yml` | The local base file, used as is; `deploy.sh` always applies it first |
-| `infrastructure/vm/docker-compose.vm.yml` | Release override: removes local ports and builds, publishes only the frontend on 443, mounts the TLS directory read-only, sets the backend release environment, disables the MinIO Console (`MINIO_BROWSER=off`) and fixes the `codemastery.invalid/*:release` image names |
+| `infrastructure/vm/docker-compose.vm.yml` | Release override: removes local ports and builds, publishes only the frontend on 443, mounts the TLS directory read-only, sets the backend release environment, disables the MinIO Console (`MINIO_BROWSER=off`), applies the runtime hardening (read-only root, `no-new-privileges`, dropped capabilities, listed tmpfs) and fixes the `codemastery.invalid/*:release` image names |
 | `frontend/Dockerfile`, `release` target | Builds the bundle with `VITE_API_BASE_URL=/api`, terminates TLS, proxies `/api` to the backend and bakes an HTTPS healthcheck. Requires the `PUBLIC_ORIGIN` build argument |
 | `infrastructure/vm/Dockerfile.minio-server` | Experimental minimal MinIO server built from the Chainguard candidate pin. Functionally qualified natively in CI ([run 41308772749](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41308772749)) after a first native run failed on directory modes. Not admitted, and not referenced by the override or `deploy.sh` ([record](#dp01-minimal-minio-server-candidate--1-november-2026)) |
 | `infrastructure/vm/deploy.sh` | Operator script with the subcommands `preflight`, `load`, `provision`, `deploy` and `all`. It verifies inputs, images and grants, provisions the PostgreSQL roles and the runtime privilege matrix, starts services in order and prints a deployment record without secrets |
@@ -1536,7 +1542,9 @@ entrypoint/command. Merging alone would not remove them.
   adding `curl` and keeping the `wget` that `deploy.sh`'s private backend probe
   uses. It runs `apk upgrade --no-cache` for Alpine security updates (Nginx stays
   pinned by the image) and restores the non-root UID 101. Timings reuse the local
-  Compose healthcheck values.
+  Compose healthcheck values. (2 November: the upgrade is now an exact list of
+  package versions and `/etc/nginx` is root-owned; see
+  [pre-release security hardening](#dp01-pre-release-security-hardening--2-november-2026).)
 - **Release images.** Images are never built or pulled on the VM. The override's
   `codemastery.invalid/*:release` names cannot resolve to any registry. They are
   bound only by `docker load` of the reviewed archive and pinned by
@@ -1560,22 +1568,43 @@ whatever the build host's own architecture. The recipe needs Docker Engine 28 or
 later on the build host, for `docker save --platform`. It follows the archive flow
 that CI job “VM deployment containerd image store” verifies.
 
+Since the [pre-release security hardening](#dp01-pre-release-security-hardening--2-november-2026),
+images are built under non-release candidate tags and receive their
+`codemastery.invalid/*:release` names only by promotion, after qualification and
+a recorded security admission of that exact image ID. `<rev>` is the reviewed
+source revision.
+
 ```bash
-docker build --platform linux/amd64 -t codemastery.invalid/backend:release ./backend
+# 1. Candidates (never a release name).
+docker build --platform linux/amd64 -t codemastery-candidate/backend:<rev> ./backend
 docker build --platform linux/amd64 --target release \
   --build-arg PUBLIC_ORIGIN=https://codemastery.eastasia.cloudapp.azure.com \
-  -t codemastery.invalid/frontend:release ./frontend
+  -t codemastery-candidate/frontend:<rev> ./frontend
 # DP01 hardened PostgreSQL: postgres:17.11-alpine3.24 with su-exec replacing
-# gosu (zero CRITICAL/HIGH in Trivy's merged view). See "DP01 PostgreSQL
-# Alpine/su-exec image hardening" below.
-docker build --platform linux/amd64 -t codemastery.invalid/postgres:release \
+# gosu, shipped as one byte-clean layer. See "DP01 PostgreSQL Alpine/su-exec
+# image hardening" and "DP01 final security remediation" (F4) below.
+docker build --platform linux/amd64 -t codemastery-candidate/postgres:<rev> \
   ./infrastructure/postgres
-# minio and minio-init: only qualified and admitted artifacts may be tagged with
-# these names. The Chainguard and minimal server candidates and the initializer
-# (built from infrastructure/minio under a non-release tag) passed functional
-# qualification; the initializer's Chainguard minio-client base is new and its
-# native CI result belongs to its pull request. None has production security
-# admission (blocker 2).
+docker build --platform linux/amd64 -t codemastery-candidate/minio-init:<rev> \
+  ./infrastructure/minio
+# The initializer's mc is a modified AGPL-3.0-or-later build: export its
+# Corresponding Source from the same revision and keep it with the archive
+# ("DP01 final security remediation", F1).
+docker build --platform linux/amd64 --target mc-source-archive \
+  --output type=local,dest=release-source ./infrastructure/minio
+shasum -a 256 release-source/mc-source.tar.gz   # must equal the suite's INIT_MC_SOURCE_SHA256
+# The release MinIO server (Chainguard or minimal candidate) is not selected or
+# admitted yet (blocker 2); no command is given for it here.
+
+# 2. Qualification of these exact images, for example:
+infrastructure/minio/test-minio-init.sh codemastery-candidate/minio-init:<rev>
+# plus the scans and checks in the dated records; record the image IDs.
+
+# 3. Security admission: a Leader record naming each admitted image ID.
+
+# 4. Promotion of admitted image IDs only, then the archive.
+docker tag codemastery-candidate/backend:<rev> codemastery.invalid/backend:release
+# ... likewise for each admitted image ...
 docker save --platform linux/amd64 -o release.tar \
   codemastery.invalid/postgres:release \
   codemastery.invalid/minio:release codemastery.invalid/minio-init:release \
@@ -2891,3 +2920,782 @@ into CodeMastery's runtime. `su-exec` is a runtime component of the PostgreSQL
 image: the entrypoint uses it to drop from root to the `postgres` user before
 starting the server. Trivy is a security scanner used manually for
 qualification; it is not part of any image or CI job.
+
+## DP01 pre-release security hardening — 2 November 2026
+
+The [3 November record](#dp01-final-security-remediation--3-november-2026)
+updates F1, F4, F5, F6, F10 and F11 below.
+
+### Boundary and baseline
+
+Two Project Leader tasks of 2 November 2026 (ICT) on branch
+`fix/pre-release-security-hardening` (PR #132): "Comprehensive Pre-Release
+Security Remediation PR", and its continuation, which also authorizes a narrowly
+scoped, restrictive runtime-hardening change to the Compose policy. They address
+the pre-release audit findings F1–F11 reported against `b2984a1`; `origin/main`
+was still `b2984a1b15895945d7a8d7821ef13d114cda2a1d` throughout. The tasks
+authorize engineering remediation and the pull request. They do not accept a
+residual risk, approve a governance or ADR change, admit an image, create a
+`codemastery.invalid/*:release` tag, deploy, or close DP01. Earlier records are
+unchanged; where this record re-measures or corrects one, it says so.
+
+Status terms: `FIXED` (removed or enforced, verified on the artifact or the
+running model); `MITIGATED` (still present; a verified control or verified
+absence of the vulnerable code reduces exposure); `NOT_VERIFIED`;
+`PENDING_LEADER_APPROVAL` (needs a Leader decision, admission or risk
+acceptance); `BLOCKED` (needs an unapproved contract).
+
+### Changes
+
+| File | Change |
+| --- | --- |
+| `frontend/Dockerfile` | `release` stage: the unbounded `apk upgrade` is replaced by ten exact Alpine 3.24 package versions; `/etc/nginx` becomes root-owned without group/other write. Both `node:22.23.3-bookworm-slim` stages are pinned to the index digest the tag resolved to (`sha256:3ed98443…`) |
+| `backend/Dockerfile` | Temurin `25.0.4.1_1` JDK and JRE stages pinned to their index digests (`sha256:a9c5ddd3…`, `sha256:ce8543dd…`); the runtime stage clears the setuid/setgid bits of the base's 12 programs |
+| `infrastructure/vm/docker-compose.vm.yml` | All five services: `read_only: true`, `security_opt: ["no-new-privileges:true"]`, `cap_drop: [ALL]`. Writable tmpfs only where needed: `/var/run/postgresql` (PostgreSQL), `/tmp` (initializer, backend, frontend), none for MinIO. PostgreSQL keeps exactly `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` |
+| `infrastructure/vm/deploy.sh` | Compose policy: those values are required exactly per service. Any other `security_opt`, `cap_add`, `cap_drop`, `read_only` or `tmpfs` value, a missing value, and every previously rejected option (`privileged`, host namespaces, devices, `user`, extra services, published ports, Console on) are rejected |
+| `infrastructure/minio/test-minio-init.sh` | The release-model checks also require the initializer's and server's hardening in the effective model and on the running containers |
+| `.github/workflows/ci.yml` | Nginx ownership and setuid/setgid image checks; 16 offline hardening policy cases; a hardened preflight fixture with 7 preflight rejection cases; hardening assertions on the committed override |
+| `docs/deployment.md` | This record; the release recipe now builds candidates and promotes admitted images only (F3) |
+
+Unchanged: both MinIO images and `minio-init.sh`, the PostgreSQL image, the base
+Compose file and local development, the release image names, published ports,
+environment contracts, `--expect-image` and the archive model.
+
+### Scanners and modes
+
+Trivy 0.76.1, database updated 2026-11-01 19:08 UTC; each image exported with
+`docker save --platform linux/amd64` and scanned with `trivy image --input
+<archive> --scanners vuln`, by default (`--detection-priority precise`) and with
+`--detection-priority comprehensive`. govulncheck v1.9.0 (Go 1.27.3),
+`-mode=binary`, database `https://vuln.go.dev` modified 2026-10-27T21:16:18Z.
+cosign v3.1.4. Nothing was ignored or suppressed. A lower count is not by itself
+evidence; each row names the artifact property checked.
+
+### F1 — MinIO initializer `mc`
+
+Artifact: the pinned base `cgr.dev/chainguard/minio-client@sha256:3b67177c…`
+(linux/amd64), `/usr/bin/mc` SHA-256 `8842390a…bc34a`, go1.27.3,
+`vcs.modified=true`.
+
+| Advisory | Module, found → fixed | Trivy default | Trivy comprehensive | govulncheck | Package in the binary |
+| --- | --- | --- | --- | --- | --- |
+| CVE-2026-63209 (GO-2026-5841) | `klauspost/compress` v1.18.5 → v1.18.7 | — | HIGH | `s2` imported; no vulnerable symbol called | `s2` present |
+| CVE-2026-78661 (GO-2026-6860) | `x/net` v0.60.0 → v0.62.0 | — | UNKNOWN | Module only | `x/net/html` absent |
+| CVE-2026-97045 (GO-2026-6866) | `x/net` v0.60.0 → v0.62.0 | — | UNKNOWN | Module only | `x/net/html` absent |
+| GO-2026-5932 | `x/crypto` v0.57.0, no fix | — | UNKNOWN | Module only | `openpgp` absent |
+| CVE-2026-73500 (GO-2026-6107) | `etcd/client/pkg/v3` v3.5.19 → v3.5.33 | — | — | Module only | — |
+
+Trivy's default mode attributes the binary to the Wolfi `mc` package, which has
+no advisory; comprehensive mode reads the Go build information. "Package in the
+binary" is a search of the function-name table, calibrated under F5.
+
+- **Option A — newer trusted upstream image: not available.** Rechecked on
+  2–3 November: `:latest` still resolves to the pinned index, `:latest-dev`
+  (`sha256:5a80cba5…`) carries the byte-identical `mc`, the newest `mc` in both the
+  Wolfi and Chainguard x86_64 indexes is the pinned `0.20250813.083541-r27`, and
+  Wolfi's `mc.yaml` was last changed on 21 October (toolchain rebuild). Its
+  `bump` list still pins `klauspost/compress` v1.18.5 and `x/net` v0.60.0.
+  `minio/mc` is archived. The pin's signature verifies.
+- **Option B — reproducible project-built `mc`: candidate built and qualified as
+  evidence, not adopted.** Disposable Dockerfile, outside the repository:
+  - Source `minio/mc` tag `RELEASE.2025-08-13T08-35-41Z`, commit `7394ce0` checked
+    against the expected hash; the same commit and `-X …cmd.Version` ldflag as
+    Wolfi's recipe.
+  - Wolfi's `bump` list with the fixed versions: `klauspost/compress` v1.18.7,
+    `x/net` v0.62.0, `x/crypto` v0.58.0, `x/sys` v0.49.0, `x/term` v0.47.0,
+    `x/text` v0.43.0, `grpc` v1.83.2, `prometheus` v0.311.3, `client_golang`
+    v1.23.2, plus `etcd/client/pkg/v3` v3.5.33; `go mod tidy` and `go mod verify`
+    against `sum.golang.org`.
+  - Toolchain `golang:1.27.3-bookworm@sha256:d9b6a1be…` (unsigned BuildKit
+    provenance naming `docker-library/golang@41d9b4d`); `CGO_ENABLED=0
+    -trimpath -buildvcs=false -ldflags "-buildid= …"`, cross-compiled for
+    linux/amd64; symbols kept so govulncheck can work at symbol level.
+  - Packaging: the pinned base's filesystem without its `mc` and `mc` package
+    records, copied into `FROM scratch` with the new binary and the unchanged
+    script (3 layers). No layer contains any byte sequence of the old `mc`. Apart
+    from `usr/bin/mc`, the `mc` SBOM file and the apk database entry, every path,
+    owner and mode equals the base. Configuration, UID/GID 65532 and entrypoint
+    are unchanged.
+  - Result: `mc` SHA-256 `fe164f1ac4a044c196d0c66d2ce91e2c6963ece9935e8c2e970f3e9840a69e9c`,
+    identical in two native cross-builds (one `--no-cache`) and an independent
+    build on an emulated amd64 builder. The image itself is not reproducible
+    (image IDs `sha256:87cd4082…` and `sha256:e8097899…`). govulncheck: only
+    GO-2026-5932, module level. Trivy: GO-2026-5932 only (UNKNOWN), now also in
+    default mode because no package record hides the binary.
+  - Functional: a test-only copy of `test-minio-init.sh`, changed only in its base
+    layer, `mc` SHA-256 and package-record assertions, passed 26/26 against the
+    Golithus, Chainguard and minimal servers.
+
+  It is not adopted because it would replace Chainguard's signed binary with a
+  project-built, unsigned one whose provenance rests on this recipe; it is a
+  modified AGPL-3.0-or-later build, so giving the image to anyone requires the
+  corresponding source (`7394ce0` plus the resulting `go.mod`/`go.sum`) and the
+  pending legal judgment; and the committed suite's identity model (pinned base
+  layers plus one script layer) would have to be replaced.
+- **Option C — keep the signed image: current state.**
+
+**Status: `PENDING_LEADER_APPROVAL`.** No vulnerable symbol is called and three
+of the four affected packages are not linked.
+
+### F2 — security records
+
+This record replaces the first-round grouping with the audit's F1–F11 numbering,
+records both rounds' evidence, and keeps the earlier dated records unchanged.
+Verification is in [testing.md](testing.md#dp01-pre-release-security-hardening-verification--2-november-2026).
+**Status: `FIXED` for the record gaps found; it accepts nothing.**
+
+### F3 — release tagging and admission workflow
+
+The [release recipe](#release-build-outside-the-vm) built images directly under
+their `codemastery.invalid/*:release` names. It now builds
+`codemastery-candidate/*` images, requires qualification and a recorded
+admission of the exact image ID, and only then promotes by `docker tag`. Four
+stages:
+
+1. **Candidate:** built from a reviewed revision under a non-release tag.
+2. **Qualification:** functional suites and scans of that exact artifact, with
+   scanner versions and database dates.
+3. **Security admission:** the Leader admits or rejects each image ID and decides
+   each `PENDING_LEADER_APPROVAL` item; signatures and scans are repeated then.
+4. **Release promotion:** only admitted images are tagged, saved into the archive
+   and bound by `--expect-image`.
+
+`codemastery.invalid/*:release` tags that already exist on a build host were
+created outside this process and are not admitted by it; this work did not
+touch them. **Status: `FIXED` (procedure); no artifact has passed stage 3.**
+
+### F4 — PostgreSQL inherited `gosu` layer
+
+Committed image (unchanged): 0 findings in both Trivy modes for the merged
+filesystem; layer 2 of 14 still holds the 1,769,900-byte `gosu` (SHA-256
+`52c8749d…`, go1.24.6; 59 Go advisories including GO-2026-4337/CVE-2025-68121, one
+at symbol level, GO-2026-6686), hidden by the layer-11 whiteout and replaced by
+the layer-12 `su-exec` symlink. It is unreachable at runtime.
+
+**Byte-clean experiment (not adopted).** The committed Dockerfile's stages,
+followed by `FROM scratch`, `COPY --from=layered / /`, and the same labels,
+environment (without the build-time `GOSU_VERSION` and `DOCKER_PG_LLVM_DEPS`),
+volume, `SIGINT`, port, entrypoint and command:
+
+| Check | Result |
+| --- | --- |
+| Layers | 1 instead of 14; no byte sequence of the `gosu` binary in it |
+| Merged filesystem | Identical to the committed image: 3,896 entries, same content, owners and modes |
+| Size | 297.9 MB uncompressed, 2.2 MB less than the layered image |
+| Trivy | 0 in both modes |
+| Volume boundary | CI step passes: Bookworm volume exit 78 and unchanged, client tools run, fresh volume marked `musl` and restarted with data |
+| Testcontainers | `./mvnw verify` with it as `infrastructure/postgres/Dockerfile`: 468 unit and 171 integration tests passed (Flyway V001–V006, privilege matrix, seed data) |
+| Release path | `deploy.sh` provision and deploy on the hardened five-image stack: roles, privilege matrix, Flyway V001–V006, role separation, healthy; marker `musl`; server runs as `postgres` |
+
+Trade-offs: the base image's layer identities are no longer visible, so the
+base digest cannot be checked layer by layer; every upstream configuration change
+must be restated by hand; and a new image identity needs its own qualification
+and admission. **Recommended (not approved):** a Leader amendment to ADR003
+adopting the flattened build, with a CI check that the image configuration equals
+the layered build's except the two build-time variables. Until then, **status
+`PENDING_LEADER_APPROVAL`**; ADR003 is unchanged.
+
+### F5 — MinIO server
+
+| Item | Evidence | Status |
+| --- | --- | --- |
+| Newer build | `cgr.dev/chainguard/minio:latest` (`sha256:0a011000…`) has the byte-identical binary (`3c3d6152…`) and package `minio 0.20261023.200651-r2`; only `ncurses` differs. The fork's `master` (`a2c3f7c`) adds only documentation/debugging-tool dependency updates | No newer server; pin unchanged |
+| GO-2026-5932 | govulncheck lists `x/crypto/openpgp/*` wildcards. **Correction:** the binary is stripped, and govulncheck v1.9.0 then reports every package of the vulnerable module. A stripped control binary importing only `x/crypto/blake2b` gave the same `openpgp/armor/*` result; unstripped it gave none. The server's function-name table contains other `x/crypto` packages (`argon2`, `blake2b`, `chacha20`, `pbkdf2`, `ssh` and more) and no `openpgp`; source mode at `76c06ff` with the binary's 21 newer module versions imports none. Trivy reports only this advisory for the minimal image (UNKNOWN) | `MITIGATED` (not linked; module finding has no fix). `PENDING_LEADER_APPROVAL` |
+| CVE-2026-113466 | No patched version. The Console stays off and enforced; the release server now also runs read-only without capabilities | `MITIGATED`, still in the binary. `PENDING_LEADER_APPROVAL` |
+| Other CRITICAL/HIGH | Minimal image: none in either mode. The full Chainguard server image also ships `mc` with the F1 findings; the minimal image does not | — |
+
+### F6 — provenance, signing and determinism
+
+| Item | Result | Status |
+| --- | --- | --- |
+| Mutable base tags | Backend and Node stages pinned to the digests their tags resolved to; content unchanged | `FIXED` |
+| Unbounded `apk upgrade` | Exact versions: `alpine-release` 3.24.3-r0, `brotli-libs` 1.2.1-r0, `c-ares` 1.34.9-r0, `ca-certificates`/`-bundle` 20261020-r0, `curl`/`libcurl` 8.23.0-r0, `musl`/`musl-utils` 1.2.6-r3, `zlib` 1.3.2-r1. Same installed set as the `main` recipe on the same day. The build fails once Alpine drops a pinned version | `FIXED` |
+| Base provenance | Temurin, Node, Nginx and Go indexes carry unsigned BuildKit SLSA provenance (`adoptium/containers@511f935`, `nodejs/docker-node@81f4191`, `nginx/docker-nginx-unprivileged@bb73931`, `docker-library/golang@41d9b4d`); not verified as build provenance. The Chainguard signatures verify | Content-equivalent pins, not independently verified provenance |
+| Project images | Unsigned; not bit-for-bit reproducible (PostgreSQL record; Option B image IDs). Identity comes from the reviewed archive and `--expect-image`. No signing or attestation workflow added: it needs signing credentials and a trust policy that no approved contract defines | `PENDING_LEADER_APPROVAL` |
+
+### F7 — backend runtime
+
+- **Image:** the 12 setuid/setgid programs (`su`, `mount`, `umount`, `passwd`,
+  `chfn`, `chsh`, `gpasswd`, `newgrp`, `chage`, `expiry`, `unix_chkpwd`,
+  `pam_extrausers_chkpwd`) lose those bits; a CI check fails on a `main` backend
+  image (12 files) and passes on the candidate. `FIXED`.
+- **Runtime:** read-only root, `/tmp` tmpfs, no capabilities (`CapBnd` 0),
+  `NoNewPrivs` 1, non-root `codemastery`. Startup, health, Flyway, Auth and CORS
+  pass on the hardened stack. `FIXED` in the release model.
+
+### F8 — frontend runtime
+
+- **Image:** `/etc/nginx` root-owned and not writable by UID 101; `/var/cache/nginx`
+  stays writable. CI check fails on the `main` image and passes on the candidate.
+  `FIXED`.
+- **Runtime:** read-only root, `/tmp` tmpfs (Nginx pid and temp paths; logs go to
+  stdout/stderr), no capabilities, `NoNewPrivs` 1, UID 101. The staged
+  `compose run`, `nginx -t`, the private backend probe, the HTTPS healthcheck and
+  public ingress pass. `FIXED` in the release model.
+
+The same policy covers PostgreSQL (read-only, `/var/run/postgresql` tmpfs, the
+five capabilities in its bounding set, `CapEff` 0 for the server) and MinIO
+(read-only, no tmpfs, no capabilities, UID 65532). Measured during development:
+PostgreSQL fails with `--cap-drop ALL` (`chmod: /var/lib/postgresql/data:
+Operation not permitted`) and without `DAC_OVERRIDE`. Docker's default tmpfs
+mount is `rw,nosuid,nodev,noexec`, mode 1777; no size limit is set, because none
+is approved. The tmpfs is RAM-backed, so whatever a service writes there (for
+example Tomcat's temporary files) now uses memory rather than disk.
+
+### F9 — MinIO initializer filesystem
+
+The initializer base has `/var/tmp` and `/data` mode 0777 without the sticky bit,
+`/tmp` 1777 and `/home/nonroot` owned by 65532. The script writes only a
+`mktemp -d` directory and mounts no storage; the server's `/data/.minio.sys`
+lives on the server's own volume. With the release model's read-only root and
+`/tmp` tmpfs, only `/tmp` is writable at runtime (`/var/tmp`, `/data`,
+`/home/nonroot` and `/usr/local/bin` are denied), and the suite verifies the
+running container's restrictions. The image itself keeps the base's modes:
+changing them would add a layer and the suite's identity model, and the
+read-only root already removes the exposure. **Status: `FIXED` in the release
+model; image modes unchanged.**
+
+### F10 — secrets and credential controls
+
+Re-inspected: `JWT_SECRET` must be exactly 64 hexadecimal characters; `<SET_ME…>`
+placeholders are rejected; bootstrap, migrator and runtime identities and
+passwords must differ; the env file must be owned by the operator, mode 0600,
+single link, in a 0700 directory with safe ancestors; `deploy.sh` passes PostgreSQL
+passwords on stdin and prints none; the release initializer keeps all secrets out
+of argv and child environments and requires an application secret of at least
+8 bytes that differs from the root identity. One local-only gap: the base
+Compose file's inline development initializer passes `MINIO_ROOT_PASSWORD` to
+`mc alias set` as an argument; the VM override replaces it, so the release is
+not affected, and the local file is outside this change. No other length or
+strength rule is authorized, so none was added. **Status: no release defect
+found; a password-strength policy remains a Leader decision.**
+
+### F11 — backend Ubuntu packages
+
+Candidate backend: 0 CRITICAL/HIGH; 24 MEDIUM and 4 LOW Ubuntu 24.04 findings
+(`libpcre2-8-0`, `libgnutls30t64`, `libc6`/`libc-bin`/`locales`, `tar`, `dash`,
+`libexpat1`), none with a fixed version; no findings in the application's Java
+libraries. `eclipse-temurin:25-jre-noble` (JDK 25.0.5+8, 29 October) has exactly
+the same 28 findings, so it brings no OS fix; Trivy does not assess the Temurin
+runtime itself. Moving from 25.0.4.1+1 is a runtime upgrade that
+[CT17 P5](#p5--runtime-envelope-locations-and-fail-fast-inputs) excludes ("No
+new service, technology or runtime upgrade"). **Status: `MITIGATED` (no fixable
+package); the JDK upgrade is `PENDING_LEADER_APPROVAL` and its JDK-level effect
+`NOT_VERIFIED`.**
+
+### Outstanding Leader decisions
+
+- F1: keep the signed image and accept the `mc` findings until an upstream
+  rebuild exists, or authorize the Option B build (provenance, AGPL source
+  provision, new qualification model).
+- F4: amend ADR003 to adopt the flattened image, or accept the inherited
+  `gosu` layer bytes.
+- F5: accept GO-2026-5932 and CVE-2026-113466 with the controls above.
+- F6: signing or attestation of project images, with its credentials and trust
+  policy.
+- F10: whether a credential strength policy is wanted.
+- F11: the JDK 25.0.5 runtime upgrade.
+- Security admission of every release image; the pending
+  [Console hardening](#dp01-minio-console-hardening--2-november-2026) and
+  [PostgreSQL hardening](#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026)
+  dispositions; release blockers 1–7 in
+  [Verification and remaining gates](#verification-and-remaining-gates).
+
+Nothing was built, loaded or run on the Azure VM, and no release tag was
+created or changed.
+
+This record and its changes were produced through AI-assisted development
+(Anthropic Claude Code) under the Leader's tasks. Trivy, govulncheck, cosign and
+their databases, the Sigstore public-good transparency log, the Go module proxy
+and checksum database, and the Wolfi and Chainguard package indexes were used
+only for this review. No AI service or new infrastructure technology is
+introduced into CodeMastery's runtime.
+
+## DP01 final security remediation — 3 November 2026
+
+### Authority and boundary
+
+The Project Leader's task of 3 November 2026 (ICT), "PR #132 Final Security
+Remediation and Delegated Technical Authorization", continues
+`fix/pre-release-security-hardening` (PR #132). It delegates the choice and
+implementation of the remaining remediations within stated conditions: a
+qualified, reproducibly built `mc` (F1), a qualified byte-clean PostgreSQL image
+with a narrowly scoped ADR003 amendment (F4), provenance and reproducibility
+improvements (F6), confirmed secret-exposure fixes (F10) and a Java 25 patch
+upgrade with a verified security benefit (F11). It does not accept a residual
+risk, give legal clearance, admit an image, authorize deployment, merging or a
+release, or touch the Azure VM. This record updates the
+[2 November record](#dp01-pre-release-security-hardening--2-november-2026),
+which stays as written; where they differ, this one describes the current
+branch. `origin/main` was still `b2984a1`.
+
+A second task the same day ("Continue the final security remediation of
+CodeMastery PR #132") asked for the test host's Docker socket to be restored,
+the open F11 CVEs to be verified on the image, the `mc` licensing to be
+re-reviewed, residual F5/F6/tmpfs/PostgreSQL-capability exposure to be
+re-examined, and the exact five-image set to be requalified. Its results are
+included below; where they correct the first version of this record, the
+section says so.
+
+### Changes
+
+| File | Change |
+| --- | --- |
+| `infrastructure/minio/Dockerfile` | Project-built `mc` (F1): source `minio/mc` `7394ce0`, fixed dependency versions, Go `golang:1.27.3-bookworm@sha256:d9b6a1be…`; the binary is built offline from its own Corresponding Source archive; the pinned Chainguard filesystem without its `mc` is copied into one layer; licence and notice texts in `/usr/share/doc/mc`; the archive also holds this Dockerfile, and `/usr/share/doc/mc/SOURCE` names the archive's SHA-256 |
+| `infrastructure/minio/test-minio-init.sh` | New artifact identity model for that image (below); checks the Corresponding Source archive of a suite-built image; records every argument the local inline initializer passes to `mc` and fails on a secret |
+| `infrastructure/postgres/Dockerfile` | The approved changes become the `layered` stage; the final stage ships its merged filesystem as one layer (F4) |
+| `infrastructure/docker-compose.yml` | Local inline initializer: `MINIO_ROOT_PASSWORD` and `STORAGE_SECRET_KEY` reach `mc` on stdin instead of as arguments; values with control characters are refused (F10) |
+| `backend/Dockerfile` | Temurin 25.0.5+8 JDK and JRE, pinned (`sha256:95e350ad…`, `sha256:a98128a5…`); the runtime's Java trust store loses "emSign Root CA - G1", and the build fails if any root OpenJDK lists for the eMudhra compromise remains (F11) |
+| `frontend/Dockerfile` | `libexpat` 2.10.0-r0 added to the exact Alpine set: today's database reports two HIGH and two other `libexpat` 2.9.0 findings for the 2 November candidate (F6/F8) |
+| `.github/workflows/ci.yml` | New step: the PostgreSQL image's configuration and merged filesystem equal its layered build, it has one layer and no layer holds `gosu` |
+| `docs/decisions/003-postgresql-alpine-su-exec-image.md` | Append-only amendment recording the F4 decision |
+| `docs/setup.md`, `docs/deployment.md`, `docs/testing.md` | Temurin version; release recipe exports the `mc` source; this record; verification |
+
+Unchanged: `minio-init.sh`, both MinIO server images, the VM override, `deploy.sh`,
+release image names, ports, environment contracts, `--expect-image` and the
+archive model.
+
+### Scanners
+
+Trivy 0.76.1, database updated 2026-11-03 01:30 UTC, `docker save --platform
+linux/amd64` archives, `--scanners vuln`, default and `--detection-priority
+comprehensive`; govulncheck v1.9.0 `-mode=binary`, database modified
+2026-11-02T22:01:43Z; cosign v3.1.4. Nothing ignored or suppressed. Trivy counts
+below are per finding row; where a scanner reports one advisory twice (binary and
+package record), it is counted once.
+
+### F1 (3 November) — project-built `mc` adopted
+
+| Advisory | Chainguard `mc` (`8842390a…`) | Project-built `mc` (`025691d4…`) |
+| --- | --- | --- |
+| CVE-2026-63209 / GO-2026-5841, `klauspost/compress` | v1.18.5; HIGH (comprehensive); `s2` imported | v1.18.7: absent |
+| CVE-2026-78661 / GO-2026-6860, `x/net` | v0.60.0; module level | v0.62.0: absent |
+| CVE-2026-97045 / GO-2026-6866, `x/net` | v0.60.0; module level | v0.62.0: absent |
+| GO-2026-5932, `x/crypto/openpgp` | v0.57.0; module level, `openpgp` not linked | `v0.58.1-0.20261009181718-2f1f834330b2`: absent |
+| CVE-2026-73500 / GO-2026-6107, `etcd/client/pkg/v3` | v3.5.19; module level | v3.5.33: absent |
+| Trivy (default / comprehensive) | 0 / 4 distinct (1 HIGH, 3 UNKNOWN) | 0 / 0 |
+| govulncheck | 5 advisories | none |
+
+- **Option A, a newer trusted upstream build: still none.** On 3 November
+  `cgr.dev/chainguard/minio-client:latest` moved to `sha256:2fc44123…`; it holds the
+  byte-identical `mc` (`8842390a…`) and differs from the pin only by epoch
+  rebuilds of `libacl1`, `libattr1`, `libbrotli*` and `libpcre2-8-0`. The pin is
+  kept; its keyless signature still verifies against Chainguard's release
+  workflow identity.
+- **Option B, adopted.** The 2 November candidate, rebuilt into the committed
+  Dockerfile with these changes:
+  - The commit is fetched by its full hash. `go get` applies Wolfi's raises with
+    the fixed versions, `go mod tidy` runs, and the resulting `go.mod` and `go.sum`
+    must have the reviewed SHA-256 values (`091e2cfc…`, `363a7760…`). New `go.sum`
+    lines are checked against `sum.golang.org`.
+  - `x/crypto` is the vulnerability database's fixed version for GO-2026-5932, a
+    pseudo-version one upstream commit (`2f1f834`, "openpgp: carve out openpgp as
+    a module") after the `v0.58.0` tag. Its module content equals `v0.58.0` except
+    that the `openpgp` directory is gone; `mc` used none of it.
+  - The `mc-source` stage writes `mc-source.tar.gz`: the `mc` tree at `7394ce0`
+    with the changed `go.mod`/`go.sum`, `dependency-changes.diff`, a README with
+    the modification notice and offline build command, and the 100 module zips the
+    linux build loads, as served by `proxy.golang.org`, in a file-proxy layout
+    that `go.sum` verifies. The `mc-build` stage runs without network access
+    (`RUN --network=none`) and builds only from that archive.
+  - Runtime: the pinned base's merged filesystem without `/usr/bin/mc`, its
+    SBOM file and its apk record (layer 1), the new `mc` (layer 2), the notices
+    (layer 3) and the unchanged script (layer 4). Same user `65532:65532`,
+    entrypoint, empty command, `PATH` and `SSL_CERT_FILE`.
+- **Reproducibility.** `mc` SHA-256
+  `025691d43adb653c6ce34723c76450153f2c024bfa232edaca6906fe3e221809` and the source
+  archive SHA-256 `ed6f972e23de4074221d1e71436ea32932d9c83eb24c728417bf4b98ddb98d11`
+  (first version; the second pass added the Dockerfile and a fuller README, giving
+  `a42400d4703c265258952b44bfd997a53dcca55bf47b691f48a1f2f483e98b50` with the same
+  `mc`) came out identical in a cross-compiling BuildKit build on an arm64 builder and
+  in an offline rebuild from the exported archive with its README command in an
+  emulated `linux/amd64` Go container; the archive was also identical across two
+  separate BuildKit builds. The suite repeats the comparison wherever it builds
+  the image, including CI's amd64 runner. The image itself is
+  not reproducible: layer timestamps and BuildKit attestations change its ID on
+  every build, so it is identified by content (below), not by image ID.
+- **Identity model in `test-minio-init.sh`.** Replaces "pinned base layers plus
+  one script layer": every layer is re-hashed and read; there must be exactly four
+  and no whiteouts; no file in any layer may be the replaced `mc`; layer 1 must
+  equal the pin's filesystem entry by entry (type, owner, mode, link target,
+  content), checked against a recorded digest of that filesystem, except for the
+  three removed or rewritten paths, whose new apk database content is recomputed;
+  layers 2–4 may hold only `mc`, the seven notice files and the script, each with
+  its recorded SHA-256 and mode. A suite-built image's source archive must have
+  the recorded SHA-256. Rejected during development: the 2 November image
+  (12 layers), the Option B experiment (3 layers), and three mutated builds
+  (base `mc` copied back, `/etc` mode changed, script mode changed).
+- **Function.** `test-minio-init.sh` against the Golithus, Chainguard and minimal
+  servers: 27/27 each (one check more than before: the source archive).
+  Bucket provisioning, the exact bucket-scoped policy, the bound identity, refusal of foreign or conflicting identity and policy state,
+  idempotent repeat runs, fail-closed inputs and readiness, exit codes and
+  propagation to the dependent service, and the release Compose model are the
+  existing checks, unchanged.
+
+**Status: `FIXED`** for the five advisories: the shipped binary no longer
+contains the vulnerable module versions, and both scanners report nothing for the
+image. Licensing below; admission pending.
+
+### MinIO Client licence and Corresponding Source
+
+Facts: `mc` is distributed under the GNU Affero General Public License version 3;
+its source files say "either version 3 of the License, or (at your option) any
+later version". The project-built binary is a modified version (dependency
+versions changed). AGPL section 6 requires that conveying the object code is
+accompanied by, or offers access to, its Corresponding Source, which covers the
+build scripts; section 5(a) requires a prominent, dated modification notice;
+section 13 concerns users interacting with a modified program over a network, and
+`mc` here is a one-shot client with no network-facing interface of its own.
+
+What this branch provides:
+
+- The Corresponding Source archive, produced by the same Dockerfile and revision
+  that build the image, and the binary's only source input. It holds the `mc`
+  tree with its changed `go.mod`/`go.sum`, `dependency-changes.diff`, the 100
+  module zips the linux build loads (each module's own licence and notice files
+  inside), the README with the dated modification notice and the offline build
+  command (Go image pinned by digest), and, since the second pass, the
+  Dockerfile itself, which fetches, builds and installs the binary.
+- In the image, `/usr/share/doc/mc`: `mc`'s `LICENSE` (the AGPL text), `NOTICE`
+  and `CREDITS`; the archive's `README`; `BUILDINFO`, the binary's embedded
+  module list with checksums; `THIRD_PARTY_NOTICES`, the Go standard library's
+  licence and every linked module's licence, notice and patent files
+  (`minio/colorjson` and `minio/filepath` have none and carry Go's BSD licence
+  in their file headers); and, since the second pass, `SOURCE`, which names the
+  exact archive (SHA-256) the binary was built from and how to regenerate it from
+  the public repository. The image label `org.opencontainers.image.licenses` is
+  `AGPL-3.0-or-later`.
+
+Second-pass review, gaps found and fixed: the image did not say where its
+Corresponding Source is (now `SOURCE`, with the archive hash); the archive did not
+contain the script that installs the binary into the image (now the Dockerfile);
+the README named the Go image by tag only (now by digest); and the notice
+collection had swept in five non-notice files (`license.go`, `license_gen.go`,
+`license_gen_test.go`, `licenseheaders.py`, `LICENSE.minisig`), which the
+filename filter now excludes. Re-verified: the exported archive equals the one
+recorded in the suite, the binary built offline from it with the README's
+command is `025691d4…`, and the licences of the linked modules are MIT (51),
+Apache-2.0 (35), BSD (18), MPL-2.0 (2), the Unlicense (1), LGPL-3.0 with a
+static-linking exception (`juju/ratelimit`) and AGPL-3.0 (`minio/madmin-go`,
+`minio/pkg`), with no licence found that forbids combination with AGPL-3.0.
+
+Source-provision procedure: when the initializer image, or a release archive
+containing it, is given to anyone outside the build host, export
+`mc-source.tar.gz` from the same revision with the
+[release recipe](#release-build-outside-the-vm), check that its SHA-256 equals
+both `INIT_MC_SOURCE_SHA256` and the value in the image's `SOURCE`, and provide it
+alongside the image, or from the same place at no further charge, for as long as
+the image is distributed. Rebuilding the archive later depends on GitHub and
+`proxy.golang.org`, so the exported copy is the one to keep. The licence defines
+conveying as propagation that lets other parties make or receive copies; running
+the image on the project's own VM without handing over a copy is not that.
+
+Not established: this is an engineering record, not legal advice or clearance.
+The Go toolchain and standard library are not in the archive; they are pinned by
+digest and publicly available, and the licence's System Libraries and
+general-purpose-tool exclusions may cover them, but that reading is not
+confirmed. Whether a given release or course submission conveys the image, and
+whether the procedure satisfies every obligation, need a legal or Leader
+determination.
+
+### F4 (3 November) — byte-clean PostgreSQL adopted
+
+Recorded in the [ADR003 amendment](decisions/003-postgresql-alpine-su-exec-image.md#amendment--3-november-2026-byte-clean-image).
+
+| Check | Result |
+| --- | --- |
+| Layers | 1 (was 14); no whiteout; no file equals the upstream `gosu` (`52c8749d…`) or contains its module path `github.com/tianon/gosu` |
+| Merged filesystem | Equal to the `layered` stage: 3,887 entries with content, owner, mode, link target and extended attributes; BuildKit (linux/amd64 and arm64) and the classic builder Testcontainers uses |
+| Configuration | Equal to the `layered` stage except the dropped `GOSU_VERSION` and `DOCKER_PG_LLVM_DEPS` |
+| Trivy | 0 in both modes (layered image: 0 in the merged view; its layer 2 still held `gosu`) |
+| Volume boundary | CI step: a Bookworm volume exits 78 and is unchanged; client tools run; a fresh volume is marked `musl`, restarted and keeps its data |
+| Testcontainers | `./mvnw verify`: 468 unit and 171 integration tests (Flyway V001–V006, privilege matrix, seed data) |
+| Release path | Hardened five-image `deploy.sh` provision and deploy (archive, image-identity, port and host-TLS checks stubbed): role provisioning, privilege matrix, Flyway V001–V006, role separation; marker `musl`; server runs as `postgres`, `CapBnd` `0xcb`, `CapEff` 0; data kept across a full restart |
+
+The new CI step "Check the PostgreSQL image is byte-clean and equivalent to its
+layered build" fails on any drift. **Status: `FIXED`** for the inherited `gosu`
+bytes. The glibc/musl collation risk, volume migration and admission are
+unchanged.
+
+### F5 (3 November) — MinIO server
+
+Rechecked: `cgr.dev/chainguard/minio:latest` (`sha256:090010a3…`) holds the same
+binary (`3c3d6152…`). The fork's `master` gained only `x/net` v0.62.0 and
+`go-jose` v4.1.7 bumps and CI changes after `a2c3f7c`, with no release tag or
+Chainguard build. The database now names a fixed `x/crypto` version for
+GO-2026-5932, but only a rebuild of the server could use it; a server built
+from the fork's unreleased `master` would replace the reviewed Chainguard
+artifact with unreviewed source, so none was made. `openpgp` is still not linked.
+CVE-2026-113466 has no fix; `MINIO_BROWSER=off` and the read-only,
+capability-free runtime stay. Rechecked again in the second pass: no new
+Chainguard digest, fork commit or release; the rebuilt minimal server still
+carries `3c3d6152…` and Trivy still reports only GO-2026-5932 (UNKNOWN). govulncheck
+reports it at symbol level for this stripped binary, which the 2 November control
+binary showed to be an artifact. **Status: `MITIGATED`, not fixed; risk
+acceptance pending.**
+
+### F6 (3 November) — provenance, reproducibility, signing
+
+| Item | Result | Status |
+| --- | --- | --- |
+| Base pins | Temurin 25.0.5+8 pinned; all other pins unchanged. BuildKit provenance names `adoptium/containers@86e89ce`, `docker-library/golang@41d9b4d`, `alpinelinux/docker-alpine@5aec467`; unsigned. Chainguard pins verify with cosign | Pinned; upstream provenance not independently verified |
+| Reproducibility | `mc` and its source archive: bit-identical across builds. PostgreSQL: content-equal to its layered build, image ID not reproducible. Others unchanged | Binary reproducible; images not |
+| Dependency inventory | `mc`: embedded module list with `h1:` checksums (`BUILDINFO`), notices and the source archive. Trivy SPDX documents of all five candidates were generated as review evidence, not committed | Provided for `mc`; no SBOM pipeline |
+| Signing | Not added; see the proposal below | `PENDING_LEADER_APPROVAL` |
+
+No signing or attestation was added and no trust policy is set. A design
+needs Leader decisions on: what is signed (each image or the release archive),
+where it is signed (a release workflow and its tag protection), which identity
+and key model is trusted (keyless with a transparency log, as Chainguard uses
+for the pins verified above, or managed keys), and whether `deploy.sh` must
+refuse unsigned input. Second-pass recheck: no base pin has a newer build
+except the build-only Node stages (`node:22` now resolves to 22.23.4); the Node
+toolchain does not ship in the runtime image and was not changed.
+
+### F10 (3 November) — local initializer secrets
+
+**Later correction:** the independent review found an incomplete enforcement
+claim here; see [the remediation record](#dp01-independent-review-remediation--3-november-2026).
+
+Confirmed: the base Compose file's inline initializer ran `mc alias set … USER
+PASSWORD` and `mc admin user add … KEY SECRET`, so the MinIO root password and the
+application secret were in process argument lists on the Docker host for the
+run. Now both reach `mc` on stdin, one line each; `mc` reads exactly one line
+without trimming, so values with control characters (which could not be passed
+intact) are refused before any change, as the release initializer already does.
+The suite wraps the local `mc` and checks that neither secret appears in any
+argument list while the initialization still succeeds and the release image
+accepts its state. Re-checked without change: no secret in Docker build
+arguments, tracked files, CI logs, test output, commit messages or the pull
+request. **Status: `FIXED` (local development only; the release path was not
+affected).**
+
+### F11 (3 November) — Java 25.0.5 and the trust store
+
+**Later correction:** the independent review found an incomplete enforcement
+claim here; see [the remediation record](#dp01-independent-review-remediation--3-november-2026).
+
+The OpenJDK Vulnerability Advisory of 2026/10/20 lists 48 CVEs fixed in the
+October release, affecting "25.0.4.1 … and earlier"; 39 of them are marked for
+JDK 25. Among them: `java.net` (9), `java.security`/`javax.security` (7),
+`javax.net.ssl` (2), `xml/jaxp` (3), the highest 7.0 (`client-libs/2d`).
+Temurin 25.0.5+8 (built from `adoptium/jdk25u` `7ec19fb`, the merge of
+`jdk-25.0.5+8`) carries them. The backend Ubuntu packages are unchanged: 24
+MEDIUM and 4 LOW, none fixable, the same as 25.0.4.1+1. The runtime contract
+(Java 25 LTS, Spring Boot 4.1.1) is unchanged; the backend suite, the image
+startup and the release path pass (below).
+
+**Correction (second pass).** The first version of this record said that
+CVE-2026-91403 and CVE-2026-114820 "remain until a Temurin release includes
+them". That was not verified and was inaccurate as stated. Both advisories
+(2026/10/21 and 2026/10/24, CVSS 9.1, `security-libs/java.security`) refer to
+OpenJDK's guidance on the compromised private keys of eight eMudhra intermediate
+CA certificates (openjdk.org/emudhra, JDK-8395690): the fix removes four roots
+from the runtime's trust store, "emSign ECC Root CA - G3" and "AAA Certificate
+Services", to which the compromised intermediates chain, and "emSign Root CA -
+G1" and "G2". The exposure is trust-store content, and the version ranges
+describe OpenJDK's own `cacerts`. Temurin generates its trust store from
+Mozilla's CA list (`adoptium/temurin-build`, `security/mk-cacerts.sh`), so the
+store itself was checked with OpenJDK's `CheckCerts.java`, compiled with the
+pinned JDK and run on each image:
+
+| Runtime | Roots `CheckCerts` reports |
+| --- | --- |
+| Temurin 25.0.4.1+1 (2 November backend) | emSign ECC Root CA - G3, emSign Root CA - G1 |
+| Temurin 25.0.5+8 as published | emSign Root CA - G1 |
+| Backend candidate (this branch) | none: "No bad root certificates found" |
+
+The upgrade removed the root of the compromised chains; the backend Dockerfile
+now deletes the remaining eMudhra root and fails the build if any of the four
+subjects is present (117 of 118 entries kept). If a future Temurin build drops
+that entry, the `keytool -delete` fails the build, so the step is revisited
+rather than silently kept. Actual exposure was low before the change: the
+backend opens no outbound TLS connection in the release (PostgreSQL and MinIO
+are reached over the private network without TLS, and there is no HTTP client or
+remote key source), so its trust store is not consulted. **Status: `FIXED` for
+both CVEs (verified on the image).** The 39 October CVEs above are fixed by the
+upgrade; no other JDK advisory affecting 25.0.5 is open.
+
+### Writable tmpfs mounts
+
+Measured on the hardened five-image stack after deployment, a registration, a
+login and a full restart: the backend's `/tmp` held 32 KiB, the frontend's 4 KiB
+and PostgreSQL's `/var/run/postgresql` 4 KiB; each mount offered 3.9 GiB, half
+of the 7.7 GiB Docker VM. Docker's default tmpfs size is
+half of the host's memory. The only documented input is the 20 MB request limit
+(`MAX_UPLOAD_SIZE`); no upload endpoint exists yet, and no concurrency or memory
+budget is defined, so any size limit would be invented. None was set.
+
+Second pass, on the exact candidate set: all requests reach the backend through
+Nginx, which rejects bodies over its default 1 MB `client_max_body_size` (a 2 MB
+POST returned 413; a 0.9 MB one reached the backend and got 400). Nginx spools
+larger request bodies and proxied responses to `/tmp/client_temp` and
+`/tmp/proxy_temp`, with `worker_processes auto` and 1,024 connections per worker,
+so its `/tmp` use is per request and transient but has no fixed upper bound short
+of connections times body size; the backend's spooling is bounded per request by
+the same 1 MB. A tmpfs `size=` cap would turn memory exhaustion into request
+failures, but choosing it still needs the VM's memory and an accepted
+concurrency, neither of which is recorded. **Open:** a memory budget for the VM
+services, from which tmpfs and container limits can be derived. Note also that the
+1 MB ingress default is below the 20 MB `MAX_UPLOAD_SIZE`, which matters once
+upload endpoints exist.
+
+### PostgreSQL capabilities (second pass)
+
+PostgreSQL keeps `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID` and `SETUID` in its
+bounding set because the entrypoint starts as root. Measured on the byte-clean
+image under the release restrictions (read-only root, `/var/run/postgresql`
+tmpfs, `no-new-privileges`), each set tested with a fresh volume, a restart with
+data, and a Bookworm volume that must be refused unchanged:
+
+| Capabilities | Result |
+| --- | --- |
+| The five | All pass |
+| `DAC_READ_SEARCH` instead of `DAC_OVERRIDE` | All pass |
+| `CHOWN`, `DAC_READ_SEARCH`, `SETGID`, `SETUID` | All pass; the entrypoint's tolerated `chmod` of the data directory fails |
+| Without `DAC_OVERRIDE`/`DAC_READ_SEARCH`, or without `CHOWN` | Initialization fails |
+| None, running as `postgres` (`--user 70:70`) | All pass, `CapBnd` 0 |
+
+Every server process already runs as `postgres` with `CapPrm` and `CapEff` 0
+and `NoNewPrivs` 1, so only root processes (the entrypoint before it hands over,
+and `docker exec`) can use the bounding set. Any root-start set keeps `SETUID`
+(needed for `su-exec`), and with it root can act as `postgres` anyway; `FOWNER`
+or `CHOWN` also allow writing others' files. The smaller root-start sets therefore
+give little real separation, and the current set was kept. The effective
+improvement is to start the server without root, which removes all five. That
+changes the image's runtime user and the entrypoint path ADR003 approved, and the
+Compose contract forbids a `user:` override, so it is a Leader decision (an ADR003
+amendment), not made here.
+
+### F2, F3, F7, F8, F9
+
+Unchanged from the 2 November record and still enforced: candidate, qualification,
+admission and promotion stages; root-owned Nginx configuration; no
+setuid/setgid programs in the backend; read-only roots, `cap_drop: [ALL]`,
+`no-new-privileges`, PostgreSQL's five capabilities and the approved tmpfs paths;
+the initializer's writable paths (its layer 1 keeps the base's modes, which the
+suite now checks entry by entry); private networking, HTTPS-only ingress and the
+disabled Console.
+
+### Remaining decisions
+
+1. Security admission of each candidate image and the DP01 release blockers 1–7.
+2. F5: acceptance of GO-2026-5932 and CVE-2026-113466 in the server, or a
+   trusted patched server.
+3. PostgreSQL: whether to start the server as `postgres` with no capabilities
+   (ADR003 amendment; measured to work above).
+4. F1 licensing: whether and how the image is conveyed, and legal confirmation
+   of the source-provision procedure.
+5. F6: whether to sign, what, and under which trust model.
+6. A memory budget for tmpfs and container limits.
+7. Still pending from earlier records: the glibc/musl collation risk, the
+   Console-hardening disposition, and a credential strength policy (none added).
+
+Nothing was built, loaded or run on the Azure VM; no release tag was created or
+changed.
+
+This record and its changes were produced through AI-assisted development
+(Anthropic Claude Code) under the Leader's task. Trivy, govulncheck, cosign and
+their databases, the Sigstore public-good transparency log, the Go module proxy
+and checksum database, GitHub and the OpenJDK and Adoptium advisory and release
+pages were used only for this review. No AI service or new infrastructure
+technology is introduced into CodeMastery's runtime.
+
+## DP01 independent-review remediation — 3 November 2026
+
+### Authority and corrected completion claims
+
+The Project Leader's "PR #132: Remediate Independent Review Findings" task
+continues the existing branch and authorizes only the two P2 corrections,
+necessary tests/evidence, and publication to PR #132. The independent review of
+`d6a4eeb033e8ded469e98d41f0d116b0e62aa5af` returned `CHANGES_REQUIRED`:
+F10 silently changed long credentials, and F11's inspection guard could pass on
+a tool failure. Earlier dated records remain historical evidence. Their F10
+`FIXED` claim covered argv disclosure but did not establish long-value
+preservation; their F11 certificate inventory was correct, but the claimed
+fail-closed enforcement was incomplete. This section supersedes those two
+completion claims only.
+
+The Leader's bounded integration acceptance of the previously documented
+MinIO-server, unsigned-image, Ubuntu, tmpfs and Alpine/musl limitations remains
+in effect for source integration. It grants no production image admission,
+release promotion, legal clearance, data migration or deployment authority.
+CODEOWNER/last-push approval and the existing DP01 release gates remain separate.
+
+### F10 — reject the pinned client's actual stdin overflow before changes
+
+Both pinned clients' `fetchAliasKeys` and `fetchUserKeys` use
+`bufio.NewReader(os.Stdin).ReadLine()` and discard its continuation flag:
+[minio/mc at 7394ce0](https://github.com/minio/mc/blob/7394ce0dd2a80935aded936b09fa12cbb3cb8096/cmd/admin-user-add.go).
+One read preserves at most 4,096 bytes. Before correction, local initialization
+with a 5,000-byte application secret exited 0, authenticated its truncated
+4,096-byte prefix, and rejected the complete configured value with
+`SignatureDoesNotMatch`. A control operation proved that the server accepts the
+intact 5,000-byte secret. This is a client-input limitation, not a MinIO server
+password limit or a new password-strength policy.
+
+Alternatives checked: aliases can use private JSON configuration, as the release
+initializer already does, but that does not fix `admin user add`; that command
+accepts its secret only as an argument or through the bounded stdin reader.
+Arguments expose it. The client's file-based alternative imports cluster-wide
+IAM state and would broaden this one-user operation. Replacing or patching the
+local client would change the separately pinned artifact. The smallest bounded
+correction therefore rejects overflow explicitly, before any MinIO operation.
+
+- **Local Compose:** checks both `MINIO_ROOT_PASSWORD` and `STORAGE_SECRET_KEY`
+  before any `mc` call or temporary configuration. `LC_ALL=C` makes shell length
+  count bytes. Values up to and including 4,096 bytes retain their exact value;
+  longer values fail with an explicit diagnostic. The existing control-character
+  rejection and stdin delivery remain; no password reaches `mc` argv or logs.
+- **Release initializer:** the same reader is used only when adding the
+  application identity. Its application secret receives the same early bound,
+  before contacting MinIO or creating resources. Root credentials still use the
+  private JSON alias file and support a 5,000-byte password. Existing IAM,
+  bucket scope, conflict refusal and no-change repeat semantics are preserved.
+- **Artifacts:** no client source, dependency, Go toolchain, binary hash,
+  Corresponding Source archive, server, image pin or deployment-policy value
+  changes. The release initializer image contains the corrected script.
+
+Regression coverage uses actual full-value authentication, shortened-value
+denial, repeat initialization, absence of mutation on rejected inputs, argv
+capture and log checks. It covers 4,095, 4,096, 4,097 and 5,000 bytes, UTF-8
+values crossing the byte boundary, and control characters. Exact commands and
+results are in [testing.md](testing.md#dp01-independent-review-remediation-verification--3-november-2026).
+The confirmed limitation is explicit rejection above the client buffer size;
+arbitrary-length local credentials are not claimed supported.
+
+### F11 — enumerate successfully and verify exact X.509 identities
+
+The old `! keytool -list ... | grep ...` accepted both a listing failure and a
+search error as if prohibited roots were absent. The pinned Temurin 25.0.5+8
+runtime and deletion of the remaining G1 alias are unchanged.
+
+`backend/Dockerfile` now compiles a build-only Java verifier. The runtime build
+step first requires successful `keytool -list -rfc`, then independently loads
+the actual binary keystore with Java's `KeyStore` API. Every trust entry must be
+an X.509 certificate entry; the store must be nonempty. The complete multiset of
+DER SHA-256 identities must equal the parsed certificate inventory. An
+unreadable, malformed, empty or incomplete inventory, or an enumeration,
+parsing or validator error fails the build. No `grep`, pipeline negation or
+unchecked tool status decides acceptance. Human-readable subject formatting is
+not used as certificate identity.
+
+The four denied identities are from OpenJDK's
+`jdk-25.0.4.1+1/src/java.base/share/data/cacerts/`: `comodoaaaca`,
+`emsigneccrootcag3`, `emsignrootcag1`, `emsignrootcag2`, corresponding to the
+four roots in [OpenJDK's advisory](https://openjdk.org/emudhra). Their exact
+fingerprints are in the verifier; regression fixtures are checked against them.
+An unrelated certificate with the same common name is accepted.
+
+The regression script executes the **actual Dockerfile verification RUN** in
+uncached test builds. It rejects the published Temurin store, each of the four
+introduced real roots, listing and validator failures, malformed/incomplete
+successful listing output, and invalid/unreadable keystores. The final backend
+store passes with 117 entries; an unrelated same-CN addition passes with 118.
+The helper class, compiler, fixtures and temporary inventory do not ship in the
+runtime image. CI invokes this script in the existing HTTPS ingress job.
+
+This remediation and its tests/documentation were produced with OpenAI Codex
+assistance under the Leader's task. OpenJDK's public certificate data and the
+pinned client source were inspected for these corrections; no AI service or new
+production dependency is added to the application.

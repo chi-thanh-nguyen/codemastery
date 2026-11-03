@@ -8,17 +8,16 @@
 # `gosu postgres`. PostgreSQL major version, the data directory layout,
 # healthcheck and initialization semantics are unchanged.
 #
-# Removing gosu and creating the symlink in separate layers gives the removal
-# its own whiteout (usr/local/bin/.wh.gosu). Trivy drops a lower layer's
-# findings only for a whiteout, so one combined layer (a symlink replacing the
-# file, no whiteout) still reports the base layer's gosu. Either way the
-# original gosu bytes remain in the inherited base layer; the zero-finding scan
-# describes the merged filesystem, not an erased binary. See docs/deployment.md,
-# "DP01 PostgreSQL Alpine/su-exec image hardening".
+# The `layered` stage makes these changes on the pinned base; there the
+# original gosu bytes stay in an inherited layer, hidden only by a whiteout. The
+# final stage copies that stage's complete merged filesystem into one layer, so
+# no layer of the image holds gosu (ADR003 amendment of 3 November 2026; see
+# docs/deployment.md, "DP01 PostgreSQL Alpine/su-exec image hardening" and
+# "DP01 final security remediation", F4).
 #
 # Build for the VM platform:
 #   docker build --platform linux/amd64 -t <non-release tag> infrastructure/postgres
-FROM postgres:17.11-alpine3.24@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+FROM postgres:17.11-alpine3.24@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b AS layered
 
 # The base image sets no labels; describe this image without inventing a
 # version or source revision that a local build cannot attest.
@@ -72,5 +71,29 @@ RUN set -eu; \
         > /docker-entrypoint-initdb.d/00-codemastery-cluster-libc.sh
 
 # Setting ENTRYPOINT clears the inherited CMD, so the upstream default is restated.
+ENTRYPOINT ["codemastery-postgres-entrypoint"]
+CMD ["postgres"]
+
+# Byte-clean image: the merged filesystem above, owners and modes included.
+# FROM scratch starts with no configuration, so the layered stage's is restated;
+# CI checks that it is identical except for GOSU_VERSION and the upstream
+# build-time DOCKER_PG_LLVM_DEPS, which describe nothing left in the image.
+FROM scratch
+COPY --from=layered / /
+LABEL org.opencontainers.image.title="CodeMastery PostgreSQL" \
+      org.opencontainers.image.description="PostgreSQL 17.11 Alpine with su-exec replacing the gosu executable" \
+      org.opencontainers.image.source="https://github.com/chi-thanh-nguyen/codemastery" \
+      org.opencontainers.image.base.name="postgres:17.11-alpine3.24" \
+      org.opencontainers.image.base.digest="sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b"
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=en_US.utf8 \
+    PG_MAJOR=17 \
+    PG_VERSION=17.11 \
+    PG_SHA256=dd27f2b3c59e73ed14aa3324901242bf69a032a6347805f274e6260322d42979 \
+    PGDATA=/var/lib/postgresql/data
+VOLUME /var/lib/postgresql/data
+WORKDIR /
+STOPSIGNAL SIGINT
+EXPOSE 5432
 ENTRYPOINT ["codemastery-postgres-entrypoint"]
 CMD ["postgres"]

@@ -78,6 +78,9 @@ byte_length() {  # value -> REPLY
 }
 byte_length "${app_secret}"
 (( REPLY >= 8 )) || fail "STORAGE_SECRET_KEY must be at least 8 bytes long."
+# admin user add uses mc's single-buffer stdin reader. Root credentials use
+# the JSON config below and are not subject to this client-input limitation.
+(( REPLY <= 4096 )) || fail "STORAGE_SECRET_KEY must not exceed mc's 4096-byte stdin limit; nothing was changed."
 # MinIO accepts 3-20 character user access keys and rejects '=' and ','. This
 # character set needs no JSON escaping, so the identity can be matched exactly
 # in server responses.
