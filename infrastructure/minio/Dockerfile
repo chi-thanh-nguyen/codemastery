@@ -49,7 +49,9 @@ RUN set -eu; \
         '091e2cfcfcf221bfc0a17ac65dd0bc7204860788312e7c7711ca2b2b26a9ee27  go.mod' \
         '363a7760e2d827c5a39e00399e8141888fdb8be509e2598f77ab22ca6db02e9e  go.sum' | sha256sum -c -
 # A fresh module cache holds only what the linux build loads; it becomes the
-# archive's file-based module proxy.
+# archive's file-based module proxy. This Dockerfile goes into the archive as the
+# script that fetches, builds and packages the binary.
+COPY Dockerfile /out/mc-source/Dockerfile
 RUN set -eu; \
     GOMODCACHE=/tmp/gomod GOFLAGS=-mod=readonly GOOS=$TARGETOS GOARCH=$TARGETARCH \
         go list -deps . >/dev/null; \
@@ -69,9 +71,12 @@ RUN set -eu; \
         'versions in mc/go.mod and mc/go.sum changed (dependency-changes.diff) from' \
         'minio/mc commit 7394ce0dd2a80935aded936b09fa12cbb3cb8096. The source code is' \
         'otherwise unchanged. goproxy/ holds every module the build uses, as served' \
-        'by proxy.golang.org; go.sum verifies each one.' \
+        'by proxy.golang.org; go.sum verifies each one. Dockerfile is the CodeMastery' \
+        'build that fetched this source, wrote this archive, builds mc from it and' \
+        'installs it in the initializer image.' \
         '' \
-        'Build (Go 1.27.3, golang:1.27.3-bookworm, linux/amd64), offline:' \
+        'Build (Go 1.27.3: golang:1.27.3-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9,' \
+        'linux/amd64), offline:' \
         '  cd mc' \
         '  CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-mod=readonly GOSUMDB=off \' \
         '  GOPROXY=file://$PWD/../goproxy GOOS=linux GOARCH=amd64 \' \
@@ -89,7 +94,8 @@ COPY --from=mc-source /out/mc-source.tar.gz /
 # what the Corresponding Source produces. /usr/share/doc/mc receives the licence
 # and notice texts of mc, the Go standard library and every linked module that
 # ships one (colorjson and filepath carry Go's BSD licence in their file
-# headers), the archive README and the binary's embedded module list (BUILDINFO).
+# headers), the archive README, the binary's embedded module list (BUILDINFO) and
+# SOURCE, which names the exact archive (SHA-256) the binary was built from.
 FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9 AS mc-build
 ARG TARGETOS TARGETARCH
 COPY --from=mc-source /out/mc-source.tar.gz /tmp/
@@ -102,12 +108,27 @@ RUN --network=none set -eu; \
         -ldflags "-buildid= -X github.com/minio/mc/cmd.Version=0.20250813.083541" -o /out/mc .; \
     mkdir /out/doc; \
     cp LICENSE NOTICE CREDITS ../README /out/doc/; \
+    printf '%s\n' \
+        'Corresponding Source of /usr/bin/mc (modified MinIO Client, AGPL-3.0-or-later)' \
+        '' \
+        'This mc was built without network access only from mc-source.tar.gz with' \
+        "SHA-256 $(sha256sum /tmp/mc-source.tar.gz | cut -d' ' -f1)," \
+        'which holds the mc source with its changed go.mod and go.sum, every module it' \
+        'links, the modification notice (README) and the build and packaging script' \
+        '(Dockerfile). CodeMastery provides that archive with every copy of this image' \
+        'it gives to anyone. It can be regenerated from the CodeMastery repository,' \
+        'https://github.com/chi-thanh-nguyen/codemastery, at the revision that built' \
+        'this image, and checked against the SHA-256 above:' \
+        '  docker build --platform linux/amd64 --target mc-source-archive \' \
+        '    --output type=local,dest=<directory> infrastructure/minio' \
+        > /out/doc/SOURCE; \
     go version -m /out/mc | sed 's|^/out/mc:|/usr/bin/mc:|' > /out/doc/BUILDINFO; \
     { \
         printf '== Go standard library %s LICENSE\n' "$(go env GOVERSION)"; cat "$(go env GOROOT)/LICENSE"; \
         go list -deps -f '{{with .Module}}{{if .Version}}{{.Path}}@{{.Version}} {{.Dir}}{{end}}{{end}}' . | sort -u \
         | while read -r module dir; do \
-            for f in $(ls "$dir" | grep -iE '^(licen[cs]e|unlicense|copying|notice|patents)' | sort); do \
+            for f in $(ls "$dir" | grep -iE '^(licen[cs]e|unlicense|copying|notice|patents)([._-][a-z0-9]+)?$' \
+                    | grep -viE '[.](go|py|minisig)$' | sort); do \
                 printf '\n== %s %s\n' "$module" "$f"; cat "$dir/$f"; \
             done; \
         done; \

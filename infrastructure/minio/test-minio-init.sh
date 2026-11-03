@@ -54,15 +54,18 @@ INIT_ROOTFS_TOOL_IMAGE='alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5a
 # The project-built linux/amd64 mc and the files the build derives from it and
 # from its Corresponding Source archive (mc-source-archive target). The build is
 # reproducible, so these are exact: a different toolchain, module or source
-# changes them.
+# changes them. The archive holds infrastructure/minio/Dockerfile and SOURCE names
+# the archive's SHA-256, so any Dockerfile edit changes the archive, SOURCE and
+# README hashes, while the mc hash changes only with what is compiled.
 INIT_MC_SHA256='025691d43adb653c6ce34723c76450153f2c024bfa232edaca6906fe3e221809'
-INIT_MC_SOURCE_SHA256='ed6f972e23de4074221d1e71436ea32932d9c83eb24c728417bf4b98ddb98d11'
+INIT_MC_SOURCE_SHA256='a42400d4703c265258952b44bfd997a53dcca55bf47b691f48a1f2f483e98b50'
 INIT_MC_DOCS='44ab3614640388cb516de279d50712ed4bee04dc7fe96b983fef5283629c6340 BUILDINFO
 4ead58181c478e2f449d5778165684f4fceb1e7b8b3ee150051c8e7adfe4f337 CREDITS
 0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0 LICENSE
 56635f1740e8c33231e76ba8fbe098e7e9cc95d28b7b4abb98fed6270405810e NOTICE
-05a0d57dd6c45a1d475b559e99be8931499dc31869df40f74f401d96cbe1f382 README
-cb78a9dea2a9f493ce7a6486ce9888fefcb3567d32a362b1c7bd82b2834f6cf8 THIRD_PARTY_NOTICES'
+51677c6c845b9d77a93f9fb437122470167178400dd44446f86f0a546e20435d README
+50a5fa59ecfcc4c1dabd46742c09b545757fc63b6cf73344c8de383b1e48aa73 SOURCE
+d7634df3afa9d85da2f53f3df092fa4afd8777b21136303d0700105b62e918f7 THIRD_PARTY_NOTICES'
 # DP01 release-server candidate: Chainguard's build of the chainguard-forks/minio
 # fork, selected only by this immutable index digest (docs/deployment.md).
 CHAINGUARD_SERVER_IMAGE='cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82'
@@ -484,9 +487,12 @@ verify_initializer_source() {
   local sum
   sum="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "${WORK}/mc-source/mc-source.tar.gz")"
   expect_eq "mc Corresponding Source archive" "${sum}" "${INIT_MC_SOURCE_SHA256}"
-  python3 - "${WORK}/mc-source/mc-source.tar.gz" <<'PY' || die "the mc source archive lacks a required part."
+  python3 - "${WORK}/mc-source/mc-source.tar.gz" "${ROOT}/infrastructure/minio/Dockerfile" <<'PY' || die "the mc source archive lacks a required part."
 import sys, tarfile
-names = set(tarfile.open(sys.argv[1]).getnames())
+archive = tarfile.open(sys.argv[1])
+names = set(archive.getnames())
+with open(sys.argv[2], "rb") as f:
+    assert archive.extractfile("mc-source/Dockerfile").read() == f.read(), "archived Dockerfile differs"
 for need in ("mc-source/README", "mc-source/dependency-changes.diff", "mc-source/mc/LICENSE",
              "mc-source/mc/NOTICE", "mc-source/mc/go.mod", "mc-source/mc/go.sum", "mc-source/mc/main.go"):
     assert need in names, need
@@ -620,7 +626,7 @@ verify_initializer_artifact
 pass "non-root user, own entrypoint, no command, secrets, ports, volumes or healthcheck; the pinned base filesystem without its mc, plus only the reproducible mc, its notices and the reviewed script; no layer holds the replaced mc"
 if [[ -n "${BUILT_HERE:-}" ]]; then
   verify_initializer_source
-  pass "the build's mc Corresponding Source archive is the recorded one and holds the mc tree, its licence, the module zips and build instructions"
+  pass "the build's mc Corresponding Source archive is the recorded one and holds the mc tree, its licence, the module zips, build instructions and this Dockerfile"
 fi
 
 runtime="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LABEL}" --entrypoint /bin/bash "${IMAGE}" -c '
