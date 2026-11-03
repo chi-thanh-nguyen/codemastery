@@ -2015,21 +2015,24 @@ jobs:
             "$FRONTEND_RELEASE_IMAGE"
           # The runtime user (UID 101) cannot change the Nginx configuration; only
           # the cache directory (and /tmp, for the pid file) stays writable.
-          docker run --rm --entrypoint sh "$FRONTEND_RELEASE_IMAGE" -ec '
-            [ "$(id -u)" = 101 ]
-            bad="$(find /etc/nginx ! -type l \( ! -user root -o ! -group root -o -perm -g+w -o -perm -o+w \))"
-            [ -z "$bad" ] || { echo "Nginx configuration not root-owned and read-only: $bad" >&2; exit 1; }
-            for target in /etc/nginx/nginx.conf /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/probe.conf /etc/nginx/probe; do
-              if (: > "$target") 2>/dev/null; then echo "UID 101 can write $target" >&2; exit 1; fi
-            done
-            : > /var/cache/nginx/probe && rm /var/cache/nginx/probe'
-          echo "release frontend: Nginx configuration is root-owned and not writable by UID 101"
-          # Neither runtime image keeps a setuid/setgid program.
-          for image in "$FRONTEND_RELEASE_IMAGE" "$BACKEND_IMAGE"; do
+          for image in "$FRONTEND_RELEASE_IMAGE" "$FRONTEND_LOCAL_IMAGE"; do
+            docker run --rm --entrypoint sh "$image" -ec '
+              [ "$(id -u)" = 101 ]
+              [ "$(nginx -v 2>&1)" = "nginx version: nginx/1.30.6" ]
+              bad="$(find /etc/nginx ! -type l \( ! -user root -o ! -group root -o -perm -g+w -o -perm -o+w \))"
+              [ -z "$bad" ] || { echo "Nginx configuration not root-owned and read-only: $bad" >&2; exit 1; }
+              for target in /etc/nginx/nginx.conf /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/probe.conf /etc/nginx/probe; do
+                if (: > "$target") 2>/dev/null; then echo "UID 101 can write $target" >&2; exit 1; fi
+              done
+              : > /var/cache/nginx/probe && rm /var/cache/nginx/probe'
+            echo "$image: patched Nginx configuration is root-owned and not writable by UID 101"
+          done
+          # No application runtime image keeps a setuid/setgid program.
+          for image in "$FRONTEND_RELEASE_IMAGE" "$FRONTEND_LOCAL_IMAGE" "$BACKEND_IMAGE"; do
             privileged="$(docker run --rm --user 0:0 --entrypoint find "$image" / -xdev -type f \( -perm -4000 -o -perm -2000 \))"
             [[ -z "$privileged" ]] || { printf 'setuid/setgid files in %s:\n%s\n' "$image" "$privileged" >&2; exit 1; }
           done
-          echo "release frontend and backend: no setuid/setgid files"
+          echo "both frontend targets and backend: no setuid/setgid files"
           # The release target fails closed without exactly one valid public origin.
           reject_origin() {  # expected-message [build args...]
             local want="$1" output; shift

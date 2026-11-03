@@ -176,8 +176,19 @@ RUN if [ -n "${VITE_API_BASE_URL:-}" ]; then \
         npm run build; \
     fi
 
-FROM nginxinc/nginx-unprivileged:1.30.5-alpine-slim AS runtime
+FROM nginxinc/nginx-unprivileged:1.30.6-alpine-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6 AS runtime
+
+# Apply the same reviewed Alpine fixes and configuration ownership as the
+# release target, limited to packages present in the slim HTTP runtime.
+USER root
+RUN set -eu; \
+    apk add --no-cache \
+        alpine-release=3.24.3-r0 ca-certificates-bundle=20261020-r0 \
+        musl=1.2.6-r3 musl-utils=1.2.6-r3 zlib=1.3.2-r1; \
+    chown -R -h root:root /etc/nginx; \
+    chmod -R go-w /etc/nginx
+USER 101
 
 COPY --from=build /app/dist/ /usr/share/nginx/html/
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chown=root:root --chmod=0444 nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 8080
