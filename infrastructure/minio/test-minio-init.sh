@@ -934,11 +934,19 @@ export DOCKER_DEFAULT_PLATFORM="${PLATFORM}"
 # and a sleeping placeholder stands in for the backend that waits on minio-init.
 # The local stack uses the same server, so its volume is never handed from one
 # server build to another.
+# The local initializer's mc is wrapped to record every argument list it gets.
+mkdir -m 0700 "${WORK}/argv"
+printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> /argv/log' 'exec /usr/bin/mc "$@"' > "${WORK}/mc-argv"
+chmod 0555 "${WORK}/mc-argv"
 cat > "${WORK}/local-ports.yml" <<EOF
 services:
   minio:
     image: ${SERVER_IMAGE}
     ports: !reset []
+  minio-init:
+    volumes:
+      - ${WORK}/mc-argv:/usr/local/bin/mc:ro
+      - ${WORK}/argv:/argv
 EOF
 cat > "${WORK}/release-images.yml" <<EOF
 services:
@@ -1015,6 +1023,13 @@ pass "effective VM model keeps codemastery.invalid/minio:release, the base comma
   || die "local stack failed to start: $(tail -5 "${WORK}/local-up.log")"
 cid="$("${local_compose[@]}" ps -a -q minio-init)"
 expect_eq "local inline initializer exit" "$(docker wait "${cid}")" "0"
+python3 - "${WORK}/argv/log" "${ROOT_PASS}" "${APP_SECRET}" <<'PY' || die "the local initializer passed a secret to mc as an argument"
+import sys
+log = open(sys.argv[1], encoding="utf-8").read()
+assert "admin user add local-admin cm-storage-app\n" in log and "alias set " in log, "mc wrapper not used"
+for secret in sys.argv[2:]:
+    assert secret not in log
+PY
 expect_listening "local server listeners" "$("${local_compose[@]}" ps -q minio)" "9000 9001"
 "${vm_compose[@]}" up -d --no-build --pull never backend >"${WORK}/up.log" 2>&1 \
   || die "release initializer path failed: $(tail -5 "${WORK}/up.log")"
@@ -1036,7 +1051,7 @@ expect_eq "release server Console setting" "$(docker inspect --format '{{json .C
   "MINIO_BROWSER=off"
 expect_eq "release server listeners" "$(listening_ports "${cid}")" "9000"
 expect_eq "release Console port" "$(tcp_probe "${project}_default" 9001)" "refused"
-pass "release image accepts local-initializer state unchanged and releases the dependent service; the release server has no Console listener"
+pass "local initializer keeps secrets out of mc arguments; the release image accepts its state unchanged and releases the dependent service; the release server has no Console listener"
 
 # A conflict introduced later must stop the initializer and keep the dependent down.
 "${vm_compose[@]}" rm -sf backend minio-init >/dev/null 2>&1

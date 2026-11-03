@@ -58,6 +58,14 @@ services:
             exit 1
             ;;
         esac
+        # Secrets reach mc on stdin, one line each, never as arguments that any
+        # process on the host can read.
+        case "$$MINIO_ROOT_PASSWORD$$STORAGE_SECRET_KEY" in
+          *[[:cntrl:]]*)
+            printf '%s\n' 'MINIO_ROOT_PASSWORD and STORAGE_SECRET_KEY must not contain control characters.' >&2
+            exit 1
+            ;;
+        esac
         work_dir=$$(mktemp -d)
         trap 'rm -rf "$$work_dir"' EXIT
         export MC_CONFIG_DIR="$$work_dir/config"
@@ -69,14 +77,14 @@ services:
           fi
         }
         # Explicit API/path avoids probing before the server is ready.
-        run_mc alias set --api S3v4 --path on local-admin http://minio:9000 \
-          "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        printf '%s\n' "$$MINIO_ROOT_PASSWORD" \
+          | run_mc alias set --api S3v4 --path on local-admin http://minio:9000 "$$MINIO_ROOT_USER"
         if ! timeout 120 mc ready local-admin >"$$work_dir/mc-output" 2>&1; then
           printf '%s\n' 'MinIO did not become ready within 120 seconds.' >&2
           exit 1
         fi
         run_mc mb --ignore-existing --region "$$STORAGE_REGION" "local-admin/$$STORAGE_BUCKET"
-        run_mc admin user add local-admin "$$STORAGE_ACCESS_KEY" "$$STORAGE_SECRET_KEY"
+        printf '%s\n' "$$STORAGE_SECRET_KEY" | run_mc admin user add local-admin "$$STORAGE_ACCESS_KEY"
         run_mc admin user enable local-admin "$$STORAGE_ACCESS_KEY"
         cat >"$$work_dir/policy.json" <<EOF
         {
@@ -118,8 +126,8 @@ services:
             run_mc admin policy attach local-admin "$$policy_name" --user "$$STORAGE_ACCESS_KEY"
             ;;
         esac
-        run_mc alias set --api S3v4 --path on local-app http://minio:9000 \
-          "$$STORAGE_ACCESS_KEY" "$$STORAGE_SECRET_KEY"
+        printf '%s\n' "$$STORAGE_SECRET_KEY" \
+          | run_mc alias set --api S3v4 --path on local-app http://minio:9000 "$$STORAGE_ACCESS_KEY"
         run_mc ls "local-app/$$STORAGE_BUCKET"
         printf '%s\n' 'MinIO bucket and application identity initialized.'
 
