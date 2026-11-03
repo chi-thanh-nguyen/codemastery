@@ -1843,3 +1843,54 @@ real Auth, catalogue and membership under the approved matrix" and the
 containerd registry step (GitHub Actions runs them); a release archive with the
 `codemastery.invalid/*:release` names; the Azure VM. GitHub Actions results
 belong to the pull request.
+
+## DP01 final qualification, second pass — 3 November 2026
+
+Scope: the second task recorded in
+[deployment.md, "DP01 final security remediation"](deployment.md#dp01-final-security-remediation--3-november-2026).
+Same host and tools as the section above (Trivy database 2026-11-03 01:30 UTC,
+govulncheck database 2026-11-02T22:01:43Z). The five candidates were built from
+this branch's final files, all `linux/amd64`:
+
+| Image | Candidate | Image ID | Layers |
+| --- | --- | --- | --- |
+| PostgreSQL | `codemastery-candidate/postgres:r5` | `sha256:d2780e42…` | 1 |
+| Minimal MinIO server | `codemastery-candidate/minio-server:r5` | `sha256:fe27b3c4…` | 5 |
+| MinIO initializer | `codemastery-candidate/minio-init:r5` | `sha256:fffa4d57…` | 4 |
+| Backend | `codemastery-candidate/backend:r5` | `sha256:587ad4ad…` | 8 |
+| Frontend (release) | `codemastery-candidate/frontend:r5` | `sha256:fdf3e288…` | 13 |
+
+**Test-host correction.** In the first pass, the operator-container runs of the
+env-file custody and committed-override preflight steps began with
+`sudo chmod 666` on the Docker socket the container saw. On Docker Desktop that
+path is the VM's `/run/host-services/docker.proxy.sock`; its change time matched
+that run, and every other socket Docker Desktop created in the same directory at
+the same boot is `0660 root:root`. It was set back to `0660` (owner and group
+unchanged, the VM's own `/run/docker.sock` was never touched). The host CLI and
+root containers still work, a container user without group 0 is refused, and the
+operator image's user, which has supplementary group 0, works without any
+permission change. Both steps were rerun that way. No repository file contains
+the `chmod`; it was only in the local command line.
+
+| Check | Method | Result |
+| --- | --- | --- |
+| Trivy, exact set | `docker save --platform linux/amd64`, default and comprehensive | PostgreSQL 0/0; initializer 0/0; frontend 0/0; backend 0 CRITICAL/HIGH, 24 MEDIUM and 4 LOW without a fix; minimal server GO-2026-5932 (UNKNOWN) only |
+| govulncheck | `-mode=binary` | `mc`: none. `minio`: GO-2026-5932 at symbol level, the stripped-binary artifact shown with a control binary on 2 November |
+| JDK trust store | OpenJDK `CheckCerts.java` compiled with the pinned JDK, run on Temurin 25.0.4.1+1, 25.0.5+8 and the candidate | Two, one and no listed roots; the build-time assertion fails on both unpatched stores |
+| `mc` Corresponding Source | Exported archive versus the suite's hash and the image's `SOURCE`; archived Dockerfile versus the committed one; offline rebuild with the README command in an emulated `linux/amd64` Go container | All equal; rebuilt `mc` `025691d4…` |
+| MinIO initializer suite | `test-minio-init.sh` for `golithus`, `chainguard`, and `minimal` with the `r5` server tagged as the suite's qualification image (tags restored afterwards) | 27/27 each (427, 505 and 369 s) |
+| CI-equivalent steps | The deployment-script, PostgreSQL and ingress job steps listed in the first-pass section, plus "Run DP01 preflight with the committed override and certificate layout" after the ingress build; operator steps without any socket change | All 13 passed |
+| Five-image release path | Real `deploy.sh` `run_provision`/`run_deploy` with the five `r5` images; archive, image-identity, port and host-TLS checks stubbed | Completed; privileges and roles as in the first pass; containers read-only, `cap_drop` ALL, `no-new-privileges`; PostgreSQL 1 layer, marker `musl`, server as `postgres`, `CapBnd` `0xcb`; initializer `changes: 4`; backend Java 25.0.5 |
+| Behavior on that stack | HTTPS through the frontend | SPA 200; register 201 / 403 (foreign origin); login token; `/api/me/courses` 401 / 200; `/actuator/health` not proxied; a 2 MB body 413, a 0.9 MB body reaches the backend (400) |
+| Restart | Stop all, start in order, rerun the initializer | Initializer `changes: 0`; frontend healthy; login 200 |
+| tmpfs | `df`/`du` in the running containers; `nginx -T` | 32 KiB / 4 KiB / 4 KiB used; Nginx temp paths under `/tmp`, `worker_processes auto`, 1,024 connections |
+| PostgreSQL capability sets | Fresh volume, restart with data, refused Bookworm volume, under the release restrictions | As tabulated in deployment.md |
+| Backend suite | `cd backend && ./mvnw -B verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures |
+| Whitespace | `git diff --check` | Passed |
+
+Not run: Playwright end-to-end tests (not available); the CI steps for the
+runtime privilege matrix with failure containment, published-port verification,
+real-backend Auth/catalogue/membership and the containerd registry (GitHub
+Actions runs them); a release archive with the `codemastery.invalid/*:release`
+names; the Azure VM. The frontend source is unchanged and its tests were not
+rerun in this pass.

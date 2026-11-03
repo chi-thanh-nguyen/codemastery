@@ -3229,15 +3229,23 @@ release, or touch the Azure VM. This record updates the
 which stays as written; where they differ, this one describes the current
 branch. `origin/main` was still `b2984a1`.
 
+A second task the same day ("Continue the final security remediation of
+CodeMastery PR #132") asked for the test host's Docker socket to be restored,
+the open F11 CVEs to be verified on the image, the `mc` licensing to be
+re-reviewed, residual F5/F6/tmpfs/PostgreSQL-capability exposure to be
+re-examined, and the exact five-image set to be requalified. Its results are
+included below; where they correct the first version of this record, the
+section says so.
+
 ### Changes
 
 | File | Change |
 | --- | --- |
-| `infrastructure/minio/Dockerfile` | Project-built `mc` (F1): source `minio/mc` `7394ce0`, fixed dependency versions, Go `golang:1.27.3-bookworm@sha256:d9b6a1be…`; the binary is built offline from its own Corresponding Source archive; the pinned Chainguard filesystem without its `mc` is copied into one layer; licence and notice texts in `/usr/share/doc/mc` |
+| `infrastructure/minio/Dockerfile` | Project-built `mc` (F1): source `minio/mc` `7394ce0`, fixed dependency versions, Go `golang:1.27.3-bookworm@sha256:d9b6a1be…`; the binary is built offline from its own Corresponding Source archive; the pinned Chainguard filesystem without its `mc` is copied into one layer; licence and notice texts in `/usr/share/doc/mc`; the archive also holds this Dockerfile, and `/usr/share/doc/mc/SOURCE` names the archive's SHA-256 |
 | `infrastructure/minio/test-minio-init.sh` | New artifact identity model for that image (below); checks the Corresponding Source archive of a suite-built image; records every argument the local inline initializer passes to `mc` and fails on a secret |
 | `infrastructure/postgres/Dockerfile` | The approved changes become the `layered` stage; the final stage ships its merged filesystem as one layer (F4) |
 | `infrastructure/docker-compose.yml` | Local inline initializer: `MINIO_ROOT_PASSWORD` and `STORAGE_SECRET_KEY` reach `mc` on stdin instead of as arguments; values with control characters are refused (F10) |
-| `backend/Dockerfile` | Temurin 25.0.5+8 JDK and JRE, pinned (`sha256:95e350ad…`, `sha256:a98128a5…`) (F11) |
+| `backend/Dockerfile` | Temurin 25.0.5+8 JDK and JRE, pinned (`sha256:95e350ad…`, `sha256:a98128a5…`); the runtime's Java trust store loses "emSign Root CA - G1", and the build fails if any root OpenJDK lists for the eMudhra compromise remains (F11) |
 | `frontend/Dockerfile` | `libexpat` 2.10.0-r0 added to the exact Alpine set: today's database reports two HIGH and two other `libexpat` 2.9.0 findings for the 2 November candidate (F6/F8) |
 | `.github/workflows/ci.yml` | New step: the PostgreSQL image's configuration and merged filesystem equal its layered build, it has one layer and no layer holds `gosu` |
 | `docs/decisions/003-postgresql-alpine-su-exec-image.md` | Append-only amendment recording the F4 decision |
@@ -3297,7 +3305,9 @@ package record), it is counted once.
 - **Reproducibility.** `mc` SHA-256
   `025691d43adb653c6ce34723c76450153f2c024bfa232edaca6906fe3e221809` and the source
   archive SHA-256 `ed6f972e23de4074221d1e71436ea32932d9c83eb24c728417bf4b98ddb98d11`
-  came out identical in a cross-compiling BuildKit build on an arm64 builder and
+  (first version; the second pass added the Dockerfile and a fuller README, giving
+  `a42400d4703c265258952b44bfd997a53dcca55bf47b691f48a1f2f483e98b50` with the same
+  `mc`) came out identical in a cross-compiling BuildKit build on an arm64 builder and
   in an offline rebuild from the exported archive with its README command in an
   emulated `linux/amd64` Go container; the archive was also identical across two
   separate BuildKit builds. The suite repeats the comparison wherever it builds
@@ -3310,7 +3320,7 @@ package record), it is counted once.
   equal the pin's filesystem entry by entry (type, owner, mode, link target,
   content), checked against a recorded digest of that filesystem, except for the
   three removed or rewritten paths, whose new apk database content is recomputed;
-  layers 2–4 may hold only `mc`, the six notice files and the script, each with
+  layers 2–4 may hold only `mc`, the seven notice files and the script, each with
   its recorded SHA-256 and mode. A suite-built image's source archive must have
   the recorded SHA-256. Rejected during development: the 2 November image
   (12 layers), the Option B experiment (3 layers), and three mutated builds
@@ -3340,33 +3350,53 @@ section 13 concerns users interacting with a modified program over a network, an
 What this branch provides:
 
 - The Corresponding Source archive, produced by the same Dockerfile and revision
-  that build the image, and the binary's only source input (the Go toolchain is
-  the pinned `golang` image).
-- The modification notice and build command in the archive's README, also in the
-  image as `/usr/share/doc/mc/README`.
-- `mc`'s `LICENSE`, `NOTICE` and `CREDITS`, the Go standard library's licence, and
-  the licence and notice files of every linked module that ships one
-  (`THIRD_PARTY_NOTICES`; `minio/colorjson` and `minio/filepath` have none and
-  carry Go's BSD licence in their file headers), plus `BUILDINFO`, the binary's
-  embedded module list with checksums. The image label
-  `org.opencontainers.image.licenses` is `AGPL-3.0-or-later`.
+  that build the image, and the binary's only source input. It holds the `mc`
+  tree with its changed `go.mod`/`go.sum`, `dependency-changes.diff`, the 100
+  module zips the linux build loads (each module's own licence and notice files
+  inside), the README with the dated modification notice and the offline build
+  command (Go image pinned by digest), and, since the second pass, the
+  Dockerfile itself, which fetches, builds and installs the binary.
+- In the image, `/usr/share/doc/mc`: `mc`'s `LICENSE` (the AGPL text), `NOTICE`
+  and `CREDITS`; the archive's `README`; `BUILDINFO`, the binary's embedded
+  module list with checksums; `THIRD_PARTY_NOTICES`, the Go standard library's
+  licence and every linked module's licence, notice and patent files
+  (`minio/colorjson` and `minio/filepath` have none and carry Go's BSD licence
+  in their file headers); and, since the second pass, `SOURCE`, which names the
+  exact archive (SHA-256) the binary was built from and how to regenerate it from
+  the public repository. The image label `org.opencontainers.image.licenses` is
+  `AGPL-3.0-or-later`.
+
+Second-pass review, gaps found and fixed: the image did not say where its
+Corresponding Source is (now `SOURCE`, with the archive hash); the archive did not
+contain the script that installs the binary into the image (now the Dockerfile);
+the README named the Go image by tag only (now by digest); and the notice
+collection had swept in five non-notice files (`license.go`, `license_gen.go`,
+`license_gen_test.go`, `licenseheaders.py`, `LICENSE.minisig`), which the
+filename filter now excludes. Re-verified: the exported archive equals the one
+recorded in the suite, the binary built offline from it with the README's
+command is `025691d4…`, and the licences of the linked modules are MIT (51),
+Apache-2.0 (35), BSD (18), MPL-2.0 (2), the Unlicense (1), LGPL-3.0 with a
+static-linking exception (`juju/ratelimit`) and AGPL-3.0 (`minio/madmin-go`,
+`minio/pkg`), with no licence found that forbids combination with AGPL-3.0.
 
 Source-provision procedure: when the initializer image, or a release archive
 containing it, is given to anyone outside the build host, export
 `mc-source.tar.gz` from the same revision with the
-[release recipe](#release-build-outside-the-vm), check its SHA-256 against
-`INIT_MC_SOURCE_SHA256`, and provide it alongside the image, or from the same
-place at no further charge, for as long as the image is distributed. Rebuilding
-the archive later depends on GitHub and `proxy.golang.org`, so the exported copy
-is the one to keep. The licence defines conveying as propagation that lets other
-parties make or receive copies; running the image on the project's own VM
-without handing over a copy is not that.
+[release recipe](#release-build-outside-the-vm), check that its SHA-256 equals
+both `INIT_MC_SOURCE_SHA256` and the value in the image's `SOURCE`, and provide it
+alongside the image, or from the same place at no further charge, for as long as
+the image is distributed. Rebuilding the archive later depends on GitHub and
+`proxy.golang.org`, so the exported copy is the one to keep. The licence defines
+conveying as propagation that lets other parties make or receive copies; running
+the image on the project's own VM without handing over a copy is not that.
 
 Not established: this is an engineering record, not legal advice or clearance.
-Whether a given release or course submission conveys the image, whether the Go
-toolchain and standard library need to be in the archive (they are identified by
-digest and are publicly available, but not included), and whether the procedure
-satisfies every obligation, need a legal or Leader determination.
+The Go toolchain and standard library are not in the archive; they are pinned by
+digest and publicly available, and the licence's System Libraries and
+general-purpose-tool exclusions may cover them, but that reading is not
+confirmed. Whether a given release or course submission conveys the image, and
+whether the procedure satisfies every obligation, need a legal or Leader
+determination.
 
 ### F4 (3 November) — byte-clean PostgreSQL adopted
 
@@ -3397,8 +3427,12 @@ GO-2026-5932, but only a rebuild of the server could use it; a server built
 from the fork's unreleased `master` would replace the reviewed Chainguard
 artifact with unreviewed source, so none was made. `openpgp` is still not linked.
 CVE-2026-113466 has no fix; `MINIO_BROWSER=off` and the read-only,
-capability-free runtime stay. **Status: `MITIGATED`, not fixed; risk acceptance
-pending.**
+capability-free runtime stay. Rechecked again in the second pass: no new
+Chainguard digest, fork commit or release; the rebuilt minimal server still
+carries `3c3d6152…` and Trivy still reports only GO-2026-5932 (UNKNOWN). govulncheck
+reports it at symbol level for this stripped binary, which the 2 November control
+binary showed to be an artifact. **Status: `MITIGATED`, not fixed; risk
+acceptance pending.**
 
 ### F6 (3 November) — provenance, reproducibility, signing
 
@@ -3409,15 +3443,14 @@ pending.**
 | Dependency inventory | `mc`: embedded module list with `h1:` checksums (`BUILDINFO`), notices and the source archive. Trivy SPDX documents of all five candidates were generated as review evidence, not committed | Provided for `mc`; no SBOM pipeline |
 | Signing | Not added; see the proposal below | `PENDING_LEADER_APPROVAL` |
 
-Proposed trust policy (not implemented): a release workflow on a protected tag
-builds the five images and the archive in GitHub Actions, writes the archive's
-SHA-256, the image identities and the `mc` source archive, and signs the archive
-with `cosign sign-blob` using GitHub OIDC (keyless, Sigstore public-good). The
-operator verifies before `deploy.sh load` with `cosign verify-blob
---certificate-identity https://github.com/chi-thanh-nguyen/codemastery/.github/workflows/<release workflow>@refs/tags/<tag>
---certificate-oidc-issuer https://token.actions.githubusercontent.com`. Needed
-decisions: the workflow and tag protection, the transparency-log dependency,
-cosign on the operator host, and whether `deploy.sh` should require it.
+No signing or attestation was added and no trust policy is set. A design
+needs Leader decisions on: what is signed (each image or the release archive),
+where it is signed (a release workflow and its tag protection), which identity
+and key model is trusted (keyless with a transparency log, as Chainguard uses
+for the pins verified above, or managed keys), and whether `deploy.sh` must
+refuse unsigned input. Second-pass recheck: no base pin has a newer build
+except the build-only Node stages (`node:22` now resolves to 22.23.4); the Node
+toolchain does not ship in the runtime image and was not changed.
 
 ### F10 (3 November) — local initializer secrets
 
@@ -3434,7 +3467,7 @@ arguments, tracked files, CI logs, test output, commit messages or the pull
 request. **Status: `FIXED` (local development only; the release path was not
 affected).**
 
-### F11 (3 November) — Java 25.0.5
+### F11 (3 November) — Java 25.0.5 and the trust store
 
 The OpenJDK Vulnerability Advisory of 2026/10/20 lists 48 CVEs fixed in the
 October release, affecting "25.0.4.1 … and earlier"; 39 of them are marked for
@@ -3446,12 +3479,36 @@ MEDIUM and 4 LOW, none fixable, the same as 25.0.4.1+1. The runtime contract
 (Java 25 LTS, Spring Boot 4.1.1) is unchanged; the backend suite, the image
 startup and the release path pass (below).
 
-Still open: CVE-2026-91403 (advisory 2026/10/21, CVSS 9.1, `java.security`,
-affects "25.0.5 and earlier") and CVE-2026-114820 (2026/10/24, CVSS 9.1,
-`java.security`, affects "25.0.5.0.2 and earlier"). OpenJDK has tagged
-`jdk-25.0.5.0.2-ga` and `jdk-25.0.5.0.3-ga`, but Temurin publishes no build after
-25.0.5+8. **Status: `MITIGATED` (39 JDK CVEs fixed by the upgrade); two
-CRITICAL-scored JDK CVEs remain until a Temurin release includes them.**
+**Correction (second pass).** The first version of this record said that
+CVE-2026-91403 and CVE-2026-114820 "remain until a Temurin release includes
+them". That was not verified and was inaccurate as stated. Both advisories
+(2026/10/21 and 2026/10/24, CVSS 9.1, `security-libs/java.security`) refer to
+OpenJDK's guidance on the compromised private keys of eight eMudhra intermediate
+CA certificates (openjdk.org/emudhra, JDK-8395690): the fix removes four roots
+from the runtime's trust store, "emSign ECC Root CA - G3" and "AAA Certificate
+Services", to which the compromised intermediates chain, and "emSign Root CA -
+G1" and "G2". The exposure is trust-store content, and the version ranges
+describe OpenJDK's own `cacerts`. Temurin generates its trust store from
+Mozilla's CA list (`adoptium/temurin-build`, `security/mk-cacerts.sh`), so the
+store itself was checked with OpenJDK's `CheckCerts.java`, compiled with the
+pinned JDK and run on each image:
+
+| Runtime | Roots `CheckCerts` reports |
+| --- | --- |
+| Temurin 25.0.4.1+1 (2 November backend) | emSign ECC Root CA - G3, emSign Root CA - G1 |
+| Temurin 25.0.5+8 as published | emSign Root CA - G1 |
+| Backend candidate (this branch) | none: "No bad root certificates found" |
+
+The upgrade removed the root of the compromised chains; the backend Dockerfile
+now deletes the remaining eMudhra root and fails the build if any of the four
+subjects is present (117 of 118 entries kept). If a future Temurin build drops
+that entry, the `keytool -delete` fails the build, so the step is revisited
+rather than silently kept. Actual exposure was low before the change: the
+backend opens no outbound TLS connection in the release (PostgreSQL and MinIO
+are reached over the private network without TLS, and there is no HTTP client or
+remote key source), so its trust store is not consulted. **Status: `FIXED` for
+both CVEs (verified on the image).** The 39 October CVEs above are fixed by the
+upgrade; no other JDK advisory affecting 25.0.5 is open.
 
 ### Writable tmpfs mounts
 
@@ -3461,9 +3518,48 @@ and PostgreSQL's `/var/run/postgresql` 4 KiB; each mount offered 3.9 GiB, half
 of the 7.7 GiB Docker VM. Docker's default tmpfs size is
 half of the host's memory. The only documented input is the 20 MB request limit
 (`MAX_UPLOAD_SIZE`); no upload endpoint exists yet, and no concurrency or memory
-budget is defined, so any size limit would be invented. None was set. **Open:**
-a memory budget for the VM services, from which tmpfs and container limits can be
-derived.
+budget is defined, so any size limit would be invented. None was set.
+
+Second pass, on the exact candidate set: all requests reach the backend through
+Nginx, which rejects bodies over its default 1 MB `client_max_body_size` (a 2 MB
+POST returned 413; a 0.9 MB one reached the backend and got 400). Nginx spools
+larger request bodies and proxied responses to `/tmp/client_temp` and
+`/tmp/proxy_temp`, with `worker_processes auto` and 1,024 connections per worker,
+so its `/tmp` use is per request and transient but has no fixed upper bound short
+of connections times body size; the backend's spooling is bounded per request by
+the same 1 MB. A tmpfs `size=` cap would turn memory exhaustion into request
+failures, but choosing it still needs the VM's memory and an accepted
+concurrency, neither of which is recorded. **Open:** a memory budget for the VM
+services, from which tmpfs and container limits can be derived. Note also that the
+1 MB ingress default is below the 20 MB `MAX_UPLOAD_SIZE`, which matters once
+upload endpoints exist.
+
+### PostgreSQL capabilities (second pass)
+
+PostgreSQL keeps `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID` and `SETUID` in its
+bounding set because the entrypoint starts as root. Measured on the byte-clean
+image under the release restrictions (read-only root, `/var/run/postgresql`
+tmpfs, `no-new-privileges`), each set tested with a fresh volume, a restart with
+data, and a Bookworm volume that must be refused unchanged:
+
+| Capabilities | Result |
+| --- | --- |
+| The five | All pass |
+| `DAC_READ_SEARCH` instead of `DAC_OVERRIDE` | All pass |
+| `CHOWN`, `DAC_READ_SEARCH`, `SETGID`, `SETUID` | All pass; the entrypoint's tolerated `chmod` of the data directory fails |
+| Without `DAC_OVERRIDE`/`DAC_READ_SEARCH`, or without `CHOWN` | Initialization fails |
+| None, running as `postgres` (`--user 70:70`) | All pass, `CapBnd` 0 |
+
+Every server process already runs as `postgres` with `CapPrm` and `CapEff` 0
+and `NoNewPrivs` 1, so only root processes (the entrypoint before it hands over,
+and `docker exec`) can use the bounding set. Any root-start set keeps `SETUID`
+(needed for `su-exec`), and with it root can act as `postgres` anyway; `FOWNER`
+or `CHOWN` also allow writing others' files. The smaller root-start sets therefore
+give little real separation, and the current set was kept. The effective
+improvement is to start the server without root, which removes all five. That
+changes the image's runtime user and the entrypoint path ADR003 approved, and the
+Compose contract forbids a `user:` override, so it is a Leader decision (an ADR003
+amendment), not made here.
 
 ### F2, F3, F7, F8, F9
 
@@ -3480,10 +3576,11 @@ disabled Console.
 1. Security admission of each candidate image and the DP01 release blockers 1–7.
 2. F5: acceptance of GO-2026-5932 and CVE-2026-113466 in the server, or a
    trusted patched server.
-3. F11: the two open JDK CVEs; upgrade when Temurin publishes a fixed build.
+3. PostgreSQL: whether to start the server as `postgres` with no capabilities
+   (ADR003 amendment; measured to work above).
 4. F1 licensing: whether and how the image is conveyed, and legal confirmation
    of the source-provision procedure.
-5. F6: signing and its trust policy.
+5. F6: whether to sign, what, and under which trust model.
 6. A memory budget for tmpfs and container limits.
 7. Still pending from earlier records: the glibc/musl collation risk, the
    Console-hardening disposition, and a credential strength policy (none added).
