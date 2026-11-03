@@ -1,6 +1,7 @@
-# Temurin 25.0.4.1+1 tags, each pinned to the index it resolved to on
-# 2 November 2026, so a rebuild cannot silently pick up different base content.
-FROM eclipse-temurin:25.0.4.1_1-jdk-noble@sha256:a9c5ddd386f629518bd500ecfabf7d1e5d32d7ffed735d5c3b1604ae92c830f4 AS build
+# Temurin 25.0.5+8 (the October 2026 OpenJDK security release), each tag pinned
+# to the index it resolved to on 3 November 2026, so a rebuild cannot silently
+# pick up different base content (docs/deployment.md, F11).
+FROM eclipse-temurin:25.0.5_8-jdk-noble@sha256:95e350ad1eb738f943e141640f7e3d797e483359a3b33c3864255bfd1ad71f8a AS build
 
 WORKDIR /build
 COPY .mvn/ .mvn/
@@ -8,7 +9,7 @@ COPY mvnw pom.xml ./
 COPY src/ src/
 RUN ./mvnw package -DskipTests
 
-FROM eclipse-temurin:25.0.4.1_1-jre-noble@sha256:ce8543ddd3070ccbeaac2106a74c9387ddeb8d47a1c43348345715c1ef245c7f AS runtime
+FROM eclipse-temurin:25.0.5_8-jre-noble@sha256:a98128a57de944a72bd31fbc79b898edd5a5864d3652071d5bbd2160ab7d7dce AS runtime
 
 # The non-root runtime needs no setuid/setgid program, so the base's su, mount,
 # passwd and similar binaries lose those bits.

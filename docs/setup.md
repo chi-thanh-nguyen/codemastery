@@ -586,12 +586,12 @@ not required for these image builds.
 ### Backend Image
 
 The build context is `backend/`. The builder uses
-`eclipse-temurin:25.0.4.1_1-jdk-noble` and the checked-in Maven Wrapper to run
+`eclipse-temurin:25.0.5_8-jdk-noble` and the checked-in Maven Wrapper to run
 `./mvnw package -DskipTests`. Tests are not executed, but their sources are still
 compiled. The image does not consume a host-built `target/` directory; normal
 CI continues to run `./mvnw verify` separately.
 
-The runtime uses `eclipse-temurin:25.0.4.1_1-jre-noble` and contains only the
+The runtime uses `eclipse-temurin:25.0.5_8-jre-noble` and contains only the
 application artifact copied from the builder:
 `/app/codemastery-backend.jar`. Java runs as the dedicated non-root
 `codemastery:codemastery` account. The JAR is root-owned and read-only to the
