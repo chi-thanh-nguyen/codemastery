@@ -1059,6 +1059,104 @@ expect_eq "release server listeners" "$(listening_ports "${cid}")" "9000"
 expect_eq "release Console port" "$(tcp_probe "${project}_default" 9001)" "refused"
 pass "local initializer keeps secrets out of mc arguments; the release image accepts its state unchanged and releases the dependent service; the release server has no Console listener"
 
+# The local client uses one 4096-byte stdin buffer. Exercise real authentication,
+# not merely the initializer's exit status; rejected input must reach no mc call.
+section "Local stdin credential byte boundary"
+saved_root_pass="${ROOT_PASS}"; saved_app_secret="${APP_SECRET}"
+local_credential_case() {  # label root-password application-secret accept|reject
+  local name="$1" outcome="$4" project cid output argv
+  ROOT_PASS="$2"; APP_SECRET="$3"
+  export MINIO_ROOT_PASSWORD="${ROOT_PASS}" STORAGE_SECRET_KEY="${APP_SECRET}"
+  project="cm-${RUN_ID}-boundary-${name}"
+  PROJECTS+=("${project}")
+  mkdir -m 0700 "${WORK}/argv-${name}"
+  cat > "${WORK}/boundary-${name}.yml" <<YAML
+services:
+  minio:
+    image: ${SERVER_IMAGE}
+    ports: !reset []
+  minio-init:
+    volumes:
+      - ${WORK}/mc-argv:/usr/local/bin/mc:ro
+      - ${WORK}/argv-${name}:/argv
+YAML
+  local -a cmd=(docker compose -p "${project}" --env-file "${WORK}/compose.env"
+    -f "${BASE_COMPOSE}" -f "${WORK}/boundary-${name}.yml")
+  "${cmd[@]}" config --quiet
+  "${cmd[@]}" up -d --no-build --pull never minio-init >"${WORK}/boundary-up.log" 2>&1 \
+    || die "local boundary ${name}: could not start fixture"
+  cid="$("${cmd[@]}" ps -a -q minio-init)"
+  output="$(docker wait "${cid}")"
+  if [[ "${outcome}" == reject ]]; then
+    expect_eq "local ${name} exit" "${output}" "1"
+    [[ ! -s "${WORK}/argv-${name}/log" ]] || die "local ${name}: mc was called before rejection"
+    expect_contains "local ${name}: server ready for state inspection" \
+      "$(CM_TIMEOUT=60 admin "${project}_default" ready t)" '"healthy":true'
+    expect_nothing_created "local ${name}: no mutation" "${project}_default"
+  else
+    expect_eq "local ${name} exit" "${output}" "0"
+    expect_initialized_state "local ${name}" "${project}_default"
+    expect_ok "local ${name}: full credential authenticates" \
+      "$(mc_as "${project}_default" "${APP_KEY}" "${APP_SECRET}" ls "t/${BUCKET}" </dev/null)"
+    expect_code "local ${name}: shortened credential rejected" SignatureDoesNotMatch \
+      "$(mc_as "${project}_default" "${APP_KEY}" "${APP_SECRET%?}" ls "t/${BUCKET}" </dev/null)"
+    # Repeat against the existing identity; the same full value must still work.
+    "${cmd[@]}" rm -sf minio-init >/dev/null 2>&1
+    "${cmd[@]}" up -d --no-build --pull never minio-init >"${WORK}/boundary-up.log" 2>&1
+    cid="$("${cmd[@]}" ps -a -q minio-init)"
+    expect_eq "local ${name}: repeat exit" "$(docker wait "${cid}")" "0"
+    expect_ok "local ${name}: full credential after repeat" \
+      "$(mc_as "${project}_default" "${APP_KEY}" "${APP_SECRET}" ls "t/${BUCKET}" </dev/null)"
+  fi
+  output="$("${cmd[@]}" logs --no-log-prefix minio-init 2>&1)"
+  argv="$(cat "${WORK}/argv-${name}/log" 2>/dev/null || true)"
+  [[ "${output}${argv}" != *"${ROOT_PASS}"* && "${output}${argv}" != *"${APP_SECRET}"* ]] \
+    || die "local ${name}: credential disclosed in logs or mc argv"
+  "${cmd[@]}" down -v --remove-orphans >/dev/null 2>&1
+}
+# All generated values are synthetic. Distinct final bytes catch truncation.
+pad_secret() { python3 -c 'import sys; print(sys.argv[1] * (int(sys.argv[2])-1) + sys.argv[3], end="")' "$@"; }
+for bytes in 4095 4096; do
+  local_credential_case "${bytes}" "$(pad_secret r "${bytes}" R)" "$(pad_secret a "${bytes}" A)" accept
+done
+for bytes in 4097 5000; do
+  local_credential_case "root-${bytes}" "$(pad_secret r "${bytes}" R)" "${saved_app_secret}" reject
+  local_credential_case "app-${bytes}" "${saved_root_pass}" "$(pad_secret a "${bytes}" A)" reject
+done
+utf8="$(python3 -c 'print("é" * 2047 + "aZ", end="")')"  # 4096 bytes, 2049 code points
+local_credential_case utf8-4096 "${saved_root_pass}" "${utf8}" accept
+local_credential_case utf8-4097 "${saved_root_pass}" "${utf8}Z" reject
+local_credential_case control "${saved_root_pass}" $'invalid\tsecret' reject
+ROOT_PASS="${saved_root_pass}"; APP_SECRET="${saved_app_secret}"
+export MINIO_ROOT_PASSWORD="${ROOT_PASS}" STORAGE_SECRET_KEY="${APP_SECRET}"
+pass "local 4095/4096-byte credentials authenticate intact and survive repeat initialization; 4097/5000-byte and control inputs fail before mc or mutation, without argv/log disclosure; UTF-8 is counted in bytes"
+
+# The release shares only the application-secret stdin reader; its administrator
+# alias is JSON and accepts a longer password without truncation.
+net="$(start_server release-boundary)"
+for bytes in 4097 5000; do
+  run_init "${net}" "STORAGE_SECRET_KEY=$(pad_secret a "${bytes}" A)"
+  expect_init_fail "release ${bytes}-byte app secret" "4096-byte stdin limit"
+  expect_nothing_created "release ${bytes}-byte secret" "${net}"
+done
+APP_SECRET="$(pad_secret a 4096 A)"
+run_init "${net}" "STORAGE_SECRET_KEY=${APP_SECRET}"
+expect_init_ok "release 4096-byte secret"
+expect_ok "release full 4096-byte credential" "$(app "${net}" ls "t/${BUCKET}" </dev/null)"
+run_init "${net}" "STORAGE_SECRET_KEY=${APP_SECRET}"
+expect_init_ok "release repeated 4096-byte secret"
+expect_contains "release repeat is unchanged" "${INIT_OUT}" "initialized (changes: 0)"
+APP_SECRET="${saved_app_secret}"
+stop_server "${net}"
+ROOT_PASS="$(pad_secret r 5000 R)"
+net="$(start_server release-long-root)"
+run_init "${net}" "MINIO_ROOT_PASSWORD=${ROOT_PASS}"
+expect_init_ok "release 5000-byte root password through JSON"
+expect_initialized_state "release full root password" "${net}"
+ROOT_PASS="${saved_root_pass}"
+stop_server "${net}"
+pass "release application-secret overflow fails before mutation; exact 4096-byte authentication and idempotency work; 5000-byte root password remains supported through JSON"
+
 # A conflict introduced later must stop the initializer and keep the dependent down.
 "${vm_compose[@]}" rm -sf backend minio-init >/dev/null 2>&1
 expect_ok "attach readwrite" "$(admin "${project}_default" admin policy attach t readwrite --user "${APP_KEY}")"

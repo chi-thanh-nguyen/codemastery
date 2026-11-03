@@ -3454,6 +3454,9 @@ toolchain does not ship in the runtime image and was not changed.
 
 ### F10 (3 November) — local initializer secrets
 
+**Later correction:** the independent review found an incomplete enforcement
+claim here; see [the remediation record](#dp01-independent-review-remediation--3-november-2026).
+
 Confirmed: the base Compose file's inline initializer ran `mc alias set … USER
 PASSWORD` and `mc admin user add … KEY SECRET`, so the MinIO root password and the
 application secret were in process argument lists on the Docker host for the
@@ -3468,6 +3471,9 @@ request. **Status: `FIXED` (local development only; the release path was not
 affected).**
 
 ### F11 (3 November) — Java 25.0.5 and the trust store
+
+**Later correction:** the independent review found an incomplete enforcement
+claim here; see [the remediation record](#dp01-independent-review-remediation--3-november-2026).
 
 The OpenJDK Vulnerability Advisory of 2026/10/20 lists 48 CVEs fixed in the
 October release, affecting "25.0.4.1 … and earlier"; 39 of them are marked for
@@ -3594,3 +3600,102 @@ their databases, the Sigstore public-good transparency log, the Go module proxy
 and checksum database, GitHub and the OpenJDK and Adoptium advisory and release
 pages were used only for this review. No AI service or new infrastructure
 technology is introduced into CodeMastery's runtime.
+
+## DP01 independent-review remediation — 3 November 2026
+
+### Authority and corrected completion claims
+
+The Project Leader's "PR #132: Remediate Independent Review Findings" task
+continues the existing branch and authorizes only the two P2 corrections,
+necessary tests/evidence, and publication to PR #132. The independent review of
+`d6a4eeb033e8ded469e98d41f0d116b0e62aa5af` returned `CHANGES_REQUIRED`:
+F10 silently changed long credentials, and F11's inspection guard could pass on
+a tool failure. Earlier dated records remain historical evidence. Their F10
+`FIXED` claim covered argv disclosure but did not establish long-value
+preservation; their F11 certificate inventory was correct, but the claimed
+fail-closed enforcement was incomplete. This section supersedes those two
+completion claims only.
+
+The Leader's bounded integration acceptance of the previously documented
+MinIO-server, unsigned-image, Ubuntu, tmpfs and Alpine/musl limitations remains
+in effect for source integration. It grants no production image admission,
+release promotion, legal clearance, data migration or deployment authority.
+CODEOWNER/last-push approval and the existing DP01 release gates remain separate.
+
+### F10 — reject the pinned client's actual stdin overflow before changes
+
+Both pinned clients' `fetchAliasKeys` and `fetchUserKeys` use
+`bufio.NewReader(os.Stdin).ReadLine()` and discard its continuation flag:
+[minio/mc at 7394ce0](https://github.com/minio/mc/blob/7394ce0dd2a80935aded936b09fa12cbb3cb8096/cmd/admin-user-add.go).
+One read preserves at most 4,096 bytes. Before correction, local initialization
+with a 5,000-byte application secret exited 0, authenticated its truncated
+4,096-byte prefix, and rejected the complete configured value with
+`SignatureDoesNotMatch`. A control operation proved that the server accepts the
+intact 5,000-byte secret. This is a client-input limitation, not a MinIO server
+password limit or a new password-strength policy.
+
+Alternatives checked: aliases can use private JSON configuration, as the release
+initializer already does, but that does not fix `admin user add`; that command
+accepts its secret only as an argument or through the bounded stdin reader.
+Arguments expose it. The client's file-based alternative imports cluster-wide
+IAM state and would broaden this one-user operation. Replacing or patching the
+local client would change the separately pinned artifact. The smallest bounded
+correction therefore rejects overflow explicitly, before any MinIO operation.
+
+- **Local Compose:** checks both `MINIO_ROOT_PASSWORD` and `STORAGE_SECRET_KEY`
+  before any `mc` call or temporary configuration. `LC_ALL=C` makes shell length
+  count bytes. Values up to and including 4,096 bytes retain their exact value;
+  longer values fail with an explicit diagnostic. The existing control-character
+  rejection and stdin delivery remain; no password reaches `mc` argv or logs.
+- **Release initializer:** the same reader is used only when adding the
+  application identity. Its application secret receives the same early bound,
+  before contacting MinIO or creating resources. Root credentials still use the
+  private JSON alias file and support a 5,000-byte password. Existing IAM,
+  bucket scope, conflict refusal and no-change repeat semantics are preserved.
+- **Artifacts:** no client source, dependency, Go toolchain, binary hash,
+  Corresponding Source archive, server, image pin or deployment-policy value
+  changes. The release initializer image contains the corrected script.
+
+Regression coverage uses actual full-value authentication, shortened-value
+denial, repeat initialization, absence of mutation on rejected inputs, argv
+capture and log checks. It covers 4,095, 4,096, 4,097 and 5,000 bytes, UTF-8
+values crossing the byte boundary, and control characters. Exact commands and
+results are in [testing.md](testing.md#dp01-independent-review-remediation-verification--3-november-2026).
+The confirmed limitation is explicit rejection above the client buffer size;
+arbitrary-length local credentials are not claimed supported.
+
+### F11 — enumerate successfully and verify exact X.509 identities
+
+The old `! keytool -list ... | grep ...` accepted both a listing failure and a
+search error as if prohibited roots were absent. The pinned Temurin 25.0.5+8
+runtime and deletion of the remaining G1 alias are unchanged.
+
+`backend/Dockerfile` now compiles a build-only Java verifier. The runtime build
+step first requires successful `keytool -list -rfc`, then independently loads
+the actual binary keystore with Java's `KeyStore` API. Every trust entry must be
+an X.509 certificate entry; the store must be nonempty. The complete multiset of
+DER SHA-256 identities must equal the parsed certificate inventory. An
+unreadable, malformed, empty or incomplete inventory, or an enumeration,
+parsing or validator error fails the build. No `grep`, pipeline negation or
+unchecked tool status decides acceptance. Human-readable subject formatting is
+not used as certificate identity.
+
+The four denied identities are from OpenJDK's
+`jdk-25.0.4.1+1/src/java.base/share/data/cacerts/`: `comodoaaaca`,
+`emsigneccrootcag3`, `emsignrootcag1`, `emsignrootcag2`, corresponding to the
+four roots in [OpenJDK's advisory](https://openjdk.org/emudhra). Their exact
+fingerprints are in the verifier; regression fixtures are checked against them.
+An unrelated certificate with the same common name is accepted.
+
+The regression script executes the **actual Dockerfile verification RUN** in
+uncached test builds. It rejects the published Temurin store, each of the four
+introduced real roots, listing and validator failures, malformed/incomplete
+successful listing output, and invalid/unreadable keystores. The final backend
+store passes with 117 entries; an unrelated same-CN addition passes with 118.
+The helper class, compiler, fixtures and temporary inventory do not ship in the
+runtime image. CI invokes this script in the existing HTTPS ingress job.
+
+This remediation and its tests/documentation were produced with OpenAI Codex
+assistance under the Leader's task. OpenJDK's public certificate data and the
+pinned client source were inspected for these corrections; no AI service or new
+production dependency is added to the application.

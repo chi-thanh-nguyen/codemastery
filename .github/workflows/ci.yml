@@ -2010,6 +2010,7 @@ jobs:
             -t "$FRONTEND_RELEASE_IMAGE" frontend >/dev/null
           docker build -q -t "$FRONTEND_LOCAL_IMAGE" frontend >/dev/null
           docker build -q -t "$BACKEND_IMAGE" backend >/dev/null
+          bash infrastructure/vm/tests/test-java-truststore.sh "$BACKEND_IMAGE"
           docker image inspect --format 'release frontend: user {{.Config.User}}, healthcheck {{json .Config.Healthcheck.Test}}' \
             "$FRONTEND_RELEASE_IMAGE"
           # The runtime user (UID 101) cannot change the Nginx configuration; only

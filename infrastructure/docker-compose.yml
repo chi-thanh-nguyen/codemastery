@@ -66,6 +66,17 @@ services:
             exit 1
             ;;
         esac
+        # The pinned mc ignores ReadLine's continuation flag. Its stdin reader
+        # preserves at most 4096 bytes; reject overflow before any mc call.
+        # LC_ALL=C makes shell string length count bytes, including UTF-8 input.
+        LC_ALL=C
+        export LC_ALL
+        for secret in "$$MINIO_ROOT_PASSWORD" "$$STORAGE_SECRET_KEY"; do
+          if [ "$${#secret}" -gt 4096 ]; then
+            printf '%s\n' 'Local mc stdin credentials must not exceed 4096 bytes; nothing was changed.' >&2
+            exit 1
+          fi
+        done
         work_dir=$$(mktemp -d)
         trap 'rm -rf "$$work_dir"' EXIT
         export MC_CONFIG_DIR="$$work_dir/config"

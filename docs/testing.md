@@ -1894,3 +1894,68 @@ real-backend Auth/catalogue/membership and the containerd registry (GitHub
 Actions runs them); a release archive with the `codemastery.invalid/*:release`
 names; the Azure VM. The frontend source is unchanged and its tests were not
 rerun in this pass.
+
+## DP01 independent-review remediation verification — 3 November 2026
+
+Scope: the two P2 defects in the independent review of PR #132 at `d6a4eeb`,
+corrected under the Leader's remediation task. See the
+[implementation and corrected claims](deployment.md#dp01-independent-review-remediation--3-november-2026).
+Earlier results above remain historical; successful old certificate-inventory
+checks did not prove that inspection failures stopped the build, and ordinary
+stdin credentials did not prove long-value preservation.
+
+Local environment: macOS arm64, Docker Engine 29.8.1, Compose v5.5.1;
+linux/amd64 containers run under emulation. Maven uses host Temurin 25.0.4.1;
+the actual backend image remains pinned Temurin 25.0.5+8. All test state is
+synthetic and disposable. No Docker socket permission was changed, production
+resource accessed, or release tag created.
+
+| Check | Exact command or method | Actual result |
+| --- | --- | --- |
+| Baseline F10 reproduction | Actual local Compose initializer, 5,000-byte synthetic secret; authenticate through private JSON aliases with full and truncated values | Before: exit 0, full value rejected with `SignatureDoesNotMatch`, 4,096-byte prefix accepted; server control accepts intact 5,000 bytes |
+| Baseline F11 reproduction | Actual old negated pipeline with `keytool` returning 42 | Before: guard exits 0 |
+| Corrected backend build | `docker build --platform linux/amd64 -t codemastery-pr132-remediation/backend:f11 backend` | PASS; 117 complete X.509 trust entries, no prohibited root |
+| Trust-store build regressions | `bash infrastructure/vm/tests/test-java-truststore.sh codemastery-pr132-remediation/backend:f11` | PASS, 13 uncached build cases: published store rejected; final store accepted; all four introduced real roots rejected; keytool error, malformed/incomplete successful output, validator error, invalid and unreadable stores rejected; unrelated same-CN certificate accepted |
+| Backend tests | `cd backend && ./mvnw -B verify` | BUILD SUCCESS; 468 unit and 171 integration tests, zero failures/errors/skips |
+| Runtime restrictions and build-only files | Read-only backend with `/tmp` tmpfs, `cap_drop ALL`, `no-new-privileges`; inspect runtime and verifier/inventory paths | PASS: Temurin 25.0.5+8, UID 999, effective/bounding capabilities zero, NoNewPrivs 1; helper class and temporary inventory absent |
+| Syntax/whitespace | `bash -n infrastructure/minio/minio-init.sh infrastructure/minio/test-minio-init.sh infrastructure/vm/tests/test-java-truststore.sh`; `git diff --check` | PASS |
+| MinIO image and three-server qualification | Commands below, supplied candidate image | PASS, 28/28 for each of Golithus, Chainguard and minimal; the suite-build form additionally checks the unchanged Corresponding Source archive |
+| Deployment/HTTPS regression checks | Existing CI-derived scripts; limitations below | PASS: cleanup, authorization, offline Compose, 24-relation matrix sync, archive fixtures and rendered Compose mutations; 65 real-backend HTTPS assertions |
+
+The MinIO suite adds actual local Compose cases at 4,095/4,096 bytes and
+repeats them against the existing identity. Full-value authentication must
+succeed and a shortened value must fail. At 4,097/5,000 bytes, each credential
+field is rejected before any `mc` call; server inspection must find no bucket,
+policy or application identity. UTF-8 cases distinguish bytes from characters.
+Control characters remain rejected. A wrapper records every `mc` argument list,
+and initializer logs are checked for credential disclosure. Existing bucket
+permissions, server Console checks, persistence, release conflict refusal and
+idempotency remain in the same suite. The release additionally proves its
+4,096-byte application-secret boundary, early overflow refusal and continued
+5,000-byte root-password support through JSON.
+
+Commands:
+
+```bash
+docker build --platform linux/amd64 \
+  -t codemastery-pr132-remediation/minio-init:f10 infrastructure/minio
+MINIO_INIT_TEST_SERVER=golithus bash infrastructure/minio/test-minio-init.sh codemastery-pr132-remediation/minio-init:f10
+MINIO_INIT_TEST_SERVER=chainguard bash infrastructure/minio/test-minio-init.sh codemastery-pr132-remediation/minio-init:f10
+MINIO_INIT_TEST_SERVER=minimal bash infrastructure/minio/test-minio-init.sh codemastery-pr132-remediation/minio-init:f10
+```
+
+The existing deployment CI steps are executed against this worktree for shell
+and authorization gates, frontend cleanup, offline Compose guards, runtime
+privilege-matrix synchronization and archive identity fixtures. Rendered Compose
+mutation checks execute the actual policy but omit Linux-only host/env-custody
+gates on macOS; they are not a full host preflight. The real-backend HTTPS CI
+script uses the corrected backend, unchanged frontend/PostgreSQL candidates,
+private synthetic PKI and the approved runtime restrictions. Its disposable
+PostgreSQL probe waits for the final TCP server rather than the temporary
+initialization socket.
+
+GitHub CI on the published HEAD is recorded on PR #132 separately from these
+local executions. Not independently repeated here: Linux host/env-custody gates,
+archive save/load/containerd round trips, Playwright, vulnerability rescans or
+upstream signatures. No Azure deployment or production admission is tested or
+authorized by these corrections.
