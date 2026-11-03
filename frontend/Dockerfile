@@ -130,7 +130,8 @@ RUN set -eu; \
 # Pinned by digest to the Nginx 1.30.6 Alpine index (linux/amd64 is deployed).
 # Nginx and its modules are pinned by the image. The Alpine runtime packages
 # are raised to exactly the reviewed 3.24 security updates (2 November 2026:
-# they clear the base's CRITICAL brotli and HIGH curl findings), which apk
+# they clear the base's CRITICAL brotli and HIGH curl findings; 3 November:
+# libexpat 2.10.0 for two further HIGH findings), which apk
 # verifies against the signing keys in the pinned base. Unlike an unbounded
 # `apk upgrade`, the build fails if the index no longer offers one of these
 # versions; re-scan and update the list instead (docs/deployment.md, "DP01
@@ -146,8 +147,8 @@ RUN set -eu; \
     apk add --no-cache \
         alpine-release=3.24.3-r0 brotli-libs=1.2.1-r0 c-ares=1.34.9-r0 \
         ca-certificates=20261020-r0 ca-certificates-bundle=20261020-r0 \
-        curl=8.23.0-r0 libcurl=8.23.0-r0 musl=1.2.6-r3 musl-utils=1.2.6-r3 \
-        zlib=1.3.2-r1; \
+        curl=8.23.0-r0 libcurl=8.23.0-r0 libexpat=2.10.0-r0 musl=1.2.6-r3 \
+        musl-utils=1.2.6-r3 zlib=1.3.2-r1; \
     chown -R -h root:root /etc/nginx; \
     chmod -R go-w /etc/nginx
 USER 101
