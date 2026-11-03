@@ -1760,34 +1760,42 @@ the Azure VM.
 ## DP01 pre-release security hardening verification — 2 November 2026
 
 Scope: [deployment.md, "DP01 pre-release security hardening"](deployment.md#dp01-pre-release-security-hardening--2-november-2026),
-which holds the scan details. Run on 2 November 2026 on macOS 27.2 arm64 with
+which holds the scan details. Run on 2–3 November 2026 on macOS 27.2 arm64 with
 Docker Engine 29.8.1 (containerd image store; `linux/amd64` under emulation),
 OpenJDK 25.0.4.1, Trivy 0.76.1 (database 2026-11-01 19:08 UTC), govulncheck
 v1.9.0 and cosign v3.1.4, on branch `fix/pre-release-security-hardening` based on
 `main` at `b2984a1`. Candidates used `codemastery-candidate/*` tags, never a
-`codemastery.invalid/*:release` name.
+`codemastery.invalid/*:release` name. `deploy.sh` code paths ran in disposable
+Ubuntu 24.04 `linux/amd64` or Alpine tool containers on the host Docker daemon,
+because macOS has bash 3.2 and `deploy.sh` enforces the B1 host.
 
 | Check | Command/method | Result |
 | --- | --- | --- |
-| Candidate builds | `docker build --platform linux/amd64` of the frontend `release` and local targets, the backend and PostgreSQL | Built; user 101, `codemastery` and the unchanged PostgreSQL entrypoint; `linux/amd64` |
-| Trivy, release frontend | `docker save --platform linux/amd64`, `trivy image --input --scanners vuln`, default and `--detection-priority comprehensive` | 0 in both modes; pinned Nginx base 1 CRITICAL, 2 HIGH, 3 MEDIUM, 44 LOW, 2 UNKNOWN |
-| Pinned Alpine set | Sorted `apk list -I` of the candidate and of the `main` recipe built the same day | Identical |
-| Trivy, backend | As above | 0 CRITICAL/HIGH; 24 MEDIUM, 4 LOW Ubuntu findings, none fixable; none in Java libraries |
-| Trivy and layers, PostgreSQL | As above; each layer tar read | 0 findings; layer 2 still holds `gosu` (unchanged, pending decision) |
-| Trivy, MinIO | Minimal server image, Chainguard server pin, initializer base | Minimal: GO-2026-5932 only (UNKNOWN). Chainguard server and initializer base: 0 by default; comprehensive adds the `mc` findings (CVE-2026-63209 HIGH; CVE-2026-78661, CVE-2026-97045, GO-2026-5932 UNKNOWN) |
-| govulncheck | `-mode=binary` on `/usr/bin/mc`, `/usr/bin/minio` and the inherited `gosu` | `mc`: no vulnerable symbol called; `minio`: GO-2026-5932 as wildcards because the binary is stripped (control experiment reproduces it without `openpgp`); `gosu`: 59 advisories |
-| Upstream signatures | `cosign verify` with the Chainguard release workflow identity | Initializer base and server pins verify |
-| Nginx ownership check (new CI) | The new assertions of the **VM HTTPS ingress** build step | Fails on the `main` release image, passes on the candidate |
-| setuid/setgid check (new CI) | Same step | Fails on a `main` backend image (12 files), passes on the candidate |
-| Ingress job, run locally | Its five steps extracted from `ci.yml` and run unchanged, with images built natively | Build/origin rejection, stub-backend ingress and real-backend ingress passed; CA-store step passed with an OpenSSL 3.5 container (macOS has LibreSSL); preflight step not run locally (needs Linux `sudo`) |
-| MinIO initializer suite | `infrastructure/minio/test-minio-init.sh` for `golithus`, `chainguard` and `minimal` | Golithus 26/26 (321 s), Chainguard 26/26 (355 s), minimal 26/26 (441 s), after the CI build of `Dockerfile.minio-server` |
-| Backend suite | `cd backend && ./mvnw verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures, 0 errors |
-| Frontend | `npm ci`, `npm test`, `npm run typecheck`, `npm run build`, `npm audit` in `node:22.23.3-bookworm-slim` (pinned digest) | 390 tests passed; typecheck and build passed; 0 vulnerabilities |
-| Runtime-hardening experiments | `docker run` with `no-new-privileges`, dropped capabilities and read-only root filesystems | Recorded in deployment.md; evidence for a decision only |
+| Images and scans | `docker build --platform linux/amd64`; `docker save --platform linux/amd64`; `trivy image --input --scanners vuln`, default and `--detection-priority comprehensive` | Release frontend 0/0 (base: 1 CRITICAL, 2 HIGH); backend 0 CRITICAL/HIGH, 24 MEDIUM unfixable; PostgreSQL 0 (merged view); minimal MinIO GO-2026-5932 only |
+| Pinned Alpine set | Sorted `apk list -I` versus the `main` recipe on the same day | Identical |
+| govulncheck | `-mode=binary` on `mc`, `minio`, the inherited `gosu`, a stripped and unstripped control binary | As recorded; the stripped control reproduces the `openpgp/*` wildcard without `openpgp` |
+| Upstream signatures | `cosign verify`, Chainguard release workflow identity | Initializer base and server pins verify |
+| Image CI checks | Nginx ownership and setuid/setgid assertions | Fail on `main` images, pass on the candidates |
+| Compose policy, offline | CI step "Check offline Compose and provisioning safety guards" | Passes; its new hardening cases fail against `main`'s `deploy.sh` |
+| Compose policy, rendered | 21 override mutations of the committed model through `deploy.sh`'s policy code | Committed model accepted; every mutation rejected (a tmpfs over the PostgreSQL data volume is refused by Compose itself) |
+| Preflight, rendered fixture | CI step "Check preflight against rendered Compose" (Ubuntu 24.04 amd64 container) | `PREFLIGHT OK`, all rejection cases including the 7 new ones; `main`'s `deploy.sh` rejects the hardened fixture |
+| Preflight, committed override | CI step "Run DP01 preflight with the committed override and certificate layout" (non-root operator with `sudo`) | Passes, including the new hardening assertions |
+| Archive identity | CI steps "Check release archive identity models" and "Check image identity through a real save/load round trip" | Pass |
+| Five-image release path | Real `deploy.sh` `run_provision`/`run_deploy` on the hardened model with candidate images; archive, image-identity, port and host-TLS checks stubbed (no release archive; macOS cannot reach container addresses) | Completed: role provisioning and privilege matrix, initializer, private backend health, Flyway V001–V006, role separation, staged `nginx -t`, frontend healthy. Containers: read-only, `NoNewPrivs` 1, `CapBnd` 0 (PostgreSQL `0xcb`) |
+| Behavior on that stack | HTTPS through the frontend | SPA 200; register 201 (approved origin) / 403 (foreign); login; `/api/me/courses` 401/200; `/actuator/health` is the SPA HTML, not proxied |
+| Restart and recovery | Stop all, start in order, rerun initializer, log in again | Healthy; initializer `changes: 0`; account persisted |
+| Foreign volume, hardened | PostgreSQL with the release restrictions on a non-empty unmarked volume | Exit 78; volume unchanged |
+| Initializer writability | Release restrictions, UID 65532 | Only `/tmp` writable |
+| MinIO initializer suite | `test-minio-init.sh` for `golithus`, `chainguard`, `minimal` (after the CI build of `Dockerfile.minio-server`) | 26/26 each. First round 321/355/441 s; second round, with the hardening checks, 372/364 s; the minimal run's elapsed time is not meaningful because the host slept during it |
+| Ingress job | Its steps run locally with native images (CA store with an OpenSSL 3.5 container) | Build/origin rejection, CA store, stub and real-backend ingress passed |
+| PostgreSQL volume boundary | CI step on the committed image | Passes |
+| Backend suite | `cd backend && ./mvnw verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures |
+| Frontend | `npm ci`, `npm test`, `npm run typecheck`, `npm run build`, `npm audit` in `node:22.23.3-bookworm-slim` (pinned) | 390 tests; typecheck and build passed; 0 vulnerabilities |
+| F1 Option B experiment | Disposable build; three builds compared; test-only suite copy (identity assertions retargeted) | `mc` bit-identical in all three; 26/26 against all three servers; not adopted |
+| F4 flattened experiment | Disposable build; layer search; volume-boundary step; `./mvnw verify` with it as the Testcontainers Dockerfile; hardened five-image release path | No `gosu` bytes; merged filesystem identical; all pass; not adopted |
 | Whitespace | `git diff --check` | Passed |
 
-Not covered: `deploy.sh preflight` and the deployment-script, containerd and
-PostgreSQL containment jobs (unchanged code; GitHub Actions runs them), Playwright
-end-to-end tests (not available), a release archive with the
+Not run: Playwright end-to-end tests (not available), the CI containerd registry
+step (GitHub Actions runs it), a release archive with the
 `codemastery.invalid/*:release` names, and the Azure VM. GitHub Actions results
 belong to the pull request.
