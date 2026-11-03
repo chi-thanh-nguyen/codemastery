@@ -13,11 +13,20 @@ FROM eclipse-temurin:25.0.5_8-jre-noble@sha256:a98128a57de944a72bd31fbc79b898edd
 
 # The non-root runtime needs no setuid/setgid program, so the base's su, mount,
 # passwd and similar binaries lose those bits.
+# The Java trust store must hold none of the four roots OpenJDK lists for the
+# compromised eMudhra intermediates (CVE-2026-91403, CVE-2026-114820;
+# https://openjdk.org/emudhra). Temurin 25.0.5+8 still ships "emSign Root CA -
+# G1", which OpenJDK's fix also removes; the check fails the build if any of the
+# four is present (docs/deployment.md, "DP01 final security remediation", F11).
 RUN groupadd --system codemastery \
     && useradd --system --gid codemastery --no-create-home \
         --shell /usr/sbin/nologin codemastery \
     && mkdir -p /app \
-    && find / -xdev -type f -perm /6000 -exec chmod a-s {} +
+    && find / -xdev -type f -perm /6000 -exec chmod a-s {} + \
+    && keytool -delete -cacerts -storepass changeit \
+        -alias 'cn_emsign_root_ca__g1,o_emudhra_technologies_limited,ou_emsign_pki,c_in [jdk]' \
+    && ! keytool -list -v -cacerts -storepass changeit \
+        | grep -E '^Owner: CN=(emSign Root CA - G1|emSign Root CA - G2|emSign ECC Root CA - G3|AAA Certificate Services),'
 WORKDIR /app
 COPY --from=build --chown=root:root --chmod=0444 \
     /build/target/codemastery-backend.jar /app/codemastery-backend.jar
