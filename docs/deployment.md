@@ -3699,3 +3699,117 @@ This remediation and its tests/documentation were produced with OpenAI Codex
 assistance under the Leader's task. OpenJDK's public certificate data and the
 pinned client source were inspected for these corrections; no AI service or new
 production dependency is added to the application.
+
+## DP01 post-merge security requalification — 3 November 2026
+
+### Baseline and scope
+
+Fresh `origin/main` is `0535ec4f3ad9939f532648a78296516e7e61801e`, the
+[PR #132](https://github.com/chi-thanh-nguyen/codemastery/pull/132) squash merge.
+Compared with the requested audit baseline `b2984a1`, it already contains the
+project-built patched `mc`, byte-clean PostgreSQL, pinned release images,
+restrictive Compose hardening and the corrected F10/F11 enforcement. Those
+changes are retained. The Leader's current task authorizes remediation,
+qualification and a follow-up PR, without risk acceptance, governance changes,
+security admission, release promotion or VM operations. Historical records above
+remain historical; this section records the post-merge recheck.
+
+One additional defect was reproduced: the default **local HTTP** target in
+`frontend/Dockerfile` still used mutable `1.30.5-alpine-slim` and allowed UID 101
+to modify `/etc/nginx`. The release target was already patched. Both the version
+and configuration-ownership assertions failed on the original local image.
+
+### Additional remediation
+
+The local target now uses
+`nginxinc/nginx-unprivileged:1.30.6-alpine-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6`.
+It pins the same reviewed fixes for the packages present in the slim runtime:
+`alpine-release=3.24.3-r0`, `ca-certificates-bundle=20261020-r0`,
+`musl=1.2.6-r3`, `musl-utils=1.2.6-r3`, `zlib=1.3.2-r1`. Configuration is
+root-owned without group/other write, and the copied HTTP configuration is 0444.
+UID 101, entrypoint, port 8080, HTTP routing, SPA fallback and the Compose-supplied
+HTTP healthcheck are preserved. The existing ingress CI job now checks Nginx
+1.30.6, configuration ownership/write denial and absence of setuid/setgid files
+in both frontend targets.
+
+The original local image reports three HIGH Nginx findings
+(`CVE-2026-15176`, `CVE-2026-93479`, `CVE-2026-97205`), three MEDIUM Nginx findings
+(`CVE-2026-90439`, `CVE-2026-95101`, `CVE-2026-97629`), MEDIUM
+`CVE-2026-85091` in zlib, and UNKNOWN `CVE-2026-107891` in both musl packages.
+The candidate reports zero in both Trivy modes. Installed package versions and
+Nginx's running version were checked, rather than inferring a fix from counts.
+These are scanner severities; [Nginx's own advisory ratings](https://nginx.org/en/security_advisories.html)
+differ, and exploitability of each advisory under the local configuration was
+not established.
+
+This local artifact remains layered: the archive holds the old zlib and musl
+files in its pinned base as well as their replacements. The runtime version and
+merged-filesystem fixes are verified; erasure of those inherited bytes is not
+claimed. PostgreSQL's separate no-gosu-layer requirement still passes. This
+layer distinction remains relevant to any artifact admission decision.
+
+### Current F1–F11 disposition
+
+`FIXED` describes the specified engineering defect, not admission. `MITIGATED`
+means a verified control reduces exposure while the finding remains.
+`NOT_VERIFIED` describes missing evidence; `PENDING_LEADER_APPROVAL` reserves a
+decision; `BLOCKED` applies to a change requiring an undefined contract.
+
+| Finding / initial risk | Remediation and current supporting evidence | Remaining risk / status |
+| --- | --- | --- |
+| F1: vulnerable initializer `mc` dependencies | Already fixed by PR #132. Rebuilt binary SHA-256 `025691d43adb653c6ce34723c76450153f2c024bfa232edaca6906fe3e221809`; embedded compress v1.18.7, x/net v0.62.0, x/crypto `v0.58.1-0.20261009181718-2f1f834330b2`, etcd client/pkg v3.5.33. Trivy 0/0; binary govulncheck has no findings. All three server suites pass 28/28; source archive equals the existing asserted hash | `FIXED` for the named dependencies; unsigned project build and source-conveyance/legal determination remain separately controlled |
+| F2: inaccurate/incomplete security records | Append-only post-merge record, exact artifact identities, complete scanner findings and execution limitations in [testing.md](testing.md#dp01-post-merge-security-requalification--3-november-2026) | `FIXED` for this record; historical qualifications do not grant admission |
+| F3: release names before admission | Existing candidate → qualification → security admission → release promotion procedure retained; only unique non-release tags used here | Procedure `FIXED`; admission and promotion `PENDING_LEADER_APPROVAL` |
+| F4: deleted inherited vulnerable `gosu` | Existing flattened PostgreSQL retained. Fresh single-layer/configuration/filesystem comparison passes; no layer contains gosu; Trivy 0/0. Foreign glibc volume refused unchanged with exit 78; fresh musl volume persists across restart | Inherited bytes `FIXED`; existing-volume migration, collation disposition and admission remain separate gates |
+| F5: server OpenPGP/module finding, Console CVE and uncertain build provenance | Server bytes remain `3c3d615241314c531e15e57485c053e60dc1af04e87b20424d2db8bdec8a49b2`. Trivy reports GO-2026-5932 UNKNOWN; binary govulncheck reports that advisory. Console-off behavior and restricted runtime are requalified | Console exposure `MITIGATED`; CVE-2026-113466 remains unfixed. OpenPGP runtime reachability `NOT_VERIFIED`; residual-risk/admission decisions `PENDING_LEADER_APPROVAL` |
+| F6: mutable bases, unbounded packages, incomplete provenance | Existing release pins retained; local Nginx pin and exact Alpine fixes added. Current/pinned Chainguard signatures verify; current upstream SLSA attestations verify against their exact subjects. Nginx index contains unsigned BuildKit provenance naming `nginx/docker-nginx-unprivileged@bb7393196554e11f7ba95452856d8b5faff217bf` | Mutable runtime base `FIXED`; unsigned provenance is not independently authenticated build provenance. Project image signing/trust policy `PENDING_LEADER_APPROVAL` |
+| F7: backend privileges/setuid programs | Existing read-only root, no capabilities, no-new-privileges and setuid/setgid removal retained; image assertions and hardened integration rechecked | `FIXED` for the implemented controls; resource budgets remain open |
+| F8: frontend vulnerabilities/configuration write access | Additional local-target fix above; both targets pass image/HTTP/HTTPS regressions and report 0 in both Trivy modes | `FIXED` for the reproduced defects; local HTTP is still a development target and is rejected as a release image |
+| F9: writable initializer paths | Existing read-only release root, `/tmp` tmpfs, no capabilities and no-new-privileges pass all three qualification suites; exact filesystem assertions retained | `FIXED` in the release model; numeric tmpfs budgets `PENDING_LEADER_APPROVAL` |
+| F10: secret exposure/truncation | Existing stdin/JSON delivery and early 4,096-byte overflow refusal retained; full-value authentication, rejection-before-mutation, argv/log checks and idempotency pass on all three server variants | Reproduced defects `FIXED`; no new password length/strength policy introduced |
+| F11: Java advisories/trust roots and Ubuntu packages | Existing Temurin 25.0.5+8 and fail-closed X.509 identity/inventory verifier retained; all 13 build regressions pass. Exact backend artifact has 0 CRITICAL/HIGH, 24 MEDIUM and 4 LOW Ubuntu rows, listed in testing.md; no scanner fixed version is available | Named Java/trust-store defects `FIXED`; Ubuntu residual findings and image admission remain `PENDING_LEADER_APPROVAL` |
+
+### Upstream and reachability limitations
+
+At this recheck, the current Chainguard indexes are
+`minio-client@sha256:1dccd2a6fd59914a98ac2d9dad95e552c91243cb0bd7242aaa224802df4b3432`
+and `minio@sha256:3c60a2a8c4d33409a9bc7a623a7fcbfb4605adc3d89422d2f53b3f673a6e5597`.
+Their binaries are still byte-identical to the previously analyzed upstream
+`mc` (`8842390a…bc34a`) and server (`3c3d6152…49b2`). Signatures and
+`https://slsa.dev/provenance/v1` attestations verify with cosign 3.1.4, exact
+issuer `https://token.actions.githubusercontent.com` and identity
+`https://github.com/chainguard-images/images/.github/workflows/release.yaml@refs/heads/main`.
+This supplies upstream identity evidence, not a vulnerability fix or proof that
+the unmodified source snapshot reproduces the server. Neither pin was changed.
+
+The [current Go advisory](https://vuln.go.dev/ID/GO-2026-5932.json) now identifies
+the x/crypto carve-out pseudo-version as fixed; the initializer already uses it.
+The server still embeds x/crypto v0.58.0 and `vcs.modified=true`; the supplied
+source snapshot's v0.57.0 graph is not the shipped build graph. Binary scanner
+symbol reports, prior source-mode negative results and prior function-table
+absence observations do not establish runtime reachability or non-reachability
+for those exact modified server bytes. **Runtime OpenPGP reachability remains
+`NOT_VERIFIED`.** No fresh source-mode result is claimed here, and disabling
+Console does not remove CVE-2026-113466 from the binary. A reliable patched
+server artifact was not established; no source substitution, storage behavior or
+licensing-model change was made.
+
+### Admission and outstanding decisions
+
+All candidates still require security admission of their exact identities.
+Preserve the existing decisions on server residual risks, client source/licence
+handling, project signing and trust policy, PostgreSQL migration/collation and
+any rootless PostgreSQL contract amendment, and service/tmpfs resource budgets.
+The last two implementation changes remain `BLOCKED` on their respective
+project-specific contract decisions; this follow-up selects no numeric budgets
+or new runtime identity. Existing qualified controls remain in place.
+
+After qualification, only an explicit admission record can authorize promotion
+to release names; archive identity, protected review/CI, operational inputs and
+production deployment authorization remain separate gates. This task grants
+none of them. No existing release tags or persistent project volumes were
+changed, and no Azure endpoint was contacted.
+
+This follow-up used OpenAI Codex for investigation, remediation, qualification
+and documentation, plus Trivy, govulncheck and cosign as external qualification
+tools. It introduces no AI runtime service or new production technology.

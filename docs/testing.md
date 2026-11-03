@@ -1959,3 +1959,163 @@ local executions. Not independently repeated here: Linux host/env-custody gates,
 archive save/load/containerd round trips, Playwright, vulnerability rescans or
 upstream signatures. No Azure deployment or production admission is tested or
 authorized by these corrections.
+
+## DP01 post-merge security requalification — 3 November 2026
+
+Baseline: `origin/main` `0535ec4f3ad9939f532648a78296516e7e61801e` (PR #132),
+compared with the requested previous baseline `b2984a1`. Follow-up implementation
+changes only the default local Nginx target and extends the existing ingress
+image checks; the dated [deployment record](deployment.md#dp01-post-merge-security-requalification--3-november-2026)
+holds the F1–F11 dispositions. No governance source is changed.
+
+### Artifacts and scanners
+
+All candidates were built for **linux/amd64**, under the separate namespace
+`codemastery-followup-20261103/`. Docker Desktop runs on arm64, so these are
+emulated-amd64 results, not native-amd64 or Azure evidence. Raw logs, scripts,
+inspect JSON, archives, complete scanner JSON and the exported Corresponding
+Source are retained outside Git in
+`/private/tmp/codemastery-security-evidence-20261103/`.
+
+Docker's containerd image store reports a local **index ID** from `image inspect
+.Id`; Trivy archive metadata reports the **platform image configuration digest**.
+They are different identities, recorded separately below. These are disposable
+candidate bindings, not release identities or admission records.
+
+| Artifact / tag suffix | Local index ID (`sha256:`) | Saved amd64 configuration digest (`sha256:`) |
+| --- | --- | --- |
+| `frontend:local-amd64` | `4fe800e7cfe38c769bb90ff743784cded682f752267242aad9f35d7a3aa2330f` | `a22a2e60dbf40a760760a6bbb83abbaff2d5624e9376f80e2891d23d8ec02910` |
+| `frontend:ingress-amd64` | `35087fd059062d4d0705c3c2a93228562714fad43029836ec253a3ff770ae890` | `0bc1c72816f8ad6a186200874ba1e59ee2188df42f31d6828263e97e2cfb6cf7` |
+| `backend:amd64` | `14bb9b03ff27289d326db605ecac9388911087243a1a179656d2a4a01349a052` | `705cb677d127988e24e40b2bf3f5ea8d802b56ebb61072ec6dd45ed382c2271d` |
+| `postgres:candidate` | `4444bcb2c93d83b3afe2dfa308a6d5b2d7d73698f6030ac2c596178eb7dde0cf` | `ca3e326296afb43df89659d1b0e25eb6d6505e634a652bd269a0bebf11ca63ec` |
+| `minio-init:candidate` | `f68f896394e7d2b09b096183f1d2f6ed166e60ad83b762c0c86cf0f84108bc50` | `fc72160eefd08e471aa31fcd0f4d367ff7c8e062fef31596ce0d4b04942cf245` |
+| `minio:candidate` | `1348e6be5cdcf6f5b21cee6e6d3334bfc35f43b7059b683eb0166942f72e6398` | `1f7051c4b7fb3d9237e3fc35ca91e9fea2fe1062c8fac3bd44642056e61270ed` |
+
+Trivy **0.76.1**, vulnerability DB updated `2026-11-03T01:30:30Z`;
+`trivy image --input <single-image.tar> --scanners vuln --detection-priority
+precise --format json --output <report.json>` and the same command with
+`--detection-priority comprehensive`. Both flags are supported by the installed
+CLI. No ignore, severity exclusion or suppression is used. Counts below are
+finding rows, including separate affected installed packages.
+
+| Artifact | Precise C/H/M/L/U | Comprehensive C/H/M/L/U |
+| --- | --- | --- |
+| frontend-baseline-local | 0/3/4/0/2 | 0/3/4/0/2 |
+| frontend-local | 0/0/0/0/0 | 0/0/0/0/0 |
+| frontend-ingress | 0/0/0/0/0 | 0/0/0/0/0 |
+| backend-final | 0/0/24/4/0 | 0/0/24/4/0 |
+| postgres | 0/0/0/0/0 | 0/0/0/0/0 |
+| minio-init | 0/0/0/0/0 | 0/0/0/0/0 |
+| minio | 0/0/0/0/1 | 0/0/0/0/1 |
+
+The local image's Nginx executable is SHA-256
+`97f9898b94114a136bd87e1eb7759aa2a15d5007154b670c447ee710e629f54b`
+and reports 1.30.6. Layer inspection also recovered base-layer zlib
+(`a1e2c03d…44e57`) and musl (`38d022ce…72806`) alongside the patched runtime
+replacements (`ecc8b9df…7c5f2`, `095b047c…0de5`). All full hashes and layer
+positions are in `frontend-local-layer-binaries.json` in the evidence directory.
+These upgrades fix the merged runtime; the inherited library bytes remain.
+
+The original local frontend's nine rows are enumerated in deployment.md. No
+CRITICAL/HIGH finding remains in these candidate scans. The minimal server's
+one UNKNOWN is `GO-2026-5932`, x/crypto v0.58.0, fixed-module version
+`0.58.1-0.20261009181718-2f1f834330b2`. Runtime reachability remains
+`NOT_VERIFIED`; this is not proof that every server CVE is absent.
+
+The backend's complete residual inventory is below. Trivy reports no fixed
+version for any row. A disposable runtime container's `apt-get update` followed
+by `apt list --upgradable` lists no available upgrades; the current Temurin tag
+still resolves to the consumed `sha256:a98128a5…` index. No packages were
+installed, and no unbounded apt upgrade or Ubuntu distribution change was
+introduced. The same counts/inventory occur in both detection modes.
+
+| Package / installed version | Severity | All reported CVEs |
+| --- | --- | --- |
+| `dash` 0.5.12-6ubuntu5 | MEDIUM | `CVE-2026-102473`, `CVE-2026-102474` |
+| `libc-bin` 2.39-0ubuntu8.9 | MEDIUM | `CVE-2026-18374`, `CVE-2026-89092` |
+| `libc6` 2.39-0ubuntu8.9 | MEDIUM | `CVE-2026-18374`, `CVE-2026-89092` |
+| `libexpat1` 2.6.1-2ubuntu0.6 | MEDIUM | `CVE-2025-66382` |
+| `libgnutls30t64` 3.8.3-1.1ubuntu3.6 | MEDIUM | `CVE-2026-67693`, `CVE-2026-88647`, `CVE-2026-88648`, `CVE-2026-95184`, `CVE-2026-95209`, `CVE-2026-95210` |
+| `libpcre2-8-0` 10.42-4ubuntu2.1 | MEDIUM | `CVE-2026-103111`, `CVE-2026-86145`, `CVE-2026-89156`, `CVE-2026-89157`, `CVE-2026-89158`, `CVE-2026-89160`, `CVE-2026-89161` |
+| `libsystemd0` 255.4-1ubuntu8.18 | LOW | `CVE-2026-40228` |
+| `libudev1` 255.4-1ubuntu8.18 | LOW | `CVE-2026-40228` |
+| `locales` 2.39-0ubuntu8.9 | MEDIUM | `CVE-2026-18374`, `CVE-2026-89092` |
+| `login` 1:4.13+dfsg1-4ubuntu3.2 | LOW | `CVE-2024-56433` |
+| `passwd` 1:4.13+dfsg1-4ubuntu3.2 | LOW | `CVE-2024-56433` |
+| `tar` 1.35+dfsg-3ubuntu0.4 | MEDIUM | `CVE-2026-18477`, `CVE-2026-18508` |
+
+`govulncheck@v1.9.0` (Go 1.27.3), `-mode=binary -json`, DB
+`https://vuln.go.dev` modified `2026-11-02T22:01:43Z`: exact candidate `mc`
+SHA-256 `025691d43adb653c6ce34723c76450153f2c024bfa232edaca6906fe3e221809`
+has no findings. Exact server SHA-256
+`3c3d615241314c531e15e57485c053e60dc1af04e87b20424d2db8bdec8a49b2`
+has only GO-2026-5932 (15 reported traces, one distinct advisory). JSON mode
+returns zero even when findings exist; the finding objects, rather than exit
+status, determine this result. No new source-mode/reachability claim is made.
+
+The exported `mc-source.tar.gz` equals the existing suite assertion:
+`a42400d4703c265258952b44bfd997a53dcca55bf47b691f48a1f2f483e98b50`.
+No new independent offline binary rebuild was performed; prior reproducibility
+evidence is historical, while the fresh archive/binary identity comparisons
+passed. Cosign **3.1.4** freshly verifies both consumed Chainguard pins and the
+new current upstream indexes. It also verifies the current indexes' SLSA v1
+attestations with exact subjects and the issuer/workflow identity in
+deployment.md. Nginx's unsigned BuildKit statement was inspected, not
+independently authenticated. No project-image signing workflow was added.
+
+### Executed functional and security checks
+
+| Check / executed command or existing CI scenario | Result |
+| --- | --- |
+| `cd backend && ./mvnw verify` (Java 25.0.4.1 host; isolated Testcontainers build) | PASS: 468 unit + 171 integration, zero failures/errors/skips; runtime candidate separately uses Temurin 25.0.5+8 |
+| `cd frontend && npm ci`; `npm test`; `npm run build` | PASS: 390 tests; build includes `npm run typecheck`; only the existing bundle-size advisory |
+| `cd frontend && npm audit --json` | PASS: 0 vulnerabilities |
+| `cd frontend && npm run test:browser` | NOT_RUN: attempted, exits 1 before browser execution because module `playwright` is unavailable; no E2E PASS claimed |
+| `docker build --platform linux/amd64 ...` for all five candidates and both frontend targets; `docker save --platform linux/amd64 ...` per scan artifact | PASS; separate candidate tags, inspect JSON and archives retained |
+| New version/ownership checks against the original local image | Expected FAIL (Red): both assertions exit 1; patched local target PASS (Green) |
+| Ingress CI image step, including `bash infrastructure/vm/tests/test-java-truststore.sh <backend>` and invalid release origins | PASS: both frontend targets have Nginx 1.30.6, root-owned non-writable configuration, usable cache and no setuid/setgid files; backend also has no such files; trust-store suite 13/13 |
+| `infrastructure/minio/test-minio-init.sh <candidate>` assertions, Golithus / Chainguard / minimal | PASS: 28/28 each, including exact OCI/binary identity, IAM, least privilege, persistence/idempotency, Console-off, credential boundaries and failure propagation |
+| Existing deployment-script CI steps: shell/authorization, cleanup, offline Compose/provisioning, privilege-record consistency, env custody, rendered Compose, archive models, real save/load round trip | PASS: all eight steps; Linux-specific custody checks passed on the harness's native filesystem |
+| Existing PostgreSQL CI privilege-matrix, foreign-volume and byte-clean equivalence steps | PASS: SQL privilege/failure cases; exit 78 and unchanged glibc data; musl marker/restart/persistence; single-layer content/configuration equivalence and no inherited gosu |
+| Existing HTTPS stub-backend ingress scenario | PASS: 126 assertions, including local HTTP deep link/404/healthcheck behavior, TLS rejection, forwarding restrictions and unavailable-backend behavior |
+| Existing public-chain CA-store fixture | PASS with Ubuntu OpenSSL 3: expected chain trusted, missing cross-sign and wrong hostname rejected; no Azure connection |
+| Existing committed-override preflight and image-policy scenario | PASS: effective five-service model/hardening, certificate rejection cases, release-image acceptance and local-image rejection |
+| Disposable hardened five-image scenario, extending the existing real-backend ingress scenario | PASS: 65 HTTPS/Auth/CORS/management/failure assertions; real Flyway V001–V006 under migrator, exact runtime/bootstrap/migrator separation; all five hardening configurations; full restart retains PostgreSQL data/marker/privileges and MinIO repeat initialization |
+| Runtime `/proc/1/status` after restart | PASS: PostgreSQL UID/GID 70, CapEff 0, CapBnd 0xcb; MinIO UID/GID 65532, backend 999, frontend 101, each CapEff/CapBnd 0; all NoNewPrivs 1 |
+| YAML parsing and `bash -n` for all Bash workflow blocks; `git diff --check` | PASS |
+
+### Harness adaptations, failures and limits
+
+CI blocks were extracted into the external evidence directory. Only disposable
+image/resource names and explicit linux/amd64 builds were substituted for this
+host; PostgreSQL role/ingress fixtures used the actual hardened candidate instead
+of Bookworm. The MinIO harness changed only its repository root and minimal
+candidate tag, preserving every qualification assertion. Supplied-image mode
+omits the build-only source-archive assertion; that archive was independently
+exported and hash-checked above.
+
+The five-image extension uses new volumes/network, synthetic TLS and disposable
+credentials, the actual `deploy.sh` provisioning/privilege functions, and the
+approved read-only/capability/tmpfs controls. Curl trusts a test-only root through
+a fixture mount. No VM command, production preflight, public port publication,
+release promotion or end-to-end `deploy.sh deploy` execution is claimed.
+
+Initial harness failures were preserved and corrected: native Docker builds
+selected arm64 before an amd64 trust-store/export check; shared macOS filesystem
+ownership failed strict Linux env-custody checks; macOS LibreSSL lacked the CA
+fixture verification option; one preflight invocation omitted image variables;
+and the first five-image extension queried PostgreSQL after the existing test
+intentionally stopped it for the 503 assertion. Corrected invocations passed,
+without weakening production tests. Multi-image Trivy input was also rejected;
+all reported scans use separate single-image archives.
+
+The daemon was not reconfigured. The full containerd job's setup and ID-removal
+round trip were NOT_RUN to preserve existing daemon/image state; the existing
+single-image save/load identity scenario did pass against the current containerd
+store. A native-amd64 run and published-HEAD CI remain separate evidence. Browser
+E2E and exact modified-server source reproduction/runtime OpenPGP reachability
+remain NOT_VERIFIED. Production security admission and the Leader decisions in
+deployment.md remain pending.
+
+OpenAI Codex assisted this follow-up implementation, test execution and evidence
+record. No application module, API, schema or adaptive behavior was changed.
