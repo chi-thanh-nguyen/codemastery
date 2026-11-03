@@ -11,6 +11,13 @@
 # The storage images are deliberately NOT the local-only golithus pins: a
 # production-qualified MinIO server and initializer artifact must be admitted
 # separately before these names can be bound (release blocker).
+#
+# Runtime hardening (docs/deployment.md, "DP01 pre-release security hardening"):
+# every service runs with no-new-privileges and a read-only root filesystem, and
+# writes only to its named volume and the listed tmpfs paths (Docker's default
+# rw,nosuid,nodev,noexec). All capabilities are dropped except the five the
+# PostgreSQL entrypoint needs as root to prepare its directories and hand off to
+# the postgres user through su-exec. deploy.sh accepts exactly these values.
 
 services:
   postgres:
@@ -21,6 +28,12 @@ services:
     build: !reset null
     ports: !reset []
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/run/postgresql
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: ["no-new-privileges:true"]
 
   minio:
     image: codemastery.invalid/minio:release
@@ -30,6 +43,9 @@ services:
       # Release only: no embedded Console listener. The base command's
       # --console-address is then unused; the private S3 API on 9000 is unchanged.
       MINIO_BROWSER: "off"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
 
   minio-init:
     # The qualified initializer image supplies its own executable; the local
@@ -40,6 +56,11 @@ services:
     image: codemastery.invalid/minio-init:release
     entrypoint: !reset null
     command: !reset null
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
 
   backend:
     image: codemastery.invalid/backend:release
@@ -54,6 +75,11 @@ services:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_FORWARD_HEADERS_STRATEGY: NONE
       JWT_EXPIRATION: PT15M
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
 
   frontend:
     # Built with --target release: TLS ingress, /api proxy and HTTPS healthcheck.
@@ -65,6 +91,11 @@ services:
     # The verified image's HTTPS healthcheck replaces the local HTTP probe.
     healthcheck: !reset null
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     volumes:
       # Serving chain and private key only (CT17 B3); create nothing if absent.
       - type: bind

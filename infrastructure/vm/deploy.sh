@@ -479,24 +479,52 @@ names = {"postgres", "minio", "minio-init", "backend", "frontend"}
 if set(svc) != names:
     problems.append("effective configuration must contain exactly the five approved services")
 
-# The local Compose foundation uses only these service options. Keep the release
-# model closed to hooks, deploy extensions, log sinks, tmpfs mounts, secrets,
-# configs, and future options that could change execution or security policy.
+# The local Compose foundation uses only these service options, plus the release
+# runtime hardening below. Keep the release model closed to hooks, deploy
+# extensions, log sinks, secrets, configs, and future options that could change
+# execution or security policy.
+hardening_options = {"cap_drop", "read_only", "security_opt", "tmpfs"}
 allowed_service_options = {
-    "postgres": {"command", "depends_on", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"},
-    "minio": {"command", "entrypoint", "environment", "image", "networks", "ports", "restart", "volumes"},
-    "minio-init": {"command", "depends_on", "entrypoint", "environment", "image", "networks", "restart"},
-    "backend": {"build", "command", "depends_on", "entrypoint", "environment", "image", "networks", "ports", "restart"},
-    "frontend": {"build", "command", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"},
+    "postgres": {"cap_add", "command", "depends_on", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"} | hardening_options,
+    "minio": {"command", "entrypoint", "environment", "image", "networks", "ports", "restart", "volumes"} | hardening_options,
+    "minio-init": {"command", "depends_on", "entrypoint", "environment", "image", "networks", "restart"} | hardening_options,
+    "backend": {"build", "command", "depends_on", "entrypoint", "environment", "image", "networks", "ports", "restart"} | hardening_options,
+    "frontend": {"build", "command", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"} | hardening_options,
 }
 for n, s in svc.items():
     extra = set(s) - allowed_service_options.get(n, set())
     if extra:
         problems.append("service '%s' contains unsupported Compose options: %s" % (n, ", ".join(sorted(extra))))
     executable_or_unapproved = {"pre_start", "post_start", "pre_stop", "post_stop",
-                                "deploy", "logging", "tmpfs", "configs", "secrets"}
+                                "deploy", "logging", "configs", "secrets"}
     if executable_or_unapproved.intersection(s):
-        problems.append("service '%s' contains an unapproved lifecycle, deploy, logging, tmpfs, config or secret option" % n)
+        problems.append("service '%s' contains an unapproved lifecycle, deploy, logging, config or secret option" % n)
+
+# Release runtime hardening (docs/deployment.md, "DP01 pre-release security
+# hardening"): each service needs exactly no-new-privileges, cap_drop ALL and a
+# read-only root filesystem, with only its reviewed capabilities and tmpfs paths.
+# PostgreSQL's entrypoint needs these five as root to prepare its directories and
+# hand off through su-exec; nothing else keeps a capability.
+runtime_hardening = {
+    "postgres": (["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"], ["/var/run/postgresql"]),
+    "minio": ([], []),
+    "minio-init": ([], ["/tmp"]),
+    "backend": ([], ["/tmp"]),
+    "frontend": ([], ["/tmp"]),
+}
+for n, s in svc.items():
+    want_caps, want_tmpfs = runtime_hardening.get(n, ([], []))
+    security_opt = s.get("security_opt") or []
+    cap_add = s.get("cap_add") or []
+    if set(security_opt) - {"no-new-privileges:true"} or set(cap_add) - set(want_caps):
+        problems.append("service '%s' requests an unapproved privilege, host namespace, identity or external environment" % n)
+    if (security_opt != ["no-new-privileges:true"] or s.get("cap_drop") != ["ALL"]
+            or sorted(cap_add) != want_caps or s.get("read_only") is not True):
+        problems.append("service '%s' must run with exactly no-new-privileges, cap_drop ALL, %s and a read-only root filesystem"
+                        % (n, "cap_add " + ", ".join(want_caps) if want_caps else "no cap_add"))
+    if sorted(s.get("tmpfs") or []) != want_tmpfs:
+        problems.append("service '%s' contains unsupported Compose options: %s"
+                        % (n, "tmpfs must be exactly " + ", ".join(want_tmpfs) if want_tmpfs else "tmpfs"))
 
 if set(cfg) - {"name", "services", "networks", "volumes"}:
     problems.append("effective configuration contains unsupported top-level Compose options")
@@ -531,8 +559,9 @@ for n, s in svc.items():
     # A release cannot smuggle another service into an up/run dependency traversal.
     if set(s.get("depends_on", {})) - names:
         problems.append("service '%s' has an unapproved dependency" % n)
-    elevated_options = ('cap_add', 'cap_drop', 'devices', 'device_cgroup_rules',
-                        'security_opt', 'userns_mode', 'cgroup', 'cgroup_parent',
+    # cap_add, cap_drop and security_opt are checked exactly above.
+    elevated_options = ('devices', 'device_cgroup_rules',
+                        'userns_mode', 'cgroup', 'cgroup_parent',
                         'uts', 'volumes_from', 'group_add', 'runtime',
                         'use_api_socket', 'env_file', 'user', 'sysctls')
     if (s.get("privileged") or s.get("pid") or s.get("ipc")
