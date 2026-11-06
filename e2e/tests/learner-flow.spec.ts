@@ -1,278 +1,318 @@
-// Local FE07 browser verification with an explicitly supplied Playwright installation.
-// Run via stdin as documented in docs/testing.md; no repository dependency or mocks.
-import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-const [modulePath, frontend, backend, output] = process.argv.slice(2);
-assert(modulePath && frontend && backend && output, 'Supply Playwright module, frontend URL, backend URL and evidence directory.');
-const { chromium } = createRequire(`${process.cwd()}/package.json`)(modulePath);
-await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-const page = await context.newPage();
-const checks = [], errors = [], privateHeaders = [], publicHeaders = [];
-page.on('pageerror', (error) => errors.push(String(error)));
-page.on('request', (request) => {
-    const url = new URL(request.url());
-    if (url.origin !== backend || !url.pathname.startsWith('/api/')) return;
-    if (url.pathname.endsWith('/membership') || url.pathname === '/api/me/courses') privateHeaders.push(!!request.headers().authorization);
-    else publicHeaders.push(!!request.headers().authorization);
+/**
+ * Group A learner journey through the real frontend, REST API and PostgreSQL.
+ * Runs against the disposable stack from fixtures/local-stack.ts (or E2E_BASE_URL).
+ * No request is intercepted or mocked.
+ */
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { accountMenuName, expect, expectNoPageOverflow, fixture, newAccount, registerThroughApi, signIn, signOut, target, test, watchAuthorization } from '../fixtures/auth-fixture';
+
+const desktop = (name: string) => name.endsWith('-desktop');
+
+test.describe('catalogue and course detail (anonymous)', () => {
+    test.skip(!target.fixture, 'Needs the deterministic catalogue fixture of the disposable stack.');
+
+    test('lists only published courses, searches on submit, filters prerequisites and pages', async ({ page }) => {
+        const auth = watchAuthorization(page);
+        await page.goto('/courses');
+        await expect(page.getByRole('heading', { level: 1, name: 'Course catalogue' })).toBeVisible();
+        const list = page.getByRole('list', { name: 'Published courses' });
+        await expect(list.getByRole('listitem')).toHaveCount(20);
+        await expect(page.getByText(`${fixture.publishedCount} courses`, { exact: true })).toBeVisible();
+        await expect(page.getByText(`Showing 1–20 of ${fixture.publishedCount} published courses`)).toBeVisible();
+        await expect(page.getByText('E2E Hidden Course')).toHaveCount(0);
+
+        await page.getByRole('button', { name: 'Go to page 2' }).click();
+        await expect(list.getByRole('listitem')).toHaveCount(1);
+        await expect(list.getByRole('heading', { name: fixture.longTitle })).toBeVisible();
+        await expect(page.getByText(`Showing 21 of ${fixture.publishedCount} published courses`)).toBeVisible();
+        await expectNoPageOverflow(page);
+
+        // Search applies only when submitted.
+        const search = page.getByRole('searchbox', { name: 'Search courses' });
+        await search.fill('foundations');
+        await expect(list.getByRole('listitem')).toHaveCount(1);
+        await page.getByRole('button', { name: 'Search', exact: true }).click();
+        await expect(list.getByRole('heading', { name: fixture.primaryTitle })).toBeVisible();
+        await expect(page.getByText('1 course', { exact: true })).toBeVisible();
+
+        // The prerequisite filter applies on selection, combined with the submitted search.
+        await page.getByRole('button', { name: 'No prerequisites' }).click();
+        await expect(page.getByRole('heading', { name: 'No courses match these filters' })).toBeVisible();
+        await page.getByRole('button', { name: 'Clear filters' }).click();
+        await expect(search).toHaveValue('');
+        await expect(list.getByRole('listitem')).toHaveCount(20);
+        await page.getByRole('button', { name: 'Prerequisites described' }).click();
+        await expect(list.getByRole('listitem')).toHaveCount(1);
+        await expect(page.getByRole('button', { name: 'Prerequisites described' })).toHaveAttribute('aria-pressed', 'true');
+
+        expect(auth.length).toBeGreaterThan(0);
+        expect(auth.every((entry) => !entry.bearer), 'public catalogue requests carry no bearer credential').toBe(true);
+    });
+
+    test('shows published syllabus only, facts and a sign-in action; hidden and unknown courses are unavailable', async ({ page }) => {
+        await page.goto('/courses');
+        await page.getByRole('link', { name: fixture.primaryTitle }).click();
+        await expect(page).toHaveURL(new RegExp(`/courses/${fixture.primary}$`));
+        await expect(page.getByRole('heading', { level: 1, name: fixture.primaryTitle })).toBeFocused();
+        await expect(page.getByText('Instructor · E2E Course Instructor')).toBeVisible();
+        const facts = page.getByRole('region', { name: 'Course facts' });
+        await expect(facts.getByText('Comfortable with basic arithmetic.')).toBeVisible();
+        await expect(facts.getByText('2 chapters · 2 lessons')).toBeVisible();
+
+        const first = page.getByRole('button', { name: /Chapter 1: Getting Started/ });
+        const second = page.getByRole('button', { name: /Chapter 2: Making Decisions/ });
+        await expect(first).toHaveAttribute('aria-expanded', 'true');
+        await expect(second).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.getByText('1. What a Program Is')).toBeVisible();
+        await second.focus();
+        await page.keyboard.press('Enter');
+        await expect(second).toHaveAttribute('aria-expanded', 'true');
+        await expect(page.getByText('1. If Statements')).toBeVisible();
+        await page.keyboard.press('Space');
+        await expect(second).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.getByText(/Draft Lesson Hidden From Learners|Hidden Chapter Lesson|Unreleased Chapter/)).toHaveCount(0);
+        await expect(page.getByRole('link', { name: 'Sign in to enroll' })).toBeVisible();
+        await expectNoPageOverflow(page);
+
+        await page.getByRole('link', { name: 'Catalogue' }).first().click();
+        await expect(page).toHaveURL(/\/courses$/);
+
+        for (const id of [fixture.hidden, 'abcdefab-cdef-4abc-8def-abcdefabcdef']) {
+            await page.goto(`/courses/${id}`);
+            await expect(page.getByRole('heading', { level: 1, name: 'Course not available' })).toBeVisible();
+            await expect(page.getByText("This course doesn't exist or isn't published.")).toBeVisible();
+        }
+    });
+
+    test('keeps 100-character titles and 500-character descriptions inside their tiles', async ({ page }) => {
+        await page.goto('/courses');
+        const longDescription = page.getByText(fixture.longDescription.slice(0, 40), { exact: false });
+        await expect(longDescription).toBeVisible();
+        await page.getByRole('button', { name: 'Go to page 2' }).click();
+        const title = page.getByRole('heading', { name: fixture.longTitle });
+        await expect(title).toBeVisible();
+        const geometry = await title.evaluate((element) => {
+            const rect = element.getBoundingClientRect(), tile = element.closest('article')!.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, tileLeft: tile.left, tileRight: tile.right, scroll: element.scrollWidth, client: element.clientWidth };
+        });
+        expect(geometry.left).toBeGreaterThanOrEqual(geometry.tileLeft);
+        expect(geometry.right).toBeLessThanOrEqual(geometry.tileRight);
+        expect(geometry.scroll).toBeLessThanOrEqual(geometry.client + 1);
+        await expectNoPageOverflow(page);
+    });
 });
-async function check(name, action) { await action(); checks.push(name); console.log('PASS', name); }
-async function visibleText(text) { await page.getByText(text, { exact: true }).waitFor({ state: 'visible' }); }
-try {
-    await check('NUL search returns safe 400 while literal percent text and Unicode remain valid', async () => {
-        const bad = await page.request.get(backend + '/api/courses?q=a%00b');
-        assert.equal(bad.status(), 400); assert(bad.headers()['content-type'].startsWith('application/problem+json'));
-        const problem = await bad.json(); assert.equal(problem.detail, 'The request is invalid.'); assert.equal(problem.instance, '/api/courses');
-        for (const value of ['a%00b', '東京']) assert.equal((await page.request.get(backend + '/api/courses?q=' + encodeURIComponent(value))).status(), 200);
+
+test.describe('accounts and sessions', () => {
+    test('registers through the form, then signs in; the session lives in memory only', async ({ page, context }) => {
+        const account = newAccount('Registrant');
+        await page.goto('/register');
+        await expect(page.getByRole('heading', { level: 1, name: 'Create account' })).toBeVisible();
+        await page.locator('#register-displayName').fill(account.displayName);
+        await page.locator('#register-email').fill(account.email);
+        await page.locator('#register-password').fill('short');
+        await expect(page.getByRole('list', { name: 'Password rules' })).toBeVisible();
+        await page.locator('#register-confirm').fill('short');
+        await page.getByRole('button', { name: 'Create account', exact: true }).click();
+        await expect(page).toHaveURL(/\/register$/);
+        await expect(page.locator('#register-password')).toHaveAttribute('aria-invalid', 'true');
+
+        await page.locator('#register-password').fill(account.password);
+        await page.locator('#register-confirm').fill(account.password);
+        await page.getByRole('button', { name: 'Create account', exact: true }).click();
+        await expect(page.getByText('Account created. Sign in to continue.')).toBeVisible();
+
+        // The same email cannot be registered twice; the API answers without creating a second account.
+        const duplicate = await page.request.post(new URL('/api/auth/register', target.api).href, { data: account });
+        expect(duplicate.status()).toBe(409);
+
+        await signIn(page, account);
+        const stored = await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }));
+        expect(stored).toEqual({ local: 0, session: 0 });
+        expect((await context.cookies()).length).toBe(0);
+        await page.reload();
+        await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
     });
-    await check('OpenAPI and real search requests use 100 UTF-16 units: 50 emoji accepted, 51 rejected', async () => {
-        const spec = JSON.parse(await readFile('docs/api/openapi.yaml', 'utf8'));
-        const query = spec.paths['/api/courses'].get.parameters.find((parameter) => parameter.name === 'q');
-        assert(!Object.hasOwn(query.schema, 'maxLength')); assert.equal(query.schema['x-max-utf16-code-units'], 100);
-        assert.equal('😀'.repeat(50).length, 100); assert.equal('😀'.repeat(51).length, 102);
-        for (const [count, status] of [[50, 200], [51, 400]]) assert.equal((await page.request.get(backend + '/api/courses?q=' + encodeURIComponent('😀'.repeat(count)))).status(), status);
-    });
-    await check('malformed UUID membership requests are rejected without changing canonical membership', async () => {
-        const credentials = { email: `r3-${randomUUID()}@example.test`, password: 'Probe-' + randomUUID() + '!' };
-        assert.equal((await page.request.post(backend + '/api/auth/register', { data: { ...credentials, displayName: 'Round Three Probe' } })).status(), 201);
-        const login = await page.request.post(backend + '/api/auth/login', { data: credentials }); assert.equal(login.status(), 200);
-        const headers = { Authorization: 'Bearer ' + (await login.json()).accessToken };
-        const bad = backend + '/api/courses/0-0-4000-8000-2/membership';
-        assert.equal((await page.request.get(bad)).status(), 401);
-        for (const method of ['GET', 'PUT', 'DELETE']) assert.equal((await page.request.fetch(bad, { method, headers })).status(), 400);
-        assert.equal((await page.request.get(backend + '/api/courses/0-0-4000-8000-2')).status(), 400);
-        const canonical = await page.request.get(backend + '/api/courses/00000000-0000-4000-8000-000000000002/membership', { headers });
-        assert.equal(canonical.status(), 200); assert.equal((await canonical.json()).status, 'none');
-        const missing = '/api/courses/aBcDeFaB-cDeF-4aBc-8DeF-aBcDeFaBcDeF';
-        assert.equal((await page.request.get(backend + missing)).status(), 404);
-        assert.equal((await page.request.get(backend + missing + '/membership', { headers })).status(), 404);
-    });
-    await check('approved large-page REST request returns 200 and accurate empty-page metadata', async () => {
-        const response = await page.request.get(backend + '/api/courses?page=107374183&size=20');
-        assert.equal(response.status(), 200);
-        assert.deepEqual(await response.json(), { content: [], page: 107374183, size: 20, totalElements: 21, totalPages: 2 });
-    });
-    await page.goto(frontend + '/courses');
-    await check('course-card title/instructor text and navigation remain accessible in all nine responsive cases', async () => {
-        const long = 'W'.repeat(100), measurements = [], failures = [];
-        const variants = [
-            { name: 'title-only', title: long, instructor: 'Instructor: FE07 Runtime Instructor', id: '00000000-0000-4000-8001-000000000001', query: long, count: 2 },
-            { name: 'instructor-only', title: 'Long instructor fixture', instructor: 'Instructor: ' + long, id: '00000000-0000-4000-8001-000000000002', query: 'Long instructor fixture', count: 1 },
-            { name: 'both-long', title: long, instructor: 'Instructor: ' + long, id: '00000000-0000-4000-8001-000000000003', query: long, count: 2 },
-        ];
-        async function geometry(locator) {
-            return locator.evaluate((element) => {
-                const rect = element.getBoundingClientRect(), card = element.closest('.MuiCard-root').getBoundingClientRect();
-                const range = document.createRange(); range.selectNodeContents(element);
-                const fragments = [...range.getClientRects()].filter((part) => part.width > 0 && part.height > 0);
-                const style = getComputedStyle(element);
-                return { text: element.textContent, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
-                    clientHeight: element.clientHeight, scrollHeight: element.scrollHeight,
-                    rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
-                    card: { left: card.left, right: card.right, top: card.top, bottom: card.bottom },
-                    fragments: fragments.map((part) => ({ left: part.left, right: part.right, top: part.top, bottom: part.bottom })),
-                    lines: new Set(fragments.map((part) => part.top.toFixed(2))).size,
-                    overflowWrap: style.overflowWrap, overflowX: style.overflowX, overflowY: style.overflowY,
-                    textOverflow: style.textOverflow, lineClamp: style.webkitLineClamp };
-            });
-        }
-        for (const variant of variants) for (const width of [320, 768, 1280]) {
-            await page.setViewportSize({ width, height: 900 });
-            await page.getByRole('heading', { name: 'Course Catalogue', exact: true }).waitFor();
-            await page.getByLabel('Search courses').fill(variant.query);
-            await page.getByRole('button', { name: 'Apply filters', exact: true }).click();
-            await visibleText(`Showing ${variant.count} of ${variant.count} published courses`);
-            const card = page.locator('.MuiCard-root').filter({ has: page.getByRole('heading', { name: variant.title, exact: true }) })
-                .filter({ has: page.getByText(variant.instructor, { exact: true }) });
-            assert.equal(await card.count(), 1);
-            await page.evaluate(() => document.fonts.ready);
-            await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-            const title = await geometry(card.getByRole('heading', { name: variant.title, exact: true }));
-            const instructor = await geometry(card.getByText(variant.instructor, { exact: true }));
-            measurements.push({ variant: variant.name, width, title, instructor });
-            for (const [field, measured, expected] of [['title', title, variant.title], ['instructor', instructor, variant.instructor]]) {
-                const label = `${variant.name}/${width}/${field}`;
-                if (measured.text !== expected) failures.push(`${label}: incomplete text`);
-                if (!(measured.clientWidth > 0 && measured.scrollWidth <= measured.clientWidth + 1 && measured.scrollHeight <= measured.clientHeight + 1)) failures.push(`${label}: element overflow`);
-                if (!measured.fragments.every((part) => part.left >= measured.rect.left - 1 && part.right <= measured.rect.right + 1 && part.top >= measured.rect.top - 1 && part.bottom <= measured.rect.bottom + 1)) failures.push(`${label}: text outside element`);
-                if (!(measured.rect.left >= measured.card.left - 1 && measured.rect.right <= measured.card.right + 1 && measured.rect.top >= measured.card.top - 1 && measured.rect.bottom <= measured.card.bottom + 1 && measured.card.left >= 0 && measured.card.right <= width + 1)) failures.push(`${label}: clipped by card or viewport`);
-                if (['hidden', 'clip', 'scroll', 'auto'].includes(measured.overflowX) || ['hidden', 'clip', 'scroll', 'auto'].includes(measured.overflowY) || measured.textOverflow === 'ellipsis' || Number.parseInt(measured.lineClamp) > 0) failures.push(`${label}: truncation or scrolling workaround`);
-                if (expected.includes(long) && measured.lines <= 1) failures.push(`${label}: unbroken text did not wrap`);
-            }
-            const description = await card.getByText('Pagination fixture', { exact: true }).evaluate((element) => ({ clamp: getComputedStyle(element).webkitLineClamp, overflow: getComputedStyle(element).overflow }));
-            assert.equal(description.clamp, '3'); assert.equal(description.overflow, 'hidden');
-            if (variant.name === 'both-long') await page.screenshot({ path: `${output}/course-card-${width}.png`, fullPage: true });
-            await card.getByRole('button', { name: 'View Syllabus', exact: true }).click();
-            await page.waitForURL(frontend + '/courses/' + variant.id);
-            await page.getByRole('heading', { level: 1, name: variant.title, exact: true }).waitFor();
-            await page.getByRole('button', { name: 'Back to Catalogue', exact: true }).click();
-        }
-        await writeFile(`${output}/course-card-text.json`, JSON.stringify({ measurements, failures }, null, 2));
-        assert.deepEqual(failures, []);
-        await page.setViewportSize({ width: 1280, height: 900 });
-    });
-    await check('real published catalogue, search and prerequisite filtering', async () => {
-        await page.getByRole('heading', { name: 'Course Catalogue' }).waitFor();
-        const search = page.getByLabel('Search courses');
-        await search.fill('😀'.repeat(50)); await search.press('End'); await search.pressSequentially('😀');
-        assert.equal(await search.inputValue(), '😀'.repeat(50));
-        await search.fill('FE07');
-        await page.getByRole('button', { name: 'Apply filters' }).click();
-        await page.getByRole('heading', { name: 'FE07 Programming', exact: true }).waitFor();
-        assert.equal(await page.getByRole('heading', { name: 'FE07 Hidden', exact: true }).count(), 0);
-        await page.getByLabel('Prerequisites', { exact: true }).click();
-        await page.getByRole('option', { name: 'Prerequisites described' }).click();
-        await page.getByRole('button', { name: 'Apply filters' }).click();
-        await visibleText('Showing 1 of 1 published courses');
-    });
-    await check('real detail and published-only syllabus with instructor presentation', async () => {
-        await page.getByRole('button', { name: 'View Syllabus' }).click();
-        await page.getByRole('heading', { name: 'FE07 Programming', exact: true }).waitFor();
-        await visibleText('Instructor: FE07 Runtime Instructor');
-        await visibleText('1. Visible lesson');
-        assert.equal(await page.getByText('Hidden lesson').count(), 0);
-        await page.getByRole('link', { name: 'Sign in to enroll' }).waitFor();
-    });
-    await check('syllabus chapter controls label unique regions and support Enter/Space expansion', async () => {
-        const names = ['Chapter 1: Foundations', 'Chapter 2: Practice'];
-        const associations = [];
-        for (const name of names) {
-            const control = page.getByRole('button', { name, exact: true });
-            const id = await control.getAttribute('id'), panelId = await control.getAttribute('aria-controls');
-            assert(id && panelId, `${name} must identify its control and panel`);
-            const panel = page.locator(`[id="${panelId}"]`);
-            assert.equal(await page.locator(`[id="${id}"]`).count(), 1);
-            assert.equal(await panel.count(), 1);
-            assert.equal(await panel.getAttribute('role'), 'region');
-            assert.equal(await panel.getAttribute('aria-labelledby'), id);
-            assert.equal(await page.getByRole('region', { name, exact: true }).count(), 1);
-            assert.equal(await control.getAttribute('aria-expanded'), 'true');
-            associations.push({ name, id, panelId });
-        }
-        assert.equal(new Set(associations.flatMap(({ id, panelId }) => [id, panelId])).size, 4);
-        for (const [index, { name, id, panelId }] of associations.entries()) {
-            const control = page.getByRole('button', { name, exact: true });
-            const panel = page.locator(`[id="${panelId}"]`);
-            await control.focus();
-            await page.keyboard.press(index === 0 ? 'Enter' : 'Space');
-            await panel.waitFor({ state: 'hidden' });
-            assert.equal(await control.getAttribute('aria-expanded'), 'false');
-            assert.equal(await page.getByRole('region', { name, exact: true }).count(), 0);
-            assert.equal(await page.getByRole('button', { name: names[1 - index], exact: true }).getAttribute('aria-expanded'), 'true');
-            assert(await control.evaluate((element) => document.activeElement === element));
-            await page.keyboard.press(index === 0 ? 'Space' : 'Enter');
-            await panel.waitFor({ state: 'visible' });
-            assert.equal(await control.getAttribute('aria-expanded'), 'true');
-            assert.equal(await page.getByRole('region', { name, exact: true }).count(), 1);
-            assert.equal(await control.getAttribute('id'), id);
-            assert.equal(await control.getAttribute('aria-controls'), panelId);
-        }
-        await writeFile(`${output}/syllabus-accessibility.json`, JSON.stringify({ associations, keyboard: 'Enter and Space collapse/reopen each chapter independently; focus and IDs retained' }, null, 2));
-    });
-    await check('500-character unbroken description remains accessible at 320px, tablet and desktop', async () => {
-        const description = page.getByText('D'.repeat(500), { exact: true });
-        await description.waitFor();
-        for (const width of [320, 768, 1280]) {
-            await page.setViewportSize({ width, height: 900 });
-            const measured = await description.evaluate((element) => {
-                const rect = element.getBoundingClientRect(), range = document.createRange();
-                range.selectNodeContents(element);
-                const lines = [...range.getClientRects()];
-                return { clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
-                    text: element.textContent, lineCount: lines.length,
-                    contained: lines.every((line) => line.left >= rect.left - 1 && line.right <= rect.right + 1 && line.bottom <= rect.bottom + 1),
-                    hidden: ['hidden', 'clip', 'scroll', 'auto'].includes(getComputedStyle(element).overflowX) };
-            });
-            assert.equal(measured.text, 'D'.repeat(500));
-            assert(measured.clientWidth > 0 && measured.scrollWidth <= measured.clientWidth + 1, `Description overflow at ${width}`);
-            assert(measured.contained && measured.lineCount > 1 && !measured.hidden, `Description must wrap without clipping at ${width}`);
-            await page.screenshot({ path: `${output}/long-description-${width}.png`, fullPage: true });
-        }
-        await page.setViewportSize({ width: 1280, height: 900 });
-    });
-    const coursePath = new URL(page.url()).pathname;
-    const password = 'FE07-' + randomUUID() + '!';
-    const email = `fe07-${randomUUID()}@example.test`;
-    await check('real registration, login and guarded My Courses', async () => {
-        await page.goto(frontend + '/my-courses');
-        await page.waitForURL(frontend + '/login');
-        await page.getByRole('link', { name: 'Create an account' }).click();
-        await page.getByLabel('Display name').fill('FE07 Browser Learner');
-        await page.getByLabel('Email address').fill(email);
-        await page.getByLabel(/^Password/).fill(password);
-        await page.getByLabel('Confirm password').fill(password);
-        await page.getByRole('button', { name: 'Register', exact: true }).click();
-        await page.getByRole('link', { name: 'Proceed to sign in' }).click();
-        await page.getByLabel('Email address').fill(email);
-        await page.getByLabel(/^Password/).fill(password);
+
+    test('rejects wrong credentials with a safe message and keeps the form', async ({ page, learner }) => {
+        await page.goto('/login');
+        await page.locator('#login-email').fill(learner.email);
+        await page.locator('#login-password').fill(`${learner.password}x`);
         await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-        await page.waitForURL(frontend + '/courses');
-        await page.goto(frontend + coursePath);
-        // A full reload intentionally drops the memory-only session.
-        await page.getByRole('link', { name: 'Sign in to enroll' }).waitFor();
-        await page.getByRole('link', { name: 'Sign in to enroll' }).click();
-        await page.getByLabel('Email address').fill(email);
-        await page.getByLabel(/^Password/).fill(password);
-        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-        await page.waitForURL(frontend + '/courses');
-        await page.getByLabel('Search courses').fill('FE07');
-        await page.getByRole('button', { name: 'Apply filters' }).click();
-        await visibleText('Showing 1 of 1 published courses');
-        await page.getByRole('button', { name: 'View Syllabus' }).click();
-        await visibleText('Membership: none');
+        await expect(page.getByRole('alert')).toBeVisible();
+        await expect(page).toHaveURL(/\/login$/);
+        await expect(page.locator('#login-email')).toHaveValue(learner.email);
     });
-    await check('real enrolment, My Courses, leave confirmation, removal and re-enrolment', async () => {
-        await page.getByRole('button', { name: 'Enroll in course', exact: true }).click();
-        await visibleText('Membership: active');
-        await page.getByRole('main').getByRole('link', { name: 'My Courses', exact: true }).click();
-        await page.getByRole('heading', { name: 'My Courses', exact: true }).waitFor();
-        await page.getByRole('heading', { name: 'FE07 Programming', exact: true }).waitFor();
-        await page.getByRole('link', { name: 'View course and membership' }).click();
-        await page.getByRole('button', { name: 'Leave course', exact: true }).click();
+
+    test('shows the profile snapshot, signs out and guards private routes again', async ({ page, learner }) => {
+        await signIn(page, learner);
+        await page.getByRole('button', { name: accountMenuName(learner) }).click();
+        await page.getByRole('menuitem', { name: 'Profile' }).click();
+        await expect(page).toHaveURL(/\/profile$/);
+        await expect(page.getByRole('heading', { level: 1, name: 'Profile' })).toBeFocused();
+        const terms = await page.locator('main dl dt').allTextContents();
+        expect(terms).toEqual(['Display name', 'Role', 'User ID']);
+        await expect(page.locator('main dl')).toContainText(learner.displayName);
+        await expect(page.locator('main dl')).toContainText('Learner');
+
+        await signOut(page, learner);
+        for (const path of ['/my-courses', '/profile']) {
+            await page.goto(path);
+            await expect(page).toHaveURL(/\/login$/);
+            await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+        }
+    });
+
+    test('an Instructor sees access denied for My courses and the API refuses membership changes', async ({ page }) => {
+        const instructor = target.instructor;
+        test.skip(!instructor, 'Needs an Instructor account (created by the disposable stack).');
+        await signIn(page, instructor!);
+        await expect(page.getByRole('link', { name: 'My courses' })).toHaveCount(0);
+        // In-app history navigation keeps the memory-only session (a typed URL would reload and sign out).
+        await page.evaluate(() => { history.pushState(null, '', '/my-courses'); dispatchEvent(new PopStateEvent('popstate')); });
+        await expect(page.getByRole('heading', { level: 1, name: "You don't have access to this page" })).toBeVisible();
+        await expect(page.getByText("You're signed in as an Instructor. This page is for learners.")).toBeVisible();
+
+        // Backend authorization is independent of the hidden link and the route guard.
+        const login = await page.request.post(new URL('/api/auth/login', target.api).href, { data: { email: instructor!.email, password: instructor!.password } });
+        const token = (await login.json()).accessToken as string;
+        const denied = await page.request.put(new URL(`/api/courses/${fixture.primary}/membership`, target.api).href, { headers: { Authorization: `Bearer ${token}` } });
+        expect(denied.status()).toBe(403);
+    });
+
+    test('unknown routes show the not-found state with a way back', async ({ page }) => {
+        await page.goto('/no-such-page');
+        await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
+        await page.getByRole('link', { name: 'Browse courses' }).click();
+        await expect(page).toHaveURL(/\/courses$/);
+    });
+});
+
+test.describe('membership', () => {
+    test.skip(!target.fixture, 'Needs the deterministic catalogue fixture of the disposable stack.');
+
+    test('enrolls from course detail, leaves from the My courses tile menu and re-enrolls', async ({ page, learner }, testInfo) => {
+        const auth = watchAuthorization(page);
+        // The session is memory-only, so stay inside the app (no full reload) after signing in.
+        await signIn(page, learner);
+        await page.getByRole('link', { name: fixture.primaryTitle }).click();
+        await expect(page).toHaveURL(new RegExp(`/courses/${fixture.primary}$`));
+        await expect(page.getByText('Membership: Not enrolled')).toBeVisible();
+        await page.getByRole('button', { name: 'Enroll in course' }).click();
+        await expect(page.getByText('Membership: Active')).toBeVisible();
+
+        await page.getByRole('link', { name: 'My courses' }).last().click();
+        await expect(page).toHaveURL(/\/my-courses$/);
+        await expect(page.getByRole('heading', { level: 1, name: 'My courses' })).toBeFocused();
+        const courses = page.getByRole('list', { name: 'Your courses' });
+        await expect(courses.getByRole('heading', { name: fixture.primaryTitle })).toBeVisible();
+        await expect(courses.getByText('Membership: Active')).toBeVisible();
+
+        const menu = page.getByRole('button', { name: `More actions for ${fixture.primaryTitle}` });
+        await menu.click();
+        await expect(page.getByRole('menuitem', { name: 'View course details' })).toBeVisible();
+        await page.getByRole('menuitem', { name: 'Leave course' }).click();
         const dialog = page.getByRole('dialog', { name: 'Leave course?' });
-        await dialog.waitFor(); await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-        await visibleText('Membership: active');
-        await page.getByRole('button', { name: 'Leave course', exact: true }).click();
-        await dialog.getByRole('button', { name: 'Leave course', exact: true }).click();
-        await visibleText('Membership: left');
-        await page.getByRole('main').getByRole('link', { name: 'My Courses', exact: true }).click();
-        await page.getByRole('heading', { name: 'No courses found' }).waitFor();
-        await page.getByLabel('Membership status').click(); await page.getByRole('option', { name: 'Left', exact: true }).click();
-        await page.getByRole('link', { name: 'View course and membership' }).click();
-        await page.getByRole('button', { name: 'Re-enroll', exact: true }).click();
-        await visibleText('Membership: active');
-    });
-    await check('responsive layout and accessible membership controls', async () => {
-        for (const width of [1280, 768, 390, 320]) {
-            await page.setViewportSize({ width, height: 900 });
-            await page.waitForTimeout(100);
-            assert(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `Overflow at ${width}`);
-            await page.getByRole('button', { name: 'Leave course', exact: true }).waitFor();
-            await page.screenshot({ path: `${output}/membership-${width}.png`, fullPage: true });
+        await expect(dialog).toContainText('Your learning history will be preserved. You can re-enroll while the course is published.');
+        await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+        if (testInfo.project.name.endsWith('-mobile')) {
+            const box = await dialog.boundingBox(), viewport = page.viewportSize()!;
+            expect(box!.width).toBeGreaterThanOrEqual(viewport.width - 1);
         }
-        await page.setViewportSize({ width: 1280, height: 900 });
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(menu).toBeFocused();
+        await menu.click();
+        await page.getByRole('menuitem', { name: 'Leave course' }).click();
+        await page.getByRole('dialog', { name: 'Leave course?' }).getByRole('button', { name: 'Leave course' }).click();
+        await expect(page.getByRole('status').filter({ hasText: `You left ${fixture.primaryTitle}.` })).toBeVisible();
+        await expect(page.getByRole('heading', { name: "You haven't joined a course yet" })).toBeVisible();
+
+        await page.getByRole('button', { name: 'Left', exact: true }).click();
+        await expect(courses.getByText('Membership: Left')).toBeVisible();
+        await page.getByRole('button', { name: `More actions for ${fixture.primaryTitle}` }).click();
+        await page.getByRole('menuitem', { name: 'Re-enroll' }).click();
+        await expect(page.getByRole('status').filter({ hasText: `You re-enrolled in ${fixture.primaryTitle}.` })).toBeVisible();
+        await page.getByRole('button', { name: 'Joined', exact: true }).click();
+        await expect(courses.getByText('Membership: Active')).toBeVisible();
+        await expectNoPageOverflow(page);
+
+        await courses.getByRole('link', { name: fixture.primaryTitle }).click();
+        await expect(page.getByText('Membership: Active')).toBeVisible();
+        await page.getByRole('button', { name: 'Leave course' }).click();
+        await page.getByRole('dialog', { name: 'Leave course?' }).getByRole('button', { name: 'Leave course' }).click();
+        await expect(page.getByText('Membership: Left')).toBeVisible();
+        await page.getByRole('button', { name: 'Re-enroll' }).click();
+        await expect(page.getByText('Membership: Active')).toBeVisible();
+
+        const privateCalls = auth.filter((entry) => entry.path.endsWith('/membership') || entry.path === '/api/me/courses');
+        const publicCalls = auth.filter((entry) => entry.path.startsWith('/api/courses') && !entry.path.endsWith('/membership'));
+        expect(privateCalls.length).toBeGreaterThan(0);
+        expect(privateCalls.every((entry) => entry.bearer), 'membership and My courses requests are authenticated').toBe(true);
+        expect(publicCalls.every((entry) => !entry.bearer), 'catalogue requests stay anonymous').toBe(true);
     });
-    await check('memory-only sessions, sign-out and protected navigation', async () => {
-        const storage = await page.evaluate(() => ({ local: Object.keys(localStorage), session: Object.keys(sessionStorage), cookies: document.cookie }));
-        assert.deepEqual(storage, { local: [], session: [], cookies: '' });
-        await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-        await page.waitForURL(frontend + '/login');
-        await page.goto(frontend + '/my-courses'); await page.waitForURL(frontend + '/login');
-        assert(!await page.getByText('FE07 Browser Learner', { exact: true }).count());
+
+    test('My courses navigation, mobile drawer and keyboard skip link', async ({ page, learner }, testInfo) => {
+        await signIn(page, learner);
+        if (desktop(testInfo.project.name)) {
+            const nav = page.getByRole('navigation', { name: 'Main navigation' });
+            await expect(nav.getByRole('link', { name: 'Catalogue' })).toHaveAttribute('aria-current', 'page');
+            await nav.getByRole('link', { name: 'My courses' }).click();
+            await expect(nav.getByRole('link', { name: 'My courses' })).toHaveAttribute('aria-current', 'page');
+        } else {
+            const toggle = page.getByRole('button', { name: 'Toggle navigation' });
+            await toggle.click();
+            const drawer = page.getByRole('dialog');
+            await expect(drawer.getByRole('link', { name: 'Catalogue' })).toHaveAttribute('aria-current', 'page');
+            await page.keyboard.press('Escape');
+            await expect(toggle).toBeFocused();
+            await toggle.click();
+            await page.getByRole('dialog').getByRole('link', { name: 'My courses' }).click();
+        }
+        await expect(page).toHaveURL(/\/my-courses$/);
+        await expect(page.getByRole('heading', { level: 1, name: 'My courses' })).toBeVisible();
+        await expectNoPageOverflow(page);
+        // WebKit does not move Tab focus to links by default (a macOS setting), so the skip link is checked in Chromium and Firefox.
+        if (desktop(testInfo.project.name) && testInfo.project.name !== 'webkit-desktop') {
+            const skip = page.getByRole('link', { name: 'Skip to main content' });
+            const first = await page.evaluate(() => document.querySelector('a[href], button:not([disabled]), input, [tabindex]:not([tabindex="-1"])')?.textContent);
+            expect(first, 'the skip link is the first tab stop').toBe('Skip to main content');
+            await skip.focus();
+            const box = await skip.boundingBox();
+            expect(box && box.y >= 0 && box.width > 0, 'the focused skip link is visible').toBe(true);
+            await page.keyboard.press('Enter');
+            await expect(page.locator('#main-content')).toBeFocused();
+        }
     });
-    await check('catalogue pagination, hidden 404 and preserved independent FE01 preview', async () => {
-        await page.goto(frontend + '/courses'); await visibleText('Showing 20 of 21 published courses');
-        await page.getByRole('button', { name: 'Go to page 2' }).click(); await visibleText('Showing 1 of 21 published courses');
-        const response = await page.request.get(backend + '/api/courses/00000000-0000-4000-8000-000000000099'); assert.equal(response.status(), 404);
-        await page.goto(frontend + '/courses/00000000-0000-4000-8000-000000000099'); await page.getByText('The requested resource is unavailable.', { exact: true }).waitFor();
-        await page.goto(frontend + '/preview'); await page.getByRole('heading', { name: 'Your learning, in focus.' }).waitFor();
-        await page.getByText('All learning data below is illustrative. Nothing is saved.', { exact: true }).waitFor();
+});
+
+test.describe('REST contract smoke (API only)', () => {
+    test('validates search input, page bounds and malformed identifiers without changing data', async ({ request }, testInfo) => {
+        test.skip(testInfo.project.name !== 'chromium-desktop', 'API-only checks run once.');
+        const api = (path: string) => new URL(path, target.api).href;
+        const bad = await request.get(api('/api/courses?q=a%00b'));
+        expect(bad.status()).toBe(400);
+        expect(bad.headers()['content-type']).toMatch(/^application\/problem\+json/);
+        for (const value of ['a%00b', '東京']) expect((await request.get(api(`/api/courses?q=${encodeURIComponent(value)}`))).status()).toBe(200);
+
+        const spec = await readFile(fileURLToPath(new URL('../../docs/api/openapi.yaml', import.meta.url)), 'utf8');
+        expect(spec).toContain('x-max-utf16-code-units');
+        for (const [count, status] of [[50, 200], [51, 400]] as const) expect((await request.get(api(`/api/courses?q=${encodeURIComponent('😀'.repeat(count))}`))).status()).toBe(status);
+
+        const account = newAccount('Probe');
+        await registerThroughApi(request, account);
+        const login = await request.post(api('/api/auth/login'), { data: { email: account.email, password: account.password } });
+        expect(login.status()).toBe(200);
+        const headers = { Authorization: `Bearer ${(await login.json()).accessToken}` };
+        const malformed = api('/api/courses/0-0-4000-8000-2/membership');
+        expect((await request.get(malformed)).status()).toBe(401);
+        for (const method of ['GET', 'PUT', 'DELETE']) expect((await request.fetch(malformed, { method, headers })).status()).toBe(400);
+        if (target.fixture) {
+            const canonical = await request.get(api(`/api/courses/${fixture.primary}/membership`), { headers });
+            expect(canonical.status()).toBe(200);
+            expect((await canonical.json()).status).toBe('none');
+            expect((await request.get(api(`/api/courses/${fixture.hidden}`))).status()).toBe(404);
+            const far = await request.get(api('/api/courses?page=107374183&size=20'));
+            expect(await far.json()).toEqual({ content: [], page: 107374183, size: 20, totalElements: fixture.publishedCount, totalPages: 2 });
+        }
     });
-    assert(privateHeaders.length > 0 && privateHeaders.every(Boolean), 'Every membership request uses the private transport');
-    assert(publicHeaders.every((value) => !value), 'Public operations never receive a bearer credential');
-    assert.deepEqual(errors, []);
-    await writeFile(`${output}/result.json`, JSON.stringify({ checks, browserErrors: errors, authenticatedRequests: privateHeaders.length, publicRequests: publicHeaders.length }, null, 2));
-} finally { await browser.close(); }
+});
