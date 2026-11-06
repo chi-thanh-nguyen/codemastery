@@ -68,7 +68,7 @@ describe('CT01 input predicates through FE03 boundaries', () => {
     it('registration whitelists payload, trims name, expects 201 and never authenticates', async () => {
         await mount(<RegisterPage />); await fillRegister(); fetcher.mockResolvedValueOnce(json(user(), 201)); await submit();
         expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ email: 'learner@example.com', password: payload.password, displayName: 'Learner' }); expect(fetcher.mock.calls[0][1].headers.has('Authorization')).toBe(false);
-        expect(host.textContent).toContain('Your account was registered.'); expect(auth.user).toBeNull();
+        expect(host.textContent).toContain('Account created. Sign in to continue.'); expect(auth.user).toBeNull();
     });
     it('blurs the connected registration input before success replaces the form inside its Auth layout', async () => {
         await mount(<RegisterPage />); await fillRegister();
@@ -80,7 +80,7 @@ describe('CT01 input predicates through FE03 boundaries', () => {
         expect(document.activeElement).toBe(input);
         await act(async () => work.resolve(json(user(), 201)));
         expect(connected).toEqual([true]); expect(host.querySelector('form')).toBeNull();
-        expect(host.textContent).toContain('Your account was registered.'); expect(auth.user).toBeNull();
+        expect(host.textContent).toContain('Account created. Sign in to continue.'); expect(auth.user).toBeNull();
     });
     it('rejects registration 200 and never publishes success', async () => { await mount(<RegisterPage />); await fillRegister(); fetcher.mockResolvedValueOnce(json(user(), 200)); await submit(); expect(host.querySelector('[role="alert"]')?.textContent).toContain('invalid response'); expect(auth.user).toBeNull(); });
     it.each(['', 'short', '😀'.repeat(30)])('login forwards unsuitable credentials unchanged %#', async (password) => {
@@ -152,8 +152,8 @@ describe('real Auth UI observable states', () => {
     it.each(['login', 'register'])('keeps %s action/progress names while pending', async (kind) => {
         await mount(kind === 'login' ? <LoginPage /> : <RegisterPage />); const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
         if (kind === 'login') { await change('email', payload.email); await change('password', payload.password); } else await fillRegister(); await submit();
-        const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!; expect(button.disabled).toBe(true); expect(button.textContent).toBe(kind === 'login' ? 'Sign in' : 'Register');
-        const bar = host.querySelector('[role="progressbar"]')!; expect(document.getElementById(bar.getAttribute('aria-labelledby')!)?.textContent).toBe(kind === 'login' ? 'Signing in…' : 'Registering account…');
+        const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!; expect(button.disabled).toBe(true); expect(button.textContent).toBe(kind === 'login' ? 'Sign in' : 'Create account');
+        const bar = host.querySelector('[role="progressbar"]')!; expect(document.getElementById(bar.getAttribute('aria-labelledby')!)?.textContent).toBe(kind === 'login' ? 'Signing in…' : 'Creating your account…');
         await act(async () => work.resolve(json(null, 503))); expect(button.disabled).toBe(false); expect(host.querySelector('[role="progressbar"]')).toBeNull(); expect(fetcher).toHaveBeenCalledTimes(1);
     });
     it('associates safe server errors and focuses affected input', async () => {

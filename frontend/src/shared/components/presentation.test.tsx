@@ -13,7 +13,14 @@ import { PageHeader } from './PageHeader';
 import { AppHeader } from './AppHeader';
 import { BrandLogo } from './BrandLogo';
 import { AuthLayout } from '../../layouts/AuthLayout';
-import { DashboardLayout } from '../../layouts/DashboardLayout';
+import { DashboardLayout, Page } from '../../layouts/DashboardLayout';
+import { StatusPill, MasteryTag, MasteryLegend, RecommendationTag } from './StatusPill';
+import { DataTable, PaginationBar } from './DataTable';
+import { SegmentedControl } from './ViewRail';
+import { PathSpine } from './PathSpine';
+import { GuidanceStack } from './GuidanceStack';
+import { SearchPill } from './PageHeader';
+import { ProgressLine } from './Tile';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root, host: HTMLDivElement;
@@ -33,11 +40,11 @@ describe('FE01 presentation contracts', () => {
         expect(decorative.getAttribute('height')).toBe('44'); expect(decorative.getAttribute('aria-hidden')).toBe('true');
     });
     it('shares canonical artwork between navigation and authentication without duplicating the wordmark name', async () => {
-        await render(<><SidebarNav items={[]} mobileOpen={false} onSelect={vi.fn()} onMobileClose={vi.fn()} />
+        await render(<><AppHeader navItems={[]} />
             <AuthLayout title="Welcome back"><p>Caller content</p></AuthLayout></>);
-        const sidebar = host.querySelector('.MuiDrawer-docked nav')!;
-        expect(sidebar.querySelector('img')?.getAttribute('src')).toBe('/favicon.svg');
-        expect(sidebar.querySelector('img')?.alt).toBe(''); expect(sidebar.textContent).toContain('CodeMastery');
+        const header = host.querySelector('header')!;
+        expect(header.querySelector('img')?.getAttribute('src')).toBe('/favicon.svg');
+        expect(header.querySelector('img')?.alt).toBe(''); expect(header.textContent).toContain('CodeMastery');
         expect(host.querySelector('img[alt="CodeMastery"]')?.getAttribute('src')).toBe('/favicon.svg');
         expect(host.textContent).toContain('Caller content'); expect(host.querySelector('h1')?.textContent).toBe('Welcome back');
     });
@@ -67,22 +74,30 @@ describe('FE01 presentation contracts', () => {
             expect(remove).toHaveBeenCalledWith('pagehide', pagehide);
         } finally { external.remove(); add.mockRestore(); remove.mockRestore(); }
     });
-    it('exposes controlled current navigation and wraps zero badges', async () => {
+    it('exposes controlled current navigation in the top bar and the mobile drawer, and wraps zero badges', async () => {
         const onSelect = vi.fn(), onClose = vi.fn();
-        const props = { items, mobileOpen: false, onSelect, onMobileClose: onClose };
-        await render(<SidebarNav {...props} selectedId="a" />);
-        const nav = document.querySelector('.MuiDrawer-docked nav')!;
+        await render(<AppHeader navItems={items} selectedNavId="a" onNavSelect={onSelect} />);
+        const top = host.querySelector('header nav[aria-label="Main navigation"]')!;
+        expect(top.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+        expect(top.querySelector('[aria-current="page"]')?.textContent).toContain('Alpha');
+        await click([...top.querySelectorAll('button')].find((node) => node.textContent?.includes('Beta'))!);
+        expect(onSelect).toHaveBeenCalledExactlyOnceWith('b');
+        await render(<AppHeader navItems={items} selectedNavId="missing" onNavSelect={onSelect} />);
+        expect(host.querySelector('header [aria-current]')).toBeNull();
+        onSelect.mockClear();
+        const props = { items, onSelect, onMobileClose: onClose };
+        await render(<SidebarNav {...props} mobileOpen selectedId="a" />);
+        const nav = document.querySelector('.MuiDrawer-modal nav')!;
         expect(nav.getAttribute('aria-label')).toBe('Main navigation');
-        expect(nav.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
-        const alpha = nav.querySelector('[aria-current="true"]')!;
+        expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+        const alpha = nav.querySelector('[aria-current="page"]')!;
         expect(Array.from(alpha.children).some((child) => child.textContent === '0')).toBe(true);
         const beta = [...nav.querySelectorAll('[role="button"]')].find((node) => node.textContent?.includes('Beta'))!;
         await click(beta); expect(onSelect).toHaveBeenCalledExactlyOnceWith('b'); expect(onClose).toHaveBeenCalledTimes(1);
-        expect(alpha.getAttribute('aria-current')).toBe('true');
-        await render(<SidebarNav {...props} selectedId="b" />);
-        expect(nav.querySelector('[aria-current="true"]')?.textContent).toContain('Beta');
-        await render(<SidebarNav {...props} selectedId="missing" />);
-        expect(nav.querySelector('[aria-current]')).toBeNull();
+        await render(<SidebarNav {...props} mobileOpen selectedId="b" />);
+        expect(document.querySelector('.MuiDrawer-modal nav [aria-current="page"]')?.textContent).toContain('Beta');
+        await render(<SidebarNav {...props} mobileOpen selectedId="missing" />);
+        expect(document.querySelector('.MuiDrawer-modal nav [aria-current]')).toBeNull();
     });
     it('accepts empty navigation without creating current state', async () => {
         await render(<SidebarNav items={[]} mobileOpen={false} onSelect={vi.fn()} onMobileClose={vi.fn()} />);
@@ -90,7 +105,7 @@ describe('FE01 presentation contracts', () => {
     });
     it('preserves caller-owned header search and account actions with the mobile toggle', async () => {
         const toggle = vi.fn();
-        await render(<AppHeader title="Learning workspace" menuOpen={false} onMenuToggle={toggle}
+        await render(<AppHeader menuOpen={false} onMenuToggle={toggle}
             search={<input aria-label="Caller search" defaultValue="variables" />} actions={<a href="/profile">Profile</a>} />);
         expect(host.querySelector<HTMLInputElement>('[aria-label="Caller search"]')?.value).toBe('variables');
         expect(host.querySelector('a')?.getAttribute('href')).toBe('/profile');
@@ -194,7 +209,7 @@ describe('FE01 presentation contracts', () => {
             expect(document.querySelector('.MuiDrawer-modal')).not.toBeNull(); expect(document.body.style.overflow).toBe('hidden');
             await act(async () => { desktop = true; [...listeners].forEach((notify) => notify()); });
             expect(document.querySelector('.MuiDrawer-modal')).toBeNull(); expect(document.body.style.overflow).toBe('');
-            expect(document.activeElement).toBe(host.querySelector('.MuiDrawer-docked [aria-current="true"]'));
+            expect(document.activeElement).toBe(host.querySelector('header nav [aria-current="page"]'));
             expect(onSelect).not.toHaveBeenCalled();
         } finally { vi.unstubAllGlobals(); }
     });
@@ -216,5 +231,98 @@ describe('FE01 presentation contracts', () => {
                 expect(document.querySelector('.MuiDrawer-modal')).toBeNull(); expect(document.body.style.overflow).toBe('');
             }
         } finally { vi.unstubAllGlobals(); vi.useRealTimers(); }
+    });
+});
+
+describe('Lit Path design-system primitives', () => {
+    it('never communicates state by colour alone: pills carry text and a glyph', async () => {
+        await render(<><StatusPill tone="mint" icon="check-circle">Completed</StatusPill><RecommendationTag type="skip" /></>);
+        expect(host.textContent).toContain('Completed'); expect(host.textContent).toContain('Test-out');
+        expect(host.querySelectorAll('svg')).toHaveLength(2);
+    });
+    it('exposes exactly the four approved mastery states with their meanings and no numbers', async () => {
+        await render(<><MasteryLegend /><MasteryTag state="weak" /></>);
+        expect([...host.querySelectorAll('[aria-label="Mastery states"] li')].map((li) => li.textContent)).toEqual([
+            'UnknownNot assessed yet.', 'LearningSome quiz evidence, not yet mastered.', "MasteredQuiz evidence shows you've mastered this skill.", 'WeakQuiz evidence shows a gap to review.']);
+        expect(host.textContent).not.toMatch(/\d/);
+    });
+    it('renders a captioned table with a row header and switches to stacked label/value rows below 600 px', async () => {
+        const props = { label: 'People', rows: [{ id: '1', name: 'Ana', role: 'Learner' }], getRowId: (row: { id: string }) => row.id,
+            columns: [{ key: 'name', header: 'Name', primary: true, render: (row: { name: string }) => row.name }, { key: 'role', header: 'Role', render: (row: { role: string }) => row.role }] };
+        await render(<DataTable {...props} />);
+        expect(host.querySelector('table caption')?.textContent).toBe('People'); expect(host.querySelector('tbody th[scope="row"]')?.textContent).toBe('Ana');
+        vi.stubGlobal('matchMedia', (media: string) => ({ matches: media.includes('max-width'), media, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+        try {
+            await render(<DataTable {...props} />);
+            expect(host.querySelector('table')).toBeNull(); expect(host.querySelector('ul[aria-label="People"] dt')?.textContent).toBe('Role');
+        } finally { vi.unstubAllGlobals(); }
+    });
+    it('turns the confirmation into a full-screen sheet below 600 px with Cancel still focused first', async () => {
+        const props = { title: 'Leave course?', message: 'Your learning history will be preserved.', confirmLabel: 'Leave course', isDestructive: true, onConfirm: vi.fn(), onCancel: vi.fn() };
+        await render(<ConfirmDialog {...props} open />);
+        expect(document.querySelector('.MuiDialog-paperFullScreen')).toBeNull();
+        await render(<ConfirmDialog {...props} open={false} />);
+        vi.stubGlobal('matchMedia', (media: string) => ({ matches: media.includes('max-width:599.95px'), media, onchange: null,
+            addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: () => false }));
+        try {
+            await render(<ConfirmDialog {...props} open />);
+            const sheet = document.querySelector<HTMLElement>('[role="dialog"].MuiDialog-paperFullScreen');
+            expect(sheet).not.toBeNull(); expect(document.activeElement?.textContent).toBe('Cancel');
+            expect([...sheet!.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Cancel', 'Leave course']);
+        } finally { vi.unstubAllGlobals(); }
+    });
+    it('clears a search pill with Escape or its clear button and keeps focus in the field', async () => {
+        const clear = vi.fn(), change = vi.fn();
+        await render(<SearchPill label="Search users" value="Linh" onChange={change} onClear={clear} />);
+        const input = host.querySelector<HTMLInputElement>('input[aria-label="Search users"]')!;
+        await act(async () => input.focus());
+        await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+        expect(clear).toHaveBeenCalledTimes(1); expect(document.activeElement).toBe(input);
+        const button = host.querySelector<HTMLButtonElement>('button[aria-label="Clear search users"]')!;
+        await act(async () => { button.focus(); button.click(); });
+        expect(clear).toHaveBeenCalledTimes(2); expect(document.activeElement).toBe(input);
+        await render(<SearchPill label="Search users" value="" onChange={change} onClear={clear} />);
+        await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+        expect(clear).toHaveBeenCalledTimes(2); expect(host.querySelector('button[aria-label="Clear search users"]')).toBeNull();
+    });
+    it('shows one-based ranges over zero-based pages and the singular noun', async () => {
+        const change = vi.fn();
+        await render(<PaginationBar page={1} totalPages={3} totalItems={45} pageSize={20} itemsOnPage={20} onChange={change} noun="courses" />);
+        expect(host.textContent).toContain('Showing 21–40 of 45 courses');
+        await click(host.querySelector('[aria-label="Go to page 3"]')); expect(change).toHaveBeenCalledWith(2);
+        await render(<PaginationBar page={0} totalPages={1} totalItems={1} pageSize={20} itemsOnPage={1} onChange={change} noun="courses" nounOne="course" />);
+        expect(host.textContent).toContain('Showing 1 of 1 course');
+    });
+    it('uses a pressed-state toggle group for segmented filters', async () => {
+        const change = vi.fn();
+        await render(<SegmentedControl label="Status" value="a" onChange={change} options={[{ value: 'a', label: 'All' }, { value: 'b', label: 'Left', count: 2 }]} />);
+        const group = host.querySelector('[role="group"][aria-label="Status"]')!;
+        const [all, left] = [...group.querySelectorAll('button')];
+        expect(all.getAttribute('aria-pressed')).toBe('true'); expect(left.textContent).toBe('Left2');
+        await click(left); expect(change).toHaveBeenCalledWith('b');
+        await click(all); expect(change).toHaveBeenCalledTimes(1);
+    });
+    it('draws canonical order as ordered lists and keeps node state decorative', async () => {
+        await render(<PathSpine listLabel={(section) => `Lessons in ${section.title}`} sections={[{ id: 'c', title: 'Chapter', items: [{ id: '1', node: 'done', content: <p>First</p> }, { id: '2', node: 'current', content: <p>Second</p> }] }]} />);
+        const list = host.querySelector('ol[aria-label="Lessons in Chapter"]')!;
+        expect([...list.children].map((li) => li.textContent)).toEqual(['First', 'Second']);
+        expect([...list.children].every((li) => li.firstElementChild?.getAttribute('aria-hidden') === 'true' || li.children[1]?.getAttribute('aria-hidden') === 'true')).toBe(true);
+    });
+    it('ends a short guidance stack with a dashed "nothing else" slot and runs entry actions', async () => {
+        const open = vi.fn();
+        await render(<GuidanceStack title="Up next" entries={[{ id: 'r', tone: 'lilac', icon: 'route', type: 'Recommended', body: <p>Review loops</p>, action: { label: 'Open lesson', onClick: open } }]} />);
+        expect(host.querySelector('h2')?.textContent).toBe('Up next'); expect(host.textContent).toContain('Nothing else needs your attention.');
+        await click([...host.querySelectorAll('a')].find((a) => a.textContent === 'Open lesson')!); expect(open).toHaveBeenCalledTimes(1);
+    });
+    it('gives the search pill an accessible name and a clear action, and progress a text value', async () => {
+        const clear = vi.fn();
+        await render(<><SearchPill label="Search courses" value="loops" onChange={vi.fn()} onClear={clear} maxLength={100} /><ProgressLine completed={4} total={12} percent={33} /></>);
+        expect(host.querySelector<HTMLInputElement>('input[aria-label="Search courses"]')?.maxLength).toBe(100);
+        await click(host.querySelector('[aria-label="Clear search courses"]')); expect(clear).toHaveBeenCalledTimes(1);
+        expect(host.querySelector('[role="progressbar"]')?.getAttribute('aria-valuetext')).toBe('4 of 12 lessons · 33%');
+    });
+    it('renders the page aside as a labelled complementary region', async () => {
+        await render(<Page aside={<p>Aside content</p>} asideLabel="Up next"><h1>Title</h1></Page>);
+        expect(host.querySelector('aside[aria-label="Up next"]')?.textContent).toBe('Aside content');
     });
 });
