@@ -76,6 +76,52 @@ remain pending. This does not retroactively satisfy pre-merge documentation
 timing, rewrite the immutable canonical tree, change ownership/hierarchy, approve
 unrelated CT14/CT37 scope or establish Issue #37 completion.
 
+## Bounded UI/UX r1 frontend and E2E inventory additions — 6 November 2026
+
+On 6 November 2026 (Asia/Ho_Chi_Minh) the Project Leader/Owner's instruction
+“CodeMastery — Finalize UI/UX Implementation, Verification & Local Commit”
+approved the frontend structure needed for the UI/UX redesign of the local
+`DESIGN.md` revision `DESIGN-2026-11-06-r1`, including `frontend/src/app/preview/`,
+and the Playwright E2E infrastructure. The additions, now shown in the tree below,
+are:
+
+- `frontend/src/app/preview/` — the isolated design preview served by the existing
+  `/preview` route as a lazily loaded chunk: `PreviewApp.tsx` (screen registry and
+  shell), `LearnerPreview.tsx`, `InstructorPreview.tsx`, `AdminPreview.tsx`,
+  `PublicPreview.tsx`, `DesignReference.tsx` (S26), `previewKit.tsx` (query-parameter
+  navigation, sample-data banner), `fixtures.ts` (synthetic sample data) and
+  `PreviewApp.test.tsx`. Only the lazy import in `App.tsx` reaches it; it calls no
+  API and reads no session.
+- `frontend/src/app/theme/figtree-latin-wght.woff2` and `frontend/public/figtree-OFL.txt`
+  — the self-hosted Figtree variable font (`@fontsource-variable/figtree` 5.2.10,
+  SIL Open Font License 1.1) and its licence.
+- `frontend/src/shared/components/` — `CodeBlock.tsx`, `DataTable.tsx`,
+  `GuidanceStack.tsx`, `PathSpine.tsx`, `StatusPill.tsx`, `Tile.tsx`, `ViewRail.tsx`:
+  presentation primitives used by several features.
+- `frontend/src/features/catalogue/pages/LandingPage.tsx` (S25) and
+  `frontend/src/features/learning/pages/LearnerHomePage.tsx` (S6) — presentation for
+  routes that remain unapproved; neither is routed in production.
+- Tests: `frontend/src/features/assessment/components/assessment.test.tsx`,
+  `frontend/src/features/instructor/course-management/components/QuestionForm.test.ts`,
+  `frontend/src/features/mastery/utils/masteryGraphLayout.test.ts`.
+- `e2e/fixtures/local-stack.ts` (Playwright global setup for a disposable local
+  stack), `e2e/fixtures/catalogue-fixture.sql` (deterministic catalogue fixture for
+  that stack only) and `e2e/fixtures/stack-down.mjs` (removes leftovers of an
+  interrupted run). The existing `e2e/package.json`, `package-lock.json`,
+  `playwright.config.ts`, `fixtures/auth-fixture.ts` and `tests/learner-flow.spec.ts`
+  now hold the suite; `tests/adaptive-flow.spec.ts` stays empty.
+
+Removed as verified unused: `frontend/src/app/theme/plus-jakarta-sans-latin-wght.woff2`
+and `frontend/public/plus-jakarta-sans-OFL.txt` (neither was listed in the tree).
+`presentation.browser.cjs` keeps its path with new contents. [The testing record](testing.md#uiux-r1-implementation-verification--6-november-2026)
+holds the decisions and verification. No top-level directory, backend module,
+package, migration or API path changes. The immutable canonical tree is unchanged;
+this is an explicit, prospective addition, not a reinterpretation of its original
+inventory. CODEOWNERS is unchanged: the existing `/frontend/src/app/`,
+`/frontend/src/shared/`, feature and `/e2e/` rules cover the additions, except
+`frontend/public/figtree-OFL.txt`, which (like the existing `favicon.ico`) matches
+no rule; adding one is a separate ownership decision.
+
 ## Bounded Course unit-test placement correction
 
 On 2026-10-26 (Asia/Ho_Chi_Minh), the Project Leader manually relocated
@@ -1035,7 +1081,9 @@ codemastery/
 
 │   ├── public/
 
-│   │   └── favicon.svg
+│   │   ├── favicon.svg
+
+│   │   └── figtree-OFL.txt
 
 │   └── src/
 
@@ -1051,7 +1099,29 @@ codemastery/
 
 │       │   │   └── AuthProvider.tsx
 
+│       │   ├── preview/
+
+│       │   │   ├── AdminPreview.tsx
+
+│       │   │   ├── DesignReference.tsx
+
+│       │   │   ├── InstructorPreview.tsx
+
+│       │   │   ├── LearnerPreview.tsx
+
+│       │   │   ├── PreviewApp.tsx
+
+│       │   │   ├── PreviewApp.test.tsx
+
+│       │   │   ├── PublicPreview.tsx
+
+│       │   │   ├── fixtures.ts
+
+│       │   │   └── previewKit.tsx
+
 │       │   └── theme/
+
+│       │       ├── figtree-latin-wght.woff2
 
 │       │       └── theme.ts
 
@@ -1121,7 +1191,9 @@ codemastery/
 
 │       │   │   │   ├── CourseCataloguePage.tsx
 
-│       │   │   │   └── CourseDetailPage.tsx
+│       │   │   │   ├── CourseDetailPage.tsx
+
+│       │   │   │   └── LandingPage.tsx
 
 │       │   │   └── types/
 
@@ -1147,6 +1219,8 @@ codemastery/
 
 │       │   │   │   ├── CourseLearningPage.tsx
 
+│       │   │   │   ├── LearnerHomePage.tsx
+
 │       │   │   │   ├── LessonPage.tsx
 
 │       │   │   │   └── MyCoursesPage.tsx
@@ -1167,7 +1241,9 @@ codemastery/
 
 │       │   │   │   ├── QuestionRenderer.tsx
 
-│       │   │   │   └── QuizTimer.tsx
+│       │   │   │   ├── QuizTimer.tsx
+
+│       │   │   │   └── assessment.test.tsx
 
 │       │   │   ├── hooks/
 
@@ -1223,7 +1299,9 @@ codemastery/
 
 │       │   │   └── utils/
 
-│       │   │       └── masteryGraphLayout.ts
+│       │   │       ├── masteryGraphLayout.ts
+
+│       │   │       └── masteryGraphLayout.test.ts
 
 │       │   ├── interaction/
 
@@ -1275,7 +1353,9 @@ codemastery/
 
 │       │   │   │   │   ├── PublishToggle.tsx
 
-│       │   │   │   │   └── QuestionForm.tsx
+│       │   │   │   │   ├── QuestionForm.tsx
+
+│       │   │   │   │   └── QuestionForm.test.ts
 
 │       │   │   │   ├── hooks/
 
@@ -1489,19 +1569,33 @@ codemastery/
 
 │           │   ├── AppHeader.tsx
 
+│           │   ├── CodeBlock.tsx
+
 │           │   ├── ConfirmDialog.tsx
 
+│           │   ├── DataTable.tsx
+
 │           │   ├── FileUploadField.tsx
+
+│           │   ├── GuidanceStack.tsx
 
 │           │   ├── MarkdownRenderer.tsx
 
 │           │   ├── PageHeader.tsx
 
+│           │   ├── PathSpine.tsx
+
 │           │   ├── PresentationIcon.tsx
 
 │           │   ├── SidebarNav.tsx
 
+│           │   ├── StatusPill.tsx
+
 │           │   ├── StatusViews.tsx
+
+│           │   ├── Tile.tsx
+
+│           │   ├── ViewRail.tsx
 
 │           │   ├── presentation.browser.cjs
 
@@ -1544,6 +1638,12 @@ codemastery/
 │   └── fixtures/
 
 │       ├── auth-fixture.ts
+
+│       ├── catalogue-fixture.sql
+
+│       ├── local-stack.ts
+
+│       ├── stack-down.mjs
 
 │       └── files/
 

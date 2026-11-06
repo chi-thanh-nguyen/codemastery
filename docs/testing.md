@@ -13,9 +13,10 @@ onward, are decision and execution records. They keep the wording of their date.
 
 Backend unit tests, Testcontainers PostgreSQL integration tests and frontend
 Vitest/jsdom tests exist for the implemented Auth, Course catalogue and
-membership, sample-data and shared REST slices, and run in CI. Integrated
-Playwright E2E is not set up. A passing test establishes only what that test
-exercises. It is not acceptance of a verification Issue: QA01 #61, QA02 #62,
+membership, sample-data and shared REST slices, and run in CI. A local
+Playwright Test suite in `e2e/` runs the implemented learner flows against a
+disposable stack built from the checkout; it is not run in CI. A passing test
+establishes only what that test exercises. It is not acceptance of a verification Issue: QA01 #61, QA02 #62,
 QA07 #63, QA13 #64, QA14 #65 and DP02 #66 remain open, and their independent
 verification is separate work.
 
@@ -25,9 +26,9 @@ verification is separate work.
 | --- | --- | --- | --- | --- |
 | Backend unit | JUnit Jupiter 6, Mockito; Maven Surefire; module test packages outside `integration/` | Yes (`Backend`) | Isolated service, mapper, adapter, validation, JWT, settings and pure mastery logic | Real PostgreSQL behavior, Spring Security wiring or HTTP serialization |
 | Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency. Auth, Enrollment and sample-data suites dispatch through MockMvc with the configured Spring Security chain; the other suites do not (see [Integration-Test Lifecycle](#integration-test-lifecycle)) | A running server, real browser, network/CORS from a browser, deployment |
-| Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
-| Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`) with an externally supplied Playwright module | No | Chromium layout, focus, contrast and accessibility-tree checks of presentation components | Live API integration |
-| Standalone browser script | `e2e/tests/learner-flow.spec.ts`, run with an externally supplied Playwright module against a running frontend and backend ([record](#pr-101-full-fe07-verification--27-october-2026)) | No | When executed and recorded: the FE07 browser → REST → PostgreSQL learner flow on that environment | Repository E2E setup: `e2e/package.json` and `playwright.config.ts` are empty and no E2E job exists |
+| Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
+| Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
+| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for registration, sign-in, catalogue, detail, membership, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
 | VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
 
@@ -55,6 +56,7 @@ criteria, independent review and any environment-specific evidence remain open.
 | 31 October 2026 | `main` `614f326` | GitHub Actions CI [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079); CodeQL [run 41191742751](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191742751) | All CI jobs; CodeQL default setup | All seven CI jobs and CodeQL passed. Backend: Surefire 468 tests, Failsafe 150 tests, 0 failures, errors or skips. Frontend: 390 tests in 11 files, then a successful build |
 | 31 October 2026 | `main` `614f326` | Local, macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1, Node 24.21.0, npm 11.19.0 | `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 468, Failsafe 150, 0 failures, errors or skips |
 | 31 October 2026 | `main` `614f326` | Same machine | `cd frontend && npm ci && npm test && npm run build` | 390 tests in 11 files passed; build succeeded |
+| 6 November 2026 | `feat/uiux-design-r1-implementation` at `b2e9035` (code; base `061102e`) | Local, macOS 27.2 arm64, Node 24.21.0, npm 11.19.0, Docker 29.8.1 | `cd frontend && npm test && npm run build`; `npm run test:browser -- --engine all`; `cd e2e && npm ci && npx playwright test` | 414 tests in 15 files passed; build succeeded. Harness: Chromium 153 and WebKit 26.6 30/30 each; Firefox did not launch in the agent sandbox. E2E: 41 passed, 4 skipped by design, Firefox 10 failed at browser launch ([record](#uiux-r1-implementation-verification--6-november-2026)) |
 
 The two local runs were made for the DO01 documentation update. They confirm that
 the documented commands work on that machine; they are not independent QA
@@ -229,34 +231,79 @@ Vite configuration without emitting files. The `build` script already runs
 Build output goes to `frontend/dist/`. Development-only Vitest `5.0.5` and jsdom
 `27.4.0` execute the bounded frontend suite through `npm test` (`vitest run`).
 No lint script is implemented. The required Frontend CI job runs `npm ci`, `npm test`, then `npm run build`.
-The optional browser harness is separate and is not run by that job.
+The optional browser harness and the E2E suite are separate and are not run by CI.
 Build success alone does not establish behavioral coverage or deployment readiness.
 
-For the existing optional `npm run test:browser` script, supply an installed
-Playwright module, artifact directory, preview URL and `chromium` or `webkit`.
-No browser is downloaded by this script. When validating a standalone frontend
-configured with the approved `/api` base and no API proxy, append `--standalone`.
-That mode verifies the Course error view and records exactly the two detail-read
-404s and one cold catalogue-read 404 separately from unexpected console errors.
-It does not establish real browser → REST → PostgreSQL integration. Backend
-connectivity/CORS, successful Auth/Course transactions and assistive-technology
-acceptance require their independent evidence.
+### Browser harness and E2E suite
 
-The optional `--test-catalogue-filter` harness mode measures search, prerequisite
-and apply-button bounds while menus open, options change and filters are applied.
-It covers empty and scrollable catalogue fixtures at 320, 390, 768, 900, 1024 and
-1440 pixels, plus keyboard selection and unchanged explicit-submit semantics.
-These controlled responses verify presentation and client criteria, not live API
-integration.
+Both use the Playwright Test package pinned in `e2e/package.json` (1.63.0, matching
+the Chromium 153, Firefox 155 and WebKit 26.6 builds it expects). Install it once;
+`npm ci` never downloads browsers, so install the pinned builds when missing:
 
-The optional `--test-auth-focus` harness mode runs bounded Login/Register focus
-checks, including catalogue-to-Auth CSS insertion order, pointer/keyboard and
-validation focus, Back/Forward, persisted `pagehide`, and connected-input blur
-before route/form removal. Catalogue and registration responses in that mode
-are controlled fixtures. Unit regressions also cover StrictMode listener cleanup,
-ordinary rerenders and focus outside the owning layout. AutoComplete semantics
-remain enabled. Headless DOM/focus checks do not inspect native operating-system
-AutoFill/password-manager popup rendering; that requires separate manual evidence.
+```bash
+cd e2e
+npm ci
+npx playwright install chromium firefox webkit   # only when the browsers are missing
+```
+
+**Browser harness** (from `frontend/`). Without `--url` it builds the frontend with
+`VITE_API_BASE_URL=/api` into a temporary directory, serves it with `vite preview`
+on a free 127.0.0.1 port, runs the checks and removes both. API responses are
+`page.route` test doubles; no backend is contacted.
+
+```bash
+npm run test:browser                                   # Chromium
+npm run test:browser -- --engine all                   # chromium, webkit, firefox
+npm run test:browser -- --url <running-frontend-url> --out <evidence-dir> --engine webkit
+npm run test:browser -- --playwright <path-to-@playwright/test>
+```
+
+It visits every `/preview` screen at 1280 and 390 px, the live pages and three
+preview screens at 320, 360, 600, 768, 900, 1024, 1200, 1280, 1440 and 1536 px,
+200% zoom (640 CSS px at 2×) and 200% text size, and checks: no page-level
+horizontal scroll; the navigation mode per breakpoint; Figtree served from the
+app with its OFL text; production routes never loading the preview chunk; the
+preview sending no API request and writing no storage; computed text contrast on
+twelve screens; skip link, route focus and visible focus on every catalogue tab
+stop; drawer and dialog focus behavior including the full-screen sheet below
+600 px; form labels, required markers and error focus; `pagehide` input blur;
+catalogue submit-only search and error states; the 1.2 s skeleton shimmer and its
+reduced-motion static form; My courses tile membership actions; and the Mastery
+Map's 220 × 72 nodes, initial viewport and keyboard operation. It writes
+screenshots, accessibility snapshots and `browser-report.json` to `--out`
+(default: a new directory under the OS temporary directory), and exits non-zero
+on any failed check or browser that cannot launch. Positional FE01 arguments
+(`<playwright-module> <evidence-dir> <url> [engine]`) are still accepted.
+
+**E2E suite** (from `e2e/`):
+
+```bash
+npm test                         # all five projects
+npm run test:chromium            # chromium-desktop and chromium-mobile
+npm run stack:down               # remove leftovers of an interrupted run
+```
+
+`fixtures/local-stack.ts` (Playwright global setup) needs Docker. It builds
+`codemastery-e2e/backend:local` and `codemastery-e2e/postgres:local` from
+`backend/` and `infrastructure/postgres/` (kept for layer reuse), starts them on a
+private network with random database, JWT and storage values passed through the
+environment, waits for `/actuator/health`, registers an Instructor through the
+API and promotes that account in the disposable database only, applies
+`fixtures/catalogue-fixture.sql` (21 published courses, one hidden course, hidden
+lessons and an empty chapter), and serves a production frontend build pointed at
+that backend. The teardown stops the preview server, removes the containers,
+network and temporary directory. Each test registers its own synthetic Learner,
+so tests are independent. Projects: `chromium-desktop`, `firefox-desktop`,
+`webkit-desktop` (1280 × 900), `chromium-mobile` (Pixel 7) and `webkit-mobile`
+(iPhone 14). Results go to `e2e/test-results/` (ignored), including
+`results.json` and an HTML report.
+
+To target an already running environment instead, set `E2E_BASE_URL` (and
+`E2E_API_URL` when the API has another origin); fixture-dependent tests are then
+skipped, and the Instructor check needs `E2E_USERNAME`/`E2E_PASSWORD` for an
+existing synthetic Instructor. `E2E_WORKERS`, `E2E_BACKEND_IMAGE` and
+`E2E_POSTGRES_IMAGE` are optional tooling overrides. Never point the suite at
+production: it registers accounts and changes memberships.
 
 ### Bounded FE01 decisions and regression coverage
 
@@ -309,7 +356,13 @@ are:
 | `src/shared/utils/format.test.ts` | Explicit locale/timezone/precision/rounding, invalid dates, duration boundaries and reconstruction. |
 | `src/shared/hooks/useDebounce.test.tsx` | Function identity, Strict Mode, timing/rescheduling, rapid updates and unmount cleanup. |
 | `src/shared/components/presentation.test.tsx` | Controlled navigation/current state, zero badges, named loaders, status content, callbacks and confirmation semantics. |
-| `src/shared/components/presentation.browser.cjs` | Optional Chromium checks, screenshots, accessibility tree, computed contrast, focus, dialogs, drawers, overflow and reduced motion. |
+| `src/shared/components/presentation.browser.cjs` | Optional Chromium checks, screenshots, accessibility tree, computed contrast, focus, dialogs, drawers, overflow and reduced motion. Its contents were replaced on 6 November 2026 ([current interface](#browser-harness-and-e2e-suite)). |
+
+**Superseded harness interface (6 November 2026).** The paragraph after the
+timezone commands records the FE01 harness as it was. That harness and its modes
+(`--standalone`, `--test-catalogue-filter`, `--test-auth-focus`, `--test-api-errors`,
+`--test-chart-escape`) targeted the retired FE01 preview; the UI/UX r1 record below
+replaces them and maps their retained checks.
 
 To reproduce host-timezone checks from `frontend/`, run
 `TZ=UTC npm test -- src/shared/utils/format.test.ts` and
@@ -391,19 +444,21 @@ test-count or coverage-percentage claim is made for them.
   `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
   `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
   their features and approved contracts.
-- **E2E.** No Playwright package, configuration, fixtures or CI job. The
-  standalone FE07 browser script needs an external Playwright installation and a
-  running stack, and is run manually.
+- **E2E.** The Playwright suite exists but has no CI job; it runs locally with
+  Docker. `e2e/tests/adaptive-flow.spec.ts` is empty until Adaptive, Assessment and
+  lesson-content contracts exist. Firefox has not yet completed a recorded run
+  (see the 6 November 2026 record).
 - **Real-browser and runtime integration.** No CI job drives a real browser
-  against a running backend and PostgreSQL. Manual local runs, including the
-  standalone FE07 script, are recorded in the dated sections below; QA07 and DP02
-  acceptance are open.
+  against a running backend and PostgreSQL. Local runs are recorded in the dated
+  sections below; QA07 and DP02 acceptance are open. Group B/C design-preview
+  screens have no backend to integrate with yet.
 - **Deployment.** No test reaches the real VM or checks outside-network access
   (DP01 #71, DP03 #72). The private `/actuator/health` probe is verified only
   locally and in CI ([record](#dp01-private-health-probe-verification--1-november-2026)).
 - **Object storage.** No backend storage adapter exists, so no test covers file
   upload or delivery (CT09).
-- **Assistive technology.** No test establishes actual screen-reader output.
+- **Assistive technology.** No test establishes actual screen-reader output; no
+  manual VoiceOver, NVDA or TalkBack session has been recorded.
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
@@ -2119,3 +2174,95 @@ deployment.md remain pending.
 
 OpenAI Codex assisted this follow-up implementation, test execution and evidence
 record. No application module, API, schema or adaptive behavior was changed.
+
+## UI/UX r1 implementation verification — 6 November 2026
+
+### Authority and scope
+
+On 6 November 2026 (Asia/Ho_Chi_Minh) the Project Leader/Owner instructed
+“CodeMastery — Complete Frontend Redesign & Implementation” and then
+“CodeMastery — Finalize UI/UX Implementation, Verification & Local Commit”. The
+second instruction approves, for this UI/UX task only: documentation and
+repository-structure synchronization, the `frontend/src/app/preview/` structure,
+frontend component/test/fixture changes, removal of verified-obsolete assets,
+replacement of the browser harness, Playwright configuration and E2E
+infrastructure with justified dependencies, and local commits. It excludes changes
+to API endpoints or contracts, backend logic, schema, JWT/session policy, security
+or authorization rules, deferred contracts, and any push, PR, merge, release or
+deployment. The design source is the local, untracked root `DESIGN.md`, revision
+`DESIGN-2026-11-06-r1`. These approvals are prospective from that date; no earlier
+approval is implied.
+
+### Decisions applied under that authority
+
+| ID | Decision | Rationale |
+| --- | --- | --- |
+| UX-R1-T1 | `@playwright/test` 1.63.0 and `@types/node` 22.20.5 as `e2e/` dev dependencies, with a regenerated `e2e/package-lock.json` | One Playwright for E2E and the harness; 1.63.0 matches the browser builds already used by earlier recorded runs (Chromium 153.0.8010.12); `npm audit`: 0 vulnerabilities. No frontend or backend dependency changed. |
+| UX-R1-T2 | Disposable local stack in Playwright global setup, deterministic `fixtures/catalogue-fixture.sql`, Instructor created through the API and promoted only in the disposable database | Reruns never depend on a developer database; generated secrets stay out of argv, logs and the repository. |
+| UX-R1-T3 | `presentation.browser.cjs` rewritten for the new UI; FE01-only modes retired | The FE01 preview it targeted no longer exists. |
+| UX-R1-T4 | `plus-jakarta-sans-latin-wght.woff2` and `public/plus-jakarta-sans-OFL.txt` deleted | No source, test, script or workflow referenced them after the switch to Figtree. Sample-material PDFs that embed Plus Jakarta Sans are unrelated and unchanged. |
+| UX-R1-T5 | Design deviations closed in code: My courses tile overflow menu (Leave course / Re-enroll, reusing the approved CT22.membership calls); full-screen confirmation sheet below 600 px; 1.2 s skeleton shimmer, static with reduced motion; Mastery Map nodes 220 × 72 px with a fit-when-readable initial viewport (0.85 floor, a preselected node pulled into view at no less than 0.75); preview navigation per role as specified | Bring the implementation to the specification rather than amend it. |
+| UX-R1-T6 | Keyboard focus ring restored on every MUI `ButtonBase` (the global ring lost to ButtonBase's `outline: 0`), with the light ring on the ink header, drawer footer and quiz header | Found by the new harness: contained buttons had no visible focus indicator. |
+
+### Regression mapping for the 15 removed unit tests
+
+`frontend/src/routes/index.test.tsx` lost 8 `it` and 3 `it.each` blocks (15 runtime
+tests), all bound to the FE01 dashboard preview that the design preview replaced.
+
+| Removed test | Disposition | Current coverage |
+| --- | --- | --- |
+| preserves current-main FE01 dashboard, formatter runtime and utilities as an independent preview | Isolation retained; formatter showcase retired | `PreviewApp.test.tsx`: sample-data label, no request, no storage; a real sign-in never reaches the preview. Harness: production routes never load the preview chunk. `format.test.ts` (11) is unchanged; no current screen consumes the formatter. |
+| focuses each local preview heading after its initiating control is removed, without changing routes | Retained | `PreviewApp.test.tsx`: query-parameter navigation keeps `/preview` and focuses the new `h1`. |
+| shares one header search with debounced sample results, clear, Escape and empty recovery | Retained on the Users search | `PreviewApp.test.tsx`: 300 ms debounce, clear keeps focus, Escape clears, “Clear filters” recovers; `presentation.test.tsx`: SearchPill Escape/clear focus. |
+| associates the active sample filter tab with its result panel | Retained on course-editor sections | `PreviewApp.test.tsx`: pressed section button `aria-controls` the labelled region. |
+| form submit / search button focuses its local result section (2) | Replaced | Catalogue submit-only search in `CourseCataloguePage.test.tsx`, the harness and E2E; every preview test asserts no request. |
+| keeps the hovered chart tooltip across column gaps; clears chart selection (3); dismisses a hover tooltip with Escape (2); cleans up the chart Escape listener; observes Escape without consuming unrelated keys; keeps sample-week arithmetic and keyboard day selection | Retired with the interactive FE01 chart | Charts are now static bars with “Show as table”. Escape is tested where it exists: SearchPill, dialogs and drawer (harness), Mastery Map selection (harness). |
+
+`presentation.test.tsx` renamed one test to “exposes controlled current navigation in
+the top bar and the mobile drawer, and wraps zero badges” and kept its assertions.
+Totals moved from 390 tests in 11 files to 414 tests in 15 files. Added coverage:
+`app/preview/PreviewApp.test.tsx` (13), `features/assessment/components/assessment.test.tsx`
+(4), `features/instructor/course-management/components/QuestionForm.test.ts` (3),
+`features/mastery/utils/masteryGraphLayout.test.ts` (5), three My courses tile
+membership tests and eleven new `presentation.test.tsx` cases (state pills, path
+spine, guidance stack, search pill, data table, pagination, segmented control,
+aside, confirmation sheet). No behavioral assertion of a still-existing feature was
+removed.
+
+The FE01 harness checks map as follows: favicon, logo, self-hosted font and licence,
+overflow by width, contrast, focus visibility, skip link, drawer, destructive
+dialog, reduced motion, form focus, `pagehide` blur and course error views are
+retained against the new UI; the anonymous Profile guard, account links and deep
+links moved to E2E against the real backend; chart, tooltip, KPI-card and
+TextField notch checks retired with their components; the response-classifier
+mode retired (classification stays covered by `httpClient.test.ts`).
+
+### Executed checks and results
+
+Revision: code commits `a1ed70e` and `b2e9035` on `feat/uiux-design-r1-implementation`
+(the checks ran on the identical working tree before committing). Environment:
+macOS 27.2 arm64, Node 24.21.0, npm 11.19.0, Docker 29.8.1, OpenJDK 25.0.4.1.
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck`, `npm test`, `npm run build` in `frontend/` | PASS: 414 tests, 15 files; build succeeded with the existing >500 kB chunk warning (main 701.11 kB, preview 444.08 kB minified) |
+| Preview isolation in `frontend/dist` | PASS: sample names, preview copy and React Flow appear only in the lazily loaded `PreviewApp` chunk |
+| `npm run test:browser -- --engine all` | PASS Chromium 153.0.8010.12 30/30; PASS WebKit 26.6 30/30; BLOCKED Firefox 155: the browser exits with “Could not find profile folder” inside the agent's command sandbox, and running it outside the sandbox was refused |
+| `npx playwright test` in `e2e/` (disposable stack) | PASS 41: chromium-desktop 11, chromium-mobile 10, webkit-desktop 10, webkit-mobile 10; 4 skipped by design (the API-only smoke runs once); BLOCKED firefox-desktop: 10 failed at browser launch with the same error. Stack removed afterwards (no labelled container, network or temp directory left) |
+| Impeccable detector on 39 rendered URLs at 1280 × 900 and 390 × 844 (78 scans) | 5 warnings, each verified: dashed drop zone and dashed empty slot reported as nested cards (both specified); the sticky full-height lesson aside reported as a column imbalance |
+| `npm audit` (`frontend --omit=dev`, `e2e`) | PASS: 0 vulnerabilities |
+| Figtree font provenance | PASS: SHA-256 `4ba7d3d0…7462dd` equals `files/figtree-latin-wght-normal.woff2` in `@fontsource-variable/figtree@5.2.10` (OFL-1.1); `public/figtree-OFL.txt` is the OFL 1.1 text |
+| Manual screen-reader session (VoiceOver) | NOT RUN: no interactive assistive-technology session was available to the agent; accessibility-tree snapshots are not a substitute |
+| CI on the branch | NOT RUN: nothing was pushed |
+
+These are local results on synthetic data. They are not production acceptance,
+QA07/QA01 acceptance, WCAG conformance or a measured visual-similarity score.
+Residual risks: Firefox and real assistive technology are unverified; the suite
+has no CI job; the disposable stack uses the local HTTP model (cross-origin API
+with CORS), not the VM's single-origin HTTPS ingress; and the 15-minute JWT with
+no refresh can expire during a long timed quiz once Assessment is integrated,
+which the Assessment contract must resolve without changing CT38 here.
+
+Anthropic's Claude Code (Claude Opus 5.5) implemented these changes and ran the
+checks, using the locally installed Impeccable skill (rendered detector) and
+Playwright CLI for browser inspection. No human review is claimed.

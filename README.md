@@ -29,9 +29,9 @@ tests), **Partial** (some approved capabilities implemented), **Planned**
 | Adaptive learning (`adaptive`) | Partial | Local mastery calculation and state classification with deterministic tests. Skill graphs, quiz-driven mastery updates, recommendations and the Mastery Map are planned; see [docs/adaptive-learning.md](docs/adaptive-learning.md). |
 | Assessment, interaction, admin | Planned | Approved scaffolds only. |
 | REST API documentation | Partial | [docs/api/openapi.yaml](docs/api/openapi.yaml) specifies the eight implemented operations on six paths: registration and sign-in, catalogue and course detail, membership GET/PUT/DELETE, and My Courses. |
-| Frontend | Partial | React Router application with sign-in, registration, profile, course catalogue and detail, My Courses and the dashboard layout, with Vitest regression tests. Instructor, administrator, assessment and Mastery Map pages are planned. |
+| Frontend | Partial | React Router application with sign-in, registration, profile, course catalogue and detail, and My courses (including leave and re-enroll), in the redesigned “Lit Path” interface, with Vitest regression tests. Lesson, assessment, Mastery Map, notification, Instructor and Administrator screens exist only in the sample-data design preview at `/preview` until their API contracts are approved. |
 | Sample data | Partial | Synthetic Users, Courses, Lessons and text materials (SD01/SD02) with database-target protection, and one sample slide deck; see [sample-data/README.md](sample-data/README.md). Skill-graph, question and learner-profile datasets are planned. |
-| Testing | Partial | Backend unit tests for Auth, Course, mastery calculation and shared REST; Testcontainers PostgreSQL integration tests for the catalogue, membership (including REST sign-in), shared REST and sample data; frontend Vitest suites. A Playwright learner-flow specification exists, but the `e2e/` package and configuration are not yet committed; see [docs/testing.md](docs/testing.md). |
+| Testing | Partial | Backend unit tests for Auth, Course, mastery calculation and shared REST; Testcontainers PostgreSQL integration tests for the catalogue, membership (including REST sign-in), shared REST and sample data; frontend Vitest suites; a local Playwright E2E suite (`e2e/`) for the implemented learner flows on a disposable Docker stack, not yet run in CI; see [docs/testing.md](docs/testing.md). |
 | CI | Implemented | GitHub Actions runs the Backend (`./mvnw verify`), Frontend (`npm ci`, `npm test`, `npm run build`), VM deployment-script and MinIO initializer qualification jobs; CodeQL code scanning also runs on pull requests. |
 | Local runtime and deployment | Partial | Docker Compose runs PostgreSQL, MinIO, the backend and the frontend locally ([setup](docs/setup.md#local-docker-compose-runtime)). An Interim VM deployment script and its decisions exist ([deployment](docs/deployment.md)); no public deployment has been performed or verified. |
 
@@ -102,7 +102,7 @@ Configured libraries do not establish completed feature integrations.
 | Backend testing | Approved JUnit Jupiter **6**, managed by Spring Boot **4.1.1** (currently **6.0.3**), + Mockito and Testcontainers PostgreSQL; Surefire/Failsafe and JaCoCo **0.8.15** (reporting only, no thresholds). |
 | Observability | Actuator and logging configuration, including ECS JSON console logging under `prod`; this profile is not complete production configuration. |
 | Frontend | React **19.3.0**, TypeScript **7.0.2**, Vite **8.3.3**, Material UI **9.4.0**, React Router **7.18.4**, React Flow **12.12.0** and Vitest **5.0.5** are pinned in [package.json](frontend/package.json) and its npm lockfile. React Flow is not yet used. |
-| Infrastructure/E2E | GitHub Actions uses Temurin 25 and Node 22 on `ubuntu-24.04`. Docker Compose (local) and an Interim VM deployment script exist; a committed Playwright configuration is pending. |
+| Infrastructure/E2E | GitHub Actions uses Temurin 25 and Node 22 on `ubuntu-24.04`. Docker Compose (local) and an Interim VM deployment script exist. Playwright Test **1.63.0** is pinned in [e2e/package.json](e2e/package.json); no CI job runs it yet. |
 
 Use the actual build/configuration files for dependency versions and executable
 commands. Current defaults do not establish final security, deployment, or
@@ -116,7 +116,7 @@ Follow the fixed [approved repository structure](docs/repository-structure.md).
 | --- | --- |
 | `backend/` | Modular Monolith, configuration, migrations, and backend tests. |
 | `frontend/` | React application with feature-oriented modules; implemented and scaffolded features are listed above. |
-| `e2e/` | Playwright learner-flow specification; package and configuration scaffolds. |
+| `e2e/` | Playwright Test suite: configuration, disposable-stack global setup, catalogue fixture and the learner-flow specification (`adaptive-flow.spec.ts` is still empty). |
 | `infrastructure/` | Local Compose runtime and the Interim VM deployment script. |
 | `.github/` | Collaboration templates, CODEOWNERS and the CI workflow. |
 | `sample-data/` | Synthetic seed SQL and sample learning material, with a [loading guide](sample-data/README.md). |
@@ -199,9 +199,9 @@ never expose secrets through `VITE_*`.
 
 The course requires automated business-logic tests, at least one main E2E flow,
 sample data, reproducible setup, and a deployed application accessible to the
-lecturer. Automated tests, the Interim sample data and the local setup exist; the
-complete E2E flow and the lecturer-accessible deployment remain to be completed
-and evidenced. Reports,
+lecturer. Automated tests, the Interim sample data, the local setup and a local E2E
+flow for the implemented learner journey exist; the adaptive E2E flow, an E2E CI run
+and the lecturer-accessible deployment remain to be completed and evidenced. Reports,
 grading documentation, the presentation, live demo, and Q&A must be in English;
 all user-facing interface text must also be in English.
 
@@ -218,7 +218,11 @@ deployment-privilege work and for the sample datasets, their verification and
 documentation, and the revised sample slides; Anthropic Claude Code assisted with
 the DP01 HTTPS ingress integration, its tests and its deployment documentation,
 and with the DP01 MinIO initializer, its qualification tests and the MinIO artifact
-review.
+review. Anthropic Claude Code also wrote the local UI/UX specification (`DESIGN.md`,
+6 November 2026) and implemented the frontend redesign, the design preview, the
+browser harness and the Playwright E2E suite, using the Impeccable design skill and
+Playwright CLI locally; the redesign's visual reference is credited in
+[setup](docs/setup.md#frontend-setup-and-validation).
 The team reviews this work through the normal pull-request process. This
 disclosure describes development assistance; CodeMastery's approved adaptive
 engine is rule-based and uses no AI/ML service.
