@@ -103,6 +103,61 @@ test.describe('catalogue and course detail (anonymous)', () => {
     });
 });
 
+test.describe('public landing and Learner start', () => {
+    test('serves the landing page at / with public navigation and no API request', async ({ page }) => {
+        const api = watchAuthorization(page);
+        await page.goto('/');
+        await expect(page.getByRole('heading', { level: 1, name: 'Learn programming at the pace of what you actually know.' })).toBeVisible();
+        const nav = page.getByRole('navigation', { name: 'Main navigation' });
+        await expect(nav.getByRole('link', { name: 'Catalogue' })).toHaveAttribute('href', '/courses');
+        await expect(nav.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
+        await expect(page.getByText('Illustration · not learner data')).toBeVisible();
+        await expectNoPageOverflow(page);
+        expect(api).toEqual([]);
+        await page.getByRole('link', { name: 'Browse courses' }).click();
+        await expect(page).toHaveURL(/\/courses$/);
+        await expect(page.getByRole('link', { name: 'CodeMastery home' })).toHaveAttribute('href', '/');
+    });
+
+    test('a Learner gets Home with real active memberships; the logo leads there', async ({ page, learner }) => {
+        test.skip(!target.fixture, 'Needs the deterministic catalogue fixture of the disposable stack.');
+        await signIn(page, learner);
+        await expect(page.getByRole('link', { name: 'CodeMastery home' })).toHaveAttribute('href', '/home');
+        await page.getByRole('link', { name: 'CodeMastery home' }).click();
+        await expect(page).toHaveURL(/\/home$/);
+        await expect(page.getByRole('heading', { level: 1, name: `Welcome back, ${learner.displayName}` })).toBeFocused();
+        await expect(page.getByRole('heading', { name: "You haven't joined a course yet" })).toBeVisible();
+        await expect(page.getByText(/Continue learning|Up next/)).toHaveCount(0);
+        await page.getByRole('link', { name: 'Browse the catalogue' }).click();
+        await page.getByRole('link', { name: fixture.primaryTitle }).click();
+        await page.getByRole('button', { name: 'Enroll in course' }).click();
+        await expect(page.getByText('Membership: Active')).toBeVisible();
+        await page.getByRole('link', { name: 'CodeMastery home' }).click();
+        const list = page.getByRole('list', { name: 'Your active courses' });
+        await expect(list.getByRole('link', { name: fixture.primaryTitle })).toHaveAttribute('href', `/courses/${fixture.primary}`);
+        await expect(list.getByText('Instructor · E2E Course Instructor')).toBeVisible();
+        await expectNoPageOverflow(page);
+    });
+
+    test('says the session ended after the 15-minute expiry, once', async ({ page, learner }) => {
+        await page.clock.install();
+        await signIn(page, learner);
+        await page.getByRole('button', { name: accountMenuName(learner) }).click();
+        await page.getByRole('menuitem', { name: 'Profile' }).click();
+        await expect(page).toHaveURL(/\/profile$/);
+        await page.clock.fastForward('15:05');
+        await expect(page).toHaveURL(/\/login$/);
+        await expect(page.getByRole('status').filter({ hasText: 'Your session ended. Sign in again to continue.' })).toBeVisible();
+        // Shown once: leaving and returning to Sign in does not repeat it. (Signing in again here would
+        // compare the server's real-time token with the fast-forwarded browser clock, so it is not attempted.)
+        await page.getByRole('link', { name: 'Browse courses' }).click();
+        await expect(page).toHaveURL(/\/courses$/);
+        await page.getByRole('link', { name: 'Sign in', exact: true }).first().click();
+        await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+        await expect(page.getByText('Your session ended')).toHaveCount(0);
+    });
+});
+
 test.describe('accounts and sessions', () => {
     test('registers through the form, then signs in; the session lives in memory only', async ({ page, context }) => {
         const account = newAccount('Registrant');
@@ -156,6 +211,7 @@ test.describe('accounts and sessions', () => {
         await expect(page.locator('main dl')).toContainText('Learner');
 
         await signOut(page, learner);
+        await expect(page.getByText('Your session ended')).toHaveCount(0);
         for (const path of ['/my-courses', '/profile']) {
             await page.goto(path);
             await expect(page).toHaveURL(/\/login$/);

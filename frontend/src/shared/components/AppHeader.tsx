@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
-import { Box, ButtonBase, Divider, IconButton, Menu, MenuItem, Tooltip, Typography, useMediaQuery, useTheme } from '@mui/material';
+import { Box, ButtonBase, Divider, IconButton, Menu, Tooltip, Typography, useMediaQuery, useTheme } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
 import type { PresentationIconName } from './PresentationIcon';
 import { BrandWordmark } from './BrandLogo';
@@ -47,7 +47,7 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
     return <Box component="header" sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: 'common.white' }}>
         <Box ref={bar} sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 },
             height: { xs: presentationTokens.topBarHeightCompact, sm: presentationTokens.topBarHeight }, px: { xs: 1.5, sm: 2.5, md: 3 },
-            maxWidth: 1600, mx: 'auto', '&& :focus-visible, && .Mui-focusVisible': focusRingOnChrome }}>
+            maxWidth: 1600, mx: 'auto', '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>
             {onMenuToggle && <IconButton aria-label="Toggle navigation" aria-expanded={!!menuOpen} onClick={onMenuToggle}
                 sx={{ display: { md: 'none' }, color: 'common.white', '&:hover': { bgcolor: color.chromeRaised } }}><PresentationIcon name="menu" /></IconButton>}
             <Box sx={{ flexShrink: 0, minWidth: 0, display: 'flex' }}>

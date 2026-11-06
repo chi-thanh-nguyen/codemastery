@@ -78,7 +78,7 @@ export function QuizAttemptPage({ quizTitle, questions, answers, currentIndex, o
     </Box>;
     return <Box sx={{ minHeight: '100dvh', bgcolor: color.ink950, display: 'flex', flexDirection: 'column' }}>
         {banner}
-        <Box component="header" sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: color.surface, '&& :focus-visible, && .Mui-focusVisible': focusRingOnChrome }}>
+        <Box component="header" sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: color.surface, '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, minHeight: { xs: 64, sm: 72 }, px: { xs: 1.5, sm: 3 }, flexWrap: 'wrap', py: { xs: 1, sm: 0 } }}>
                 <IconButton aria-label="Leave quiz" onClick={() => setDialog('leave')} disabled={locked} sx={{ color: color.surface, '&:hover': { bgcolor: color.chromeRaised } }}><PresentationIcon name="close" /></IconButton>
                 <Typography component="p" sx={{ fontWeight: 600, fontSize: '1rem', minWidth: 0, flex: { xs: '1 1 auto', md: '0 1 auto' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quizTitle}</Typography>

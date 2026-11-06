@@ -230,6 +230,19 @@ async function runEngine(playwright, engine, baseUrl) {
                 assert.equal((await context.request.get(url('/plus-jakarta-sans-OFL.txt'))).headers()['content-type']?.includes('text/plain') ? 'served' : 'absent', 'absent');
                 assert.equal((await page.locator('main h1').evaluate((h) => getComputedStyle(h).fontFamily)).split(',')[0].replace(/["']/g, '').trim(), 'Figtree');
             });
+            await check('the landing page at / loads only its example-map chunk, never the preview, and sends no API request', async () => {
+                const { context: landingContext, page: landing, api: landingApi } = await newPage();
+                await landing.goto(url('/')); await ready(landing);
+                await landing.getByText('Illustration · not learner data').waitFor();
+                const scripts = await landing.evaluate(() => performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname));
+                assert(scripts.some((s) => /ExampleMasteryMap/.test(s)), scripts.join(','));
+                assert(!scripts.some((s) => /PreviewApp/.test(s)));
+                assert.deepEqual(landingApi.state.requests, []);
+                const links = await landing.getByRole('navigation', { name: 'Main navigation' }).getByRole('link').evaluateAll((list) => list.map((a) => [a.textContent, a.getAttribute('href')]));
+                assert.deepEqual(links, [['Catalogue', '/courses'], ['Sign in', '/login'], ['Create account', '/register']]);
+                await landing.screenshot({ path: path.join(dir, 'landing-1280.png'), fullPage: true });
+                await landingContext.close();
+            });
             await check('production routes never load the preview chunk', async () => {
                 const scripts = await page.evaluate(() => performance.getEntriesByType('resource').filter((e) => e.initiatorType === 'script' || e.name.endsWith('.js')).map((e) => new URL(e.name).pathname));
                 assert(!scripts.some((s) => /PreviewApp/.test(s)), scripts.join(','));
@@ -281,7 +294,7 @@ async function runEngine(playwright, engine, baseUrl) {
             const bad = [], nav = [];
             for (const width of widths) {
                 await page.setViewportSize({ width, height: 900 });
-                for (const route of ['/courses', `/courses/${primaryId}`, '/login', '/register', '/no-such-page', '/preview?screen=mastery', '/preview?screen=admin-users', '/preview?screen=learners']) {
+                for (const route of ['/', '/courses', `/courses/${primaryId}`, '/login', '/register', '/no-such-page', '/preview?screen=mastery', '/preview?screen=admin-users', '/preview?screen=learners']) {
                     await page.goto(url(route)); await ready(page);
                     const size = await overflow(page);
                     if (size.scroll > size.client) bad.push(`${route}@${width}: ${size.scroll}>${size.client}`);
@@ -299,7 +312,7 @@ async function runEngine(playwright, engine, baseUrl) {
             // 200% browser zoom of a 1280 px window lays out at 640 CSS px with 2x pixels.
             const { context, page } = await newPage({ viewport: { width: 640, height: 450 }, deviceScaleFactor: 2 });
             const bad = [];
-            for (const route of ['/courses', `/courses/${primaryId}`, '/login', '/register', '/preview?screen=mastery', '/preview?screen=course', '/preview?screen=admin-users']) {
+            for (const route of ['/', '/courses', `/courses/${primaryId}`, '/login', '/register', '/preview?screen=mastery', '/preview?screen=course', '/preview?screen=admin-users']) {
                 await page.goto(url(route)); await ready(page);
                 const size = await overflow(page); if (size.scroll > size.client) bad.push(`${route}: ${size.scroll}>${size.client}`);
             }
@@ -322,7 +335,7 @@ async function runEngine(playwright, engine, baseUrl) {
         {
             const { context, page } = await newPage();
             const failures = [];
-            for (const [route, width] of [['/courses', 1280], [`/courses/${primaryId}`, 1280], ['/login', 1280], ['/register', 390], ['/preview?screen=learner-home', 1280], ['/preview?screen=mastery', 1280], ['/preview?screen=assessments', 1280], ['/preview?screen=quiz-result', 1280], ['/preview?screen=admin-overview', 1280], ['/preview?screen=admin-users', 390], ['/preview?screen=notifications', 1280], ['/preview?screen=course', 390]]) {
+            for (const [route, width] of [['/', 1280], ['/', 390], ['/courses', 1280], [`/courses/${primaryId}`, 1280], ['/login', 1280], ['/register', 390], ['/preview?screen=learner-home', 1280], ['/preview?screen=mastery', 1280], ['/preview?screen=assessments', 1280], ['/preview?screen=quiz-result', 1280], ['/preview?screen=admin-overview', 1280], ['/preview?screen=admin-users', 390], ['/preview?screen=notifications', 1280], ['/preview?screen=course', 390]]) {
                 await page.setViewportSize({ width, height: 900 });
                 await page.goto(url(route)); await ready(page); await page.waitForTimeout(200);
                 for (const row of await page.evaluate(sampleText)) {
@@ -370,6 +383,13 @@ async function runEngine(playwright, engine, baseUrl) {
         {
             const { context, page } = await newPage({ viewport: { width: 390, height: 844 } });
             await page.goto(url('/courses')); await ready(page);
+            await check('the landing header keeps Catalogue and Sign in reachable at 390 px', async () => {
+                await page.goto(url('/')); await ready(page);
+                const nav = page.getByRole('navigation', { name: 'Main navigation' });
+                assert(await nav.getByRole('link', { name: 'Catalogue' }).isVisible()); assert(await nav.getByRole('link', { name: 'Sign in' }).isVisible());
+                assert(await page.getByRole('main').getByRole('link', { name: 'Create account' }).isVisible());
+                await page.goto(url('/courses')); await ready(page);
+            });
             await check('mobile drawer opens, marks the current item, closes on Escape and returns focus', async () => {
                 const toggle = page.getByRole('button', { name: 'Toggle navigation' });
                 await toggle.click(); const drawer = page.getByRole('dialog'); await drawer.waitFor();
@@ -500,6 +520,17 @@ async function runEngine(playwright, engine, baseUrl) {
             await page.goto(url('/login')); await ready(page);
             await page.locator('#login-email').fill('learner@example.test'); await page.locator('#login-password').fill('correct-password-123');
             await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL(/\/courses$/);
+            await check(`Learner home lists active memberships only, without pending sections (${width} px)`, async () => {
+                if (width < 900) { await page.getByRole('button', { name: 'Toggle navigation' }).click(); await page.getByRole('dialog').getByRole('link', { name: 'Home' }).click(); }
+                else await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Home' }).click();
+                await page.getByRole('heading', { level: 1, name: 'Welcome back, Harness Learner' }).waitFor();
+                const list = page.getByRole('list', { name: 'Your active courses' }); await list.waitFor();
+                assert.equal(await list.getByRole('listitem').count(), 1);
+                assert(api.state.requests.some((r) => r.startsWith('GET /api/me/courses') && r.includes('status=active')));
+                assert.equal(await page.getByText(/Continue learning|Up next/).count(), 0);
+                const size = await overflow(page); assert(size.scroll <= size.client);
+                await page.screenshot({ path: path.join(dir, `home-${width}.png`), fullPage: true });
+            });
             await check(`My courses tile menu leaves with confirmation and re-enrolls (${width} px)`, async () => {
                 if (width < 900) { await page.getByRole('button', { name: 'Toggle navigation' }).click(); await page.getByRole('dialog').getByRole('link', { name: 'My courses' }).click(); }
                 else await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'My courses' }).click();

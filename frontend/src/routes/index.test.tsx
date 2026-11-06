@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, StrictMode } from 'react';
+import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { BrowserRouter, useNavigate } from 'react-router';
@@ -84,7 +84,7 @@ describe('real declarative routing and Profile', () => {
         expect(input.value).toBe('Local sample password'); expect(document.activeElement).not.toBe(input);
         expect(fetcher).not.toHaveBeenCalled();
     });
-    it.each([['/', '/courses', 'Course catalogue'], ['/login', '/login', 'Sign in'], ['/register', '/register', 'Create account'], ['/courses', '/courses', 'Course catalogue'], ['/courses/course-one', '/courses/course-one', 'Course details'], ['/missing', '/missing', 'Page not found']])('direct entry %s', async (path, finalPath, title) => {
+    it.each([['/', '/', 'Learn programming at the pace of what you actually know.'], ['/login', '/login', 'Sign in'], ['/register', '/register', 'Create account'], ['/courses', '/courses', 'Course catalogue'], ['/courses/course-one', '/courses/course-one', 'Course details'], ['/missing', '/missing', 'Page not found']])('direct entry %s', async (path, finalPath, title) => {
         await mount(path); expect(location.pathname).toBe(finalPath); expect(host.querySelector('main h1')?.textContent).toBe(title); expect(fetcher.mock.calls.every(([url]) => new URL(url).pathname.startsWith('/api/courses'))).toBe(true); expect(document.activeElement).toBe(host.querySelector('main h1'));
     });
     it('anonymous /profile never mounts personal fields and replaces with login', async () => {
@@ -141,6 +141,7 @@ describe('real declarative routing and Profile', () => {
         await travel(() => window.history.back()); expect(location.pathname).toBe('/profile'); expect(host.querySelector('dl')).not.toBeNull(); await travel(() => window.history.forward()); expect(location.pathname).toBe('/courses/one'); await act(async () => auth.logout()); await travel(() => window.history.back()); expect(location.pathname).toBe('/login'); expect(host.querySelector('dl')).toBeNull();
     });
     it('composes the actual public catalogue/detail with current Auth navigation', async () => {
+        window.history.replaceState(null, '', '/courses');
         await act(async () => root.render(<App />));
         expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Course catalogue');
         await act(async () => host.querySelector<HTMLAnchorElement>('a[data-tile-link]')!.click()); expect(location.pathname).toBe(`/courses/${id}`); expect(host.querySelector('h1')?.textContent).toBe('Course details');
@@ -169,4 +170,70 @@ it('mounts real learner My Courses with authenticated transport and removes it a
     const [, init] = fetcher.mock.calls.find(([url]) => new URL(url).pathname === '/api/me/courses')!;
     expect(init.headers.has('Authorization')).toBe(true);
     await act(async () => vi.advanceTimersByTime(900000)); expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('My courses');
+});
+
+const membershipPage = (status: 'active' | 'left' = 'active') => ({ ...page, content: [{ ...course, title: 'Active course', status }] });
+class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
+it('serves the public landing page at / with public navigation and no request', async () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub); vi.stubGlobal('DOMMatrixReadOnly', class { m22 = 1; });
+    await mount('/');
+    for (let attempt = 0; attempt < 50 && !host.textContent?.includes('Illustration'); attempt++) await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(host.querySelector('main h1')?.textContent).toBe('Learn programming at the pace of what you actually know.');
+    const nav = host.querySelector('nav[aria-label="Main navigation"]')!;
+    expect([...nav.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([['Catalogue', '/courses'], ['Sign in', '/login'], ['Create account', '/register']]);
+    expect(host.querySelector('a[href="#main-content"]')?.textContent).toBe('Skip to main content');
+    expect(host.textContent).toContain('Illustration · not learner data');
+    expect(fetcher).not.toHaveBeenCalled();
+    await click('Catalogue'); expect(location.pathname).toBe('/courses');
+    expect(host.querySelector('header a[aria-label="CodeMastery home"]')?.getAttribute('href')).toBe('/');
+});
+it.each([['Learner', '/home'], ['Instructor', '/courses'], ['Administrator', '/courses']])('sends a signed-in %s from / to %s and points the logo there', async (role, start) => {
+    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? membershipPage() : page)));
+    await mount('/courses'); await login('Role test', role); await go('/');
+    expect(location.pathname).toBe(start);
+    expect(host.querySelector('header a[aria-label="CodeMastery home"]')?.getAttribute('href')).toBe(start);
+});
+it('shows a Learner home of active courses from the membership API only', async () => {
+    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? membershipPage() : page)));
+    await mount('/courses'); await login();
+    expect([...host.querySelectorAll('header nav a')].map((link) => link.textContent)).toEqual(['Home', 'Catalogue', 'My courses']);
+    await go('/home');
+    expect(host.querySelector('main h1')?.textContent).toBe('Welcome back, Person A');
+    expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Home');
+    const call = fetcher.mock.calls.find(([url]) => new URL(url).pathname === '/api/me/courses')!;
+    expect(new URL(call[0]).searchParams.get('status')).toBe('active'); expect(call[1].headers.has('Authorization')).toBe(true);
+    const list = host.querySelector('ul[aria-label="Your active courses"]')!;
+    expect(list.textContent).toContain('Active course'); expect(list.textContent).toContain('Instructor · Instructor Demo');
+    expect(list.querySelector('a')?.getAttribute('href')).toBe(`/courses/${id}`);
+    // Resume, progress and recommendations have no contract yet, so their sections are absent.
+    expect(host.textContent).not.toMatch(/Continue learning|Up next|lessons ·|Resume/);
+    expect(fetcher.mock.calls.every(([url]) => ['/api/auth/login', '/api/courses', '/api/me/courses'].includes(new URL(url).pathname))).toBe(true);
+});
+it('guards Learner home: anonymous visitors sign in, other roles are denied without a request', async () => {
+    await mount('/home'); expect(location.pathname).toBe('/login');
+    await mount('/courses'); await login('Teacher', 'Instructor'); await go('/home');
+    expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
+    expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/me/courses')).toHaveLength(0);
+});
+it('says the session ended on the sign-in page after expiry, once, but not after signing out', async () => {
+    await mount('/courses'); await login(); await go('/profile');
+    await act(async () => vi.advanceTimersByTime(900000));
+    expect(location.pathname).toBe('/login');
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('Your session ended. Sign in again to continue.');
+    await go('/courses'); await go('/login');
+    expect(host.textContent).not.toContain('Your session ended');
+    await go('/courses'); await login(); await signOutFromMenu();
+    expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('Your session ended');
+});
+it('shows Learner home empty and retryable error states', async () => {
+    let fail = true;
+    fetcher.mockImplementation((url: string) => {
+        if (new URL(url).pathname !== '/api/me/courses') return Promise.resolve(json(page));
+        return Promise.resolve(fail ? json({ type: 'about:blank', title: 'Internal Server Error', status: 500, detail: 'Unavailable.', instance: '/api/me/courses' }, 500)
+            : json({ ...page, content: [], totalElements: 0, totalPages: 0 }));
+    });
+    await mount('/courses'); await login(); await go('/home');
+    expect(host.textContent).toContain("Couldn't load your courses");
+    fail = false; await click('Try again');
+    expect(host.textContent).toContain("You haven't joined a course yet"); expect(host.querySelector('a[href="/courses"]')?.textContent).toBeTruthy();
 });

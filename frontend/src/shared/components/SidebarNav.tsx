@@ -55,7 +55,7 @@ export function SidebarNav({ items, selectedId, onSelect, mobileOpen, onMobileCl
                     </ListItem>;
                 })}
             </List>
-            {footer && <Box sx={{ mt: 'auto', px: 2, pb: 3, pt: 2, borderTop: `1px solid ${color.chromeRaised}`, '&& :focus-visible, && .Mui-focusVisible': focusRingOnChrome }}>{footer}</Box>}
+            {footer && <Box sx={{ mt: 'auto', px: 2, pb: 3, pt: 2, borderTop: `1px solid ${color.chromeRaised}`, '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>{footer}</Box>}
         </Box>
     </Drawer>;
 }

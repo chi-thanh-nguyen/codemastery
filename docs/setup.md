@@ -33,7 +33,7 @@ Issues remain open.
 | Adaptive | Pure mastery calculator and state classifier (no database, events or API) | Skill graph, mastery persistence, routing, recommendations |
 | Assessment, Interaction, Admin | — | Source files are empty scaffolds |
 | Object storage | Local MinIO and its least-privilege initializer | Backend storage adapter and file delivery (CT09) |
-| Frontend | Router with `/courses`, `/courses/:courseId`, `/login`, `/register`, Learner-only `/my-courses`, authenticated `/profile` and the design preview at `/preview` (sample data for every designed screen, including the React Flow Mastery Map and Instructor/Administrator screens); shared HTTP client; memory-only session | Production routes and API integration for lessons, assessments, Mastery Map, notifications, Instructor and Administrator screens (their contracts are pending) |
+| Frontend | Router with the public landing page at `/`, `/courses`, `/courses/:courseId`, `/login`, `/register`, Learner-only `/home` and `/my-courses`, authenticated `/profile` and the design preview at `/preview` (sample data for every designed screen, including the React Flow Mastery Map and Instructor/Administrator screens); shared HTTP client; memory-only session | Production routes and API integration for lessons, assessments, Mastery Map, notifications, Instructor and Administrator screens (their contracts are pending) |
 | Sample data | SD01 Users and SD02 Courses in `sample-data/seed/01-…` and `02-…`, with a disposable-target loader procedure in [sample-data/README.md](../sample-data/README.md) | Seeds 03–05 are empty; no object is uploaded to MinIO |
 | Runtime | Local Docker Compose stack (this guide) and the one-VM release tooling `infrastructure/vm/deploy.sh`, `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` image target ([deployment.md](deployment.md)) | No deployment has been performed |
 | E2E | Local Playwright Test suite in `e2e/` with a disposable Docker stack and deterministic fixture ([testing.md](testing.md#browser-harness-and-e2e-suite)) | An E2E CI job; `e2e/tests/adaptive-flow.spec.ts` |
@@ -505,9 +505,16 @@ Latin; other scripts fall back to system fonts. No font CDN is used.
 
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
 in `src/routes/index.tsx`, listed in
-[Implemented capabilities on `main`](#implemented-capabilities-on-main). `/`
-redirects to `/courses`. Navigation shows Catalogue, plus My courses for Learners;
-Profile and Sign out are in the account menu. `/preview` lazily loads the design
+[Implemented capabilities on `main`](#implemented-capabilities-on-main). `/` is
+the public landing page (S25) for visitors without a session; its example Mastery
+Map is a fixed illustration loaded in its own chunk, and a signed-in visitor is
+sent to their start page instead (`/home` for Learners, `/courses` for other
+roles; the logo links there too). Navigation shows Catalogue for everyone, plus
+Home (`/home`) and My courses for Learners; Profile and Sign out are in the
+account menu. `/home` lists the Learner's active courses from `GET /api/me/courses`
+only. After a session ends without signing out (15-minute expiry or a current-session
+401), the sign-in page says “Your session ended. Sign in again to continue.” once.
+Sign-in still lands on `/courses` (or the one-use `/profile` return). `/preview` lazily loads the design
 preview from `src/app/preview/` in its own chunk: every designed screen for the
 Learner, Instructor and Administrator workspaces and the proposed public screens,
 with synthetic sample data, a permanent “Design preview · Sample data” notice and

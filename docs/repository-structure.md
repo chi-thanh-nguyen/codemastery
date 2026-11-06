@@ -122,6 +122,14 @@ inventory. CODEOWNERS is unchanged: the existing `/frontend/src/app/`,
 `frontend/public/figtree-OFL.txt`, which (like the existing `favicon.ico`) matches
 no rule; adding one is a separate ownership decision.
 
+### Production activation addition — 6 November 2026
+
+The Leader's follow-up instruction of the same date (activate every component that
+works on approved contracts) adds one file:
+`frontend/src/features/mastery/components/ExampleMasteryMap.tsx`, the fixed,
+labelled example map of the public landing page, loaded as its own chunk. No other
+path changes; the existing `/frontend/src/features/mastery/` CODEOWNERS rule covers it.
+
 ## Bounded Course unit-test placement correction
 
 On 2026-10-26 (Asia/Ho_Chi_Minh), the Project Leader manually relocated
@@ -1274,6 +1282,8 @@ codemastery/
 │       │   │   │   └── masteryApi.ts
 
 │       │   │   ├── components/
+
+│       │   │   │   ├── ExampleMasteryMap.tsx
 
 │       │   │   │   ├── MasteryGraph.tsx
 

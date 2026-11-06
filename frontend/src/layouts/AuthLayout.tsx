@@ -27,7 +27,7 @@ export function AuthLayout({ title = 'CodeMastery', subtitle = 'Mastery-based pr
     }, []);
     return <Box ref={surface} sx={{ minHeight: '100dvh', display: 'grid', bgcolor: color.ink950, gridTemplateColumns: { xs: '1fr', md: '5fr 7fr' } }}>
         <Box sx={{ color: 'common.white', px: { xs: 3, sm: 5, lg: 8 }, py: { xs: 3, md: 6 }, display: 'flex', flexDirection: 'column', gap: 4, minHeight: { xs: 120, md: 'auto' } }}>
-            <Box {...(routed ? { component: Link, to: '/courses' } : { component: 'a', href: `${import.meta.env.BASE_URL}courses` })} aria-label="CodeMastery, browse courses" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, color: 'inherit', textDecoration: 'none', alignSelf: 'flex-start',
+            <Box {...(routed ? { component: Link, to: '/' } : { component: 'a', href: import.meta.env.BASE_URL })} aria-label="CodeMastery home" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, color: 'inherit', textDecoration: 'none', alignSelf: 'flex-start',
                 borderRadius: `${radius.sm}px`, '&:focus-visible': { outline: `2px solid ${color.focusOnChrome}`, outlineOffset: 4 } }}>
                 <BrandLogo size={40} />
                 <Typography component="span" aria-hidden sx={{ fontSize: '1.375rem', fontWeight: 600, letterSpacing: '-0.02em' }}>CodeMastery</Typography>

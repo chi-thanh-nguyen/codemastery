@@ -28,7 +28,7 @@ verification is separate work.
 | Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency. Auth, Enrollment and sample-data suites dispatch through MockMvc with the configured Spring Security chain; the other suites do not (see [Integration-Test Lifecycle](#integration-test-lifecycle)) | A running server, real browser, network/CORS from a browser, deployment |
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
-| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for registration, sign-in, catalogue, detail, membership, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
+| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
 | VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
 
@@ -56,6 +56,7 @@ criteria, independent review and any environment-specific evidence remain open.
 | 31 October 2026 | `main` `614f326` | GitHub Actions CI [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079); CodeQL [run 41191742751](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191742751) | All CI jobs; CodeQL default setup | All seven CI jobs and CodeQL passed. Backend: Surefire 468 tests, Failsafe 150 tests, 0 failures, errors or skips. Frontend: 390 tests in 11 files, then a successful build |
 | 31 October 2026 | `main` `614f326` | Local, macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1, Node 24.21.0, npm 11.19.0 | `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 468, Failsafe 150, 0 failures, errors or skips |
 | 31 October 2026 | `main` `614f326` | Same machine | `cd frontend && npm ci && npm test && npm run build` | 390 tests in 11 files passed; build succeeded |
+| 6 November 2026 (activation) | `feat/uiux-design-r1-implementation`, production-activation commit after `17cc444` | Same machine | Same commands | 422 tests in 15 files passed; build succeeded. Harness: Chromium and WebKit 34/34 each; Firefox did not launch in the agent sandbox. E2E: 53 passed, 4 skipped by design, Firefox 13 failed at browser launch ([record](#production-activation-of-eligible-uiux-components--6-november-2026)) |
 | 6 November 2026 | `feat/uiux-design-r1-implementation` at `b2e9035` (code; base `061102e`) | Local, macOS 27.2 arm64, Node 24.21.0, npm 11.19.0, Docker 29.8.1 | `cd frontend && npm test && npm run build`; `npm run test:browser -- --engine all`; `cd e2e && npm ci && npx playwright test` | 414 tests in 15 files passed; build succeeded. Harness: Chromium 153 and WebKit 26.6 30/30 each; Firefox did not launch in the agent sandbox. E2E: 41 passed, 4 skipped by design, Firefox 10 failed at browser launch ([record](#uiux-r1-implementation-verification--6-november-2026)) |
 
 The two local runs were made for the DO01 documentation update. They confirm that
@@ -268,8 +269,9 @@ twelve screens; skip link, route focus and visible focus on every catalogue tab
 stop; drawer and dialog focus behavior including the full-screen sheet below
 600 px; form labels, required markers and error focus; `pagehide` input blur;
 catalogue submit-only search and error states; the 1.2 s skeleton shimmer and its
-reduced-motion static form; My courses tile membership actions; and the Mastery
-Map's 220 × 72 nodes, initial viewport and keyboard operation. It writes
+reduced-motion static form; the landing page's public navigation, example-map chunk
+and absence of API requests; Learner home and My courses tile membership actions;
+and the Mastery Map's 220 × 72 nodes, initial viewport and keyboard operation. It writes
 screenshots, accessibility snapshots and `browser-report.json` to `--out`
 (default: a new directory under the OS temporary directory), and exits non-zero
 on any failed check or browser that cannot launch. Positional FE01 arguments
@@ -2266,3 +2268,45 @@ which the Assessment contract must resolve without changing CT38 here.
 Anthropic's Claude Code (Claude Opus 5.5) implemented these changes and ran the
 checks, using the locally installed Impeccable skill (rendered detector) and
 Playwright CLI for browser inspection. No human review is claimed.
+
+## Production activation of eligible UI/UX components — 6 November 2026
+
+### Authority
+
+The Leader's instruction of 6 November 2026 asked to activate in production every
+component that works on approved contracts or needs no backend, keeping everything
+else in `/preview`, and approved the frontend routing decisions this needs without
+any API or backend change. It supersedes, for these routes only, the CT16 shell's
+root redirect (`/` → `/courses`) and resolves the `DESIGN.md` open questions on the
+landing page (S25), a Learner home route (S6) and the session-ended notice (F2).
+Post-sign-in navigation (`/courses`, or the one-use `/profile` return), the memory
+session, expiry, 401 handling, guards and every API call are unchanged.
+
+### Disposition by component
+
+| Component | Disposition | Basis |
+| --- | --- | --- |
+| S25 landing page at `/` | Activated | Static content; public navigation (Catalogue, Sign in, Create account) and skip link; the example map is a fixed illustration labelled “Illustration · not learner data” in its own lazily loaded chunk (`ExampleMasteryMap`), below 600 px as a list. A signed-in visitor is redirected to `/home` (Learner) or `/courses`. |
+| Public navigation | Activated | Logo → `/` for visitors, → start page when signed in; Catalogue for everyone; Sign in / Create account (drawer footer below 900 px); the sign-in and registration logo links to `/`. |
+| S6 Learner home at `/home` | Activated (active memberships only) | Learner-only guard; reads `GET /api/me/courses?status=active` (CT22.membership). Rows link to course detail. Resume, progress and Up next are not rendered: CT22 progress/resume, Adaptive, Assessment and Interaction are pending; the full design stays in `/preview`. |
+| F2 session-ended notice | Activated | After a session present in this tab ends without signing out (timer, resume/focus checks or a current-session 401), `/login` shows “Your session ended. Sign in again to continue.” once. Observed in the router from `useAuth()`; the provider and session policy are untouched. Not shown after sign-out or for a fresh document. |
+| Learner navigation | Activated | Home · Catalogue · My courses (the bell stays omitted). |
+| Instructor and Administrator navigation | Unchanged | Only Catalogue is implemented; Teaching, Grading, Learners and every Administrator page remain preview-only. |
+| Password recovery (F1), lessons and progress (S7, S8), diagnostic and assessments (S9–S13), Mastery Map (S14), notifications and Q&A (S15), Instructor (S17–S22) and Administrator (S24) screens | Kept preview-only | Their contracts (CT02, CT21, CT22 progress/resume, CT09, CT04/CT10/CT23, Adaptive, Interaction, CT12/CT31, reporting) are pending. |
+| S23 reporting, Markdown lesson rendering | Kept preview-only / blocked | No reporting definitions; no approved Markdown sanitisation decision. |
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| `tsc --noEmit` (also with `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 422 tests in 15 files (8 new routing/home/landing/notice tests); build succeeded. Main chunk 532.06 kB plus a shared UI chunk 181.66 kB; the example map (186.10 kB, React Flow) and preview (250.97 kB) load on demand |
+| Chunk isolation | PASS: no preview copy, sample names, React Flow or illustration text in the main or shared chunk; the landing page loads `ExampleMasteryMap` and never `PreviewApp` |
+| Browser harness, `--engine all` | PASS Chromium 153 and WebKit 26.6, 34/34 each (adds landing, mobile landing header and Learner home checks; `/` joins the width, zoom and contrast sets). BLOCKED Firefox (same sandbox launch error) |
+| E2E, five projects | PASS 53 (chromium-desktop 14, chromium-mobile 13, webkit-desktop 13, webkit-mobile 13), 4 skipped by design; BLOCKED firefox-desktop 13 at launch. New: landing with no API request, Learner home with a real enrolment, session-ended notice after a 15-minute clock fast-forward |
+| Impeccable detector on `/`, `/courses`, `/login`, `/register` and the preview landing, session-ended and Learner-home screens at 1280 and 390 px | PASS: no findings. `/home` needs a session and was checked through harness screenshots instead |
+
+The landing copy follows `DESIGN.md` S25 and describes the product's learning model
+(diagnostic, quizzes, skill states, instructor tools). Several of those features are
+not available until their contracts are implemented; the Leader may want that copy
+reviewed before a public release. Anthropic's Claude Code (Claude Opus 5.5) made and
+verified these changes.

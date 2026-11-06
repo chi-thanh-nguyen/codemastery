@@ -22,13 +22,13 @@ interface ScreenDef { id: string; workspace: Workspace; title: string; spec: str
 /** Every DESIGN.md screen group. `nav` names the top-bar item that stays current (parent-aware). */
 const SCREENS: ScreenDef[] = [
     { id: 'overview', workspace: 'reference', title: 'Design system and screen index', spec: 'S26', status: 'Live', note: 'This page', nav: 'overview' },
-    { id: 'landing', workspace: 'public', title: 'Landing page', spec: 'S25', status: 'Proposed', note: 'Route change pending; / still redirects to /courses', bare: true },
+    { id: 'landing', workspace: 'public', title: 'Landing page', spec: 'S25', status: 'Live', note: 'Live at / for visitors without a session; the example map is an illustration', bare: true },
     { id: 'sign-in', workspace: 'public', title: 'Sign in (sample states)', spec: 'S2', status: 'Preview', note: 'Presentation of the live page without a request', bare: true },
-    { id: 'session-ended', workspace: 'public', title: 'Session-ended notice', spec: 'F2', status: 'Proposed', note: 'CT16 auth-lifecycle approval pending', bare: true },
+    { id: 'session-ended', workspace: 'public', title: 'Session-ended notice', spec: 'F2', status: 'Live', note: 'Live on /login after an expiry or session 401 in the same tab', bare: true },
     { id: 'forgot-password', workspace: 'public', title: 'Forgot password', spec: 'F1', status: 'Proposed', note: 'CT02 recovery contract pending', bare: true },
     { id: 'reset-password', workspace: 'public', title: 'Reset password', spec: 'F1', status: 'Proposed', note: 'CT02 recovery contract pending', bare: true },
     { id: 'reset-expired', workspace: 'public', title: 'Reset link expired', spec: 'F1', status: 'Proposed', note: 'CT02 recovery contract pending', bare: true },
-    { id: 'learner-home', workspace: 'learner', title: 'Learner home', spec: 'S6', status: 'Proposed', note: 'Route and CT22/Adaptive reads pending', nav: 'learner-home' },
+    { id: 'learner-home', workspace: 'learner', title: 'Learner home (full design)', spec: 'S6', status: 'Preview', note: 'Live at /home with active courses only; resume, progress and Up next wait for CT22 and Adaptive', nav: 'learner-home' },
     { id: 'my-courses', workspace: 'learner', title: 'My courses (sample memberships)', spec: 'S5', status: 'Preview', note: 'Live page uses the real API; tiles here open the sample workspace', nav: 'my-courses' },
     { id: 'course', workspace: 'learner', title: 'Course workspace — Path', spec: 'S7', status: 'Preview', note: 'CT21/CT22 progress and resume pending', nav: 'my-courses' },
     { id: 'lesson', workspace: 'learner', title: 'Lesson reader with Q&A', spec: 'S8', status: 'Preview', note: 'Lesson content, CT09 files, Interaction pending', nav: 'my-courses' },
@@ -56,8 +56,10 @@ const SCREENS: ScreenDef[] = [
 ];
 const LIVE: { title: string; spec: string; href: string; note: string }[] = [
     { title: 'Design preview (this page)', spec: 'S26', href: '/preview', note: 'Living reference with sample data' },
+    { title: 'Landing page', spec: 'S25', href: '/', note: 'Public; signed-in visitors go to their start page' },
     { title: 'Course catalogue', spec: 'S3', href: '/courses', note: 'Real API: search, filter, paging' },
     { title: 'Sign in', spec: 'S2', href: '/login', note: 'Real API' }, { title: 'Create account', spec: 'S2', href: '/register', note: 'Real API' },
+    { title: 'Learner home', spec: 'S6', href: '/home', note: 'Real API (active memberships); Learner sign-in required' },
     { title: 'My courses', spec: 'S5', href: '/my-courses', note: 'Real API; Learner sign-in required' }, { title: 'Profile', spec: 'S16', href: '/profile', note: 'Session snapshot; sign-in required' },
     { title: 'Page not found', spec: 'F14', href: '/missing-page', note: 'System state' },
 ];

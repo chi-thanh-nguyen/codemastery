@@ -57,7 +57,8 @@ export function LoginView({ email, password, onEmailChange, onPasswordChange, on
     </AuthLayout>;
 }
 
-export function LoginPage() {
+/** Live sign-in. `notice` shows above the form (the router passes the session-ended notice). */
+export function LoginPage({ notice }: { notice?: ReactNode } = {}) {
     const auth = useAuth(), navigate = useNavigate();
     const [email, setEmail] = useState(''), [password, setPassword] = useState(''), [loading, setLoading] = useState(false);
     const [failure, setFailure] = useState<FormFailure | null>(null);
@@ -70,7 +71,7 @@ export function LoginPage() {
         const field = Object.keys(failure.fields)[0], input = field ? form.current?.elements.namedItem(field) : null;
         if (input instanceof HTMLElement) input.focus(); else summary.current?.focus();
     }, [failure]);
-    return <LoginView email={email} password={password} onEmailChange={setEmail} onPasswordChange={setPassword} loading={loading} failure={failure} formRef={form} summaryRef={summary}
+    return <LoginView email={email} password={password} onEmailChange={setEmail} onPasswordChange={setPassword} loading={loading} failure={failure} formRef={form} summaryRef={summary} notice={notice}
         registerLink={<TextLink component={Link} to="/register" sx={{ fontWeight: 600 }}>Create an account</TextLink>}
         browseLink={<TextLink component={Link} to="/courses" sx={{ fontWeight: 600 }}>Browse courses</TextLink>}
         onSubmit={async (event) => {
