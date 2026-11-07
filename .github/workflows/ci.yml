@@ -1710,12 +1710,22 @@ jobs:
             printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\n' "$(openssl rand -hex 32)"
           } > "$work/backend.env"
           docker run -d --name "$backend" --network "$PGTEST_NETWORK" -p "127.0.0.1:${port}:8080" --env-file "$work/backend.env" "$BACKEND_IMAGE" >/dev/null
+          # Read the whole log before matching: `docker logs | grep -q` fails under pipefail
+          # (docker logs gets SIGPIPE, status 141) once the log outgrows the pipe buffer.
+          backend_started() { local logs; logs="$(docker logs "$backend" 2>&1)" && [[ "$logs" == *'Started CodeMasteryApplication'* ]]; }
+          backend_failed() {
+            echo "backend did not start: $1" >&2
+            docker inspect -f 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' "$backend" >&2 || true
+            docker logs --tail 80 "$backend" >&2 2>&1 || true
+            exit 1
+          }
+          started=no
           for _ in $(seq 1 180); do
-            docker logs "$backend" 2>&1 | grep -q 'Started CodeMasteryApplication' && break
-            [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || { docker logs "$backend" 2>&1 | tail -30 >&2; echo "backend exited during startup" >&2; exit 1; }
+            if backend_started; then started=yes; break; fi
+            [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || backend_failed "the container exited during startup"
             sleep 1
           done
-          docker logs "$backend" 2>&1 | grep -q 'Started CodeMasteryApplication' || { echo "backend did not start" >&2; exit 1; }
+          [[ "$started" == yes ]] || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
           check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "6/6 $(env_get SPRING_FLYWAY_USER)"
           harden_after_migration
           verify_role_separation >/dev/null
@@ -2495,13 +2505,22 @@ jobs:
             --env-file "$work/backend.env" "$be_image" >/dev/null
           docker run -d --name "$prefix-frontend" --network "$net" --network-alias "$host" \
             -v "$tls:/etc/nginx/tls:ro" "$fe_image" >/dev/null
+          # Read the whole log before matching: `docker logs | grep -q` fails under pipefail
+          # (docker logs gets SIGPIPE, status 141) once the log outgrows the pipe buffer.
+          backend_started() { local logs; logs="$(docker logs "$prefix-backend" 2>&1)" && [[ "$logs" == *'Started CodeMasteryApplication'* ]]; }
+          backend_failed() {
+            echo "backend did not start: $1" >&2
+            docker inspect -f 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' "$prefix-backend" >&2 || true
+            docker logs --tail 80 "$prefix-backend" >&2 2>&1 || true
+            exit 1
+          }
+          started=no
           for _ in $(seq 1 180); do
-            docker logs "$prefix-backend" 2>&1 | grep -q 'Started CodeMasteryApplication' && break
-            [[ "$(docker inspect -f '{{.State.Running}}' "$prefix-backend")" == true ]] \
-              || { docker logs "$prefix-backend" 2>&1 | tail -30 >&2; echo "backend exited" >&2; exit 1; }
+            if backend_started; then started=yes; break; fi
+            [[ "$(docker inspect -f '{{.State.Running}}' "$prefix-backend")" == true ]] || backend_failed "the container exited during startup"
             sleep 1
           done
-          docker logs "$prefix-backend" 2>&1 | grep -q 'Started CodeMasteryApplication' || { echo "backend did not start" >&2; exit 1; }
+          [[ "$started" == yes ]] || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
 
           fail() { echo "FAIL: $*" >&2; docker logs "$prefix-backend" 2>&1 | tail -15 >&2; exit 1; }
           pass() { printf '  ok: %s\n' "$*"; }
