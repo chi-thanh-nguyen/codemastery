@@ -219,7 +219,9 @@ documentation, and the revised sample slides; Anthropic Claude Code assisted wit
 the DP01 HTTPS ingress integration, its tests and its deployment documentation,
 and with the DP01 MinIO initializer, its qualification tests and the MinIO artifact
 review. Anthropic Claude Code also wrote the local UI/UX specification (`DESIGN.md`,
-6 November 2026) and implemented the frontend redesign, the design preview, the
+6 November 2026) and implemented the frontend redesign (and on 7 November its
+typography, logo-palette and navigation-indicator refinement and the frontend
+Alpine pin refresh), the design preview, the
 browser harness and the Playwright E2E suite, using the Impeccable design skill and
 Playwright CLI locally; the redesign's visual reference is credited in
 [setup](docs/setup.md#frontend-setup-and-validation).

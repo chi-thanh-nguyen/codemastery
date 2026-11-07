@@ -130,6 +130,19 @@ works on approved contracts) adds one file:
 labelled example map of the public landing page, loaded as its own chunk. No other
 path changes; the existing `/frontend/src/features/mastery/` CODEOWNERS rule covers it.
 
+### Typography and brand asset change — 7 November 2026
+
+The Leader's instruction “CodeMastery — PR #209 CI Remediation, Typography, Premium
+Brand Identity & Navigation Indicator Refinement” (7 November 2026) replaces the
+Figtree assets listed above. Added in `frontend/src/app/theme/`:
+`google-sans-flex-{latin,latin-ext,vietnamese}-wght.woff2`,
+`jetbrains-mono-{latin,latin-ext,vietnamese}-wght.woff2` and `poppins-latin-800.woff2`;
+added in `frontend/public/`: `google-sans-flex-OFL.txt`, `jetbrains-mono-OFL.txt` and
+`poppins-OFL.txt`. Removed: `frontend/src/app/theme/figtree-latin-wght.woff2` and
+`frontend/public/figtree-OFL.txt`. `favicon.svg` and `favicon.ico` keep their paths with
+a new palette. The three new licence files, like `favicon.ico`, match no CODEOWNERS
+rule; the theme files are covered by `/frontend/src/app/`. No other path changes.
+
 ## Bounded Course unit-test placement correction
 
 On 2026-10-26 (Asia/Ho_Chi_Minh), the Project Leader manually relocated
@@ -1091,7 +1104,11 @@ codemastery/
 
 │   │   ├── favicon.svg
 
-│   │   └── figtree-OFL.txt
+│   │   ├── google-sans-flex-OFL.txt
+
+│   │   ├── jetbrains-mono-OFL.txt
+
+│   │   └── poppins-OFL.txt
 
 │   └── src/
 
@@ -1129,7 +1146,19 @@ codemastery/
 
 │       │   └── theme/
 
-│       │       ├── figtree-latin-wght.woff2
+│       │       ├── google-sans-flex-latin-ext-wght.woff2
+
+│       │       ├── google-sans-flex-latin-wght.woff2
+
+│       │       ├── google-sans-flex-vietnamese-wght.woff2
+
+│       │       ├── jetbrains-mono-latin-ext-wght.woff2
+
+│       │       ├── jetbrains-mono-latin-wght.woff2
+
+│       │       ├── jetbrains-mono-vietnamese-wght.woff2
+
+│       │       ├── poppins-latin-800.woff2
 
 │       │       └── theme.ts
 

@@ -262,8 +262,11 @@ npm run test:browser -- --playwright <path-to-@playwright/test>
 It visits every `/preview` screen at 1280 and 390 px, the live pages and three
 preview screens at 320, 360, 600, 768, 900, 1024, 1200, 1280, 1440 and 1536 px,
 200% zoom (640 CSS px at 2×) and 200% text size, and checks: no page-level
-horizontal scroll; the navigation mode per breakpoint; Figtree served from the
-app with its OFL text; production routes never loading the preview chunk; the
+horizontal scroll; the navigation mode per breakpoint; Google Sans Flex, JetBrains
+Mono and the wordmark face served from the app with their OFL texts, Vietnamese,
+code and wordmark text rendered without fallback glyphs (Chromium font inspection),
+and the logo's colour regions distinct on the ink frame at 16–40 px; the active-tab
+reach centred, symmetric and following clicks, child routes and history; production routes never loading the preview chunk; the
 preview sending no API request and writing no storage; computed text contrast on
 twelve screens; skip link, route focus and visible focus on every catalogue tab
 stop; drawer and dialog focus behavior including the full-screen sheet below
@@ -2310,3 +2313,73 @@ The landing copy follows `DESIGN.md` S25 and describes the product's learning mo
 not available until their contracts are implemented; the Leader may want that copy
 reviewed before a public release. Anthropic's Claude Code (Claude Opus 5.5) made and
 verified these changes.
+
+## PR #209 CI remediation, typography, brand and navigation indicator — 7 November 2026
+
+### Authority
+
+The Leader's instruction “CodeMastery — PR #209 CI Remediation, Typography, Premium
+Brand Identity & Navigation Indicator Refinement” (7 November 2026) asked to fix the
+two CI failures on PR head `0ba1db0`, select one UI typeface from a ranked list,
+keep JetBrains Mono for code, give the wordmark its own display face, refine the
+logo palette for dark backgrounds and replace the active-tab indicator with the
+reference's concave curved bottom edge. No commit was requested; the changes are
+uncommitted on `feat/uiux-design-r1-implementation`.
+
+### CI failures and root causes
+
+| Job | Root cause (reproduced) | Fix |
+| --- | --- | --- |
+| Frontend: `PreviewApp.test.tsx` › “never reads the signed-in session …” (`/login` instead of `/courses`) | The test signs in through the real client but did not supply `VITE_API_BASE_URL`. Vite loads the developer's untracked root `.env`, so it passed locally; CI has no `.env`, the client refused the request with a configuration error and the page stayed on `/login`. Reproduced locally with `VITE_API_BASE_URL= npx vitest run src/app/preview`. Not an Auth or navigation regression. | The test stubs the API base (as `routes/index.test.tsx` does) and restores it; a bounded `waitUntil` (3 s, real timers) replaces the 200 ms loop and fails with the route and any visible alert; it also asserts one `POST /api/auth/login`. Full suite passes with and without the local API base. |
+| VM HTTPS ingress: `Build the release and local images …` (`apk add`, exit 18) | Deterministic: the Alpine v3.24 index no longer serves `alpine-release=3.24.3-r0` and `zlib=1.3.2-r1` ([deployment record](deployment.md#frontend-alpine-package-pins-refreshed--7-november-2026)). | Pins raised to `3.24.4-r0` and `zlib 1.4-r0` in both targets; the CI step prints the build log tail on failure. |
+
+### Typography, brand and indicator decisions
+
+- **UI face:** Google Sans Flex 4.005 (Fontsource `@fontsource-variable/google-sans-flex`
+  5.3.2, Google Fonts v23, SIL OFL 1.1). PP Neue Montreal 3 and Suisse Int'l, ranked
+  higher, are commercial and the project holds no licence that permits bundling them
+  for all team members and visitors; Google Sans Flex was the highest-ranked eligible
+  candidate, so Inter and Be Vietnam Pro were not evaluated further or installed.
+  Shipped: Latin (50.8 kB), Latin Extended (26.3 kB) and Vietnamese (11.1 kB) weight-axis
+  WOFF2 files with Google Fonts `unicode-range`s. fontTools confirmed every Vietnamese
+  base and tone-marked letter (Đ/đ, ă, â, ê, ô, ơ, ư, U+1EA0–U+1EF9) and combining marks;
+  `₫` (U+20AB) is absent and unused.
+- **Code face:** JetBrains Mono 2.211 (`@fontsource-variable/jetbrains-mono` 5.3.0, OFL),
+  same three subsets, complete Vietnamese coverage. `codeFontStack` is the only code
+  stack; the platform monospace stack is gone.
+- **Wordmark face:** Poppins ExtraBold 800 4.004 (`@fontsource/poppins` 5.3.0, OFL), one
+  Latin file (7.8 kB) declared as “CodeMastery Wordmark”, used only by `BrandWordmark`,
+  now also in the auth brand panel.
+- **Logo:** palette of `favicon.svg` retuned (electric-blue C, sky outer nodes, violet
+  focal node, lighter links); `favicon.ico` regenerated from it at 16/32/48/64 px.
+- **Indicator:** `canvasReachPath` draws an 88 × 14 px symmetric bell traced from the
+  reference (concave shoulders, convex crest); it re-centres on font swaps and sibling
+  resizes and takes the colour of the surface below the bar.
+- Figtree assets removed; no hardcoded font stack remains outside the theme tokens.
+
+A real defect found by the new harness check: in WebKit the reach stayed 2.4 px off
+centre because the item list moved without resizing when the wordmark font swapped
+in; the header now also observes its slots.
+
+### Executed checks and results
+
+Environment: macOS 27.2 arm64, Node 24.21.0, npm 11.19.0, Docker 29.8.1.
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (and `--noUnusedLocals`), `npm test`, `npm run build` (frontend; manifest and lockfile unchanged, so `npm ci` was not rerun) | PASS: 424 tests in 15 files; also 424/424 with `VITE_API_BASE_URL` empty (CI condition); build succeeded |
+| Preview isolation in `dist` | PASS: no preview copy, sample names, React Flow, Figtree or Plus Jakarta in the main chunk |
+| `docker build --no-cache` release and local targets, linux/amd64 and native | PASS (before the fix: release target failed with the apk error above) |
+| Ingress job steps 1–4, extracted from `ci.yml`, linux/amd64, OpenSSL 3 for step 2 | PASS: trust store 13/13, UID 101/Nginx 1.30.6/read-only configuration, no setuid/setgid, 8/8 invalid origins rejected; CA chain checks; `INGRESS_STUB_TESTS_PASS`; `INGRESS_BACKEND_TESTS_PASS`. The new failure-log path was exercised with a deliberately stale pin |
+| Ingress job step 5 (DP01 preflight) | NOT RUN: needs root on the host (`sudo install` under `/etc/codemastery`) |
+| Trivy, all severities, both frontend images | PASS: 0 findings |
+| `npm run test:browser -- --engine all` | PASS Chromium 153 38/38 and WebKit 26.6 38/38, including: only the three bundled faces load; the Vietnamese subset is fetched; Chromium font inspection shows Vietnamese text in Google Sans Flex, code in JetBrains Mono and the wordmark in Poppins with no fallback; logo regions ≥ 3:1 on ink and distinct at 16–40 px; reach centred (±1 px), 88 × 15 incl. 1 px overlap, symmetric, not focusable, following clicks, back/forward and child screens across Administrator, Instructor, Learner and anonymous navigation, present at 1024 px and absent at 390 px without overflow. BLOCKED Firefox (sandbox launch error, as before) |
+| E2E, five projects, disposable stack | PASS 53 (chromium-desktop 14, chromium-mobile 13, webkit-desktop 13, webkit-mobile 13), 4 skipped by design; BLOCKED firefox-desktop 13 at launch |
+| Impeccable detector, live pages and 20 preview screens at 1280 and 390 px | Live pages: no findings. Preview: the same accepted findings as on 6 November (dashed slot and drop zone as nested cards; sticky lesson aside) |
+| CI on the PR | NOT RUN: nothing was pushed |
+
+Visual comparison of the indicator with the reference was done by tracing the
+reference profile and inspecting enlarged screenshots side by side; it is a
+judgement, not a pixel-diff metric. No WCAG conformance or similarity score is
+claimed. Anthropic's Claude Code (Claude Opus 5.5) made the changes and ran the
+checks, with the local Impeccable detector and Playwright CLI.

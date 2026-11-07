@@ -497,10 +497,16 @@ are pills and icon actions 44 px circles. Text is ink `#15171C`/`#50545C`; the l
 blue `#0866F2` (and `#0652C4` for small text) marks interaction and focus. Pastel
 sky, mint, butter, lilac and rose families carry Learning, Mastered/Completed,
 Weak/warnings, recommendations and errors, always with a text label and glyph;
-Unknown is a dashed outline. The self-hosted Figtree variable font
-(`src/app/theme/figtree-latin-wght.woff2`, from `@fontsource-variable/figtree`
-5.2.10, SIL Open Font License 1.1, licence text in `public/figtree-OFL.txt`) covers
-Latin; other scripts fall back to system fonts. No font CDN is used.
+Unknown is a dashed outline. Typography uses exactly one UI face, Google Sans Flex
+4.005, with JetBrains Mono 2.211 for code and Poppins ExtraBold 800 only for the
+"CodeMastery" wordmark; all three are self-hosted variable or single-weight WOFF2
+files in `src/app/theme/` (Fontsource 5.3.x builds of the Google Fonts releases,
+SIL Open Font License 1.1, licence texts `public/google-sans-flex-OFL.txt`,
+`public/jetbrains-mono-OFL.txt`, `public/poppins-OFL.txt`). The UI and code faces
+ship Latin, Latin Extended and Vietnamese subsets selected by `unicode-range`. The
+theme exports `fontStack`, `codeFontStack` and `brandFontStack`. No font CDN is used.
+The logo artwork is `public/favicon.svg` (its palette was tuned for the ink frame on
+7 November 2026); `public/favicon.ico` is generated from it.
 `PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
 
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
@@ -527,7 +533,8 @@ Plan Dashboard — Nixtio](https://dribbble.com/shots/23956256). The redesign
 follows its general composition (ink frame, canvas, pastel tiles); no asset from
 the shot is used, the logo is CodeMastery's own, and no affiliation is implied.
 Known AI assistance: Anthropic's Claude Code (Claude Opus 5.5) wrote the
-`DESIGN.md` revision and implemented and verified the redesign, with the locally
+`DESIGN.md` revision and implemented and verified the redesign and its 7 November
+2026 typography, logo-palette and navigation-indicator refinement, with the locally
 installed Impeccable skill for design review and Playwright CLI for browser
 inspection.
 
