@@ -3,25 +3,25 @@ import { act, StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { ThemeProvider } from '@mui/material';
+import { Button, ThemeProvider } from '@mui/material';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { appTheme, brandFontStack, codeFontStack, color, fontStack, pathLine, presentationTokens, shadow } from '../../app/theme/theme';
+import { appTheme, brandFontStack, codeFontStack, color, control, fontStack, pathLine, presentationTokens, shadow } from '../../app/theme/theme';
 import { SidebarNav } from './SidebarNav';
 import { LoadingView, EmptyView, ErrorView } from './StatusViews';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PageHeader } from './PageHeader';
-import { AccountMenu, AppHeader, HeaderIconButton, Monogram, canvasReachPath } from './AppHeader';
+import { AccountMenu, AppHeader, HeaderIconButton, Monogram, REACH_MASK, canvasReachPath } from './AppHeader';
 import { BrandLogo, BrandWordmark } from './BrandLogo';
 import { CodeBlock } from './CodeBlock';
 import { AuthLayout } from '../../layouts/AuthLayout';
-import { DashboardLayout, Page } from '../../layouts/DashboardLayout';
+import { DashboardLayout, Page, canvasOutlinePath } from '../../layouts/DashboardLayout';
 import { StatusPill, MasteryTag, MasteryLegend, RecommendationTag } from './StatusPill';
 import { DataTable, PaginationBar } from './DataTable';
 import { SegmentedControl } from './ViewRail';
 import { PathSpine } from './PathSpine';
 import { GuidanceStack } from './GuidanceStack';
 import { SearchPill } from './PageHeader';
-import { CourseTile, ProgressLine } from './Tile';
+import { CircleAction, CircleAffordance, CourseTile, ProgressLine } from './Tile';
 import { COURSE_LOGOS, CourseMark, courseLanguage } from './CourseMark';
 import { LearnerHomePage } from '../../features/learning/pages/LearnerHomePage';
 
@@ -306,6 +306,19 @@ describe('Lit Path design-system primitives', () => {
         expect(half.every((y, i) => i === 0 || y <= half[i - 1])).toBe(true);
         expect(d.endsWith('V15 H0 Z')).toBe(true);
     });
+    it('cuts the reach out of the header with a mask built from the bell path, painting nothing', () => {
+        const svg = decodeURIComponent(REACH_MASK.match(/^url\("data:image\/svg\+xml,(.+)"\)$/)![1]);
+        expect(svg).toContain('viewBox="0 0 88 15"'); expect(svg).toContain(`d="${canvasReachPath(88, 14)}"`);
+        expect(svg).not.toMatch(/fill="#|fill="white|fill="rgb/);
+    });
+    it('outlines the canvas so it reaches under the bar and its visible corners start at the bar edge', () => {
+        const d = canvasOutlinePath(1264, 900, 14, 32, 32);
+        // A band under the bar (inset by the corner radius), then corners that begin at y = rise.
+        expect(d.startsWith('M32 0 H1232 V14 A32 32 0 0 1 1264 46')).toBe(true);
+        expect(d).toContain('V868 A32 32 0 0 1 1232 900 H32 A32 32 0 0 1 0 868 V46 A32 32 0 0 1 32 14 Z');
+        // Phones: 24 px top corners, square bottom.
+        expect(canvasOutlinePath(390, 600, 14, 24, 0)).toBe('M24 0 H366 V14 A24 24 0 0 1 390 38 V600 L390 600 H0 L0 600 V38 A24 24 0 0 1 24 14 Z');
+    });
     it('keeps one UI face, a dedicated code face and a wordmark face in the theme', async () => {
         expect(fontStack.split(',')[0]).toBe('"Google Sans Flex"'); expect(codeFontStack.split(',')[0]).toBe('"JetBrains Mono"');
         expect(brandFontStack.split(',')[0]).toBe('"CodeMastery Wordmark"');
@@ -421,6 +434,40 @@ describe('Lit Path design-system primitives', () => {
         const marks = [...host.querySelectorAll<HTMLElement>('ul[aria-label="Your active courses"] [data-course-mark]')];
         expect(marks.map((mark) => mark.dataset.courseMark)).toEqual(['python', 'generic']);
         for (const mark of marks) { expect(getComputedStyle(mark).width).toBe('32px'); expect(getComputedStyle(mark).backgroundColor).toBe('rgb(246, 246, 247)'); }
+    });
+    it('ranks buttons: graphite primary, neutral outlined secondary, Logo Blue tertiary, red destructive', async () => {
+        expect(control.primary).toBe(color.chromeRaised); expect(control.primaryHover).toBe(color.chromeHover);
+        await render(<><Button variant="contained">Save</Button><Button variant="outlined">Cancel</Button><Button>Skip</Button>
+            <Button variant="contained" color="error">Delete</Button><Button variant="contained" disabled>Off</Button><Button variant="outlined" disabled>Off 2</Button>
+            <Button variant="contained" color="onChrome">Create account</Button><Button variant="outlined" color="onChrome">Browse</Button></>);
+        const [primary, secondary, tertiary, danger, primaryOff, secondaryOff, chromePrimary, chromeSecondary] = [...host.querySelectorAll('button')].map((node) => getComputedStyle(node));
+        // MUI sets contained label colours through a custom property; jsdom does not resolve var().
+        const label = (style: CSSStyleDeclaration) => style.color.startsWith('var(') ? style.getPropertyValue('--variant-containedColor').toUpperCase() : style.color;
+        expect(primary.backgroundColor).toBe('rgb(28, 30, 36)'); expect(label(primary)).toBe('#FFFFFF'); // graphite, not the ink frame
+        expect(secondary.backgroundColor).toBe('rgb(255, 255, 255)'); expect(secondary.borderStyle).toBe('solid'); expect(secondary.borderColor).toBe('rgb(228, 228, 231)'); expect(secondary.color).toBe('rgb(21, 23, 28)');
+        expect(['rgba(0, 0, 0, 0)', 'transparent', '']).toContain(tertiary.backgroundColor.startsWith('var(') ? tertiary.getPropertyValue('--variant-textBg') : tertiary.backgroundColor); expect(tertiary.color).toBe('rgb(8, 102, 242)'); expect(tertiary.borderStyle).not.toBe('solid');
+        expect(danger.backgroundColor).toBe('rgb(180, 35, 24)');
+        expect(primaryOff.backgroundColor).toBe('rgb(238, 238, 240)'); expect(primaryOff.color).toBe('rgb(107, 112, 121)');
+        expect(secondaryOff.backgroundColor).toBe('rgb(255, 255, 255)'); expect(secondaryOff.color).toBe('rgb(107, 112, 121)');
+        expect(chromePrimary.backgroundColor).toBe('rgb(255, 255, 255)'); expect(['rgb(10, 11, 15)', '#0A0B0F']).toContain(label(chromePrimary));
+        expect(chromeSecondary.backgroundColor).toBe('rgb(28, 30, 36)'); expect(chromeSecondary.color).toBe('rgb(255, 255, 255)');
+        for (const style of [primary, secondary, danger]) expect(style.minHeight).toBe('48px');
+    });
+    it('uses the same roles for circular actions: graphite primary circle, outlined secondary circle', async () => {
+        await render(<><CircleAction label="Open" icon="arrow-right" variant="ink" /><CircleAction label="More" icon="more" /><CircleAffordance /><CircleAffordance icon="play" emphasis="primary" /></>);
+        const [primary, secondary] = [...host.querySelectorAll('button')].map((node) => getComputedStyle(node));
+        expect(primary.backgroundColor).toBe('rgb(28, 30, 36)');
+        expect(secondary.backgroundColor).toBe('rgb(255, 255, 255)'); expect(secondary.borderColor).toBe('rgb(228, 228, 231)');
+        // Tile arrows: neutral outlined with a graphite icon by default; graphite filled only for Resume/Continue.
+        const [open, resume] = [...host.querySelectorAll<HTMLElement>('[data-affordance]')];
+        expect(open.dataset.affordance).toBe('secondary'); expect(getComputedStyle(open).backgroundColor).toBe('rgb(255, 255, 255)');
+        expect(getComputedStyle(open).borderColor).toBe('rgb(228, 228, 231)'); expect(getComputedStyle(open).color).toBe('rgb(28, 30, 36)');
+        expect(resume.dataset.affordance).toBe('primary'); expect(getComputedStyle(resume).backgroundColor).toBe('rgb(28, 30, 36)');
+    });
+    it('keeps an error block recovery secondary so it never competes with the page primary', async () => {
+        await render(<ErrorView title="Couldn't load" message="Try again." onRetry={() => undefined} />);
+        const retry = host.querySelector('button')!;
+        expect(retry.textContent).toBe('Try again'); expect(retry.className).toContain('MuiButton-outlined');
     });
     it('shows one-based ranges over zero-based pages and the singular noun', async () => {
         const change = vi.fn();

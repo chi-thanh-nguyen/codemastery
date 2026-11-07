@@ -17,7 +17,7 @@ import { SegmentedControl } from '../../../shared/components/ViewRail';
 import { PaginationBar, TableToolbar } from '../../../shared/components/DataTable';
 import { Page } from '../../../layouts/DashboardLayout';
 import { CourseTile } from '../../../shared/components/Tile';
-import { color } from '../../../app/theme/theme';
+import { control } from '../../../app/theme/theme';
 
 const failure = (error: unknown) => error instanceof ApiError ? error.message : 'The request could not be completed. Please try again.';
 
@@ -92,7 +92,7 @@ export function MembershipTileMenu({ title, status, detailsHref, onDetails, onLe
     const close = () => setAnchor(null);
     return <>
         <IconButton aria-label={`More actions for ${title}`} aria-haspopup="menu" aria-expanded={anchor ? true : undefined} disabled={disabled}
-            onClick={(event) => setAnchor(event.currentTarget)} sx={{ width: 44, height: 44, bgcolor: color.fill150, color: color.ink900, '&:hover': { bgcolor: color.line200 } }}>
+            onClick={(event) => setAnchor(event.currentTarget)} sx={{ width: 44, height: 44, ...control.secondary }}>
             <PresentationIcon name="more" />
         </IconButton>
         <Menu anchorEl={anchor} open={!!anchor} onClose={close} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>

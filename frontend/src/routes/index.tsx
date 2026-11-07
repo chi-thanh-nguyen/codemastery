@@ -18,7 +18,6 @@ import { CourseDetailPage } from '../features/catalogue/pages/CourseDetailPage';
 import { LandingPage } from '../features/catalogue/pages/LandingPage';
 import { LearnerHome } from '../features/learning/pages/LearnerHomePage';
 import type { UserRole } from '../features/auth/types/authTypes';
-import { color } from '../app/theme/theme';
 
 // The landing page's example map pulls in the graph library, so it loads on demand.
 const ExampleMasteryMap = lazy(() => import('../features/mastery/components/ExampleMasteryMap'));
@@ -68,7 +67,7 @@ export function SessionNavigation() {
     return <>
         <Button component={Link} to="/login" variant="text" color="inherit" size="small" sx={{ color: 'common.white' }}>Sign in</Button>
         {/* Below 900 px "Create account" lives in the navigation drawer so the bar never overflows at large text sizes. */}
-        <Button component={Link} to="/register" variant="contained" size="small" sx={{ display: { xs: 'none', md: 'inline-flex' }, bgcolor: 'common.white', color: color.ink950, '&:hover': { bgcolor: color.fill150 } }}>Create account</Button>
+        <Button component={Link} to="/register" variant="contained" color="onChrome" size="small" sx={{ display: { xs: 'none', md: 'inline-flex' } }}>Create account</Button>
     </>;
 }
 
@@ -91,7 +90,7 @@ function Workspace() {
     const brand = auth.isAuthenticated ? startFor(auth.user?.role) : '/';
     return <DashboardLayout navItems={navItems} selectedNavId={currentSection(location.pathname)} onNavSelect={(path) => navigate(path)}
         headerActions={<SessionNavigation />} brandHref={brand} onBrandSelect={() => navigate(brand)}
-        drawerFooter={auth.isAuthenticated ? undefined : <Button component={Link} to="/register" variant="contained" fullWidth sx={{ bgcolor: 'common.white', color: color.ink950, '&:hover': { bgcolor: color.fill150 } }}>Create account</Button>}>
+        drawerFooter={auth.isAuthenticated ? undefined : <Button component={Link} to="/register" variant="contained" color="onChrome" fullWidth>Create account</Button>}>
         <Outlet />
     </DashboardLayout>;
 }

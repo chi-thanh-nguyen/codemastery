@@ -634,31 +634,44 @@ async function runEngine(playwright, engine, baseUrl) {
 
         // ── Active navigation: concave curved bottom-edge indicator ──────────
         {
+            // The reach is an opening cut into the header by its CSS mask (no painted element): read its geometry
+            // from the mask itself and verify the opening with screenshot pixels.
             const geometry = (page) => page.evaluate(() => {
-                const reach = document.querySelector('[data-canvas-reach]'), active = document.querySelector('header nav [aria-current="page"]');
-                if (!reach || !active) return null;
-                const r = reach.getBoundingClientRect(), a = active.getBoundingClientRect(), bar = reach.parentElement.getBoundingClientRect();
-                const path = reach.querySelector('path'), total = path.getTotalLength(); const pts = [];
-                for (let i = 0; i <= 200; i++) { const p = path.getPointAtLength((total * i) / 200); pts.push([p.x, p.y]); }
-                const w = Number(reach.querySelector('svg').getAttribute('width'));
-                const curve = pts.filter(([, y]) => y < 14 - 1e-3);
+                const header = document.querySelector('header[data-canvas-reach]'), active = document.querySelector('header nav [aria-current="page"]');
+                if (!header || !active) return null;
+                const st = getComputedStyle(header), h = header.getBoundingClientRect(), a = active.getBoundingClientRect();
+                const image = st.maskImage || st.webkitMaskImage, size = (st.maskSize || st.webkitMaskSize).split(',')[1].trim().split(' ').map(parseFloat);
+                const composite = st.maskComposite || st.webkitMaskComposite;
+                const svg = decodeURIComponent(image.match(/url\("data:image\/svg\+xml,([^"]+)"\)/)[1]);
+                const d = svg.match(/ d="([^"]+)"/)[1];
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', d);
+                const holder = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); holder.append(path); document.body.append(holder);
+                const total = path.getTotalLength(), pts = [];
+                for (let i = 0; i <= 200; i++) { const q = path.getPointAtLength((total * i) / 200); pts.push([q.x, q.y]); }
+                holder.remove();
+                const w = size[0], curve = pts.filter(([, y]) => y < 14 - 1e-3);
                 const asym = Math.max(...curve.map(([x, y]) => Math.min(...curve.filter(([, yy]) => Math.abs(yy - y) < 0.2).map(([xx]) => Math.abs(xx - (w - x))))));
-                return { reachCentre: r.left + r.width / 2, activeCentre: a.left + a.width / 2, width: r.width, height: r.height, bottomGap: Math.round(bar.bottom - r.bottom),
-                    crest: Math.min(...pts.map(([, y]) => y)), asym, focusable: reach.querySelectorAll('[tabindex], a, button').length, for: reach.getAttribute('data-for'), label: active.textContent,
-                    fill: getComputedStyle(reach).color, canvas: (() => {
-                        // Effective background of whatever surface sits directly below the bar.
-                        for (let el = document.elementFromPoint(r.left + r.width / 2, r.bottom + 3); el; el = el.parentElement) {
-                            const bg = getComputedStyle(el).backgroundColor; if (!/rgba\(0, 0, 0, 0\)|transparent/.test(bg)) return bg;
-                        }
-                        return null;
-                    })() };
+                const x = Number(header.dataset.reachX);
+                return { reachCentre: h.left + x + w / 2, activeCentre: a.left + a.width / 2, width: size[0], height: size[1], headerBottom: h.bottom, headerLeft: h.left, x,
+                    crest: Math.min(...pts.map(([, y]) => y)), asym, composite, for: header.dataset.reachFor, label: active.textContent,
+                    painted: document.querySelectorAll('header [data-canvas-reach], header svg[data-reach]').length };
             });
+            /** RGB of screenshot pixels at viewport points (decoded in the page through a canvas). */
+            const pixels = async (page, points) => {
+                const png = (await page.screenshot()).toString('base64');
+                return page.evaluate(async ({ png, points }) => {
+                    const img = new Image(); img.src = `data:image/png;base64,${png}`; await img.decode();
+                    const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+                    const scale = img.naturalWidth / innerWidth;
+                    return points.map(([px, py]) => [...x.getImageData(Math.round(px * scale), Math.round(py * scale), 1, 1).data].slice(0, 3).join(','));
+                }, { png, points });
+            };
             const settled = async (page) => { await page.waitForTimeout(400); return geometry(page); };
             const assertAligned = (g, label) => {
                 assert(g, `${label}: indicator present`);
                 assert(Math.abs(g.reachCentre - g.activeCentre) <= 1, `${label}: centred under the active item ${JSON.stringify(g)}`);
                 assert.equal(g.width, 88); assert.equal(g.height, 15); assert(g.crest < 0.01, `${label}: crest reaches the top (${g.crest})`); assert(g.asym < 0.6, `${label}: symmetric (${g.asym})`);
-                assert.equal(g.focusable, 0); assert.equal(g.fill, g.canvas, `${label}: drawn in the colour of the surface below the bar`);
+                assert.match(g.composite, /exclude|xor/, `${label}: the bell is subtracted from the header`); assert.equal(g.painted, 0, `${label}: nothing painted to fake the opening`);
             };
             const { context, page } = await newPage({ viewport: { width: 1280, height: 900 } });
             await check('the active tab carries one symmetric concave reach that follows clicks, child routes and history', async () => {
@@ -682,8 +695,30 @@ async function runEngine(playwright, engine, baseUrl) {
                 assertAligned(await settled(page), '1024');
                 await page.screenshot({ path: path.join(dir, 'nav-reach-admin-1024.png'), clip: { x: 0, y: 0, width: 1024, height: 110 } });
                 await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
-                assert.equal(await page.locator('[data-canvas-reach]').isVisible().catch(() => false), false);
+                assert.equal(await page.locator('header[data-canvas-reach]').count(), 0, 'no reach below 900 px');
                 const size = await overflow(page); assert(size.scroll <= size.client);
+            });
+            await check('the reach is a real opening: the canvas shows through it seamlessly, and content scrolling under the bar shows through too', async () => {
+                await page.setViewportSize({ width: 1280, height: 900 }); await page.goto(url('/preview?screen=my-courses')); await ready(page);
+                const g = await settled(page); assertAligned(g, 'My courses');
+                const cx = g.reachCentre, bottom = g.headerBottom;
+                const [crest, above, shoulder, edge, below, seamLeft, seamRight] = await pixels(page, [[cx, bottom - 3], [cx, bottom - 18], [cx - 60, bottom - 3], [cx, bottom - 1], [cx, bottom + 1], [cx - 30, bottom - 0.5], [cx + 30, bottom - 0.5]]);
+                const canvas = '246,246,247', ink = '10,11,15';
+                assert.equal(crest, canvas, 'inside the bell: the canvas'); assert.equal(above, ink, 'above the crest: the bar');
+                assert.equal(shoulder, ink, 'beside the bell: the bar'); assert.equal(edge, canvas, 'no seam where the opening meets the bar edge');
+                assert.equal(below, canvas, 'below the bar: the same canvas'); assert.equal(seamLeft, seamRight, 'symmetric at the base');
+                // Scroll so a white tile passes under the sticky bar: the opening now shows the tile, not a fixed colour.
+                // (The catalogue is long enough to scroll a tile under the bar; the reach sits under "Catalogue".)
+                await page.goto(url('/courses')); await ready(page); await page.locator('main article').first().waitFor();
+                const cat = await settled(page); assertAligned(cat, 'Catalogue');
+                const tileTop = await page.evaluate((x) => { const t = [...document.querySelectorAll('main article')].find((el) => { const r = el.getBoundingClientRect(); return r.left < x && r.right > x; }); return t ? t.getBoundingClientRect().top + scrollY : null; }, cat.reachCentre);
+                assert(tileTop, 'a tile lies under the reach');
+                await page.evaluate((y) => scrollTo(0, y), tileTop - cat.headerBottom + 44); await page.waitForTimeout(300);
+                const g2 = await geometry(page);
+                const [through] = await pixels(page, [[g2.reachCentre, g2.headerBottom - 3]]);
+                assert.equal(through, '255,255,255', `the scrolled tile shows through the opening (${through})`);
+                await page.screenshot({ path: path.join(dir, 'nav-reach-scrolled-1280.png'), clip: { x: Math.max(0, g2.reachCentre - 160), y: 0, width: 320, height: 120 } });
+                await page.evaluate(() => scrollTo(0, 0));
             });
             await context.close();
         }
@@ -717,14 +752,13 @@ async function runEngine(playwright, engine, baseUrl) {
                 }
                 await page.setViewportSize({ width: 1280, height: 900 });
             });
-            await check('preview screens carry no preview chrome (no notice, switcher, index or reset button) and the reach matches the canvas', async () => {
+            await check('preview screens carry no preview chrome (no notice, switcher, index or reset button)', async () => {
                 for (const screen of ['overview', 'my-courses', 'admin-overview', 'sign-in', 'forgot-password', 'quiz-attempt']) {
                     await page.goto(url(`/preview?screen=${screen}`)); await ready(page);
                     assert.equal(await page.locator('[aria-label="Design preview notice"], [aria-label="Preview workspace"]').count(), 0, `${screen}: no notice or switcher`);
                     for (const name of ['Reset sample data', 'Preview index', 'Simulate time running out']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, `${screen}: ${name}`);
                     assert.equal(await page.getByText('Design preview · Sample data.').count(), 0, `${screen}: no sample-data line`);
-                    const reach = await page.locator('[data-canvas-reach]').evaluate((el) => getComputedStyle(el).color).catch(() => null);
-                    if (reach) assert.equal(reach, 'rgb(246, 246, 247)', `${screen}: reach colour`);
+                    assert.equal(await page.locator('header svg[data-reach], header [data-canvas-reach] > svg').count(), 0, `${screen}: no painted reach shape`);
                 }
                 await page.goto(url('/preview?screen=my-courses')); await ready(page);
                 await page.screenshot({ path: path.join(dir, 'preview-top-1280.png'), clip: { x: 0, y: 0, width: 1280, height: 260 } });
@@ -779,6 +813,25 @@ async function runEngine(playwright, engine, baseUrl) {
                 await page.setViewportSize({ width: 390, height: 844 }); await page.goto(url('/courses')); await ready(page);
                 const mobile = await marks(); assert(mobile.length > 0 && mobile.every((m) => m.w === 48 && generic(m)));
                 await page.screenshot({ path: path.join(dir, 'course-marks-catalogue-390.png') });
+            });
+            await check('button hierarchy: graphite primary, outlined secondary, blue tertiary, red destructive, with hover, focus and disabled states', async () => {
+                await page.setViewportSize({ width: 1280, height: 900 });
+                await page.goto(url('/preview?screen=overview')); await ready(page);
+                const style = (name) => page.getByRole('button', { name, exact: true }).first().evaluate((el) => { const s = getComputedStyle(el); return { bg: s.backgroundColor, color: s.color, border: `${s.borderTopWidth} ${s.borderTopStyle} ${s.borderTopColor}`, outline: `${s.outlineWidth} ${s.outlineStyle} ${s.outlineColor}` }; });
+                const rest = { primary: await style('Primary action'), secondary: await style('Secondary'), tertiary: await style('Text link action'), danger: await style('Delete'), disabled: await style('Disabled') };
+                assert.equal(rest.primary.bg, 'rgb(28, 30, 36)'); assert.equal(rest.primary.color, 'rgb(255, 255, 255)');
+                assert.equal(rest.secondary.bg, 'rgb(255, 255, 255)'); assert.equal(rest.secondary.border, '1px solid rgb(228, 228, 231)'); assert.equal(rest.secondary.color, 'rgb(21, 23, 28)');
+                assert.equal(rest.tertiary.bg, 'rgba(0, 0, 0, 0)'); assert.equal(rest.tertiary.color, 'rgb(8, 102, 242)');
+                assert.equal(rest.danger.bg, 'rgb(180, 35, 24)'); assert.equal(rest.disabled.bg, 'rgb(238, 238, 240)');
+                await page.getByRole('button', { name: 'Primary action', exact: true }).hover(); await page.waitForTimeout(200);
+                assert.equal((await style('Primary action')).bg, 'rgb(42, 45, 53)', 'primary hover lightens to chrome-hover');
+                await page.getByRole('button', { name: 'Secondary', exact: true }).hover(); await page.waitForTimeout(200);
+                assert.equal((await style('Secondary')).bg, 'rgb(238, 238, 240)', 'secondary hover fills fill-150');
+                await page.mouse.move(0, 0);
+                await page.getByRole('button', { name: 'Secondary', exact: true }).focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
+                assert.match((await style('Secondary')).outline, /^2px solid rgb\(8, 102, 242\)$/, 'keyboard focus keeps the 2 px Logo Blue ring');
+                await page.locator('main').getByText('Primary action').scrollIntoViewIfNeeded();
+                await page.locator('main').getByText('Primary action').locator('xpath=ancestor::*[contains(@class,"MuiPaper-root") or self::div][1]').screenshot({ path: path.join(dir, 'buttons-1280.png') }).catch(() => undefined);
             });
             await check('consistency fixes: flat map nodes, 4/6 dashes, one instructor mention, current bell, 280 px outline', async () => {
                 await page.setViewportSize({ width: 1280, height: 900 });

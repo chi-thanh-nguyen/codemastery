@@ -13,7 +13,8 @@ export function PlacementPrompt({ onStart, onSkip, busy }: PlacementPromptProps)
             <Typography sx={{ mt: .5, color: color.ink700 }}>CodeMastery uses it to mark what you already know, so you can skip it. You can also start from the beginning.</Typography>
         </Box>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignSelf: 'center' }}>
-            <Button variant="contained" onClick={onStart} disabled={busy}>Start diagnostic</Button>
+            {/* Secondary: the course title row keeps the page's one primary action (Start or Resume course). */}
+            <Button variant="outlined" onClick={onStart} disabled={busy}>Start diagnostic</Button>
             <Button variant="text" color="inherit" onClick={onSkip} disabled={busy} sx={{ color: color.ink900 }}>Skip and start from the beginning</Button>
         </Box>
     </Box>;

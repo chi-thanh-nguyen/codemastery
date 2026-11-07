@@ -11,7 +11,7 @@ import { QuestionRenderer } from '../components/QuestionRenderer';
 import { QuizTimer, formatClock } from '../components/QuizTimer';
 import { quizKindLabel } from '../types/assessmentTypes';
 import type { QuestionView, QuizSummaryView } from '../types/assessmentTypes';
-import { color, focusRingOnChrome, radius } from '../../../app/theme/theme';
+import { color, control, focusRingOnChrome, radius } from '../../../app/theme/theme';
 
 export interface QuizIntroViewProps { quiz: QuizSummaryView; onStart: () => void; starting?: boolean; error?: string; back?: Crumb; note?: ReactNode; title?: string; children?: ReactNode }
 /** Before the timer starts: kind, length, time limit and attempt number (US-05). */
@@ -69,7 +69,7 @@ export function QuizAttemptPage({ quizTitle, questions, answers, currentIndex, o
                 const done = (answers[item.id] ?? []).length > 0, current = index === currentIndex;
                 return <Box component="li" key={item.id} sx={{ flexShrink: 0 }}>
                     <ButtonBase onClick={() => onNavigate(index)} aria-current={current ? 'step' : undefined} aria-label={`Question ${index + 1}, ${done ? 'answered' : 'not answered'}`}
-                        sx={{ width: 44, height: 44, borderRadius: '50%', fontWeight: 600, fontSize: '0.9375rem', bgcolor: done ? color.ink950 : color.surface, color: done ? color.surface : color.ink900,
+                        sx={{ width: 44, height: 44, borderRadius: '50%', fontWeight: 600, fontSize: '0.9375rem', bgcolor: done ? control.primary : color.surface, color: done ? color.surface : color.ink900,
                             border: done ? 0 : `1.5px solid ${color.ink400}`, boxShadow: current ? `0 0 0 3px ${color.canvas100}, 0 0 0 5px ${color.brand600}` : 'none' }}>{index + 1}</ButtonBase>
                 </Box>;
             })}
@@ -84,7 +84,7 @@ export function QuizAttemptPage({ quizTitle, questions, answers, currentIndex, o
                 <Typography component="p" sx={{ fontWeight: 600, fontSize: '1rem', minWidth: 0, flex: { xs: '1 1 auto', md: '0 1 auto' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quizTitle}</Typography>
                 <Typography component="p" className="cm-tabular" sx={{ color: color.chromeMuted, flex: 1, textAlign: 'center', display: { xs: 'none', md: 'block' } }}>Question {currentIndex + 1} of {questions.length}</Typography>
                 <QuizTimer remainingSeconds={remainingSeconds} totalSeconds={totalSeconds} />
-                <Button variant="contained" size="small" onClick={() => setDialog('submit')} disabled={locked} sx={{ bgcolor: color.surface, color: color.ink950, '&:hover': { bgcolor: color.fill150 } }}>Submit quiz</Button>
+                <Button variant="contained" color="onChrome" size="small" onClick={() => setDialog('submit')} disabled={locked}>Submit quiz</Button>
             </Box>
             <Box sx={{ display: { md: 'none' }, px: 1.5, pb: 1.5, bgcolor: color.canvas100, borderRadius: `${radius.lg}px ${radius.lg}px 0 0`, pt: 1.5, color: color.ink900 }}>{navigator}</Box>
         </Box>

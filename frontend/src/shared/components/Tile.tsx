@@ -4,7 +4,7 @@ import type { SxProps, Theme } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
 import { CourseMark } from './CourseMark';
 import type { PresentationIconName } from './PresentationIcon';
-import { color, motion, radius, shadow, tones } from '../../app/theme/theme';
+import { color, control, motion, radius, shadow, tones } from '../../app/theme/theme';
 import type { Tone } from '../../app/theme/theme';
 
 export interface TileProps {
@@ -24,7 +24,8 @@ export function Tile({ children, component = 'div', interactive = false, padding
         position: 'relative', bgcolor: color.surface, borderRadius: `${radius.lg}px`, p: padding, minWidth: 0, boxSizing: 'border-box',
         ...(interactive ? {
             transition: `transform ${motion.standard}ms ${motion.easeIn}, box-shadow ${motion.standard}ms ${motion.easeIn}`,
-            '@media (hover: hover) and (pointer: fine)': { '&:hover': { transform: 'translateY(-2px)', boxShadow: shadow.hover } },
+            // The whole tile is the link: hovering it also fills a secondary arrow circle, like a hovered secondary button.
+            '@media (hover: hover) and (pointer: fine)': { '&:hover': { transform: 'translateY(-2px)', boxShadow: shadow.hover, '& [data-affordance="secondary"]': { bgcolor: color.fill150 } } },
             '&:focus-within:has(a[data-tile-link]:focus-visible)': { boxShadow: `0 0 0 2px ${color.brand600}` },
         } : {}),
     }, ...(Array.isArray(sx) ? sx : [sx])]}>{children}</Box>;
@@ -77,14 +78,15 @@ export interface CircleActionProps {
 /** 44 px circular action. `ink` is the single primary action of a tile or row. */
 export function CircleAction({ label, icon, onClick, href, variant = 'fill', disabled, size = 'md', ...aria }: CircleActionProps) {
     const s = size === 'sm' ? 36 : 44;
-    const palette = variant === 'ink' ? { bgcolor: color.ink950, color: color.surface, '&:hover': { bgcolor: color.chromeRaised } }
-        : variant === 'fill' ? { bgcolor: color.fill150, color: color.ink900, '&:hover': { bgcolor: color.line200 } }
+    // ink = primary (graphite fill); fill = secondary (neutral outlined circle); plain = no surface.
+    const palette = variant === 'ink' ? { bgcolor: control.primary, color: color.surface, '&:hover': { bgcolor: control.primaryHover } }
+        : variant === 'fill' ? control.secondary
             : { color: color.ink700, '&:hover': { bgcolor: color.fill150 } };
     return <Tooltip title={label}>
         <span style={{ display: 'inline-flex' }}>
             <IconButton aria-label={label} onClick={(event: MouseEvent) => { if (href && onClick) event.preventDefault(); onClick?.(); }} disabled={disabled}
                 {...(href ? { component: 'a', href } : {})} {...aria}
-                sx={{ width: s, height: s, flexShrink: 0, ...palette, '&.Mui-disabled': { bgcolor: variant === 'plain' ? 'transparent' : color.fill150, color: variant === 'plain' ? color.line200 : color.ink500 }, '& svg': { fontSize: 20 } }}>
+                sx={{ width: s, height: s, flexShrink: 0, ...palette, '&.Mui-disabled': { bgcolor: variant === 'plain' ? 'transparent' : variant === 'fill' ? color.surface : color.fill150, color: variant === 'plain' ? color.line200 : color.ink500 }, '& svg': { fontSize: 20 } }}>
                 <PresentationIcon name={icon} />
             </IconButton>
         </span>
@@ -92,9 +94,15 @@ export function CircleAction({ label, icon, onClick, href, variant = 'fill', dis
 }
 
 /** Visual ink circle for a tile whose title link already covers the tile (no duplicate tab stop). */
-export function CircleAffordance({ icon = 'arrow-right' }: { icon?: PresentationIconName }) {
-    return <Box aria-hidden sx={{ width: 44, height: 44, borderRadius: '50%', bgcolor: color.ink950, color: color.surface, display: 'grid', placeItems: 'center',
-        flexShrink: 0, pointerEvents: 'none', '& svg': { fontSize: 20 } }}><PresentationIcon name={icon} /></Box>;
+/**
+ * `secondary` (default): neutral outlined circle with a graphite icon, for ordinary "open" tiles.
+ * `primary`: graphite circle, only for the one important next step (Resume, Continue).
+ */
+export function CircleAffordance({ icon = 'arrow-right', emphasis = 'secondary' }: { icon?: PresentationIconName; emphasis?: 'primary' | 'secondary' }) {
+    const surface = emphasis === 'primary' ? { bgcolor: control.primary, color: color.surface }
+        : { bgcolor: color.surface, color: control.primary, border: `1px solid ${color.line200}`, boxSizing: 'border-box' };
+    return <Box aria-hidden data-affordance={emphasis} sx={{ width: 44, height: 44, borderRadius: '50%', ...surface, display: 'grid', placeItems: 'center',
+        flexShrink: 0, pointerEvents: 'none', transition: `background-color ${motion.fast}ms`, '& svg': { fontSize: 20 } }}><PresentationIcon name={icon} /></Box>;
 }
 
 export interface StatTileProps { value: ReactNode; label: string; tone?: 'sky' | 'mint' | 'butter' | 'lilac' | 'neutral' | 'dashed' | 'white' }

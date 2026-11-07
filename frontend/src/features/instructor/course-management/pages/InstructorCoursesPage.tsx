@@ -16,7 +16,7 @@ export function InstructorCoursesPage({ instructorName, courses, attention, onOp
     return <Page aside={<GuidanceStack title="Needs attention" entries={attention} emptyText="Nothing else needs your attention." />} asideLabel="Needs attention">
         <PageHeader title="Teaching" subtitle={`Courses you own, ${instructorName}. Learners see only published content.`}
             actions={<Button variant="contained" onClick={onCreate} startIcon={<PresentationIcon name="plus" />}>Create course</Button>} />
-        {courses.length === 0 ? <EmptyView icon="book" title="You don't own a course yet" message="Create a course, add chapters and lessons, then publish it when it's ready." action={<Button variant="contained" onClick={onCreate}>Create course</Button>} />
+        {courses.length === 0 ? <EmptyView icon="book" title="You don't own a course yet" message="Create a course, add chapters and lessons, then publish it when it's ready." action={<Button variant="outlined" onClick={onCreate}>Create course</Button>} />
             : <Box component="ul" aria-label="Your courses" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 3, gridTemplateColumns: { xs: 'minmax(0,1fr)', sm: 'repeat(2, minmax(0, 1fr))' } }}>
                 {courses.map((course) => <Box component="li" key={course.id} sx={{ minWidth: 0 }}>
                     <CourseTile title={course.title} description={course.description} href={`#course-${course.id}`} onOpen={() => onOpen(course.id)}

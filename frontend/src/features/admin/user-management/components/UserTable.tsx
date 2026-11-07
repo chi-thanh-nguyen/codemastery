@@ -6,6 +6,7 @@ import { EmptyView } from '../../../../shared/components/StatusViews';
 import { StatusPill } from '../../../../shared/components/StatusPill';
 import { PresentationIcon } from '../../../../shared/components/PresentationIcon';
 import type { UserRowView } from '../types/userManagementTypes';
+import { control } from '../../../../app/theme/theme';
 
 export interface UserTableProps { rows: UserRowView[]; onChangeRole: (user: UserRowView) => void; onToggleLock: (user: UserRowView) => void; page: number; pageSize: number; total: number; onPage: (page: number) => void; showEmail: boolean; emptyAction?: ReactNode }
 
@@ -25,7 +26,7 @@ export function UserTable({ rows, onChangeRole, onToggleLock, page, pageSize, to
 function RowMenu({ user, onChangeRole, onToggleLock }: { user: UserRowView; onChangeRole: (user: UserRowView) => void; onToggleLock: (user: UserRowView) => void }) {
     const [anchor, setAnchor] = useState<HTMLElement | null>(null);
     return <>
-        <IconButton aria-label={`Actions for ${user.displayName}`} aria-haspopup="menu" onClick={(event) => setAnchor(event.currentTarget)} sx={{ bgcolor: 'action.hover' }}><PresentationIcon name="more" /></IconButton>
+        <IconButton aria-label={`Actions for ${user.displayName}`} aria-haspopup="menu" onClick={(event) => setAnchor(event.currentTarget)} sx={control.secondary}><PresentationIcon name="more" /></IconButton>
         <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
             <MenuItem onClick={() => { setAnchor(null); onChangeRole(user); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="user" sx={{ fontSize: 20 }} /></ListItemIcon>Change role</MenuItem>
             <MenuItem onClick={() => { setAnchor(null); onToggleLock(user); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name={user.status === 'active' ? 'lock' : 'unlock'} sx={{ fontSize: 20 }} /></ListItemIcon>{user.status === 'active' ? 'Lock account' : 'Unlock account'}</MenuItem>

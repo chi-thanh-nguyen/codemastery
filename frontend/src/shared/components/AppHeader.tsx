@@ -20,8 +20,6 @@ export interface AppHeaderProps {
     search?: ReactNode;
     brandHref?: string;
     onBrandSelect?: () => void;
-    /** Fill of the reach: the colour of the surface directly below the bar (canvas by default). */
-    reachColor?: string;
 }
 
 const REACH = presentationTokens.reachWidth, REACH_RISE = presentationTokens.reachHeight;
@@ -54,17 +52,24 @@ export function canvasReachPath(width: number, rise: number, samples = 12): stri
     return `${d} V${rise + 1} H0 Z`;
 }
 const REACH_PATH = canvasReachPath(REACH, REACH_RISE);
+/**
+ * The bell as a mask layer (88 × 15: the curve plus 1 px below the bar edge). It is subtracted from the
+ * header, so the bar itself is cut and the surface underneath (the canvas, or content scrolling under the
+ * sticky bar) shows through. Nothing is painted to fake the cut-out.
+ */
+export const REACH_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${REACH}" height="${REACH_RISE + 1}" viewBox="0 0 ${REACH} ${REACH_RISE + 1}"><path d="${REACH_PATH}"/></svg>`)}")`;
 
 /** Ink top bar with the "canvas reach" under the active destination (DESIGN.md › Top bar). */
-export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId, onNavSelect, actions, search, brandHref, onBrandSelect, reachColor = color.canvas100 }: AppHeaderProps) {
+export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId, onNavSelect, actions, search, brandHref, onBrandSelect }: AppHeaderProps) {
     const theme = useTheme();
     const wide = useMediaQuery(theme.breakpoints.up('lg'));
-    const bar = useRef<HTMLDivElement>(null);
+    const bar = useRef<HTMLDivElement>(null), header = useRef<HTMLElement>(null);
     const [reach, setReach] = useState<number | null>(null);
     const measure = useCallback(() => {
-        const host = bar.current, active = host?.querySelector<HTMLElement>('[data-nav-item][aria-current="page"]');
-        if (!host || !active || active.offsetParent === null) { setReach(null); return; }
-        const a = active.getBoundingClientRect(), h = host.getBoundingClientRect();
+        const host = bar.current, frame = header.current, active = host?.querySelector<HTMLElement>('[data-nav-item][aria-current="page"]');
+        if (!host || !frame || !active || active.offsetParent === null) { setReach(null); return; }
+        // Relative to the header element, which carries the mask (the bar is centred inside it).
+        const a = active.getBoundingClientRect(), h = frame.getBoundingClientRect();
         setReach(Math.round(a.left - h.left + a.width / 2 - REACH / 2));
     }, []);
     useLayoutEffect(() => {
@@ -81,11 +86,24 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
         // The item list moves without resizing when a sibling changes width (for example when the
         // wordmark face swaps in), so observe the bar, every slot in it and the list itself.
         const observer = new ResizeObserver(measure); observer.observe(host);
+        if (header.current) observer.observe(header.current);
         for (const slot of [...host.children, ...host.querySelectorAll('nav ul')]) observer.observe(slot);
         return () => { observer.disconnect(); fonts?.removeEventListener?.('loadingdone', measure); };
     }, [measure, selectedNavId, navItems, wide]);
     const brand = <BrandWordmark size={presentationTokens.brandMark} hideTextBelow={360} />;
-    return <Box component="header" sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: 'common.white' }}>
+    // Canvas reach: the bar's own ink is cut by the bell (mask-composite: exclude), so the shape is a real
+    // opening in the header, not a painted patch. Below 900 px there is no reach (the drawer marks the page).
+    const cut = reach !== null ? {
+        maskImage: `linear-gradient(#000, #000), ${REACH_MASK}`, WebkitMaskImage: `linear-gradient(#000, #000), ${REACH_MASK}`,
+        maskSize: `100% 100%, ${REACH}px ${REACH_RISE + 1}px`, WebkitMaskSize: `100% 100%, ${REACH}px ${REACH_RISE + 1}px`,
+        maskRepeat: 'no-repeat', WebkitMaskRepeat: 'no-repeat',
+        maskPosition: `0 0, ${reach}px calc(100% + 1px)`, WebkitMaskPosition: `0 0, ${reach}px calc(100% + 1px)`,
+        WebkitMaskComposite: 'xor', maskComposite: 'exclude',
+        transition: `mask-position ${motion.reach}ms ${motion.easeIn}, -webkit-mask-position ${motion.reach}ms ${motion.easeIn}`,
+    } : {};
+    return <Box component="header" ref={header} data-canvas-reach={reach !== null ? '' : undefined} data-reach-for={reach !== null ? selectedNavId : undefined}
+        data-reach-x={reach ?? undefined}
+        sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: 'common.white', [theme.breakpoints.up('md')]: cut }}>
         <Box ref={bar} sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 },
             height: { xs: presentationTokens.topBarHeightCompact, sm: presentationTokens.topBarHeight }, px: { xs: 1.5, sm: 2.5, md: 3 },
             maxWidth: 1600, mx: 'auto', '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>
@@ -106,12 +124,6 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
             {navItems.length === 0 && <Box sx={{ flex: 1 }} />}
             {search && <Box sx={{ flex: '0 1 320px', minWidth: 0, display: { xs: 'none', md: 'block' } }}>{search}</Box>}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1 }, flexShrink: 0, ml: { xs: 'auto', md: 0 } }}>{actions}</Box>
-            {reach !== null && <Box aria-hidden data-canvas-reach data-for={selectedNavId} sx={{ display: { xs: 'none', md: 'block' }, position: 'absolute', bottom: -1, left: 0, width: REACH, height: REACH_RISE + 1,
-                transform: `translateX(${reach}px)`, transition: `transform ${motion.reach}ms ${motion.easeIn}`, pointerEvents: 'none', color: reachColor }}>
-                <svg width={REACH} height={REACH_RISE + 1} viewBox={`0 0 ${REACH} ${REACH_RISE + 1}`} fill="currentColor" focusable="false" style={{ display: 'block' }}>
-                    <path d={REACH_PATH} />
-                </svg>
-            </Box>}
         </Box>
     </Box>;
 }

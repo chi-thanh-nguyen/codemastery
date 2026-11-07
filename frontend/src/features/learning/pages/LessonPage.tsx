@@ -11,7 +11,7 @@ import type { GuidanceEntryData } from '../../../shared/components/GuidanceStack
 import { CourseOutline, LessonProgressPill, MarkerTag } from '../components/CourseOutline';
 import { LessonContent, MaterialList } from '../components/LessonContent';
 import type { LessonBlock, LessonMaterialView, LessonProgressState, OutlineChapterView, SkillTagView, LessonAdaptiveMarker } from '../types/learningTypes';
-import { color, presentationTokens, radius, shadow } from '../../../app/theme/theme';
+import { color, control, presentationTokens, radius, shadow } from '../../../app/theme/theme';
 
 export interface PrerequisiteWarningView { skillName: string; reviewLessonTitle?: string; onReview?: () => void }
 export interface LessonPageProps {
@@ -86,14 +86,14 @@ export function LessonPage({ courseTitle, chapterTitle, lesson, chapters, onOpen
                 {discussion && <Box sx={{ mt: 6 }}>{discussion}</Box>}
                 <Box role="region" aria-label="Lesson actions" sx={{ position: 'sticky', bottom: { xs: 8, sm: 16 }, zIndex: 5, mt: 6, maxWidth: 720, bgcolor: color.surface, borderRadius: `${radius.pill}px`,
             boxShadow: shadow.raised, p: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <IconButton aria-label="Previous lesson" onClick={onPrevious} disabled={!onPrevious} sx={{ bgcolor: color.fill150 }}><PresentationIcon name="arrow-left" /></IconButton>
+            <IconButton aria-label="Previous lesson" onClick={onPrevious} disabled={!onPrevious} sx={control.secondary}><PresentationIcon name="arrow-left" /></IconButton>
             <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
                 {completion === 'error' && <Typography role="alert" variant="body2" sx={{ color: color.rose700, display: { xs: 'none', sm: 'block' } }}>Couldn't save. Try again.</Typography>}
                 {done ? <Typography role="status" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}><PresentationIcon name="check-circle" sx={{ color: color.mint700 }} />{lesson.progress === 'completed' ? 'Lesson completed' : 'Counted as complete'}</Typography>
                     : <Button variant="contained" onClick={onMarkComplete} disabled={completion === 'saving'} aria-busy={completion === 'saving' || undefined}>{completion === 'saving' ? 'Saving…' : completion === 'error' ? 'Try again' : 'Mark as complete'}</Button>}
             </Box>
             {onNext ? <Button variant={done ? 'contained' : 'outlined'} onClick={onNext} endIcon={<PresentationIcon name="arrow-right" />} sx={{ display: { xs: 'none', sm: 'inline-flex' } }}>Next lesson</Button> : null}
-            <IconButton aria-label="Next lesson" onClick={onNext} disabled={!onNext} sx={{ bgcolor: color.fill150, display: { sm: 'none' } }}><PresentationIcon name="arrow-right" /></IconButton>
+            <IconButton aria-label="Next lesson" onClick={onNext} disabled={!onNext} sx={{ ...control.secondary, display: { sm: 'none' } }}><PresentationIcon name="arrow-right" /></IconButton>
         </Box>
             </Box>
         </Box>

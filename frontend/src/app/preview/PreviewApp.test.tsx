@@ -85,8 +85,8 @@ describe('isolated design preview', () => {
             expect(host.querySelector('[aria-label="Preview workspace"]'), screen).toBeNull();
             expect(host.textContent, screen).not.toContain('Design preview · Sample data.');
             for (const label of ['Reset sample data', 'Preview index', 'Simulate time running out']) expect(buttons(label).length, `${screen}: ${label}`).toBe(0);
-            const reach = host.querySelector<HTMLElement>('[data-canvas-reach]');
-            if (reach) expect(getComputedStyle(reach).color, screen).toBe('rgb(246, 246, 247)');
+            // The reach is cut into the header by its mask; no painted shape fakes the opening.
+            expect(host.querySelector('header [data-canvas-reach]'), screen).toBeNull();
         }
     });
 

@@ -57,7 +57,8 @@ export function ErrorView({ title = 'Something went wrong', message = 'Something
             <Typography component={headingLevel} variant="h4">{title}</Typography>
             <Typography sx={{ mt: .5, overflowWrap: 'anywhere' }}>{message}</Typography>
             {(onRetry || action) && <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {onRetry && <Button variant="contained" size="small" onClick={onRetry} startIcon={<PresentationIcon name="refresh" />}>{retryLabel}</Button>}
+                {/* Secondary: the page keeps its own primary action; the block's message carries the urgency. */}
+                {onRetry && <Button variant="outlined" size="small" onClick={onRetry} startIcon={<PresentationIcon name="refresh" />}>{retryLabel}</Button>}
                 {action}
             </Box>}
         </Box>

@@ -1,7 +1,7 @@
 import { Box, ToggleButton, ToggleButtonGroup, Tooltip, useMediaQuery, useTheme } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
 import type { PresentationIconName } from './PresentationIcon';
-import { color, radius } from '../../app/theme/theme';
+import { color, control, radius } from '../../app/theme/theme';
 import { CircleAction } from './Tile';
 
 export interface SegmentOption<T extends string> { value: T; label: string; count?: number; icon?: PresentationIconName }
@@ -52,7 +52,7 @@ export function ViewRail<T extends string>({ label, value, options, onChange, to
             {options.map((option) => <Tooltip key={option.value} title={option.label} placement="right">
                 <ToggleButton value={option.value} aria-label={option.label} disableRipple
                     sx={{ width: 44, height: 44, minHeight: 44, p: 0, borderRadius: '50% !important', color: color.ink900,
-                        '&.Mui-selected, &.Mui-selected:hover': { bgcolor: color.ink950, color: color.surface, boxShadow: 'none' }, '& svg': { fontSize: 20 } }}>
+                        '&.Mui-selected, &.Mui-selected:hover': { bgcolor: control.primary, color: color.surface, boxShadow: 'none' }, '& svg': { fontSize: 20 } }}>
                     <PresentationIcon name={option.icon} />
                 </ToggleButton>
             </Tooltip>)}

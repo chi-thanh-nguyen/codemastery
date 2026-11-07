@@ -51,6 +51,22 @@ export const shadow = {
     scrim: 'rgba(10, 11, 15, 0.48)',
 } as const;
 
+/**
+ * Button and control roles (DESIGN.md › Buttons). Graphite (the existing chrome-raised value) is the
+ * one fill for primary actions and chosen controls, so controls read apart from the ink frame.
+ * Secondary controls are neutral outlined surfaces; no new colour is introduced.
+ */
+export const control = {
+    primary: color.chromeRaised,
+    primaryHover: color.chromeHover,
+    /** Neutral outlined surface for secondary buttons, circles and overflow actions. */
+    secondary: {
+        backgroundColor: color.surface, color: color.ink900, border: `1px solid ${color.line200}`, boxSizing: 'border-box',
+        '&:hover': { backgroundColor: color.fill150, borderColor: color.line200 },
+        '&.Mui-disabled': { backgroundColor: color.surface, color: color.ink500, borderColor: color.line200 },
+    },
+} as const;
+
 /** The dashed path line (Path Spine, prerequisite edges, brand path): 2 px, 4 px dash, 6 px gap. */
 export const pathLine = { width: 2, dash: 4, gap: 6, dasharray: '4 6' } as const;
 
@@ -91,8 +107,8 @@ export const focusRing = { outline: `2px solid ${color.brand600}`, outlineOffset
 export const focusRingOnChrome = { outline: `2px solid ${color.focusOnChrome}`, outlineOffset: 2 } as const;
 
 declare module '@mui/material/styles' {
-    interface Palette { ink: Palette['primary'] }
-    interface PaletteOptions { ink?: PaletteOptions['primary'] }
+    interface Palette { ink: Palette['primary']; onChrome: Palette['primary'] }
+    interface PaletteOptions { ink?: PaletteOptions['primary']; onChrome?: PaletteOptions['primary'] }
     interface TypographyVariants { display: CSSProperties; stat: CSSProperties; reading: CSSProperties; code: CSSProperties }
     // `display` changes size at 600 px, so its options take MUI's style type (media keys allowed).
     interface TypographyVariantsOptions { display?: TypographyStyle; stat?: CSSProperties; reading?: CSSProperties; code?: CSSProperties }
@@ -100,7 +116,7 @@ declare module '@mui/material/styles' {
 declare module '@mui/material/Typography' {
     interface TypographyPropsVariantOverrides { display: true; stat: true; reading: true; code: true }
 }
-declare module '@mui/material/Button' { interface ButtonPropsColorOverrides { ink: true } }
+declare module '@mui/material/Button' { interface ButtonPropsColorOverrides { ink: true; onChrome: true } }
 declare module '@mui/material/IconButton' { interface IconButtonPropsColorOverrides { ink: true } }
 declare module '@mui/material/LinearProgress' { interface LinearProgressPropsColorOverrides { ink: true } }
 
@@ -122,7 +138,10 @@ export const appTheme = createTheme({
     palette: {
         mode: 'light',
         primary: { main: color.brand600, dark: color.brand700, light: color.brand400, contrastText: color.surface },
-        ink: { main: color.ink950, dark: color.chromeRaised, light: color.ink700, contrastText: color.surface },
+        // `ink` drives primary buttons: graphite fill, lighter graphite on hover (control tokens).
+        ink: { main: color.chromeRaised, dark: color.chromeHover, light: color.ink700, contrastText: color.surface },
+        // Buttons on the ink frame: white primary, graphite secondary.
+        onChrome: { main: color.surface, dark: color.fill150, light: color.surface, contrastText: color.ink950 },
         secondary: { main: color.lilac700, light: color.lilac100, dark: color.lilac700, contrastText: color.surface },
         success: { main: color.mint700, light: color.mint100, dark: color.mint700, contrastText: color.surface },
         warning: { main: color.butter800, light: color.butter100, dark: color.butter800, contrastText: color.surface },
@@ -194,13 +213,17 @@ export const appTheme = createTheme({
                     '&:active': { transform: 'scale(0.98)' },
                     '&.Mui-disabled': { backgroundColor: color.fill150, color: color.ink500 },
                     variants: [
-                        { props: { variant: 'outlined' }, style: { border: 0, backgroundColor: color.fill150, color: color.ink900, paddingInline: 20,
-                            '&:hover': { border: 0, backgroundColor: color.line200 } } },
-                        { props: { variant: 'text' }, style: { color: color.brand600, paddingInline: 12, '&:hover': { backgroundColor: 'transparent', textDecoration: 'underline', textUnderlineOffset: 3 } } },
+                        // Secondary: neutral outlined surface (white, line-200 border, ink-900 label).
+                        { props: { variant: 'outlined' }, style: { ...control.secondary, paddingInline: 20 } },
+                        // Tertiary: no fill, no border; Logo Blue label like a link, underline on hover.
+                        { props: { variant: 'text' }, style: { color: color.brand600, paddingInline: 12, '&:hover': { backgroundColor: 'transparent', color: color.brand700, textDecoration: 'underline', textUnderlineOffset: 3 } } },
                         { props: { variant: 'text', color: 'inherit' }, style: { color: 'inherit' } },
                         { props: { variant: 'text', color: 'error' }, style: { color: color.rose700 } },
                         { props: { variant: 'text' }, style: { '&.Mui-disabled': { backgroundColor: 'transparent' } } },
-                        { props: { variant: 'contained', color: 'ink' }, style: { '&:hover': { backgroundColor: color.chromeRaised } } },
+                        // Primary: graphite fill, white label; one per region.
+                        { props: { variant: 'contained', color: 'ink' }, style: { backgroundColor: control.primary, '&:hover': { backgroundColor: control.primaryHover } } },
+                        { props: { variant: 'contained', color: 'onChrome' }, style: { backgroundColor: color.surface, color: color.ink950, '&:hover': { backgroundColor: color.fill150 } } },
+                        { props: { variant: 'outlined', color: 'onChrome' }, style: { border: 0, backgroundColor: color.chromeRaised, color: color.surface, '&:hover': { border: 0, backgroundColor: color.chromeHover } } },
                         { props: { variant: 'contained', color: 'error' }, style: { backgroundColor: color.rose700, '&:hover': { backgroundColor: color.rose800 } } },
                     ],
                 },
@@ -310,7 +333,7 @@ export const appTheme = createTheme({
             deleteIcon: { color: color.ink600, '&:hover': { color: color.ink900 } } } },
         MuiPagination: { styleOverrides: { ul: { gap: 4 } } },
         MuiPaginationItem: { styleOverrides: { root: { minWidth: 44, height: 44, borderRadius: radius.pill, fontSize: '0.9375rem', fontWeight: 600, color: color.ink900,
-            '&.Mui-selected, &.Mui-selected:hover': { backgroundColor: color.ink950, color: color.surface } } } },
+            '&.Mui-selected, &.Mui-selected:hover': { backgroundColor: control.primary, color: color.surface } } } },
         MuiBreadcrumbs: { styleOverrides: { root: { fontSize: '0.8125rem', fontWeight: 500, color: color.ink600 }, separator: { marginInline: 6 } } },
         MuiLink: { defaultProps: { underline: 'hover' }, styleOverrides: { root: { color: color.brand600, textUnderlineOffset: 3, '&:hover': { color: color.brand700 } } } },
         MuiCheckbox: { styleOverrides: { root: { color: color.ink400, '&.Mui-checked': { color: color.brand600 } } } },

@@ -40,7 +40,7 @@ export function SkillGraphEditorPage(props: SkillGraphEditorPageProps) {
             {tab === 'graph' && <Button variant="contained" onClick={onAdd} startIcon={<PresentationIcon name="plus" />}>Add skill</Button>}
         </Box>
         {status}
-        {tab === 'graph' && (skills.length === 0 && !adding ? <EmptyView icon="graph" title="No skills yet" message="Add the skills this course teaches, then link prerequisites." action={<Button variant="contained" onClick={onAdd}>Add skill</Button>} />
+        {tab === 'graph' && (skills.length === 0 && !adding ? <EmptyView icon="graph" title="No skills yet" message="Add the skills this course teaches, then link prerequisites." action={<Button variant="outlined" onClick={onAdd}>Add skill</Button>} />
             : <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: 'minmax(0,1fr)', lg: 'minmax(0,1fr) 360px' }, alignItems: 'start' }}>
                 <SkillGraphCanvas skills={skills} selectedId={selectedId} onSelect={onSelect} label={`Skill graph for ${courseTitle}`} />
                 {adding || selected ? <Tile><SkillForm key={adding ? 'new' : selected!.id} skill={adding ? null : selected} skills={skills} onSave={onSaveSkill} serverError={serverError} onCancel={() => onSelect(null)} /></Tile>

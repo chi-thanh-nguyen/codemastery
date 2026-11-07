@@ -95,7 +95,8 @@ function LessonTile({ lesson, href, onOpen }: { lesson: OutlineLessonView; href:
                 {lesson.isResume && lesson.progress === 'not-started' && <StatusPill tone="sky" icon="play" size="tag">Resume</StatusPill>}
                 {lesson.markers?.map((marker) => <MarkerTag key={marker} marker={marker} />)}
             </Box>
-            <CircleAffordance />
+            {/* Graphite only for the resume point; every other lesson opens through a neutral circle. */}
+            <CircleAffordance emphasis={lesson.isResume ? 'primary' : 'secondary'} />
         </Box>
     </Tile>;
 }

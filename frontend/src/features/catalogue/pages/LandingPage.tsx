@@ -34,7 +34,7 @@ export function LandingPage({ exampleMap }: LandingPageProps) {
             <Box component="nav" aria-label="Main navigation" sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1.5 } }}>
                 <Button component={Link} to="/courses" variant="text" color="inherit" sx={{ color: color.surface, px: { xs: 1.25, sm: 2 } }}>Catalogue</Button>
                 <Button component={Link} to="/login" variant="text" color="inherit" sx={{ color: color.surface, px: { xs: 1.25, sm: 2 } }}>Sign in</Button>
-                <Button component={Link} to="/register" variant="contained" size="small" sx={{ display: { xs: 'none', sm: 'inline-flex' }, bgcolor: color.surface, color: color.ink950, '&:hover': { bgcolor: color.fill150 } }}>Create account</Button>
+                <Button component={Link} to="/register" variant="contained" color="onChrome" size="small" sx={{ display: { xs: 'none', sm: 'inline-flex' } }}>Create account</Button>
             </Box>
         </Box>
         <Box component="main" id="main-content" tabIndex={-1}>
@@ -44,8 +44,8 @@ export function LandingPage({ exampleMap }: LandingPageProps) {
                     <Typography id="landing-title" component="h1" variant="display">Learn programming at the pace of what you actually know.</Typography>
                     <Typography sx={{ mt: 3, color: color.chromeMuted, fontSize: '1.125rem', maxWidth: '46ch' }}>CodeMastery is a course-based platform for first programming courses. Quizzes show which skills you have mastered, and the next step comes with a reason.</Typography>
                     <Box sx={{ mt: 5, display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-                        <Button component={Link} to="/courses" variant="contained" sx={{ bgcolor: color.surface, color: color.ink950, '&:hover': { bgcolor: color.fill150 } }}>Browse courses</Button>
-                        <Button component={Link} to="/register" variant="outlined" sx={{ bgcolor: color.chromeRaised, color: color.surface, '&:hover': { bgcolor: color.chromeHover } }}>Create account</Button>
+                        <Button component={Link} to="/courses" variant="contained" color="onChrome">Browse courses</Button>
+                        <Button component={Link} to="/register" variant="outlined" color="onChrome">Create account</Button>
                     </Box>
                 </Box>
                 <Box sx={{ bgcolor: color.canvas100, borderRadius: `${radius.xl}px`, p: { xs: 1.5, sm: 2.5 }, color: color.ink900 }}>{exampleMap}</Box>

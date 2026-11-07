@@ -62,7 +62,7 @@ export function LearnerHomePage({ learnerName, subtitle = 'Pick up where you lef
             {continueLesson ? <Tile interactive component="article" padding={{ xs: 3, sm: 4 }} sx={{ display: 'grid', gap: 1.5 }}>
                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>{continueLesson.courseTitle} · {continueLesson.chapterTitle} · Lesson {continueLesson.position}</Typography>
                 <TileTitleLink component="h3" onClick={continueLesson.onResume}>{continueLesson.lessonTitle}</TileTitleLink>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ flex: 1 }}><StatusPill tone="sky" icon="play" size="tag">Resume</StatusPill></Box><CircleAffordance icon="play" /></Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Box sx={{ flex: 1 }}><StatusPill tone="sky" icon="play" size="tag">Resume</StatusPill></Box><CircleAffordance icon="play" emphasis="primary" /></Box>
             </Tile> : <EmptyView compact icon="book" headingLevel="h3" title="Nothing in progress" message="Open a course to start its first lesson." />}
         </Box>}
         <Box component="section" aria-labelledby="home-courses">
