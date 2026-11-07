@@ -2383,3 +2383,92 @@ reference profile and inspecting enlarged screenshots side by side; it is a
 judgement, not a pixel-diff metric. No WCAG conformance or similarity score is
 claimed. Anthropic's Claude Code (Claude Opus 5.5) made the changes and ran the
 checks, with the local Impeccable detector and Playwright CLI.
+
+## Preview band, header lockup and course marks — 7 November 2026
+
+### Authority and scope
+
+The Leader's follow-up instructions of 7 November 2026 asked to remove the light-blue
+band at the top of the design preview (the sample-data notice with the workspace
+switcher; nothing inside screens), enlarge the CodeMastery lockup in the top bars, and
+show courses with official full-colour language logos in consistent neutral containers
+with optical size normalisation, never on a dark ground. No commit was requested.
+
+### Changes
+
+- **Preview notice:** `SampleDataBanner` sits on `canvas-100` instead of `sky-100`
+  (neutral icon, hairline only above bare screens); the reach takes the canvas colour.
+  Its statement, workspace switcher, Preview index and Reset stay. In-content colours
+  (info alerts, Sky specimens, pills) are unchanged.
+- **Lockup:** `presentationTokens.brandMark` sets the mark to 40 px from 600 px and,
+  below 600 px, fluidly 32 px at 360 px to 36 px from about 382 px; the wordmark stays
+  0.625 × and the gap 0.3 × the mark. Bar heights (80/64 px) are unchanged. A fixed
+  36 px mark overflowed the 360 px Learner bar (bell + account) by 16 px; the harness
+  found it, hence the fluid phone size.
+- **Course marks:** `CourseMark` replaces the ink initial square in `CourseTile`
+  (catalogue, My courses, preview). One registry maps Python and TypeScript to their
+  official SVGs with a per-logo visible-artwork box and optical scale (Python 0.66,
+  TypeScript 0.56 of the 48 px container); the container is `canvas-100` with a
+  `line-200` inset hairline at `rounded.md`. The language is read only when the course's
+  title, else description, names exactly one language; otherwise the initial is shown
+  in the same container. No current seed, E2E or preview course names a language, so
+  live tiles show the neutral initial; the design reference shows the logo samples.
+
+### Executed checks and results
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit`, `npm test`, `npm run build` (frontend) | PASS: 429 tests in 15 files, also 429/429 with `VITE_API_BASE_URL` empty; build succeeded (Vite warns that the `index` chunk is 536 kB, over its 500 kB advisory limit) |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 41/41 and WebKit 26.6 41/41, including the new checks: lockup size and clearance at 1280/1024/390/360 px on `/courses`, `/preview` and `/`; neutral preview notice and reach colour; course marks decoded, inside their containers, on `canvas-100`, colours kept, no ink container on catalogue or My courses at 1280 and 390 px |
+| `npx playwright test` (chromium/webkit desktop and mobile, disposable stack) | PASS 53, 3 skipped by design; stack removed afterwards. Firefox not run (sandbox launch failure recorded above) |
+
+### Follow-up the same day: preview chrome, generic course mark and avatar
+
+The Leader then asked to remove the preview notice entirely (sample-data line,
+workspace switcher, Preview index and Reset buttons) so screens look as deployed and
+are opened by link; to replace the letter fallback with a white glyph on a coloured
+fill; and to recolour the account avatar. Changes: `SampleDataBanner` and the workspace
+switcher are removed from every screen, including the quiz attempt (its “Simulate time
+running out” button went with it; the auto-submit test now runs the full 10-minute
+sample timer); Preview index and Reset remain only in the preview account menu, and the
+brand link still opens the index. Courses without a language logo show the `code`
+glyph in white on `brandFill` (`#2A62F0` → `#0652C4`, white 5.12–6.97:1). The
+signed-in avatar (`Monogram` tone `brand`, top bar and profile) uses the same fill;
+Q&A author monograms stay on ink.
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 430 tests in 15 files, also with `VITE_API_BASE_URL` empty; build succeeded (same 536 kB `index` chunk advisory) |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 42/42, WebKit 26.6 42/42, including: no notice, switcher, index, reset or simulate button on six preview screens; avatar fill; generic marks on catalogue and My courses at 1280 and 390 px |
+| `npx playwright test` (chromium/webkit desktop and mobile, disposable stack) | PASS 53, 3 skipped by design; stack removed |
+
+### Consistency fixes C1–C14 — 7 November 2026
+
+The Leader approved the fixes for the 14 inconsistencies recorded in the local
+`DESIGN.md` review. Changes: one neutral course-mark container with a `brand-700`
+code glyph when no language logo applies (no gradient); shared sample-course
+descriptions in the preview; account avatar in solid `brand-700`; a Learner's sign-in
+fallback is `/home` (the one-use `/profile` return and other roles' `/courses` are
+unchanged; amendment recorded beside CT16-PROFILE P1 in `docs/setup.md`); 32 px
+course marks in Learner home rows; fixed lockup steps (36 px, 32 px below 390 px) and
+a `display` type step for the landing hero; flat map nodes with a hairline and a
+`shadow.control` token; a `pathLine` 4/6 dash for the Path Spine, prerequisite edges,
+the legend and the auth brand path; the instructor named once on course detail; no
+spinner in loading states; `chromeHover` and `rose800` colour tokens; a dashed
+Proposed pill in the preview index; a current state for the preview bell; the lesson
+outline at `presentationTokens.outlineWidth`.
+
+Tests changed with the behavior: the routing tests and the preview sign-in test now
+expect `/home` for a Learner (and `/courses` for Instructor and Administrator); the
+loading tests assert a named status line, a skeleton and no spinner; E2E `signIn`
+takes the role's start page, the enrolment flow opens the catalogue from Home, the
+navigation test expects Home current after sign-in, and the reload check expects the
+protected route to send the visitor to Sign in. New tests cover course detail facts,
+the path-line dash, the shadow and type tokens, the current bell, Learner home course
+marks and the Proposed pill.
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 437 tests in 15 files, also with `VITE_API_BASE_URL` empty; build succeeded (536 kB `index` chunk advisory unchanged) |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 43/43, WebKit 26.6 43/43, including lockup steps at 1280/1024/600/599/390/389/375/360 px, solid avatar, neutral marks across catalogue, My courses, Teaching and Learner home, no loading spinner, flat nodes, 4/6 dashes, single instructor mention, current bell and the 280 px outline |
+| `npx playwright test` (chromium/webkit desktop and mobile, disposable stack) | PASS 53, 3 skipped by design; stack removed |

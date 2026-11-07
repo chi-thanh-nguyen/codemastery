@@ -506,7 +506,22 @@ SIL Open Font License 1.1, licence texts `public/google-sans-flex-OFL.txt`,
 ship Latin, Latin Extended and Vietnamese subsets selected by `unicode-range`. The
 theme exports `fontStack`, `codeFontStack` and `brandFontStack`. No font CDN is used.
 The logo artwork is `public/favicon.svg` (its palette was tuned for the ink frame on
-7 November 2026); `public/favicon.ico` is generated from it.
+7 November 2026); `public/favicon.ico` is generated from it. The top-bar lockup uses a
+40 px mark from 600 px, 36 px below and 32 px below 390 px (`presentationTokens.brandMark`,
+fixed steps), with the wordmark at 0.625 × the mark. Course tiles show a course mark
+(`src/shared/components/CourseMark.tsx`): the official full-colour logo of the
+programming language that the course's own title, or else its description, names
+(exactly one language); otherwise a Deep Logo Blue (`#0652C4`) code glyph. Every mark
+uses the same neutral `#F6F6F7` container with a hairline (48 px on tiles, 32 px in
+Learner home rows). The course API has no language field, so no logo is inferred
+beyond that text. The signed-in account avatar (top bar and profile) is solid Deep
+Logo Blue with a white initial; no gradient is used. The design preview at `/preview` has no preview chrome: each screen is
+opened by link, `/preview?screen=<id>`, and the index lists them all. The logo files are the unaltered official artwork:
+`course-logo-python.svg` (python.org `python-logo-only.svg`, with a `viewBox` added so
+it can scale; "Python" and the Python logos are trademarks of the Python Software
+Foundation) and `course-logo-typescript.svg` (`ts-logo-256.svg` from the TypeScript
+branding asset pack; TypeScript is a trademark of Microsoft Corporation). Both are
+used only to name the language a course teaches.
 `PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
 
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
@@ -520,11 +535,15 @@ Home (`/home`) and My courses for Learners; Profile and Sign out are in the
 account menu. `/home` lists the Learner's active courses from `GET /api/me/courses`
 only. After a session ends without signing out (15-minute expiry or a current-session
 401), the sign-in page says “Your session ended. Sign in again to continue.” once.
-Sign-in still lands on `/courses` (or the one-use `/profile` return). `/preview` lazily loads the design
+After sign-in a Learner lands on `/home` and other roles on `/courses`; the one-use
+`/profile` return (CT16-PROFILE P1) still takes precedence and is consumed once. This
+changes only the Learner's fallback destination, at the Leader's instruction of
+7 November 2026; P1's capture, consumption and open-redirect rules are unchanged. `/preview` lazily loads the design
 preview from `src/app/preview/` in its own chunk: every designed screen for the
 Learner, Instructor and Administrator workspaces and the proposed public screens,
-with synthetic sample data, a permanent “Design preview · Sample data” notice and
-a reset. It never calls the API, reads the session or writes browser storage, and
+with synthetic sample data. Since 7 November 2026 it shows no preview notice or
+switcher: screens open by link and the account menu keeps “Preview index” and
+“Reset sample data”. It never calls the API, reads the session or writes browser storage, and
 it adds no route: screens change through `?screen=` query parameters. Screens
 whose contracts are pending exist only there.
 
@@ -1426,6 +1445,12 @@ redirect must not re-arm that destination from the discarded Profile. A new
 deliberate protected-route visit can establish a new return intent. Reuse CT16's
 external/API/asset/traversal rejection; no open redirect. A fresh document load loses both session and return memory; a new
 anonymous /profile entry may capture /profile again, not restore an old session.
+
+*Amendment, 7 November 2026 (Leader instruction, recorded here without changing the
+approved text above):* when no `/profile` return is pending, a Learner's sign-in
+fallback is `/home` (Learner home) instead of `/courses`; Instructors and
+Administrators keep `/courses`. The return capture, one-time consumption, rejection
+of caller-supplied targets and logout behavior are unchanged.
 
 Expiry, logout or current-generation authenticated 401 invalidates the session
 before personal content can be published and replaces the active protected route
