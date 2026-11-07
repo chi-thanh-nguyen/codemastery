@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
-import { Box, Button, Typography } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import { PresentationIcon } from '../../shared/components/PresentationIcon';
-import { color, radius } from '../theme/theme';
+import { color } from '../theme/theme';
 
 export type Workspace = 'reference' | 'public' | 'learner' | 'instructor' | 'admin';
 
@@ -27,18 +27,6 @@ export const previewHref = (screen: string, extra: Record<string, string> = {}) 
 interface PreviewContextValue { notify: (message: string) => void; reset: () => void }
 export const PreviewContext = createContext<PreviewContextValue>({ notify: () => undefined, reset: () => undefined });
 export const usePreview = () => useContext(PreviewContext);
-
-/** Persistent label: every preview screen says it shows sample data and sends nothing. */
-export function SampleDataBanner({ tools, onIndex, onReset, compact }: { tools?: ReactNode; onIndex?: () => void; onReset?: () => void; compact?: boolean }) {
-    return <Box role="note" aria-label="Design preview notice" sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: { xs: 1, sm: 1.5 }, px: { xs: 2, sm: 3, md: 4, lg: 5 }, py: 1.25,
-        bgcolor: color.sky100, color: color.ink900, borderBottom: `1px solid ${color.line200}`, ...(compact ? {} : { borderRadius: { xs: `${radius.lg}px ${radius.lg}px 0 0`, sm: `${radius.xl}px ${radius.xl}px 0 0` } }) }}>
-        <PresentationIcon name="info" sx={{ fontSize: 20, color: color.brand700 }} />
-        <Typography sx={{ fontSize: '0.9375rem', flex: '1 1 260px', minWidth: 0 }}><strong>Design preview · Sample data.</strong> Nothing here is saved or sent to CodeMastery.</Typography>
-        {tools}
-        {onIndex && <Button variant="text" size="small" onClick={onIndex} sx={{ color: color.brand700 }}>Preview index</Button>}
-        {onReset && <Button variant="outlined" size="small" onClick={onReset} startIcon={<PresentationIcon name="refresh" />} sx={{ bgcolor: color.surface }}>Reset sample data</Button>}
-    </Box>;
-}
 
 /** Note inside a screen naming the contract a preview interaction stands in for. */
 export function ContractNote({ children }: { children: ReactNode }) {

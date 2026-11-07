@@ -84,7 +84,7 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
         for (const slot of [...host.children, ...host.querySelectorAll('nav ul')]) observer.observe(slot);
         return () => { observer.disconnect(); fonts?.removeEventListener?.('loadingdone', measure); };
     }, [measure, selectedNavId, navItems, wide]);
-    const brand = <BrandWordmark size={32} hideTextBelow={360} />;
+    const brand = <BrandWordmark size={presentationTokens.brandMark} hideTextBelow={360} />;
     return <Box component="header" sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: 'common.white' }}>
         <Box ref={bar} sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 },
             height: { xs: presentationTokens.topBarHeightCompact, sm: presentationTokens.topBarHeight }, px: { xs: 1.5, sm: 2.5, md: 3 },
@@ -145,7 +145,7 @@ export function AccountMenu({ displayName, role, renderItems }: AccountMenuProps
             onClick={(event) => setAnchor(event.currentTarget)}
             sx={{ display: 'flex', alignItems: 'center', gap: 1.25, height: 52, pl: .75, pr: { xs: .75, md: 1.5 }, borderRadius: `${radius.pill}px`, color: 'common.white',
                 '&:hover': { bgcolor: color.chromeRaised } }}>
-            <Monogram name={displayName} initial={initial} />
+            <Monogram name={displayName} initial={initial} tone="brand" />
             <Box sx={{ display: { xs: 'none', md: 'block' }, textAlign: 'left', minWidth: 0, maxWidth: 180 }}>
                 <Typography component="span" sx={{ display: 'block', fontSize: '0.9375rem', fontWeight: 600, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</Typography>
                 <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: color.chromeMuted, lineHeight: 1.3 }}>{role}</Typography>
@@ -159,18 +159,21 @@ export function AccountMenu({ displayName, role, renderItems }: AccountMenuProps
     </>;
 }
 
-export function Monogram({ name, initial, size = 40, tone = 'chrome' }: { name: string; initial?: string; size?: number; tone?: 'chrome' | 'ink' }) {
+/** `brand` (solid Deep Logo Blue) is the signed-in account's own avatar (top bar, profile); `ink` marks other people (Q&A authors). */
+export function Monogram({ name, initial, size = 40, tone = 'chrome' }: { name: string; initial?: string; size?: number; tone?: 'chrome' | 'ink' | 'brand' }) {
     const letter = initial ?? Array.from(name.trim())[0]?.toUpperCase() ?? '?';
-    return <Box component="span" aria-hidden sx={{ width: size, height: size, borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0,
-        bgcolor: tone === 'chrome' ? color.chromeRaised : color.ink950, color: 'common.white', fontSize: size * 0.42, fontWeight: 600 }}>{letter}</Box>;
+    return <Box component="span" aria-hidden data-monogram={tone} sx={{ width: size, height: size, borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0,
+        bgcolor: tone === 'brand' ? color.brand700 : tone === 'chrome' ? color.chromeRaised : color.ink950, color: 'common.white', fontSize: size * 0.42, fontWeight: 600 }}>{letter}</Box>;
 }
 
 export function AccountMenuDivider() { return <Divider sx={{ my: .5 }} />; }
 
-export function HeaderIconButton({ label, icon, badge, onClick, href }: { label: string; icon: PresentationIconName; badge?: number; onClick?: () => void; href?: string }) {
+/** Utility button on the frame. `current` marks the page it opens (as the drawer marks its active row). */
+export function HeaderIconButton({ label, icon, badge, onClick, href, current = false }: { label: string; icon: PresentationIconName; badge?: number; onClick?: () => void; href?: string; current?: boolean }) {
     const name = badge ? `${label}, ${badge} unread` : label;
     return <Tooltip title={label}>
-        <IconButton aria-label={name} onClick={onClick} {...(href ? { component: 'a', href } : {})} sx={{ position: 'relative', color: 'common.white', '&:hover': { bgcolor: color.chromeRaised } }}>
+        <IconButton aria-label={name} aria-current={current ? 'page' : undefined} onClick={onClick} {...(href ? { component: 'a', href } : {})}
+            sx={{ position: 'relative', color: 'common.white', bgcolor: current ? color.chromeRaised : undefined, '&:hover': { bgcolor: color.chromeRaised } }}>
             <PresentationIcon name={icon} />
             {!!badge && <Box component="span" aria-hidden sx={{ position: 'absolute', top: 0, right: -2, minWidth: 20, height: 20, px: .5, borderRadius: `${radius.pill}px`,
                 bgcolor: color.brand600, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center', border: `2px solid ${color.ink950}`, boxSizing: 'content-box' }}>{badge}</Box>}

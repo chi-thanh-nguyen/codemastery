@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import type { ReactNode } from 'react';
-import { Box, Button, CircularProgress, Skeleton, Typography } from '@mui/material';
+import { Box, Button, Skeleton, Typography } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
 import type { PresentationIconName } from './PresentationIcon';
 import { color, radius } from '../../app/theme/theme';
@@ -18,10 +18,8 @@ export function LoadingView({ message = 'Loading...', variant = 'block', count =
     const messageId = useId();
     const label = message.trim() ? message : 'Loading...';
     return <Box sx={{ mb: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: variant === 'none' ? 0 : 2, color: 'text.secondary' }}>
-            <CircularProgress size={16} thickness={5} aria-labelledby={messageId} sx={{ color: color.brand600 }} />
-            <Typography id={messageId} role="status" variant="body2" sx={{ color: 'text.secondary' }}>{label}</Typography>
-        </Box>
+        {/* The named status line plus a content-shaped skeleton is the whole loading state; no spinner (DESIGN.md › Feedback). */}
+        <Typography id={messageId} role="status" variant="body2" sx={{ mb: variant === 'none' ? 0 : 2, color: 'text.secondary' }}>{label}</Typography>
         {variant === 'tiles' && <Box aria-hidden sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(3, minmax(0, 1fr))' } }}>
             {Array.from({ length: count }, (_, i) => <Box key={i} sx={{ bgcolor: 'background.paper', borderRadius: `${radius.lg}px`, p: 3 }}>
                 <Skeleton variant="rounded" width={48} height={48} sx={{ mb: 2 }} /><Skeleton height={28} width="80%" /><Skeleton height={18} sx={{ mt: 1.5 }} /><Skeleton height={18} width="60%" sx={{ mt: 1 }} />

@@ -2,6 +2,7 @@ import type { ElementType, MouseEvent, ReactNode } from 'react';
 import { Box, IconButton, LinearProgress, Tooltip, Typography } from '@mui/material';
 import type { SxProps, Theme } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
+import { CourseMark } from './CourseMark';
 import type { PresentationIconName } from './PresentationIcon';
 import { color, motion, radius, shadow, tones } from '../../app/theme/theme';
 import type { Tone } from '../../app/theme/theme';
@@ -120,13 +121,6 @@ export function ProgressLine({ completed, total, percent, unit = 'lessons', labe
     </Box>;
 }
 
-/** 48 px typographic course glyph: ink square with the title's first letter. Decorative. */
-export function CourseGlyph({ title, size = 48 }: { title: string; size?: number }) {
-    const letter = Array.from(title.trim())[0]?.toUpperCase() ?? '·';
-    return <Box aria-hidden sx={{ width: size, height: size, borderRadius: `${radius.md}px`, bgcolor: color.ink950, color: color.surface, display: 'grid', placeItems: 'center',
-        fontSize: size * 0.46, fontWeight: 600, flexShrink: 0, letterSpacing: '-0.02em' }}>{letter}</Box>;
-}
-
 /** Label + value pairs (definition list) for fact asides and record details. */
 export function FactList({ items, columns = 1 }: { items: { label: string; value: ReactNode }[]; columns?: 1 | 2 }) {
     return <Box component="dl" sx={{ m: 0, display: 'grid', gridTemplateColumns: columns === 2 ? { xs: '1fr', sm: '1fr 1fr' } : '1fr', columnGap: 3, rowGap: 2.5 }}>
@@ -160,7 +154,7 @@ export interface CourseTileProps {
 /** Course tile (DESIGN.md › Tiles): the whole tile opens the course. Shared by catalogue, learning and teaching views. */
 export function CourseTile({ title, description, byline, href, onOpen, status, extraActions, headingLevel = 'h2', children }: CourseTileProps) {
     return <Tile component="article" interactive sx={{ display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
-        <CourseGlyph title={title} />
+        <CourseMark title={title} description={description} />
         <Box sx={{ minWidth: 0 }}>
             <TileTitleLink component={headingLevel} href={href} onClick={onOpen}>{title}</TileTitleLink>
             <Typography sx={{ mt: 1.5, color: 'text.secondary', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}>

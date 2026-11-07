@@ -34,7 +34,7 @@ import { DiscussionPanel } from '../../features/interaction/components/Discussio
 import { ReportContentDialog } from '../../features/interaction/components/ReportContentDialog';
 import type { DiscussionPostView, NotificationView } from '../../features/interaction/types/interactionTypes';
 import * as fx from './fixtures';
-import { ContractNote, SampleDataBanner, later, nowLabel, usePreview } from './previewKit';
+import { ContractNote, later, nowLabel, usePreview } from './previewKit';
 
 export interface LearnerState {
     chapters: OutlineChapterView[];
@@ -54,7 +54,7 @@ export const initialLearnerState = (): LearnerState => structuredClone({
 });
 
 type Go = (screen: string, extra?: Record<string, string | undefined>) => void;
-interface Props { state: LearnerState; setState: Dispatch<SetStateAction<LearnerState>>; screen: string; item?: string; go: Go; onIndex: () => void; onReset: () => void }
+interface Props { state: LearnerState; setState: Dispatch<SetStateAction<LearnerState>>; screen: string; item?: string; go: Go }
 
 const lessons = (state: LearnerState) => state.chapters.flatMap((chapter) => chapter.lessons.map((lesson) => ({ ...lesson, chapter })));
 const skillCounts = (skills: SkillView[]) => skills.reduce((counts, skill) => ({ ...counts, [skill.state]: counts[skill.state] + 1 }), { unknown: 0, learning: 0, mastered: 0, weak: 0 } as Record<MasteryState, number>);
@@ -64,7 +64,7 @@ const progressOf = (state: LearnerState) => {
 };
 
 /** Learner workspace preview: every interaction changes sample state only. */
-export function LearnerPreview({ state, setState, screen, item, go, onIndex, onReset }: Props) {
+export function LearnerPreview({ state, setState, screen, item, go }: Props) {
     const { notify } = usePreview();
     const openLesson = (id: string) => go('lesson', { item: id });
     const rec = recommendationEntry(state.recommendation, openLesson);
@@ -77,8 +77,8 @@ export function LearnerPreview({ state, setState, screen, item, go, onIndex, onR
 
     if (screen === 'learner-home') return <LearnerHomePage learnerName={fx.sampleLearner.name} guidance={guidance} onBrowse={() => notify('In production this opens the live catalogue at /courses.')}
         continueLesson={{ courseTitle: fx.COURSE_TITLE, chapterTitle: 'Repetition', lessonTitle: 'For Loops', position: 7, onResume: () => openLesson('l7') }}
-        courses={[{ id: 'c-intro', title: fx.COURSE_TITLE, progress: progressOf(state), nextLessonTitle: 'For Loops', onOpen: () => go('course') },
-            { id: 'c-practice', title: 'Programming Practice', progress: { completed: 1, total: 4, percent: 25 }, nextLessonTitle: 'Week 2 exercises', onOpen: () => go('course') }]} />;
+        courses={[{ id: 'c-intro', title: fx.COURSE_TITLE, description: fx.COURSE_DESCRIPTIONS['c-intro'], progress: progressOf(state), nextLessonTitle: 'For Loops', onOpen: () => go('course') },
+            { id: 'c-practice', title: 'Programming Practice', description: fx.COURSE_DESCRIPTIONS['c-practice'], progress: { completed: 1, total: 4, percent: 25 }, nextLessonTitle: 'Week 2 exercises', onOpen: () => go('course') }]} />;
 
     if (screen === 'my-courses') return <MyCoursesScreen state={state} setState={setState} go={go} />;
 
@@ -108,7 +108,7 @@ export function LearnerPreview({ state, setState, screen, item, go, onIndex, onR
     if (screen === 'quiz') return <QuizIntroView quiz={{ ...fx.loopsQuiz, nextAttemptNumber: state.attempts.length + 1 }} back={back('Assessments', 'assessments')} onStart={() => go('quiz-attempt')}
         note={<ContractNote>Sample quiz. In production the timer counts down to the expiry the server records when you start (Assessment contracts pending).</ContractNote>} />;
 
-    if (screen === 'quiz-attempt') return <QuizAttemptController diagnostic={item === 'diagnostic'} onIndex={onIndex} onReset={onReset}
+    if (screen === 'quiz-attempt') return <QuizAttemptController diagnostic={item === 'diagnostic'}
         onExit={() => go(item === 'diagnostic' ? 'course' : 'assessments')}
         onDone={(result) => { setState((current) => ({ ...current, lastResult: result, diagnosticOffered: result.diagnostic ? false : current.diagnosticOffered,
             attempts: result.diagnostic ? current.attempts : [...current.attempts, { id: `att-${current.attempts.length + 1}`, attemptNumber: result.attemptNumber, submittedAtLabel: nowLabel, score: result.score, correct: result.correct, total: result.review.length }] }));
@@ -218,7 +218,7 @@ function AssessmentsScreen({ go, sectionNav }: { go: Go; sectionNav: ReactNode }
 }
 
 /** Local attempt state machine. Preview timer only; production counts down to the server's expiry. */
-function QuizAttemptController({ diagnostic, onExit, onDone, nextAttempt, onIndex, onReset }: { diagnostic: boolean; onExit: () => void; onDone: (result: NonNullable<LearnerState['lastResult']>) => void; nextAttempt: number; onIndex: () => void; onReset: () => void }) {
+function QuizAttemptController({ diagnostic, onExit, onDone, nextAttempt }: { diagnostic: boolean; onExit: () => void; onDone: (result: NonNullable<LearnerState['lastResult']>) => void; nextAttempt: number }) {
     const quiz = diagnostic ? fx.diagnosticQuiz : { ...fx.loopsQuiz, nextAttemptNumber: nextAttempt };
     const questions: QuestionView[] = diagnostic ? fx.loopsQuestions.slice(0, 4) : fx.loopsQuestions;
     const [answers, setAnswers] = useState<Record<string, string[]>>({}), [index, setIndex] = useState(0), [remaining, setRemaining] = useState(quiz.timeLimitSeconds);
@@ -248,8 +248,7 @@ function QuizAttemptController({ diagnostic, onExit, onDone, nextAttempt, onInde
     useEffect(() => { if (remaining === 0 && phase === 'answering') finish(true); }); // eslint-disable-line react-hooks/exhaustive-deps
     return <QuizAttemptPage quizTitle={quiz.title} questions={questions} answers={answers} currentIndex={index} onAnswer={(id, ids) => setAnswers((current) => ({ ...current, [id]: ids }))}
         onNavigate={(next) => setIndex(Math.max(0, Math.min(questions.length - 1, next)))} remainingSeconds={remaining} totalSeconds={quiz.timeLimitSeconds} phase={phase}
-        onSubmit={() => finish(false)} onExit={onExit} guardUnload
-        banner={<SampleDataBanner compact onIndex={onIndex} onReset={onReset} tools={<Button variant="outlined" size="small" sx={{ bgcolor: 'common.white' }} disabled={phase !== 'answering'} onClick={() => setRemaining(Math.min(remaining, 5))}>Simulate time running out</Button>} />} />;
+        onSubmit={() => finish(false)} onExit={onExit} guardUnload />;
 }
 
 function AssignmentScreen({ id, state, setState, back }: { id: string; state: LearnerState; setState: Props['setState']; back: { label: string; href: string; onClick: () => void } }) {

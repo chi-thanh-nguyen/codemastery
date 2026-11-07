@@ -121,8 +121,11 @@ test.describe('public landing and Learner start', () => {
 
     test('a Learner gets Home with real active memberships; the logo leads there', async ({ page, learner }) => {
         test.skip(!target.fixture, 'Needs the deterministic catalogue fixture of the disposable stack.');
-        await signIn(page, learner);
+        await signIn(page, learner); // lands on /home
         await expect(page.getByRole('link', { name: 'CodeMastery home' })).toHaveAttribute('href', '/home');
+        // From another page the logo returns to Home and route focus moves to its heading.
+        await page.getByRole('link', { name: 'Browse the catalogue' }).click();
+        await expect(page).toHaveURL(/\/courses$/);
         await page.getByRole('link', { name: 'CodeMastery home' }).click();
         await expect(page).toHaveURL(/\/home$/);
         await expect(page.getByRole('heading', { level: 1, name: `Welcome back, ${learner.displayName}` })).toBeFocused();
@@ -185,8 +188,10 @@ test.describe('accounts and sessions', () => {
         const stored = await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }));
         expect(stored).toEqual({ local: 0, session: 0 });
         expect((await context.cookies()).length).toBe(0);
+        // Reloading Learner home loses the memory-only session, so the protected route sends the visitor to Sign in.
         await page.reload();
-        await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
+        await expect(page).toHaveURL(/\/login$/);
+        await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
     });
 
     test('rejects wrong credentials with a safe message and keeps the form', async ({ page, learner }) => {
@@ -222,7 +227,7 @@ test.describe('accounts and sessions', () => {
     test('an Instructor sees access denied for My courses and the API refuses membership changes', async ({ page }) => {
         const instructor = target.instructor;
         test.skip(!instructor, 'Needs an Instructor account (created by the disposable stack).');
-        await signIn(page, instructor!);
+        await signIn(page, instructor!, 'courses');
         await expect(page.getByRole('link', { name: 'My courses' })).toHaveCount(0);
         // In-app history navigation keeps the memory-only session (a typed URL would reload and sign out).
         await page.evaluate(() => { history.pushState(null, '', '/my-courses'); dispatchEvent(new PopStateEvent('popstate')); });
@@ -251,6 +256,9 @@ test.describe('membership', () => {
         const auth = watchAuthorization(page);
         // The session is memory-only, so stay inside the app (no full reload) after signing in.
         await signIn(page, learner);
+        // Sign-in lands on Learner home; the catalogue is one in-app link away.
+        await page.getByRole('link', { name: 'Browse the catalogue' }).click();
+        await expect(page).toHaveURL(/\/courses$/);
         await page.getByRole('link', { name: fixture.primaryTitle }).click();
         await expect(page).toHaveURL(new RegExp(`/courses/${fixture.primary}$`));
         await expect(page.getByText('Membership: Not enrolled')).toBeVisible();
@@ -311,14 +319,14 @@ test.describe('membership', () => {
         await signIn(page, learner);
         if (desktop(testInfo.project.name)) {
             const nav = page.getByRole('navigation', { name: 'Main navigation' });
-            await expect(nav.getByRole('link', { name: 'Catalogue' })).toHaveAttribute('aria-current', 'page');
+            await expect(nav.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
             await nav.getByRole('link', { name: 'My courses' }).click();
             await expect(nav.getByRole('link', { name: 'My courses' })).toHaveAttribute('aria-current', 'page');
         } else {
             const toggle = page.getByRole('button', { name: 'Toggle navigation' });
             await toggle.click();
             const drawer = page.getByRole('dialog');
-            await expect(drawer.getByRole('link', { name: 'Catalogue' })).toHaveAttribute('aria-current', 'page');
+            await expect(drawer.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
             await page.keyboard.press('Escape');
             await expect(toggle).toBeFocused();
             await toggle.click();

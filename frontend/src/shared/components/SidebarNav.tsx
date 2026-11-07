@@ -29,7 +29,7 @@ export function SidebarNav({ items, selectedId, onSelect, mobileOpen, onMobileCl
         sx={{ '& .MuiDrawer-paper': { width: `min(${width}px, calc(100vw - 48px))`, boxSizing: 'border-box', borderRadius: '0 24px 24px 0' } }}>
         <Box component="nav" aria-label="Main navigation" sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', px: 3, height: presentationTokens.topBarHeightCompact, flexShrink: 0 }}>
-                <BrandWordmark size={28} />
+                <BrandWordmark size={presentationTokens.brandMark.xs} />
             </Box>
             <List sx={{ px: 1.5, py: 1 }}>
                 {items.map((item) => {

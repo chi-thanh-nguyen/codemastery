@@ -4,7 +4,7 @@ import type { Edge, Node, NodeProps } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Box, ButtonBase, Typography } from '@mui/material';
 import type { EditableSkill } from '../types/skillGraphTypes';
-import { color, radius, shadow } from '../../../../app/theme/theme';
+import { color, pathLine, radius, shadow } from '../../../../app/theme/theme';
 
 const W = 184, H = 64, GAP_X = 56, GAP_Y = 28;
 type Data = { skill: EditableSkill; selected: boolean; onSelect: (id: string) => void };
@@ -31,7 +31,7 @@ function SkillBox({ data }: NodeProps<Node<Data>>) {
         <ButtonBase onClick={() => onSelect(skill.id)} aria-pressed={selected} className="nodrag"
             aria-label={`${skill.name}, ${skill.prerequisiteIds.length} prerequisites, ${skill.questionCount} questions`}
             sx={{ width: W, height: H, borderRadius: `${radius.lg}px`, bgcolor: color.surface, px: 2, justifyContent: 'flex-start', textAlign: 'left',
-                boxShadow: selected ? `0 0 0 2px ${color.brand600}, ${shadow.raised}` : '0 1px 2px rgba(10,11,15,.06)', '&.Mui-focusVisible': { outline: `2px solid ${color.brand600}`, outlineOffset: 3 } }}>
+                boxShadow: selected ? `0 0 0 2px ${color.brand600}, ${shadow.raised}` : `inset 0 0 0 1px ${color.line200}`, '&.Mui-focusVisible': { outline: `2px solid ${color.brand600}`, outlineOffset: 3 } }}>
             <Box sx={{ minWidth: 0 }}>
                 <Typography component="span" sx={{ display: 'block', fontWeight: 600, fontSize: '0.9375rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{skill.name}</Typography>
                 <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: color.ink600 }}>{skill.questionCount} questions</Typography>
@@ -52,7 +52,7 @@ export function SkillGraphCanvas({ skills, selectedId, onSelect, label }: { skil
         const edges: Edge[] = skills.flatMap((skill) => skill.prerequisiteIds.filter((p) => ids.has(p)).map((p) => {
             const active = p === selectedId || skill.id === selectedId;
             return { id: `${p}->${skill.id}`, source: p, target: skill.id, type: 'smoothstep', focusable: false, selectable: false,
-                style: { stroke: active ? color.brand600 : color.ink400, strokeWidth: 2, strokeDasharray: active ? undefined : '5 5' }, markerEnd: { type: MarkerType.ArrowClosed, color: active ? color.brand600 : color.ink400 } };
+                style: { stroke: active ? color.brand600 : color.ink400, strokeWidth: 2, strokeDasharray: active ? undefined : pathLine.dasharray }, markerEnd: { type: MarkerType.ArrowClosed, color: active ? color.brand600 : color.ink400 } };
         }));
         return { nodes, edges };
     }, [skills, selectedId, onSelect]);

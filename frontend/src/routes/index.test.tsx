@@ -40,8 +40,8 @@ async function change(name: string, value: string) {
     const input = host.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
 }
-async function formLogin(name = 'Person A') {
-    await change('email', 'learner@example.com'); await change('password', 'synthetic'); fetcher.mockResolvedValueOnce(json(loginResponse(name)));
+async function formLogin(name = 'Person A', role = 'Learner') {
+    await change('email', 'learner@example.com'); await change('password', 'synthetic'); fetcher.mockResolvedValueOnce(json(loginResponse(name, role)));
     await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 }
 async function click(text: string) {
@@ -93,10 +93,13 @@ describe('real declarative routing and Profile', () => {
     });
     it('consumes literal Profile return once, ignoring query/fragment/history redirect payloads', async () => {
         await mount('/profile?returnTo=https://outside.test#secret'); window.history.replaceState({ returnTo: 'https://outside.test' }, '', '/login?returnTo=//outside.test');
-        await formLogin(); expect(location.pathname).toBe('/profile'); expect(location.search + location.hash).toBe(''); expect(auth.consumeReturn()).toBe('/courses'); expect(host.querySelector('dl')?.textContent).toContain('Person A');
+        await formLogin(); expect(location.pathname).toBe('/profile'); expect(location.search + location.hash).toBe(''); // Consumed once: a second read falls back to the Learner's start page, never /profile again.
+        expect(auth.consumeReturn()).toBe('/home'); expect(host.querySelector('dl')?.textContent).toContain('Person A');
     });
-    it('login defaults to Courses for arbitrary supplied return targets', async () => {
-        await mount('/login?returnTo=/api/secrets'); await formLogin(); expect(location.pathname).toBe('/courses');
+    // Leader instruction, 7 November 2026: a Learner's default destination is Learner home; other roles keep the
+    // CT16 /courses fallback. A caller-supplied return target is still never authority.
+    it.each([['Learner', '/home'], ['Instructor', '/courses'], ['Administrator', '/courses']])('login sends a %s to %s for arbitrary supplied return targets', async (role, start) => {
+        await mount('/login?returnTo=/api/secrets'); await formLogin('Person A', role); expect(location.pathname).toBe(start); expect(location.search + location.hash).toBe('');
     });
     it.each(['Learner', 'Instructor', 'Administrator'])('shows exactly the validated three fields for %s without any Profile request', async (role) => {
         await mount('/courses'); await login('Person A', role); await go('/profile');
@@ -121,7 +124,7 @@ describe('real declarative routing and Profile', () => {
     });
     it('explicit logout clears Profile, does not re-arm return, and deliberate revisit can set it', async () => {
         await mount('/courses'); await login(); await go('/profile'); await act(async () => auth.logout()); expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('Person A');
-        await formLogin('Person B'); expect(location.pathname).toBe('/courses'); await signOutFromMenu(); expect(location.pathname).toBe('/login'); await go('/profile'); await formLogin('Person C'); expect(location.pathname).toBe('/profile'); expect(host.textContent).not.toContain('Person B');
+        await formLogin('Person B'); expect(location.pathname).toBe('/home'); await signOutFromMenu(); expect(location.pathname).toBe('/login'); await go('/profile'); await formLogin('Person C'); expect(location.pathname).toBe('/profile'); expect(host.textContent).not.toContain('Person B');
     });
     it.each(['timer', 'pageshow'])('expiry via %s removes active Profile before redirect', async (mode) => {
         await mount('/courses'); await login(); await go('/profile');

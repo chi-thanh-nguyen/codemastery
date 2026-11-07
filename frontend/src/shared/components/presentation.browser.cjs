@@ -311,8 +311,9 @@ async function runEngine(playwright, engine, baseUrl) {
         {
             const { context, page, api } = await newPage();
             await page.goto(url('/preview')); await ready(page);
-            await check('preview index labels sample data and links every screen inside /preview', async () => {
-                await page.getByText('Design preview · Sample data.').waitFor();
+            await check('preview index links every screen inside /preview and shows no preview chrome', async () => {
+                await page.locator('[data-preview-screen="overview"]').waitFor();
+                assert.equal(await page.locator('[aria-label="Design preview notice"], [aria-label="Preview workspace"]').count(), 0);
                 const hrefs = await page.locator('a[href^="/preview?screen="]').evaluateAll((links) => [...new Set(links.map((a) => new URL(a.href).searchParams.get('screen')))]);
                 screens.push(...hrefs.filter(Boolean));
                 assert(screens.length >= 30, `found ${screens.length} screens`);
@@ -541,13 +542,14 @@ async function runEngine(playwright, engine, baseUrl) {
                 await page.getByText("Couldn't load this course").waitFor();
                 await page.goto(url('/courses/abcdefab-cdef-4abc-8def-abcdefabcdef')); await page.getByRole('heading', { level: 1, name: 'Course not available' }).waitFor();
             });
-            await check('loading skeletons shimmer for 1.2 s and name what is loading', async () => {
+            await check('loading skeletons shimmer for 1.2 s and name what is loading, without a spinner', async () => {
                 api.state.hold = /^\/courses$/;
                 await page.goto(url('/courses'));
                 await page.locator('.MuiSkeleton-root').first().waitFor();
                 const style = await page.locator('.MuiSkeleton-root').first().evaluate((el) => { const s = getComputedStyle(el); return { name: s.animationName, duration: s.animationDuration }; });
                 assert.equal(style.name, 'cm-shimmer'); assert.equal(style.duration, '1.2s');
                 assert(await page.getByRole('status').filter({ hasText: /Loading available courses/ }).count() > 0);
+                assert.equal(await page.locator('main .MuiCircularProgress-root, main [role="progressbar"]').count(), 0, 'no spinner while content loads');
                 api.state.hold = null; api.state.release?.('continue');
                 await page.getByRole('list', { name: 'Published courses' }).waitFor();
             });
@@ -573,11 +575,11 @@ async function runEngine(playwright, engine, baseUrl) {
             const { context, page, api } = await newPage({ viewport: { width, height: 844 } });
             await page.goto(url('/login')); await ready(page);
             await page.locator('#login-email').fill('learner@example.test'); await page.locator('#login-password').fill('correct-password-123');
-            await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL(/\/courses$/);
-            await check(`Learner home lists active memberships only, without pending sections (${width} px)`, async () => {
-                if (width < 900) { await page.getByRole('button', { name: 'Toggle navigation' }).click(); await page.getByRole('dialog').getByRole('link', { name: 'Home' }).click(); }
-                else await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Home' }).click();
+            // A Learner signs in to Learner home (Leader instruction, 7 November 2026; other roles keep /courses).
+            await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL(/\/home$/);
+            await check(`sign-in lands a Learner on Learner home, which lists active memberships only, without pending sections (${width} px)`, async () => {
                 await page.getByRole('heading', { level: 1, name: 'Welcome back, Harness Learner' }).waitFor();
+                if (width >= 900) assert.equal(await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Home' }).getAttribute('aria-current'), 'page');
                 const list = page.getByRole('list', { name: 'Your active courses' }); await list.waitFor();
                 assert.equal(await list.getByRole('listitem').count(), 1);
                 assert(api.state.requests.some((r) => r.startsWith('GET /api/me/courses') && r.includes('status=active')));
@@ -682,6 +684,123 @@ async function runEngine(playwright, engine, baseUrl) {
                 await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
                 assert.equal(await page.locator('[data-canvas-reach]').isVisible().catch(() => false), false);
                 const size = await overflow(page); assert(size.scroll <= size.client);
+            });
+            await context.close();
+        }
+
+        // ── Brand lockup, preview notice and course marks (7 November 2026) ─
+        {
+            const lockup = (page) => page.evaluate(() => {
+                const header = document.querySelector('header'), img = header.querySelector('img'), mark = header.querySelector('[data-wordmark]');
+                const brand = img.closest('a') || img.parentElement, b = brand.getBoundingClientRect();
+                // Every other control to the right of the lockup (the mobile menu button sits to its left).
+                const after = [...header.querySelectorAll('a, button')].filter((el) => !brand.contains(el) && !el.contains(brand))
+                    .map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.left >= b.left);
+                return { bar: header.getBoundingClientRect().height, img: img.getBoundingClientRect().height, natural: img.naturalWidth,
+                    text: parseFloat(getComputedStyle(mark).fontSize), brandRight: b.right, nextLeft: Math.min(...after.map((r) => r.left)) };
+            });
+            const { context, page } = await newPage({ viewport: { width: 1280, height: 900 } });
+            await check('the header lockup is larger and proportional (40 px mark, 25 px wordmark; fixed 36 px and 32 px steps on phones, no viewport units) and never crowds the navigation', async () => {
+                for (const [width, mark, bar] of [[1280, 40, 80], [1024, 40, 80], [600, 40, 80], [599, 36, 64], [390, 36, 64], [389, 32, 64], [375, 32, 64], [360, 32, 64]]) {
+                    await page.setViewportSize({ width, height: 844 });
+                    for (const route of ['/courses', '/preview?screen=learner-home', '/']) {
+                        await page.goto(url(route)); await ready(page);
+                        const l = await lockup(page);
+                        assert.equal(l.img, mark, `${width} ${route}: mark ${JSON.stringify(l)}`); assert(l.natural > 0, `${route}: mark decoded`);
+                        assert.equal(l.text, mark * 0.625, `${width} ${route}: wordmark ${JSON.stringify(l)}`);
+                        assert.equal(l.bar, bar, `${width} ${route}: bar height unchanged`);
+                        assert(l.brandRight + 8 <= l.nextLeft, `${width} ${route}: brand clear of the next control ${JSON.stringify(l)}`);
+                        const size = await overflow(page); assert(size.scroll <= size.client, `${width} ${route}: no page overflow`);
+                    }
+                    await page.goto(url('/courses')); await ready(page);
+                    await page.screenshot({ path: path.join(dir, `brand-lockup-${width}.png`), clip: { x: 0, y: 0, width, height: bar + 24 } });
+                }
+                await page.setViewportSize({ width: 1280, height: 900 });
+            });
+            await check('preview screens carry no preview chrome (no notice, switcher, index or reset button) and the reach matches the canvas', async () => {
+                for (const screen of ['overview', 'my-courses', 'admin-overview', 'sign-in', 'forgot-password', 'quiz-attempt']) {
+                    await page.goto(url(`/preview?screen=${screen}`)); await ready(page);
+                    assert.equal(await page.locator('[aria-label="Design preview notice"], [aria-label="Preview workspace"]').count(), 0, `${screen}: no notice or switcher`);
+                    for (const name of ['Reset sample data', 'Preview index', 'Simulate time running out']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, `${screen}: ${name}`);
+                    assert.equal(await page.getByText('Design preview · Sample data.').count(), 0, `${screen}: no sample-data line`);
+                    const reach = await page.locator('[data-canvas-reach]').evaluate((el) => getComputedStyle(el).color).catch(() => null);
+                    if (reach) assert.equal(reach, 'rgb(246, 246, 247)', `${screen}: reach colour`);
+                }
+                await page.goto(url('/preview?screen=my-courses')); await ready(page);
+                await page.screenshot({ path: path.join(dir, 'preview-top-1280.png'), clip: { x: 0, y: 0, width: 1280, height: 260 } });
+            });
+            await check('the signed-in account avatar is solid Deep Logo Blue with a white initial (no gradient)', async () => {
+                await page.goto(url('/preview?screen=learner-home')); await ready(page);
+                const avatar = await page.locator('header [data-monogram]').evaluate((el) => { const st = getComputedStyle(el); return { tone: el.dataset.monogram, bg: st.backgroundColor, image: st.backgroundImage, color: st.color, text: el.textContent }; });
+                assert.equal(avatar.tone, 'brand'); assert.equal(avatar.bg, 'rgb(6, 82, 196)'); assert.equal(avatar.image, 'none'); assert.equal(avatar.color, 'rgb(255, 255, 255)'); assert.equal(avatar.text, 'L');
+            });
+            await check('course marks: one neutral container; official full-colour logos optically sized, otherwise a Deep Logo Blue code glyph; never letters, ink or gradients', async () => {
+                const marks = () => page.evaluate(() => [...document.querySelectorAll('[data-course-mark]')].map((el) => {
+                    const c = el.getBoundingClientRect(), img = el.querySelector('img'), s = getComputedStyle(el);
+                    return { kind: el.dataset.courseMark, bg: s.backgroundColor, image: s.backgroundImage, color: s.color, text: el.textContent, radius: s.borderRadius, w: c.width, h: c.height,
+                        img: img ? { loaded: img.complete && img.naturalWidth > 0, w: img.getBoundingClientRect().width, h: img.getBoundingClientRect().height,
+                            inside: img.getBoundingClientRect().bottom <= c.bottom + 0.5 && img.getBoundingClientRect().top >= c.top - 0.5 } : null };
+                }));
+                await page.goto(url('/preview?screen=overview')); await ready(page);
+                const sample = await marks();
+                assert.deepEqual([...new Set(sample.map((m) => m.kind))].sort(), ['generic', 'python', 'typescript']);
+                const neutral = (m) => m.bg === 'rgb(246, 246, 247)' && m.image === 'none';
+                const generic = (m) => m.kind === 'generic' && neutral(m) && m.color === 'rgb(6, 82, 196)' && m.text === '';
+                for (const m of sample) {
+                    assert(m.kind === 'generic' ? generic(m) : neutral(m), JSON.stringify(m)); assert.equal(m.w, m.h);
+                    if (m.img) { assert(m.img.loaded, `${m.kind} decoded`); assert(m.img.inside, `${m.kind} stays inside its container`); }
+                }
+                // Colour is kept: render the 48 px marks and find both official Python hues and TypeScript blue.
+                const hues = await page.evaluate(async () => {
+                    const out = {};
+                    for (const el of document.querySelectorAll('[data-course-mark="python"] img, [data-course-mark="typescript"] img')) {
+                        const img = new Image(); img.src = el.src; await img.decode();
+                        const c = document.createElement('canvas'); c.width = 96; c.height = 96; const x = c.getContext('2d'); x.drawImage(img, 0, 0, 96, 96 * img.naturalHeight / img.naturalWidth);
+                        const d = x.getImageData(0, 0, 96, 96).data; let blue = 0, yellow = 0;
+                        for (let i = 0; i < d.length; i += 4) { const [r, g, b, a] = [d[i], d[i + 1], d[i + 2], d[i + 3]]; if (a < 200) continue; if (b > 150 && r < 90) blue++; if (r > 220 && g > 190 && b < 120) yellow++; }
+                        out[el.closest('[data-course-mark]').dataset.courseMark] = { blue, yellow };
+                    }
+                    return out;
+                });
+                assert(hues.python.blue > 50 && hues.python.yellow > 50, `python colours ${JSON.stringify(hues)}`); assert(hues.typescript.blue > 1000, `typescript colour ${JSON.stringify(hues)}`);
+                await page.locator('[aria-label="Course mark samples"]').screenshot({ path: path.join(dir, 'course-marks-1280.png') });
+                // Catalogue doubles name no language, so no logo is guessed. The sample "Introduction to Programming"
+                // (Python) shows the same mark in the Learner and Instructor workspaces; Learner home rows reuse it at 32 px.
+                for (const [route, label, kinds, size] of [['/courses', 'catalogue', null, 48], ['/preview?screen=my-courses', 'my courses (sample)', ['python', 'generic', 'generic'], 48],
+                    ['/preview?screen=teaching', 'teaching (sample)', ['python', 'generic'], 48], ['/preview?screen=learner-home', 'learner home rows (sample)', ['python', 'generic'], 32]]) {
+                    await page.goto(url(route)); await ready(page);
+                    const live = await marks(); assert(live.length > 0, `${label}: course marks shown`);
+                    for (const m of live) { assert(neutral(m), `${label}: neutral container ${JSON.stringify(m)}`); assert.equal(m.w, size, label); }
+                    if (kinds) assert.deepEqual(live.map((m) => m.kind), kinds, label);
+                    else assert(live.every(generic), `${label}: ${JSON.stringify(live.map((m) => m.kind))}`);
+                }
+                await page.goto(url('/preview?screen=teaching')); await ready(page);
+                await page.screenshot({ path: path.join(dir, 'course-marks-teaching-1280.png'), clip: { x: 0, y: 0, width: 1280, height: 600 } });
+                await page.setViewportSize({ width: 390, height: 844 }); await page.goto(url('/courses')); await ready(page);
+                const mobile = await marks(); assert(mobile.length > 0 && mobile.every((m) => m.w === 48 && generic(m)));
+                await page.screenshot({ path: path.join(dir, 'course-marks-catalogue-390.png') });
+            });
+            await check('consistency fixes: flat map nodes, 4/6 dashes, one instructor mention, current bell, 280 px outline', async () => {
+                await page.setViewportSize({ width: 1280, height: 900 });
+                await page.goto(url('/preview?screen=mastery')); await ready(page); await page.locator('.react-flow__node').first().waitFor();
+                const graph = await page.evaluate(() => ({
+                    nodes: [...document.querySelectorAll('.react-flow__node button')].map((node) => getComputedStyle(node).boxShadow),
+                    dashes: [...new Set([...document.querySelectorAll('.react-flow__edge-path')].map((edge) => getComputedStyle(edge).strokeDasharray))],
+                }));
+                assert(graph.nodes.some((shadow) => /inset/.test(shadow)) && !graph.nodes.some((shadow) => /0px 1px 2px/.test(shadow)), `resting nodes are flat with a hairline: ${JSON.stringify(graph.nodes)}`);
+                assert(graph.dashes.includes('4px, 6px'), `edge dashes ${JSON.stringify(graph.dashes)}`);
+                await page.goto(url('/preview?screen=course')); await ready(page);
+                const spine = await page.locator('[data-path-line="dashed"]').first().evaluate((el) => getComputedStyle(el).backgroundImage);
+                assert.match(spine, /4px.*10px/, `path line dash ${spine}`);
+                await page.goto(url(`/courses/${primaryId}`)); await ready(page);
+                assert.equal(await page.getByText('Instructor Demo', { exact: false }).count(), 1, 'instructor named once');
+                await page.goto(url('/preview?screen=notifications')); await ready(page);
+                assert.equal(await page.locator('header [aria-label^="Notifications"]').getAttribute('aria-current'), 'page');
+                await page.setViewportSize({ width: 1536, height: 900 }); await page.goto(url('/preview?screen=lesson')); await ready(page);
+                // The reading grid's first column is the outline: presentationTokens.outlineWidth (280 px).
+                const grid = await page.evaluate(() => [...document.querySelectorAll('main div')].map((el) => getComputedStyle(el)).filter((st) => st.display === 'grid').map((st) => st.gridTemplateColumns).find((cols) => /^\d+px \d/.test(cols) && parseFloat(cols) < 500) ?? null);
+                assert.match(String(grid), /^280px /, `lesson outline column ${grid}`);
+                await page.setViewportSize({ width: 1280, height: 900 });
             });
             await context.close();
         }

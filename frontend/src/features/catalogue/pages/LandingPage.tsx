@@ -5,7 +5,7 @@ import { BrandWordmark } from '../../../shared/components/BrandLogo';
 import { PathSpine } from '../../../shared/components/PathSpine';
 import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import type { PresentationIconName } from '../../../shared/components/PresentationIcon';
-import { color, radius } from '../../../app/theme/theme';
+import { color, presentationTokens, radius } from '../../../app/theme/theme';
 
 export interface LandingPageProps {
     /** The labelled example Mastery Map illustration, composed by the caller (lazily loaded in production). */
@@ -29,7 +29,7 @@ export function LandingPage({ exampleMap }: LandingPageProps) {
         <Box component="a" href="#main-content" sx={{ position: 'absolute', left: 16, top: -64, zIndex: 10, px: 2, py: 1.25, borderRadius: `${radius.sm}px`, bgcolor: color.surface, color: color.ink950, fontWeight: 600,
             '&:focus': { top: 12 } }}>Skip to main content</Box>
         <Box component="header" sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, px: { xs: 2, sm: 4 }, height: { xs: 64, sm: 80 }, maxWidth: 1440, mx: 'auto' }}>
-            <BrandWordmark size={32} />
+            <BrandWordmark size={presentationTokens.brandMark} />
             <Box sx={{ flex: 1 }} />
             <Box component="nav" aria-label="Main navigation" sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1.5 } }}>
                 <Button component={Link} to="/courses" variant="text" color="inherit" sx={{ color: color.surface, px: { xs: 1.25, sm: 2 } }}>Catalogue</Button>
@@ -41,11 +41,11 @@ export function LandingPage({ exampleMap }: LandingPageProps) {
             <Box component="section" aria-labelledby="landing-title" sx={{ px: { xs: 2, sm: 4 }, pt: { xs: 6, md: 10 }, pb: { xs: 8, md: 12 }, maxWidth: 1440, mx: 'auto', color: color.surface,
                 display: 'grid', gap: 6, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 5fr) minmax(0, 6fr)' }, alignItems: 'center' }}>
                 <Box>
-                    <Typography id="landing-title" component="h1" sx={{ fontSize: { xs: '2.5rem', md: '3.5rem' }, fontWeight: 600, lineHeight: 1.05, letterSpacing: '-0.03em', textWrap: 'balance' }}>Learn programming at the pace of what you actually know.</Typography>
+                    <Typography id="landing-title" component="h1" variant="display">Learn programming at the pace of what you actually know.</Typography>
                     <Typography sx={{ mt: 3, color: color.chromeMuted, fontSize: '1.125rem', maxWidth: '46ch' }}>CodeMastery is a course-based platform for first programming courses. Quizzes show which skills you have mastered, and the next step comes with a reason.</Typography>
                     <Box sx={{ mt: 5, display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
                         <Button component={Link} to="/courses" variant="contained" sx={{ bgcolor: color.surface, color: color.ink950, '&:hover': { bgcolor: color.fill150 } }}>Browse courses</Button>
-                        <Button component={Link} to="/register" variant="outlined" sx={{ bgcolor: color.chromeRaised, color: color.surface, '&:hover': { bgcolor: '#2A2D35' } }}>Create account</Button>
+                        <Button component={Link} to="/register" variant="outlined" sx={{ bgcolor: color.chromeRaised, color: color.surface, '&:hover': { bgcolor: color.chromeHover } }}>Create account</Button>
                     </Box>
                 </Box>
                 <Box sx={{ bgcolor: color.canvas100, borderRadius: `${radius.xl}px`, p: { xs: 1.5, sm: 2.5 }, color: color.ink900 }}>{exampleMap}</Box>

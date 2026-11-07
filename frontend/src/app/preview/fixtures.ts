@@ -22,12 +22,21 @@ export const sampleLearner = { name: 'Linh Pham', role: 'Learner' };
 export const sampleInstructor = { name: 'Instructor Demo', role: 'Instructor' };
 export const sampleAdmin = { name: 'Admin Demo', role: 'Administrator' };
 export const COURSE_TITLE = 'Introduction to Programming';
+/**
+ * One description per sample course, shared by every workspace, so a course shows the same
+ * course mark everywhere (the mark reads the language from the course's own text; the sample
+ * lessons teach Python).
+ */
+export const COURSE_DESCRIPTIONS = {
+    'c-intro': 'Variables, decisions, loops and functions in Python for first-year students, one short lesson at a time.',
+    'c-practice': 'Weekly exercises that apply each chapter of Introduction to Programming.',
+} as const;
 
 // ── Learner: memberships (S5 sample; the live page reads CT22.membership) ──
 export interface SampleMembership { id: string; title: string; description: string; instructorDisplayName: string | null; status: 'active' | 'completed' | 'left' }
 export const learnerMemberships: SampleMembership[] = [
-    { id: 'c-intro', title: COURSE_TITLE, description: 'Variables, decisions, loops and functions for first-year students, one short lesson at a time.', instructorDisplayName: sampleInstructor.name, status: 'active' },
-    { id: 'c-practice', title: 'Programming Practice', description: 'Weekly exercises that apply each chapter of Introduction to Programming.', instructorDisplayName: sampleInstructor.name, status: 'active' },
+    { id: 'c-intro', title: COURSE_TITLE, description: COURSE_DESCRIPTIONS['c-intro'], instructorDisplayName: sampleInstructor.name, status: 'active' },
+    { id: 'c-practice', title: 'Programming Practice', description: COURSE_DESCRIPTIONS['c-practice'], instructorDisplayName: sampleInstructor.name, status: 'active' },
     { id: 'c-thinking', title: 'Computational Thinking', description: 'Decomposition, patterns and abstraction before you write any code.', instructorDisplayName: null, status: 'completed' },
     { id: 'c-data', title: 'Working with Data', description: 'Lists, dictionaries and reading simple files.', instructorDisplayName: sampleInstructor.name, status: 'left' },
 ];
@@ -144,8 +153,8 @@ export const notifications: NotificationView[] = [
 
 // ── Instructor ─────────────────────────────────────────────────────────────
 export const instructorCourses: (InstructorCourseView & { prerequisiteDescription: string })[] = [
-    { id: 'c-intro', title: COURSE_TITLE, description: 'Demo course for the Interim catalogue. Variables, decisions, loops and functions in Python.', publication: 'published', lessonCount: 12, learnerCount: 6, prerequisiteDescription: 'No prior programming. Comfortable using a computer and a text editor.' },
-    { id: 'c-practice', title: 'Programming Practice', description: 'Short weekly exercises that reuse the skills from the introduction course.', publication: 'hidden', lessonCount: 4, learnerCount: 0, prerequisiteDescription: '' },
+    { id: 'c-intro', title: COURSE_TITLE, description: COURSE_DESCRIPTIONS['c-intro'], publication: 'published', lessonCount: 12, learnerCount: 6, prerequisiteDescription: 'No prior programming. Comfortable using a computer and a text editor.' },
+    { id: 'c-practice', title: 'Programming Practice', description: COURSE_DESCRIPTIONS['c-practice'], publication: 'hidden', lessonCount: 4, learnerCount: 0, prerequisiteDescription: '' },
 ];
 export const editChapters: ChapterEditView[] = learnerChapters.map((chapter) => ({ id: chapter.id, title: chapter.title, position: chapter.position, lessons: chapter.lessons.map((lesson) => ({
     id: lesson.id, title: lesson.title, position: lesson.position, publication: lesson.id === 'l12' ? 'hidden' : 'published', skillIds: lesson.id === 'l9' ? [] : (lesson.skills ?? []).map((skill) => skill.id),

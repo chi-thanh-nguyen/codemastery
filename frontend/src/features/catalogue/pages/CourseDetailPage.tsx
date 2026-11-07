@@ -72,7 +72,6 @@ export function CourseDetailPage({ courseId, onBack, membershipActions }: Course
                     <Typography variant="h4" component="h2" id="course-facts" sx={{ mb: 2.5 }}>Course facts</Typography>
                     <FactList items={[
                         { label: 'Prerequisites', value: course.prerequisiteDescription ?? 'None specified' },
-                        { label: 'Instructor', value: instructorLabel(course.instructorDisplayName) },
                         { label: 'Published content', value: `${course.syllabus.length} ${course.syllabus.length === 1 ? 'chapter' : 'chapters'} · ${lessonCount} ${lessonCount === 1 ? 'lesson' : 'lessons'}` },
                     ]} />
                 </Box>

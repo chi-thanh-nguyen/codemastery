@@ -6,6 +6,7 @@ import { PageHeader, SearchPill } from '../../shared/components/PageHeader';
 import { StatusPill, MasteryLegend, RecommendationTag } from '../../shared/components/StatusPill';
 import { CircleAction, CourseTile, ProgressLine, StatGroup, StatTile, Tile, SectionHeading } from '../../shared/components/Tile';
 import { PathSpine } from '../../shared/components/PathSpine';
+import { CourseMark } from '../../shared/components/CourseMark';
 import { GuidanceStack } from '../../shared/components/GuidanceStack';
 import { SegmentedControl } from '../../shared/components/ViewRail';
 import { DataTable, PaginationBar } from '../../shared/components/DataTable';
@@ -19,7 +20,8 @@ import { usePreview } from './previewKit';
 export interface DirectoryEntry { id: string; title: string; spec: string; status: 'Live' | 'Preview' | 'Proposed'; note: string; href?: string; onOpen?: () => void }
 export interface DirectoryGroup { title: string; description: string; entries: DirectoryEntry[] }
 
-const statusTone = { Live: 'mint', Preview: 'sky', Proposed: 'lilac' } as const;
+// Lilac is reserved for adaptive guidance; a proposal is "not yet", so it takes the dashed outline.
+const statusTone = { Live: 'mint', Preview: 'sky', Proposed: 'dashed' } as const;
 const swatches: { name: string; value: string; role: string; dark?: boolean }[] = [
     { name: 'Ink', value: color.ink950, role: 'Frame, primary buttons', dark: true }, { name: 'Canvas', value: color.canvas100, role: 'Working ground' }, { name: 'Panel fill', value: color.fill150, role: 'Aside, secondary controls' },
     { name: 'Surface', value: color.surface, role: 'Tiles, tables, forms' }, { name: 'Logo Blue', value: color.brand600, role: 'Links, focus, selection, progress', dark: true }, { name: 'Text', value: color.ink900, role: 'Primary text', dark: true },
@@ -104,6 +106,17 @@ export function DesignReference({ groups }: { groups: DirectoryGroup[] }) {
             <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: 'minmax(0,1fr)', lg: 'minmax(0,1fr) 360px' }, alignItems: 'start' }}>
                 <Box sx={{ display: 'grid', gap: 3 }}>
                     <CourseTile title="Introduction to Programming" description="Demo course for the Interim catalogue." byline="Instructor · Instructor Demo" href="#" onOpen={() => notify('Course tile (sample).')} headingLevel="h3" />
+                    <Tile padding={{ xs: 3, sm: 4 }} sx={{ display: 'grid', gap: 2 }}>
+                        <Typography variant="h4" component="h3">Course marks</Typography>
+                        <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: '60ch' }}>The official logo of the language a course names in its title or description, in one neutral container and sized by eye. Courses that name no single language show one Deep Logo Blue code glyph in the same container.</Typography>
+                        <Box component="ul" aria-label="Course mark samples" sx={{ m: 0, p: 0, listStyle: 'none', display: 'flex', flexWrap: 'wrap', gap: { xs: 2.5, sm: 4 } }}>
+                            {[{ title: 'Python Fundamentals', caption: 'Python' }, { title: 'TypeScript Basics', caption: 'TypeScript' }, { title: 'Introduction to Programming', caption: 'No language named' }].map((sample) =>
+                                <Box component="li" key={sample.title} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                    <CourseMark title={sample.title} /><CourseMark title={sample.title} size={32} />
+                                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>{sample.caption}</Typography>
+                                </Box>)}
+                        </Box>
+                    </Tile>
                     <PathSpine sections={[{ id: 's', title: 'Path Spine', items: [
                         { id: 'a', node: 'done', content: <Tile><Typography variant="h4" component="p">Completed lesson</Typography></Tile> },
                         { id: 'b', node: 'current', content: <Tile><Typography variant="h4" component="p">Current lesson</Typography></Tile> },

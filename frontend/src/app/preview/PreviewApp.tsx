@@ -6,7 +6,6 @@ import { DashboardLayout } from '../../layouts/DashboardLayout';
 import { AccountMenu } from '../../shared/components/AppHeader';
 import { PresentationIcon } from '../../shared/components/PresentationIcon';
 import type { NavItem } from '../../shared/components/SidebarNav';
-import { SegmentedControl } from '../../shared/components/ViewRail';
 import { NotificationBell } from '../../features/interaction/components/NotificationBell';
 import { DesignReference } from './DesignReference';
 import type { DirectoryGroup } from './DesignReference';
@@ -15,8 +14,7 @@ import { InstructorPreview, initialInstructorState } from './InstructorPreview';
 import { AdminPreview, initialAdminState } from './AdminPreview';
 import { PublicPreview } from './PublicPreview';
 import * as fx from './fixtures';
-import { color } from '../theme/theme';
-import { PreviewContext, SampleDataBanner, previewHref, usePreviewNav } from './previewKit';
+import { PreviewContext, previewHref, usePreviewNav } from './previewKit';
 import type { Workspace } from './previewKit';
 
 interface ScreenDef { id: string; workspace: Workspace; title: string; spec: string; status: 'Live' | 'Preview' | 'Proposed'; note: string; bare?: boolean; nav?: string }
@@ -79,7 +77,6 @@ const NAV: Record<Workspace, (NavItem & { screen: string; live?: string })[]> = 
 };
 const PERSONA: Record<Workspace, { name: string; role: string }> = { reference: { name: 'Design preview', role: 'Sample data' }, public: { name: 'Visitor', role: 'Sample data' },
     learner: fx.sampleLearner, instructor: fx.sampleInstructor, admin: fx.sampleAdmin };
-const WORKSPACE_HOME: Record<Workspace, string> = { reference: 'overview', public: 'landing', learner: 'learner-home', instructor: 'teaching', admin: 'admin-overview' };
 
 /** Isolated design preview at the approved `/preview` route. It never reads AuthProvider or calls the API. */
 export default function PreviewApp() {
@@ -109,25 +106,21 @@ export default function PreviewApp() {
     let content: ReactNode;
     if (workspace === 'reference') content = <DesignReference groups={groups} />;
     else if (workspace === 'public') content = <PublicPreview screen={def.id} go={go} />;
-    else if (workspace === 'learner') content = <LearnerPreview state={learner} setState={setLearner} screen={def.id} item={item} go={go} onIndex={toIndex} onReset={reset} />;
+    else if (workspace === 'learner') content = <LearnerPreview state={learner} setState={setLearner} screen={def.id} item={item} go={go} />;
     else if (workspace === 'instructor') content = <InstructorPreview state={instructor} setState={setInstructor} screen={def.id} item={item} tab={tab} go={go} />;
     else content = <AdminPreview state={admin} setState={setAdmin} screen={def.id} />;
-    const switcher = <SegmentedControl label="Preview workspace" value={workspace} onChange={(next) => go(WORKSPACE_HOME[next])}
-        options={[{ value: 'reference', label: 'Index' }, { value: 'public', label: 'Public' }, { value: 'learner', label: 'Learner' }, { value: 'instructor', label: 'Instructor' }, { value: 'admin', label: 'Administrator' }]} />;
     const persona = PERSONA[workspace];
     const unread = learner.notifications.filter((entry) => !entry.read).length;
     return <PreviewContext.Provider value={context}>
-        <Box key={resetKey}>
-            {def.bare ? (def.id === 'quiz-attempt' ? content : <Box sx={{ position: 'relative' }}>
-                <SampleDataBanner compact onIndex={toIndex} onReset={reset} tools={switcher} />
-                {content}
-            </Box>)
+        <Box key={resetKey} data-preview-screen={def.id}>
+            {/* No preview chrome on any screen (7 November 2026): each screen looks as it would in
+                production. Screens are opened by link (`/preview?screen=<id>`, listed on the index). */}
+            {def.bare ? content
                 : <DashboardLayout navItems={NAV[workspace].map(({ screen: target, live, ...entry }) => ({ ...entry, href: live ?? previewHref(target) }))} selectedNavId={def.nav}
                     onNavSelect={(id) => { const entry = NAV[workspace].find((candidate) => candidate.id === id); if (entry?.live) navigate(entry.live); else go(entry?.screen ?? 'overview'); }}
                     brandHref={previewHref('overview')} onBrandSelect={toIndex}
-                    canvasTopColor={color.sky100} banner={<SampleDataBanner onIndex={workspace === 'reference' ? undefined : toIndex} onReset={reset} tools={switcher} />}
                     headerActions={<>
-                        {workspace === 'learner' && <NotificationBell unread={unread} href={previewHref('notifications')} onClick={() => go('notifications')} />}
+                        {workspace === 'learner' && <NotificationBell unread={unread} href={previewHref('notifications')} onClick={() => go('notifications')} current={def.id === 'notifications'} />}
                         <AccountMenu displayName={persona.name} role={persona.role} renderItems={(close) => [
                             <MenuItem key="index" onClick={() => { close(); toIndex(); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="layers" sx={{ fontSize: 20 }} /></ListItemIcon>Preview index</MenuItem>,
                             <MenuItem key="reset" onClick={() => { close(); reset(); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="refresh" sx={{ fontSize: 20 }} /></ListItemIcon>Reset sample data</MenuItem>,

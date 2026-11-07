@@ -17,7 +17,12 @@ export interface AuthContextValue {
     logout(): void;
     isCurrent(generation: number): boolean;
     rememberProfile(leavingSession?: boolean): void;
-    consumeReturn(): '/profile' | '/courses';
+    /**
+     * Post-sign-in destination: the one-use `/profile` return when one was captured (CT16-PROFILE P1),
+     * otherwise the role's start page — `/home` for a Learner (Leader instruction, 7 November 2026),
+     * `/courses` for every other role.
+     */
+    consumeReturn(): '/profile' | '/home' | '/courses';
 }
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -110,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         get generation() { return generation.current; },
         login, register, logout: () => clear(true), isCurrent,
         rememberProfile: (leavingSession = false) => { if (!leavingSession || !explicitLogout.current) returnPath.current = '/profile'; },
-        consumeReturn: () => { const path = returnPath.current; returnPath.current = null; return path ?? '/courses'; },
+        consumeReturn: () => { const path = returnPath.current; returnPath.current = null; return path ?? (eligible()?.user.role === 'Learner' ? '/home' : '/courses'); },
     }), [snapshot, eligible, login, register, clear, isCurrent]);
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

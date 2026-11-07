@@ -20,6 +20,13 @@ describe('course detail integration', () => {
         const back = await mount(); expect(host.textContent).toContain('Read the introduction'); expect(host.textContent).toContain('1. Lesson'); expect(host.textContent).not.toContain('Enroll Now');
         await act(async () => [...host.querySelectorAll('a')].find((link) => link.textContent === 'Catalogue')!.click()); expect(back).toHaveBeenCalledOnce();
     });
+    it('names the instructor once, in the title meta, and keeps Course facts to prerequisites and published content', async () => {
+        await mount();
+        expect(host.textContent?.match(/Instructor Demo/g)).toHaveLength(1);
+        expect(host.querySelector('header')?.textContent).toContain('Instructor · Instructor Demo');
+        const facts = host.querySelector('section[aria-labelledby="course-facts"]')!;
+        expect([...facts.querySelectorAll('dt')].map((node) => node.textContent)).toEqual(['Prerequisites', 'Published content']);
+    });
     it('links multiple chapter controls to uniquely identified regions and keeps associations stable', async () => {
         const secondId = '00000000-0000-4000-8000-000000000002';
         vi.mocked(getPublishedCourseById).mockResolvedValue({ ...detail, syllabus: [

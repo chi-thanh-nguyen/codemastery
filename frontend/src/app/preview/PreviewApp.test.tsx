@@ -38,10 +38,10 @@ afterEach(async () => {
 async function mount(search = '') {
     window.history.replaceState(null, '', `/preview${search}`);
     await act(async () => root.render(<App />));
-    for (let attempt = 0; attempt < 50 && !host.querySelector('[aria-label="Design preview notice"]'); attempt++) {
+    for (let attempt = 0; attempt < 50 && !host.querySelector('[data-preview-screen]'); attempt++) {
         await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     }
-    expect(host.querySelector('[aria-label="Design preview notice"]')).not.toBeNull();
+    expect(host.querySelector('[data-preview-screen]')).not.toBeNull();
 }
 const h1 = () => host.querySelector('main h1')?.textContent;
 const buttons = (text: string, scope: ParentNode = host) => [...scope.querySelectorAll<HTMLElement>('button, a, [role="menuitem"]')].filter((node) => node.textContent?.trim() === text);
@@ -64,13 +64,30 @@ async function waitUntil(done: () => boolean, what: string, timeoutMs = 3000) {
 async function settle(ms: number) { await act(async () => { vi.advanceTimersByTime(ms); }); }
 
 describe('isolated design preview', () => {
-    it('labels sample data, lists every workspace and never calls the network or writes storage', async () => {
+    it('lists every workspace on the index and never calls the network or writes storage', async () => {
         await mount();
         expect(h1()).toBe('CodeMastery design preview');
-        expect(host.textContent).toContain('Design preview · Sample data.');
+        // Status pills: Live mint, Preview sky, Proposed dashed (lilac stays reserved for adaptive guidance).
+        const pill = (text: string) => [...host.querySelectorAll<HTMLElement>('span')].find((node) => node.textContent === text && node.querySelector('span') !== null)!;
+        expect(getComputedStyle(pill('Proposed')).borderStyle).toBe('dashed');
+        expect(getComputedStyle(pill('Proposed')).backgroundColor).toBe('rgb(255, 255, 255)');
         for (const group of ['Live screens', 'Learner', 'Instructor', 'Administrator', 'Public and account']) expect(host.textContent).toContain(group);
         for (const spec of ['S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S17', 'S18', 'S21', 'S22', 'S23', 'S24', 'S25', 'S26']) expect(host.textContent).toContain(spec);
         expect(fetcher).not.toHaveBeenCalled(); expect(localStorage.length + sessionStorage.length).toBe(0);
+    });
+
+    it('shows no preview chrome: screens look as in production and are opened by link', async () => {
+        for (const screen of ['overview', 'my-courses', 'admin-overview', 'sign-in', 'quiz-attempt']) {
+            await act(async () => root.unmount()); root = createRoot(host);
+            await mount(`?screen=${screen}`);
+            expect(host.querySelector(`[data-preview-screen="${screen}"]`), screen).not.toBeNull();
+            expect(host.querySelector('[aria-label="Design preview notice"]'), screen).toBeNull();
+            expect(host.querySelector('[aria-label="Preview workspace"]'), screen).toBeNull();
+            expect(host.textContent, screen).not.toContain('Design preview · Sample data.');
+            for (const label of ['Reset sample data', 'Preview index', 'Simulate time running out']) expect(buttons(label).length, `${screen}: ${label}`).toBe(0);
+            const reach = host.querySelector<HTMLElement>('[data-canvas-reach]');
+            if (reach) expect(getComputedStyle(reach).color, screen).toBe('rgb(246, 246, 247)');
+        }
     });
 
     it('navigates with query parameters inside /preview, keeps the parent destination current and focuses the new heading', async () => {
@@ -122,7 +139,7 @@ describe('isolated design preview', () => {
     it('auto-submits when the sample timer runs out', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
         await mount('?screen=quiz-attempt');
-        await press('Simulate time running out'); await settle(5000);
+        await settle(600_000); // the full 10-minute sample limit
         expect(host.textContent).toContain('Time is up. Submitting your answers…');
         await settle(1500);
         expect(new URLSearchParams(location.search).get('screen')).toBe('quiz-result');
@@ -155,7 +172,9 @@ describe('isolated design preview', () => {
         expect([...host.querySelectorAll('tbody tr')].find((row) => row.textContent?.includes('Linh Pham'))?.textContent).toContain('Locked');
         await press('Audit log');
         expect(host.querySelector('tbody tr')?.textContent).toContain('user.lock');
-        await press('Reset sample data');
+        // Reset stays available from the account menu only.
+        await act(async () => host.querySelector<HTMLElement>('button[aria-haspopup="menu"][aria-label^="Account menu"]')!.click());
+        await press('Reset sample data', document.querySelector('[role="menu"]')!);
         expect(host.querySelector('tbody tr')?.textContent).not.toContain('Just now');
         expect(fetcher).not.toHaveBeenCalled();
     });
@@ -181,9 +200,11 @@ describe('isolated design preview', () => {
         expect(labels()).toEqual(['Home', 'Catalogue', 'My courses']);
         expect(host.querySelector('header nav a[href="/courses"]')?.textContent).toBe('Catalogue');
         expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Home');
-        await press('Instructor');
+        // Workspaces are opened by link, as the Leader switches them by hand.
+        const open = (search: string) => act(async () => { window.history.pushState(null, '', `/preview${search}`); window.dispatchEvent(new PopStateEvent('popstate')); });
+        await open('?screen=teaching');
         expect(labels()).toEqual(['Teaching', 'Grading', 'Learners', 'Catalogue']);
-        await press('Administrator');
+        await open('?screen=admin-overview');
         expect(labels()).toEqual(['Overview', 'Users', 'Courses', 'Reports', 'Audit log']);
         expect(fetcher).not.toHaveBeenCalled();
     });
@@ -222,14 +243,14 @@ describe('isolated design preview', () => {
         await typeInto(host.querySelector<HTMLInputElement>('input[name="email"]')!, 'learner@example.com');
         await typeInto(host.querySelector<HTMLInputElement>('input[name="password"]')!, 'synthetic-password');
         await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-        await waitUntil(() => location.pathname === '/courses' && !!host.textContent?.includes('Signed In Person'), 'the signed-in catalogue');
-        expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Signed In Person');
+        // A Learner signs in to Learner home (7 November 2026).
+        await waitUntil(() => location.pathname === '/home' && !!host.textContent?.includes('Signed In Person'), 'the signed-in Learner home');
+        expect(location.pathname).toBe('/home'); expect(host.textContent).toContain('Signed In Person');
         const login = fetcher.mock.calls.find(([url]) => new URL(url).pathname === '/api/auth/login');
         expect(login, 'one real login request').toBeTruthy(); expect(login![1].method).toBe('POST');
         const requests = fetcher.mock.calls.length;
         await act(async () => { window.history.pushState(null, '', '/preview?screen=learner-home'); window.dispatchEvent(new PopStateEvent('popstate')); });
-        await waitUntil(() => !!host.querySelector('[aria-label="Design preview notice"]'), 'the lazily loaded preview');
-        expect(host.textContent).toContain('Design preview · Sample data.');
+        await waitUntil(() => !!host.querySelector('[data-preview-screen="learner-home"]'), 'the lazily loaded preview');
         expect(host.textContent).not.toContain('Signed In Person'); expect(host.textContent).toContain('Linh Pham');
         expect(fetcher.mock.calls.length).toBe(requests); expect(localStorage.length + sessionStorage.length).toBe(0);
     });

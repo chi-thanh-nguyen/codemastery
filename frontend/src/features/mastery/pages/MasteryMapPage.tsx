@@ -15,7 +15,7 @@ import { SkillDetailPanel } from '../components/SkillDetailPanel';
 import { recommendationEntry } from '../components/NextRecommendedCard';
 import { masteryGraphLayout, orderedSkillIds } from '../utils/masteryGraphLayout';
 import type { RecommendationView, SkillView } from '../types/masteryTypes';
-import { color, radius } from '../../../app/theme/theme';
+import { color, pathLine, radius } from '../../../app/theme/theme';
 
 export type MasteryView = 'graph' | 'list';
 export interface MasteryMapPageProps {
@@ -67,7 +67,7 @@ export function MasteryMapPage({ courseTitle, skills, view, onViewChange, select
                 <Box sx={{ mt: 2.5, display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center', justifyContent: 'space-between' }}>
                     <MasteryLegend dense={embedded} />
                     <Typography variant="caption" sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box component="svg" aria-hidden viewBox="0 0 40 10" sx={{ width: 40, height: 10 }}><path d="M2 5h30" stroke={color.ink400} strokeWidth="2" strokeDasharray="5 5" /><path d="m30 1 6 4-6 4Z" fill={color.ink400} /></Box>
+                        <Box component="svg" aria-hidden viewBox="0 0 40 10" sx={{ width: 40, height: 10 }}><path d="M2 5h30" stroke={color.ink400} strokeWidth="2" strokeDasharray={pathLine.dasharray} /><path d="m30 1 6 4-6 4Z" fill={color.ink400} /></Box>
                         Arrow: from a prerequisite to the skill that builds on it
                     </Typography>
                 </Box>

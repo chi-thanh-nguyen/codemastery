@@ -7,7 +7,7 @@ import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import { masteryMeta } from '../../../shared/components/StatusPill';
 import type { MasteryState } from '../../../shared/components/StatusPill';
 import { graphExtent, initialGraphViewport, masteryGraphLayout, orderedSkillIds, NODE_HEIGHT, NODE_WIDTH } from '../utils/masteryGraphLayout';
-import { color, radius, shadow, tones } from '../../../app/theme/theme';
+import { color, pathLine, radius, shadow, tones } from '../../../app/theme/theme';
 
 export interface GraphSkill { id: string; name: string; state: MasteryState; prerequisiteIds: string[] }
 
@@ -47,7 +47,7 @@ const SkillNode = memo(function SkillNode({ data }: NodeProps<Node<SkillNodeData
         <Handle type="target" position={Position.Left} isConnectable={false} style={{ opacity: 0, left: 0 }} />
         <ButtonBase onClick={() => onSelect(skill.id)} aria-pressed={selected} aria-label={name} className="nodrag"
             sx={{ position: 'relative', width: NODE_WIDTH, height: NODE_HEIGHT, borderRadius: `${radius.lg}px`, bgcolor: color.surface, justifyContent: 'flex-start', gap: 1.5, px: 1.5, textAlign: 'left',
-                boxShadow: selected ? `0 0 0 2px ${color.brand600}, ${shadow.raised}` : updated ? `0 0 0 2px ${skill.state === 'mastered' ? color.mint700 : color.butter800}` : '0 1px 2px rgba(10,11,15,.06)',
+                boxShadow: selected ? `0 0 0 2px ${color.brand600}, ${shadow.raised}` : updated ? `0 0 0 2px ${skill.state === 'mastered' ? color.mint700 : color.butter800}` : `inset 0 0 0 1px ${color.line200}`,
                 transition: 'box-shadow 200ms', '&:hover': { boxShadow: selected ? `0 0 0 2px ${color.brand600}, ${shadow.raised}` : shadow.hover },
                 '&.Mui-focusVisible': { outline: `2px solid ${color.brand600}`, outlineOffset: 3 } }}>
             {!hideStates && <Box aria-hidden sx={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center', bgcolor: tone.bg, color: tone.fg,
@@ -83,7 +83,7 @@ const Canvas = forwardRef<MasteryGraphHandle, MasteryGraphProps>(function Canvas
         const edges: Edge[] = skills.flatMap((skill) => skill.prerequisiteIds.filter((p) => byId.has(p)).map((prerequisite) => {
             const active = selectedId !== null && (prerequisite === selectedId || skill.id === selectedId);
             return { id: `${prerequisite}->${skill.id}`, source: prerequisite, target: skill.id, type: 'smoothstep', focusable: false, selectable: false,
-                style: { stroke: active ? color.brand600 : color.ink400, strokeWidth: 2, strokeDasharray: active ? undefined : '5 5' },
+                style: { stroke: active ? color.brand600 : color.ink400, strokeWidth: 2, strokeDasharray: active ? undefined : pathLine.dasharray },
                 markerEnd: { type: MarkerType.ArrowClosed, color: active ? color.brand600 : color.ink400, width: 16, height: 16 } };
         }));
         return { nodes, edges, rows, extent: graphExtent(positions), positions };

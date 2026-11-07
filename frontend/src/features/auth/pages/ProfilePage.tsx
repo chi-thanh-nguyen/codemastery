@@ -16,7 +16,7 @@ export function ProfilePage() {
             <PageHeader title="Profile" subtitle="Details from your current sign-in." />
             <Tile padding={{ xs: 3, sm: 4 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5, mb: 4, flexWrap: 'wrap' }}>
-                    <Monogram name={user.displayName} size={64} tone="ink" />
+                    <Monogram name={user.displayName} size={64} tone="brand" />
                     <Box sx={{ minWidth: 0 }}>
                         <Typography component="p" variant="h2" sx={{ overflowWrap: 'anywhere' }}>{user.displayName}</Typography>
                         <Box sx={{ mt: 1 }}><StatusPill icon="user" size="tag">{user.role}</StatusPill></Box>

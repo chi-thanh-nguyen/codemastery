@@ -6,6 +6,7 @@ import { PageHeader } from '../../../shared/components/PageHeader';
 import { GuidanceStack, GuidanceEntry } from '../../../shared/components/GuidanceStack';
 import type { GuidanceEntryData } from '../../../shared/components/GuidanceStack';
 import { ProgressLine, Tile, TileTitleLink, CircleAffordance } from '../../../shared/components/Tile';
+import { CourseMark } from '../../../shared/components/CourseMark';
 import { StatusPill } from '../../../shared/components/StatusPill';
 import { EmptyView, ErrorView, LoadingView } from '../../../shared/components/StatusViews';
 import { ApiError } from '../../../shared/types/apiTypes';
@@ -19,6 +20,8 @@ export interface ContinueLessonView { courseTitle: string; chapterTitle: string;
 export interface HomeCourseView {
     id: string;
     title: string;
+    /** Read by the course mark (the course's own text names its language). */
+    description?: string;
     /** Course progress (CT22 progress, pending). Without it the row shows `detail` instead. */
     progress?: CourseProgressView;
     nextLessonTitle?: string;
@@ -69,7 +72,11 @@ export function LearnerHomePage({ learnerName, subtitle = 'Pick up where you lef
                 : courses.length === 0 ? <EmptyView icon="catalogue" headingLevel="h3" title="You haven't joined a course yet" message="Browse the catalogue to find one." /> :
                 <Box component="ul" aria-label="Your active courses" sx={{ listStyle: 'none', m: 0, p: 0, bgcolor: color.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
                     {courses.map((course) => <Box component="li" key={course.id} sx={{ position: 'relative', p: { xs: 2.5, sm: 3 }, borderBottom: `1px solid ${color.line200}`, '&:last-child': { borderBottom: 0 },
-                        display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', md: course.progress ? 'minmax(0, 1.2fr) minmax(0, 1fr) auto' : 'minmax(0, 1.2fr) minmax(0, 1fr)' }, alignItems: 'center', '&:hover': { bgcolor: color.canvas100 } }}>
+                        display: 'grid', columnGap: 2, rowGap: 1.5, alignItems: 'center', '&:hover': { bgcolor: color.canvas100 },
+                        gridTemplateColumns: { xs: '32px minmax(0, 1fr)', md: course.progress ? '32px minmax(0, 1.2fr) minmax(0, 1fr) auto' : '32px minmax(0, 1.2fr) minmax(0, 1fr)' },
+                        // Below 900 px the secondary cells sit under the title, aligned with it.
+                        '& > :nth-child(n+3)': { gridColumn: { xs: '2', md: 'auto' } } }}>
+                        <CourseMark title={course.title} description={course.description} size={32} />
                         <TileTitleLink component="h3" variant="h4" href={course.href} onClick={course.onOpen}>{course.title}</TileTitleLink>
                         {course.progress ? <>
                             <ProgressLine completed={course.progress.completed} total={course.progress.total} percent={course.progress.percent} label={`${course.title} progress`} />
@@ -106,7 +113,7 @@ export function LearnerHome() {
     }, [generation, revision]);
     const courses: HomeCourseView[] = (data?.content ?? []).map((course) => {
         const href = `/courses/${encodeURIComponent(course.id)}`;
-        return { id: course.id, title: course.title, href, onOpen: () => navigate(href), detail: `Instructor · ${course.instructorDisplayName ?? 'Instructor name unavailable'}` };
+        return { id: course.id, title: course.title, description: course.description, href, onOpen: () => navigate(href), detail: `Instructor · ${course.instructorDisplayName ?? 'Instructor name unavailable'}` };
     });
     const more = data && data.totalElements > data.content.length ? data.totalElements : 0;
     return <LearnerHomePage learnerName={auth.user?.displayName ?? ''} subtitle="Your active courses, one click from their syllabus." courses={courses}

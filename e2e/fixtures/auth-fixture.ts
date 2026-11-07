@@ -44,12 +44,16 @@ export async function registerThroughApi(request: APIRequestContext, account: Ac
 const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const accountMenuName = (account: Account) => new RegExp(`^Account menu, ${account.displayName ? escape(account.displayName) : ''}`);
 
-export async function signIn(page: Page, account: Account) {
+/**
+ * Signs in through the form. A Learner lands on Learner home; Instructors and Administrators keep the
+ * catalogue (Leader instruction of 7 November 2026; the one-use /profile return is unchanged).
+ */
+export async function signIn(page: Page, account: Account, start: 'home' | 'courses' = 'home') {
     await page.goto('/login');
     await page.locator('#login-email').fill(account.email);
     await page.locator('#login-password').fill(account.password);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await expect(page).toHaveURL(/\/courses$/);
+    await expect(page).toHaveURL(start === 'home' ? /\/home$/ : /\/courses$/);
     await expect(page.getByRole('button', { name: accountMenuName(account) })).toBeVisible();
 }
 

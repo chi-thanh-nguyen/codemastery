@@ -52,7 +52,7 @@ function SignIn() {
     return <LoginPage notice={shown ? <Alert severity="info" role="status">Your session ended. Sign in again to continue.</Alert> : undefined} />;
 }
 
-/** Where a signed-in role starts: Learner home, otherwise the catalogue (post-sign-in navigation is unchanged). */
+/** Where a signed-in role starts: Learner home, otherwise the catalogue. Sign-in uses the same rule (AuthProvider `consumeReturn`). */
 const startFor = (role?: UserRole) => role === 'Learner' ? '/home' : '/courses';
 
 /** Header utilities: account menu for a session, sign-in actions otherwise. Hiding links is not authorization. */

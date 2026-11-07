@@ -5,12 +5,12 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { ThemeProvider } from '@mui/material';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { appTheme, brandFontStack, codeFontStack, fontStack } from '../../app/theme/theme';
+import { appTheme, brandFontStack, codeFontStack, color, fontStack, pathLine, presentationTokens, shadow } from '../../app/theme/theme';
 import { SidebarNav } from './SidebarNav';
 import { LoadingView, EmptyView, ErrorView } from './StatusViews';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PageHeader } from './PageHeader';
-import { AppHeader, canvasReachPath } from './AppHeader';
+import { AccountMenu, AppHeader, HeaderIconButton, Monogram, canvasReachPath } from './AppHeader';
 import { BrandLogo, BrandWordmark } from './BrandLogo';
 import { CodeBlock } from './CodeBlock';
 import { AuthLayout } from '../../layouts/AuthLayout';
@@ -21,9 +21,13 @@ import { SegmentedControl } from './ViewRail';
 import { PathSpine } from './PathSpine';
 import { GuidanceStack } from './GuidanceStack';
 import { SearchPill } from './PageHeader';
-import { ProgressLine } from './Tile';
+import { CourseTile, ProgressLine } from './Tile';
+import { COURSE_LOGOS, CourseMark, courseLanguage } from './CourseMark';
+import { LearnerHomePage } from '../../features/learning/pages/LearnerHomePage';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+/** Deep Logo Blue (brand-700) as the browser serialises it. */
+const BRAND_700 = 'rgb(6, 82, 196)';
 let root: Root, host: HTMLDivElement;
 beforeEach(() => { host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
@@ -116,22 +120,20 @@ describe('FE01 presentation contracts', () => {
         await click(host.querySelector('[aria-label="Toggle navigation"]')); expect(toggle).toHaveBeenCalledTimes(1);
         expect(host.querySelector('[aria-label="Toggle navigation"]')?.getAttribute('aria-expanded')).toBe('false');
     });
-    it('associates unique visible status text with each indeterminate indicator', async () => {
-        await render(<><LoadingView message="Loading sample lessons" /><LoadingView message=" " /></>);
-        const bars = [...host.querySelectorAll('[role="progressbar"]')];
-        expect(bars).toHaveLength(2);
-        const ids = bars.map((bar) => bar.getAttribute('aria-labelledby'));
-        expect(new Set(ids).size).toBe(2);
-        expect(document.getElementById(ids[0]!)?.textContent).toBe('Loading sample lessons');
-        expect(document.getElementById(ids[1]!)?.textContent).toBe('Loading...');
-        expect(host.querySelectorAll('[role="status"]')).toHaveLength(2);
-        bars.forEach((bar) => { expect(bar.hasAttribute('aria-valuenow')).toBe(false); expect(bar.hasAttribute('aria-live')).toBe(false); });
+    it('names each loading state in its own status line with a content-shaped skeleton and no spinner', async () => {
+        await render(<><LoadingView message="Loading sample lessons" variant="tiles" count={2} /><LoadingView message=" " /></>);
+        const statuses = [...host.querySelectorAll<HTMLElement>('[role="status"]')];
+        expect(statuses.map((node) => node.textContent)).toEqual(['Loading sample lessons', 'Loading...']);
+        expect(new Set(statuses.map((node) => node.id)).size).toBe(2);
+        // DESIGN.md › Feedback: skeletons, not spinners, carry loading feedback.
+        expect(host.querySelector('[role="progressbar"], .MuiCircularProgress-root')).toBeNull();
+        expect(host.querySelectorAll('.MuiSkeleton-root').length).toBeGreaterThan(0);
+        statuses.forEach((node) => expect(node.closest('[aria-hidden="true"]')).toBeNull());
     });
-    it('updates the loading name without replacing its association', async () => {
-        await render(<LoadingView message="First" />); const id = host.querySelector('[role="progressbar"]')!.getAttribute('aria-labelledby');
+    it('updates the loading name in place, keeping the same status element', async () => {
+        await render(<LoadingView message="First" />); const status = host.querySelector('[role="status"]')!; const id = status.id;
         await render(<LoadingView message="Second" />);
-        expect(host.querySelector('[role="progressbar"]')!.getAttribute('aria-labelledby')).toBe(id);
-        expect(document.getElementById(id!)?.textContent).toBe('Second');
+        expect(host.querySelector('[role="status"]')).toBe(status); expect(status.id).toBe(id); expect(status.textContent).toBe('Second');
     });
     it('preserves empty/error supplied content, actions and optional retry', async () => {
         const retry = vi.fn();
@@ -316,6 +318,109 @@ describe('Lit Path design-system primitives', () => {
         expect(wordmark.textContent).toBe('CodeMastery'); expect(getComputedStyle(wordmark).fontWeight).toBe('800');
         expect(getComputedStyle(wordmark).fontFamily).toContain('CodeMastery Wordmark');
         expect(getComputedStyle(host.querySelector('pre')!).fontFamily).toContain('JetBrains Mono');
+    });
+    it('scales the header lockup as one unit: mark, gap and wordmark from one size', async () => {
+        expect(presentationTokens.brandMark).toEqual({ narrow: 32, xs: 36, sm: 40 });
+        await render(<><AppHeader navItems={[]} /><BrandWordmark size={40} /></>);
+        // The header mark reserves the larger (>= 600 px) size; height stays the only sizing input.
+        expect(host.querySelector('header img')?.getAttribute('height')).toBe('40');
+        const [, plain] = host.querySelectorAll<HTMLElement>('[data-wordmark]');
+        expect(getComputedStyle(plain).fontSize).toBe('1.5625rem'); // 0.625 × 40 px
+        const img = host.querySelectorAll('img')[1];
+        expect(img.getAttribute('height')).toBe('40'); expect(getComputedStyle(img).width).toBe('auto');
+        expect(getComputedStyle(plain.parentElement!).gap).toBe('12px'); // 0.3 × 40 px
+    });
+    it('reads a course language only from a single language named by the course itself', () => {
+        expect(courseLanguage({ title: 'Python Fundamentals' })).toBe('python');
+        expect(courseLanguage({ title: 'Introduction to Programming', description: 'Variables and loops in Python.' })).toBe('python');
+        expect(courseLanguage({ title: 'TypeScript Basics', description: 'Not Python.' })).toBe('typescript');
+        // Nothing named, several named, or a language without an approved logo: no logo is guessed.
+        expect(courseLanguage({ title: 'Introduction to Programming', description: 'Demo course for the Interim catalogue' })).toBeNull();
+        expect(courseLanguage({ title: 'Computational Thinking', description: null })).toBeNull();
+        expect(courseLanguage({ title: 'Python and Java side by side' })).toBeNull();
+        expect(courseLanguage({ title: 'JavaScript Essentials' })).toBeNull();
+        expect(courseLanguage({ title: 'C++ for Python programmers' })).toBeNull();
+        expect(courseLanguage({ title: 'Pythonic patterns' })).toBeNull();
+        expect(courseLanguage({ title: 'Course 01', description: 'Practice course number 1 for catalogue paging.' })).toBeNull();
+    });
+    it('shows every course mark on one neutral container: the official logo, otherwise a Deep Logo Blue code glyph; never letters, ink or a gradient', async () => {
+        await render(<><CourseTile title="Python Fundamentals" description="Variables and loops." href="#" onOpen={() => undefined} />
+            <CourseTile title="Introduction to Programming" description="Demo course for the Interim catalogue" href="#" onOpen={() => undefined} /></>);
+        const [python, generic] = host.querySelectorAll<HTMLElement>('[data-course-mark]');
+        expect(python.dataset.courseMark).toBe('python'); expect(python.getAttribute('aria-hidden')).toBe('true');
+        const logo = python.querySelector('img')!;
+        expect(logo.getAttribute('src')).toBe(COURSE_LOGOS.python.src); expect(logo.alt).toBe('');
+        expect(generic.dataset.courseMark).toBe('generic'); expect(generic.getAttribute('aria-hidden')).toBe('true');
+        expect(generic.textContent).toBe(''); expect(generic.querySelector('img')).toBeNull(); expect(generic.querySelector('svg')).not.toBeNull();
+        expect(getComputedStyle(generic).color).toBe(BRAND_700);
+        for (const mark of [python, generic]) {
+            expect(getComputedStyle(mark).backgroundColor).toBe('rgb(246, 246, 247)'); // canvas-100
+            expect(getComputedStyle(mark).boxShadow).toBe('inset 0 0 0 1px #E4E4E7');
+            expect(getComputedStyle(mark).backgroundImage).not.toContain('gradient');
+            expect(getComputedStyle(mark).backgroundColor).not.toBe('rgb(10, 11, 15)'); // never ink-950
+            expect(getComputedStyle(mark).width).toBe('48px'); expect(getComputedStyle(mark).height).toBe('48px');
+            expect(getComputedStyle(mark).borderRadius).toBe('16px');
+        }
+        // The tile's accessible name stays the course title; the mark adds no text or image name.
+        expect(host.querySelector('a[data-tile-link]')?.textContent).toBe('Python Fundamentals');
+    });
+    it('gives the signed-in account avatar solid Deep Logo Blue with a white initial; other people stay on ink', async () => {
+        await render(<><AppHeader navItems={[]} actions={<AccountMenu displayName="Linh Pham" role="Learner" renderItems={() => []} />} /><Monogram name="Q&A Author" tone="ink" /></>);
+        const account = host.querySelector<HTMLElement>('header [data-monogram]')!;
+        expect(account.dataset.monogram).toBe('brand'); expect(account.textContent).toBe('L');
+        expect(getComputedStyle(account).backgroundColor).toBe(BRAND_700); expect(getComputedStyle(account).backgroundImage).not.toContain('gradient');
+        expect(getComputedStyle(account).color).toBe('rgb(255, 255, 255)');
+        const other = host.querySelector<HTMLElement>('[data-monogram="ink"]')!;
+        expect(getComputedStyle(other).backgroundColor).toBe('rgb(10, 11, 15)');
+        // White text on brand-700 stays above 4.5:1 (6.97:1).
+        const lum = (hex: string) => { const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+        expect(1.05 / (lum(color.brand700) + 0.05)).toBeGreaterThan(4.5);
+    });
+    it('sizes each logo optically: the visible artwork fills its own share of the container, centred, unstretched', async () => {
+        await render(<><CourseMark title="Python Fundamentals" /><CourseMark title="TypeScript Basics" /><CourseMark title="Python Fundamentals" size={32} /></>);
+        for (const mark of host.querySelectorAll<HTMLElement>('[data-course-mark]')) {
+            const spec = COURSE_LOGOS[mark.dataset.courseMark as keyof typeof COURSE_LOGOS];
+            const size = parseFloat(getComputedStyle(mark).width), img = mark.querySelector('img')!, style = getComputedStyle(img);
+            const width = parseFloat(style.width), height = parseFloat(style.height), left = parseFloat(style.left), top = parseFloat(style.top);
+            expect(width / height).toBeCloseTo(spec.aspect, 6);
+            const art = { w: spec.art.w * width, h: spec.art.h * height };
+            expect(Math.max(art.w, art.h)).toBeCloseTo(spec.scale * size, 6);
+            expect(left + (spec.art.x + spec.art.w / 2) * width).toBeCloseTo(size / 2, 6);
+            expect(top + (spec.art.y + spec.art.h / 2) * height).toBeCloseTo(size / 2, 6);
+            expect(top + height).toBeLessThanOrEqual(size); // Python's soft shadow stays inside the container.
+        }
+        // A solid square is set smaller than an open mark so the two read at the same size.
+        expect(COURSE_LOGOS.typescript.scale).toBeLessThan(COURSE_LOGOS.python.scale);
+    });
+    it('draws the path line as a 4/6 dash, solid only after a completed item', async () => {
+        expect(pathLine).toEqual({ width: 2, dash: 4, gap: 6, dasharray: '4 6' });
+        await render(<PathSpine sections={[{ id: 's', items: [{ id: 'a', node: 'done', content: 'A' }, { id: 'b', node: 'current', content: 'B' }, { id: 'c', node: 'todo', content: 'C' }] }]} />);
+        const lines = [...host.querySelectorAll<HTMLElement>('[data-path-line]')];
+        expect(lines.map((line) => line.dataset.pathLine)).toEqual(['solid', 'dashed', 'dashed']);
+        const dashed = getComputedStyle(lines[1]).backgroundImage;
+        expect(dashed).toContain('repeating-linear-gradient'); expect(dashed).toContain('4px'); expect(dashed).toContain('10px');
+        expect(getComputedStyle(lines[1]).width).toBe('2px');
+    });
+    it('keeps shadows and type in the shared tokens: segmented control shadow and the display step', () => {
+        const toggle = appTheme.components?.MuiToggleButton?.styleOverrides?.root as Record<string, Record<string, unknown>>;
+        expect(toggle['&.Mui-selected, &.Mui-selected:hover'].boxShadow).toBe(shadow.control);
+        expect(appTheme.typography.display).toMatchObject({ fontSize: '3.5rem', fontWeight: 600, '@media (max-width:599.95px)': { fontSize: '2.5rem' } });
+        expect(color.chromeHover).toBe('#2A2D35'); expect(color.rose800).toBe('#951C13');
+    });
+    it('marks a header utility as current for the page it opens', async () => {
+        await render(<><HeaderIconButton label="Notifications" icon="bell" badge={3} current /><HeaderIconButton label="Help" icon="info" /></>);
+        const [bell, other] = host.querySelectorAll('button');
+        expect(bell.getAttribute('aria-current')).toBe('page'); expect(bell.getAttribute('aria-label')).toBe('Notifications, 3 unread');
+        expect(getComputedStyle(bell).backgroundColor).toBe('rgb(28, 30, 36)'); // chrome-raised
+        expect(other.hasAttribute('aria-current')).toBe(false);
+    });
+    it('gives each Learner home course row the same course mark as its tile', async () => {
+        await render(<LearnerHomePage learnerName="Linh" onBrowse={() => undefined} courses={[
+            { id: 'a', title: 'Python Fundamentals', onOpen: () => undefined, detail: 'Instructor · A' },
+            { id: 'b', title: 'Introduction to Programming', description: 'Demo course', onOpen: () => undefined, detail: 'Instructor · B' }]} />);
+        const marks = [...host.querySelectorAll<HTMLElement>('ul[aria-label="Your active courses"] [data-course-mark]')];
+        expect(marks.map((mark) => mark.dataset.courseMark)).toEqual(['python', 'generic']);
+        for (const mark of marks) { expect(getComputedStyle(mark).width).toBe('32px'); expect(getComputedStyle(mark).backgroundColor).toBe('rgb(246, 246, 247)'); }
     });
     it('shows one-based ranges over zero-based pages and the singular noun', async () => {
         const change = vi.fn();

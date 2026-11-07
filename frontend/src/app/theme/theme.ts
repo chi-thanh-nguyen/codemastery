@@ -1,4 +1,5 @@
 import { createTheme } from '@mui/material/styles';
+import type { TypographyStyle } from '@mui/material/styles';
 import type { CSSProperties } from 'react';
 import uiLatin from './google-sans-flex-latin-wght.woff2';
 import uiLatinExt from './google-sans-flex-latin-ext-wght.woff2';
@@ -18,13 +19,13 @@ import brandLatin from './poppins-latin-800.woff2';
 export const color = {
     ink950: '#0A0B0F', ink900: '#15171C', ink700: '#3A3E46', ink600: '#50545C', ink500: '#6B7079', ink400: '#80858E',
     line200: '#E4E4E7', fill150: '#EEEEF0', canvas100: '#F6F6F7', surface: '#FFFFFF',
-    chromeRaised: '#1C1E24', chromeMuted: '#A3A7B0', focusOnChrome: '#7DB7FF',
+    chromeRaised: '#1C1E24', chromeHover: '#2A2D35', chromeMuted: '#A3A7B0', focusOnChrome: '#7DB7FF',
     brand700: '#0652C4', brand600: '#0866F2', brand400: '#3B9CFA', brand100: '#E3EEFF',
     sky100: '#DFF6FB', sky50: '#EEFAFD',
     mint100: '#D3F7D9', mint50: '#E9FBEC', mint700: '#1F7A3A',
     butter100: '#FCEBB8', butter50: '#FEF5DB', butter800: '#7A5200',
     lilac100: '#F1D9FB', lilac50: '#F8ECFD', lilac700: '#7A2FB8',
-    rose100: '#FDE2E1', rose50: '#FEF0EF', rose700: '#B42318',
+    rose100: '#FDE2E1', rose50: '#FEF0EF', rose700: '#B42318', rose800: '#951C13',
     dataMastered: '#2E9E4F', dataLearning: '#0866F2', dataWeak: '#B07A00', dataUnknown: '#80858E',
 } as const;
 
@@ -44,9 +45,14 @@ export const radius = { xs: 8, sm: 12, md: 16, lg: 24, xl: 32, pill: 999 } as co
 export const shadow = {
     hover: '0 6px 20px rgba(10, 11, 15, 0.08)',
     raised: '0 12px 32px rgba(10, 11, 15, 0.12)',
+    /** Selected segment inside a segmented control: lifts the white pill off its fill-150 track. */
+    control: '0 2px 8px rgba(10, 11, 15, 0.10)',
     overlay: '0 24px 64px rgba(10, 11, 15, 0.20)',
     scrim: 'rgba(10, 11, 15, 0.48)',
 } as const;
+
+/** The dashed path line (Path Spine, prerequisite edges, brand path): 2 px, 4 px dash, 6 px gap. */
+export const pathLine = { width: 2, dash: 4, gap: 6, dasharray: '4 6' } as const;
 
 export const motion = {
     fast: 120, standard: 200, panel: 280, reach: 240, signature: 400,
@@ -58,6 +64,11 @@ export const presentationTokens = {
     topBarHeight: 80, topBarHeightCompact: 64, canvasInset: 8,
     asideWidth: 360, asideWidthWide: 400, outlineWidth: 280, readingWidth: 720, contentMax: 1440,
     drawerWidth: 304, reachWidth: 88, reachHeight: 14,
+    /**
+     * Logo mark height in the top bars (64 px bar below 600 px, 80 px from 600 px); the wordmark is
+     * 0.625 × this. One fixed step below 390 px (`narrow`) keeps the narrowest bars from scrolling.
+     */
+    brandMark: { narrow: 32, xs: 36, sm: 40 },
     pagePadding: { xs: 2, sm: 3, md: 4, lg: 5 },
 } as const;
 
@@ -82,11 +93,12 @@ export const focusRingOnChrome = { outline: `2px solid ${color.focusOnChrome}`, 
 declare module '@mui/material/styles' {
     interface Palette { ink: Palette['primary'] }
     interface PaletteOptions { ink?: PaletteOptions['primary'] }
-    interface TypographyVariants { stat: CSSProperties; reading: CSSProperties; code: CSSProperties }
-    interface TypographyVariantsOptions { stat?: CSSProperties; reading?: CSSProperties; code?: CSSProperties }
+    interface TypographyVariants { display: CSSProperties; stat: CSSProperties; reading: CSSProperties; code: CSSProperties }
+    // `display` changes size at 600 px, so its options take MUI's style type (media keys allowed).
+    interface TypographyVariantsOptions { display?: TypographyStyle; stat?: CSSProperties; reading?: CSSProperties; code?: CSSProperties }
 }
 declare module '@mui/material/Typography' {
-    interface TypographyPropsVariantOverrides { stat: true; reading: true; code: true }
+    interface TypographyPropsVariantOverrides { display: true; stat: true; reading: true; code: true }
 }
 declare module '@mui/material/Button' { interface ButtonPropsColorOverrides { ink: true } }
 declare module '@mui/material/IconButton' { interface IconButtonPropsColorOverrides { ink: true } }
@@ -141,6 +153,8 @@ export const appTheme = createTheme({
         caption: { fontSize: '0.8125rem', fontWeight: 500, lineHeight: 1.4 },
         overline: { fontSize: '0.8125rem', fontWeight: 600, lineHeight: 1.4, letterSpacing: 0, textTransform: 'none' },
         button: { fontSize: '0.9375rem', fontWeight: 600, lineHeight: 1.2, letterSpacing: 0, textTransform: 'none' },
+        // Display: the landing hero only (Persuade surface). Changes at 600 px like every other step.
+        display: { fontFamily: fontStack, fontSize: '3.5rem', fontWeight: 600, lineHeight: 1.05, letterSpacing: '-0.03em', textWrap: 'balance', [compact]: { fontSize: '2.5rem' } },
         stat: { fontFamily: fontStack, fontSize: '2.5rem', fontWeight: 600, lineHeight: 1, letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums lining-nums' },
         reading: { fontFamily: fontStack, fontSize: '1.0625rem', fontWeight: 400, lineHeight: 1.7, textWrap: 'pretty' },
         code: { fontFamily: codeFontStack, fontSize: '0.9375rem', fontWeight: 400, lineHeight: 1.6 },
@@ -187,7 +201,7 @@ export const appTheme = createTheme({
                         { props: { variant: 'text', color: 'error' }, style: { color: color.rose700 } },
                         { props: { variant: 'text' }, style: { '&.Mui-disabled': { backgroundColor: 'transparent' } } },
                         { props: { variant: 'contained', color: 'ink' }, style: { '&:hover': { backgroundColor: color.chromeRaised } } },
-                        { props: { variant: 'contained', color: 'error' }, style: { backgroundColor: color.rose700, '&:hover': { backgroundColor: '#951C13' } } },
+                        { props: { variant: 'contained', color: 'error' }, style: { backgroundColor: color.rose700, '&:hover': { backgroundColor: color.rose800 } } },
                     ],
                 },
                 sizeSmall: { minHeight: 40, paddingInline: 16, fontSize: '0.9375rem' },
@@ -290,7 +304,7 @@ export const appTheme = createTheme({
         MuiToggleButton: { styleOverrides: { root: {
             border: 0, minHeight: 36, paddingInline: 16, fontSize: '0.9375rem', fontWeight: 600, color: color.ink600, textTransform: 'none', whiteSpace: 'nowrap',
             '&:hover': { backgroundColor: color.line200 },
-            '&.Mui-selected, &.Mui-selected:hover': { backgroundColor: color.surface, color: color.ink900, boxShadow: '0 2px 8px rgba(10, 11, 15, 0.10)' },
+            '&.Mui-selected, &.Mui-selected:hover': { backgroundColor: color.surface, color: color.ink900, boxShadow: shadow.control },
         } } },
         MuiChip: { styleOverrides: { root: { borderRadius: radius.pill, height: 32, fontSize: '0.9375rem', fontWeight: 600, backgroundColor: color.fill150, color: color.ink900 },
             deleteIcon: { color: color.ink600, '&:hover': { color: color.ink900 } } } },

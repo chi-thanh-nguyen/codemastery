@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Box, Typography } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
-import { color, motion } from '../../app/theme/theme';
+import { color, motion, pathLine } from '../../app/theme/theme';
 
 /** Decorative node state; the item's own text (status pill) always carries the meaning. */
 export type SpineNode = 'done' | 'current' | 'recommended' | 'todo' | 'static';
@@ -37,10 +37,12 @@ export function PathSpine({ sections, listLabel, density = 'tiles', headingLevel
                     const solid = item.node === 'done';
                     return <Box component="li" key={item.id} data-node={item.node} sx={{ position: 'relative', display: 'grid', gridTemplateColumns: { xs: `${gutter.xs}px minmax(0, 1fr)`, sm: `${gutter.sm}px minmax(0, 1fr)` },
                         pb: last ? 0 : density === 'tiles' ? 2 : 0 }}>
-                        {section.items.length > 1 && <Box aria-hidden sx={{ position: 'absolute', left: { xs: gutter.xs / 2 - 1, sm: gutter.sm / 2 - 1 }, width: 0,
+                        {section.items.length > 1 && <Box aria-hidden data-path-line={solid && !last ? 'solid' : 'dashed'} sx={{ position: 'absolute', left: { xs: gutter.xs / 2 - 1, sm: gutter.sm / 2 - 1 }, width: pathLine.width,
                             top: first ? nodeTop : 0, bottom: last ? `calc(100% - ${nodeTop}px)` : 0,
-                            borderLeft: `2px ${solid && !last ? 'solid' : 'dashed'} ${solid && !last ? color.mint700 : color.brand400}`,
-                            transition: `border-color ${motion.signature}ms ${motion.easeIn}` }} />}
+                            // A drawn 4/6 dash (pathLine), the same rhythm as the map's prerequisite edges; CSS `dashed` borders vary by browser.
+                            background: solid && !last ? color.mint700
+                                : `repeating-linear-gradient(to bottom, ${color.brand400} 0 ${pathLine.dash}px, transparent ${pathLine.dash}px ${pathLine.dash + pathLine.gap}px)`,
+                            transition: `background-color ${motion.signature}ms ${motion.easeIn}` }} />}
                         <Box aria-hidden sx={{ position: 'relative', zIndex: 1 }}><SpineDot node={item.node} top={nodeTop} /></Box>
                         <Box sx={{ minWidth: 0 }}>{item.content}</Box>
                     </Box>;

@@ -11,7 +11,7 @@ import type { GuidanceEntryData } from '../../../shared/components/GuidanceStack
 import { CourseOutline, LessonProgressPill, MarkerTag } from '../components/CourseOutline';
 import { LessonContent, MaterialList } from '../components/LessonContent';
 import type { LessonBlock, LessonMaterialView, LessonProgressState, OutlineChapterView, SkillTagView, LessonAdaptiveMarker } from '../types/learningTypes';
-import { color, radius, shadow } from '../../../app/theme/theme';
+import { color, presentationTokens, radius, shadow } from '../../../app/theme/theme';
 
 export interface PrerequisiteWarningView { skillName: string; reviewLessonTitle?: string; onReview?: () => void }
 export interface LessonPageProps {
@@ -59,7 +59,7 @@ export function LessonPage({ courseTitle, chapterTitle, lesson, chapters, onOpen
         </Box>
     </Box>;
     return <Page aside={aside} asideLabel="Lesson details" stickyAside>
-        <Box sx={{ display: 'grid', gap: 4, gridTemplateColumns: { xs: 'minmax(0, 1fr)', xl: '260px minmax(0, 1fr)' }, alignItems: 'start' }}>
+        <Box sx={{ display: 'grid', gap: 4, gridTemplateColumns: { xs: 'minmax(0, 1fr)', xl: `${presentationTokens.outlineWidth}px minmax(0, 1fr)` }, alignItems: 'start' }}>
             {wide && <Box sx={{ position: 'sticky', top: 104, maxHeight: 'calc(100dvh - 140px)', overflowY: 'auto', pr: 1 }}>{outline}</Box>}
             <Box component="article" aria-labelledby="lesson-title" sx={{ minWidth: 0, maxWidth: 720 }}>
                 <PageHeader title={lesson.title} titleId="lesson-title" back={back}

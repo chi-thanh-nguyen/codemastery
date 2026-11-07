@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useLayoutEffect, useRef } from 'react';
 import { Box, Typography } from '@mui/material';
 import { Link, useInRouterContext } from 'react-router';
-import { color, radius } from '../app/theme/theme';
+import { color, pathLine, radius } from '../app/theme/theme';
 import { BrandWordmark } from '../shared/components/BrandLogo';
 
 export interface AuthLayoutProps { title?: string; subtitle?: string; notice?: ReactNode; children: ReactNode }
@@ -56,9 +56,9 @@ export function AuthLayout({ title = 'CodeMastery', subtitle = 'Mastery-based pr
 /** Crisp vector echo of the logo's three linked skill nodes. Decorative. */
 function BrandPath() {
     return <Box component="svg" aria-hidden viewBox="0 0 320 120" sx={{ width: '100%', maxWidth: 320, height: 'auto', display: 'block' }}>
-        <path d="M24 92 H120 Q148 92 160 64 Q172 36 200 36 H296" fill="none" stroke={color.brand400} strokeWidth="2" strokeDasharray="4 6" strokeLinecap="round" />
+        <path d="M24 92 H120 Q148 92 160 64 Q172 36 200 36 H296" fill="none" stroke={color.brand400} strokeWidth="2" strokeDasharray={pathLine.dasharray} strokeLinecap="round" />
         <circle cx="24" cy="92" r="12" fill={color.mint700} />
-        <path d="m18 92 4.5 4.5L31 88" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="m18 92 4.5 4.5L31 88" fill="none" stroke={color.surface} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
         <circle cx="160" cy="64" r="14" fill={color.brand600} />
         <circle cx="160" cy="64" r="20" fill="none" stroke={color.brand600} strokeOpacity=".35" strokeWidth="4" />
         <circle cx="296" cy="36" r="11" fill="none" stroke={color.chromeMuted} strokeWidth="2" />
