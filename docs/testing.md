@@ -2472,3 +2472,37 @@ marks and the Proposed pill.
 | `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 437 tests in 15 files, also with `VITE_API_BASE_URL` empty; build succeeded (536 kB `index` chunk advisory unchanged) |
 | `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 43/43, WebKit 26.6 43/43, including lockup steps at 1280/1024/600/599/390/389/375/360 px, solid avatar, neutral marks across catalogue, My courses, Teaching and Learner home, no loading spinner, flat nodes, 4/6 dashes, single instructor mention, current bell and the 280 px outline |
 | `npx playwright test` (chromium/webkit desktop and mobile, disposable stack) | PASS 53, 3 skipped by design; stack removed |
+
+### Button system hierarchy — 7 November 2026
+
+The Leader asked for a clearer button hierarchy with fewer black buttons. Primary
+buttons, primary circles and chosen controls now use graphite (`chrome-raised`,
+hover `chrome-hover`) instead of the frame's ink; secondary buttons and circles are
+neutral outlined surfaces (white, `line-200` border, hover `fill-150`); tertiary
+stays a Logo Blue text button; destructive stays `rose-700`. The roles are theme
+tokens (`control`) and button variants (including `color="onChrome"` for the frame),
+replacing local styles. Competing primaries were demoted: the placement prompt's
+"Start diagnostic", the Teaching and skill-graph empty-state actions that repeat
+their title-row action, and the error block's "Try again".
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 440 tests in 15 files, also with `VITE_API_BASE_URL` empty; build succeeded |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 44/44, WebKit 26.6 44/44, including button ranks, hover, keyboard focus and disabled states, focus visibility and text contrast |
+| `npx playwright test` (chromium/webkit desktop and mobile) | PASS 53, 3 skipped by design |
+
+### Tile arrows and the mask-cut canvas reach — 7 November 2026
+
+Course and lesson tile arrows (`CircleAffordance`) are now secondary by default (white,
+`line-200` border, graphite arrow, `fill-150` while the tile is hovered); graphite stays
+only on the Learner home "Continue learning" tile and the resume lesson. The canvas
+reach no longer paints a canvas-coloured shape: the bell path is a CSS mask layer
+subtracted from the header (`mask-composite: exclude`), and the canvas starts 14 px
+under the bar with a `clip-path` outline whose visible corners begin at the bar edge,
+so the opening shows the real canvas, or content scrolling under the sticky bar.
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 442 tests in 15 files; build succeeded |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 45/45, WebKit 26.6 45/45: reach centred and symmetric from the mask geometry; pixels show canvas inside the bell, ink beside and above it, no seam at the bar edge; a white tile scrolled under the bar shows through the opening |
+| `npx playwright test` (chromium/webkit desktop and mobile) | PASS 53, 3 skipped by design |
