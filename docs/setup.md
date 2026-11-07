@@ -33,10 +33,10 @@ Issues remain open.
 | Adaptive | Pure mastery calculator and state classifier (no database, events or API) | Skill graph, mastery persistence, routing, recommendations |
 | Assessment, Interaction, Admin | — | Source files are empty scaffolds |
 | Object storage | Local MinIO and its least-privilege initializer | Backend storage adapter and file delivery (CT09) |
-| Frontend | Router with `/courses`, `/courses/:courseId`, `/login`, `/register`, Learner-only `/my-courses`, authenticated `/profile` and the illustrative dashboard at `/preview`; shared HTTP client; memory-only session | React Flow Mastery Map, Instructor/Administrator pages |
+| Frontend | Router with the public landing page at `/`, `/courses`, `/courses/:courseId`, `/login`, `/register`, Learner-only `/home` and `/my-courses`, authenticated `/profile` and the design preview at `/preview` (sample data for every designed screen, including the React Flow Mastery Map and Instructor/Administrator screens); shared HTTP client; memory-only session | Production routes and API integration for lessons, assessments, Mastery Map, notifications, Instructor and Administrator screens (their contracts are pending) |
 | Sample data | SD01 Users and SD02 Courses in `sample-data/seed/01-…` and `02-…`, with a disposable-target loader procedure in [sample-data/README.md](../sample-data/README.md) | Seeds 03–05 are empty; no object is uploaded to MinIO |
 | Runtime | Local Docker Compose stack (this guide) and the one-VM release tooling `infrastructure/vm/deploy.sh`, `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` image target ([deployment.md](deployment.md)) | No deployment has been performed |
-| E2E | `e2e/tests/learner-flow.spec.ts`, a standalone browser script run with an externally supplied Playwright installation ([testing.md](testing.md#test-layers-and-evidence)) | The `e2e/` package, Playwright configuration, fixtures and an E2E CI job are empty or absent |
+| E2E | Local Playwright Test suite in `e2e/` with a disposable Docker stack and deterministic fixture ([testing.md](testing.md#browser-harness-and-e2e-suite)) | An E2E CI job; `e2e/tests/adaptive-flow.spec.ts` |
 
 Exact request and response shapes are in [the OpenAPI document](api/openapi.yaml);
 approved behavior is in [ADR002](decisions/002-interim-delegated-contracts.md) and
@@ -66,11 +66,10 @@ approved behavior is in [ADR002](decisions/002-interim-delegated-contracts.md) a
 React, TypeScript, Vite, Material UI, and React Flow dependencies are pinned in
 the frontend manifest and tracked `frontend/package-lock.json`. React Flow
 feature usage remains pending. Vitest `5.0.5` and jsdom `27.4.0` are development-only
-frontend test dependencies. Repository E2E Playwright setup remains pending; the
-empty E2E package files define no executable commands. The optional frontend
-browser harness and the standalone `e2e/tests/learner-flow.spec.ts` script instead
-require an explicitly supplied existing Playwright module and installed Chromium
-browser; frontend `npm ci` does not provide them.
+frontend test dependencies. Playwright Test 1.63.0 is pinned in `e2e/package.json`;
+`npm ci` in `e2e/` installs it for both the E2E suite and the optional frontend
+browser harness, and `npx playwright install chromium firefox webkit` installs the
+browsers it expects. The E2E suite also needs Docker.
 
 ## Environment File
 
@@ -95,7 +94,7 @@ other secret format and any `JWT_EXPIRATION` other than `PT15M`, so the backend
 does not start with them. Use non-production local credentials. Uncomment optional
 settings only when needed; Compose forwards only its explicit allowlist.
 `VITE_API_BASE_URL` remains optional public build-time configuration. E2E entries
-remain commented until their configuration is implemented.
+stay commented: the E2E suite reads them from the shell, never from `.env`.
 
 Real `.env` files must remain untracked. The current `.gitignore` excludes `.env`
 and `.env.*` while retaining `.env.example`. Never commit secrets, actual storage
@@ -183,7 +182,7 @@ The approved Option A contract uses these names:
 | Spring profile selection | `SPRING_PROFILES_ACTIVE` | Supported through Spring profile selection, rather than a `${...}` placeholder in `application.yml`. |
 | Frontend | `VITE_API_BASE_URL` | Public build-time API address read by the shared HTTP client; Compose passes a build ARG defaulting to http://localhost:8080. Required for any API request. |
 | VM deployment only | `SPRING_FLYWAY_URL`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` | Separate Flyway migrator identity required by `deploy.sh` and the VM override. Local Compose ignores them; see [deployment.md](deployment.md#current-status-and-reproduction-summary). |
-| E2E | `E2E_BASE_URL`, `E2E_USERNAME`, `E2E_PASSWORD` | Pending Playwright/E2E configuration; no consumer reads these names. |
+| E2E | `E2E_BASE_URL`, `E2E_API_URL`, `E2E_USERNAME`, `E2E_PASSWORD` | Read from the shell by `e2e/` only, to target an already running environment (`E2E_USERNAME`/`E2E_PASSWORD`: an existing synthetic Instructor). Unset, the suite starts a disposable stack ([testing.md](testing.md#browser-harness-and-e2e-suite)). Not loaded from `.env`. |
 
 PostgreSQL initialization credentials and backend datasource credentials are
 conceptually distinct and are not implicitly interchangeable. The backend does
@@ -474,50 +473,97 @@ Run the following commands from `frontend/`:
 | --- | --- |
 | `npm run dev` | Start the Vite development server. |
 | `npm run typecheck` | Check application source and Vite configuration without emitting files. |
-| `npm test` | Run the Vitest/jsdom suite: FE01 utilities and presentation, FE03 HTTP client, Auth provider and router, and FE07 catalogue, detail and My Courses (11 files). |
+| `npm test` | Run the Vitest/jsdom suite: utilities and shared presentation, HTTP client, Auth provider and router, catalogue, detail, My courses, assessment and course-management components, Mastery Map layout and the design preview (15 files). |
 | `npm run build` | Run type-checking and build production assets in `frontend/dist/`. |
 | `npm run preview` | Preview an existing production build locally; run after building. |
-| `npm run test:browser -- "<installed-playwright-module>" "<evidence-directory>" "<preview-url>"` | Run optional Chromium presentation checks against a running frontend, with actual prerequisite paths and URL substituted. |
+| `npm run test:browser [-- --engine all] [--url <frontend-url>] [--out <evidence-dir>]` | Optional real-browser presentation checks; builds and serves the app itself unless `--url` is given ([details](testing.md#browser-harness-and-e2e-suite)). |
 
 Keep `frontend/package-lock.json` tracked with the manifest. `node_modules/`
 and `frontend/dist/` are generated, ignored local state. No lint script is declared.
-For browser prerequisites, outputs, timezone cases and bounded authority, see
-[the FE01 testing record](testing.md#bounded-fe01-decisions-and-regression-coverage).
-Use the actual URL printed by Vite; the harness's fallback port is not a project
-configuration decision. The required Frontend CI job runs `npm ci`, `npm test`
-and `npm run build`; it does not run `test:browser`. Passing unit/component tests
+For browser prerequisites and outputs see
+[Browser harness and E2E suite](testing.md#browser-harness-and-e2e-suite); for the
+timezone cases see [the FE01 testing record](testing.md#bounded-fe01-decisions-and-regression-coverage).
+The required Frontend CI job runs `npm ci`, `npm test`
+and `npm run build`; it does not run `test:browser` or the E2E suite. Passing unit/component tests
 and a successful build do not establish frontend/backend integration in a real
 browser or deployment readiness.
 
-The custom light MUI theme and `presentationTokens` live in
-`frontend/src/app/theme/theme.ts`: primary `#1F6BE8`, light accent `#52A5F7`, page
-background `#F8F9FA`, white surfaces, text `#101418`/`#4A5458`, warm `#996F1F` and
-restrained blue/green/orange/violet/pink tints. Muted `#A8A6AF` is decorative only.
-The foundation uses 8px spacing, 12px cards, 10px controls, a 248px sidebar and a
-72px header; contained primary buttons use the primary blue and selected
-navigation uses a light blue background. The bundled Plus Jakarta Sans variable
-font (`src/app/theme/plus-jakarta-sans-latin-wght.woff2`, SIL Open Font License
-1.1, licence text in `public/plus-jakarta-sans-OFL.txt`) is served from the
-application with system fallbacks; no font CDN is used.
+The MUI theme and `presentationTokens` live in `frontend/src/app/theme/theme.ts`
+and implement the local `DESIGN.md` revision `DESIGN-2026-11-06-r1` (“The Lit
+Path”; the file is not tracked in Git). An ink frame `#0A0B0F` holds the top bar
+(80 px, 64 px below 600 px) and a `#F6F6F7` canvas that rises under the current
+navigation item; asides use `#EEEEF0`, tiles are white at a 24 px radius, buttons
+are pills and icon actions 44 px circles. Text is ink `#15171C`/`#50545C`; the logo
+blue `#0866F2` (and `#0652C4` for small text) marks interaction and focus. Pastel
+sky, mint, butter, lilac and rose families carry Learning, Mastered/Completed,
+Weak/warnings, recommendations and errors, always with a text label and glyph;
+Unknown is a dashed outline. Typography uses exactly one UI face, Google Sans Flex
+4.005, with JetBrains Mono 2.211 for code and Poppins ExtraBold 800 only for the
+"CodeMastery" wordmark; all three are self-hosted variable or single-weight WOFF2
+files in `src/app/theme/` (Fontsource 5.3.x builds of the Google Fonts releases,
+SIL Open Font License 1.1, licence texts `public/google-sans-flex-OFL.txt`,
+`public/jetbrains-mono-OFL.txt`, `public/poppins-OFL.txt`). The UI and code faces
+ship Latin, Latin Extended and Vietnamese subsets selected by `unicode-range`. The
+theme exports `fontStack`, `codeFontStack` and `brandFontStack`. No font CDN is used.
+The logo artwork is `public/favicon.svg` (its palette was tuned for the ink frame on
+7 November 2026); `public/favicon.ico` is generated from it. The top-bar lockup uses a
+40 px mark from 600 px, 36 px below and 32 px below 390 px (`presentationTokens.brandMark`,
+fixed steps), with the wordmark at 0.625 × the mark. Course tiles show a course mark
+(`src/shared/components/CourseMark.tsx`): the official full-colour logo of the
+programming language that the course's own title, or else its description, names
+(exactly one language); otherwise a Deep Logo Blue (`#0652C4`) code glyph. Every mark
+uses the same neutral `#F6F6F7` container with a hairline (48 px on tiles, 32 px in
+Learner home rows). The course API has no language field, so no logo is inferred
+beyond that text. The signed-in account avatar (top bar and profile) is solid Deep
+Logo Blue with a white initial; no gradient is used. The design preview at `/preview` has no preview chrome: each screen is
+opened by link, `/preview?screen=<id>`, and the index lists them all. The logo files are the unaltered official artwork:
+`course-logo-python.svg` (python.org `python-logo-only.svg`, with a `viewBox` added so
+it can scale; "Python" and the Python logos are trademarks of the Python Software
+Foundation) and `course-logo-typescript.svg` (`ts-logo-256.svg` from the TypeScript
+branding asset pack; TypeScript is a trademark of Microsoft Corporation). Both are
+used only to name the language a course teaches.
 `PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
 
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
 in `src/routes/index.tsx`, listed in
-[Implemented capabilities on `main`](#implemented-capabilities-on-main). `/`
-redirects to `/courses`. `App.tsx` also defines the explicitly labelled,
-illustrative dashboard that is served only at `/preview`. Its search, tabs, retry
-and confirmation controls operate on demonstration state; its fixtures are not
-production metrics or learner data, and its Auth-layout preview does not sign in.
-Role-driven Instructor/Administrator navigation and the React Flow Mastery Map
-are not implemented.
+[Implemented capabilities on `main`](#implemented-capabilities-on-main). `/` is
+the public landing page (S25) for visitors without a session; its example Mastery
+Map is a fixed illustration loaded in its own chunk, and a signed-in visitor is
+sent to their start page instead (`/home` for Learners, `/courses` for other
+roles; the logo links there too). Navigation shows Catalogue for everyone, plus
+Home (`/home`) and My courses for Learners; Profile and Sign out are in the
+account menu. `/home` lists the Learner's active courses from `GET /api/me/courses`
+only. After a session ends without signing out (15-minute expiry or a current-session
+401), the sign-in page says “Your session ended. Sign in again to continue.” once.
+After sign-in a Learner lands on `/home` and other roles on `/courses`; the one-use
+`/profile` return (CT16-PROFILE P1) still takes precedence and is consumed once. This
+changes only the Learner's fallback destination, at the Leader's instruction of
+7 November 2026; P1's capture, consumption and open-redirect rules are unchanged. `/preview` lazily loads the design
+preview from `src/app/preview/` in its own chunk: every designed screen for the
+Learner, Instructor and Administrator workspaces and the proposed public screens,
+with synthetic sample data. Since 7 November 2026 it shows no preview notice or
+switcher: screens open by link and the account menu keeps “Preview index” and
+“Reset sample data”. It never calls the API, reads the session or writes browser storage, and
+it adds no route: screens change through `?screen=` query parameters. Screens
+whose contracts are pending exist only there.
 
-**Visual inspiration:** [LMS Admin Dashboard UI/UX Design for EdTech SaaS Platforms —
+**Visual inspiration (6 November 2026 redesign):** [E-learning Platform – Learning
+Plan Dashboard — Nixtio](https://dribbble.com/shots/23956256). The redesign
+follows its general composition (ink frame, canvas, pastel tiles); no asset from
+the shot is used, the logo is CodeMastery's own, and no affiliation is implied.
+Known AI assistance: Anthropic's Claude Code (Claude Opus 5.5) wrote the
+`DESIGN.md` revision and implemented and verified the redesign and its 7 November
+2026 typography, logo-palette and navigation-indicator refinement, with the locally
+installed Impeccable skill for design review and Playwright CLI for browser
+inspection.
+
+**Earlier FE01 visual inspiration (historical):** [LMS Admin Dashboard UI/UX Design for EdTech SaaS Platforms —
 Rakibul Ism / Panze UX Design Studio](https://dribbble.com/shots/27183809-LMS-Admin-Dashboard-UI-UX-Design-for-EdTech-SaaS-Platforms).
-CodeMastery's implementation uses general dashboard principles and was independently
-developed; no proprietary assets or complete reference composition are reused,
+The FE01 implementation used general dashboard principles and was independently
+developed; no proprietary assets or complete reference composition were reused,
 and no affiliation is implied. Known AI assistance: OpenAI Codex for FE01
-implementation, test/verification preparation and this documentation reconciliation.
-This disclosure does not describe an AI-powered product feature.
+implementation, test/verification preparation and that documentation reconciliation.
+These disclosures do not describe an AI-powered product feature.
 
 ## Backend Validation
 
@@ -1399,6 +1445,12 @@ redirect must not re-arm that destination from the discarded Profile. A new
 deliberate protected-route visit can establish a new return intent. Reuse CT16's
 external/API/asset/traversal rejection; no open redirect. A fresh document load loses both session and return memory; a new
 anonymous /profile entry may capture /profile again, not restore an old session.
+
+*Amendment, 7 November 2026 (Leader instruction, recorded here without changing the
+approved text above):* when no `/profile` return is pending, a Learner's sign-in
+fallback is `/home` (Learner home) instead of `/courses`; Instructors and
+Administrators keep `/courses`. The return capture, one-time consumption, rejection
+of caller-supplied targets and logout behavior are unchanged.
 
 Expiry, logout or current-generation authenticated 401 invalidates the session
 before personal content can be published and replaces the active protected route
