@@ -212,6 +212,31 @@ it('shows a Learner home of active courses from the membership API only', async 
     expect(host.textContent).not.toMatch(/Continue learning|Up next|lessons ·|Resume/);
     expect(fetcher.mock.calls.every(([url]) => ['/api/auth/login', '/api/courses', '/api/me/courses'].includes(new URL(url).pathname))).toBe(true);
 });
+it('links "See all N active courses" to My courses filtered by Active, which reads ?status= and keeps Joined as the default', async () => {
+    // 25 active memberships: Home lists the first 20 and links to the rest.
+    const statusOf = (url: string) => new URL(url).searchParams.get('status');
+    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses'
+        ? { ...membershipPage(), totalElements: statusOf(url) === 'active' ? 25 : 28, totalPages: 2 } : page)));
+    await mount('/courses'); await login(); await go('/home');
+    const more = [...host.querySelectorAll<HTMLAnchorElement>('main a')].find((link) => link.textContent === 'See all 25 active courses in My courses')!;
+    expect(more.getAttribute('href')).toBe('/my-courses?status=active');
+    fetcher.mockClear(); await act(async () => more.click());
+    expect(location.pathname + location.search).toBe('/my-courses?status=active');
+    const lastStatus = () => statusOf(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/me/courses').at(-1)![0]);
+    const pressed = () => host.querySelector('[aria-label="Membership status"] [aria-pressed="true"]')?.textContent;
+    expect(lastStatus()).toBe('active'); expect(pressed()).toBe('Active'); expect(host.textContent).toContain('25 courses');
+    // Choosing a filter updates the URL; Joined removes the parameter again.
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Membership status"] button')].find((b) => b.textContent === 'Completed')!.click());
+    expect(location.search).toBe('?status=completed'); expect(lastStatus()).toBe('completed');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Membership status"] button')].find((b) => b.textContent === 'Joined')!.click());
+    expect(location.search).toBe(''); expect(lastStatus()).toBe('joined');
+    // No or unknown values fall back to Joined.
+    for (const search of ['', '?status=none', '?status=ACTIVE', '?status=']) {
+        // Arrive fresh each time (from the catalogue), as a link or typed URL would.
+        await go('/courses'); fetcher.mockClear(); await go(`/my-courses${search}`);
+        expect(lastStatus(), search).toBe('joined'); expect(pressed(), search).toBe('Joined');
+    }
+});
 it('guards Learner home: anonymous visitors sign in, other roles are denied without a request', async () => {
     await mount('/home'); expect(location.pathname).toBe('/login');
     await mount('/courses'); await login('Teacher', 'Instructor'); await go('/home');

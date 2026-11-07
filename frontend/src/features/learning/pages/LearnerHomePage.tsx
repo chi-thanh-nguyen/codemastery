@@ -118,5 +118,5 @@ export function LearnerHome() {
     const more = data && data.totalElements > data.content.length ? data.totalElements : 0;
     return <LearnerHomePage learnerName={auth.user?.displayName ?? ''} subtitle="Your active courses, one click from their syllabus." courses={courses}
         coursesState={{ loading: !data && !error, error, onRetry: () => retry((value) => value + 1) }} onBrowse={() => navigate('/courses')}
-        moreCourses={more ? { label: `See all ${more} active courses in My courses`, href: '/my-courses', onOpen: () => navigate('/my-courses') } : undefined} />;
+        moreCourses={more ? { label: `See all ${more} active courses in My courses`, href: '/my-courses?status=active', onOpen: () => navigate('/my-courses?status=active') } : undefined} />;
 }

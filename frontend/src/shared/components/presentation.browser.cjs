@@ -40,7 +40,19 @@ function loadPlaywright() {
     throw new Error('Playwright not found. Run `npm ci` in e2e/ or pass --playwright <module path>.');
 }
 const freePort = () => new Promise((resolve, reject) => { const server = net.createServer(); server.unref(); server.on('error', reject); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); }); });
-async function waitForUrl(url, ms) { const end = Date.now() + ms; for (;;) { try { if ((await fetch(url)).ok) return; } catch { /* starting */ } if (Date.now() > end) throw new Error(`Timed out waiting for ${url}`); await new Promise((r) => setTimeout(r, 500)); } }
+/** Polls `url`; with `child`, fails at once (with its stderr tail) if that process exits first, for example on a taken port. */
+async function waitForUrl(url, ms, child) {
+    let stderr = '';
+    child?.stderr?.on('data', (chunk) => { stderr = (stderr + chunk).slice(-2000); });
+    const end = Date.now() + ms;
+    for (;;) {
+        if (child && child.exitCode !== null) throw new Error(`The preview server exited (${child.exitCode}) before ${url} was ready.${stderr ? `\n${stderr.trim()}` : ''}`);
+        // Each probe is bounded, so a socket that accepts but never answers cannot stall the loop.
+        try { if ((await fetch(url, { signal: AbortSignal.timeout(3000) })).ok) return; } catch { /* starting */ }
+        if (Date.now() > end) throw new Error(`Timed out waiting for ${url}`);
+        await new Promise((r) => setTimeout(r, 500));
+    }
+}
 
 // ── Controlled API doubles (presentation only) ───────────────────────────────
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -143,28 +155,32 @@ const sampleText = () => {
 async function main() {
     const playwright = loadPlaywright();
     fs.mkdirSync(out, { recursive: true });
-    let preview, dist, baseUrl = externalUrl;
-    if (!baseUrl) {
-        dist = fs.mkdtempSync(path.join(os.tmpdir(), 'codemastery-browser-dist-'));
-        const port = await freePort();
-        execFileSync('npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'error'], { cwd: frontendRoot, env: { ...process.env, VITE_API_BASE_URL: '/api' }, stdio: 'inherit' });
-        preview = spawn('npx', ['vite', 'preview', '--outDir', dist, '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: frontendRoot, stdio: 'ignore' });
-        baseUrl = `http://127.0.0.1:${port}/`;
-        await waitForUrl(baseUrl, 60000);
-    }
-    const report = { revision: (() => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: frontendRoot, encoding: 'utf8' }).trim(); } catch { return null; } })(),
-        dirty: (() => { try { return execFileSync('git', ['status', '--porcelain'], { cwd: frontendRoot, encoding: 'utf8' }).trim().length > 0; } catch { return null; } })(),
-        baseUrl, api: 'Controlled page.route responses only; no backend', engines: [] };
-    let failed = 0;
+    let preview, dist, baseUrl = externalUrl, report = null, failed = 0;
+    // Startup is inside the try as well: a build or preview failure still stops the preview process
+    // and removes the temporary build directory.
     try {
+        if (!baseUrl) {
+            dist = fs.mkdtempSync(path.join(os.tmpdir(), 'codemastery-browser-dist-'));
+            const port = await freePort();
+            execFileSync('npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'error'], { cwd: frontendRoot, env: { ...process.env, VITE_API_BASE_URL: '/api' }, stdio: 'inherit' });
+            preview = spawn('npx', ['vite', 'preview', '--outDir', dist, '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: frontendRoot, stdio: ['ignore', 'ignore', 'pipe'] });
+            baseUrl = `http://127.0.0.1:${port}/`;
+            await waitForUrl(baseUrl, 60000, preview);
+        }
+        report = { revision: (() => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: frontendRoot, encoding: 'utf8' }).trim(); } catch { return null; } })(),
+            dirty: (() => { try { return execFileSync('git', ['status', '--porcelain'], { cwd: frontendRoot, encoding: 'utf8' }).trim().length > 0; } catch { return null; } })(),
+            baseUrl, api: 'Controlled page.route responses only; no backend', engines: [] };
         for (const engine of engines) {
             const result = await runEngine(playwright, engine, baseUrl);
             report.engines.push(result); failed += result.failed.length;
         }
     } finally {
-        if (preview) preview.kill('SIGTERM');
+        if (preview && preview.exitCode === null) {
+            preview.kill('SIGTERM');
+            await new Promise((gone) => { preview.once('exit', gone); setTimeout(gone, 5000); });
+        }
         if (dist) fs.rmSync(dist, { recursive: true, force: true });
-        fs.writeFileSync(path.join(out, 'browser-report.json'), JSON.stringify(report, null, 2));
+        if (report) fs.writeFileSync(path.join(out, 'browser-report.json'), JSON.stringify(report, null, 2));
     }
     for (const result of report.engines) console.log(`${result.engine} ${result.version ?? ''}: ${result.passed.length} passed, ${result.failed.length} failed${result.launchError ? ` (launch: ${result.launchError})` : ''}`);
     console.log(`Evidence: ${out}`);

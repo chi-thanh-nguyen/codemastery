@@ -54,6 +54,20 @@ it('submits search/filter criteria and resets a later page to zero', async () =>
     expect(vi.mocked(getPublishedCourses).mock.calls.at(-1)).toEqual([0, 20, expect.objectContaining({ q: 'basics', prerequisites: 'any' })]);
 });
 
+it('applies a prerequisite filter with the last submitted search, never unsent text (submit-only search)', async () => {
+    await mount();
+    const input = host.querySelector<HTMLInputElement>('input:not([aria-hidden])')!;
+    const type = (value: string) => act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    const filter = (label: string) => act(async () => [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Prerequisites"] button')].find((button) => button.textContent === label)!.click());
+    const last = () => vi.mocked(getPublishedCourses).mock.calls.at(-1)![2];
+    await type('loops'); await filter('No prerequisites');
+    expect(last()).toEqual(expect.objectContaining({ q: '', prerequisites: 'none' }));
+    await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(last()).toEqual(expect.objectContaining({ q: 'loops', prerequisites: 'none' }));
+    await type('draft text'); await filter('Prerequisites described');
+    expect(last()).toEqual(expect.objectContaining({ q: 'loops', prerequisites: 'described' }));
+});
+
 function catalogueResult(total: number, index: number): CoursePage {
     return { ...page, page: index, totalElements: total, totalPages: Math.ceil(total / 20),
         content: Array.from({ length: Math.max(0, Math.min(20, total - index * 20)) }, (_, offset) => ({

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, IconButton, ListItemIcon, Menu, MenuItem, Typography } from '@mui/material';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../../auth/hooks/useAuth';
 import { getCourseMembership, getMyEnrolledCourses, enrollInCourse, leaveCourse } from '../api/learningApi';
 import type { CourseMembership, MembershipCourse, MembershipFilter, MembershipPage, MembershipStatus } from '../types/learningTypes';
@@ -113,10 +113,28 @@ export function MembershipCourseTile({ course, href, onOpen, menu }: { course: P
         status={<><span className="cm-visually-hidden">Membership: </span><MembershipPill status={course.status} /></>} />;
 }
 
+const MEMBERSHIP_FILTERS: readonly MembershipFilter[] = ['joined', 'active', 'completed', 'left', 'all'];
+/** `?status=` preselects a filter (for example from Learner home); a missing or unknown value means Joined. */
+export function membershipFilterFromQuery(value: string | null): MembershipFilter {
+    return MEMBERSHIP_FILTERS.find((filter) => filter === value) ?? 'joined';
+}
+
 export function MyCoursesPage() {
     const auth = useAuth(), generation = auth.generation;
-    const [data, setData] = useState<MembershipPage | null>(null), [page, setPage] = useState(0);
-    const [filter, setFilter] = useState<MembershipFilter>('joined'), [revision, retry] = useState(0);
+    // The URL is the single source of the filter, so links, reload and history agree with what is shown.
+    const [params, setParams] = useSearchParams();
+    const filter = membershipFilterFromQuery(params.get('status'));
+    // The page index belongs to one filter: another filter (by control or URL) starts at page 0.
+    const [paging, setPaging] = useState<{ filter: MembershipFilter; page: number }>({ filter, page: 0 });
+    const page = paging.filter === filter ? paging.page : 0;
+    const setPage = (next: number) => setPaging({ filter, page: next });
+    const setFilter = (next: MembershipFilter) => setParams((current) => {
+        const updated = new URLSearchParams(current);
+        if (next === 'joined') updated.delete('status'); else updated.set('status', next);
+        return updated;
+    }, { replace: true });
+    const [data, setData] = useState<MembershipPage | null>(null);
+    const [revision, retry] = useState(0);
     const [loading, setLoading] = useState(true), [error, setError] = useState<string | null>(null);
     useEffect(() => {
         let alive = true, recovering = false; const controller = new AbortController();
@@ -173,7 +191,7 @@ export function MyCoursesPage() {
         <PageHeader title="My courses" subtitle="Published courses you have joined. Your learning history stays here if you leave a course."
             actions={<Button variant="outlined" onClick={() => retry((value) => value + 1)} startIcon={<PresentationIcon name="refresh" />}>Refresh</Button>} />
         <TableToolbar count={data ? `${data.totalElements} ${data.totalElements === 1 ? 'course' : 'courses'}` : undefined}>
-            <SegmentedControl label="Membership status" value={filter} onChange={(next) => { setPage(0); setFilter(next); }}
+            <SegmentedControl label="Membership status" value={filter} onChange={setFilter}
                 options={[{ value: 'joined', label: 'Joined' }, { value: 'active', label: 'Active' }, { value: 'completed', label: 'Completed' }, { value: 'left', label: 'Left' }, { value: 'all', label: 'All' }]} />
         </TableToolbar>
         <Box ref={noticeRef} tabIndex={-1} data-focus-target role={notice?.severity === 'error' ? 'alert' : 'status'} sx={{ '&:empty': { display: 'none' }, mb: notice ? 3 : 0 }}>

@@ -31,7 +31,8 @@ export function CourseCataloguePage({ onSelectCourse }: CourseCataloguePageProps
         <TableToolbar count={!loading && !error ? `${totalElements} ${totalElements === 1 ? 'course' : 'courses'}` : undefined}>
             <SegmentedControl label="Prerequisites" value={prerequisites}
                 options={[{ value: 'any', label: 'Any prerequisites' }, { value: 'none', label: 'No prerequisites' }, { value: 'described', label: 'Prerequisites described' }]}
-                onChange={(next) => { setPrerequisites(next); apply({ q: q.trim(), prerequisites: next }); }} />
+                // Search is submit-only (DESIGN.md › Inputs): a filter change keeps the last submitted query, never unsent text.
+                onChange={(next) => { setPrerequisites(next); apply({ q: applied.q, prerequisites: next }); }} />
         </TableToolbar>
         {loading && <LoadingView message="Loading available courses..." variant="tiles" />}
         {error && <ErrorView title="Couldn't load the catalogue" message={error} onRetry={refetch} />}

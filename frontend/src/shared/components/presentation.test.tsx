@@ -6,7 +6,7 @@ import type { Root } from 'react-dom/client';
 import { Button, ThemeProvider } from '@mui/material';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { appTheme, brandFontStack, codeFontStack, color, control, fontStack, pathLine, presentationTokens, shadow } from '../../app/theme/theme';
-import { SidebarNav } from './SidebarNav';
+import { SidebarNav, isPlainClick } from './SidebarNav';
 import { LoadingView, EmptyView, ErrorView } from './StatusViews';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PageHeader } from './PageHeader';
@@ -106,6 +106,25 @@ describe('FE01 presentation contracts', () => {
         expect(document.querySelector('.MuiDrawer-modal nav [aria-current="page"]')?.textContent).toContain('Beta');
         await render(<SidebarNav {...props} mobileOpen selectedId="missing" />);
         expect(document.querySelector('.MuiDrawer-modal nav [aria-current]')).toBeNull();
+    });
+    it('routes plain clicks in-app but keeps native links for modified clicks or a missing handler', async () => {
+        const items = [{ id: 'catalogue', label: 'Catalogue', href: '/courses' }];
+        const fire = (link: Element, init: MouseEventInit = {}) => { const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init }); link.dispatchEvent(event); return event.defaultPrevented; };
+        const select = vi.fn();
+        await render(<AppHeader navItems={items} onNavSelect={select} />);
+        let link = host.querySelector('header nav a[href="/courses"]')!;
+        expect(fire(link)).toBe(true); expect(select).toHaveBeenCalledWith('catalogue');
+        select.mockClear();
+        for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }]) {
+            expect(fire(link, modifier), JSON.stringify(modifier)).toBe(false);
+        }
+        expect(select).not.toHaveBeenCalled();
+        // Without a handler the link is an ordinary link: the browser follows its href.
+        await render(<AppHeader navItems={items} />);
+        link = host.querySelector('header nav a[href="/courses"]')!;
+        expect(fire(link)).toBe(false);
+        expect(isPlainClick({ button: 1, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: false })).toBe(false);
+        expect(isPlainClick({ button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: true })).toBe(false);
     });
     it('accepts empty navigation without creating current state', async () => {
         await render(<SidebarNav items={[]} mobileOpen={false} onSelect={vi.fn()} onMobileClose={vi.fn()} />);

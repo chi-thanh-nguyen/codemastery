@@ -8,7 +8,9 @@
  *   to Docker through the environment rather than the command line, and are never
  *   printed or written inside the repository.
  * - Everything is removed by the returned teardown; `npm run stack:down` removes
- *   leftovers from an interrupted run (containers and networks carry a label).
+ *   leftovers from an interrupted run. Containers and networks carry the shared label
+ *   plus the run ID and the owning process ID, so stack:down never touches a run whose
+ *   process is still alive (for example a concurrent run from another checkout).
  *
  * Set E2E_BASE_URL (and E2E_API_URL when the API has another origin) to run against an
  * already running environment instead. That mode never writes fixtures and skips the
@@ -29,6 +31,8 @@ const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..', '..');
 export const STACK_LABEL = 'codemastery.e2e=disposable';
+/** Labels that tie a resource to this run and to the process that owns it (read by stack-down.mjs). */
+const runLabels = (runId: string) => ['--label', STACK_LABEL, '--label', `codemastery.e2e.run=${runId}`, '--label', `codemastery.e2e.pid=${process.pid}`];
 
 async function docker(args: string[], env: Record<string, string> = {}, input?: string) {
     if (input === undefined) {
@@ -57,9 +61,20 @@ function freePort() {
     });
 }
 
-async function waitFor(what: string, probe: () => Promise<boolean>, timeoutMs: number) {
+/** Two distinct free loopback ports (a port can be handed out twice in a row once its probe socket closes). */
+async function freePorts() {
+    for (let attempt = 0; attempt < 10; attempt++) {
+        const first = await freePort(), second = await freePort();
+        if (first !== second) return [first, second] as const;
+    }
+    throw new Error('Could not find two distinct free ports');
+}
+
+async function waitFor(what: string, probe: () => Promise<boolean>, timeoutMs: number, stopIf?: () => string | null) {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
+        const stop = stopIf?.();
+        if (stop) throw new Error(`${what}: ${stop}`);
         try { if (await probe()) return; } catch { /* not ready yet */ }
         if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
         await new Promise((ready) => setTimeout(ready, 1000));
@@ -97,32 +112,34 @@ export default async function globalSetup() {
             JWT_SECRET: randomBytes(32).toString('hex'),
             STORAGE_ACCESS_KEY: `e2e-${randomBytes(6).toString('hex')}`, STORAGE_SECRET_KEY: randomBytes(24).toString('hex'),
         };
-        const backendImage = process.env.E2E_BACKEND_IMAGE ?? 'codemastery-e2e/backend:local';
-        const postgresImage = process.env.E2E_POSTGRES_IMAGE ?? 'codemastery-e2e/postgres:local';
-        if (!process.env.E2E_BACKEND_IMAGE) await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', backendImage, join(repo, 'backend')]);
-        if (!process.env.E2E_POSTGRES_IMAGE) await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', postgresImage, join(repo, 'infrastructure', 'postgres')]);
+        // Containers run the exact image ID this run built (printed by --quiet), not the shared tag, so a
+        // concurrent run from another checkout that rebuilds the tag cannot swap the image underneath.
+        const backendImage = process.env.E2E_BACKEND_IMAGE
+            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', 'codemastery-e2e/backend:local', join(repo, 'backend')]);
+        const postgresImage = process.env.E2E_POSTGRES_IMAGE
+            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', 'codemastery-e2e/postgres:local', join(repo, 'infrastructure', 'postgres')]);
 
         network = runId;
-        await docker(['network', 'create', '--label', STACK_LABEL, network]);
+        await docker(['network', 'create', ...runLabels(runId), network]);
         const postgres = `${runId}-postgres`;
         containers.push(postgres);
-        await docker(['run', '-d', '--name', postgres, '--label', STACK_LABEL, '--network', network, '--network-alias', 'postgres',
+        await docker(['run', '-d', '--name', postgres, ...runLabels(runId), '--network', network, '--network-alias', 'postgres',
             '-e', 'POSTGRES_DB', '-e', 'POSTGRES_USER', '-e', 'POSTGRES_PASSWORD', postgresImage], secrets);
         await waitFor('PostgreSQL', async () => {
             await docker(['exec', postgres, 'pg_isready', '-q', '-U', secrets.POSTGRES_USER, '-d', secrets.POSTGRES_DB]);
             return true;
         }, 90_000);
 
-        const backendPort = await freePort(), frontendPort = await freePort();
+        const [backendPort, frontendPort] = await freePorts();
         const apiUrl = `http://127.0.0.1:${backendPort}`, baseUrl = `http://127.0.0.1:${frontendPort}`;
         const backend = `${runId}-backend`;
         containers.push(backend);
-        await docker(['run', '-d', '--name', backend, '--label', STACK_LABEL, '--network', network, '-p', `127.0.0.1:${backendPort}:8080`,
+        await docker(['run', '-d', '--name', backend, ...runLabels(runId), '--network', network, '-p', `127.0.0.1:${backendPort}:8080`,
             '-e', 'DB_HOST=postgres', '-e', 'DB_PORT=5432', '-e', 'DB_NAME', '-e', 'DB_USER', '-e', 'DB_PASSWORD', '-e', 'JWT_SECRET',
             '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY', '-e', `CORS_ALLOWED_ORIGINS=${baseUrl}`, '-e', 'SERVER_PORT=8080', backendImage],
         { DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD, JWT_SECRET: secrets.JWT_SECRET,
             STORAGE_ACCESS_KEY: secrets.STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY: secrets.STORAGE_SECRET_KEY });
-        await waitFor('backend health', async () => (await fetch(`${apiUrl}/actuator/health`)).ok, 180_000);
+        await waitFor('backend health', async () => (await fetch(`${apiUrl}/actuator/health`, { signal: AbortSignal.timeout(5000) })).ok, 180_000);
 
         // Instructor account through the real registration API, then promoted in the disposable database only.
         const instructor = { email: `e2e-instructor-${randomUUID()}@example.test`, password: `E2e-${randomBytes(12).toString('hex')}!`, displayName: 'E2E Course Instructor' };
@@ -137,8 +154,14 @@ export default async function globalSetup() {
         // Production build pointed at this backend, served by vite preview.
         const frontend = join(repo, 'frontend'), dist = join(work, 'dist');
         await run('npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'error'], { cwd: frontend, env: { ...process.env, VITE_API_BASE_URL: apiUrl }, maxBuffer: 32 * 1024 * 1024 });
-        preview = spawn('npx', ['vite', 'preview', '--outDir', dist, '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'], { cwd: frontend, stdio: 'ignore' });
-        await waitFor('frontend preview', async () => (await fetch(baseUrl)).ok, 60_000);
+        preview = spawn('npx', ['vite', 'preview', '--outDir', dist, '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'], { cwd: frontend, stdio: ['ignore', 'ignore', 'pipe'] });
+        let previewError = '';
+        preview.stderr?.on('data', (chunk) => { previewError = (previewError + chunk).slice(-2000); });
+        // Fail at once, with Vite's own message, if the preview exits early (for example the port was taken
+        // between probing and binding), instead of polling until the timeout.
+        const child = preview;
+        await waitFor('frontend preview', async () => (await fetch(baseUrl, { signal: AbortSignal.timeout(5000) })).ok, 60_000,
+            () => (child.exitCode !== null ? `vite preview exited (${child.exitCode})${previewError ? `: ${previewError.trim()}` : ''}` : null));
 
         Object.assign(process.env, {
             E2E_STACK: 'disposable', E2E_BASE_URL: baseUrl, E2E_API_URL: apiUrl,

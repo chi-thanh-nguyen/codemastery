@@ -4,6 +4,7 @@ import { Box, ButtonBase, Divider, IconButton, Menu, Tooltip, Typography, useMed
 import { PresentationIcon } from './PresentationIcon';
 import type { PresentationIconName } from './PresentationIcon';
 import { BrandWordmark } from './BrandLogo';
+import { isPlainClick } from './SidebarNav';
 import type { NavItem } from './SidebarNav';
 import { color, motion, presentationTokens, radius, focusRingOnChrome } from '../../app/theme/theme';
 
@@ -130,7 +131,13 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
 
 function TopNavItem({ item, current, iconOnly, onSelect }: { item: NavItem; current: boolean; iconOnly: boolean; onSelect?: (id: string) => void }) {
     const content = <ButtonBase component={item.href ? 'a' : 'button'} href={item.href} data-nav-item aria-current={current ? 'page' : undefined}
-        onClick={(event: MouseEvent) => { if (item.href) event.preventDefault(); onSelect?.(item.id); }}
+        onClick={(event: MouseEvent) => {
+            // A link is routed in-app only when a handler exists and the click is plain; otherwise the
+            // browser follows the href natively (including Cmd/Ctrl-click into a new tab).
+            if (!onSelect || (item.href && !isPlainClick(event))) return;
+            if (item.href) event.preventDefault();
+            onSelect(item.id);
+        }}
         sx={{ position: 'relative', height: 44, px: iconOnly ? 1.25 : 2, gap: 1, borderRadius: `${radius.pill}px`, fontSize: '0.9375rem', fontWeight: current ? 600 : 500,
             color: current ? 'common.white' : color.chromeMuted, whiteSpace: 'nowrap', transition: `background-color ${motion.fast}ms, color ${motion.fast}ms`,
             '&:hover': { bgcolor: color.chromeRaised, color: 'common.white' }, '& svg': { fontSize: 20 } }}>

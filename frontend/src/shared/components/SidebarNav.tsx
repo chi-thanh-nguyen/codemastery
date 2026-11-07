@@ -4,6 +4,14 @@ import { color, presentationTokens, radius, focusRingOnChrome } from '../../app/
 import { BrandWordmark } from './BrandLogo';
 
 export interface NavItem { id: string; label: string; badge?: string | number; icon?: ReactNode; group?: string; href?: string }
+
+/**
+ * True for a plain primary click that the app should route itself. Modified clicks (Cmd/Ctrl/Shift/Alt),
+ * other buttons and already-handled events keep the browser's native link behavior (new tab, new window).
+ */
+export function isPlainClick(event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; defaultPrevented: boolean }) {
+    return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented;
+}
 export interface SidebarNavProps {
     items: NavItem[];
     selectedId?: string;
@@ -39,7 +47,7 @@ export function SidebarNav({ items, selectedId, onSelect, mobileOpen, onMobileCl
                     return <ListItem key={item.id} disablePadding sx={{ display: 'block', mb: .5 }}>
                         {heading && <Typography component="div" sx={{ px: 1.5, mt: 2, mb: 1, color: color.chromeMuted, fontSize: '0.8125rem', fontWeight: 600 }}>{heading}</Typography>}
                         <ListItemButton {...(item.href ? { component: 'a', href: item.href } : {})} selected={current} aria-current={current ? 'page' : undefined}
-                            onClick={(event) => { if (item.href) event.preventDefault(); onSelect(item.id); onMobileClose(); }}
+                            onClick={(event) => { if (item.href && !isPlainClick(event)) return; if (item.href) event.preventDefault(); onSelect(item.id); onMobileClose(); }}
                             sx={{ minHeight: 52, px: 1.5, gap: 1.5, borderRadius: `${radius.md}px`, color: current ? 'common.white' : color.chromeMuted,
                                 '&:hover': { bgcolor: color.chromeRaised, color: 'common.white' },
                                 '&.Mui-selected, &.Mui-selected:hover': { bgcolor: color.chromeRaised, color: 'common.white' },
