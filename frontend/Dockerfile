@@ -131,7 +131,9 @@ RUN set -eu; \
 # Nginx and its modules are pinned by the image. The Alpine runtime packages
 # are raised to exactly the reviewed 3.24 security updates (2 November 2026:
 # they clear the base's CRITICAL brotli and HIGH curl findings; 3 November:
-# libexpat 2.10.0 for two further HIGH findings), which apk
+# libexpat 2.10.0 for two further HIGH findings; 7 November: the v3.24 index
+# replaced alpine-release 3.24.3-r0 and zlib 1.3.2-r1 with 3.24.4-r0 and 1.4-r0,
+# which also fixes CVE-2026-4738, so the old pins no longer resolved), which apk
 # verifies against the signing keys in the pinned base. Unlike an unbounded
 # `apk upgrade`, the build fails if the index no longer offers one of these
 # versions; re-scan and update the list instead (docs/deployment.md, "DP01
@@ -145,10 +147,10 @@ FROM nginxinc/nginx-unprivileged@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0a
 USER root
 RUN set -eu; \
     apk add --no-cache \
-        alpine-release=3.24.3-r0 brotli-libs=1.2.1-r0 c-ares=1.34.9-r0 \
+        alpine-release=3.24.4-r0 brotli-libs=1.2.1-r0 c-ares=1.34.9-r0 \
         ca-certificates=20261020-r0 ca-certificates-bundle=20261020-r0 \
         curl=8.23.0-r0 libcurl=8.23.0-r0 libexpat=2.10.0-r0 musl=1.2.6-r3 \
-        musl-utils=1.2.6-r3 zlib=1.3.2-r1; \
+        musl-utils=1.2.6-r3 zlib=1.4-r0; \
     chown -R -h root:root /etc/nginx; \
     chmod -R go-w /etc/nginx
 USER 101
@@ -183,8 +185,8 @@ FROM nginxinc/nginx-unprivileged:1.30.6-alpine-slim@sha256:5d8bb9437d74a600ec5db
 USER root
 RUN set -eu; \
     apk add --no-cache \
-        alpine-release=3.24.3-r0 ca-certificates-bundle=20261020-r0 \
-        musl=1.2.6-r3 musl-utils=1.2.6-r3 zlib=1.3.2-r1; \
+        alpine-release=3.24.4-r0 ca-certificates-bundle=20261020-r0 \
+        musl=1.2.6-r3 musl-utils=1.2.6-r3 zlib=1.4-r0; \
     chown -R -h root:root /etc/nginx; \
     chmod -R go-w /etc/nginx
 USER 101

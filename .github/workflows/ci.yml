@@ -2006,10 +2006,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker build -q --target release --build-arg PUBLIC_ORIGIN=https://ingress.codemastery.test \
-            -t "$FRONTEND_RELEASE_IMAGE" frontend >/dev/null
-          docker build -q -t "$FRONTEND_LOCAL_IMAGE" frontend >/dev/null
-          docker build -q -t "$BACKEND_IMAGE" backend >/dev/null
+          # Quiet on success; on failure print the end of the plain build log so
+          # the real cause (for example an apk resolution error) is visible.
+          # No build argument here carries a secret.
+          build_image() {
+            local log; log="$(mktemp)"
+            if ! docker build --progress=plain "$@" >"$log" 2>&1; then
+              echo "docker build $* failed; last 80 lines of the build log:" >&2
+              tail -n 80 "$log" >&2; rm -f "$log"; return 1
+            fi
+            rm -f "$log"
+          }
+          build_image --target release --build-arg PUBLIC_ORIGIN=https://ingress.codemastery.test \
+            -t "$FRONTEND_RELEASE_IMAGE" frontend
+          build_image -t "$FRONTEND_LOCAL_IMAGE" frontend
+          build_image -t "$BACKEND_IMAGE" backend
           bash infrastructure/vm/tests/test-java-truststore.sh "$BACKEND_IMAGE"
           docker image inspect --format 'release frontend: user {{.Config.User}}, healthcheck {{json .Config.Healthcheck.Test}}' \
             "$FRONTEND_RELEASE_IMAGE"

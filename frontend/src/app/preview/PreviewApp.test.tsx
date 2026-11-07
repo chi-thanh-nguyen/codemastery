@@ -31,7 +31,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
     await act(async () => root.unmount()); host.remove();
-    window.history.replaceState(null, '', '/'); vi.useRealTimers(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear();
+    window.history.replaceState(null, '', '/'); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear(); sessionStorage.clear();
 });
 
 /** Mount the real App at /preview and wait for the lazily loaded preview chunk. */
@@ -46,6 +46,21 @@ async function mount(search = '') {
 const h1 = () => host.querySelector('main h1')?.textContent;
 const buttons = (text: string, scope: ParentNode = host) => [...scope.querySelectorAll<HTMLElement>('button, a, [role="menuitem"]')].filter((node) => node.textContent?.trim() === text);
 async function press(text: string, scope: ParentNode = host) { const node = buttons(text, scope)[0]; expect(node, text).toBeTruthy(); await act(async () => node.click()); }
+/**
+ * Waits (real timers, bounded) for an observable outcome. On timeout it fails with the
+ * current route and any visible alert, so a genuine sign-in failure is not reported as
+ * an ambiguous route mismatch.
+ */
+async function waitUntil(done: () => boolean, what: string, timeoutMs = 3000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!done()) {
+        if (Date.now() > deadline) {
+            const alert = host.querySelector('[role="alert"]')?.textContent?.trim();
+            throw new Error(`Timed out after ${timeoutMs} ms waiting for ${what}; route ${location.pathname}${alert ? `; alert: "${alert}"` : ''}.`);
+        }
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+}
 async function settle(ms: number) { await act(async () => { vi.advanceTimersByTime(ms); }); }
 
 describe('isolated design preview', () => {
@@ -199,16 +214,21 @@ describe('isolated design preview', () => {
             if (path.endsWith('/courses')) return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
             return Promise.reject(new Error(`Unexpected request ${path}`));
         });
+        // The API base is build-time configuration. Supply it here rather than depending on a
+        // developer's untracked .env (CI has none, so the login request failed with a configuration error).
+        vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
         window.history.replaceState(null, '', '/login');
         await act(async () => root.render(<App />));
         await typeInto(host.querySelector<HTMLInputElement>('input[name="email"]')!, 'learner@example.com');
         await typeInto(host.querySelector<HTMLInputElement>('input[name="password"]')!, 'synthetic-password');
         await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-        for (let attempt = 0; attempt < 20 && location.pathname !== '/courses'; attempt++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+        await waitUntil(() => location.pathname === '/courses' && !!host.textContent?.includes('Signed In Person'), 'the signed-in catalogue');
         expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Signed In Person');
+        const login = fetcher.mock.calls.find(([url]) => new URL(url).pathname === '/api/auth/login');
+        expect(login, 'one real login request').toBeTruthy(); expect(login![1].method).toBe('POST');
         const requests = fetcher.mock.calls.length;
         await act(async () => { window.history.pushState(null, '', '/preview?screen=learner-home'); window.dispatchEvent(new PopStateEvent('popstate')); });
-        for (let attempt = 0; attempt < 50 && !host.querySelector('[aria-label="Design preview notice"]'); attempt++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+        await waitUntil(() => !!host.querySelector('[aria-label="Design preview notice"]'), 'the lazily loaded preview');
         expect(host.textContent).toContain('Design preview · Sample data.');
         expect(host.textContent).not.toContain('Signed In Person'); expect(host.textContent).toContain('Linh Pham');
         expect(fetcher.mock.calls.length).toBe(requests); expect(localStorage.length + sessionStorage.length).toBe(0);

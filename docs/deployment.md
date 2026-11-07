@@ -3813,3 +3813,37 @@ changed, and no Azure endpoint was contacted.
 This follow-up used OpenAI Codex for investigation, remediation, qualification
 and documentation, plus Trivy, govulncheck and cosign as external qualification
 tools. It introduces no AI runtime service or new production technology.
+
+## Frontend Alpine package pins refreshed — 7 November 2026
+
+The `VM HTTPS ingress` CI job failed on PR #209 at `frontend/Dockerfile` (release
+target, `apk add`, exit code 18). Rebuilding without cache for linux/amd64 showed
+a deterministic resolution failure, not a network error:
+
+```text
+ERROR: unable to select packages:
+  alpine-release-3.24.2-r0: breaks: world[alpine-release=3.24.3-r0]
+  zlib-1.3.2-r0: breaks: world[zlib=1.3.2-r1]
+```
+
+The Alpine v3.24 `main` index (v3.24.4) now offers `alpine-release` 3.24.4-r0 and
+`zlib` 1.4-r0 and no longer serves the pinned 3.24.3-r0 and 1.3.2-r1; Alpine keeps
+only the current build of each package in a stable branch. Every other pinned
+version is still the index version. The Alpine security database lists
+CVE-2026-4738 as fixed in `zlib` 1.4-r0 (in addition to the fixes of 1.3.2-r1).
+Both frontend targets now pin `alpine-release=3.24.4-r0` and `zlib=1.4-r0`; base
+image digests, the other pins, configuration ownership and UID 101 are unchanged.
+The CI build step now prints the last 80 lines of a failing `docker build` log
+instead of discarding it (no build argument carries a secret).
+
+Local verification (macOS arm64, Docker 29.8.1, builds forced to linux/amd64 as on
+the runner): both targets built without cache; the job's first four steps passed
+(trust-store regressions 13/13, UID 101, Nginx 1.30.6, root-owned read-only
+configuration, no setuid/setgid files, all eight invalid release origins rejected;
+CA store against the YE2 chain with OpenSSL 3; `INGRESS_STUB_TESTS_PASS`;
+`INGRESS_BACKEND_TESTS_PASS`). Trivy (all severities) reported zero findings in
+both images. The fifth step (DP01 preflight) needs root on the host (`sudo
+install` under `/etc/codemastery`) and was not run locally. This is local evidence;
+the job must still pass on the CI runner.
+
+Anthropic's Claude Code (Claude Opus 5.5) diagnosed the failure, made the change and ran these checks.
