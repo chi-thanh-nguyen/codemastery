@@ -285,7 +285,7 @@ on any failed check or browser that cannot launch. Positional FE01 arguments
 ```bash
 npm test                         # all five projects
 npm run test:chromium            # chromium-desktop and chromium-mobile
-npm run stack:down               # remove leftovers of an interrupted run
+npm run stack:down               # remove leftovers of an interrupted run (skips stacks whose run is still alive)
 ```
 
 `fixtures/local-stack.ts` (Playwright global setup) needs Docker. It builds
@@ -296,7 +296,12 @@ environment, waits for `/actuator/health`, registers an Instructor through the
 API and promotes that account in the disposable database only, applies
 `fixtures/catalogue-fixture.sql` (21 published courses, one hidden course, hidden
 lessons and an empty chapter), and serves a production frontend build pointed at
-that backend. The teardown stops the preview server, removes the containers,
+that backend. Containers run the exact image IDs this run built, so a concurrent
+run from another checkout that rebuilds the shared tags cannot swap them. The two
+loopback ports are distinct, and setup fails at once with Vite's message if the
+preview server exits before it is ready. Containers and the network carry the
+run ID and the owning process ID, so `stack:down` removes only resources whose
+owner is gone. The teardown stops the preview server, removes the containers,
 network and temporary directory. Each test registers its own synthetic Learner,
 so tests are independent. Projects: `chromium-desktop`, `firefox-desktop`,
 `webkit-desktop` (1280 × 900), `chromium-mobile` (Pixel 7) and `webkit-mobile`
@@ -2506,3 +2511,31 @@ so the opening shows the real canvas, or content scrolling under the sticky bar.
 | `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 442 tests in 15 files; build succeeded |
 | `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 45/45, WebKit 26.6 45/45: reach centred and symmetric from the mask geometry; pixels show canvas inside the bell, ink beside and above it, no seam at the bar edge; a white tile scrolled under the bar shows through the opening |
 | `npx playwright test` (chromium/webkit desktop and mobile) | PASS 53, 3 skipped by design |
+
+### PR #209 self-review fixes — 7 November 2026
+
+A logic-only self-review of PR #209 found no P0–P2 defects; these P3 items were fixed:
+
+- **My courses filter from the URL:** `/my-courses?status=active|completed|left|all`
+  preselects the filter (missing or unknown values mean Joined), the control keeps the
+  URL in step, and Learner home's "See all N active courses" links to `?status=active`.
+- **Catalogue:** a prerequisite filter change keeps the last submitted search instead of
+  applying unsent text (submit-only search).
+- **Navigation links:** top-bar and drawer items route in-app only on a plain click with
+  a handler; Cmd/Ctrl/Shift/Alt-clicks and items without a handler follow the native link.
+- **Browser harness:** startup is inside `try/finally`, so a failed build or preview still
+  stops the preview process and removes the temporary build; probes are time-bounded and
+  stop at once when the preview exits.
+- **E2E stack:** run-scoped labels and owner-aware `stack:down`, image IDs instead of shared
+  tags, distinct ports, bounded probes and a fast failure with Vite's message.
+
+Not changed: cleanup after `SIGKILL` of the test runner (no handler can run;
+`stack:down` removes the containers and network afterwards).
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 445 tests in 15 files, also with `VITE_API_BASE_URL` empty; build succeeded |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 45/45, WebKit 26.6 45/45; no preview process or temporary build left |
+| Harness with a forced preview port conflict | Failed in 4 s with Vite's "Port … is already in use"; no preview process or temporary build left |
+| `stack-down.mjs` with synthetic labelled resources | Removed the dead-owner and unlabelled-owner container and network; kept the ones owned by a live process |
+| `npx playwright test` (chromium/webkit desktop and mobile) | PASS 53, 3 skipped by design; no container, network, preview process or temporary directory left |
