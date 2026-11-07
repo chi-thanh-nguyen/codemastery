@@ -143,6 +143,24 @@ added in `frontend/public/`: `google-sans-flex-OFL.txt`, `jetbrains-mono-OFL.txt
 a new palette. The three new licence files, like `favicon.ico`, match no CODEOWNERS
 rule; the theme files are covered by `/frontend/src/app/`. No other path changes.
 
+### PR #209 review regression tests — 7 November 2026
+
+The repository owner's instruction of 7 November 2026 to fix the PR #209
+independent-review findings with regression tests, and to record the files they
+add, adds three test files, now shown in the tree below:
+
+- `frontend/src/shared/components/presentation.browser.test.ts` — Vitest lifecycle
+  tests for `presentation.browser.cjs` (build marker, readiness, cleanup after a
+  failed start); it runs with `npm test`.
+- `e2e/fixtures/local-stack.test.mjs` — `node --test` tests for the readiness and
+  backend-diagnostics helpers and the failure path of `fixtures/local-stack.ts`.
+- `e2e/fixtures/stack-down.test.mjs` — `node --test` tests for `fixtures/stack-down.mjs`.
+
+Both E2E tests use stub `docker` and `npx` executables and touch no Docker resource;
+Playwright does not collect them (its `testDir` is `tests/`). The existing
+`/frontend/src/shared/` and `/e2e/` CODEOWNERS rules cover them. No other path
+changes; the immutable canonical tree is unchanged.
+
 ## Bounded Course unit-test placement correction
 
 On 2026-10-26 (Asia/Ho_Chi_Minh), the Project Leader manually relocated
@@ -1638,6 +1656,8 @@ codemastery/
 
 │           │   ├── presentation.browser.cjs
 
+│           │   ├── presentation.browser.test.ts
+
 │           │   └── presentation.test.tsx
 
 │           ├── hooks/
@@ -1680,9 +1700,13 @@ codemastery/
 
 │       ├── catalogue-fixture.sql
 
+│       ├── local-stack.test.mjs
+
 │       ├── local-stack.ts
 
 │       ├── stack-down.mjs
+
+│       ├── stack-down.test.mjs
 
 │       └── files/
 

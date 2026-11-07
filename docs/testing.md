@@ -28,6 +28,7 @@ verification is separate work.
 | Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency. Auth, Enrollment and sample-data suites dispatch through MockMvc with the configured Spring Security chain; the other suites do not (see [Integration-Test Lifecycle](#integration-test-lifecycle)) | A running server, real browser, network/CORS from a browser, deployment |
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
+| E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`fixtures/local-stack.test.mjs`, `fixtures/stack-down.test.mjs`); stub `docker` and `npx` first on `PATH`; Node 22.18+ or 24 (they load `local-stack.ts` natively) | No | Frontend readiness requires this run's build marker; backend start failures fail promptly with state and redacted log tail captured before teardown; `stack:down` keeps live-owner and unreadable-owner resources and survives concurrently removed ones | Real Docker, Vite, browsers or the E2E flows themselves |
 | Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
 | VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
@@ -248,8 +249,12 @@ npx playwright install chromium firefox webkit   # only when the browsers are mi
 ```
 
 **Browser harness** (from `frontend/`). Without `--url` it builds the frontend with
-`VITE_API_BASE_URL=/api` into a temporary directory, serves it with `vite preview`
-on a free 127.0.0.1 port, runs the checks and removes both. API responses are
+`VITE_API_BASE_URL=/api` into a temporary directory, writes a per-run marker into
+that copy's `index.html`, serves it with `vite preview` on a free 127.0.0.1 port
+chosen right before the preview starts, runs the checks and removes both. It is
+ready only when the port answers with that marker while the preview process is
+still running, so another server on the same port is never tested. With `--url`
+no build is made and no marker is required. API responses are
 `page.route` test doubles; no backend is contacted.
 
 ```bash
@@ -286,23 +291,35 @@ on any failed check or browser that cannot launch. Positional FE01 arguments
 npm test                         # all five projects
 npm run test:chromium            # chromium-desktop and chromium-mobile
 npm run stack:down               # remove leftovers of an interrupted run (skips stacks whose run is still alive)
+node --test fixtures/*.test.mjs  # stub-based lifecycle tests for local-stack.ts and stack-down.mjs (no Docker)
 ```
 
 `fixtures/local-stack.ts` (Playwright global setup) needs Docker. It builds
 `codemastery-e2e/backend:local` and `codemastery-e2e/postgres:local` from
 `backend/` and `infrastructure/postgres/` (kept for layer reuse), starts them on a
 private network with random database, JWT and storage values passed through the
-environment, waits for `/actuator/health`, registers an Instructor through the
-API and promotes that account in the disposable database only, applies
+environment, builds the production frontend pointed at that backend and serves it
+with `vite preview`, waits for `/actuator/health`, registers an Instructor through
+the API and promotes that account in the disposable database only, and applies
 `fixtures/catalogue-fixture.sql` (21 published courses, one hidden course, hidden
-lessons and an empty chapter), and serves a production frontend build pointed at
-that backend. Containers run the exact image IDs this run built, so a concurrent
-run from another checkout that rebuilds the shared tags cannot swap them. The two
-loopback ports are distinct, and setup fails at once with Vite's message if the
-preview server exits before it is ready. Containers and the network carry the
-run ID and the owning process ID, so `stack:down` removes only resources whose
-owner is gone. The teardown stops the preview server, removes the containers,
-network and temporary directory. Each test registers its own synthetic Learner,
+lessons and an empty chapter). Containers run the exact image IDs this run built, so
+a concurrent run from another checkout that rebuilds the shared tags cannot swap
+them. The two loopback ports are distinct. The frontend port is chosen right before
+`vite preview` starts, and the backend starts afterwards because it needs that
+origin for CORS. The temporary build carries a per-run marker in its `index.html`:
+the preview counts as ready only when the port answers with that marker while the
+preview process is still running, and it is checked again before the tests start.
+A port collision therefore fails setup (at once with Vite's message if the preview
+exits) instead of testing another server. If the backend container stops while
+setup waits for health, setup fails at once; on that or on the 180 s timeout the
+error carries the container state (status, exit code, OOM, error) and its last 100
+log lines, with the generated secrets redacted, captured before the teardown removes
+the container. Containers and the network carry the run ID and the owning process
+ID, so `stack:down` removes only resources whose owner is gone; it inspects and
+removes each resource on its own, counts one already removed by a concurrent
+teardown as gone, keeps (and reports, exiting 1) one whose owner cannot be read or
+that cannot be removed, and continues with the rest. The teardown stops the preview
+server, removes the containers, network and temporary directory. Each test registers its own synthetic Learner,
 so tests are independent. Projects: `chromium-desktop`, `firefox-desktop`,
 `webkit-desktop` (1280 × 900), `chromium-mobile` (Pixel 7) and `webkit-mobile`
 (iPhone 14). Results go to `e2e/test-results/` (ignored), including
@@ -2539,3 +2556,42 @@ Not changed: cleanup after `SIGKILL` of the test runner (no handler can run;
 | Harness with a forced preview port conflict | Failed in 4 s with Vite's "Port … is already in use"; no preview process or temporary build left |
 | `stack-down.mjs` with synthetic labelled resources | Removed the dead-owner and unlabelled-owner container and network; kept the ones owned by a live process |
 | `npx playwright test` (chromium/webkit desktop and mobile) | PASS 53, 3 skipped by design; no container, network, preview process or temporary directory left |
+
+### PR #209 independent review fixes — 7 November 2026
+
+An independent logic review of PR #209 at `39fce76` found no P0–P2 defects. Commit
+`a9d9dac` fixes its confirmed P3 findings and two further reliability items:
+
+- **Native links:** the brand link, course tiles (catalogue, My courses, Learner home),
+  the course-detail back link, Learner home's "Browse the catalogue" and "See all N
+  active courses" links and the My courses "View course details" menu item route in-app
+  only on a plain primary click with a handler (shared `isPlainClick`, as the top bar
+  and drawer already did). Cmd/Ctrl/Shift/Alt, middle and already-handled clicks, and
+  links without a handler, follow the browser's native behavior.
+- **My courses paging:** any filter change (control, `?status=` URL or history) starts
+  at page 0; returning to a filter no longer restores its earlier page, and no request
+  is made for the previous filter's page.
+- **Frontend readiness (E2E stack and browser harness):** readiness requires a per-run
+  marker in the temporary build and a still-running preview process, so HTTP 200 from
+  another server on the port is not accepted; the frontend port is chosen right before
+  the preview starts.
+- **E2E backend start:** a stopped container fails setup at once, and its state and
+  redacted log tail are kept in the error before teardown removes it.
+- **`stack:down`:** per-resource inspection and removal, resilient to resources that a
+  concurrent teardown removes first; an unreadable owner is never treated as orphaned.
+- **CI:** both backend readiness loops read the log once more after the last poll, so a
+  start marker logged during the final sleep is not missed.
+
+Not changed: PID reuse or a different PID namespace (runner in a container or remote
+Docker) can still mislead the owner check of `stack:down`; the PostgreSQL readiness
+probe has no per-call timeout; the `node --test` lifecycle tests are not run in CI.
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck`; `npx vitest run --exclude 'src/app/preview/**'`; `vite build` (local, Node 24.21.0) | PASS: 444 tests in 15 files; build succeeded |
+| GitHub Actions `Frontend` on `a9d9dac` ([run 42361109743](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/42361109743), Ubuntu 24.04, Node 22.23.4): `npm ci`, `npm test`, `npm run build` | PASS: 458 tests in 16 files (including `presentation.browser.test.ts`, 8 tests); build succeeded. All 12 checks of that run passed |
+| `node --test fixtures/stack-down.test.mjs fixtures/local-stack.test.mjs` (from `e2e/`) | PASS 15/15; no container, network or Vite process touched |
+| New regression tests against the previous code (each fixed file reverted in turn, or the fix removed) | FAIL as expected: modified clicks at each of the five link sites, page restore on a filter round trip (control and history), HTTP 200 without the marker, exit during a successful probe, and the old `stack-down.mjs` |
+| CI readiness steps extracted from `ci.yml` before and after, with a stub `docker` | Marker logged during the final sleep: before FAIL, after PASS; early marker, no marker and an exited container unchanged; `bash -n` PASS for both steps and the inner script |
+| `local-stack.ts` loaded through Playwright 1.63's TypeScript transform (scratch config; its default export not called) | PASS; no Docker resource created |
+| `npx playwright test`, `npm run test:browser` | Not run: the suite rebuilds and re-tags the shared `codemastery-e2e/backend:local` image; the harness is a visual check outside this change |
