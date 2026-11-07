@@ -215,20 +215,74 @@ async function runEngine(playwright, engine, baseUrl) {
                 const logo = page.locator('header img').first(); await logo.waitFor();
                 assert(await logo.evaluate((img) => img.complete && img.naturalWidth > 0));
             });
-            await check('self-hosted Figtree loads weights 400–800 from this origin with its OFL licence; no retired face remains', async () => {
+            await check('one UI face (Google Sans Flex), JetBrains Mono for code and the wordmark face load from this origin with their OFL texts; no retired face remains', async () => {
                 const faces = await page.evaluate(async () => {
-                    for (const weight of [400, 500, 600, 700, 800]) { const loaded = await document.fonts.load(`${weight} 16px Figtree`, 'Learning 0123'); if (!loaded.length) throw new Error(`weight ${weight}`); }
-                    return [...document.fonts].map((f) => ({ family: f.family.replace(/["']/g, ''), weight: f.weight, status: f.status }));
+                    for (const weight of [400, 500, 600, 700]) { const loaded = await document.fonts.load(`${weight} 16px "Google Sans Flex"`, 'Learning 0123 Tiếng Việt Đ'); if (!loaded.length) throw new Error(`UI weight ${weight}`); }
+                    if (!(await document.fonts.load('400 16px "JetBrains Mono"', 'for i in range(3):')).length) throw new Error('code face');
+                    if (!(await document.fonts.load('800 20px "CodeMastery Wordmark"', 'CodeMastery')).length) throw new Error('wordmark face');
+                    return [...new Set([...document.fonts].map((f) => f.family.replace(/["']/g, '')))];
                 });
-                assert(faces.some((f) => f.family === 'Figtree' && f.status === 'loaded'), JSON.stringify(faces));
-                assert(!faces.some((f) => /Jakarta/i.test(f.family)));
-                const woff = await page.evaluate(() => performance.getEntriesByType('resource').filter((e) => e.name.includes('.woff2')).map((e) => e.name));
-                assert(woff.length > 0 && woff.every((name) => new URL(name).origin === new URL(baseUrl).origin));
-                const licence = await context.request.get(url('/figtree-OFL.txt'));
-                assert(licence.ok()); const text = await licence.text();
-                assert(text.includes('Copyright 2022 The Figtree Project Authors') && text.includes('SIL OPEN FONT LICENSE Version 1.1'));
-                assert.equal((await context.request.get(url('/plus-jakarta-sans-OFL.txt'))).headers()['content-type']?.includes('text/plain') ? 'served' : 'absent', 'absent');
-                assert.equal((await page.locator('main h1').evaluate((h) => getComputedStyle(h).fontFamily)).split(',')[0].replace(/["']/g, '').trim(), 'Figtree');
+                assert.deepEqual(faces.sort(), ['CodeMastery Wordmark', 'Google Sans Flex', 'JetBrains Mono'], JSON.stringify(faces));
+                const woff = await page.evaluate(() => performance.getEntriesByType('resource').filter((e) => e.name.includes('.woff2')).map((e) => new URL(e.name)));
+                assert(woff.length > 0 && woff.every((u) => u.origin === new URL(baseUrl).origin));
+                assert(woff.some((u) => /google-sans-flex-vietnamese/.test(u.pathname)), 'the Vietnamese subset is fetched for Vietnamese text');
+                for (const [file, owner] of [['/google-sans-flex-OFL.txt', 'Copyright 2015 Google LLC'], ['/jetbrains-mono-OFL.txt', 'The JetBrains Mono Project Authors'], ['/poppins-OFL.txt', 'The Poppins Project Authors']]) {
+                    const licence = await context.request.get(url(file)); assert(licence.ok(), file); const text = await licence.text();
+                    assert(text.includes(owner) && text.includes('SIL OPEN FONT LICENSE Version 1.1'), file);
+                }
+                for (const gone of ['/figtree-OFL.txt', '/plus-jakarta-sans-OFL.txt']) assert(!((await context.request.get(url(gone))).headers()['content-type'] ?? '').includes('text/plain'), `${gone} is no longer served`);
+                assert.equal((await page.locator('main h1').evaluate((h) => getComputedStyle(h).fontFamily)).split(',')[0].replace(/["']/g, '').trim(), 'Google Sans Flex');
+            });
+            await check('Vietnamese text, code and the wordmark render with the shipped faces, without fallback glyphs', async () => {
+                const vietnamese = 'Đường đi học lập trình: ăn, ân, ên, ôn, ơn, ưng — Ấ Ầ Ẩ Ẫ Ậ ặ ệ ộ ợ ự ỹ ỵ ĐĂÂÊÔƠƯ 0123456789';
+                await page.evaluate((text) => {
+                    const p = document.createElement('p'); p.id = 'vi-probe'; p.textContent = text; p.style.fontSize = '18px'; document.querySelector('main').append(p);
+                    const c = document.createElement('code'); c.id = 'code-probe'; c.textContent = 'for i in range(3): print(i) # chào'; document.querySelector('main').append(c);
+                }, vietnamese);
+                await page.evaluate(() => document.fonts.ready);
+                assert(await page.evaluate((text) => document.fonts.check('16px "Google Sans Flex"', text), vietnamese));
+                if (engine === 'chromium') {
+                    const cdp = await context.newCDPSession(page); await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
+                    const { root } = await cdp.send('DOM.getDocument');
+                    const rendered = async (selector) => {
+                        const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+                        return (await cdp.send('CSS.getPlatformFontsForNode', { nodeId })).fonts;
+                    };
+                    const vi = await rendered('#vi-probe'), code = await rendered('#code-probe'), mark = await rendered('header [data-wordmark]');
+                    const only = (fonts, family) => fonts.length > 0 && fonts.every((f) => f.familyName.startsWith(family) && f.isCustomFont);
+                    assert(only(vi, 'Google Sans Flex'), `Vietnamese: ${JSON.stringify(vi)}`);
+                    assert(only(code, 'JetBrains Mono'), `code: ${JSON.stringify(code)}`);
+                    assert(only(mark, 'Poppins'), `wordmark: ${JSON.stringify(mark)}`);
+                    await cdp.detach();
+                }
+                const mark = await page.locator('header [data-wordmark]').evaluate((e) => { const s = getComputedStyle(e); return { family: s.fontFamily, weight: s.fontWeight }; });
+                const first = (family) => family.split(',')[0].replace(/["']/g, '').trim();
+                assert(first(mark.family) === 'CodeMastery Wordmark' && mark.weight === '800', JSON.stringify(mark));
+                const nav = await page.locator('header nav a').first().evaluate((e) => getComputedStyle(e).fontFamily);
+                assert.equal(first(nav), 'Google Sans Flex', `navigation keeps the UI face: ${nav}`);
+                await page.evaluate(() => { document.getElementById('vi-probe')?.remove(); document.getElementById('code-probe')?.remove(); });
+            });
+            await check('the logo mark is sharp and its colour regions stay distinct on the ink frame at 16–40 px', async () => {
+                const regions = await page.evaluate(async () => {
+                    const svg = await (await fetch('/favicon.svg')).text();
+                    const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+                    return [...doc.querySelectorAll('linearGradient')].map((g) => ({ id: g.id, stops: [...g.querySelectorAll('stop')].map((s) => s.getAttribute('stop-color')) }));
+                });
+                const lum = (hex) => { const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((x) => x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+                const ink = lum('#0A0B0F');
+                for (const region of regions) for (const stop of region.stops) assert((lum(stop) + 0.05) / (ink + 0.05) >= 3, `${region.id} ${stop} stands out from the ink frame`);
+                const mean = (id) => { const stops = regions.find((r) => r.id === id).stops; return stops.reduce((sum, s) => sum + lum(s), 0) / stops.length; };
+                assert(Math.abs(mean('nodeDark') - mean('cBlue')) > 0.1 && Math.abs(mean('nodeLight') - mean('cBlue')) > 0.1, 'nodes separate from the C');
+                for (const size of [16, 24, 32, 40]) {
+                    const shot = await page.evaluate(async (s) => {
+                        const img = new Image(); img.src = '/favicon.svg'; await img.decode();
+                        const c = document.createElement('canvas'); c.width = c.height = s; const x = c.getContext('2d'); x.fillStyle = '#0A0B0F'; x.fillRect(0, 0, s, s); x.drawImage(img, 0, 0, s, s);
+                        const d = x.getImageData(0, 0, s, s).data; let lit = 0, violet = 0, sky = 0;
+                        for (let i = 0; i < d.length; i += 4) { const [r, g, b] = [d[i], d[i + 1], d[i + 2]]; if (r + g + b > 150) lit++; if (r > 110 && b > 200 && g < 170) violet++; if (g > 150 && b > 200 && r < 120) sky++; }
+                        return { lit, violet, sky };
+                    }, size);
+                    assert(shot.lit > size * 2 && shot.sky > 0 && (size < 24 || shot.violet > 0), `${size}px: ${JSON.stringify(shot)}`);
+                }
             });
             await check('the landing page at / loads only its example-map chunk, never the preview, and sends no API request', async () => {
                 const { context: landingContext, page: landing, api: landingApi } = await newPage();
@@ -572,6 +626,62 @@ async function runEngine(playwright, engine, baseUrl) {
                 await page.keyboard.press('Enter'); assert.equal(await nodes.nth(1).getAttribute('aria-pressed'), 'true');
                 await page.keyboard.press('Escape'); assert.equal(await nodes.nth(1).getAttribute('aria-pressed'), 'false');
                 await page.screenshot({ path: path.join(dir, 'mastery-map-1440.png'), fullPage: true });
+            });
+            await context.close();
+        }
+
+        // ── Active navigation: concave curved bottom-edge indicator ──────────
+        {
+            const geometry = (page) => page.evaluate(() => {
+                const reach = document.querySelector('[data-canvas-reach]'), active = document.querySelector('header nav [aria-current="page"]');
+                if (!reach || !active) return null;
+                const r = reach.getBoundingClientRect(), a = active.getBoundingClientRect(), bar = reach.parentElement.getBoundingClientRect();
+                const path = reach.querySelector('path'), total = path.getTotalLength(); const pts = [];
+                for (let i = 0; i <= 200; i++) { const p = path.getPointAtLength((total * i) / 200); pts.push([p.x, p.y]); }
+                const w = Number(reach.querySelector('svg').getAttribute('width'));
+                const curve = pts.filter(([, y]) => y < 14 - 1e-3);
+                const asym = Math.max(...curve.map(([x, y]) => Math.min(...curve.filter(([, yy]) => Math.abs(yy - y) < 0.2).map(([xx]) => Math.abs(xx - (w - x))))));
+                return { reachCentre: r.left + r.width / 2, activeCentre: a.left + a.width / 2, width: r.width, height: r.height, bottomGap: Math.round(bar.bottom - r.bottom),
+                    crest: Math.min(...pts.map(([, y]) => y)), asym, focusable: reach.querySelectorAll('[tabindex], a, button').length, for: reach.getAttribute('data-for'), label: active.textContent,
+                    fill: getComputedStyle(reach).color, canvas: (() => {
+                        // Effective background of whatever surface sits directly below the bar.
+                        for (let el = document.elementFromPoint(r.left + r.width / 2, r.bottom + 3); el; el = el.parentElement) {
+                            const bg = getComputedStyle(el).backgroundColor; if (!/rgba\(0, 0, 0, 0\)|transparent/.test(bg)) return bg;
+                        }
+                        return null;
+                    })() };
+            });
+            const settled = async (page) => { await page.waitForTimeout(400); return geometry(page); };
+            const assertAligned = (g, label) => {
+                assert(g, `${label}: indicator present`);
+                assert(Math.abs(g.reachCentre - g.activeCentre) <= 1, `${label}: centred under the active item ${JSON.stringify(g)}`);
+                assert.equal(g.width, 88); assert.equal(g.height, 15); assert(g.crest < 0.01, `${label}: crest reaches the top (${g.crest})`); assert(g.asym < 0.6, `${label}: symmetric (${g.asym})`);
+                assert.equal(g.focusable, 0); assert.equal(g.fill, g.canvas, `${label}: drawn in the colour of the surface below the bar`);
+            };
+            const { context, page } = await newPage({ viewport: { width: 1280, height: 900 } });
+            await check('the active tab carries one symmetric concave reach that follows clicks, child routes and history', async () => {
+                await page.goto(url('/preview?screen=admin-overview')); await ready(page);
+                let g = await settled(page); assertAligned(g, 'Overview'); assert.equal(g.label, 'Overview');
+                await page.screenshot({ path: path.join(dir, 'nav-reach-admin-1280.png'), clip: { x: 0, y: 0, width: 1280, height: 120 } });
+                await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Reports' }).click();
+                g = await settled(page); assertAligned(g, 'Reports'); assert.equal(g.label, 'Reports');
+                await page.goBack(); g = await settled(page); assert.equal(g.label, 'Overview'); assertAligned(g, 'back');
+                await page.goForward(); g = await settled(page); assert.equal(g.label, 'Reports'); assertAligned(g, 'forward');
+                await page.goto(url('/preview?screen=teaching')); await ready(page); g = await settled(page); assertAligned(g, 'Teaching');
+                await page.goto(url('/preview?screen=course-editor&item=c-intro')); await ready(page); g = await settled(page); assert.equal(g.label, 'Teaching', 'a child screen keeps its parent current'); assertAligned(g, 'child');
+                await page.goto(url('/preview?screen=learner-home')); await ready(page); g = await settled(page); assertAligned(g, 'Learner Home');
+                await page.goto(url('/courses')); await ready(page); g = await settled(page); assertAligned(g, 'Catalogue');
+                await page.getByRole('link', { name: 'Introduction to Programming' }).click(); await page.getByRole('heading', { level: 1, name: 'Introduction to Programming' }).waitFor();
+                g = await settled(page); assert.equal(g.label, 'Catalogue'); assertAligned(g, 'course detail');
+                await page.screenshot({ path: path.join(dir, 'nav-reach-catalogue-1280.png'), clip: { x: 0, y: 0, width: 1280, height: 120 } });
+            });
+            await check('icon-only navigation at 1024 px keeps the reach under the active item; below 900 px it is not drawn', async () => {
+                await page.setViewportSize({ width: 1024, height: 800 }); await page.goto(url('/preview?screen=admin-users')); await ready(page);
+                assertAligned(await settled(page), '1024');
+                await page.screenshot({ path: path.join(dir, 'nav-reach-admin-1024.png'), clip: { x: 0, y: 0, width: 1024, height: 110 } });
+                await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(300);
+                assert.equal(await page.locator('[data-canvas-reach]').isVisible().catch(() => false), false);
+                const size = await overflow(page); assert(size.scroll <= size.client);
             });
             await context.close();
         }

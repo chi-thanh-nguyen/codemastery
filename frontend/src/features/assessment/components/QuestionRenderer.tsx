@@ -32,7 +32,7 @@ export function QuestionRenderer({ question, selected, onChange, disabled, total
                         sx={{ position: 'absolute', opacity: 0, width: 1, height: 1, m: 0 }} />
                     <Box aria-hidden sx={{ width: 32, height: 32, borderRadius: multiple ? `${radius.xs}px` : '50%', flexShrink: 0, display: 'grid', placeItems: 'center', fontWeight: 600,
                         bgcolor: checked ? color.brand600 : color.fill150, color: checked ? color.surface : color.ink900 }}>{letter}</Box>
-                    <Typography component="span" sx={{ flex: 1, fontSize: '1rem', fontWeight: 500, overflowWrap: 'anywhere', fontFamily: question.code ? 'inherit' : undefined }}>{option.label}</Typography>
+                    <Typography component="span" sx={{ flex: 1, fontSize: '1rem', fontWeight: 500, overflowWrap: 'anywhere' }}>{option.label}</Typography>
                 </Box>;
             })}
         </Box>

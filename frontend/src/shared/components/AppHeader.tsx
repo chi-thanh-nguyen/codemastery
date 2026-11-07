@@ -20,12 +20,43 @@ export interface AppHeaderProps {
     search?: ReactNode;
     brandHref?: string;
     onBrandSelect?: () => void;
+    /** Fill of the reach: the colour of the surface directly below the bar (canvas by default). */
+    reachColor?: string;
 }
 
-const REACH = presentationTokens.reachWidth + 24;
+const REACH = presentationTokens.reachWidth, REACH_RISE = presentationTokens.reachHeight;
+
+/**
+ * Concave curved bottom-edge indicator ("canvas reach", DESIGN.md › Top bar): the
+ * navbar's lower edge bends up under the active item in one symmetric bell. The
+ * profile was traced from the reference (width ≈ 6.2 × height): long concave
+ * shoulders that leave the edge tangentially, an inflection near mid-height and a
+ * rounded convex crest. y(u) = ((1 − cos πu) / 2)^1.2 for each half, drawn as a
+ * Catmull-Rom spline converted to cubic Béziers, so it is C1-smooth with no corners.
+ * The shape is mirrored point for point, so it is exactly symmetric.
+ */
+export function canvasReachPath(width: number, rise: number, samples = 12): string {
+    const half = Array.from({ length: samples + 1 }, (_, i) => {
+        const u = i / samples;
+        return [u * width / 2, rise * (1 - ((1 - Math.cos(Math.PI * u)) / 2) ** 1.2)] as const;
+    });
+    const points = [...half, ...half.slice(0, -1).reverse().map(([x, y]) => [width - x, y] as const)];
+    const f = (n: number) => Number(n.toFixed(3));
+    let d = `M${f(points[0][0])} ${f(points[0][1])}`;
+    for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[Math.max(0, i - 1)], p1 = points[i], p2 = points[i + 1], p3 = points[Math.min(points.length - 1, i + 2)];
+        // Ends keep a horizontal tangent so the curve meets the straight edge without a kink.
+        const t1 = i === 0 ? [p2[0] - p1[0], 0] : [(p2[0] - p0[0]) / 2, (p2[1] - p0[1]) / 2];
+        const t2 = i === points.length - 2 ? [p2[0] - p1[0], 0] : [(p3[0] - p1[0]) / 2, (p3[1] - p1[1]) / 2];
+        d += ` C${f(p1[0] + t1[0] / 3)} ${f(p1[1] + t1[1] / 3)} ${f(p2[0] - t2[0] / 3)} ${f(p2[1] - t2[1] / 3)} ${f(p2[0])} ${f(p2[1])}`;
+    }
+    // Close below the edge (1 px overlap with the canvas) so no seam shows.
+    return `${d} V${rise + 1} H0 Z`;
+}
+const REACH_PATH = canvasReachPath(REACH, REACH_RISE);
 
 /** Ink top bar with the "canvas reach" under the active destination (DESIGN.md › Top bar). */
-export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId, onNavSelect, actions, search, brandHref, onBrandSelect }: AppHeaderProps) {
+export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId, onNavSelect, actions, search, brandHref, onBrandSelect, reachColor = color.canvas100 }: AppHeaderProps) {
     const theme = useTheme();
     const wide = useMediaQuery(theme.breakpoints.up('lg'));
     const bar = useRef<HTMLDivElement>(null);
@@ -39,9 +70,19 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
     useLayoutEffect(() => {
         measure();
         const host = bar.current;
-        if (!host || typeof ResizeObserver === 'undefined') { window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure); }
+        // Web fonts swap in after first paint and change item widths, so remeasure when they finish loading.
+        const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+        fonts?.addEventListener?.('loadingdone', measure);
+        void fonts?.ready?.then(measure);
+        if (!host || typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', measure);
+            return () => { window.removeEventListener('resize', measure); fonts?.removeEventListener?.('loadingdone', measure); };
+        }
+        // The item list moves without resizing when a sibling changes width (for example when the
+        // wordmark face swaps in), so observe the bar, every slot in it and the list itself.
         const observer = new ResizeObserver(measure); observer.observe(host);
-        return () => observer.disconnect();
+        for (const slot of [...host.children, ...host.querySelectorAll('nav ul')]) observer.observe(slot);
+        return () => { observer.disconnect(); fonts?.removeEventListener?.('loadingdone', measure); };
     }, [measure, selectedNavId, navItems, wide]);
     const brand = <BrandWordmark size={32} hideTextBelow={360} />;
     return <Box component="header" sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: 'common.white' }}>
@@ -65,10 +106,10 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
             {navItems.length === 0 && <Box sx={{ flex: 1 }} />}
             {search && <Box sx={{ flex: '0 1 320px', minWidth: 0, display: { xs: 'none', md: 'block' } }}>{search}</Box>}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1 }, flexShrink: 0, ml: { xs: 'auto', md: 0 } }}>{actions}</Box>
-            {reach !== null && <Box aria-hidden data-canvas-reach sx={{ display: { xs: 'none', md: 'block' }, position: 'absolute', bottom: -1, left: 0, width: REACH, height: presentationTokens.reachHeight + 1,
-                transform: `translateX(${reach}px)`, transition: `transform ${motion.reach}ms ${motion.easeIn}`, pointerEvents: 'none', color: color.canvas100 }}>
-                <svg width={REACH} height={presentationTokens.reachHeight + 1} viewBox="0 0 80 13" fill="currentColor" style={{ display: 'block' }}>
-                    <path d="M0 13C8 13 12 11 14 7 17 2 20 1 26 1h28c6 0 9 1 12 6 2 4 6 6 14 6Z" />
+            {reach !== null && <Box aria-hidden data-canvas-reach data-for={selectedNavId} sx={{ display: { xs: 'none', md: 'block' }, position: 'absolute', bottom: -1, left: 0, width: REACH, height: REACH_RISE + 1,
+                transform: `translateX(${reach}px)`, transition: `transform ${motion.reach}ms ${motion.easeIn}`, pointerEvents: 'none', color: reachColor }}>
+                <svg width={REACH} height={REACH_RISE + 1} viewBox={`0 0 ${REACH} ${REACH_RISE + 1}`} fill="currentColor" focusable="false" style={{ display: 'block' }}>
+                    <path d={REACH_PATH} />
                 </svg>
             </Box>}
         </Box>

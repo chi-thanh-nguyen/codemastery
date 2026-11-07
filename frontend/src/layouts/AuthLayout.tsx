@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef } from 'react';
 import { Box, Typography } from '@mui/material';
 import { Link, useInRouterContext } from 'react-router';
 import { color, radius } from '../app/theme/theme';
-import { BrandLogo } from '../shared/components/BrandLogo';
+import { BrandWordmark } from '../shared/components/BrandLogo';
 
 export interface AuthLayoutProps { title?: string; subtitle?: string; notice?: ReactNode; children: ReactNode }
 
@@ -29,8 +29,7 @@ export function AuthLayout({ title = 'CodeMastery', subtitle = 'Mastery-based pr
         <Box sx={{ color: 'common.white', px: { xs: 3, sm: 5, lg: 8 }, py: { xs: 3, md: 6 }, display: 'flex', flexDirection: 'column', gap: 4, minHeight: { xs: 120, md: 'auto' } }}>
             <Box {...(routed ? { component: Link, to: '/' } : { component: 'a', href: import.meta.env.BASE_URL })} aria-label="CodeMastery home" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, color: 'inherit', textDecoration: 'none', alignSelf: 'flex-start',
                 borderRadius: `${radius.sm}px`, '&:focus-visible': { outline: `2px solid ${color.focusOnChrome}`, outlineOffset: 4 } }}>
-                <BrandLogo size={40} />
-                <Typography component="span" aria-hidden sx={{ fontSize: '1.375rem', fontWeight: 600, letterSpacing: '-0.02em' }}>CodeMastery</Typography>
+                <BrandWordmark size={40} textSize="1.5rem" />
             </Box>
             <Box sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', flex: 1, justifyContent: 'center', gap: 5, maxWidth: 440 }}>
                 <Typography component="p" sx={{ fontSize: '2.5rem', fontWeight: 600, lineHeight: 1.1, letterSpacing: '-0.025em', textWrap: 'balance' }}>

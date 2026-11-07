@@ -42,7 +42,8 @@ export function SampleDataBanner({ tools, onIndex, onReset, compact }: { tools?:
 
 /** Note inside a screen naming the contract a preview interaction stands in for. */
 export function ContractNote({ children }: { children: ReactNode }) {
-    // Figtree's "0" is wider than its average glyph, so 54ch keeps lines near 75 characters.
+    // In Google Sans Flex the "0" that defines 1ch is wider than an average glyph: 54ch measured
+    // 68–77 characters per line on the preview notes (6 November 2026 typography change).
     return <Box role="note" sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mb: 3 }}>
         <PresentationIcon name="info" sx={{ fontSize: 18, color: color.brand700, mt: .25, flexShrink: 0 }} />
         <Typography variant="body2" sx={{ color: color.ink700, maxWidth: '54ch' }}>{children}</Typography>

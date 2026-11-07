@@ -1,6 +1,12 @@
 import { createTheme } from '@mui/material/styles';
 import type { CSSProperties } from 'react';
-import figtreeUrl from './figtree-latin-wght.woff2';
+import uiLatin from './google-sans-flex-latin-wght.woff2';
+import uiLatinExt from './google-sans-flex-latin-ext-wght.woff2';
+import uiVietnamese from './google-sans-flex-vietnamese-wght.woff2';
+import codeLatin from './jetbrains-mono-latin-wght.woff2';
+import codeLatinExt from './jetbrains-mono-latin-ext-wght.woff2';
+import codeVietnamese from './jetbrains-mono-vietnamese-wght.woff2';
+import brandLatin from './poppins-latin-800.woff2';
 
 /**
  * "The Lit Path" design tokens — DESIGN.md revision DESIGN-2026-11-06-r1.
@@ -51,13 +57,25 @@ export const motion = {
 export const presentationTokens = {
     topBarHeight: 80, topBarHeightCompact: 64, canvasInset: 8,
     asideWidth: 360, asideWidthWide: 400, outlineWidth: 280, readingWidth: 720, contentMax: 1440,
-    drawerWidth: 304, reachWidth: 56, reachHeight: 12,
+    drawerWidth: 304, reachWidth: 88, reachHeight: 14,
     pagePadding: { xs: 2, sm: 3, md: 4, lg: 5 },
 } as const;
 
-const fontStack = 'Figtree, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
-export const codeFontStack = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+/**
+ * Typography roles (DESIGN.md › Typography). Exactly one UI typeface, one code
+ * typeface and one wordmark typeface are bundled; everything else is a generic fallback.
+ * - UI: Google Sans Flex (variable wght, Latin + Latin Extended + Vietnamese).
+ * - Code: JetBrains Mono (variable wght) for code, programming examples and technical output.
+ * - Brand: Poppins ExtraBold 800, only for the "CodeMastery" wordmark.
+ */
+export const fontStack = '"Google Sans Flex", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
+export const codeFontStack = '"JetBrains Mono", ui-monospace, monospace';
+export const brandFontStack = '"CodeMastery Wordmark", "Google Sans Flex", ui-sans-serif, system-ui, sans-serif';
 const compact = '@media (max-width:599.95px)';
+// Google Fonts subset ranges (identical for both variable families).
+const LATIN = 'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD';
+const LATIN_EXT = 'U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF';
+const VIETNAMESE = 'U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB';
 export const focusRing = { outline: `2px solid ${color.brand600}`, outlineOffset: 2 } as const;
 export const focusRingOnChrome = { outline: `2px solid ${color.focusOnChrome}`, outlineOffset: 2 } as const;
 
@@ -73,6 +91,17 @@ declare module '@mui/material/Typography' {
 declare module '@mui/material/Button' { interface ButtonPropsColorOverrides { ink: true } }
 declare module '@mui/material/IconButton' { interface IconButtonPropsColorOverrides { ink: true } }
 declare module '@mui/material/LinearProgress' { interface LinearProgressPropsColorOverrides { ink: true } }
+
+/** Self-hosted faces (Fontsource builds of the Google Fonts releases), subset like the Google Fonts API so a
+ * browser fetches only the files its text needs. Licences: public/*-OFL.txt (SIL OFL 1.1). */
+const fontFaces = [
+    ...([[uiLatin, LATIN], [uiLatinExt, LATIN_EXT], [uiVietnamese, VIETNAMESE]] as const).map(([url, unicodeRange]) => ({
+        fontFamily: 'Google Sans Flex', fontStyle: 'normal', fontWeight: '100 900', fontDisplay: 'swap', src: `url("${url}") format("woff2")`, unicodeRange })),
+    ...([[codeLatin, LATIN], [codeLatinExt, LATIN_EXT], [codeVietnamese, VIETNAMESE]] as const).map(([url, unicodeRange]) => ({
+        fontFamily: 'JetBrains Mono', fontStyle: 'normal', fontWeight: '100 800', fontDisplay: 'swap', src: `url("${url}") format("woff2")`, unicodeRange })),
+    // The wordmark is Latin only: one 800 file under its own family name, so no other text can pick it up.
+    { fontFamily: 'CodeMastery Wordmark', fontStyle: 'normal', fontWeight: 800, fontDisplay: 'swap', src: `url("${brandLatin}") format("woff2")`, unicodeRange: LATIN },
+];
 
 export const appTheme = createTheme({
     spacing: 8,
@@ -94,8 +123,7 @@ export const appTheme = createTheme({
     },
     shape: { borderRadius: radius.md },
     typography: {
-        // Self-hosted Figtree Latin variable WOFF2 (SIL OFL 1.1, public/figtree-OFL.txt),
-        // from @fontsource-variable/figtree 5.2.10; upstream google/fonts ofl/figtree.
+        // Google Sans Flex 4.005 (Google Fonts v23 via @fontsource-variable/google-sans-flex 5.3.2), SIL OFL 1.1.
         fontFamily: fontStack,
         htmlFontSize: 16,
         fontSize: 16,
@@ -118,12 +146,8 @@ export const appTheme = createTheme({
         code: { fontFamily: codeFontStack, fontSize: '0.9375rem', fontWeight: 400, lineHeight: 1.6 },
     },
     components: {
-        MuiCssBaseline: { styleOverrides: {
-            '@font-face': {
-                fontFamily: 'Figtree', fontStyle: 'normal', fontWeight: '300 900', fontDisplay: 'swap',
-                src: `url("${figtreeUrl}") format("woff2")`,
-                unicodeRange: 'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD',
-            },
+        // An array: emotion keeps only the last value of a repeated '@font-face' key, so each face is its own entry.
+        MuiCssBaseline: { styleOverrides: () => [...fontFaces.map((face) => ({ '@font-face': face })), {
             // The page scrollbar sits on the ink frame; keep it in the frame's palette where the platform shows one.
             html: { WebkitTextSizeAdjust: '100%', scrollbarColor: `${color.ink600} ${color.ink950}` },
             body: { margin: 0, backgroundColor: color.ink950, color: color.ink900, caretColor: color.brand600 },
@@ -143,7 +167,7 @@ export const appTheme = createTheme({
                     transitionDuration: '0.01ms !important', scrollBehavior: 'auto !important',
                 },
             },
-        } },
+        }] },
         MuiPaper: { defaultProps: { elevation: 0 }, styleOverrides: { root: { backgroundImage: 'none' } } },
         // ButtonBase resets outline to 0, which beats the zero-specificity global ring; restore it for keyboard focus.
         MuiButtonBase: { defaultProps: { disableRipple: true }, styleOverrides: { root: { '&.Mui-focusVisible': focusRing } } },

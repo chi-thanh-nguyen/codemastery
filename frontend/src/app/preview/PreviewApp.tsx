@@ -15,6 +15,7 @@ import { InstructorPreview, initialInstructorState } from './InstructorPreview';
 import { AdminPreview, initialAdminState } from './AdminPreview';
 import { PublicPreview } from './PublicPreview';
 import * as fx from './fixtures';
+import { color } from '../theme/theme';
 import { PreviewContext, SampleDataBanner, previewHref, usePreviewNav } from './previewKit';
 import type { Workspace } from './previewKit';
 
@@ -124,7 +125,7 @@ export default function PreviewApp() {
                 : <DashboardLayout navItems={NAV[workspace].map(({ screen: target, live, ...entry }) => ({ ...entry, href: live ?? previewHref(target) }))} selectedNavId={def.nav}
                     onNavSelect={(id) => { const entry = NAV[workspace].find((candidate) => candidate.id === id); if (entry?.live) navigate(entry.live); else go(entry?.screen ?? 'overview'); }}
                     brandHref={previewHref('overview')} onBrandSelect={toIndex}
-                    banner={<SampleDataBanner onIndex={workspace === 'reference' ? undefined : toIndex} onReset={reset} tools={switcher} />}
+                    canvasTopColor={color.sky100} banner={<SampleDataBanner onIndex={workspace === 'reference' ? undefined : toIndex} onReset={reset} tools={switcher} />}
                     headerActions={<>
                         {workspace === 'learner' && <NotificationBell unread={unread} href={previewHref('notifications')} onClick={() => go('notifications')} />}
                         <AccountMenu displayName={persona.name} role={persona.role} renderItems={(close) => [

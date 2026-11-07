@@ -5,13 +5,14 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { ThemeProvider } from '@mui/material';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { appTheme } from '../../app/theme/theme';
+import { appTheme, brandFontStack, codeFontStack, fontStack } from '../../app/theme/theme';
 import { SidebarNav } from './SidebarNav';
 import { LoadingView, EmptyView, ErrorView } from './StatusViews';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PageHeader } from './PageHeader';
-import { AppHeader } from './AppHeader';
-import { BrandLogo } from './BrandLogo';
+import { AppHeader, canvasReachPath } from './AppHeader';
+import { BrandLogo, BrandWordmark } from './BrandLogo';
+import { CodeBlock } from './CodeBlock';
 import { AuthLayout } from '../../layouts/AuthLayout';
 import { DashboardLayout, Page } from '../../layouts/DashboardLayout';
 import { StatusPill, MasteryTag, MasteryLegend, RecommendationTag } from './StatusPill';
@@ -45,7 +46,10 @@ describe('FE01 presentation contracts', () => {
         const header = host.querySelector('header')!;
         expect(header.querySelector('img')?.getAttribute('src')).toBe('/favicon.svg');
         expect(header.querySelector('img')?.alt).toBe(''); expect(header.textContent).toContain('CodeMastery');
-        expect(host.querySelector('img[alt="CodeMastery"]')?.getAttribute('src')).toBe('/favicon.svg');
+        // Both surfaces use the same mark and wordmark component; the mark is decorative beside the text.
+        expect([...host.querySelectorAll('img')].map((img) => [img.getAttribute('src'), img.alt])).toEqual([['/favicon.svg', ''], ['/favicon.svg', '']]);
+        expect([...host.querySelectorAll('[data-wordmark]')].map((node) => node.textContent)).toEqual(['CodeMastery', 'CodeMastery']);
+        expect(host.querySelector('a[aria-label="CodeMastery home"]')).not.toBeNull();
         expect(host.textContent).toContain('Caller content'); expect(host.querySelector('h1')?.textContent).toBe('Welcome back');
     });
     it.each(['input', 'textarea'])('blurs a connected Auth layout %s before unmount', async (tag) => {
@@ -284,6 +288,34 @@ describe('Lit Path design-system primitives', () => {
         await render(<SearchPill label="Search users" value="" onChange={change} onClear={clear} />);
         await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
         expect(clear).toHaveBeenCalledTimes(2); expect(host.querySelector('button[aria-label="Clear search users"]')).toBeNull();
+    });
+    it('draws the active-tab reach as one symmetric bell that leaves the edge tangentially', () => {
+        const d = canvasReachPath(88, 14);
+        const segments = [...d.matchAll(/C([\d. -]+)/g)].map((m) => m[1].trim().split(/\s+/).map(Number));
+        const start = d.match(/^M([\d.]+) ([\d.]+)/)!.slice(1).map(Number);
+        const ends = [start, ...segments.map((c) => [c[4], c[5]])];
+        expect(start).toEqual([0, 14]); expect(ends.at(-1)).toEqual([88, 14]);
+        expect(Math.min(...ends.map(([, y]) => y))).toBe(0); expect(ends.find(([, y]) => y === 0)![0]).toBe(44);
+        // Mirror symmetry: every end point has its reflection about x = 44.
+        for (const [x, y] of ends) expect(ends.some(([mx, my]) => Math.abs(mx - (88 - x)) < 0.002 && Math.abs(my - y) < 0.002)).toBe(true);
+        // Horizontal tangents where it meets the straight edge, and a monotonic rise to the crest.
+        expect(segments[0][1]).toBe(14); expect(segments.at(-1)![3]).toBe(14);
+        const half = ends.slice(0, ends.length / 2 + 1).map(([, y]) => y);
+        expect(half.every((y, i) => i === 0 || y <= half[i - 1])).toBe(true);
+        expect(d.endsWith('V15 H0 Z')).toBe(true);
+    });
+    it('keeps one UI face, a dedicated code face and a wordmark face in the theme', async () => {
+        expect(fontStack.split(',')[0]).toBe('"Google Sans Flex"'); expect(codeFontStack.split(',')[0]).toBe('"JetBrains Mono"');
+        expect(brandFontStack.split(',')[0]).toBe('"CodeMastery Wordmark"');
+        for (const stack of [fontStack, codeFontStack, brandFontStack]) expect(stack).not.toMatch(/Figtree|Jakarta|Inter|Neue Montreal|Suisse|Be Vietnam/);
+        expect(appTheme.typography.fontFamily).toBe(fontStack);
+        for (const variant of ['h1', 'body1', 'button', 'caption'] as const) expect(appTheme.typography[variant].fontFamily).toBe(fontStack);
+        expect(appTheme.typography.code.fontFamily).toBe(codeFontStack);
+        await render(<><BrandWordmark size={32} /><CodeBlock code="print('xin chào')" /></>);
+        const wordmark = host.querySelector<HTMLElement>('[data-wordmark]')!;
+        expect(wordmark.textContent).toBe('CodeMastery'); expect(getComputedStyle(wordmark).fontWeight).toBe('800');
+        expect(getComputedStyle(wordmark).fontFamily).toContain('CodeMastery Wordmark');
+        expect(getComputedStyle(host.querySelector('pre')!).fontFamily).toContain('JetBrains Mono');
     });
     it('shows one-based ranges over zero-based pages and the singular noun', async () => {
         const change = vi.fn();

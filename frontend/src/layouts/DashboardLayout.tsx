@@ -19,13 +19,15 @@ export interface DashboardLayoutProps {
     drawerFooter?: ReactNode;
     /** Optional strip rendered at the top of the canvas (for example the preview's sample-data notice). */
     banner?: ReactNode;
+    /** Colour at the top edge of the canvas (the banner's background when there is one); the active-tab reach matches it. */
+    canvasTopColor?: string;
     brandHref?: string;
     onBrandSelect?: () => void;
     children: ReactNode;
 }
 
 /** Ink frame + sticky top bar + rounded canvas (DESIGN.md › Layout › Shell). */
-export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerActions, headerSearch, drawerFooter, banner, brandHref, onBrandSelect, children }: DashboardLayoutProps) {
+export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerActions, headerSearch, drawerFooter, banner, canvasTopColor, brandHref, onBrandSelect, children }: DashboardLayoutProps) {
     const [mobileOpen, setMobileOpen] = useState(false);
     const desktop = useMediaQuery(useTheme().breakpoints.up('md'));
     useEffect(() => {
@@ -43,7 +45,7 @@ export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerAc
             Skip to main content
         </Box>
         <AppHeader navItems={navItems} selectedNavId={selectedNavId} onNavSelect={onNavSelect} actions={headerActions} search={headerSearch}
-            brandHref={brandHref} onBrandSelect={onBrandSelect} onMenuToggle={() => setMobileOpen((open) => !open)} menuOpen={mobileOpen && !desktop} />
+            brandHref={brandHref} onBrandSelect={onBrandSelect} reachColor={canvasTopColor} onMenuToggle={() => setMobileOpen((open) => !open)} menuOpen={mobileOpen && !desktop} />
         <SidebarNav items={navItems} selectedId={selectedNavId} onSelect={onNavSelect} footer={drawerFooter}
             mobileOpen={mobileOpen && !desktop} onMobileClose={() => setMobileOpen(false)} />
         <Box component="main" id="main-content" tabIndex={-1} sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', bgcolor: color.canvas100,
