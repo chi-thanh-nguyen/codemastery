@@ -21,7 +21,7 @@ import { SegmentedControl } from './ViewRail';
 import { PathSpine } from './PathSpine';
 import { GuidanceStack } from './GuidanceStack';
 import { SearchPill } from './PageHeader';
-import { CircleAction, CircleAffordance, CourseTile, ProgressLine } from './Tile';
+import { CircleAction, CircleAffordance, CourseTile, ProgressLine, TileTitleLink } from './Tile';
 import { COURSE_LOGOS, CourseMark, courseLanguage } from './CourseMark';
 import { LearnerHomePage } from '../../features/learning/pages/LearnerHomePage';
 
@@ -125,6 +125,44 @@ describe('FE01 presentation contracts', () => {
         expect(fire(link)).toBe(false);
         expect(isPlainClick({ button: 1, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: false })).toBe(false);
         expect(isPlainClick({ button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: true })).toBe(false);
+    });
+    it('routes only plain primary clicks in-app on the brand, course tile, back and Learner home links', async () => {
+        // Plain primary click: handled in-app (prevented). Modified, middle and already-handled clicks: left to the browser.
+        const fire = (link: Element, type: string, init: MouseEventInit = {}) => {
+            const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init }); link.dispatchEvent(event); return event.defaultPrevented;
+        };
+        const expectPlainClickOnly = (link: Element | null | undefined, handler: ReturnType<typeof vi.fn>, name: string) => {
+            expect(link, name).toBeTruthy();
+            for (const init of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) expect(fire(link!, 'click', init), `${name} ${JSON.stringify(init)}`).toBe(false);
+            expect(fire(link!, 'auxclick', { button: 1 }), `${name} middle button`).toBe(false);
+            const handledFirst = (event: Event) => event.preventDefault();
+            document.addEventListener('click', handledFirst, true);
+            try { fire(link!, 'click'); } finally { document.removeEventListener('click', handledFirst, true); }
+            expect(handler, name).not.toHaveBeenCalled();
+            expect(fire(link!, 'click'), `${name} plain`).toBe(true); expect(handler, name).toHaveBeenCalledTimes(1);
+        };
+        const brand = vi.fn(), tile = vi.fn(), back = vi.fn(), browse = vi.fn(), more = vi.fn(), row = vi.fn();
+        await render(<>
+            <AppHeader navItems={[]} brandHref="/home" onBrandSelect={brand} />
+            <CourseTile title="Programming" description="Foundations" href="/courses/c1" onOpen={tile} />
+            <PageHeader title="Programming" back={{ label: 'Catalogue', href: '/courses', onClick: back }} />
+        </>);
+        expectPlainClickOnly(host.querySelector('a[aria-label="CodeMastery home"]'), brand, 'brand');
+        expectPlainClickOnly(host.querySelector('a[data-tile-link][href="/courses/c1"]'), tile, 'course tile');
+        expectPlainClickOnly([...host.querySelectorAll('main a, a')].find((link) => link.textContent === 'Catalogue'), back, 'back link');
+        await render(<LearnerHomePage learnerName="Linh" courses={[{ id: 'c1', title: 'Programming', href: '/courses/c1', onOpen: row }]} onBrowse={browse}
+            moreCourses={{ label: 'See all 25 active courses in My courses', href: '/my-courses?status=active', onOpen: more }} />);
+        const byText = (text: string) => [...host.querySelectorAll('a')].find((link) => link.textContent === text);
+        expectPlainClickOnly(byText('Browse the catalogue'), browse, 'browse');
+        expectPlainClickOnly(byText('See all 25 active courses in My courses'), more, 'see all');
+        expectPlainClickOnly(host.querySelector('a[data-tile-link][href="/courses/c1"]'), row, 'home course row');
+        // Without an in-app handler these are ordinary links: even a plain click follows the href natively.
+        await render(<>
+            <AppHeader navItems={[]} brandHref="/" />
+            <TileTitleLink href="/courses/c2">Other</TileTitleLink>
+            <PageHeader title="Other" back={{ label: 'Catalogue', href: '/courses' }} />
+        </>);
+        for (const link of [host.querySelector('a[aria-label="CodeMastery home"]'), host.querySelector('a[data-tile-link]'), byText('Catalogue')]) expect(fire(link!, 'click')).toBe(false);
     });
     it('accepts empty navigation without creating current state', async () => {
         await render(<SidebarNav items={[]} mobileOpen={false} onSelect={vi.fn()} onMobileClose={vi.fn()} />);

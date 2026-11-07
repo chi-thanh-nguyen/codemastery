@@ -1725,7 +1725,8 @@ jobs:
             [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || backend_failed "the container exited during startup"
             sleep 1
           done
-          [[ "$started" == yes ]] || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
+          # One last read after the final sleep, so a marker logged during it still counts.
+          [[ "$started" == yes ]] || backend_started || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
           check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "6/6 $(env_get SPRING_FLYWAY_USER)"
           harden_after_migration
           verify_role_separation >/dev/null
@@ -2520,7 +2521,8 @@ jobs:
             [[ "$(docker inspect -f '{{.State.Running}}' "$prefix-backend")" == true ]] || backend_failed "the container exited during startup"
             sleep 1
           done
-          [[ "$started" == yes ]] || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
+          # One last read after the final sleep, so a marker logged during it still counts.
+          [[ "$started" == yes ]] || backend_started || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
 
           fail() { echo "FAIL: $*" >&2; docker logs "$prefix-backend" 2>&1 | tail -15 >&2; exit 1; }
           pass() { printf '  ok: %s\n' "$*"; }

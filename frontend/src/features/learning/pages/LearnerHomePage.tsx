@@ -8,6 +8,7 @@ import type { GuidanceEntryData } from '../../../shared/components/GuidanceStack
 import { ProgressLine, Tile, TileTitleLink, CircleAffordance } from '../../../shared/components/Tile';
 import { CourseMark } from '../../../shared/components/CourseMark';
 import { StatusPill } from '../../../shared/components/StatusPill';
+import { isPlainClick } from '../../../shared/components/SidebarNav';
 import { EmptyView, ErrorView, LoadingView } from '../../../shared/components/StatusViews';
 import { ApiError } from '../../../shared/types/apiTypes';
 import { useAuth } from '../../auth/hooks/useAuth';
@@ -85,8 +86,8 @@ export function LearnerHomePage({ learnerName, subtitle = 'Pick up where you lef
                     </Box>)}
                 </Box>}
             <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', columnGap: 3, rowGap: 1 }}>
-                {moreCourses && <Box component="a" href={moreCourses.href} onClick={(event) => { event.preventDefault(); moreCourses.onOpen(); }} sx={{ color: color.brand700, fontWeight: 600 }}>{moreCourses.label}</Box>}
-                <Box component="a" href="/courses" onClick={(event) => { event.preventDefault(); onBrowse(); }} sx={{ color: color.brand700, fontWeight: 600 }}>Browse the catalogue</Box>
+                {moreCourses && <Box component="a" href={moreCourses.href} onClick={(event) => { if (!isPlainClick(event)) return; event.preventDefault(); moreCourses.onOpen(); }} sx={{ color: color.brand700, fontWeight: 600 }}>{moreCourses.label}</Box>}
+                <Box component="a" href="/courses" onClick={(event) => { if (!isPlainClick(event)) return; event.preventDefault(); onBrowse(); }} sx={{ color: color.brand700, fontWeight: 600 }}>Browse the catalogue</Box>
             </Box>
         </Box>
     </Page>;

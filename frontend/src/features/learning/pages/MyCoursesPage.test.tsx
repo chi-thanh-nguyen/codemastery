@@ -2,11 +2,12 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router';
+import type { NavigateFunction } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthContext } from '../../../app/providers/AuthProvider';
 import type { AuthContextValue } from '../../../app/providers/AuthProvider';
-import { CourseMembershipActions, MyCoursesPage } from './MyCoursesPage';
+import { CourseMembershipActions, MembershipTileMenu, MyCoursesPage } from './MyCoursesPage';
 import { getCourseMembership, getMyEnrolledCourses, enrollInCourse, leaveCourse } from '../api/learningApi';
 import type { CourseMembership, MembershipPage } from '../types/learningTypes';
 import { ApiError } from '../../../shared/types/apiTypes';
@@ -178,4 +179,77 @@ it('allows one tile membership change at a time and aborts it on unmount', async
     const options = vi.mocked(leaveCourse).mock.calls[0][1]!;
     await act(async () => root.unmount()); root = createRoot(host); expect(options.signal?.aborted).toBe(true); expect(options.isCurrent?.()).toBe(false);
     await act(async () => resolve({ courseId: id, status: 'left' })); expect(host.textContent).toBe('');
+});
+
+it('keeps native link behavior for modified clicks on "View course details" and routes plain clicks in-app', async () => {
+    const onDetails = vi.fn();
+    const menu = (details?: () => void) => <MembershipTileMenu title="Programming" status="active" detailsHref={`/courses/${id}`} onDetails={details} onLeave={vi.fn()} onReenroll={vi.fn()} />;
+    // Returns whether the click was prevented (in-app routing) or left to the browser.
+    const fire = async (init: MouseEventInit) => {
+        await openTileMenu(); const link = menuItem('View course details')!; expect(link.getAttribute('href')).toBe(`/courses/${id}`);
+        const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init });
+        await act(async () => link.dispatchEvent(event)); return event.defaultPrevented;
+    };
+    await mount(menu(onDetails));
+    for (const init of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) expect(await fire(init), JSON.stringify(init)).toBe(false);
+    expect(onDetails).not.toHaveBeenCalled();
+    expect(await fire({})).toBe(true); expect(onDetails).toHaveBeenCalledTimes(1);
+    // Without an in-app handler the router link keeps its own semantics: modified clicks stay native.
+    await mount(menu());
+    expect(await fire({ metaKey: true })).toBe(false);
+});
+
+describe('My courses page index follows the membership filter', () => {
+    let navigateTo: NavigateFunction, where = '';
+    function Probe() { navigateTo = useNavigate(); const location = useLocation(); where = location.pathname + location.search; return null; }
+    const results = (page: number, filter: string): MembershipPage => ({ content: [{ ...listing.content[0], title: `${filter} page ${page}` }], page, size: 20, totalElements: 60, totalPages: 3 });
+    const requests = () => vi.mocked(getMyEnrolledCourses).mock.calls.map(([page, filter]) => `${filter}#${page}`);
+    const pressed = () => host.querySelector('[aria-label="Membership status"] [aria-pressed="true"]')?.textContent;
+    const shown = () => [...host.querySelectorAll('[aria-label="Your courses"] h2')].map((node) => node.textContent);
+    async function open(entry: string) {
+        await act(async () => root.render(<MemoryRouter initialEntries={[entry]}><AuthContext.Provider value={auth}><Probe /><MyCoursesPage /></AuthContext.Provider></MemoryRouter>));
+    }
+    const choose = async (label: string) => click(label, host.querySelector('[aria-label="Membership status"]')!);
+    const goToPage = async (page: number) => act(async () => host.querySelector<HTMLButtonElement>(`[aria-label="Go to page ${page}"]`)!.click());
+    beforeEach(() => { vi.mocked(getMyEnrolledCourses).mockImplementation(async (page = 0, filter = 'joined') => results(page, filter)); });
+
+    it('starts every filter chosen with the control at page 0, including a filter paged earlier', async () => {
+        await open('/my-courses');
+        await goToPage(3); expect(shown()).toEqual(['joined page 2']);
+        await choose('Active'); expect(where).toBe('/my-courses?status=active'); expect(pressed()).toBe('Active'); expect(shown()).toEqual(['active page 0']);
+        await choose('Joined'); expect(where).toBe('/my-courses'); expect(pressed()).toBe('Joined'); expect(shown()).toEqual(['joined page 0']);
+        await choose('Completed'); await goToPage(2); expect(shown()).toEqual(['completed page 1']);
+        await choose('Left'); expect(shown()).toEqual(['left page 0']);
+        await choose('Completed'); expect(where).toBe('/my-courses?status=completed'); expect(shown()).toEqual(['completed page 0']);
+        // Every request matches the page shown: none for a previous filter's page.
+        expect(requests()).toEqual(['joined#0', 'joined#2', 'active#0', 'joined#0', 'completed#0', 'completed#1', 'left#0', 'completed#0']);
+    });
+
+    it('starts at page 0 when the URL or browser history changes the filter, and keeps unrelated parameters', async () => {
+        await open('/my-courses?status=completed&view=grid');
+        await goToPage(2); expect(shown()).toEqual(['completed page 1']);
+        await act(async () => navigateTo('/my-courses?status=left'));
+        expect(pressed()).toBe('Left'); expect(shown()).toEqual(['left page 0']);
+        await act(async () => navigateTo(-1));
+        expect(where).toBe('/my-courses?status=completed&view=grid'); expect(pressed()).toBe('Completed'); expect(shown()).toEqual(['completed page 0']);
+        await act(async () => navigateTo(1));
+        expect(where).toBe('/my-courses?status=left'); expect(shown()).toEqual(['left page 0']);
+        await act(async () => navigateTo('/my-courses?status=active&view=grid'));
+        await choose('All'); expect(where).toBe('/my-courses?status=all&view=grid');
+        // Unknown values still mean Joined.
+        await act(async () => navigateTo('/my-courses?status=bogus')); expect(pressed()).toBe('Joined'); expect(shown()).toEqual(['joined page 0']);
+        expect(requests()).toEqual(['completed#0', 'completed#1', 'left#0', 'completed#0', 'left#0', 'active#0', 'all#0', 'joined#0']);
+    });
+
+    it('ignores a slower response for a filter that was already replaced', async () => {
+        const pending = new Map<string, (value: MembershipPage) => void>();
+        vi.mocked(getMyEnrolledCourses).mockImplementation((page = 0, filter = 'joined') => new Promise((done) => { pending.set(`${filter}#${page}`, done); }));
+        await open('/my-courses');
+        await act(async () => pending.get('joined#0')!(results(0, 'joined')));
+        await choose('Active'); await choose('Left');
+        expect(requests()).toEqual(['joined#0', 'active#0', 'left#0']);
+        await act(async () => pending.get('left#0')!(results(0, 'left')));
+        await act(async () => pending.get('active#0')!(results(0, 'active')));
+        expect(where).toBe('/my-courses?status=left'); expect(pressed()).toBe('Left'); expect(shown()).toEqual(['left page 0']);
+    });
 });

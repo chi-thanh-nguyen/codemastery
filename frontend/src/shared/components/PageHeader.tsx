@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import { Box, Breadcrumbs, IconButton, InputAdornment, Link, TextField, Typography } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
+import { isPlainClick } from './SidebarNav';
 
 export interface SearchPillProps {
     label: string;
@@ -50,7 +51,7 @@ export interface PageHeaderProps {
 }
 
 function CrumbLink({ crumb, children }: { crumb: Crumb; children: ReactNode }) {
-    return <Link href={crumb.href ?? '#'} onClick={(event: MouseEvent) => { if (crumb.onClick) { event.preventDefault(); crumb.onClick(); } }}
+    return <Link href={crumb.href ?? '#'} onClick={(event: MouseEvent) => { if (!crumb.onClick || (crumb.href && !isPlainClick(event))) return; event.preventDefault(); crumb.onClick(); }}
         sx={{ color: 'text.secondary', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: .5, minHeight: 32, '&:hover': { color: 'text.primary' } }}>{children}</Link>;
 }
 

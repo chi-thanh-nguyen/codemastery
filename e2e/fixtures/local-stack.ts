@@ -20,7 +20,7 @@
 import { execFile, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -61,23 +61,103 @@ function freePort() {
     });
 }
 
-/** Two distinct free loopback ports (a port can be handed out twice in a row once its probe socket closes). */
-async function freePorts() {
+/** A free loopback port other than `taken` (a port can be handed out twice in a row once its probe socket closes). */
+async function freePortExcept(taken: number) {
     for (let attempt = 0; attempt < 10; attempt++) {
-        const first = await freePort(), second = await freePort();
-        if (first !== second) return [first, second] as const;
+        const port = await freePort();
+        if (port !== taken) return port;
     }
     throw new Error('Could not find two distinct free ports');
 }
 
-async function waitFor(what: string, probe: () => Promise<boolean>, timeoutMs: number, stopIf?: () => string | null) {
+/**
+ * Polls `probe` until it succeeds or `timeoutMs` passes. `stopIf` names a reason to give up at once (for example the
+ * awaited process exited); it is checked before every probe and again after a successful one, so a success reported
+ * while the awaited process was already gone does not count.
+ */
+export async function waitFor(what: string, probe: () => Promise<boolean>, timeoutMs: number,
+    stopIf?: () => string | null | Promise<string | null>, intervalMs = 1000) {
     const deadline = Date.now() + timeoutMs;
+    const check = async () => { const stop = await stopIf?.(); if (stop) throw new Error(`${what}: ${stop}`); };
     for (;;) {
-        const stop = stopIf?.();
-        if (stop) throw new Error(`${what}: ${stop}`);
-        try { if (await probe()) return; } catch { /* not ready yet */ }
+        await check();
+        let ready = false;
+        try { ready = await probe(); } catch { /* not ready yet */ }
+        if (ready) { await check(); return; }
         if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
-        await new Promise((ready) => setTimeout(ready, 1000));
+        await new Promise((next) => setTimeout(next, intervalMs));
+    }
+}
+
+/** The marker written into this run's temporary build; no other server on the port can answer with it. */
+export const buildMarker = (token: string) => `<meta name="codemastery-e2e-build" content="${token}">`;
+/** Marks the temporary build's index.html (outside the source tree) with this run's token. */
+export async function markBuild(dist: string, token: string) {
+    const file = join(dist, 'index.html'), html = await readFile(file, 'utf8');
+    if (!html.includes('</head>')) throw new Error(`${file} has no </head> to carry the build marker`);
+    await writeFile(file, html.replace('</head>', `${buildMarker(token)}</head>`));
+}
+/** True only when `url` answers with this run's marked build; HTTP 200 from any other server is not enough. */
+export async function servesBuild(url: string, token: string, probeTimeoutMs = 5000) {
+    const response = await fetch(url, { signal: AbortSignal.timeout(probeTimeoutMs) });
+    return response.ok && (await response.text()).includes(buildMarker(token));
+}
+/** Waits until `child` (vite preview) serves the marked build; fails at once, with its stderr tail, if it exits. */
+export async function waitForPreview(child: ChildProcess, url: string, token: string, stderrTail: () => string,
+    { timeoutMs = 60_000, probeTimeoutMs = 5000, intervalMs = 1000 } = {}) {
+    const tail = () => (stderrTail().trim() ? `: ${stderrTail().trim()}` : '');
+    try {
+        await waitFor('frontend preview', () => servesBuild(url, token, probeTimeoutMs), timeoutMs,
+            () => (child.exitCode !== null || child.signalCode !== null ? `vite preview exited (${child.exitCode ?? child.signalCode})${tail()}` : null), intervalMs);
+    } catch (error) {
+        if ((error as Error).message.startsWith('Timed out')) throw new Error(`${(error as Error).message} (no response carried this run's build marker)${tail()}`, { cause: error });
+        throw error;
+    }
+}
+
+/** A bounded Docker CLI call for state and diagnostics: it never hangs and never throws. */
+async function dockerQuery(args: string[], timeoutMs = 15_000) {
+    try {
+        const { stdout, stderr } = await run('docker', args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 });
+        return { ok: true, stdout: String(stdout), stderr: String(stderr) };
+    } catch (error) {
+        const failure = error as { stdout?: unknown; stderr?: unknown; message?: string };
+        return { ok: false, stdout: String(failure.stdout ?? ''), stderr: String(failure.stderr || failure.message || 'docker failed') };
+    }
+}
+const STATE_FORMAT = 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{json .State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}';
+/**
+ * Why `container` is confirmed to have stopped, or null while it runs. A failed inspection is a confirmed stop only when
+ * Docker reports the container missing; any other inspection error is treated as transient and polling continues.
+ */
+export async function containerExit(container: string): Promise<string | null> {
+    const state = await dockerQuery(['inspect', '--type', 'container', '--format', STATE_FORMAT, container]);
+    if (!state.ok) return /no such (object|container)/i.test(state.stderr) ? `container ${container} no longer exists` : null;
+    const summary = state.stdout.trim();
+    return summary.startsWith('state=running ') ? null : `the container stopped (${summary})`;
+}
+/** Container state and the last `lines` log lines, with `secrets` redacted. Never throws; collection failures are reported inline. */
+export async function containerDiagnostics(container: string, secrets: readonly string[], lines = 100) {
+    const redact = (text: string) => secrets.filter((secret) => secret.length >= 6).reduce((out, secret) => out.split(secret).join('[redacted]'), text);
+    const state = await dockerQuery(['inspect', '--type', 'container', '--format', STATE_FORMAT, container]);
+    const logs = await dockerQuery(['logs', '--tail', String(lines), container]);
+    const report = [
+        `--- ${container} state: ${state.ok ? state.stdout.trim() : `unavailable (${state.stderr.trim().slice(0, 500)})`}`,
+        logs.ok ? `--- last ${lines} log lines of ${container}:\n${`${logs.stdout}${logs.stderr}`.trimEnd().slice(-20_000)}` : `--- logs unavailable: ${logs.stderr.trim().slice(0, 500)}`,
+    ].join('\n');
+    return redact(report);
+}
+/**
+ * Waits for the backend health endpoint, failing at once if the container stops. On any failure the container's state and
+ * log tail are captured here, before the caller's teardown removes the container, and added to the original error.
+ */
+export async function waitForBackend(apiUrl: string, container: string, secrets: readonly string[], { timeoutMs = 180_000, intervalMs = 1000 } = {}) {
+    try {
+        await waitFor('backend health', async () => (await fetch(`${apiUrl}/actuator/health`, { signal: AbortSignal.timeout(5000) })).ok,
+            timeoutMs, () => containerExit(container), intervalMs);
+    } catch (error) {
+        const diagnostics = await containerDiagnostics(container, secrets).catch((reason: unknown) => `--- diagnostics unavailable: ${String(reason)}`);
+        throw new Error(`${(error as Error).message}\n${diagnostics}`, { cause: error });
     }
 }
 
@@ -98,7 +178,7 @@ export default async function globalSetup() {
     const containers: string[] = [];
     let network = '', preview: ChildProcess | undefined;
     const teardown = async () => {
-        if (preview && preview.exitCode === null) {
+        if (preview && preview.exitCode === null && preview.signalCode === null) {
             preview.kill('SIGTERM');
             await new Promise((gone) => { preview!.once('exit', gone); setTimeout(gone, 5000); });
         }
@@ -130,8 +210,21 @@ export default async function globalSetup() {
             return true;
         }, 90_000);
 
-        const [backendPort, frontendPort] = await freePorts();
-        const apiUrl = `http://127.0.0.1:${backendPort}`, baseUrl = `http://127.0.0.1:${frontendPort}`;
+        const backendPort = await freePort(), apiUrl = `http://127.0.0.1:${backendPort}`;
+        // Production build pointed at this backend, marked with a per-run token in the temporary copy only.
+        const frontend = join(repo, 'frontend'), dist = join(work, 'dist'), buildToken = randomBytes(16).toString('hex');
+        await run('npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'error'], { cwd: frontend, env: { ...process.env, VITE_API_BASE_URL: apiUrl }, maxBuffer: 32 * 1024 * 1024 });
+        await markBuild(dist, buildToken);
+
+        // The frontend port is chosen immediately before vite preview binds it. The backend needs that origin for CORS,
+        // so it starts afterwards. Probing a port does not reserve it: readiness also requires this run's build marker,
+        // so a collision fails instead of testing whatever server took the port.
+        const frontendPort = await freePortExcept(backendPort), baseUrl = `http://127.0.0.1:${frontendPort}`;
+        preview = spawn('npx', ['vite', 'preview', '--outDir', dist, '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'], { cwd: frontend, stdio: ['ignore', 'ignore', 'pipe'] });
+        let previewError = '';
+        preview.stderr?.on('data', (chunk) => { previewError = (previewError + chunk).slice(-2000); });
+        await waitForPreview(preview, baseUrl, buildToken, () => previewError);
+
         const backend = `${runId}-backend`;
         containers.push(backend);
         await docker(['run', '-d', '--name', backend, ...runLabels(runId), '--network', network, '-p', `127.0.0.1:${backendPort}:8080`,
@@ -139,7 +232,7 @@ export default async function globalSetup() {
             '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY', '-e', `CORS_ALLOWED_ORIGINS=${baseUrl}`, '-e', 'SERVER_PORT=8080', backendImage],
         { DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD, JWT_SECRET: secrets.JWT_SECRET,
             STORAGE_ACCESS_KEY: secrets.STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY: secrets.STORAGE_SECRET_KEY });
-        await waitFor('backend health', async () => (await fetch(`${apiUrl}/actuator/health`, { signal: AbortSignal.timeout(5000) })).ok, 180_000);
+        await waitForBackend(apiUrl, backend, [secrets.POSTGRES_PASSWORD, secrets.JWT_SECRET, secrets.STORAGE_ACCESS_KEY, secrets.STORAGE_SECRET_KEY]);
 
         // Instructor account through the real registration API, then promoted in the disposable database only.
         const instructor = { email: `e2e-instructor-${randomUUID()}@example.test`, password: `E2e-${randomBytes(12).toString('hex')}!`, displayName: 'E2E Course Instructor' };
@@ -150,18 +243,8 @@ export default async function globalSetup() {
             "UPDATE users SET role = 'instructor' WHERE email = :'email' RETURNING id;\n");
         if (!/^[0-9a-f-]{36}$/.test(instructorId)) throw new Error('Instructor promotion failed');
         await docker([...psql, '-v', `instructor_id=${instructorId}`], pg, await readFile(join(here, 'catalogue-fixture.sql'), 'utf8'));
-
-        // Production build pointed at this backend, served by vite preview.
-        const frontend = join(repo, 'frontend'), dist = join(work, 'dist');
-        await run('npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'error'], { cwd: frontend, env: { ...process.env, VITE_API_BASE_URL: apiUrl }, maxBuffer: 32 * 1024 * 1024 });
-        preview = spawn('npx', ['vite', 'preview', '--outDir', dist, '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'], { cwd: frontend, stdio: ['ignore', 'ignore', 'pipe'] });
-        let previewError = '';
-        preview.stderr?.on('data', (chunk) => { previewError = (previewError + chunk).slice(-2000); });
-        // Fail at once, with Vite's own message, if the preview exits early (for example the port was taken
-        // between probing and binding), instead of polling until the timeout.
-        const child = preview;
-        await waitFor('frontend preview', async () => (await fetch(baseUrl, { signal: AbortSignal.timeout(5000) })).ok, 60_000,
-            () => (child.exitCode !== null ? `vite preview exited (${child.exitCode})${previewError ? `: ${previewError.trim()}` : ''}` : null));
+        // The preview started before the backend wait: confirm it is still alive and still serving this run's build.
+        await waitForPreview(preview, baseUrl, buildToken, () => previewError, { timeoutMs: 10_000 });
 
         Object.assign(process.env, {
             E2E_STACK: 'disposable', E2E_BASE_URL: baseUrl, E2E_API_URL: apiUrl,

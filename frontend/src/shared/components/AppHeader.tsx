@@ -112,7 +112,7 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
                 sx={{ display: { md: 'none' }, color: 'common.white', '&:hover': { bgcolor: color.chromeRaised } }}><PresentationIcon name="menu" /></IconButton>}
             <Box sx={{ flexShrink: 0, minWidth: 0, display: 'flex' }}>
                 {brandHref ? <ButtonBase component="a" href={brandHref} aria-label="CodeMastery home"
-                    onClick={(event: MouseEvent) => { if (onBrandSelect) { event.preventDefault(); onBrandSelect(); } }}
+                    onClick={(event: MouseEvent) => { if (!onBrandSelect || !isPlainClick(event)) return; event.preventDefault(); onBrandSelect(); }}
                     sx={{ borderRadius: `${radius.sm}px`, p: .5 }}>{brand}</ButtonBase> : brand}
             </Box>
             {navItems.length > 0 && <Box component="nav" aria-label="Main navigation" sx={{ display: { xs: 'none', md: 'flex' }, flex: 1, justifyContent: 'center', minWidth: 0 }}>

@@ -22,6 +22,7 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, execFileSync } = require('node:child_process');
+const { randomBytes } = require('node:crypto');
 
 const frontendRoot = path.resolve(__dirname, '../../..');
 const args = process.argv.slice(2);
@@ -40,17 +41,34 @@ function loadPlaywright() {
     throw new Error('Playwright not found. Run `npm ci` in e2e/ or pass --playwright <module path>.');
 }
 const freePort = () => new Promise((resolve, reject) => { const server = net.createServer(); server.unref(); server.on('error', reject); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); }); });
-/** Polls `url`; with `child`, fails at once (with its stderr tail) if that process exits first, for example on a taken port. */
-async function waitForUrl(url, ms, child) {
+/** The marker written into the harness's temporary build; no other server on the port can answer with it. */
+const buildMarker = (token) => `<meta name="codemastery-browser-build" content="${token}">`;
+/** Marks the temporary build's index.html (outside the source tree) with `token`. */
+function markBuild(dist, token) {
+    const file = path.join(dist, 'index.html'), html = fs.readFileSync(file, 'utf8');
+    if (!html.includes('</head>')) throw new Error(`${file} has no </head> to carry the build marker`);
+    fs.writeFileSync(file, html.replace('</head>', `${buildMarker(token)}</head>`));
+}
+/**
+ * Polls `url` until it serves the build marked with `token` (HTTP 200 from another server on the port is not enough).
+ * Fails at once, with its stderr tail, if `child` exits first (for example on a taken port), and does not report
+ * ready if `child` exited while the probe was answered.
+ */
+async function waitForUrl(url, ms, child, token, { probeMs = 3000, intervalMs = 500 } = {}) {
     let stderr = '';
-    child?.stderr?.on('data', (chunk) => { stderr = (stderr + chunk).slice(-2000); });
+    child.stderr?.on('data', (chunk) => { stderr = (stderr + chunk).slice(-2000); });
+    const exited = () => {
+        if (child.exitCode !== null || child.signalCode !== null) throw new Error(`The preview server exited (${child.exitCode ?? child.signalCode}) before ${url} was ready.${stderr ? `\n${stderr.trim()}` : ''}`);
+    };
     const end = Date.now() + ms;
     for (;;) {
-        if (child && child.exitCode !== null) throw new Error(`The preview server exited (${child.exitCode}) before ${url} was ready.${stderr ? `\n${stderr.trim()}` : ''}`);
-        // Each probe is bounded, so a socket that accepts but never answers cannot stall the loop.
-        try { if ((await fetch(url, { signal: AbortSignal.timeout(3000) })).ok) return; } catch { /* starting */ }
-        if (Date.now() > end) throw new Error(`Timed out waiting for ${url}`);
-        await new Promise((r) => setTimeout(r, 500));
+        exited();
+        let ready = false;
+        // Each probe, body included, is bounded, so a socket that accepts but never answers cannot stall the loop.
+        try { const response = await fetch(url, { signal: AbortSignal.timeout(probeMs) }); ready = response.ok && (await response.text()).includes(buildMarker(token)); } catch { /* starting */ }
+        if (ready) { exited(); return; }
+        if (Date.now() > end) throw new Error(`Timed out waiting for ${url} to serve this harness's build${stderr ? `\n${stderr.trim()}` : ''}`);
+        await new Promise((r) => setTimeout(r, intervalMs));
     }
 }
 
@@ -161,11 +179,15 @@ async function main() {
     try {
         if (!baseUrl) {
             dist = fs.mkdtempSync(path.join(os.tmpdir(), 'codemastery-browser-dist-'));
-            const port = await freePort();
             execFileSync('npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'error'], { cwd: frontendRoot, env: { ...process.env, VITE_API_BASE_URL: '/api' }, stdio: 'inherit' });
+            const token = randomBytes(16).toString('hex');
+            markBuild(dist, token);
+            // The port is chosen right before vite preview binds it; probing does not reserve it, so readiness also
+            // requires the build marker and a collision fails instead of testing another server.
+            const port = await freePort();
             preview = spawn('npx', ['vite', 'preview', '--outDir', dist, '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: frontendRoot, stdio: ['ignore', 'ignore', 'pipe'] });
             baseUrl = `http://127.0.0.1:${port}/`;
-            await waitForUrl(baseUrl, 60000, preview);
+            await waitForUrl(baseUrl, 60000, preview, token);
         }
         report = { revision: (() => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: frontendRoot, encoding: 'utf8' }).trim(); } catch { return null; } })(),
             dirty: (() => { try { return execFileSync('git', ['status', '--porcelain'], { cwd: frontendRoot, encoding: 'utf8' }).trim().length > 0; } catch { return null; } })(),
@@ -175,7 +197,7 @@ async function main() {
             report.engines.push(result); failed += result.failed.length;
         }
     } finally {
-        if (preview && preview.exitCode === null) {
+        if (preview && preview.exitCode === null && preview.signalCode === null) {
             preview.kill('SIGTERM');
             await new Promise((gone) => { preview.once('exit', gone); setTimeout(gone, 5000); });
         }
@@ -891,4 +913,6 @@ async function runEngine(playwright, engine, baseUrl) {
     return result;
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1; });
+// Lifecycle helpers are exported for presentation.browser.test.ts; the harness runs only when executed directly.
+module.exports = { buildMarker, markBuild, waitForUrl };
+if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1; });

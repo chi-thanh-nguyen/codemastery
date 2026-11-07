@@ -3,6 +3,7 @@ import { Box, IconButton, LinearProgress, Tooltip, Typography } from '@mui/mater
 import type { SxProps, Theme } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
 import { CourseMark } from './CourseMark';
+import { isPlainClick } from './SidebarNav';
 import type { PresentationIconName } from './PresentationIcon';
 import { color, control, motion, radius, shadow, tones } from '../../app/theme/theme';
 import type { Tone } from '../../app/theme/theme';
@@ -42,7 +43,7 @@ export interface TileTitleLinkProps {
 /** Tile title whose link stretches over the tile; inner actions sit above it (z-index 1). */
 export function TileTitleLink({ children, href, onClick, component = 'h3', variant = 'h3', id }: TileTitleLinkProps) {
     return <Typography component={component} variant={variant} id={id} sx={{ overflowWrap: 'anywhere', textWrap: 'balance' }}>
-        <Box component="a" data-tile-link href={href ?? '#'} onClick={(event: MouseEvent) => { if (onClick) { event.preventDefault(); onClick(); } }}
+        <Box component="a" data-tile-link href={href ?? '#'} onClick={(event: MouseEvent) => { if (!onClick || (href && !isPlainClick(event))) return; event.preventDefault(); onClick(); }}
             sx={{ color: 'inherit', textDecoration: 'none', '&::after': { content: '""', position: 'absolute', inset: 0, borderRadius: `${radius.lg}px` },
                 '&:focus-visible': { outline: 'none' }, '&:hover': { textDecoration: 'underline', textUnderlineOffset: 4, textDecorationThickness: 2 } }}>
             {children}

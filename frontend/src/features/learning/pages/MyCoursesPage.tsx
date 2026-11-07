@@ -17,6 +17,7 @@ import { SegmentedControl } from '../../../shared/components/ViewRail';
 import { PaginationBar, TableToolbar } from '../../../shared/components/DataTable';
 import { Page } from '../../../layouts/DashboardLayout';
 import { CourseTile } from '../../../shared/components/Tile';
+import { isPlainClick } from '../../../shared/components/SidebarNav';
 import { control } from '../../../app/theme/theme';
 
 const failure = (error: unknown) => error instanceof ApiError ? error.message : 'The request could not be completed. Please try again.';
@@ -96,7 +97,7 @@ export function MembershipTileMenu({ title, status, detailsHref, onDetails, onLe
             <PresentationIcon name="more" />
         </IconButton>
         <Menu anchorEl={anchor} open={!!anchor} onClose={close} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
-            <MenuItem component={Link} to={detailsHref} onClick={(event) => { close(); if (onDetails) { event.preventDefault(); onDetails(); } }}>
+            <MenuItem component={Link} to={detailsHref} onClick={(event) => { close(); if (onDetails && isPlainClick(event)) { event.preventDefault(); onDetails(); } }}>
                 <ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="eye" sx={{ fontSize: 20 }} /></ListItemIcon>View course details
             </MenuItem>
             {status === 'left'
@@ -124,8 +125,10 @@ export function MyCoursesPage() {
     // The URL is the single source of the filter, so links, reload and history agree with what is shown.
     const [params, setParams] = useSearchParams();
     const filter = membershipFilterFromQuery(params.get('status'));
-    // The page index belongs to one filter: another filter (by control or URL) starts at page 0.
+    // The page index belongs to the current filter: any filter change (control, URL or history) starts at
+    // page 0. The reset happens during render, so no request is ever made for the previous filter's page.
     const [paging, setPaging] = useState<{ filter: MembershipFilter; page: number }>({ filter, page: 0 });
+    if (paging.filter !== filter) setPaging({ filter, page: 0 });
     const page = paging.filter === filter ? paging.page : 0;
     const setPage = (next: number) => setPaging({ filter, page: next });
     const setFilter = (next: MembershipFilter) => setParams((current) => {
