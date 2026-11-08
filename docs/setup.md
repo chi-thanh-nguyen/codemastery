@@ -1053,7 +1053,7 @@ verification is claimed by this contract selection or documentation validation.
 ### Authority, revision and effective-scope boundary
 
 **CT16-2026-10-24-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Project Leader
+[LEADER_APPROVED](decisions/README.md#approval-status-labels).** The Project Leader
 @chi-thanh-nguyen's explicit instruction **“CodeMastery — Bounded Technical
 Approval Under Explicit Leader Delegation”**, dated 24 October 2026 (ICT),
 authorizes Codex to investigate, select, reconcile and technically approve only
@@ -1215,7 +1215,7 @@ by this bounded technical approval.
 
 **CT16-INTERIM-COVERAGE-2026-10-24-r1** certifies
 **CT16_INTERIM_TECHNICAL_SCOPE_COMPLETE**, limited to technical decision coverage
-for the selected Interim Minimum. **APPROVED_PENDING_PROTECTED_INTEGRATION**;
+for the selected Interim Minimum. **LEADER_APPROVED**;
 this is neither effective main integration nor whole-Issue, implementation, QA,
 runtime or deployment acceptance.
 
@@ -1273,7 +1273,7 @@ protection bypass or personal Leader review is asserted.
 ### Authority, provenance and canonical review path
 
 **CT16-FINAL-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Leader's explicit instruction
+LEADER_APPROVED.** The Leader's explicit instruction
 **“CodeMastery — Consolidate Contract Approval PRs and Complete Eligible Final
 Technical Approvals”**, supplied 25 October 2026 (ICT), authorizes consolidation
 and actual bounded Final technical approval. Codex is the delegated technical
@@ -1393,7 +1393,7 @@ No reviewer, merge, implementation permission or actual QA success is invented.
 ### Authority, revision and inspected baseline
 
 **CT16-PROFILE-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Project Leader
+LEADER_APPROVED.** The Project Leader
 @chi-thanh-nguyen explicitly authorizes actual technical selection and approval
 in **“CodeMastery — Complete Additional CT16, CT17 and CT14 Technical Approvals in
 Existing PRs”**, supplied 25 October 2026 (ICT). Codex, the delegated technical

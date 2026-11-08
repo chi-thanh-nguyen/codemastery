@@ -200,6 +200,24 @@ The shared graph takes data through props only and defines its own node and edge
 
 The tree below is unchanged until FE12 performs the move.
 
+### Decision records directory record — 8 November 2026
+
+The Project Leader's 8 November 2026 instructions ("Pre-Approval Readiness Update" and the
+LD-01 decision recorded in [ADR004](decisions/004-leader-approval-of-delegated-records.md))
+authorize two new files under the existing `docs/decisions/` directory and ask for the
+decision documentation to be indexed. The tree below now shows all of them:
+
+- `docs/decisions/002-interim-delegated-contracts.md` and
+  `docs/decisions/003-postgresql-alpine-su-exec-image.md` — existing ADRs, on `main` since
+  PR #73 (11 October 2026) and 2 November 2026 respectively, not recorded here before.
+- `docs/decisions/004-leader-approval-of-delegated-records.md` — new: the Leader's
+  `LEADER-APPROVED-2026-11-08-r1` record.
+- `docs/decisions/README.md` — new: index of decision records and definitions of the
+  approval status labels.
+
+This adds no directory, module or code path and moves no record. The existing
+`/docs/decisions/` CODEOWNERS rule covers the files.
+
 ## Bounded Course unit-test placement correction
 
 On 2026-10-26 (Asia/Ho_Chi_Minh), the Project Leader manually relocated
@@ -1831,7 +1849,15 @@ codemastery/
 
 │   └── decisions/
 
-│       └── 001-modular-monolith-module-boundaries.md
+│       ├── 001-modular-monolith-module-boundaries.md
+
+│       ├── 002-interim-delegated-contracts.md
+
+│       ├── 003-postgresql-alpine-su-exec-image.md
+
+│       ├── 004-leader-approval-of-delegated-records.md
+
+│       └── README.md
 
 ├── .env.example
 
@@ -1849,7 +1875,7 @@ codemastery/
 ## Bounded Interim FE03/FE07 test inventory
 
 **CT14-INTERIM-FE03-FE07-2026-10-24-r1 —
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Leader's explicit
+[LEADER_APPROVED](decisions/README.md#approval-status-labels).** The Leader's explicit
 “CodeMastery — Complete Interim Technical Contract Approvals (CT16, CT17, CT14)”,
 24 October 2026, delegates technical approval of the smallest FE03/FE07 test
 inventory. Codex acts as the delegated approval authority for exactly:

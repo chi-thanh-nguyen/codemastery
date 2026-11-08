@@ -27,7 +27,7 @@ their original evidence and limitations; DP01 remains incomplete.
 
 | Level | Status | Evidence |
 | --- | --- | --- |
-| Design and approval status | The one-VM Docker Compose deployment is approved (ADR002 CT17.I-scope and the approved architecture). The frontend Nginx as the only public HTTPS ingress, and the TLS bindings, are recorded in the dated CT17 records as `APPROVED_PENDING_PROTECTED_INTEGRATION`. Provider, VM, TLS/DNS, secrets, production origin and public access remain Leader-reserved (ADR002 CT17.I-runtime is `PROPOSED_LEADER_RESERVED`) | [B2](#b2--approved-engineering-ingressconnection-bindings), [DP01 HTTPS ingress integration](#dp01-https-ingress-integration--31-october-2026) |
+| Design and approval status | The one-VM Docker Compose deployment is approved (ADR002 CT17.I-scope and the approved architecture). The frontend Nginx as the only public HTTPS ingress, and the TLS bindings, are recorded in the dated CT17 records as `LEADER_APPROVED`. Provider, VM, TLS/DNS, secrets, production origin and public access remain Leader-reserved (ADR002 CT17.I-runtime is `PROPOSED_LEADER_RESERVED`) | [B2](#b2--approved-engineering-ingressconnection-bindings), [DP01 HTTPS ingress integration](#dp01-https-ingress-integration--31-october-2026) |
 | Deployment tooling | Implemented and merged | `infrastructure/vm/deploy.sh` (PR #110), `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` target (PR #118) |
 | Tested configuration | The tooling passes its CI jobs on the GitHub runner, against real containers but not the VM | Six `VM …` jobs, see [testing.md](testing.md#ci). The five deployment-script and ingress jobs passed on `614f326` in [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079); the MinIO initializer job is described in [DP01 MinIO Community initializer](#dp01-minio-community-initializer--31-october-2026), [DP01 Chainguard MinIO release-server candidate](#dp01-chainguard-minio-release-server-candidate--1-november-2026) and [DP01 minimal MinIO server candidate](#dp01-minimal-minio-server-candidate--1-november-2026) |
 | Actual deployment | **None recorded.** No `preflight`, `load`, `provision` or `deploy` on the VM is recorded in this repository | — |
@@ -443,7 +443,7 @@ These product references do not supply CodeMastery-specific approval or secrets.
 ### Authority, baseline and approval boundary
 
 **CT17-2026-10-24-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Project Leader
+[LEADER_APPROVED](decisions/README.md#approval-status-labels).** Under the Project Leader
 @chi-thanh-nguyen's explicit instruction **“CodeMastery — Bounded Technical
 Approval Under Explicit Leader Delegation”**, dated 24 October 2026 (ICT),
 **Codex, as delegated technical decision-maker, approves only P1–P4 below**.
@@ -599,7 +599,7 @@ or new infrastructure technology is introduced.
 ### Delegation, predecessor and classification
 
 **CT17-INTERIM-2026-10-24-r2: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** Authority is the Project Leader's
+LEADER_APPROVED.** Authority is the Project Leader's
 explicit **“CodeMastery — Complete Interim Technical Contract Approvals
 (CT16, CT17, CT14)”**, supplied 24 October 2026 (ICT). Codex acts as the delegated
 technical decision-maker and **approves P5–P10 below**. Ordinary engineering
@@ -829,7 +829,7 @@ U18 actual environment binding and U33/U34 are not marked resolved. P1–P4, CT0
 CT03, CT06/CT24/CT36, CT18/CT20/CT21/CT38 remain unchanged except these explicitly
 named, additive CT17 deployment conventions. No whole family is approved.
 
-All new policy remains APPROVED_PENDING_PROTECTED_INTEGRATION. The sole-Leader
+All new policy remains LEADER_APPROVED. The sole-Leader
 CODEOWNER/PR-authorship conflict is unchanged: a non-owner review or another
 contributor's push alone cannot satisfy it. Eligible independent human review,
 last-push approval, required checks and compliant exact-revision integration are
@@ -840,7 +840,7 @@ mandatory; no bypass, review submission or personal Leader acceptance is claimed
 ### Authority and preserved history
 
 **CT17-FINAL-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Leader's explicit
+LEADER_APPROVED.** Under the Leader's explicit
 **“CodeMastery — Consolidate Contract Approval PRs and Complete Eligible Final
 Technical Approvals”**, supplied 25 October 2026 (ICT), Codex acts as delegated
 technical decision-maker and **approves F1/F2 below only**. No personal financial,
@@ -971,7 +971,7 @@ exposure, runtime verification or protected merge was performed or authorized.
 ### Authority, revision and actual resource evidence
 
 **CT17-INTERIM-BINDINGS-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION** for B1–B3 below only. The Leader's explicit
+LEADER_APPROVED** for B1–B3 below only. The Leader's explicit
 **“CodeMastery — Complete Additional CT16, CT17 and CT14 Technical Approvals in
 Existing PRs”**, supplied 25 October 2026 (ICT), delegates ordinary technical
 selection/approval to Codex, the technical decision-maker. Actual expenditure,
@@ -1169,7 +1169,7 @@ independently supported additional engineering selections above; actual binding,
 production artifact qualification, implementation authorization and runtime/external
 verification remain incomplete. U18 is not closed. No whole CT17 approval or
 ready-to-provision/deploy claim is made. All new technical selections remain
-**APPROVED_PENDING_PROTECTED_INTEGRATION**, subject to eligible independent
+**LEADER_APPROVED**, subject to eligible independent
 CODEOWNER/last-push review, new-head required checks and resolved review threads.
 
 Primary evidence: [Docker's Ubuntu support/install channel and firewall limitations](https://docs.docker.com/engine/install/ubuntu/),
@@ -1188,7 +1188,7 @@ account availability, risk acceptance or executed verification.
 ### Authority, baseline and classification
 
 **CT17-P6-PRIVILEGES-2026-10-28-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION** for checkpoints
+LEADER_APPROVED** for checkpoints
 **CT17.I-runtime-privileges** and **CT17.I-operation-gates** below only. Authority is
 the Project Leader @chi-thanh-nguyen's explicit **“CodeMastery — PR #110: Delegated
 Technical Authority, Contract Approval & Complete Remediation”**, effective
@@ -1403,7 +1403,7 @@ Acceptance:
   CT17-P6-PRIVILEGES-2026-10-28-r1 matrix was verified before ingress.
 
 **CT17.I-runtime-privileges** and **CT17.I-operation-gates** are
-APPROVED_PENDING_PROTECTED_INTEGRATION. Concrete bindings remain
+LEADER_APPROVED. Concrete bindings remain
 PENDING_LEADER_INPUT, and runtime verification is pending.
 `docs/deployment.md` and `.github/workflows/` have the Leader as sole CODEOWNER;
 `infrastructure/` adds @tihh647-ui. The existing sole-Leader CODEOWNER/authorship

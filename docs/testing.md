@@ -824,7 +824,7 @@ and [Testcontainers singleton lifecycle](https://java.testcontainers.org/test_fr
 ### Authority, exact revision and pending dependencies
 
 **CT14-INTERIM-FE03-FE07-2026-10-24-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Project Leader explicitly delegates
+[LEADER_APPROVED](decisions/README.md#approval-status-labels).** The Project Leader explicitly delegates
 actual Interim CT14 technical selection/approval in **“CodeMastery — Complete
 Interim Technical Contract Approvals (CT16, CT17, CT14)”**, supplied 24 October 2026
 (ICT). Codex, as the delegated technical decision-maker, **approves the exact six
@@ -950,7 +950,7 @@ is created or executed, and no implementation is authorized.
 Current #98/#101 have no corresponding automated behavior suites; that is missing
 implementation/evidence, not a reason to weaken CT01/CT16. Their scope discrepancies
 must be remediated separately; CT22 remains excluded. Every new determination
-stays APPROVED_PENDING_PROTECTED_INTEGRATION, with #102's dependency explicit.
+stays LEADER_APPROVED, with #102's dependency explicit.
 The sole-Leader-CODEOWNER PR-authorship conflict, eligible independent human
 review, last-push approval, checks and exact-revision integration remain unresolved;
 non-owner review or another contributor's push alone cannot substitute. Issue #27
@@ -973,7 +973,7 @@ executed test result; only one canonical test class is retained.
 ### Authority, predecessor and canonical scope
 
 **CT14-FINAL-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Leader's explicit
+LEADER_APPROVED.** Under the Leader's explicit
 **“CodeMastery — Consolidate Contract Approval PRs and Complete Eligible Final
 Technical Approvals”**, supplied 25 October 2026 (ICT), Codex acts as delegated
 technical decision-maker and **approves F1/F2 below only**. This does not authorize
@@ -1101,7 +1101,7 @@ self-approved or satisfied by an unrelated non-owner review/push alone.
 ### Authority, revision and behavioral dependency
 
 **CT14-PROFILE-AUTH-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Leader's explicit
+LEADER_APPROVED.** Under the Leader's explicit
 **“CodeMastery — Complete Additional CT16, CT17 and CT14 Technical Approvals in
 Existing PRs”**, supplied 25 October 2026 (ICT), Codex acts as delegated technical
 decision-maker and **approves the specification below only**. Test creation/run,
@@ -1231,7 +1231,7 @@ is not a failing executed test and is not acceptance. CT20.I remains unchanged:
 Profile is additional capability, not a new Interim completion prerequisite.
 
 **Additional bounded Profile/Auth test specification: technically approved;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** Whole CT14/Final remains partially
+LEADER_APPROVED.** Whole CT14/Final remains partially
 approved. CT16/CT01 integration, separately authorized implementation, actual
 producers, current-head checks, eligible independent CODEOWNER/last-push review
 and real QA evidence remain required. No unrelated Final testing contract is
