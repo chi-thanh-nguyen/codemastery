@@ -278,10 +278,10 @@ does not approve APIs, routes, dependencies, files or backend behavior.
 
 | Item | Value |
 | --- | --- |
-| Revision | `DESIGN-2026-11-08-r6` — factual and consistency corrections against `main` (8 November 2026; no visual change); `DESIGN-2026-11-07-r5` set the tile arrows and the mask-cut canvas reach; `DESIGN-2026-11-07-r4` set the button hierarchy; `DESIGN-2026-11-07-r3` implemented the consistency fixes C1–C14; `DESIGN-2026-11-07-r2` reconciled this file with the implemented UI; `DESIGN-2026-11-06-r1` was the full rewrite that replaced the 5 November 2026 "UX/UI Design Foundation" baseline |
-| Repository state audited | r6: `main` at `882751e0d16556e665cc4cf53dda22ebf9dc7ba6` (equal to `origin/main`, 8 November 2026, Asia/Ho_Chi_Minh), read from source: routes, theme tokens, shared components, the preview registry and its tests. r6 changed no code and re-ran no browser check. r2–r5: the redesign branch `feat/uiux-design-r1-implementation` at `2691e95dc1a1439f77d0e15f9b3a32ee19ce02c6` plus the 7 November 2026 working-tree changes, audited from source and in Chrome on 7 November 2026; that work is now part of `main`. r1: `main` at `061102e31a47cb73d43a92bb429c7d114492005a` (6 November 2026, Asia/Ho_Chi_Minh) |
+| Revision | `DESIGN-2026-11-08-r7` — aligned with the delegated technical decisions of 8 November 2026 (route map, Learner home scope, Markdown policy, notification fields, shared Mastery Map location; no visual change); `DESIGN-2026-11-08-r6` made factual and consistency corrections against `main`; `DESIGN-2026-11-07-r5` set the tile arrows and the mask-cut canvas reach; `DESIGN-2026-11-07-r4` set the button hierarchy; `DESIGN-2026-11-07-r3` implemented the consistency fixes C1–C14; `DESIGN-2026-11-07-r2` reconciled this file with the implemented UI; `DESIGN-2026-11-06-r1` was the full rewrite that replaced the 5 November 2026 "UX/UI Design Foundation" baseline |
+| Repository state audited | r7: `main` at `4eb5b70be0c98df14e162b34d2c0314b02ab47b5` (8 November 2026) plus the decision records added to `docs/setup.md`, `docs/data-model.md` and `docs/repository-structure.md` in the same change; no code was read anew or changed. r6: `main` at `882751e0d16556e665cc4cf53dda22ebf9dc7ba6` (equal to `origin/main`, 8 November 2026, Asia/Ho_Chi_Minh), read from source: routes, theme tokens, shared components, the preview registry and its tests. r6 changed no code and re-ran no browser check. r2–r5: the redesign branch `feat/uiux-design-r1-implementation` at `2691e95dc1a1439f77d0e15f9b3a32ee19ce02c6` plus the 7 November 2026 working-tree changes, audited from source and in Chrome on 7 November 2026; that work is now part of `main`. r1: `main` at `061102e31a47cb73d43a92bb429c7d114492005a` (6 November 2026, Asia/Ho_Chi_Minh) |
 | Design authority | The task instruction of 6 November 2026 from the project Leader (the session user; identity not verified beyond the local Git identity) explicitly delegated UI/UX and frontend-presentation decisions in this document. That delegation covers visual direction, design tokens, component specifications, layouts, interaction patterns and UX copy. It does **not** approve API contracts, route paths, role/permission rules, dependencies, new repository files, business rules or implementation start. |
-| Prepared by | Claude Code (Anthropic, Claude Opus 5.5) with the installed Impeccable design skill, under the delegation above; r2 by Claude Code at the Leader's instruction of 7 November 2026 to make this file match the implemented UI. The previous baseline was prepared with OpenAI Codex. No reviewer approval is claimed here. r6 by Claude Code (Claude Opus 5.5) at the Leader's documentation-alignment instruction of 8 November 2026. |
+| Prepared by | Claude Code (Anthropic, Claude Opus 5.5) with the installed Impeccable design skill, under the delegation above; r2 by Claude Code at the Leader's instruction of 7 November 2026 to make this file match the implemented UI. The previous baseline was prepared with OpenAI Codex. No reviewer approval is claimed here. r6 by Claude Code (Claude Opus 5.5) at the Leader's documentation-alignment instruction of 8 November 2026. r7 by Claude Code (Claude Opus 5.5) at the Leader's instruction of 8 November 2026 to align this file with the recorded decisions. |
 | Version control | Tracked in Git at the repository root from r6; earlier revisions were a local file excluded from Git. |
 | Visual reference | "E-learning Platform — Learning Plan Dashboard" by Bogdan Nikitin for Nixtio, published on Dribbble (shot 23956256). Its visual language was studied. No logo, artwork, illustration, avatar, copy or screen composition from it is reused (see [Reference Analysis](#reference-analysis)). |
 | Governs | Root `CLAUDE.md` § Impeccable: this file is the authoritative UI/UX specification. It is subordinate to mandatory requirements, approved architecture, repository structure, ADRs and API contracts. If those conflict with this file, they win and the Blocker Protocol applies. |
@@ -295,7 +295,7 @@ Every screen, flow and integration in this file carries one of these labels.
 | **Implemented** | Routed in the production app on `main` with an approved contract. The redesign restyled it and kept its behavior. |
 | **Preview** | Built as presentation components and shown only inside `/preview` with sample data. Not routed in production because its contract or route is pending. The layout and components in this file describe what is built. |
 | **Decided** | A design decision made under the 6 November 2026 delegation. It is binding for implementation unless it is superseded by a later Leader-approved revision of this file. |
-| **Proposed** | A UX concept that needs an approval this file cannot grant, usually a new route (CT16 route/menu decisions remain deferred) or a behavior change. |
+| **Proposed** | A UX concept that needs an approval this file cannot grant, usually a behavior change or a contract that does not exist yet. Routes and menu destinations are decided in CT16.routes (`CT16-ROUTES-2026-11-08-r1`); an approved route does not by itself make a Proposed screen buildable. |
 | **Contract Pending** | The screen design is complete but the owning API/domain contract is DEFERRED. It must not be built against invented endpoints or data. |
 | **Blocked** | Cannot be designed or built further without a missing decision. The dependency is named. |
 
@@ -303,9 +303,11 @@ A screen can carry two labels, for example Learner home: **Implemented** at
 `/home` with only the sections its approved contract supports, and **Preview**
 for the full design.
 
-Path and route spellings written for Proposed screens (for example
-`/courses/:courseId/learn`) are illustrative only. They are not approved route
-contracts.
+Route paths in the [sitemap](#sitemap) are approved by CT16.routes
+(`CT16-ROUTES-2026-11-08-r1`). Approval is not registration: a path is added to
+production, with its navigation item, only after its screen's contracts are
+approved, its Issue is authorized and the screen is delivered. Until then the path
+shows Page not found.
 
 ### Sources of truth used
 
@@ -317,20 +319,21 @@ contracts.
 | Data semantics | [data-model](docs/data-model.md) §§6–8, 11 | State catalogues, lesson progress flags, quiz scoring, submission and report lifecycles |
 | Approved API | [OpenAPI](docs/api/openapi.yaml) | Exactly eight operations (listed in [Implementation Handoff](#implementation-handoff)) |
 | Frontend contracts | [setup](docs/setup.md) CT16-2026-10-24-r1, CT16-FINAL-2026-10-25-r1 (F1, F2), CT16-PROFILE-2026-10-25-r1; [ADR002](docs/decisions/002-interim-delegated-contracts.md) FE07-2026-10-27-r1 | Session, routing, Profile, membership and accessible-composition rules preserved below |
+| Delegated technical decisions (8 November 2026) | [`docs/setup.md`](docs/setup.md#ct16-route-map-learner-home-composition-and-ct37-markdown-policy--8-november-2026) (`CT16-ROUTES-2026-11-08-r1`, `CT16-LEARNER-HOME-2026-11-08-r1`, `CT37-MARKDOWN-2026-11-08-r1`), [data model](docs/data-model.md) (`CT11-READ-FIELDS-2026-11-08-r1`), [repository structure](docs/repository-structure.md) (`STRUCT-MASTERY-MAP-2026-11-08-r1`) | Approved routes and navigation, Final Learner home scope, Markdown rendering policy, notification fields, shared Mastery Map location. Approval of a decision is not implementation |
 | Module ownership | [ADR001](docs/decisions/001-modular-monolith-module-boundaries.md) | Feature ownership; Interaction owns notifications; Admin consumes, does not decide |
 | Current implementation | `frontend/src/**` (theme in `app/theme/theme.ts`, shared components in `shared/components/`, preview in `app/preview/`), `frontend/package.json`, `frontend/public/favicon.svg` | Implemented behavior and presentation; r2 values were read from these files and re-checked against `main` `882751e` for r6 |
 
 ### Implementation status (8 November 2026)
 
-This is the state of the UI on `main` at `882751e`. Statuses per screen are in the
+This is the state of the UI on `main` at `4eb5b70` (no frontend change since `882751e`). Statuses per screen are in the
 [page inventory](#page-inventory); the visual system below describes what is built.
 
 | Status | What it covers |
 | --- | --- |
 | **Implemented (production routes)** | Shell (ink frame, top bar with canvas reach, mobile drawer, canvas), landing page `/`, catalogue `/courses`, course detail and membership `/courses/:courseId`, sign in `/login` with the session-ended notice (F2), create account `/register`, Learner home `/home` (active memberships only), My courses `/my-courses`, Profile `/profile`, Page not found, Access denied, design preview `/preview`. Fonts, logo palette, header lockup, course marks and account avatar as specified in this file. |
 | **Preview only (sample data in `/preview`)** | Full Learner home; course workspace (Path); lesson reader with Q&A; placement diagnostic; course assessments; quiz introduction, attempt, result and history; assignment; Mastery Map; notifications; Instructor course editor, lesson editor, question bank, quiz and assignment editors, lesson Q&A, skill graph editor, grading, learner insights; Administrator overview, users, courses, content reports and audit log; sign-in sample states. |
-| **Proposed (shown in `/preview`, behavior or contract not approved)** | Teaching home; forgot password, reset password and expired reset link (CT02). |
-| **Not implemented** | Instructor and Administrator navigation in production (both roles see only Catalogue); Instructor and Administrator start pages (they sign in to `/courses`; a Learner signs in to `/home`); progress, resume, lesson content, assessments, mastery, recommendations, notifications, Q&A, reports, users, metrics and audit APIs; Markdown rendering; a dark theme. |
+| **Proposed (shown in `/preview`, behavior or contract not approved; routes approved in CT16.routes)** | Teaching home; forgot password, reset password and expired reset link (CT02). |
+| **Not implemented** | Instructor and Administrator navigation in production (both roles see only Catalogue); Instructor and Administrator start pages (they sign in to `/courses` until `/teach` and `/admin` are routed under CT16.routes; a Learner signs in to `/home`); the approved feature routes of the sitemap; progress, resume, lesson content, assessments, mastery, recommendations, notifications, Q&A, reports, users, metrics and audit APIs; Markdown rendering (policy approved in CT37.markdown); a dark theme. |
 
 ## Overview
 
@@ -742,7 +745,7 @@ typography, component overrides and custom variants in
 
 ### Top bar and navigation
 
-- **Structure:** brand lockup left (`BrandWordmark`: 40 px mark and 25 px Poppins ExtraBold wordmark from 600 px, 36/22.5 px below, 32/20 px below 390 px; see [Brand and logo](#brand-and-logo)), linking to the visitor's start page (`/` anonymous, `/home` for a Learner, `/courses` for other roles); primary navigation centred at ≥ 900 px; utilities right (notification button where its contract exists — today only in `/preview` — and the account button).
+- **Structure:** brand lockup left (`BrandWordmark`: 40 px mark and 25 px Poppins ExtraBold wordmark from 600 px, 36/22.5 px below, 32/20 px below 390 px; see [Brand and logo](#brand-and-logo)), linking to the visitor's start page (`/` anonymous, `/home` for a Learner; `/teach` for an Instructor and `/admin` for an Administrator once those screens are routed, `/courses` until then); primary navigation centred at ≥ 900 px; utilities right (notification button where its contract exists — today only in `/preview` — and the account button).
 - **Nav item:** 44 px tall pill, 16 px horizontal padding, 20 px icon + label. Default `chrome-muted`; hover `chrome-raised` pill background, white text; active white label, 600 weight, canvas reach below, `aria-current="page"`. Focus: 2 px `focus-on-chrome` ring, 2 px offset.
 - **Links:** items are real links. A plain click routes in-app; Cmd/Ctrl/Shift/Alt-clicks (new tab or window) and items without a handler follow the native link.
 - **Parent highlighting:** the item stays active for its child routes (for example `/courses/:courseId` keeps "Catalogue" active). This fixes the current exact-match defect.
@@ -837,7 +840,8 @@ label (label type) and meta (caption, right-aligned); an inner `rounded.md`
 soft panel with the body text (body); an optional full-width white pill action.
 Entry types: Recommendation (lilac), Deadline (butter, Contract Pending),
 Result available (mint, Contract Pending), Reply or announcement (sky, Contract
-Pending). The list ends with a dashed empty slot when fewer than three entries
+Pending). On the Learner home only Recommendation entries are Final scope
+(`CT16-LEARNER-HOME-2026-11-08-r1`); the other types stay Preview there. The list ends with a dashed empty slot when fewer than three entries
 exist ("Nothing else needs your attention"). Entries are a `ul` with an `h2`
 for the panel.
 
@@ -903,7 +907,7 @@ Assessment contract provides it.
 ### Code and Markdown content
 
 - Code block (`CodeBlock`): `ink-950` panel, `rounded.sm`, 20 px padding, JetBrains Mono 15 px in `fill-150`, horizontal scroll, focusable; a 40 px copy button on chrome whose tooltip and status message change to "Copied"; optional caption below in caption type. Inline code: `fill-150` background, 4 px radius.
-- Markdown lesson content uses body-reading, 70ch measure, headings at section title and title sizes, 1.5 em paragraph spacing, tables in the table style without toolbar. Rendering requires an approved Markdown/sanitisation decision (see Handoff).
+- Markdown lesson content uses body-reading, 70ch measure, headings at section title and title sizes, 1.5 em paragraph spacing, tables in the table style without toolbar. Rendering follows CT37.markdown (`CT37-MARKDOWN-2026-11-08-r1`, [`docs/setup.md`](docs/setup.md#ct16-route-map-learner-home-composition-and-ct37-markdown-policy--8-november-2026)): CommonMark with tables and fenced code rendered as React elements; raw HTML is shown as literal text, never interpreted; only `https`/`http` URLs, root-relative paths (not `//…`) and `#` fragments become links, checked after decoding, and every other target (including `javascript:` and `data:`) is plain text; images render as links, not inline; Markdown headings start at `h2`; fenced code uses the code block. The renderer library is a separate dependency decision.
 
 ### Mastery Map node and edge
 
@@ -978,8 +982,8 @@ reduced-motion rules and `motion.reducedMotion: 'system'` remain.
 | --- | --- | --- | --- |
 | Public | Anonymous visitors | Landing page at `/` (own ink header); other pages in the frame with "Catalogue" and Sign in / Create account | Landing page `/` (Implemented) |
 | Learner | Learner role | Frame with Learner navigation (Home, Catalogue, My courses) | Start page `/home` (Implemented): sign-in, `/` and the logo lead there; the one-use `/profile` return still takes precedence after sign-in |
-| Instructor | Instructor role | Frame with Catalogue only in production; full Instructor navigation in `/preview` | `/courses` (Implemented) → Teaching home (Proposed, in preview) |
-| Administrator | Administrator role | Frame with Catalogue only in production; full Administrator navigation in `/preview` | `/courses` (Implemented) → Platform overview (Preview; as a start page Proposed) |
+| Instructor | Instructor role | Frame with Catalogue only in production; full Instructor navigation in `/preview` | `/courses` (Implemented) → `/teach` Teaching home once it is routed (route approved in CT16.routes; screen Proposed, in preview) |
+| Administrator | Administrator role | Frame with Catalogue only in production; full Administrator navigation in `/preview` | `/courses` (Implemented) → `/admin` Platform overview once it is routed (route and start page approved in CT16.routes; screen Contract Pending, in preview) |
 
 Roles never inherit each other's navigation or rights. Hiding a navigation item
 is not authorization; backend checks remain authoritative (ADR001 §§11–12).
@@ -989,13 +993,18 @@ is not authorization; backend checks remain authoritative (ADR001 §§11–12).
 | Role | Items (label → destination) | Status |
 | --- | --- | --- |
 | Anonymous | Catalogue → `/courses` | Implemented |
-| Learner | Home → `/home` · Catalogue → `/courses` · My courses → `/my-courses` · bell → Notifications | Home, Catalogue and My courses Implemented; the bell and Notifications are Preview only |
-| Instructor | Teaching → Teaching home · Grading → submissions · Learners → learner insights · Catalogue → `/courses` | Catalogue Implemented; the others exist only in `/preview` |
-| Administrator | Overview → metrics · Users · Courses → course administration · Reports → content reports · Audit log | All only in `/preview`; production shows Catalogue |
+| Learner | Home → `/home` · Catalogue → `/courses` · My courses → `/my-courses` · bell → `/notifications` | Home, Catalogue and My courses Implemented; the bell and Notifications are Preview only (route approved) |
+| Instructor | Teaching → `/teach` · Grading → `/teach/grading` · Learners → `/teach/learners` · Catalogue → `/courses` · bell → `/notifications` | Catalogue Implemented; the others exist only in `/preview` (routes approved) |
+| Administrator | Overview → `/admin` · Users → `/admin/users` · Courses → `/admin/courses` · Reports → `/admin/reports` · Audit log → `/admin/audit` · Catalogue → `/courses` | Catalogue Implemented; the others exist only in `/preview` (routes approved) |
 | Every signed-in role | Account menu: Profile → `/profile`, Sign out | Implemented |
 
-Until a Proposed destination is approved and implemented, its item is omitted;
-never render a navigation item that leads to an unimplemented page. The label
+These destinations are approved in CT16.routes (`CT16-ROUTES-2026-11-08-r1`). An
+item appears only when its destination is routed in production; never render a
+navigation item that leads to an unimplemented page. Roles never inherit items.
+Active item: `/courses/:courseId` keeps Catalogue; the Learner course-workspace
+paths (`/courses/:courseId/learn`, `…/lessons/…`, `…/diagnostic`, `…/mastery`,
+`…/assessments`, `…/quizzes/…`, `…/attempts/…`, `…/assignments/…`) make My courses
+active; `/teach/courses/…` makes Teaching active. The label
 "Catalogue" replaces "Courses" for the public list so that "Courses" can mean
 course administration for Administrators and "My courses" stays unambiguous.
 
@@ -1008,42 +1017,45 @@ Public
 │   └── Course detail + membership         /courses/:courseId
 ├── Sign in (Implemented)                  /login
 ├── Create account (Implemented)           /register
-├── Forgot password (Contract Pending)     /forgot-password*
-└── Reset password (Contract Pending)      /reset-password*
+├── Forgot password (Proposed, CT02)       /forgot-password †
+└── Reset password (Proposed, CT02)        /reset-password †
 
 Learner
 ├── Learner home (Implemented, partial)    /home
 ├── My courses (Implemented)               /my-courses
-├── Course workspace (Contract Pending)    /courses/:courseId/learn*
+├── Course workspace (Contract Pending)    /courses/:courseId/learn †
 │   ├── Path (default view)
-│   ├── Lesson + Q&A                       /courses/:courseId/lessons/:lessonId*
-│   ├── Placement diagnostic               /courses/:courseId/diagnostic*
-│   ├── Mastery Map                        /courses/:courseId/mastery*
-│   └── Assessments                        /courses/:courseId/assessments*
-│       ├── Quiz attempt                   …/quizzes/:quizId/attempt*
-│       ├── Quiz result                    …/attempts/:attemptId*
-│       ├── Attempt history                …/quizzes/:quizId/history*
-│       └── Assignment                     …/assignments/:assignmentId*
-├── Notifications (Contract Pending)       /notifications*
+│   ├── Lesson + Q&A                       /courses/:courseId/lessons/:lessonId †
+│   ├── Placement diagnostic               /courses/:courseId/diagnostic †
+│   ├── Mastery Map                        /courses/:courseId/mastery †
+│   └── Assessments                        /courses/:courseId/assessments †
+│       ├── Quiz introduction              /courses/:courseId/quizzes/:quizId †
+│       ├── Quiz attempt                   /courses/:courseId/quizzes/:quizId/attempt †
+│       ├── Attempt history                /courses/:courseId/quizzes/:quizId/history †
+│       ├── Quiz result                    /courses/:courseId/attempts/:attemptId †
+│       └── Assignment                     /courses/:courseId/assignments/:assignmentId †
+├── Notifications (Contract Pending)       /notifications † (Learner, Instructor)
 └── Profile (Implemented)                  /profile
 
 Instructor
-├── Teaching home (Proposed)               /teach*
-├── Course editor (Contract Pending)       /teach/courses/:courseId*
-│   ├── Content (chapters, lessons)        …/content*, …/lessons/:lessonId*
-│   ├── Skills (graph + mapping + adaptive mode) …/skills*
-│   ├── Assessments (question bank, quizzes, assignments) …/assessments*
-│   ├── Learners → Learner detail          …/learners*, …/learners/:learnerId*
-│   └── Q&A                                …/qa*
-├── Grading (Contract Pending)             /teach/grading*, /teach/grading/:submissionId*
+├── Teaching home (Proposed)               /teach †
+├── Course editor (Contract Pending)       /teach/courses/:courseId † (tabs …/content default, …/settings)
+│   ├── Lesson editor                      /teach/courses/:courseId/lessons/:lessonId †
+│   ├── Skills (graph + mapping + adaptive mode) /teach/courses/:courseId/skills †
+│   ├── Assessments (question bank, quizzes) /teach/courses/:courseId/assessments †, …/quizzes/:quizId †
+│   ├── Assignment editor                  /teach/courses/:courseId/assignments/:assignmentId †
+│   ├── Learners → Learner detail          /teach/courses/:courseId/learners †, …/learners/:learnerId †
+│   └── Q&A                                /teach/courses/:courseId/qa †
+├── Learners (choose an owned course)      /teach/learners †
+├── Grading (Contract Pending)             /teach/grading †, /teach/grading/:submissionId †
 └── Profile (Implemented)                  /profile
 
 Administrator
-├── Platform overview (Contract Pending)   /admin*
-├── Users (Contract Pending)               /admin/users*
-├── Courses (Contract Pending)             /admin/courses*
-├── Content reports (Contract Pending)     /admin/reports*
-├── Audit log (Contract Pending)           /admin/audit*
+├── Platform overview (Contract Pending)   /admin †
+├── Users (Contract Pending)               /admin/users †
+├── Courses (Contract Pending)             /admin/courses †
+├── Content reports (Contract Pending)     /admin/reports †
+├── Audit log (Contract Pending)           /admin/audit †
 └── Profile (Implemented)                  /profile
 
 System: Page not found (Implemented, `*`), Access denied (Implemented in guard),
@@ -1051,7 +1063,13 @@ Design preview (Implemented, `/preview?screen=<id>`, sample data only; every
 Preview and Proposed screen in this tree is reachable there)
 ```
 
-`*` marks an illustrative path that is not an approved route. Contract Pending
+`†` marks a path approved in CT16.routes (`CT16-ROUTES-2026-11-08-r1`, whose route
+table has 22 entries) that is not registered in production: it shows Page not
+found until its screen's contracts are approved, its Issue is authorized and the
+screen is delivered. Creation screens use the literal segment `new` in the
+identifier position (for example `/teach/courses/new`); record detail in
+Administrator tables opens in a side sheet without a route; how the reset
+capability is carried is CT02's decision. Contract Pending and Proposed
 screens in this tree are built and viewable in `/preview` (status **Preview**).
 
 ### Page inventory
@@ -1071,7 +1089,7 @@ contract named after it is what keeps it out of production.
 | My courses | Learner | Find joined courses / open one | Nav, course detail | `learning/pages/MyCoursesPage.tsx` | Implemented | H |
 | Page not found / Access denied | All | Recover / go to catalogue | Any bad URL or role | `routes/index.tsx`, `routes/guards/ProtectedRoute.tsx` | Implemented | A |
 | Design preview | Team | Review the design system and every screen with sample data | Direct URL `/preview?screen=<id>` | `app/preview/PreviewApp.tsx` (lazy chunk) + `app/preview/*` | Implemented | H |
-| Forgot / reset password | Account holder | Recover access | Sign-in page (preview only) | `auth/pages/ForgotPasswordPage.tsx`, `ResetPasswordPage.tsx` | Proposed, in preview (CT02) | S |
+| Forgot / reset password | Account holder | Recover access | Sign-in page (preview only) | `auth/pages/ForgotPasswordPage.tsx`, `ResetPasswordPage.tsx` | Proposed, in preview (CT02; routes approved) | S |
 | Learner home | Learner | Continue the right next step across courses | Nav, logo, `/` when signed in, sign-in | `learning/pages/LearnerHomePage.tsx` | Implemented (active courses only); full design Preview (CT22, Adaptive, Assessment, Interaction) | H |
 | Course workspace (Path) | Learner | See the course path and the next step / Open lesson | My courses, course detail, home | `learning/pages/CourseLearningPage.tsx`, `learning/components/CourseOutline.tsx` | Preview | H |
 | Lesson | Learner | Study and mark complete / Mark as complete | Path, recommendation, resume | `learning/pages/LessonPage.tsx`, `learning/components/LessonContent.tsx` | Preview | A |
@@ -1083,7 +1101,7 @@ contract named after it is what keeps it out of production.
 | Assignment | Learner | Submit before the deadline; read grade and feedback | Assessments, deadline entry | `assessment/pages/AssignmentDetailPage.tsx` | Preview (CT09) | A |
 | Mastery Map | Learner | Understand skill states and next step | Course workspace, result | `mastery/pages/MasteryMapPage.tsx` + mastery components | Preview | H |
 | Notifications | Learner, Instructor | Read in-app updates | Bell | `interaction/pages/NotificationsPage.tsx` | Preview | A |
-| Teaching home | Instructor | Pick a course to work on / Create course | Nav | `instructor/course-management/pages/InstructorCoursesPage.tsx` | Proposed, in preview (routes, authoring contracts) | H |
+| Teaching home | Instructor | Pick a course to work on / Create course | Nav | `instructor/course-management/pages/InstructorCoursesPage.tsx` | Proposed, in preview (route approved in CT16.routes; authoring and "Needs attention" data contracts pending) | H |
 | Course editor | Instructor | Structure and publish content | Teaching home | `instructor/course-management/pages/CourseEditorPage.tsx` | Preview | S |
 | Lesson editor | Instructor | Edit lesson, materials, skills | Course editor | `…/pages/LessonEditorPage.tsx` | Preview (CT09) | S |
 | Question bank | Instructor | Author tagged questions | Course editor | `…/pages/QuestionBankPage.tsx` | Preview | S |
@@ -1108,7 +1126,7 @@ means navigation; "⟳" means an in-place update.
 
 1. Visitor → "Create account" → form (email, display name, password, confirm password) → submit.
 2. Success: inline mint alert "Account created. Sign in to continue." with a "Sign in" button → Sign in (no auto-login, ADR002 CT01.core). Nothing is passed to the sign-in page.
-3. Sign in → success → the one-use `/profile` return when one was captured (CT16-PROFILE P1); otherwise a Learner lands on Learner home `/home` and other roles on `/courses` (Leader instruction, 7 November 2026; recorded beside P1 in `docs/setup.md`).
+3. Sign in → success → the one-use `/profile` return when one was captured (CT16-PROFILE P1); otherwise a Learner lands on Learner home `/home` (Leader instruction, 7 November 2026; recorded beside P1 in `docs/setup.md`), an Instructor on `/teach` and an Administrator on `/admin` once those screens are routed, and both on `/courses` until then (`CT16-ROUTES-2026-11-08-r1`).
 
 States: field errors on submit, then re-validated on blur for fields already in
 error (focus the first invalid field or the error summary); the conflict
@@ -1215,7 +1233,7 @@ replaced by "The deadline has passed. Submissions are closed." (US-08).
 ### F10 Q&A, report and notifications — Contract Pending (Interaction)
 
 Lesson → "Questions" section → ask (text area, "Post question") → appears in the
-list. Reply notification → bell count → Notifications → item → lesson anchor.
+list. Reply notification → bell count → Notifications, where the message names the lesson in words (notification rows carry no link, `CT11-READ-FIELDS-2026-11-08-r1`).
 Report: post overflow menu → "Report post" → dialog → confirmation "Thanks. An
 administrator will review this post." Instructors reply from Lesson Q&A.
 
@@ -1386,9 +1404,15 @@ Welcome back, Minh
 ```
 
 - **Implemented at `/home` (6 November 2026):** title "Welcome back, *display name*", subtitle "Your active courses, one click from their syllabus.", then "Your courses": one white surface with a row per active membership (32 px course mark, title link to course detail, "Instructor · Name"), "See all *N* active courses in My courses" when more exist, and "Browse the catalogue". Loading, error with retry and the empty state ("You haven't joined a course yet") follow Feedback. "Continue learning", progress lines and the "Up next" aside are omitted because their contracts are pending. `/`, the logo and (since 7 November 2026, C4) sign-in lead a signed-in Learner here; a pending one-use `/profile` return still takes precedence after sign-in, and Instructors and Administrators keep `/courses`.
-- **Preview (full design):** the wireframe above with sample data. It needs resume and progress (CT22), recommendations (Adaptive), deadlines and results (Assessment) and notifications (Interaction).
-- Below 1200 px the aside's Recommended entry moves to the top of the main column, above "Continue learning"; deadlines follow; other entries go below the courses.
-- "Your courses" is one white surface with a row per active course (title, linear progress with text, canonical next lesson). There is no cross-course stat trio: totals across courses mean nothing to a learner.
+- **Preview (full design):** the wireframe above with sample data, including deadline, result and notification entries.
+- **Final scope (`CT16-LEARNER-HOME-2026-11-08-r1`, approved composition; not implemented):**
+  - "Your courses" stays the list of active memberships; each row adds the progress line and the canonical next lesson only from one approved learner-scoped CT22 read (no request per course).
+  - "Continue learning" appears only when CT22 supplies the learner's most recent position; the frontend never compares courses itself.
+  - "Up next" holds at most one recommendation per active course, that course's own current recommendation, unaltered (type, target lesson, backend reason verbatim, time), labelled with its course and listed in the order the API returns the courses. No ranking, merging, scoring or other cross-course logic; courses without a current recommendation show none.
+  - Deadline, result-available and reply/announcement entries are not Final scope; they stay Preview, and learners reach them through Notifications and the course Assessments page.
+  - Each element loads and fails on its own and never hides "Your courses"; an element whose read is not approved is omitted. This decision approves no CT22 or CT33 operation.
+- Below 1200 px the aside's recommendation entries move to the top of the main column, above "Continue learning" (in the Preview design, deadlines follow and other entries go below the courses).
+- "Your courses" is one white surface with a row per active course (title, linear progress with text, canonical next lesson, each only when supplied as above). There is no cross-course stat trio: totals across courses mean nothing to a learner.
 - No search pill (no search contract for a learner's courses), no greeting avatar, no streaks, no time-spent charts (no data source).
 
 ### S7 Course workspace — Path — Contract Pending, built as Preview, High fidelity
@@ -1517,12 +1541,17 @@ Introduction to Programming
 ### S15 Notifications — Contract Pending, built as Preview, Adapted
 
 Bell button in the top bar with count badge *(contract)*; it shows the current state while the page is open. Page: list grouped by
-day (Today, Yesterday, date), each row: type glyph in its family tint circle,
-message (title type when unread, body when read), time caption, unread dot
-(`brand-600`) with "Unread" text for screen readers, link to the source. Actions
-"Mark as read" / "Mark all as read" only if the contract provides them. Types:
-new content, deadline approaching, result available, Q&A reply, recommendation
-(US-09; architecture §6).
+day (Today, Yesterday, date), each row: one neutral bell glyph, the message as
+plain text (title type when unread, body when read), time caption and unread dot
+(`brand-600`) with "Unread" text for screen readers. Rows show the message only:
+the notification representation has no type or link field
+(`CT11-READ-FIELDS-2026-11-08-r1`, partial approval of CT11.read), so rows carry no
+category tint, no category label and no destination, and the UI never infers
+either from the text. Notifications concern new content, upcoming deadlines,
+results, Q&A replies or recommendations (US-09; architecture §6), named in the
+message itself. Actions "Mark as read" / "Mark all as read" appear only if CT11.read
+approves them (still pending). The preview's per-type tints and source links are
+Preview only.
 
 ### S16 Profile — Implemented (restyle), Adapted
 
@@ -1544,12 +1573,12 @@ not ready for adaptive mode (lilac) — each Contract Pending.
 
 - Header: course title, publication pill, "Preview as learner" *(contract)*, "Publish" or "Hide" (confirmation). Tabs: Content · Skills · Assessments · Learners · Q&A · Settings.
 - Content: chapter sections each with an ordered lesson list (rows with position, title, publication pill, skills count, actions Edit / Move up / Move down / overflow). "Add chapter", "Add lesson". Reordering uses buttons with announced results ("Moved For Loops to position 3"); drag-and-drop may be added later only with an accessible alternative kept.
-- Lesson editor (Form archetype): Title; Content (Markdown textarea with a Preview tab once Markdown rendering is approved); Materials list with "Add text", "Add file" (CT09), "Add video link"; Skills (multi-select chips of course skills; at least one required, US-11); Publication. Sticky action bar "Save changes" + status ("Saved", "Unsaved changes"). Leaving with unsaved changes asks for confirmation.
+- Lesson editor (Form archetype): Title; Content (Markdown textarea with a Preview tab rendered under CT37.markdown once a renderer dependency is approved); Materials list with "Add text", "Add file" (CT09), "Add video link"; Skills (multi-select chips of course skills; at least one required, US-11); Publication. Sticky action bar "Save changes" + status ("Saved", "Unsaved changes"). Leaving with unsaved changes asks for confirmation.
 
 ### S19 Question bank, quiz editor, assignment editor — Contract Pending, built as Preview, Specialized
 
 - Question bank: Manage archetype. Filters by skill, difficulty (Easy/Medium/Hard), kind. Columns: Question (2 lines), Kind, Skill, Difficulty, Used in. "New question".
-- Question form: kind; prompt; optional code snippet (code editor textarea with monospace); options with "Correct" toggles (exactly one for single choice and true/false; at least one for multiple choice; True/False labels fixed); skill (required); difficulty (required). Notice for used questions: "This question is used in past attempts. Saving creates a new version; past attempts keep the original." (data-model §11).
+- Question form: kind; prompt; optional code snippet (code editor textarea with monospace); options with "Correct" toggles (exactly one for single choice and true/false; at least one for multiple choice; True/False labels fixed); skill (required); difficulty (required). Notice for used questions: "This question is used in past attempts. Saving creates a replacement question; past attempts keep the original." (data-model §11: used questions are immutable and edits create replacement questions; there is no revision entity).
 - Quiz editor: kind (Diagnostic, Practice, Test), title, time limit in minutes (stored as seconds), ordered question list with add/remove/move, publication.
 - Assignment editor: title, instructions, deadline (date-time with timezone label), optional lesson link, publication.
 
@@ -1815,17 +1844,19 @@ invented endpoints, fixtures or mock services in production code.
 | `shared/components/Tile.tsx` | Tile, title link, corner badge, circle action and affordance, stat tile and group, progress line, course tile, fact list, section heading |
 | `shared/components/CourseMark.tsx` + `course-logo-*.svg` | Course mark: logo registry, language resolution, optical sizing, generic mark |
 | `shared/components/PathSpine.tsx`, `GuidanceStack.tsx`, `ViewRail.tsx`, `DataTable.tsx`, `CodeBlock.tsx` | Path Spine, Guidance Stack, segmented control and View Rail, table with toolbar and pagination, code block |
-| `shared/components/MarkdownRenderer.tsx` | Lesson Markdown (needs an approved rendering and sanitisation decision; a Markdown library would be a new dependency) |
+| `shared/components/MarkdownRenderer.tsx` | Lesson Markdown under CT37.markdown (`CT37-MARKDOWN-2026-11-08-r1`); a Markdown library is a separate dependency decision |
+| `shared/components/MasteryGraph.tsx`, `shared/utils/masteryGraphLayout.ts` (planned move) | Read-only Mastery Map graph and layout shared by the Learner map and Instructor learner detail (`STRUCT-MASTERY-MAP-2026-11-08-r1`); FE12 moves them from `features/mastery` |
 | `features/learning/components/CourseOutline.tsx` | Path Spine and outline list |
-| `features/mastery/components/*` | `MasteryGraph`, `MasteryStateChip`, `NextRecommendedCard`, `SkillDetailPanel`, `PlacementPrompt` as specified |
+| `features/mastery/components/*` | `MasteryStateChip`, `NextRecommendedCard`, `SkillDetailPanel`, `PlacementPrompt` as specified (`MasteryGraph` is here today and moves to `shared/`) |
 
 Status pills, tiles, tables and the other primitives above are shared
 presentation components (approved 6 November 2026), built on MUI and the theme.
 Mastery-state labels and glyph names live in `StatusPill.tsx`, so
 the Learner, Instructor and Administrator features use them without importing
-each other's internals. Reusing the full Mastery Map graph in Instructor learner
-detail needs either an approved shared location for the graph presentation or a
-feature-local read-only version; this is an open structure decision.
+each other's internals. The read-only Mastery Map graph moves to `shared/`
+(`STRUCT-MASTERY-MAP-2026-11-08-r1`): it takes data through props only, Instructor
+learner detail composes it with its own data, and no feature imports another
+feature's internals. The move is FE12's; it has not happened yet.
 
 ### Delivery order
 
@@ -1842,7 +1873,7 @@ needs its contracts before it can be routed.
 | 5 Interaction | Q&A, notifications, reports | Interaction-owned operations |
 | 6 Instructor | Teaching, editors, skill graph, grading, insights | CT21.remaining, CT40, Assessment, CT22, CT09 |
 | 7 Administrator | Overview, users, courses, reports, audit | CT12, CT31, reporting definitions |
-| 8 Optional | Learner home, landing, session-ended notice | Done 6 November 2026 (Learner home with active courses only) |
+| 8 Optional | Learner home, landing, session-ended notice | Done 6 November 2026 (Learner home with active courses only); the Final Learner home scope of `CT16-LEARNER-HOME-2026-11-08-r1` waits for the CT22 and CT33 reads |
 
 ### Acceptance criteria per implemented screen
 
@@ -1916,14 +1947,26 @@ unit results.
 | Consistency fixes C1–C14 | Design consistency review |
 | Design preview without preview chrome (no notice, switcher, index or reset buttons); screens opened by link | S26 |
 
+### Delegated technical decisions (8 November 2026)
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task; not personal Leader review, implementation authorization or verification. Records: [`docs/setup.md`](docs/setup.md#ct16-route-map-learner-home-composition-and-ct37-markdown-policy--8-november-2026), [data model](docs/data-model.md), [repository structure](docs/repository-structure.md).
+
+| Decision | Effect on this file |
+| --- | --- |
+| `CT16-ROUTES-2026-11-08-r1` (CT16.routes) | Sitemap paths approved with the activation rule; navigation destinations and active items; Instructor `/teach` and Administrator `/admin` start pages once routed, `/courses` until then |
+| `CT16-LEARNER-HOME-2026-11-08-r1` (CT16.learner-home) | S6 Final scope; Guidance Stack on the Learner home limited to recommendation entries |
+| `CT37-MARKDOWN-2026-11-08-r1` (CT37.markdown) | Code and Markdown content rules; open question 6 |
+| `CT11-READ-FIELDS-2026-11-08-r1` (CT11.read, partial) | S15 rows message-only; F10 |
+| `STRUCT-MASTERY-MAP-2026-11-08-r1` | Shared component plan; open question 5 |
+
 ### Open questions (do not block design)
 
 1. Resolved 7 November 2026: Google Sans Flex, JetBrains Mono and Poppins (wordmark) assets approved by the Leader's typography instruction.
-2. Approve concrete routes and post-sign-in destinations for Instructors and Administrators (CT16 route/menu decisions are deferred). Learners sign in to `/home` since 7 November 2026.
+2. Resolved 8 November 2026 (`CT16-ROUTES-2026-11-08-r1`, delegated technical approval): concrete routes and post-sign-in destinations — Instructors start at `/teach` and Administrators at `/admin` once those screens are routed, `/courses` until then; Learners sign in to `/home` since 7 November 2026. Routes are registered only under the activation rule in the [sitemap](#sitemap).
 3. Resolved 6 November 2026: the session-ended notice (F2) is implemented.
 4. Resolved 6 November 2026: the landing page replaces the `/` redirect (S25).
-5. Decide the shared location for the read-only Mastery Map used by Instructor learner detail.
-6. Approve Markdown rendering and sanitisation for lesson content.
+5. Resolved 8 November 2026 (`STRUCT-MASTERY-MAP-2026-11-08-r1`, delegated technical approval): the read-only Mastery Map graph and layout move to `shared/` (FE12 performs the move; FE19 reuses it).
+6. Resolved 8 November 2026 for the rendering and sanitisation policy (`CT37-MARKDOWN-2026-11-08-r1`, delegated technical approval; see [Code and Markdown content](#code-and-markdown-content)). Still open: the renderer library (Dependency Policy), and `CT37.embed` and `CT37.widget`.
 7. Dark theme: not designed in this revision; tokens are role-named so a later theme can remap them.
 8. Source of a course's language for course marks: the course API has no language field, so logos appear only when a course's own title or description names one language. A recorded language would need an API and data contract.
 9. Resolved 7 November 2026: no visual sample-data label on preview screens (Leader decision recorded in [S26](#s26-design-preview--implemented-route-no-preview-chrome)); the index subtitle names the sample data.
@@ -1933,11 +1976,11 @@ unit results.
 | Area | Blocker | Owner source |
 | --- | --- | --- |
 | Password recovery | CT02 deferred | ADR002 |
-| Lesson content and materials | CT21.remaining, CT03.remaining, CT09 deferred | ADR002, setup CT16-FINAL |
+| Lesson content and materials | CT21.remaining, CT03.remaining, CT09 deferred; Markdown policy approved (CT37.markdown), renderer dependency and CT37.embed/widget pending | ADR002, setup CT16-FINAL, setup CT37.markdown |
 | Progress and resume | CT22 progress/resume/atomic deferred | ADR002 FE07 exclusions |
 | Assessments | Assessment operations (CT04/CT10/CT23) and CT08 event deferred | ADR002, testing/setup records |
 | Mastery, recommendations, diagnostic, adaptive mode | Final thresholds, evidence rules, routing, settings and APIs deferred; CT40 structural contract unresolved | Adaptive §15, ADR001 §12 |
-| Q&A, notifications, reports | Interaction-owned operations deferred | ADR001, data-model §8 |
+| Q&A, notifications, reports | Interaction-owned operations deferred; notification fields settled (`CT11-READ-FIELDS-2026-11-08-r1`, partial) | ADR001, data-model §8 and §12 |
 | Instructor authoring and grading | CT21.remaining, CT40, Assessment, CT09 deferred | ADR002 |
 | Administration and audit | CT12, CT31, reporting definitions deferred | ADR001 §11–12 |
 
@@ -1953,6 +1996,7 @@ named screens until its contract is approved and recorded.
 - `frontend/src/app/theme/theme.ts` still names revision r1 in its header comment; the values match this revision. Source comments are outside this documentation revision.
 - The preview `QuizTimer` announces "1 minutes left." when one minute remains at the butter threshold; the [Progress](#progress) copy rule says "1 minute left.". The timer is preview-only and should follow the rule when FE10 implements it.
 - Resolved: the route guard shows the Access denied page from F14; behavior is unchanged.
+- The `/preview` notifications screen still shows per-type tints and source links, and the preview Learner home shows deadline and result entries; both are Preview only and differ from the Final scope above (S15, S6). Preview source is outside this documentation revision.
 
 ### Design consistency review (7 November 2026)
 
@@ -1992,6 +2036,7 @@ Verified by unit tests, the browser harness (Chromium and WebKit) and E2E.
 | Baseline | 2026-11-05 | Inventory and constraints; all visual decisions pending (OpenAI Codex) |
 | DESIGN-2026-11-06-r1 | 2026-11-06 | Full redesign specification under Leader delegation: visual system, IA, flows, screens, handoff (Claude Code with Impeccable) |
 | r1 amendments | 2026-11-07 | Typography (Google Sans Flex, JetBrains Mono, Poppins wordmark), logo palette, Brand and logo section, traced canvas reach (Leader instruction for PR #209) |
+| DESIGN-2026-11-08-r7 | 2026-11-08 | Aligned with the delegated technical decisions recorded the same day in `docs/setup.md`, `docs/data-model.md` and `docs/repository-structure.md`, with no visual change (Claude Code, Leader instruction of 8 November 2026): approved route map in the Sitemap (`†` marks approved, unregistered paths) with the activation rule; navigation destinations, active items and Instructor/Administrator start pages (Workspaces, Primary navigation, Top bar, F1); S6 Final scope; S15 message-only rows and F10; Markdown policy (Code and Markdown content, S18, Handoff); S19 replacement-question wording; shared Mastery Map location (Handoff); open questions 2, 5 and 6 resolved; Proposed status wording; a delegated-decisions table; two preview discrepancies recorded. Screen statuses are unchanged and nothing here is implemented. |
 | DESIGN-2026-11-08-r6 | 2026-11-08 | Factual and consistency corrections against `main` `882751e`, with no visual change (Claude Code, Leader instruction of 8 November 2026). Changes: current-state text no longer describes the implementation as unmerged branch work; the Learner sign-in destination reads `/home` everywhere (S6 corrected) with the `/profile` return first; the lesson outline token reads 280 px in the theme mapping, matching S8, C14 and the source; S26 separates the absent on-screen controls from the preview account-menu items; open question 9 is marked resolved; quiz-timer visual thresholds are separated from its two screen-reader announcements; the ~90% fidelity is clarified as visual language, not composition; Figtree references are marked historical; `palette.ink`/`onChrome` and `brandMark` match `theme.ts`; graphite replaces "ink" for primary buttons in S3, S4 and F3; the S8 aside is 360/400 px; page-inventory entry points name the sign-in destinations; the README and CONTRIBUTING discrepancies are marked resolved and two new source discrepancies are recorded; the file is tracked in Git. Earlier decisions keep their dates. |
 | DESIGN-2026-11-07-r5 | 2026-11-07 | Tile arrows secondary (graphite only for Resume/Continue); canvas reach rebuilt as a mask-cut opening in the header with the canvas extended under the bar (no painted shape) (Claude Code) |
 | DESIGN-2026-11-07-r4 | 2026-11-07 | Button system: graphite primary (`chrome-raised`), neutral outlined secondary, Logo Blue tertiary, red destructive; `control` tokens and the `onChrome` button colour; graphite for chosen controls; competing primaries demoted (placement prompt, empty states, error retry) (Claude Code) |
