@@ -24,7 +24,7 @@ tests), **Partial** (some approved capabilities implemented), **Planned**
 | Governance and decisions | Implemented | [AGENTS.md](AGENTS.md), [requirements](docs/requirements.md), [architecture](docs/architecture.md), [repository structure](docs/repository-structure.md), [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md) and the bounded Interim contracts in [ADR 002](docs/decisions/002-interim-delegated-contracts.md). |
 | Database | Implemented | The approved 23-table PostgreSQL schema is applied by Flyway migrations V001–V006; see [docs/data-model.md](docs/data-model.md). |
 | Shared backend | Implemented | Problem-detail error handling, validated pagination, correlation IDs and password validation in `common`. The object-storage adapter is still an empty scaffold. |
-| Authentication (`auth`) | Partial | Learner self-registration and sign-in (`POST /api/auth/register`, `POST /api/auth/login`), BCrypt `$2b$` cost 14, 15-minute HS256 JWTs and per-request account-status checks. Logout, password reset and account administration are planned. |
+| Authentication (`auth`) | Partial | Learner self-registration and sign-in (`POST /api/auth/register`, `POST /api/auth/login`), BCrypt `$2b$` cost 14, 15-minute HS256 JWTs and per-request account-status checks. Sign-out is client-local: the frontend discards its in-memory session and there is no server logout endpoint ([ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md) §11.3). Password reset and account administration are planned. |
 | Courses (`course`) | Partial | Public catalogue with search, filtering and pagination; course detail with the published syllabus; Learner join/leave and My Courses (`/api/courses/{courseId}/membership`, `/api/me/courses`); Course and Lesson access checks. Lesson viewing, progress, authoring and file materials are planned. |
 | Adaptive learning (`adaptive`) | Partial | Local mastery calculation and state classification with deterministic tests. Skill graphs, quiz-driven mastery updates, recommendations and the Mastery Map are planned; see [docs/adaptive-learning.md](docs/adaptive-learning.md). |
 | Assessment, interaction, admin | Planned | Approved scaffolds only. |
@@ -177,6 +177,7 @@ these documents for their specific responsibilities:
 | [Testing](docs/testing.md) | Test strategy, suite placement and executed verification evidence. |
 | [Deployment](docs/deployment.md) | Interim deployment decisions, privileges and operating procedure. |
 | [OpenAPI](docs/api/openapi.yaml) | Specification of the implemented REST endpoints. |
+| [UI/UX design](DESIGN.md) | Visual system, screens, flows and frontend handoff; subordinate to the requirements, architecture, ADRs and API contracts. |
 | [Sample data](sample-data/README.md) | Synthetic dataset, safe loading procedure and material provenance. |
 | [Contributing](CONTRIBUTING.md) | Branch, commit, PR, testing, and documentation workflow. |
 
@@ -218,8 +219,8 @@ deployment-privilege work and for the sample datasets, their verification and
 documentation, and the revised sample slides; Anthropic Claude Code assisted with
 the DP01 HTTPS ingress integration, its tests and its deployment documentation,
 and with the DP01 MinIO initializer, its qualification tests and the MinIO artifact
-review. Anthropic Claude Code also wrote the local UI/UX specification (`DESIGN.md`,
-6 November 2026) and implemented the frontend redesign (and on 7 November its
+review. Anthropic Claude Code also wrote the UI/UX specification ([DESIGN.md](DESIGN.md);
+revisions r1 on 6 November 2026 through r6 on 8 November 2026) and implemented the frontend redesign (and on 7 November its
 typography, logo-palette and navigation-indicator refinement and the frontend
 Alpine pin refresh), the design preview, the
 browser harness and the Playwright E2E suite, using the Impeccable design skill and

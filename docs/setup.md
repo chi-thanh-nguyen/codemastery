@@ -489,8 +489,8 @@ and a successful build do not establish frontend/backend integration in a real
 browser or deployment readiness.
 
 The MUI theme and `presentationTokens` live in `frontend/src/app/theme/theme.ts`
-and implement the local `DESIGN.md` revision `DESIGN-2026-11-06-r1` (“The Lit
-Path”; the file is not tracked in Git). An ink frame `#0A0B0F` holds the top bar
+and implement the root `DESIGN.md` specification (“The Lit Path”; first revision
+`DESIGN-2026-11-06-r1`, current revision `DESIGN-2026-11-08-r6`, tracked in Git from r6). An ink frame `#0A0B0F` holds the top bar
 (80 px, 64 px below 600 px) and a `#F6F6F7` canvas that rises under the current
 navigation item; asides use `#EEEEF0`, tiles are white at a 24 px radius, buttons
 are pills and icon actions 44 px circles. Text is ink `#15171C`/`#50545C`; the logo
@@ -549,10 +549,11 @@ whose contracts are pending exist only there.
 
 **Visual inspiration (6 November 2026 redesign):** [E-learning Platform – Learning
 Plan Dashboard — Nixtio](https://dribbble.com/shots/23956256). The redesign
-follows its general composition (ink frame, canvas, pastel tiles); no asset from
-the shot is used, the logo is CodeMastery's own, and no affiliation is implied.
+follows its visual language (ink frame, canvas, pastel tiles); its composition,
+screens and assets are not copied, the logo is CodeMastery's own, and no affiliation
+is implied (see the `DESIGN.md` fidelity contract).
 Known AI assistance: Anthropic's Claude Code (Claude Opus 5.5) wrote the
-`DESIGN.md` revision and implemented and verified the redesign and its 7 November
+`DESIGN.md` revisions (r1 on 6 November 2026 through r6 on 8 November 2026) and implemented and verified the redesign and its 7 November
 2026 typography, logo-palette and navigation-indicator refinement, with the locally
 installed Impeccable skill for design review and Playwright CLI for browser
 inspection.

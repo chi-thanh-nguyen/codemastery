@@ -161,6 +161,27 @@ Playwright does not collect them (its `testDir` is `tests/`). The existing
 `/frontend/src/shared/` and `/e2e/` CODEOWNERS rules cover them. No other path
 changes; the immutable canonical tree is unchanged.
 
+### Design specification and shared brand components record — 8 November 2026
+
+The Leader's instruction "CodeMastery — Design Specification R6, Backlog Coverage and
+Documentation Alignment" (8 November 2026) asks for the root UI/UX specification to be
+tracked and for the following existing files to be recorded. The tree below now shows them:
+
+- `DESIGN.md` — the root UI/UX specification (revision `DESIGN-2026-11-08-r6`). It was a
+  local file excluded from Git; it is now tracked at the repository root. It matches no
+  CODEOWNERS rule; adding one is a separate ownership decision.
+- `frontend/src/shared/components/CourseMark.tsx` and its two official logo assets,
+  `course-logo-python.svg` and `course-logo-typescript.svg` — the course mark and logo
+  registry described in [setup](setup.md#frontend-setup-and-validation). They have been on
+  `main` since 7 November 2026 and were not recorded here before.
+- `frontend/src/shared/components/BrandLogo.tsx` — the logo artwork and wordmark lockup
+  components (`BrandLogo`, `BrandWordmark`). The file has been on `main` since
+  29 October 2026 and was not recorded here before.
+
+This records files that already exist. It changes no code, path, ownership or
+hierarchy, grants no retrospective approval, and leaves the immutable canonical tree
+unchanged. The existing `/frontend/src/shared/` CODEOWNERS rule covers the frontend files.
+
 ## Bounded Course unit-test placement correction
 
 On 2026-10-26 (Asia/Ho_Chi_Minh), the Project Leader manually relocated
@@ -1626,9 +1647,13 @@ codemastery/
 
 │           │   ├── AppHeader.tsx
 
+│           │   ├── BrandLogo.tsx
+
 │           │   ├── CodeBlock.tsx
 
 │           │   ├── ConfirmDialog.tsx
+
+│           │   ├── CourseMark.tsx
 
 │           │   ├── DataTable.tsx
 
@@ -1653,6 +1678,10 @@ codemastery/
 │           │   ├── Tile.tsx
 
 │           │   ├── ViewRail.tsx
+
+│           │   ├── course-logo-python.svg
+
+│           │   ├── course-logo-typescript.svg
 
 │           │   ├── presentation.browser.cjs
 
@@ -1791,6 +1820,8 @@ codemastery/
 ├── .gitignore
 
 ├── AGENTS.md
+
+├── DESIGN.md
 
 ├── README.md
 
