@@ -554,6 +554,8 @@ governance or immutable reference artifacts.
 
 ## CT06 production and enablement proposal — no physical change
 
+> **8 November 2026 scope update:** the following proposal is historical. [ADR005 §§3–7/9](decisions/005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility) now approves Course-owned closed JSON settings, latest-per-skill evidence policy, U08/U09 and the Course-row transaction guard. Its new PR remains unmerged. No SQL column, migration or numeric mastery/history ledger is added.
+
 The [CT06 reconciliation and proposal](adaptive-learning.md#19-ct06-reconciliation-and-completion-proposal)
 is the detailed pending policy record. It preserves V002 Course-owned JSONB settings,
 V003 skill/mapping ownership, V004 Assessment evidence and V005 categorical mastery;
@@ -577,3 +579,23 @@ Course-root locking serializes mutations and publication changes. Hidden members
 remain stored but are concealed from learner REST reads/counts/mutations. No dates,
 progress/resume policy, atomic mastery participation or schema changes are selected.
 See ADR002 and OpenAPI for exact operations, precedence, representations and filters.
+
+
+## Batch 1 integrity and configuration contract — 8 November 2026
+
+[ADR005](decisions/005-batch-01-contract-approvals.md) is the normative delegated
+approval; these are documentation contracts awaiting implementation and PR integration.
+
+| Guarantee | Database baseline | Required application owner and contract |
+|---|---|---|
+| Prerequisite endpoint Course, duplicate and self-edge protection | V003 composite FKs, UNIQUE and CHECK | Adaptive additionally rejects arbitrary cycles under the Course-owned row guard; deterministic DFS reachability, not a DDL guarantee. |
+| Lesson–skill same-Course consistency | V003 independent FKs do not enforce it | Course proves Lesson ancestry; Adaptive proves skill scope before pair mutations. Referenced identities cannot move across Courses in place. |
+| Question Course and complete coverage | V004 has skill_id, no course_id or publication flag | Adaptive supplies scoped skill validation; Assessment counts distinct valid Question IDs including zero for requested skills. Reused quiz membership does not multiply counts. |
+| Policy and readiness | V002 checks JSON-object presence only when enabled | Course stores intent/configuration; Adaptive validates the closed weak/mastered rational pairs and positive minimumQuestionsPerSkill, applies complete coverage and published-Lesson mapping checks. No production defaults. |
+| Concurrency | No DDL acyclicity/coverage trigger | CourseManagementService owns SELECT FOR UPDATE on its Course row at explicitly selected READ COMMITTED; all relevant Course/Adaptive/Assessment writers must participate before readiness is verified. |
+| Mastery history | V005 stores categorical state only; V004 retains attempt/answer evidence | Latest eligible submitted attempt per assessed skill, equal question weight/no decay, deterministic existing-field ordering. Complete capture/immutability, replay and atomic policy reclassification require real implementation under CT04/CT08/CT22. |
+
+The exact JSON schema and bounds are in ADR005 §6.2 and OpenAPI's AdaptivePolicy;
+they refine the existing JSONB object, not the SQL schema. Missing legacy policy
+is readable only on a disabled Course; new settings writes require explicit valid
+policy. No schema migration is made or authorized by this contract approval.

@@ -2595,3 +2595,29 @@ probe has no per-call timeout; the `node --test` lifecycle tests are not run in 
 | CI readiness steps extracted from `ci.yml` before and after, with a stub `docker` | Marker logged during the final sleep: before FAIL, after PASS; early marker, no marker and an exited container unchanged; `bash -n` PASS for both steps and the inner script |
 | `local-stack.ts` loaded through Playwright 1.63's TypeScript transform (scratch config; its default export not called) | PASS; no Docker resource created |
 | `npx playwright test`, `npm run test:browser` | Not run: the suite rebuilds and re-tags the shared `codemastery-e2e/backend:local` image; the harness is a visual check outside this change |
+
+
+## Batch 1 bounded verification allocation — 8 November 2026
+
+**CT14-B1-COVERAGE-2026-11-08-r1 — DELEGATED_APPROVED**, under the Leader's
+“Batch 1 Complete Contract Approval & Integration Preparation” instruction;
+Codex independently approves this allocation in [ADR005 §9](decisions/005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility).
+Only these Batch 1 obligations are added to the existing inventory, relative to
+`backend/src/test/java/com/codemastery/`:
+
+| Existing location | Required contract coverage |
+|---|---|
+| `modules/adaptive/skillgraph/SkillGraphTest.java` | B1-O01/O02/O11: representation/graph, invalid references, cycle/self/duplicate behavior, mapping consumption and deletion outcomes using explicit fixtures/doubles. |
+| `modules/adaptive/mastery/AdaptiveSettingsServiceTest.java` | B1-O05/O08/O09/O10: closed policy validation, coverage completeness, readiness, disabled-mode and settings-change orchestration with conforming producer doubles. |
+| `modules/adaptive/mastery/MasteryCalculatorTest.java`, `MasteryStateClassifierTest.java` | B1-O06: unchanged pure CT24 arithmetic, symbolic thresholds/equality/invalid/max-int oracles; CT36 independent review remains separate. |
+| `integration/AdaptiveLearningFlowIntegrationTest.java` | B1-O01/O03/O04/O05/O07/O08/O11: real Course/Adaptive/Assessment providers, authenticated scopes, PostgreSQL concurrent graph writes and coverage/publication races, FK and rollback evidence. Use independent transactions and barriers, not sleeps or mocks. |
+| `integration/MasteryProgressTransactionIntegrationTest.java` | B1-O07/O09/O10: actual evidence ordering/replay, policy reclassification and mastery/progress all-or-nothing behavior after CT08/CT22 execution contracts and providers exist. |
+
+Do not mistake allocated tests for implemented tests or runtime success. All paths
+already exist; no new suite, framework, fixture lifecycle, runner or whole Final
+CT14.coverage/E2E approval is granted. Preserve shared Testcontainers/Flyway lifecycle,
+synthetic identities and explicit cleanup/isolation. Real concurrency assertions
+must examine committed state after success/failure and prove guard participation;
+unit doubles cannot establish the PostgreSQL guarantees. The normative expected
+results are [ADR005 B1-O01–O11](decisions/005-batch-01-contract-approvals.md#82-required-oracles-specification-not-executed-tests).
+Application verification has not been executed by this documentation task.

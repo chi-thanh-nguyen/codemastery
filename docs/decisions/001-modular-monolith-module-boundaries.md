@@ -487,6 +487,8 @@ service is added to the application.
 
 ## 12. CT03 access and consumer contract reconciliation
 
+> **8 November 2026 amendment:** [ADR005 §§3/5/7/9](005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility), `CT03-B1-2026-11-08-r2` (DELEGATED_APPROVED), completes the former U07 structural/no-extra-read gate and adds only the named Course structure/guard/settings boundaries. The original r1 text below is preserved; its U07 pending and combined checklist dispositions are historical where replaced by that amendment. All seven assertions, U03/U04, access/error policy and approval provenance remain unchanged. The new amendment is pending PR integration; r1 is already effective under ADR004.
+
 ### 12.1 Status, authority and inspected baseline
 
 **CT03-2026-10-21-r1: DELEGATED_TECHNICAL_APPROVAL;
@@ -875,6 +877,8 @@ are retained; none was performed by this documentation change.
 
 
 ## 13. CT06 settings and coverage boundary reconciliation — proposal
+
+> **Historical proposal, superseded within Batch 1 scope on 8 November 2026.** [ADR005](005-batch-01-contract-approvals.md) is the normative delegated approval for CT40, CT05 and CT06.production/enablement, including U08/U09 and exact existing locations. The original proposal below remains verbatim as history; its unresolved bindings are replaced by ADR005, whose PR integration and implementation remain separate.
 
 The detailed [CT06 reconciliation and proposal](../adaptive-learning.md#19-ct06-reconciliation-and-completion-proposal)
 records Codex's scoped technical selection, prepared/revalidated 2026-10-19

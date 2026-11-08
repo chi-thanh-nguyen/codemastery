@@ -34,10 +34,11 @@ approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPR
 
 | ADR | Subject | Status |
 |---|---|---|
-| [ADR001](001-modular-monolith-module-boundaries.md) | Modular-monolith module boundaries (§§1–10); CT01 (§11) and CT03 (§12) contract records; CT06 boundary proposal (§13) | §§1–10 approved architecture; §11/§12 `LEADER_APPROVED` (ADR004); §13 `PROPOSED_NOT_EFFECTIVE` |
+| [ADR001](001-modular-monolith-module-boundaries.md) | Modular-monolith module boundaries (§§1–10); CT01 (§11) and CT03 (§12) contract records; CT06 boundary proposal (§13) | §§1–10 approved architecture; §11/§12 `LEADER_APPROVED` (ADR004); §13 historical proposal; Batch 1 choices superseded by ADR005 |
 | [ADR002](002-interim-delegated-contracts.md) | Bounded Interim delegated contracts and full source disposition inventory; FE07 and SD01/SD02 records | Slices `DELEGATED_APPROVED` (CT20.I Leader-authorized); FE07 and CT15-SD `LEADER_APPROVED` (ADR004); other dispositions as listed |
 | [ADR003](003-postgresql-alpine-su-exec-image.md) | PostgreSQL image hardening (Alpine with su-exec) | `LEADER_APPROVED` (2 November 2026); residual risks `PENDING_LEADER_RISK_ACCEPTANCE` |
-| [ADR004](004-leader-approval-of-delegated-records.md) | Leader approval of the earlier delegated records; label rename | `LEADER_APPROVED` (8 November 2026) |
+| [ADR004](004-leader-approval-of-delegated-records.md) | Leader approval of the earlier delegated records; label rename | `LEADER_APPROVED` (8 November 2026), merged PR #227 |
+| [ADR005](005-batch-01-contract-approvals.md) | Nine Batch 1 approvals and bounded CT03/CT24/CT14/CT18 prerequisites | `DELEGATED_APPROVED` (8 November 2026); new PR integration pending |
 
 ## Contract decision records by revision
 
@@ -66,13 +67,26 @@ approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPR
 | `CT37-MARKDOWN-2026-11-08-r1` | Markdown rendering policy | [setup](../setup.md#ct37markdown--ct37-markdown-2026-11-08-r1--delegated_approved) | `DELEGATED_APPROVED` | PR #226 |
 | `CT11-READ-FIELDS-2026-11-08-r1` | Notification row field set | [data model](../data-model.md#notification-fields--ct11read-field-set-only--ct11-read-fields-2026-11-08-r1--delegated_partially_approved) | `DELEGATED_PARTIALLY_APPROVED` | PR #226 |
 | `STRUCT-MASTERY-MAP-2026-11-08-r1` | Shared read-only Mastery Map location (structure) | [structure](../repository-structure.md#shared-read-only-mastery-map-location--struct-mastery-map-2026-11-08-r1--delegated_approved-structure-decision-not-yet-implemented) | `DELEGATED_APPROVED`, not yet implemented | PR #226 |
-| `LEADER-APPROVED-2026-11-08-r1` | Effectiveness of the records above that carried the retired label | [ADR004](004-leader-approval-of-delegated-records.md) | `LEADER_APPROVED` | this change |
+| `LEADER-APPROVED-2026-11-08-r1` | Effectiveness of the records above that carried the retired label | [ADR004](004-leader-approval-of-delegated-records.md) | `LEADER_APPROVED` | PR #227 |
+| `CT40-LESSON-READ-2026-11-08-r1` | CT40.lesson-read | [ADR005](005-batch-01-contract-approvals.md#2-checkpoint-dispositions-and-dependency-order) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT40-SKILL-TAG-2026-11-08-r1` | CT40.skill-tag | [ADR005](005-batch-01-contract-approvals.md#2-checkpoint-dispositions-and-dependency-order) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT40-COVERAGE-2026-11-08-r1` | CT40.coverage | [ADR005](005-batch-01-contract-approvals.md#2-checkpoint-dispositions-and-dependency-order) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT05-REPRESENTATION-2026-11-08-r1` | CT05.representation | [ADR005](005-batch-01-contract-approvals.md#2-checkpoint-dispositions-and-dependency-order) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT05-MUTATION-2026-11-08-r1` | CT05.mutation | [ADR005](005-batch-01-contract-approvals.md#2-checkpoint-dispositions-and-dependency-order) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT05-MAPPING-2026-11-08-r1` | CT05.mapping | [ADR005](005-batch-01-contract-approvals.md#2-checkpoint-dispositions-and-dependency-order) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT05-BINDINGS-2026-11-08-r1` | CT05.bindings | [ADR005](005-batch-01-contract-approvals.md#2-checkpoint-dispositions-and-dependency-order) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT06-PRODUCTION-2026-11-08-r1` | CT06.production | [ADR005](005-batch-01-contract-approvals.md#2-checkpoint-dispositions-and-dependency-order) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT06-ENABLEMENT-2026-11-08-r1` | CT06.enablement | [ADR005](005-batch-01-contract-approvals.md#2-checkpoint-dispositions-and-dependency-order) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT03-B1-2026-11-08-r2` | U07 completion and bounded Course boundaries | [ADR005 §9](005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT24-CALCULATION-2026-11-08-r2` | Final reuse of existing pure arithmetic | [ADR005 §9](005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT14-B1-COVERAGE-2026-11-08-r1` | Batch 1 existing test allocation | [ADR005 §9](005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
+| `CT18-B1-ERRORS-2026-11-08-r1` | Batch 1 feature-specific failure mappings | [ADR005 §8.1](005-batch-01-contract-approvals.md#81-exact-inventory-and-rest-contract) | `DELEGATED_APPROVED`; PR integration pending | Batch 1 PR |
 
 ## Proposals and open Leader decisions recorded in the repository
 
 | Record | Status |
 |---|---|
-| [CT06 production and enablement proposal](../adaptive-learning.md#19-ct06-reconciliation-and-completion-proposal) (with [ADR001 §13](001-modular-monolith-module-boundaries.md#13-ct06-settings-and-coverage-boundary-reconciliation--proposal) and the [data-model note](../data-model.md#ct06-production-and-enablement-proposal--no-physical-change)) | `PROPOSED_NOT_EFFECTIVE`; Leader decisions listed in its §19.5 |
+| [CT06 production and enablement proposal](../adaptive-learning.md#19-ct06-reconciliation-and-completion-proposal) (with [ADR001 §13](001-modular-monolith-module-boundaries.md#13-ct06-settings-and-coverage-boundary-reconciliation--proposal) and the [data-model note](../data-model.md#ct06-production-and-enablement-proposal--no-physical-change)) | Historical `PROPOSED_NOT_EFFECTIVE` proposal; corresponding Batch 1 choices now superseded by [ADR005](005-batch-01-contract-approvals.md), with LD-B1-1/2/3 resolved by delegation |
 | [CT14 coverage and isolation proposal](../testing.md#ct14-coverage-and-isolation-reconciliation--proposal) | `PROPOSED_NOT_EFFECTIVE`, partly overtaken by CT14-FINAL |
 | [CT16 proposal, 18 October](../setup.md#ct16-frontend-contract-proposal--18-october-2026-historical-record) and [CT17 proposal, 18 October](../deployment.md#ct17-completion-proposal--18-october-2026-historical-record) | Historical records, superseded by the approvals above |
 | DP01 security and image decisions in [deployment](../deployment.md) (sections "Outstanding Leader decisions", "Remaining decisions", "Admission and outstanding decisions") | Open Leader decisions F1, F4, F5, F6, F10, F11 and image admissions |

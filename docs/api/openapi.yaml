@@ -858,6 +858,632 @@
           }
         }
       }
+    },
+    "/api/courses/{courseId}/skill-graph": {
+      "get": {
+        "operationId": "getOwnedSkillGraph",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Returns all valid Course skills, prerequisites and Lesson mappings. No pagination; empty graph valid for draft authoring. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillGraph"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/skills": {
+      "post": {
+        "operationId": "createCourseSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Creates one skill with server UUID. Nonblank name, optional null/nonblank description. Names are not unique; no invented length cap. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/skills/{skillId}": {
+      "put": {
+        "operationId": "updateCourseSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Replaces name/description; omitted description becomes null. Course/identity immutable. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCourseSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Rejects any prerequisite, mapping, Question or mastery reference (409); no cascade. Missing skill is 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation"
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Batch1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}": {
+      "put": {
+        "operationId": "addCoursePrerequisite",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent add after both scoped endpoints validate. Self-edge 400, new cycle 409. Full DFS reachability and Course-row serialization required. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prerequisiteSkillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation"
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Batch1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      },
+      "delete": {
+        "operationId": "removeCoursePrerequisite",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent remove after validating both endpoints; absent pair succeeds, missing/foreign endpoint 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prerequisiteSkillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation"
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}": {
+      "put": {
+        "operationId": "mapCourseLessonSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent mapping under Course-owned ancestry assertion and Adaptive same-Course skill check; no extra mapping structural read. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation"
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      },
+      "delete": {
+        "operationId": "unmapCourseLessonSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent unmap after validating Course Lesson/skill scope. May suspend effective readiness while preserving stored enabled intent and earned progress. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation"
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/adaptive-settings": {
+      "get": {
+        "operationId": "getCourseAdaptiveSettings",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Reads Course-owned stored intent/configuration. Unconfigured disabled policy may be null; malformed stored policy is 500. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptiveSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      },
+      "put": {
+        "operationId": "replaceCourseAdaptiveSettings",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Validates policy and guarded Course/graph/Assessment readiness before enabling; known insufficiency 409, unavailable data 500. Disabling retains evidence/progress and valid-policy quiz-driven mastery. No automatic mutation retry. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptiveSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Batch1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdaptiveSettingsWrite"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1293,6 +1919,213 @@
           "totalElements",
           "totalPages"
         ]
+      },
+      "SkillWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Skill": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ]
+      },
+      "SkillPrerequisite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prerequisiteSkillId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "skillId",
+          "prerequisiteSkillId"
+        ]
+      },
+      "LessonSkillMapping": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "lessonId",
+          "skillId"
+        ]
+      },
+      "SkillGraph": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Skill"
+            }
+          },
+          "prerequisites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillPrerequisite"
+            }
+          },
+          "mappings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LessonSkillMapping"
+            }
+          }
+        },
+        "required": [
+          "courseId",
+          "skills",
+          "prerequisites",
+          "mappings"
+        ],
+        "description": "Complete owning-Instructor graph. Lists sorted by lowercase UUID text, pairs by first then second ID. Each skill and mapped Lesson belongs to courseId. Dependency direction is skillId -> prerequisiteSkillId. No canonical lesson order or learner mastery projection is implied."
+      },
+      "RationalThreshold": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "numerator": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "denominator": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "numerator",
+          "denominator"
+        ],
+        "description": "Exact positive bounded-int ratio <= 1. Responses reduce by greatest common divisor; comparisons use exact long cross-products."
+      },
+      "AdaptivePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "weak": {
+            "$ref": "#/components/schemas/RationalThreshold"
+          },
+          "mastered": {
+            "$ref": "#/components/schemas/RationalThreshold"
+          },
+          "minimumQuestionsPerSkill": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "weak",
+          "mastered",
+          "minimumQuestionsPerSkill"
+        ],
+        "description": "Explicit per-Course policy: 0 < weak < mastered <= 1; positive n counts distinct valid bank Questions per skill, not questions per attempt. All keys required; no defaults. Reject duplicate/unknown keys, nulls, numeric strings and non-integers. No supplied concrete production/demo values."
+      },
+      "AdaptiveSettingsWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AdaptivePolicy"
+          }
+        },
+        "required": [
+          "adaptiveEnabled",
+          "policy"
+        ],
+        "description": "Full replacement. Valid explicit policy required even when disabling. Enabled write also requires guarded readiness. Threshold change requires atomic whole-Course reclassification before publication; n-only change revalidates coverage."
+      },
+      "AdaptiveSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdaptivePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "courseId",
+          "adaptiveEnabled",
+          "policy"
+        ],
+        "description": "Stored intent and policy, not a durable readiness assertion. Null policy allowed only for existing unconfigured disabled Course reads; updates cannot clear policy. No extra mastery/progress fields."
       }
     },
     "responses": {
@@ -1321,6 +2154,46 @@
             "$ref": "#/components/headers/AuthenticationNoStore"
           }
         },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Invalid": {
+        "description": "Malformed UUID/body, invalid text/policy or self-prerequisite; safe field errors sorted by field then code",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Unavailable": {
+        "description": "Resource not available; concealed missing/foreign descendant or hidden non-owner Course",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Failure": {
+        "description": "Safe internal/provider/integrity/transaction failure; no partial effects",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Conflict": {
+        "description": "Cycle, referenced skill deletion or enablement/readiness rejection; no partial effects",
         "content": {
           "application/problem+json": {
             "schema": {
@@ -1444,7 +2317,14 @@
       "Protected CODEOWNERS/owner review, required checks/security scanning, last-push approval, resolved conversations and integration into main",
       "Full U07 requires an effective CT40.lesson-read structural contract or explicit no-extra-read disposition; no CT40 approval here",
       "Owning-Issue operation/REST/mutation approvals, implementation authorization and actual runtime verification remain separate"
-    ]
+    ],
+    "batch1Amendment": {
+      "contractRevision": "CT03-B1-2026-11-08-r2",
+      "decisionReference": "../decisions/005-batch-01-contract-approvals.md",
+      "approvalDisposition": "DELEGATED_APPROVED",
+      "effectiveOnMain": false,
+      "scope": "U07 structural/no-extra-read prerequisite technically resolved; bounded Course structure/guard/settings boundaries added. Original seven assertions, U03/U04 and access/error policy unchanged. New PR integration pending."
+    }
   },
   "x-fe07-delegated-approval": {
     "revision": "FE07-2026-10-27-r1",
@@ -1462,6 +2342,39 @@
       "CT22.resume",
       "CT22.atomic",
       "FE08"
+    ]
+  },
+  "x-batch-01-contract-approval": {
+    "status": "DELEGATED_APPROVED",
+    "decisionReference": "../decisions/005-batch-01-contract-approvals.md",
+    "approvalDate": "2026-11-08",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "authority": "Codex independently selected and technically approved under explicit Project Leader Batch 1 delegation; no personal Leader/module review implied.",
+    "effectiveOnMain": false,
+    "integrationStatus": "PR_PENDING_INTEGRATION",
+    "implementationStatus": "NEW_OPERATIONS_APPROVED_NOT_IMPLEMENTED",
+    "checkpoints": [
+      "CT40.lesson-read",
+      "CT40.skill-tag",
+      "CT40.coverage",
+      "CT05.representation",
+      "CT05.mutation",
+      "CT05.mapping",
+      "CT05.bindings",
+      "CT06.production",
+      "CT06.enablement"
+    ],
+    "compatibilityAmendments": [
+      "CT03-B1-2026-11-08-r2",
+      "CT24-CALCULATION-2026-11-08-r2",
+      "CT14-B1-COVERAGE-2026-11-08-r1",
+      "CT18-B1-ERRORS-2026-11-08-r1"
+    ],
+    "internalBoundaries": "ADR005 sections 3, 5 and 7.1; Course/Adaptive/Assessment application surfaces in existing files only. These are not extra REST operations.",
+    "retainedGates": [
+      "Protected main integration; eligible CODEOWNER and independent last-push review, required checks and resolved threads",
+      "Separate implementation authorization and actual provider/PostgreSQL/security/concurrency verification",
+      "CT04/CT08/CT22 execution, evidence and atomic progress contracts; no implementation, deployment, release or risk acceptance authorized"
     ]
   }
 }
