@@ -465,7 +465,7 @@ in this foundation supplies application records.
 The [CT01 technical contract](decisions/001-modular-monolith-module-boundaries.md#11-ct01-completion-proposal--pending-authoritative-integration)
 records **CT01-2026-10-21-r1**, technically approved on 2026-10-21 under the
 Project Leader's explicit CT01/CT03 delegation. New detail is
-APPROVED_PENDING_PROTECTED_INTEGRATION; existing effective approvals retain
+[LEADER_APPROVED](decisions/README.md#approval-status-labels); existing effective approvals retain
 their own provenance. Protected review and merge remain required. Preserve
 ADR002 `CT01.core` and the immutable V001 schema without change: Auth owns
 `users.id/email/password_hash/display_name/role/account_status`; role literals
@@ -504,7 +504,7 @@ instructor acceptance.
 [ADR001 §12](decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation)
 records **CT03-2026-10-21-r1**, technically approved on 2026-10-21 under the
 Project Leader's explicit CT01/CT03 delegation; new CT03-owned decisions are
-APPROVED_PENDING_PROTECTED_INTEGRATION. Effective catalogue/identity approvals
+LEADER_APPROVED. Effective catalogue/identity approvals
 retain their existing scope. Full U07 remains unresolved for CT40.lesson-read.
 It consumes V002's existing membership states and Course/Chapter/Lesson/Material
 references without changing schema, state catalogues or lifecycle invariants in

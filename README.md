@@ -171,6 +171,9 @@ these documents for their specific responsibilities:
 | [Repository structure](docs/repository-structure.md) | Approved file/module locations. |
 | [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md) | Approved module boundaries and interactions. |
 | [ADR 002](docs/decisions/002-interim-delegated-contracts.md) | Bounded Interim technical contracts and their approval records. |
+| [ADR 003](docs/decisions/003-postgresql-alpine-su-exec-image.md) | PostgreSQL image hardening (Alpine with su-exec). |
+| [ADR 004](docs/decisions/004-leader-approval-of-delegated-records.md) | Leader approval of earlier delegated records; the `LEADER_APPROVED` label. |
+| [Decision index](docs/decisions/README.md) | Where every decision record lives, and what each approval status label means. |
 | [Data model](docs/data-model.md) | Conceptual model and approved initial PostgreSQL physical baseline. |
 | [Adaptive Learning](docs/adaptive-learning.md) | Approved design, planned evaluation, and deferred decisions. |
 | [Setup](docs/setup.md) / [environment template](.env.example) | Current development configuration contract. |

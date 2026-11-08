@@ -1421,20 +1421,22 @@
         "Integration/security verification"
       ]
     },
-    "approvalDisposition": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "approvalDisposition": "LEADER_APPROVED",
     "contractRevision": "CT01-2026-10-21-r1",
     "approvalDate": "2026-10-21",
     "timezone": "Asia/Ho_Chi_Minh",
-    "effectiveOnMain": false
+    "effectiveOnMain": true,
+    "effectivenessRecord": "LEADER-APPROVED-2026-11-08-r1 (docs/decisions/004-leader-approval-of-delegated-records.md); effectiveOnMain was false until 2026-11-08"
   },
   "x-ct03-access-proposal": {
     "status": "DELEGATED_APPROVED",
     "decisionReference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation",
-    "approvalDisposition": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "approvalDisposition": "LEADER_APPROVED",
     "contractRevision": "CT03-2026-10-21-r1",
     "approvalDate": "2026-10-21",
     "timezone": "Asia/Ho_Chi_Minh",
-    "effectiveOnMain": false,
+    "effectiveOnMain": true,
+    "effectivenessRecord": "LEADER-APPROVED-2026-11-08-r1 (docs/decisions/004-leader-approval-of-delegated-records.md); effectiveOnMain was false until 2026-11-08",
     "authority": "Project Leader @chi-thanh-nguyen instruction CodeMastery — Complete CT01/CT03 Technical Approval Under Explicit Leader Delegation; Codex approves CT03-owned scope only.",
     "scope": "ADR001 section 12: learning/ownership/visibility/ancestry predicates, seven assertions, U03/U04 Course-side bindings and U07 authorization. Public catalogue and REST DTOs unchanged.",
     "u04Resolution": "Existing CourseAccessService.requireLessonReadAccess(UUID lessonId), void; Course privately derives ancestry. No new structural lookup or schema field. Exact concealment/error behavior in ADR001 section 12.4.",
@@ -1446,7 +1448,8 @@
   },
   "x-fe07-delegated-approval": {
     "revision": "FE07-2026-10-27-r1",
-    "status": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "status": "LEADER_APPROVED",
+    "effectivenessRecord": "LEADER-APPROVED-2026-11-08-r1 (docs/decisions/004-leader-approval-of-delegated-records.md)",
     "reference": "../decisions/002-interim-delegated-contracts.md#fe07-full-implementation--delegated-approval-27-october-2026",
     "scope": [
       "CT22.membership",

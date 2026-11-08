@@ -64,7 +64,7 @@ reference correction above to the canonical existing
 repository tree and current approved inventory agree on this location. See
 [CT16-2026-10-24-r1](../setup.md#ct16-delegated-technical-approval--24-october-2026)
 for authority, evidence and protected-integration gates. This correction is
-**APPROVED_PENDING_PROTECTED_INTEGRATION**; no filename, API, unrelated ADR002
+**[LEADER_APPROVED](README.md#approval-status-labels)**; no filename, API, unrelated ADR002
 clause or historical disposition is changed, and no implementation is authorized.
 
 ### CT38.core — DELEGATED_APPROVED
@@ -298,7 +298,7 @@ Independently reviewed arithmetic and actual executable prototype results remain
 ## FE07 full implementation — delegated approval, 27 October 2026
 
 Revision `FE07-2026-10-27-r1`, recorded in PR #101, is
-**APPROVED_PENDING_PROTECTED_INTEGRATION**. Authorization: Project Leader
+**LEADER_APPROVED**. Authorization: Project Leader
 @chi-thanh-nguyen's explicit “PR #101 Full FE07 Completion, Delegated Contract
 Approval and Integration” task, sections 2.1–2.4, delegates selection and technical
 approval of necessary FE07 dependencies to Codex and authorizes their implementation,
@@ -408,7 +408,7 @@ the committed origin/configuration defaults.
 
 ## SD01/SD02 sample data completion — delegated approval, 30 October 2026
 
-Revision `CT15-SD-2026-10-30-r3` is **APPROVED_PENDING_PROTECTED_INTEGRATION**.
+Revision `CT15-SD-2026-10-30-r3` is **LEADER_APPROVED**.
 Authorization: Project Leader @chi-thanh-nguyen's explicit “CodeMastery — Complete
 SD01 and SD02 Implementation with Delegated Technical Authority” task, 30 October
 2026 (ICT), delegates selection and technical approval of the decisions directly

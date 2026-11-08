@@ -405,6 +405,8 @@ and recommendation history; V006 owns Interaction/audit, not an Adaptive policy.
 
 ### 19.2 Prototype implementation reconciliation
 
+> **Status note, 8 November 2026.** PR #86 was merged on 24 October 2026 as `0b29672`. On `main` at `5a83a00`, `MasteryCalculator` declares `SkillEvidence` and `MasteryEvidenceRate` (with `isUnknown()`), and `MasteryStateClassifier` declares `ClassificationThresholds` and `RationalThreshold(int numerator, int denominator)`; invalid input raises `IllegalArgumentException`. The discrepancies listed below describe the PR #86 head of 19 October and are historical. This note changes no proposal and no approval; CT06.production and CT06.enablement remain `PROPOSED_NOT_EFFECTIVE`.
+
 The effective CT24 contract remains
 `MasteryCalculator.calculate(SkillEvidence) -> MasteryEvidenceRate`, including
 validated immutable records and `isUnknown()`, and
