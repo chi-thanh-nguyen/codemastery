@@ -182,6 +182,24 @@ This records files that already exist. It changes no code, path, ownership or
 hierarchy, grants no retrospective approval, and leaves the immutable canonical tree
 unchanged. The existing `/frontend/src/shared/` CODEOWNERS rule covers the frontend files.
 
+### Shared read-only Mastery Map location — STRUCT-MASTERY-MAP-2026-11-08-r1 — DELEGATED_APPROVED structure decision, not yet implemented
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+Resolves [DESIGN.md r6](https://github.com/chi-thanh-nguyen/codemastery/blob/4eb5b70be0c98df14e162b34d2c0314b02ab47b5/DESIGN.md#open-questions-do-not-block-design) open question 5.
+
+**Decision.** The read-only Mastery Map graph presentation becomes shared presentation:
+- `frontend/src/features/mastery/components/MasteryGraph.tsx` → `frontend/src/shared/components/MasteryGraph.tsx`;
+- `frontend/src/features/mastery/utils/masteryGraphLayout.ts` and `masteryGraphLayout.test.ts` → `frontend/src/shared/utils/`.
+
+The shared graph takes data through props only and defines its own node and edge view types; it imports no API, hook or feature type. The page, `SkillDetailPanel`, `NextRecommendedCard`, `PlacementPrompt`, `MasteryStateChip`, `ExampleMasteryMap`, hooks, API and types stay in `features/mastery`. Instructor learner detail composes the shared graph with its own CT33.insights data, the shared `DataTable` as its list equivalent and the shared `MasteryLegend`. The skill-graph editor canvas is unchanged; merging it is not decided.
+
+**Implementation.** FE12 performs the move when it is authorized and records it in the tree; FE19 consumes the shared component. The `/frontend/src/shared/` CODEOWNERS rule covers the new paths.
+
+**Alternatives considered.** Importing `features/mastery` from `features/instructor` (rejected: cross-feature internal import, CT16.final-state F1); a second read-only graph in learner-insights (rejected: duplication); a new shared feature directory (rejected: unnecessary structure level).
+
+The tree below is unchanged until FE12 performs the move.
+
 ## Bounded Course unit-test placement correction
 
 On 2026-10-26 (Asia/Ho_Chi_Minh), the Project Leader manually relocated

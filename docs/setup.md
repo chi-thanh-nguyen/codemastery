@@ -1453,6 +1453,8 @@ fallback is `/home` (Learner home) instead of `/courses`; Instructors and
 Administrators keep `/courses`. The return capture, one-time consumption, rejection
 of caller-supplied targets and logout behavior are unchanged.
 
+*Amendment, 8 November 2026 (`CT16-ROUTES-2026-11-08-r1`, delegated technical approval; see [the CT16 route map](#ct16routes--ct16-routes-2026-11-08-r1--delegated_approved)):* Instructors start at `/teach` and Administrators at `/admin` once those screens are routed in production; until then both keep `/courses`. The Learner fallback, return capture and one-time consumption are unchanged.
+
 Expiry, logout or current-generation authenticated 401 invalidates the session
 before personal content can be published and replaces the active protected route
 with /login. Navigating back cannot reveal the discarded session. Evaluate
@@ -1544,6 +1546,95 @@ Technical references: [declarative route composition](https://reactrouter.com/7.
 and [React state ownership/reset](https://react.dev/learn/preserving-and-resetting-state);
 these support the existing-stack mechanism, not new backend authority.
 
+
+## CT16 route map, Learner home composition and CT37 Markdown policy — 8 November 2026
+
+These records were approved on 8 November 2026 by delegated technical approval, as each record states; this section is their authoritative repository location. Earlier CT16 records above are unchanged; where a record below resolves or amends one, it says so.
+
+### `CT16.routes` — CT16-ROUTES-2026-11-08-r1 — DELEGATED_APPROVED
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+**Scope.** Browser paths, guard roles, navigation destinations, active navigation item and role start pages for the Final screens of [DESIGN.md r6](https://github.com/chi-thanh-nguyen/codemastery/blob/4eb5b70be0c98df14e162b34d2c0314b02ab47b5/DESIGN.md#information-architecture). It resolves the "routes, menu destinations" part of the CT16-FINAL disposition "Concrete feature APIs, routes, menu destinations and role/resource policies — D — DEFER" (`docs/setup.md`); feature APIs and role/resource policies stay with their owning contracts.
+
+| Path | Screen | Guard (navigation only) | Active item | Owning Issue |
+|---|---|---|---|---|
+| `/forgot-password`, `/reset-password` | Recovery | anonymous | — | FE06 (how the reset capability is carried is CT02's decision) |
+| `/courses/:courseId/learn` | S7 Path | Learner | My courses | FE08 |
+| `/courses/:courseId/lessons/:lessonId` | S8 Lesson | Learner | My courses | FE08 |
+| `/courses/:courseId/diagnostic` | S9 entry and result | Learner | My courses | FE09 |
+| `/courses/:courseId/mastery` | S14 Mastery Map | Learner | My courses | FE12 |
+| `/courses/:courseId/assessments` | S10 | Learner | My courses | FE10 (quizzes), FE11 (assignments) |
+| `/courses/:courseId/quizzes/:quizId`, `…/quizzes/:quizId/attempt`, `…/quizzes/:quizId/history` | Quiz intro, S11, S12 history | Learner | My courses | FE10 |
+| `/courses/:courseId/attempts/:attemptId` | S12 result | Learner | My courses | FE10 |
+| `/courses/:courseId/assignments/:assignmentId` | S13 | Learner | My courses | FE11 |
+| `/notifications` | S15 | Learner, Instructor (only where CT11 grants the read) | bell (current) | FE28 |
+| `/teach` | S17 Teaching home | Instructor | Teaching | FE14 |
+| `/teach/courses/:courseId` with tabs `/content` (default), `/settings` | S18 | Instructor | Teaching | FE14 |
+| `/teach/courses/:courseId/lessons/:lessonId` | S18 lesson editor | Instructor | Teaching | FE14 |
+| `/teach/courses/:courseId/skills` | S20 | Instructor | Teaching | FE18 |
+| `/teach/courses/:courseId/assessments`, `…/quizzes/:quizId` | S19 bank, quiz editor | Instructor | Teaching | FE15 |
+| `/teach/courses/:courseId/assignments/:assignmentId` | S19 assignment editor | Instructor | Teaching | FE16 |
+| `/teach/courses/:courseId/qa` | Lesson Q&A | Instructor | Teaching | FE13 |
+| `/teach/courses/:courseId/learners`, `…/learners/:learnerId` | S22 | Instructor | Teaching | FE19 |
+| `/teach/learners` | S22 entry (choose an owned course) | Instructor | Learners | FE19 |
+| `/teach/grading`, `/teach/grading/:submissionId` | S21 | Instructor | Grading | FE17 |
+| `/admin` | S23 Platform overview | Administrator | Overview | FE23 |
+| `/admin/users`, `/admin/courses`, `/admin/reports`, `/admin/audit` | S24 | Administrator | Users, Courses, Reports, Audit log | FE20, FE21, FE22, FE23 |
+
+Creation screens use the literal segment `new` in the identifier position (for example `/teach/courses/new`, `…/lessons/new`, `…/quizzes/new`); identifiers are UUIDs, so `new` cannot collide. Record detail in Administrator tables opens in a side sheet without a route. Query parameters inside a screen belong to its owning Issue.
+
+**Navigation.** Learner: Home, Catalogue, My courses, bell. Instructor: Teaching, Grading, Learners, Catalogue, bell. Administrator: Overview, Users, Courses, Reports, Audit log, Catalogue. Every signed-in role keeps the account menu (Profile, Sign out). Roles never inherit each other's items. `/courses/:courseId` (detail) keeps Catalogue active; the Learner course-workspace paths above make My courses active.
+
+**Activation rule.** A path is registered in production, and its navigation item rendered, only when its screen's consumed contracts are approved, its Issue is authorized for implementation and the screen is delivered. Until then the path shows the existing Page not found state; no preview component, placeholder or sample data is routed.
+
+**Start pages.** Learner: `/home` (unchanged). Instructor: `/teach` once Teaching home is routed in production; Administrator: `/admin` once Platform overview is routed; until then both keep `/courses`. The one-use `/profile` return of CT16-PROFILE P1 keeps precedence and is consumed once; `/` and the logo use the same start page. This amends P1's fallback (as amended on 7 November 2026) for Instructor and Administrator only, conditional on activation; the earlier text is preserved.
+
+**Guards.** Wrong role shows Access denied from the session role; anonymous visits replace to `/login`, and return capture stays limited to `/profile`. Guards are navigation conveniences; backend authorization in each owning contract stays authoritative.
+
+**Alternatives considered.** A new contract Issue for routes (rejected: duplicates CT16's ownership of routing); deferring each path to its feature contract (rejected: 18 Issues gated on an unowned decision and inconsistent namespaces); the sitemap verbatim (adopted, with its "…" segments resolved directly under `/courses/:courseId/` and `/teach/courses/:courseId/`, and a `/teach/learners` entry for the Learners navigation item).
+
+**Exclusions.** No API, payload, permission, role, dependency or new provider; no extension of return capture; no route for preview-only behavior.
+
+**Owners for review.** Frontend lane CODEOWNER; Leader. **Unlocks.** Removes the route/navigation gate from FE06, FE08–FE23 and FE28 (each stays gated on its own contracts); consumed by FE32. **Retained gates.** Repository record in `docs/setup.md`, implementation authorization, CODEOWNER review, protected integration and verification.
+
+### `CT16.learner-home` — CT16-LEARNER-HOME-2026-11-08-r1 — DELEGATED_APPROVED
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+**Scope.** Which parts of [S6 Learner home](https://github.com/chi-thanh-nguyen/codemastery/blob/4eb5b70be0c98df14e162b34d2c0314b02ab47b5/DESIGN.md#s6-learner-home--implemented-active-courses--preview-full-design-high-fidelity) enter Final and from which owners, under CT16.final-state (F1: routes compose features; no cross-feature internal import or shared store). It approves no API of another contract.
+
+1. **Your courses** stays the implemented list of active memberships (`GET /api/me/courses`). Each row may add the progress line ("N of M lessons · P%") and the canonical next lesson only when CT22.progress/CT22.resume approve a learner-scoped read that returns them for the listed memberships in one request. The page never loops one request per course.
+2. **Continue learning** appears only if CT22.resume approves a learner-level "most recent position" read (US-04). The frontend never compares or ranks courses itself; without that read the tile is omitted.
+3. **Up next** keeps only recommendation entries: at most one per active course, that course's current recommendation from an approved course-scoped Adaptive read (CT33 read, CT07 semantics), shown unaltered — type, target lesson, the backend reason verbatim, time — and labelled with its course. Entries follow the "Your courses" order returned by the API. No cross-course ranking, merging, scoring, filtering or selection; courses without adaptive mode or a current recommendation show none. Without an approved learner-scoped read returning per-enrollment items, the aside is omitted.
+4. **Deadline, result-available and reply/announcement entries are not part of the Final Learner home** and stay Preview. Learners reach them through Notifications (CT11) and the course Assessments page.
+5. Each element loads and fails independently and never hides "Your courses"; no sample data reaches `/home`.
+
+**Alternatives considered.** A dedicated aggregated home endpoint (rejected: no single module owner and a path to cross-course adaptive logic); per-course requests from the browser (rejected: unbounded requests and partial failures); the full r6 design (rejected: no approved data for deadlines, results or typed notifications).
+
+**Consumer requirements (recorded in CT22 and CT33; not approvals of those contracts).** CT22: a learner-scoped progress/next-lesson summary and a learner-level most-recent resume read. CT33: a learner-scoped read of each active enrollment's current recommendation without aggregation.
+
+**Exclusions.** Cross-course adaptive learning remains a non-goal; no CT22/CT33 shape is approved. **Owners for review.** Course (CT22), Adaptive (CT33/CT07), frontend lane, Leader. **Unlocks.** FE33 (still gated on the CT22/CT33 reads).
+
+### `CT37.markdown` — CT37-MARKDOWN-2026-11-08-r1 — DELEGATED_APPROVED
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+**Scope.** Rendering of `lessons.content_markdown` and `learning_materials.text_content` (text materials). `CT37.embed` and `CT37.widget` stay pending.
+
+- **Syntax.** CommonMark with GitHub-style tables and fenced code; no other extensions.
+- **No HTML path.** Source is parsed to a syntax tree and rendered as React elements in `frontend/src/shared/components/MarkdownRenderer.tsx`. Raw HTML in the source (block or inline) is never interpreted: it is displayed as literal text. No `dangerouslySetInnerHTML`, `innerHTML` or HTML-string rendering is used anywhere in the path, so no HTML sanitiser is needed.
+- **Links.** A link target is accepted only if it is (a) an absolute URL whose scheme is exactly `https` or `http`, or (b) a relative reference limited to a root-relative path (`/` followed by a character other than `/` or `\`) or an in-page fragment (`#…`). Everything else renders as plain text, including `javascript:`, `data:`, `vbscript:`, `file:` and any other scheme, protocol-relative `//host` and backslash forms (`\host`, `/\host`). The check runs after decoding character references and percent-encoding and removing whitespace and control characters, compares the scheme case-insensitively, and uses the standard URL parser rather than string prefixes, so encoded or obfuscated variants (for example `jav&#x61;script:` or `%6Aavascript:`) cannot pass. External links carry `rel="noopener noreferrer"`.
+- **Images.** Markdown images are not loaded; they render as a link labelled by their alt text whose target follows the same link rule (otherwise the alt text is plain text), so lesson text makes no third-party requests.
+- **Structure.** Markdown headings start at `h2` under the lesson's `h1`; fenced code renders with `CodeBlock` (no execution, no highlighting dependency); tables use the shared table style.
+- **Backend.** Stores and returns Markdown source only; no server-side HTML rendering.
+- **Verification.** Renderer tests must cover `<script>`, event-handler attributes, raw HTML blocks, `javascript:` and `data:` links and images.
+
+**Dependency.** This policy is library-independent. Choosing a parser/renderer is a separate decision under the Dependency Policy at implementation time; any candidate must render without raw HTML and must not enable a raw-HTML plugin.
+
+**Alternatives considered.** HTML string plus a sanitiser (rejected: keeps an HTML injection path and adds a dependency); plain text only (rejected: loses the approved text-material formatting); an in-house parser (not chosen here: maintenance and correctness risk; still allowed if it meets every rule above).
+
+**Owners for review.** Course (CO09), frontend lane, Leader. **Unlocks.** FE08 lesson rendering and the FE14 Markdown preview tab (still gated on their other contracts).
 
 ## FE03 implementation in PR #98 — 25 October 2026
 

@@ -516,6 +516,18 @@ lesson-only read assertion: Course derives ancestry privately; no Course field,
 structural projection or repository access is added to Interaction. Access rules,
 failure precedence and all seven Java signatures are defined only in ADR001.
 
+### Notification fields — `CT11.read` (field set only) — CT11-READ-FIELDS-2026-11-08-r1 — DELEGATED_PARTIALLY_APPROVED
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+**Decision.** The notification representation keeps the approved V006 baseline: message, read state and creation time (with the identifier that CT11.read selects). No `type` and no `link`/source field are added, and no migration is required. Messages are plain text written by the creating module through CT11.create and name the course or lesson in words where useful. The frontend renders them as plain text and never infers a type or link from the text.
+
+**Effect on DESIGN r6 S15.** Final notification rows are message-only with one neutral glyph and the unread indicator; the per-type tint circles and source links stay Preview.
+
+**Alternatives considered.** A `type` enum column (rejected now: migration for presentation only); `type` plus a stored internal link (rejected now: migration and an open-redirect validation surface); deriving the type in the UI from the text (rejected: fragile, invented semantics). Either column may be proposed later as a CT11 amendment with its migration.
+
+**Still pending in CT11.** List, paging and mark-read operations (rest of CT11.read), CT11.create and CT11.reminders. **Owners for review.** Interaction, frontend lane, Leader. **Unlocks.** FE28 presentation; IN07 representation.
+
 ## 13. References
 
 - [Canonical approved architecture](references/originals/approved-architecture.docx)
