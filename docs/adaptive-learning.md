@@ -1,5 +1,7 @@
 # CodeMastery Mastery-Based Adaptive Learning
 
+> **F1–F4 correction:** [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) supersedes only unconditional settings replacement and unrestricted threshold/re-enable recomputation. Settings writes require a matching state ETag; thresholds are frozen once submitted history or stored mastery exists. Same-policy toggles/n edits remain supported. Latest-attempt classification is unchanged; small-sample sensitivity is an explicit CT36 evaluation obligation.
+
 > **Current Batch 1 contract, 8 November 2026:** [ADR005](decisions/005-batch-01-contract-approvals.md) technically approves CT40’s three boundaries, CT05’s four graph checkpoints and CT06.production/enablement under explicit Leader delegation (DELEGATED_APPROVED; PR integration pending). Its §§3–8 supply the formerly deferred graph/policy/settings/coverage choices within that scope. Numeric thresholds and n are explicit per-Course configuration with no defaults. Unrelated routing, event/progress execution, diagnostic and evaluation decisions remain with their owning contracts. Historical text below is retained; this notice and ADR005 §9 identify the exact precedence.
 
 ## 1. Purpose and Scope

@@ -1372,7 +1372,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Reads Course-owned stored intent/configuration. Unconfigured disabled policy may be null; malformed stored policy is 500. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Reads Course-owned intent/policy and their strong ETag as one snapshot; disabled legacy policy may be null. Canonical response bytes and ABA scope are defined in ADR005 section 13.1. Owning Instructor only; not a readiness assertion. Approved, not implemented.",
         "security": [
           {
             "bearerAuth": []
@@ -1396,6 +1396,22 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdaptiveSettings"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong SHA-256 state validator of canonical identity-encoded settings JSON; current-state semantics with documented ABA; not readiness, authorization or an audit revision."
+              },
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
                 }
               }
             }
@@ -1424,7 +1440,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Validates policy and guarded Course/graph/Assessment readiness before enabling; known insufficiency 409, unavailable data 500. Disabling retains evidence/progress and valid-policy quiz-driven mastery. No automatic mutation retry. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Conditional full replacement under ADR005 section 13: owning Instructor only, required If-Match checked on fresh guarded configuration. Threshold changes permitted only before any submitted attempt and any stored mastery row; otherwise 409 with no replay. Same-policy toggles/n changes remain supported; every requested true requires fresh readiness. Settings use fail-fast admission on the same Course root (busy 409). No automatic retry, whole-Course recomputation or re-enable catch-up. Approved, not implemented.",
         "security": [
           {
             "bearerAuth": []
@@ -1439,6 +1455,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Required entity-tag list from the settings GET. Any matching strong member passes; weak members never match. Missing 428; malformed/empty or wildcard * 400; nonmatching/weak-only 412. Evaluate fresh state under Course guard before history/readiness work or writes. This is expected-current-state semantics, not an ABA-proof revision."
           }
         ],
         "responses": {
@@ -1450,6 +1476,22 @@
                   "$ref": "#/components/schemas/AdaptiveSettings"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong SHA-256 state validator of canonical identity-encoded settings JSON; current-state semantics with documented ABA; not readiness, authorization or an audit revision."
+              },
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
             }
           },
           "400": {
@@ -1459,16 +1501,68 @@
             "$ref": "#/components/responses/Batch1Unavailable"
           },
           "409": {
-            "$ref": "#/components/responses/Batch1Conflict"
+            "description": "Frozen threshold change, failed readiness or busy Course root; no effects, no automatic retry. Refresh and require explicit user review. No historical replay is approved.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "500": {
-            "$ref": "#/components/responses/Batch1Failure"
+            "description": "Safe provider/transaction/compatibility failure. Failures observed before commit roll back; indeterminate commit/response loss is not asserted to be rollback and must not be retried automatically. Refresh and reconcile current settings; no partial transaction is authorized.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/ProtectedUnauthorized"
           },
           "403": {
             "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "412": {
+            "description": "Precondition Failed. The settings have changed. Fetch the current settings before resubmitting. No changes; no current configuration or replacement ETag in the error. Authentication/ownership/concealment precedence preserved.",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required. Fetch the current settings and supply If-Match. No changes; no current configuration or replacement ETag in the error. Authentication/ownership/concealment precedence preserved.",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         },
         "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
@@ -2096,7 +2190,7 @@
           "adaptiveEnabled",
           "policy"
         ],
-        "description": "Full replacement. Valid explicit policy required even when disabling. Enabled write also requires guarded readiness. Threshold change requires atomic whole-Course reclassification before publication; n-only change revalidates coverage."
+        "description": "Conditional full replacement; If-Match header required. Explicit valid policy even when disabling. Threshold changes require no submitted Course attempts and no stored mastery rows; otherwise 409 pending separately approved reclassification. Same normalized thresholds permit toggles/n edits, no replay. Requested true revalidates readiness."
       },
       "AdaptiveSettings": {
         "type": "object",
@@ -2125,7 +2219,7 @@
           "adaptiveEnabled",
           "policy"
         ],
-        "description": "Stored intent and policy, not a durable readiness assertion. Null policy allowed only for existing unconfigured disabled Course reads; updates cannot clear policy. No extra mastery/progress fields."
+        "description": "Canonical stored-intent/policy JSON, paired with ETag response metadata. Fixed key order/normalization/bytes per ADR005 section 13.1; ETag is not a JSON property. Disabled legacy policy may be null. Not a readiness or audit-revision assertion."
       }
     },
     "responses": {
@@ -2323,7 +2417,8 @@
       "decisionReference": "../decisions/005-batch-01-contract-approvals.md",
       "approvalDisposition": "DELEGATED_APPROVED",
       "effectiveOnMain": false,
-      "scope": "U07 structural/no-extra-read prerequisite technically resolved; bounded Course structure/guard/settings boundaries added. Original seven assertions, U03/U04 and access/error policy unchanged. New PR integration pending."
+      "scope": "U07 structural/no-extra-read prerequisite technically resolved; bounded Course structure/guard/settings boundaries added. Original seven assertions, U03/U04 and access/error policy unchanged. New PR integration pending.",
+      "focusedCorrectionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026"
     }
   },
   "x-fe07-delegated-approval": {
@@ -2375,6 +2470,27 @@
       "Protected main integration; eligible CODEOWNER and independent last-push review, required checks and resolved threads",
       "Separate implementation authorization and actual provider/PostgreSQL/security/concurrency verification",
       "CT04/CT08/CT22 execution, evidence and atomic progress contracts; no implementation, deployment, release or risk acceptance authorized"
-    ]
+    ],
+    "focusedCorrection": {
+      "status": "DELEGATED_APPROVED",
+      "authority": "Project Leader explicit PR #228 Focused Technical Corrections & Revalidation; independently selected by Codex.",
+      "decisionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026",
+      "approvalDate": "2026-11-08",
+      "effectiveOnMain": false,
+      "currentRevisions": [
+        "CT06-ENABLEMENT-2026-11-08-r2",
+        "CT03-B1-2026-11-08-r3",
+        "CT14-B1-COVERAGE-2026-11-08-r2",
+        "CT18-B1-ERRORS-2026-11-08-r2"
+      ],
+      "predecessors": {
+        "CT06-ENABLEMENT-2026-11-08-r1": "CT06-ENABLEMENT-2026-11-08-r2",
+        "CT03-B1-2026-11-08-r2": "CT03-B1-2026-11-08-r3",
+        "CT14-B1-COVERAGE-2026-11-08-r1": "CT14-B1-COVERAGE-2026-11-08-r2",
+        "CT18-B1-ERRORS-2026-11-08-r1": "CT18-B1-ERRORS-2026-11-08-r2"
+      },
+      "preserved": "All nine checkpoint approvals and four original prerequisite records retained; only named settings signatures/lifecycle/error/verification scopes amended. CT06.production arithmetic/latest-attempt policy and CT24 remain unchanged.",
+      "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+    }
   }
 }

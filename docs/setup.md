@@ -1711,3 +1711,32 @@ CORS admits PUT/DELETE for the selected authenticated flow while other protected
 routes remain denied. No token parameter is exposed to feature clients.
 See docs/testing.md for executed local PostgreSQL/browser evidence, fixture and
 external Playwright requirements; the E2E directory still has no npm pipeline.
+
+
+## Batch 1 conditional settings client handoff — F1–F4
+
+[ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026)
+(`CT06-ENABLEMENT-2026-11-08-r2`) governs FE18/AD08/CO14's current contract.
+This documents requirements only; it implements no client, CORS or UI behavior.
+
+The existing Instructor `skill-graph-editor/api/skillGraphApi.ts`,
+`hooks/useSkillGraph.ts` and `components/AdaptiveSettingsPanel.tsx` must retain the
+successful GET settings body and its strong ETag as one snapshot. All settings PUTs
+send If-Match; 412 retains the draft, refreshes latest state, and requires deliberate
+user reconciliation before resubmission. Never refresh the tag and automatically
+replay a stale full form. 428 requires fetching a tag; 409 requires safe explanation
+and deliberate retry/review. None clears Auth. Same-policy disable, enable and n
+changes remain possible; thresholds may be changed only before submitted history
+and stored mastery. No whole-Course replay/catch-up progress indicator is promised.
+
+`shared/api/httpClient.ts` currently accepts custom request headers and returns only
+decoded bodies. A later authorized additive response-metadata capability is required
+to observe ETag only after successful status/decoding and current-generation checks;
+preserve existing callers, cancellation and session isolation. Its existing 412/428
+safe ProblemDetail title handling also needs implementation. Do not bypass shared
+transport, expose credentials, or introduce a store/framework for validators.
+The existing CORS policy must allow If-Match and expose ETag for approved origins,
+without changing origins, credentials or role policy. This is a bounded header
+requirement, not proof of current browser integration. Use a same-origin test and
+an approved-origin cross-origin test before FE18 acceptance. Current preview/local
+components do not prove backend readiness or conditional-write support.

@@ -1,5 +1,13 @@
 # ADR005: Batch 1 Contract Approvals
 
+> **Effective correction within this PR, 8 November 2026:** [§13](#13-focused-f1f4-amendments--8-november-2026)
+> narrowly amends the settings write/lifecycle and verification contracts under the
+> Leader's “PR #228 Focused Technical Corrections & Revalidation” instruction.
+> Sections 1–12 preserve the original `8bc7469` record verbatim. Where they differ,
+> §13 governs only the explicitly listed scopes/signatures/oracles; the other eight
+> checkpoints, four original prerequisite records and their provenance are retained.
+> Technical approval remains separate from protected integration and implementation.
+
 ## 1. Authority, baseline and precedence
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED**, 8 November 2026
@@ -239,6 +247,10 @@ an application responsibility even though UUIDs/FKs exist.
 
 ## 5. Explicit concurrency and ownership mechanism
 
+> Read with [§13.3](#133-course-transaction-enforcement-and-contention-f3): the
+> Course boundary and default graph-lock behavior remain; settings gain fail-fast
+> admission on that same row/transaction and explicit enforcement requirements.
+
 **Selection:** serialize Course configuration/graph/coverage-affecting writes on
 the existing **Course row**, acquired by Course using PostgreSQL `SELECT … FOR
 UPDATE`, before graph/structure/question/settings reads and writes. Execute at
@@ -376,6 +388,10 @@ per Course under U08; SD03/CT15.F-adaptive must explicitly supply and justify de
 values later. Their absence does not leave this configuration contract undecided.
 
 ## 7. CT06 enablement and U08
+
+> **Original r1 contract, retained as history.** [§13.1–13.2](#131-conditional-settings-writes-f1)
+> supersede its unconditional write signatures and whole-Course/re-enable
+> recomputation requirements. Only the r2 signatures/lifecycle are implementable.
 
 ### 7.1 Course storage and Adaptive validation boundary
 
@@ -595,6 +611,8 @@ these declared scopes. That is separate from the following retained gates:
 
 ## 12. Validation of this documentation revision
 
+> These are the original `8bc7469` results, not evidence for the later §13 correction.
+
 Executed on 8 November 2026 against the inspected main baseline and this docs-only
 working tree, before the PR. Existing implementation bytes were unchanged.
 
@@ -609,3 +627,367 @@ working tree, before the PR. Existing implementation bytes were unchanged.
 New graph/settings/provider and production-history tests were not implemented or
 run. Required protected CI is evaluated separately on the PR head; no green CI,
 human review, PostgreSQL integration or independent oracle reproduction is inferred.
+
+## 13. Focused F1–F4 amendments — 8 November 2026
+
+**DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED**, independently selected by
+Codex under the Project Leader's explicit **“CodeMastery — PR #228 Focused Technical
+Corrections & Revalidation”** instruction. This is an amendment to the same PR,
+not a new batch approval, personal Leader/module review or implementation authority.
+
+Evidence: independent read-only review of `8bc7469d5376ff478b0af821db6db4a6c4406636`,
+completed 8 November at 19:07 ICT, review session
+`01a1bb00-ad7e-7033-8449-5f9c69825c2a`. Its F1/F2 MEDIUM findings concern stale
+replacement and unbounded reclassification; F3 is an implementation acceptance
+obligation, F4 an educational limitation. The review is local evidence, not a
+submitted GitHub review. Its earlier executed tests are not reruns of this revision.
+
+| Amendment | Exact predecessor and retained scope | Replacement scope |
+|---|---|---|
+| `CT06-ENABLEMENT-2026-11-08-r2` | `CT06-ENABLEMENT-2026-11-08-r1`; preserve readiness, ownership, configuration schema, disabled-mode mastery and earned progress | §§13.1–13.2 replace unconditional settings writes and automatic whole-Course threshold/re-enable recomputation. Approve only the necessary Assessment history-presence read below, not CT04 lifecycle or CT08 execution. |
+| `CT03-B1-2026-11-08-r3` | `CT03-B1-2026-11-08-r2`; preserve U07, structural projection, all seven assertions and Course-owned guard | Expected-state storage write, fail-fast settings admission on the same guard, and §13.3 acceptance requirements. |
+| `CT14-B1-COVERAGE-2026-11-08-r2` | `CT14-B1-COVERAGE-2026-11-08-r1`; preserve existing test paths/harness and B1-O01–O09/O11 | Replace B1-O10 as below; add precise F1–F4 implementation/evaluation obligations. No new test file, runner or complete CT36/CT14 Final approval. |
+| `CT18-B1-ERRORS-2026-11-08-r2` | `CT18-B1-ERRORS-2026-11-08-r1`; preserve graph errors, safe ProblemDetail and authentication/concealment | Settings-only 412/428 and precise 409 lifecycle/busy mappings in §13.1. |
+
+The other eight checkpoint revision IDs and `CT24-CALCULATION-2026-11-08-r2`
+are unchanged. F4 adds a limitation/verification obligation to CT06.production r1,
+not a new evidence rule or minimum sample size. All original IDs remain indexed;
+only the replaced clauses above cease to govern. The five HARD edges remain intact.
+
+### 13.1 Conditional settings writes (F1)
+
+Select **strong state ETag + required If-Match** for the existing settings GET/PUT.
+Keep the JSON request/response fields unchanged. GET and successful PUT emit
+`ETag` and `Cache-Control: no-store`. A tag represents this Course's **configuration**,
+not readiness, history, mastery, an audit revision or a lasting authorization.
+
+Use the exact compact UTF-8 JSON response bytes, with keys in this order:
+`courseId`, `adaptiveEnabled`, `policy`; policy keys `weak`, `mastered`,
+`minimumQuestionsPerSkill`; rational keys `numerator`, `denominator`. Course UUID
+is canonical lowercase, booleans/integer numbers use JSON notation, policy may be
+null only for a disabled legacy read, rationals are GCD-normalized, no whitespace
+or trailing newline. Return identity content encoding for this representation.
+The strong ETag is `"sha256-<64 lowercase hexadecimal SHA-256 digits>"` over those
+bytes. No extra hash library is required; Java supplies SHA-256. The Course ID
+prevents cross-Course reuse. This fixed representation makes the validator strong;
+it must not be reused if middleware changes the representation bytes/encoding.
+
+PUT requires a syntactically valid If-Match list of entity-tags. Match if **any
+strong** member equals the current tag; weak members never match. A weak-only
+list therefore fails 412. This API profile rejects wildcard `*` with 400 because
+existence alone does not protect an Instructor's read state. Missing header → 428;
+empty/malformed header → 400. No missing/default validator is allowed internally.
+
+After authentication, Course ownership/concealment and ordinary request validation,
+acquire the Course guard, **freshly** read configuration and evaluate If-Match
+before history/readiness queries or any write. A different current configuration
+→ 412, including a repeated request whose original tag is now stale even when its
+desired body happens to equal current state. The old tag does not authorize a
+write merely because the desired policy is valid. Failure returns no new tag or
+current configuration in the error body; the client must GET again. Guard contention
+may fail 409 before a fresh comparison can run; it never justifies ignoring the tag.
+
+**ABA limit:** A→B→A with byte-identical canonical configuration yields the same tag.
+Such a request can proceed if all **current** lifecycle/readiness checks also pass.
+This is deliberately an expected-current-state contract, not “no intervening write”.
+No audit/event revision is claimed. History appearing while configuration stays A
+does not change the tag, but §13.2 still prohibits threshold changes. Durable revision
+columns, PostgreSQL `xmin`/`ctid`, process-local counters or timestamps are not selected:
+the schema has no monotonic settings version, and database/system tuple identities
+are not stable application revisions. Strict no-intervening-write semantics would
+require a separately justified durable revision and migration. For the declared
+state-replacement operation, that additional persistence is unnecessary.
+
+Application contracts, all nested types in existing files:
+
+```java
+// AdaptiveSettingsService; replaces only update/Configuration in §7.1
+public Configuration update(UUID courseId, Set<String> expectedStrongEtags,
+        boolean adaptiveEnabled, Policy policy);
+public record Configuration(UUID courseId, boolean adaptiveEnabled,
+        Policy policy, String etag) {}
+// CourseManagementService; replaces only the storage write in §7.1
+public void writeAdaptiveConfiguration(UUID courseId, AdaptiveConfiguration expected,
+        boolean adaptiveEnabled, Map<String, Object> adaptiveSettings);
+```
+
+The HTTP adapter parses the list and passes immutable strong tags (an empty set
+from a weak-only list produces a failed match); no arbitrary caller actor is added.
+The application compares the freshly derived tag inside the guard. It then passes
+the raw Course snapshot it just read as `expected` to Course's write. Course verifies
+the same held guard and fresh `(courseId, adaptive_enabled, adaptive_settings)`
+expected state with structural JSON equality, not JSON string formatting. An internal
+expected-state mismatch aborts as safe 500: it indicates an invalid guarded caller
+or provider, not permission to persist stale state. The externally supplied stale
+tag has already been handled as 412. `read` returns etag for the same immutable
+snapshot/body; `etag` is response metadata, **not** an added JSON property.
+
+| Settings failure | HTTP and client behavior |
+|---|---|
+| Missing If-Match | 428 Precondition Required; no write; GET and obtain a validator. |
+| Malformed/empty If-Match, wildcard or malformed body/policy | 400; no write. |
+| No strong tag matches fresh current state | 412 Precondition Failed; preserve local draft, GET latest and require an explicit user reconciliation/resubmission. |
+| Thresholds frozen, readiness insufficient, or Course guard busy | 409 Conflict; no write; explain safely and refresh before any deliberate retry. |
+| Provider/guard compatibility/deadline/cancellation failure before commit | Safe 500 and complete rollback; no implicit success/retry. An unavailable provider is never “no history”. Commit/response uncertainty is handled explicitly in §13.3. |
+
+401/403/404 retain existing precedence; missing preconditions do not disclose hidden
+Course state. 412/428 use the unchanged CT18 ProblemDetail envelope and standard
+titles, safe fixed English detail, no old/new values or SQL; responses are no-store.
+They are not `BusinessRuleException` statuses (that class remains 400/409). Future
+HTTP binding uses Spring's existing native `ErrorResponseException`/MVC handling for
+these statuses, with a bounded application rejection mapped by the adapter; no new
+top-level exception file/library or unsanitized exception reason is approved.
+
+For a failed application tag comparison, use the explicitly approved nested
+`AdaptiveSettingsService.ConfigurationPreconditionFailed` runtime rejection;
+the HTTP adapter maps that type to the safe 412 above. The fail-fast Course entry
+uses nested `CourseManagementService.ConfigurationBusy` only for the known
+PostgreSQL row-lock-not-available outcome (SQLSTATE 55P03), mapped to 409 **after**
+rollback. Other SQL/timeout failures remain safe 500. These nested types export no
+state/diagnostic payload and add no file. Missing/malformed headers are rejected at
+the HTTP boundary; the internal expected-tag set is nonnull (empty means no match).
+
+Alternatives: an expected-state JSON body is feasible but duplicates the settings
+payload and comparison convention; an incrementing revision is stronger against ABA
+but unnecessary for current-state semantics and needs schema/lifecycle work; separate
+toggle/policy endpoints still need stale-write detection and expand the REST surface.
+HTTP basis: [RFC9110 If-Match](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.1),
+[RFC6585 428](https://www.rfc-editor.org/rfc/rfc6585.html#section-3).
+
+### 13.2 Threshold lifecycle and bounded settings work (F2)
+
+Select **configure thresholds before history; freeze afterwards**. No synchronous
+whole-Course history replay, background job, policy ledger, migration, numeric
+accumulator or new automatic completion effect is approved by the settings endpoint.
+
+Inside the guard, after the precondition passes, compare normalized weak/mastered
+ratios with the current policy (GCD-equivalent fractions are unchanged). A null
+legacy policy becoming a valid policy also counts as a threshold change.
+
+| Request | Decision |
+|---|---|
+| Initial configuration or changed thresholds; no submitted attempts and no stored mastery rows in the Course | Permit, subject to explicit valid policy and requested enablement readiness. |
+| Changed thresholds (including null→policy repair); any submitted attempt **or any stored mastery row**, even explicit Unknown | Reject 409 with no effects. Disabling in the same request does not bypass the freeze. A separately approved reclassification/repair capability is required; none is silently promised here. |
+| Same normalized thresholds; enable/disable or `n` change | Permit with matching tag and valid policy. Every requested true is revalidated for current readiness; false does not require sufficient mapping/bank coverage. No reclassification. |
+| Re-enable under unchanged thresholds | Fresh readiness validation only; no whole-Course catch-up. Quiz-driven mastery must have continued while disabled under CT08's eventual execution contract. |
+| Stale/corrupt current mastery or missed updates discovered during execution | Fail closed on adaptive effects and use CT08's separately approved recovery path; flag toggling does not repair/recompute history. Evidence and earned progress are preserved. |
+
+The conservative barrier is **any submitted attempt**, not just a producer's claim
+of valid qualifying evidence. Malformed/partial submitted history must not be
+treated as absence. The necessary bounded prerequisite is Assessment-owned, in the
+existing `modules/assessment/application/service/AttemptService.java`:
+
+```java
+public boolean hasSubmittedAttempts(UUID courseId);
+```
+
+It consumes Course ownership, reads only Assessment's quizzes/attempts and returns
+whether any Course quiz has an attempt with nonnull submitted_at. Include hidden
+quizzes, all learners and kinds; no answer payload, history export or pagination.
+Unavailable/inconsistent provider → 500. Adaptive separately checks existence of
+**any** `LearnerSkillMastery` row for its own Course skills. Both are existence
+probes, not full history loading, counting or per-learner recomputation. They run
+after the Course guard is acquired and only when thresholds change. This read is
+approved only as the prerequisite to this lifecycle decision; CT04 start/submission/
+results and actorless evidence APIs remain unapproved. No new Question/Course field.
+
+CT04/CT08 must serialize **first submitted evidence and first mastery-row creation**
+with this same Course-root mutex, before lower-level writes. If submission commits
+first, a threshold edit sees the barrier and rejects. If the edit commits first,
+the submission uses the newly current policy. Until that participation is approved,
+implemented and verified, real threshold edits concurrent with Assessment execution
+are not qualified. Never infer no history from a local double, missing provider,
+stale persistence context, a zero answer count or a disabled flag. Enforcing the
+barrier is monotonic because submitted history/used definitions cannot be deleted
+through this contract; legacy mastery alone is also conservative refusal.
+
+Preserve the same Course guard and enrollment lock identity. For **settings only**,
+add an entry in the existing CourseManagementService:
+
+```java
+public <T> T tryWithCourseConfigurationWrite(UUID courseId, Supplier<T> work);
+```
+
+It has the same ownership/transaction/rollback contract as §5, but acquires the
+same Course row with `FOR UPDATE NOWAIT`. Existing graph/default guard behavior and
+FE07 enrollment operations are unchanged. A known row-lock-not-available outcome
+is a safe 409 after transaction rollback; it is not success, no-history, or automatic
+retry. Do not use SKIP LOCKED (which could falsely imply a missing Course). Owner
+admission occurs before acquisition; Course state is rechecked once acquired.
+This is a fail-fast entry on the existing boundary, not a new transaction mechanism.
+
+The guarded body performs only fresh configuration/predicate reads, necessary graph/
+coverage validation and the Course configuration write. No learner loop, external
+I/O, callback network call, task waiting, sleep, new transaction or historical replay.
+Do not select/mutate Enrollment/Progress rows during a settings request. Enrollment
+can still wait briefly behind a settings transaction, and graph/coverage size affects
+validation cost: no measured latency guarantee is claimed. NOWAIT bounds the Course
+**row-lock** admission, not relation locks, queries or total duration. Implementation
+acceptance must demonstrate finite database statement/transaction deadlines and
+cancellation, rollback and lock release with explicit test budgets and recorded
+configuration; zero/unbounded defaults are not acceptance evidence. No undocumented
+timeout number or environment variable is selected by this documentation amendment.
+
+This removes the review's unbounded historical work from the shared critical section.
+Unrestricted synchronous replay is rejected for enrollment/pool contention and
+missing workload qualification. Versioned staged/asynchronous reclassification is
+deferred as unnecessary architecture/persistence complexity. Future reclassification
+requires separate approval of publication, work bounds, cancellation, policy provenance
+and CT08/CT22 atomic effects before accepting post-history threshold edits.
+
+### 13.3 Course transaction enforcement and contention (F3)
+
+Retain Course ownership, READ COMMITTED, one physical database transaction and the
+same Course-row lock until outer commit/rollback. Implement both guard entries using
+the existing Spring transaction facilities with **explicit programmatic enforcement
+in the existing service**, so same-service authoring calls receive the same semantics.
+No new transaction library, service/interface file or proxy self-injection is selected.
+
+Implementation acceptance requires real Spring/PostgreSQL evidence that:
+
+- Same-bean/self-invocation and external calls both start a real transaction when
+  none exists. A method annotation alone is not proof of interception.
+- Joining a compatible outer transaction shares the same physical transaction and
+  root lock. Check actual isolation and read-only state **before callback effects**;
+  reject read-only, REPEATABLE READ/SERIALIZABLE, wrong-Course nested scopes and
+  incompatible contexts as 500. Spring's lenient REQUIRED defaults are insufficient.
+- Callback exceptions, rollback-only completion, an outer failure after successful
+  callback return, and cancellation/deadlines observed before commit must abort the
+  transaction with no committed changes. HTTP success is emitted only after outer
+  commit. Do not promise rollback for a cancellation arriving after commit, or a
+  connection failure whose commit outcome is unknown. Report safe failure/transport
+  loss without an automatic retry, then require a fresh authorized read and user
+  reconciliation; a thrown exception alone is not proof of rollback. Tests distinguish
+  confirmed rollback from committed or indeterminate response loss. No savepoint rollback releases
+  the guard followed by continued work under a stale “held” marker; mark rollback-only.
+- Do not trust pre-lock JPA entities, first-level/second-level cache or earlier
+  authoring snapshots. After waiting/acquisition, explicitly refresh/reload invariant
+  inputs and evict/refresh conflicting managed state **before any flush**; prove a
+  queued stale managed update cannot flush over the winner. Never clear away unrelated
+  pending changes to make a test pass; reject incompatible pending write contexts.
+- Acquire the Course root before graph, Assessment, mastery or progress locks/writes.
+  CT08/CT22 must define compatible ordering before integration. A nested different
+  Course scope is rejected; this contract approves no cross-Course write unit or
+  reverse-order acquisition. Do not join after an outer caller already acquired
+  lower-level locks or queued invariant writes; reject before callback effects.
+- NOWAIT settings contention with enrollment/graph returns 409 and preserves both
+  participants. Waiting graph writers retain the B1-O03 cycle oracle. Verify owner
+  denial, lock release after rollback, independent Course concurrency and a waiting
+  enrollment observing the committed/rolled-back result. Use barriers, not sleeps.
+
+Mechanism evidence: [Spring self-invocation](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html),
+[outer transaction joining](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/tx-propagation.html),
+[PostgreSQL NOWAIT](https://www.postgresql.org/docs/17/sql-select.html#SQL-FOR-UPDATE-SHARE).
+These are acceptance obligations, not a claim that the empty guard has been implemented.
+
+### 13.4 Small-sample limitation and CT36 handoff (F4)
+
+CT06.production r1's latest eligible attempt per assessed skill, equal question
+weight/no decay, exact arithmetic and ordering remain unchanged. One correct
+eligible question yields Mastered and a subsequent one-question failure yields Weak
+for **every** permitted threshold pair. A large question bank and `n` do not increase
+the sample in the selected attempt. These labels are categorical rule outcomes,
+not statistical confidence or proof of durable knowledge. Do not silently add a
+minimum sample, smoothing, weighting or a rolling window during implementation.
+
+CT36 must include parameterized small-sample and alternating-result scenarios before
+Final evaluation acceptance: single correct/incorrect attempts, repeated alternation,
+many older successes replaced by one newer failure, unassessed-skill preservation,
+equal-time ordering and a larger bank with the **same** one-question evidence. Report
+actual states/changes and this sensitivity, without claiming an achieved learning
+benefit or inventing a new quantitative target. CT07/Test-out consumers and demo
+explanations must disclose the limitation; no routing rule or CT36 Final dataset is
+approved here. A minimum-evidence/window policy remains a separate future decision.
+
+### 13.5 Verification, direct consumers and retained gates
+
+**B1-O10 is superseded**: equivalent ratios are unchanged; pre-history threshold
+edits succeed; post-submission or any stored-mastery threshold change returns 409
+with no effects; n-only and same-policy toggles never reclassify; re-enable checks
+readiness only. The former whole-Course recomputation oracle is historical.
+
+| New oracle | Required result before implementation acceptance |
+|---|---|
+| B1-O12 conditional replacement | Two tabs read P; first disables/changes configuration; second PUT with old tag → 412, unchanged newer state. Same-current-state ABA is explicitly allowed, subject to fresh lifecycle/readiness validation. Missing→428; malformed/wildcard→400; weak-only/nonmatching/foreign-Course tag→412. |
+| B1-O13 history race | A matching tag with submitted history or any mastery row blocks threshold change. Race first submission/first mastery creation versus edit under the common root; whichever commits first determines the permitted policy. Provider failure→500/no write; no direct foreign repository access. |
+| B1-O14 transaction reality | Self-invocation, compatible/incompatible outer contexts, callback/outer/commit failures, rollback-only and stale managed state satisfy §13.3 on real PostgreSQL. Verify committed state and actual transaction/lock lifetime, not mocked callbacks. |
+| B1-O15 contention and duration | Enrollment holds root: settings NOWAIT→409/no change. Settings holds root: enrollment proceeds after commit/rollback; cancellation/deadline releases locks. Finite statement/transaction budgets are recorded; no history-sized loop, unbounded wait or connection-pool exhaustion is accepted. |
+| B1-O16 sample sensitivity | For explicit valid fixture policies, one correct→Mastered, next one incorrect→Weak; alternation and older larger samples behave exactly as latest-attempt policy. Changing bank n does not change the evidence ratio. CT36 must review these limitations independently. |
+
+CT14 uses existing `AdaptiveSettingsServiceTest.java` for local conditional/lifecycle
+cases, `AdaptiveLearningFlowIntegrationTest.java` for O12–O15 real providers/guard/
+enrollment races, and `MasteryProgressTransactionIntegrationTest.java` for CT08/CT22
+first-evidence/outer-rollback ordering when their contracts exist. O16 belongs in
+existing `AdaptiveProfileScenarioTest.java` under CT36's later scenario acceptance;
+pure calculator/classifier suites retain their current scope. No new test path.
+
+AD08/CO14 implement the amended exact signatures; the existing AttemptService is the
+only new producer location. FE18's `skillGraphApi.ts`, `useSkillGraph.ts` and
+`AdaptiveSettingsPanel.tsx` must keep body+ETag together, supply If-Match on **every**
+settings write and retain local drafts on 412/409. GET latest and require deliberate
+reconciliation; never replace the tag and automatically retry an old full body.
+Apply the owning feature's Course/request-generation checks to body and ETag together;
+an older response cannot replace either half of a newer snapshot.
+Do not clear Auth on 412/428/409 or show disabled stale switches as authoritative.
+Persist no credentials/ETag-based authorization; the tag is not an access capability.
+
+The current shared HTTP client accepts request headers but returns decoded body
+only and lacks 412/428 ProblemDetail titles. Its later authorized implementation
+needs a bounded, additive way to observe the successful response's ETag (only after
+status/decoding/current-session checks), preserving existing body-returning callers,
+cancellation and generation isolation. Cross-origin consumers require explicit ETag
+exposure and If-Match allowance in the existing CORS configuration; localhost
+browser/production-origin proof remains separate. This consumer requirement does
+not certify current transport/UI support or approve a new frontend store/framework.
+
+No checkboxes asserting executed providers, owner review, CT36 Final approval or
+implementation completeness may be ticked by this amendment. Existing nine Batch 1
+approvals remain technical approvals; protected review/integration and separate
+implementation authorization remain required. No new HARD approval edge to a future
+batch is introduced: bounded owner-only history presence is approved here; actual
+submission/progress/system-actor integration remains CT04/CT08/CT22-owned.
+
+## 14. Focused revalidation and independent final assessment
+
+The fresh critical review considered the amended decisions and their direct
+consumers, including adverse schedules rather than treating successful parsing or
+the original approval as sufficient evidence:
+
+| Finding | Final assessment of the corrected decision and direct consumers |
+|---|---|
+| F1 | State-based conditional replacement prevents a stale form from reversing a newer different policy/enablement value. Adaptive compares after locking; Course independently checks the fresh expected snapshot; FE18 must preserve draft/body/tag sequencing and explicitly reconcile errors. Same-state ABA is intentionally permitted and is not represented as an audit version. No revision persistence is required for that stated semantic. |
+| F2 | Pre-history changes plus a conservative submitted-attempt/mastery barrier avoid mixed-policy persisted states without a replay job. Unchanged-policy enable/disable/n changes remain supported. The owner-only Assessment existence provider and CT08's first-evidence mutex participation are explicit; a missing producer cannot count as absent history. NOWAIT settings admission preserves the same physical lock and default graph behavior; finite query/transaction/cancellation qualification remains mandatory before runtime acceptance. |
+| F3 | Programmatic enforcement and adverse real-database obligations cover self-invocation, incompatible outer transactions, dirty/stale persistence contexts, root-first ordering and outer rollback. Confirmed rollback is distinguished from indeterminate commit/response loss. The boundary is retained; no implementation or tested transaction behavior is claimed for the empty service. |
+| F4 | Latest-attempt arithmetic/order is unchanged. One-item success/failure sensitivity is proven from the permitted threshold inequalities and required as a CT36 evaluation limitation. No sample floor, confidence claim or unapproved smoothing/routing rule is introduced. |
+
+**Technical verdict: READY_FOR_PROTECTED_REVIEW** for the documentation contract
+as amended. No material contradiction remains in its declared scope. This is not
+GitHub approval or merge eligibility: current-head checks, eligible independent
+CODEOWNER/last-push review and the protected review route remain mandatory.
+Reclassification after history remains deliberately unsupported pending separate
+approval, rather than an implicitly approved unbounded operation. Producer completion,
+deadline/workload qualification, CT04/CT08/CT22 execution approval and real integration
+verification remain implementation gates. No unrelated checkpoint is downgraded,
+reapproved or certified; no implementation, release, deployment or risk acceptance.
+
+Validation executed for the focused amendment on 8 November 2026:
+
+- `git diff --check`: passed. Eight documentation files changed in this correction;
+  original lines preserved in all six amended historical Markdown records.
+- 239 relative Markdown links/anchors resolve; all nine original checkpoint rows,
+  five HARD edges and 13 original revision IDs preserved; four amendment IDs indexed.
+- OpenAPI JSON parsing without duplicate keys, 137 internal references resolve.
+  No route or wire-body property added; only settings GET/PUT changed from `8bc7469`.
+  All six pre-Batch-1 paths and all other operations/component shapes are unchanged.
+- A standalone **contract model** exercised 27 conditional/lifecycle cases and both
+  first-submission/edit serial orders; small-sample outcomes checked for 231 explicit
+  fixture threshold pairs. These are specification/model checks, not endpoint,
+  database concurrency, Spring proxy, benchmark or learning-outcome results.
+- `cd backend && ./mvnw -Dtest=MasteryCalculatorTest,MasteryStateClassifierTest test`:
+  **27 passed**, zero failures/errors/skips; unchanged pure implementation only.
+- `cd frontend && npm test -- src/features/catalogue/pages/CourseCataloguePage.test.tsx`:
+  **12 passed**; existing OpenAPI-consuming catalogue regression only.
+
+Full backend/VM/browser/reclassification execution was not rerun by this focused
+documentation task. The independent review's historical verification remains tied
+to its own exact head/environment and is not evidence of new behavior here.

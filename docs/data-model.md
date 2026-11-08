@@ -583,6 +583,8 @@ See ADR002 and OpenAPI for exact operations, precedence, representations and fil
 
 ## Batch 1 integrity and configuration contract — 8 November 2026
 
+> **Current correction:** [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) supplies conditional expected-state writes and the pre-history-only threshold lifecycle. Earlier whole-Course reclassification requirements are historical and no longer approved as settings-endpoint behavior.
+
 [ADR005](decisions/005-batch-01-contract-approvals.md) is the normative delegated
 approval; these are documentation contracts awaiting implementation and PR integration.
 
@@ -599,3 +601,25 @@ The exact JSON schema and bounds are in ADR005 §6.2 and OpenAPI's AdaptivePolic
 they refine the existing JSONB object, not the SQL schema. Missing legacy policy
 is readable only on a disabled Course; new settings writes require explicit valid
 policy. No schema migration is made or authorized by this contract approval.
+
+
+### Settings state validators and history barrier — focused correction
+
+**CT06-ENABLEMENT-2026-11-08-r2 / CT03-B1-2026-11-08-r3** are the scoped delegated
+approvals in [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026).
+V002 still has only adaptive_enabled and JSONB adaptive_settings for configuration;
+there is no settings revision column. The strong ETag hashes the canonical response
+and is recomputed, not persisted. Identical A→B→A state has the same validator;
+it is not an audit/monotonic revision. No xmin/ctid/process-local version is used.
+
+Under the Course guard, Adaptive checks the current validator and later passes
+Course's freshly read raw snapshot as expected state for its own guarded write.
+Threshold changes require both no submitted Assessment attempts in the Course and
+no stored mastery rows for its skills. Assessment supplies an owner-only boolean
+existence read from existing AttemptService; Adaptive reads its own mastery/skill
+data. Missing/unavailable providers fail closed. No foreign repository access,
+COUNT/history loading, new table/index or migration is selected. Query-plan and
+finite duration/cancellation qualification remain real implementation obligations.
+CT15/SD03 must configure policy before populating submitted history or mastery;
+legacy data cannot be cleared/relabelled merely to bypass the barrier. Post-history
+reclassification/repair requires separate approval. Evidence and progress remain intact.

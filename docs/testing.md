@@ -2599,6 +2599,8 @@ probe has no per-call timeout; the `node --test` lifecycle tests are not run in 
 
 ## Batch 1 bounded verification allocation — 8 November 2026
 
+> **Current amendment:** [CT14-B1-COVERAGE-2026-11-08-r2](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) preserves the locations below but replaces the original whole-Course B1-O10 with lifecycle refusal/no-reclassification checks and adds B1-O12–O16. The earlier wording below is retained as r1 history.
+
 **CT14-B1-COVERAGE-2026-11-08-r1 — DELEGATED_APPROVED**, under the Leader's
 “Batch 1 Complete Contract Approval & Integration Preparation” instruction;
 Codex independently approves this allocation in [ADR005 §9](decisions/005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility).
@@ -2621,3 +2623,23 @@ must examine committed state after success/failure and prove guard participation
 unit doubles cannot establish the PostgreSQL guarantees. The normative expected
 results are [ADR005 B1-O01–O11](decisions/005-batch-01-contract-approvals.md#82-required-oracles-specification-not-executed-tests).
 Application verification has not been executed by this documentation task.
+
+
+### F1–F4 focused Batch 1 verification amendment
+
+**CT14-B1-COVERAGE-2026-11-08-r2 — DELEGATED_APPROVED.** Authority, exact predecessor,
+expected results and limits: [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026).
+Use existing locations relative to `backend/src/test/java/com/codemastery/`:
+
+| Existing suite | Amended acceptance obligations; not executed functionality |
+|---|---|
+| `modules/adaptive/mastery/AdaptiveSettingsServiceTest.java` | B1-O10/O12/O13: full conditional-write cases, two-tab disable protection, canonical/GCD tags, documented ABA, frozen thresholds for submitted or any mastery history, n-only/toggle/re-enable without replay, provider failure. |
+| `integration/AdaptiveLearningFlowIntegrationTest.java` | B1-O12–O15 with real Spring/PostgreSQL: self-invocation, external entry, actual isolation/read-only checks, compatible joining, outer rollback/commit failure, stale preloaded JPA state and dirty queued flush, lock ordering and NOWAIT settings vs enrollment. Verify committed states, lock lifetime/release, independent Courses and bounded cancellation/deadlines. |
+| `integration/MasteryProgressTransactionIntegrationTest.java` | B1-O13/O14 after CT08/CT22 approval: first submission/mastery-row creation versus threshold edit shares Course root; outer failure cannot commit callback/mastery/progress effects. No reversed lower-level lock ordering. |
+| `modules/adaptive/evaluation/AdaptiveProfileScenarioTest.java` | B1-O16 required CT36 evaluation cases: one-question success/failure, alternation, one later failure replacing older larger success, unassessed preservation and same evidence with larger bank n. Outcomes follow current policy; no invented stability target, sample floor or Final dataset approval. |
+
+Finite test budgets are explicit fixtures, not production configuration approval.
+Record actual statement/transaction timeout/cancellation behavior and query plans
+before implementation acceptance; NOWAIT alone does not bound all database work.
+Controlled models or parsing checks in this docs PR do not prove a real Spring
+proxy, PostgreSQL lock, HTTP precondition or browser implementation.

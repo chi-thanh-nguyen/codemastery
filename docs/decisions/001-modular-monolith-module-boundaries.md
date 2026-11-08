@@ -487,6 +487,8 @@ service is added to the application.
 
 ## 12. CT03 access and consumer contract reconciliation
 
+> **Focused amendment:** [CT03-B1-2026-11-08-r3](005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) adds expected-state settings storage and fail-fast settings admission on the same Course guard, with explicit transaction/cache/rollback acceptance. The r2 U07/structure and seven original assertions remain unchanged; only the named r2 write signature is superseded.
+
 > **8 November 2026 amendment:** [ADR005 §§3/5/7/9](005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility), `CT03-B1-2026-11-08-r2` (DELEGATED_APPROVED), completes the former U07 structural/no-extra-read gate and adds only the named Course structure/guard/settings boundaries. The original r1 text below is preserved; its U07 pending and combined checklist dispositions are historical where replaced by that amendment. All seven assertions, U03/U04, access/error policy and approval provenance remain unchanged. The new amendment is pending PR integration; r1 is already effective under ADR004.
 
 ### 12.1 Status, authority and inspected baseline
