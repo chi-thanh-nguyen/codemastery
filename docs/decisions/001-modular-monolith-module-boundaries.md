@@ -915,3 +915,16 @@ Admin mutation, file-storage interface, event/atomic execution or architecture
 change is implied. The Leader expressly authorized the reset-only email exception
 and bounded resume schema/read in ADR006 §7; CT02's detailed approval is in §9. Implementation, privileges, review and protected integration
 remain independent gates.
+
+
+## 14. Batch 3 companion boundaries — 9 November 2026
+
+[ADR007 §3](007-batch-03-contract-approvals.md#3-additional-necessary-prerequisite-slices)
+records the separately delegated **CT03-ASSESSMENT-GUARD-2026-11-09-r1**
+Learner/expiry companion entries. Existing assertions and ADR005's Instructor-only
+configuration guard are unchanged. [ADR007 §12](007-batch-03-contract-approvals.md#12-ct08evidence-only)
+resolves only the submitted-quiz **payload schema/location** deferral in §9
+(**CT08-EVIDENCE-2026-11-09-r1**). Execution, publication coupling, replay and atomic
+mastery/progress participation remain unapproved Batch 6 contracts. These records
+are technical approvals pending independent review/CI/protected integration, not
+implementation or real transaction verification.

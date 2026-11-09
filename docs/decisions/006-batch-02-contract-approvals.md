@@ -47,6 +47,12 @@ Course access, membership and repository implementation; empty progress,
 authoring/material/reset service inventories; live Issues and all 157 Project items.
 Graphify's 5 November graph was used for navigation only and checked against source.
 
+**Present-state integration confirmation — 9 November 2026:** PR #229 merged
+as `912d4324263e19e80b87d899eae51c03842d592f` at **14:51:56 ICT**. The
+preparation-time pending-integration statements below remain historical. This
+confirms documentation presence on main, not independent review, implementation,
+SMTP/runtime qualification, residual-risk acceptance or deployment readiness.
+
 ## 2. Checkpoint dispositions and approval order
 
 | Order | Checkpoint / Issue | Decision revision | Disposition | Exact scope / dependencies |

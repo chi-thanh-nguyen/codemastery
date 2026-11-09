@@ -668,3 +668,15 @@ descending and Course UUID ascending on ties; legacy null times never become fak
 visits. No cross-course adaptive logic. CT01 membership/identity/JWT contracts and
 all existing physical constraints remain effective. NEW migrations, grants,
 implementation/security review and reset exposure risk acceptance stay separate.
+
+
+## Batch 3 assessment lifecycle contract — no physical change
+
+[ADR007](decisions/007-batch-03-contract-approvals.md) defines question/quiz
+authoring, captured attempts, saved answers, grading and results over unchanged
+V004. Used definitions (including skill tags) and attempted quiz definitions are
+frozen; replacements use new existing-entity identities, without revision tables.
+Auto-submission records logical expiry as submitted_at and grades saved masks.
+See ADR007 §§4–13 for normative decisions, errors, concurrency and evidence schema.
+Its DTO status is derived, never a new persisted enum. Physical schema and prior
+approvals remain intact; no migration or application implementation is supplied.

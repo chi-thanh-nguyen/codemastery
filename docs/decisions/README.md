@@ -39,7 +39,8 @@ approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPR
 | [ADR003](003-postgresql-alpine-su-exec-image.md) | PostgreSQL image hardening (Alpine with su-exec) | `LEADER_APPROVED` (2 November 2026); residual risks `PENDING_LEADER_RISK_ACCEPTANCE` |
 | [ADR004](004-leader-approval-of-delegated-records.md) | Leader approval of the earlier delegated records; label rename | `LEADER_APPROVED` (8 November 2026), merged PR #227 |
 | [ADR005](005-batch-01-contract-approvals.md) | Nine Batch 1 approvals and bounded CT03/CT24/CT14/CT18 prerequisites | `DELEGATED_APPROVED` (8 November 2026); integrated via PR #228 (9 November 2026) |
-| [ADR006](006-batch-02-contract-approvals.md) | Eight verified Batch 2 checkpoints: progress, resume, embed, authoring and recovery | Eight `DELEGATED_APPROVED`; bounded architecture/schema additions explicitly authorized; new PR integration pending |
+| [ADR006](006-batch-02-contract-approvals.md) | Eight verified Batch 2 checkpoints: progress, resume, embed, authoring and recovery | Eight `DELEGATED_APPROVED`; integrated via PR #229, 9 November 2026; implementation/exposure gates retained |
+| [ADR007](007-batch-03-contract-approvals.md) | Ten verified Batch 3 checkpoints CP-019–028; two bounded prerequisite slices | `DELEGATED_APPROVED`; independent review/CI/protected integration pending |
 
 ## Contract decision records by revision
 
@@ -118,3 +119,31 @@ CT02 delivery/workflow/token/REST revisions `CT02-DELIVERY-2026-11-09-r1`,
 [ADR006 §9](006-batch-02-contract-approvals.md#9-ct02-recovery-chain--approved-after-the-explicit-exception).
 Implementation, SMTP qualification, NEW migrations and reset-specific residual-risk
 acceptance before public exposure remain separate; no out-of-batch approval occurred.
+
+
+### Batch 3 revisions — 9 November 2026
+
+ADR007 is the authoritative record for the following **DELEGATED_APPROVED**
+revisions. All await independent review/CI/protected integration; no runtime work
+is implemented by the approvals. CT08 remains evidence-only at whole-Issue level.
+
+| Revision | Exact slice | Record |
+|---|---|---|
+| `CT03-ASSESSMENT-GUARD-2026-11-09-r1` | CT03.assessment-guard | [ADR007](007-batch-03-contract-approvals.md#31-ct03assessment-guard) |
+| `CT38-QUIZ-EXPIRY-2026-11-09-r1` | CT38.feature.quiz-expiry | [ADR007](007-batch-03-contract-approvals.md#32-ct38featurequiz-expiry) |
+| `CT23-QUESTIONS-2026-11-09-r1` | CT23.questions | [ADR007](007-batch-03-contract-approvals.md#4-ct23questions) |
+| `CT23-COMPOSITION-2026-11-09-r1` | CT23.composition | [ADR007](007-batch-03-contract-approvals.md#5-ct23composition) |
+| `CT23-PUBLICATION-2026-11-09-r1` | CT23.publication | [ADR007](007-batch-03-contract-approvals.md#6-ct23publication) |
+| `CT23-BINDINGS-2026-11-09-r1` | CT23.bindings | [ADR007](007-batch-03-contract-approvals.md#7-ct23bindings-and-authoring-api) |
+| `CT04-START-2026-11-09-r1` | CT04.start | [ADR007](007-batch-03-contract-approvals.md#8-ct04start) |
+| `CT04-SUBMISSION-2026-11-09-r1` | CT04.submission | [ADR007](007-batch-03-contract-approvals.md#9-ct04submission-and-saved-answers) |
+| `CT04-EXPIRY-2026-11-09-r1` | CT04.expiry | [ADR007](007-batch-03-contract-approvals.md#10-ct04expiry) |
+| `CT04-RESULTS-2026-11-09-r1` | CT04.results | [ADR007](007-batch-03-contract-approvals.md#11-ct04results) |
+| `CT08-EVIDENCE-2026-11-09-r1` | CT08.evidence | [ADR007](007-batch-03-contract-approvals.md#12-ct08evidence-only) |
+| `CT04-BINDINGS-2026-11-09-r1` | CT04.bindings | [ADR007](007-batch-03-contract-approvals.md#13-ct04bindings-errors-and-compatibility) |
+
+Batch 2 present-state confirmation: PR #229 merged as
+`912d4324263e19e80b87d899eae51c03842d592f` at 14:51:56 ICT on 9 November
+2026 (ADR006 §1). Revision-table integration-pending text above describes its
+preparation state; documentation integration is now confirmed. All residual
+implementation, protected-review provenance, risk and exposure gates remain.

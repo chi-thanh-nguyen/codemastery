@@ -3330,6 +3330,1475 @@
           }
         }
       }
+    },
+    "/api/courses/{courseId}/questions": {
+      "post": {
+        "operationId": "b3CreateQuestion",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor Course owner; validate same-Course skill under original Instructor guard. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3QuestionWrite"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "b3ListQuestions",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner only; answer keys permitted. UUID ascending; coherent scope/count/page. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuestionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/questions/{questionId}": {
+      "get": {
+        "operationId": "b3ReadQuestion",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; scoped Question, includes key. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "questionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      },
+      "put": {
+        "operationId": "b3ReplaceUnusedQuestion",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; full replacement only if no AttemptAnswer references. Used definition 409; POST new replacement explicitly. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "questionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3QuestionWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "b3DeleteUnusedQuestion",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; no QuizQuestion/AttemptAnswer reference. Returns deleted definition after commit. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "questionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes": {
+      "post": {
+        "operationId": "b3CreateQuiz",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; hidden Quiz, exact explicit ordered same-Course membership. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3QuizWrite"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "b3ListLearnerQuizzes",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Current self Learner ACTIVE/COMPLETED membership; published Course/Quiz only. Title COLLATE C then UUID. Metadata only, no keys. Diagnostic workflow/start remains CT25 gated. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizSummaryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-quizzes": {
+      "get": {
+        "operationId": "b3ListOwnedQuizzes",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; hidden and published, includes question definitions/keys. Title COLLATE C then UUID. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwnedPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}": {
+      "get": {
+        "operationId": "b3ReadOwnedQuiz",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner only; full ordered definition including keys. Learners read metadata list and captured attempt only. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      },
+      "put": {
+        "operationId": "b3ReplaceUnusedHiddenQuiz",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; hidden and zero Attempts; replace complete title/kind/time/membership. Any Attempt freezes definitions. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3QuizWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "b3DeleteUnusedHiddenQuiz",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; hidden and zero Attempts; deletes own membership only, returns deleted definition. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/publication": {
+      "put": {
+        "operationId": "b3SetQuizPublication",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; idempotent explicit state command; publish validates nonempty same-Course membership; hiding never cancels captured expiry. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts": {
+      "post": {
+        "operationId": "b3StartAttempt",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner; no request body; fixed practice/test only. Return existing active attempt 200 without timer reset; create next committed number 201. Overdue unsubmitted or diagnostic exposure gate 409. Server UTC microsecond time, captured full membership/order/all-false masks. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Attempt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          },
+          "200": {
+            "description": "Existing active Attempt; no new timer/number; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Attempt"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      },
+      "get": {
+        "operationId": "b3AttemptHistory",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner, current Course/Quiz visibility; all own attempts, descending attemptNumber. No key; submittedAt/score null together until submitted. GET never finalizes. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}": {
+      "get": {
+        "operationId": "b3ReadAttempt",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner current access; own captured active/overdue view or immutable result. No key, GET never finalizes. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptRead"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/answers": {
+      "put": {
+        "operationId": "b3SaveAnswers",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner full answer replacement; root/Quiz/Attempt locks then server time strictly before expiry. No grade/event. Terminal/overdue 409. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Attempt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3AnswersWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/submission": {
+      "post": {
+        "operationId": "b3SubmitAttempt",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner full validated answers; strictly before expiry grade/persist atomically. Already submitted returns immutable result, ignores new selections. Overdue unsubmitted 409 accepts no late masks. No automatic mutation retry/event execution approval. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3AnswersWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/result": {
+      "get": {
+        "operationId": "b3ReadAttemptResult",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner current access; submitted only, active/overdue 409. Per-question correctness, no answer key. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/owned-attempts/{attemptId}/result": {
+      "get": {
+        "operationId": "b3ReadOwnedAttemptResult",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner of admitted Course; submitted scoped Attempt including hidden Quiz. No learner impersonation/aggregate reporting; result omits keys. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
     }
   },
   "components": {
@@ -4834,6 +6303,749 @@
         "required": [
           "message"
         ]
+      },
+      "B3QuestionWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prompt": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "single_choice",
+              "multiple_choice",
+              "true_false"
+            ]
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ]
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "minItems": 2
+          },
+          "correctOptions": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "skillId",
+          "prompt",
+          "kind",
+          "difficulty",
+          "options",
+          "correctOptions"
+        ],
+        "description": "V004 masks/kinds apply. true_false labels exactly True, False. Single/true_false one true key, multiple at least one. No null, unknown or duplicate JSON properties."
+      },
+      "B3Question": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prompt": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "single_choice",
+              "multiple_choice",
+              "true_false"
+            ]
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ]
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "minItems": 2
+          },
+          "correctOptions": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "skillId",
+          "prompt",
+          "kind",
+          "difficulty",
+          "options",
+          "correctOptions"
+        ]
+      },
+      "B3QuestionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B3Question"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B3QuizWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "practice",
+              "test"
+            ]
+          },
+          "timeLimitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "questionIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "title",
+          "kind",
+          "timeLimitSeconds",
+          "questionIds"
+        ],
+        "description": "Full explicit ordered membership. Empty hidden draft allowed. No random/adaptive selection."
+      },
+      "B3QuizSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "practice",
+              "test"
+            ]
+          },
+          "timeLimitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "published": {
+            "type": "boolean"
+          },
+          "questionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "title",
+          "kind",
+          "timeLimitSeconds",
+          "published",
+          "questionCount"
+        ]
+      },
+      "B3QuizOwned": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "practice",
+              "test"
+            ]
+          },
+          "timeLimitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "published": {
+            "type": "boolean"
+          },
+          "questionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "question": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              },
+              "required": [
+                "position",
+                "question"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "title",
+          "kind",
+          "timeLimitSeconds",
+          "published",
+          "questionCount",
+          "questions"
+        ]
+      },
+      "B3QuizOwnedPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B3QuizOwned"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B3QuizSummaryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B3QuizSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B3AnswersWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "questionId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "selectedOptions": {
+                  "type": "array",
+                  "minItems": 2,
+                  "items": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "required": [
+                "questionId",
+                "selectedOptions"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "answers"
+        ],
+        "description": "Exactly every captured Question once. No missing/extra IDs, wrong mask lengths or multi-true single_choice/true_false. All-false explicitly unanswered."
+      },
+      "B3Attempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "overdue"
+            ]
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "questionId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "prompt": {
+                  "type": "string",
+                  "pattern": "\\S"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "single_choice",
+                    "multiple_choice",
+                    "true_false"
+                  ]
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  },
+                  "minItems": 2
+                },
+                "selectedOptions": {
+                  "type": "array",
+                  "minItems": 2,
+                  "items": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "required": [
+                "questionId",
+                "position",
+                "prompt",
+                "kind",
+                "options",
+                "selectedOptions"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "attemptId",
+          "quizId",
+          "courseId",
+          "attemptNumber",
+          "startedAt",
+          "expiresAt",
+          "status",
+          "questions"
+        ],
+        "description": "Unsubmitted only; derived DTO status, never persisted. No answer keys, correctness or score."
+      },
+      "B3AttemptSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "overdue",
+              "submitted"
+            ]
+          },
+          "submittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scorePercentage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          }
+        },
+        "required": [
+          "attemptId",
+          "quizId",
+          "courseId",
+          "attemptNumber",
+          "startedAt",
+          "expiresAt",
+          "status",
+          "submittedAt",
+          "scorePercentage"
+        ]
+      },
+      "B3AttemptHistory": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B3AttemptSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B3AttemptResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "const": "submitted"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scorePercentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "questionId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "prompt": {
+                  "type": "string",
+                  "pattern": "\\S"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "single_choice",
+                    "multiple_choice",
+                    "true_false"
+                  ]
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  },
+                  "minItems": 2
+                },
+                "selectedOptions": {
+                  "type": "array",
+                  "minItems": 2,
+                  "items": {
+                    "type": "boolean"
+                  }
+                },
+                "correct": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "questionId",
+                "position",
+                "prompt",
+                "kind",
+                "options",
+                "selectedOptions",
+                "correct"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "attemptId",
+          "quizId",
+          "courseId",
+          "attemptNumber",
+          "startedAt",
+          "expiresAt",
+          "status",
+          "submittedAt",
+          "scorePercentage",
+          "answers"
+        ],
+        "description": "Immutable exact-mask result. All captured rows, no correctOptions. Expiry finalization uses submittedAt=expiresAt."
+      },
+      "B3AttemptRead": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/B3Attempt"
+          },
+          {
+            "$ref": "#/components/schemas/B3AttemptResult"
+          }
+        ],
+        "description": "Active/overdue captured view or submitted immutable result; never null correctness or keys."
       }
     },
     "responses": {
@@ -4957,6 +7169,66 @@
       },
       "Batch2PositionConflict": {
         "description": "Positive position range exhausted; no partial write.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B3Invalid": {
+        "description": "Malformed identifier/body/page, duplicate or unknown JSON members, invalid question/mask/order; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B3Unavailable": {
+        "description": "Safe unavailable resource, hidden or foreign scope, or another learner's Attempt; no identifiers or keys.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B3Conflict": {
+        "description": "Valid request conflicts with lifecycle: used definition, published edit, empty publication, overdue attempt, active result, diagnostic exposure gate or positive-int exhaustion.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B3Failure": {
+        "description": "Safe provider, integrity, clock, grading or transaction failure. No partial success; mutation rolls back. No automatic retry.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/AuthenticationNoStore"
@@ -5210,6 +7482,34 @@
       "Reset-specific residual-token risk acceptance before public recovery exposure",
       "CT09/CT12/CT26/CT22.atomic/CT33 remain separately governed",
       "CT22 schema/read explicitly authorized; no migration or privilege change performed"
+    ]
+  },
+  "x-batch-03-contracts": {
+    "decisionReference": "../decisions/007-batch-03-contract-approvals.md",
+    "status": "DELEGATED_APPROVED",
+    "implementation": "NOT_IMPLEMENTED",
+    "checkpoints": [
+      "CT23.questions",
+      "CT23.composition",
+      "CT23.publication",
+      "CT23.bindings",
+      "CT04.start",
+      "CT04.submission",
+      "CT04.expiry",
+      "CT04.results",
+      "CT08.evidence",
+      "CT04.bindings"
+    ],
+    "prerequisites": [
+      "CT03-ASSESSMENT-GUARD-2026-11-09-r1",
+      "CT38-QUIZ-EXPIRY-2026-11-09-r1"
+    ],
+    "retainedGates": [
+      "Independent review, required CI and protected integration",
+      "Separate implementation authorization and actual artifacts/tests",
+      "CT08.execution/failure/verification-plan and CT22.atomic remain pending",
+      "CT25 diagnostic and CT28 notification binding remain pending",
+      "Configuration values and scheduler/deadline/privilege qualification"
     ]
   }
 }
