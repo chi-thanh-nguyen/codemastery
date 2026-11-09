@@ -1,5 +1,15 @@
 # CodeMastery Deployment Preparation
 
+**Batch 4 disposition — 9 November 2026:**
+[ADR008 §8](decisions/008-batch-04-contract-approvals.md#8-ct17-blocked-scope-and-smallest-remaining-decisions)
+retains CP-033 CT17.F-runtime and CP-034 CT17.F-recovery as
+**PENDING_LEADER_INPUT / BLOCKED for approval**, without an approved new revision.
+Actual resource/custody/exposure facts and recovery objectives/authority are still
+required; full MinIO recovery/encryption qualification and exact-image risk/admission
+gates remain separate. The six independently approved testing decisions do not
+approve these two checkpoints or any deployment. Prior decisions/history below
+are preserved; no operational binding, budget, secret or numerical promise is selected.
+
 ## Current status and reproduction summary
 
 Status as inspected on 31 October 2026 at `main`

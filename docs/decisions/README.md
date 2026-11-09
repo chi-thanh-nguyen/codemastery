@@ -40,7 +40,8 @@ approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPR
 | [ADR004](004-leader-approval-of-delegated-records.md) | Leader approval of the earlier delegated records; label rename | `LEADER_APPROVED` (8 November 2026), merged PR #227 |
 | [ADR005](005-batch-01-contract-approvals.md) | Nine Batch 1 approvals and bounded CT03/CT24/CT14/CT18 prerequisites | `DELEGATED_APPROVED` (8 November 2026); integrated via PR #228 (9 November 2026) |
 | [ADR006](006-batch-02-contract-approvals.md) | Eight verified Batch 2 checkpoints: progress, resume, embed, authoring and recovery | Eight `DELEGATED_APPROVED`; integrated via PR #229, 9 November 2026; implementation/exposure gates retained |
-| [ADR007](007-batch-03-contract-approvals.md) | Ten verified Batch 3 checkpoints CP-019–028; two bounded prerequisite slices | `DELEGATED_APPROVED`; independent review/CI/protected integration pending |
+| [ADR007](007-batch-03-contract-approvals.md) | Ten verified Batch 3 checkpoints CP-019–028; two bounded prerequisite slices | `DELEGATED_APPROVED`; integrated via PR #230, 9 November 2026; implementation/verification gates retained |
+| [ADR008](008-batch-04-contract-approvals.md) | Eight verified Batch 4 checkpoints CP-029–036: test infrastructure/placement/clock and operational inputs | Six `DELEGATED_APPROVED` decisions (including no shared Clock binding); two CT17 checkpoints `PENDING_LEADER_INPUT`; new record awaits independent review/CI/protected integration |
 
 ## Contract decision records by revision
 
@@ -147,3 +148,27 @@ Batch 2 present-state confirmation: PR #229 merged as
 2026 (ADR006 §1). Revision-table integration-pending text above describes its
 preparation state; documentation integration is now confirmed. All residual
 implementation, protected-review provenance, risk and exposure gates remain.
+
+### Batch 4 revisions — 9 November 2026
+
+[ADR008](008-batch-04-contract-approvals.md) records the corrected CP-029–036
+inventory. The six decisions below are **DELEGATED_APPROVED** under the explicit
+Batch 4 instruction; independent review/CI/protected integration and separate
+implementation/verification remain required. CT17.F-runtime/CT17.F-recovery
+are **PENDING_LEADER_INPUT**, with no approved revision. No prerequisite slice
+or earlier-contract amendment is introduced.
+
+| Revision | Exact slice | Record |
+|---|---|---|
+| `CT34-RUNNER-2026-11-09-r1` | CT34.runner | [ADR008 §3](008-batch-04-contract-approvals.md#3-ct34runner) |
+| `CT34-FIXTURES-2026-11-09-r1` | CT34.fixtures | [ADR008 §4](008-batch-04-contract-approvals.md#4-ct34fixtures) |
+| `CT14-COVERAGE-2026-11-09-r1` | CT14.coverage placement and gap map | [ADR008 §5](008-batch-04-contract-approvals.md#5-ct14coverage) |
+| `CT39-BINDING-2026-11-09-r1` | CT39.binding: no shared bean | [ADR008 §6](008-batch-04-contract-approvals.md#6-ct39binding-and-ct39consumers) |
+| `CT34-CI-2026-11-09-r1` | CT34.ci: future job contract | [ADR008 §7](008-batch-04-contract-approvals.md#7-ct34ci) |
+| `CT39-CONSUMERS-2026-11-09-r1` | CT39.consumers: empty shared set; local alternatives/gates | [ADR008 §6](008-batch-04-contract-approvals.md#6-ct39binding-and-ct39consumers) |
+
+Batch 3 present-state confirmation: PR #230 merged as
+`3eeacc8f5b3244c6d3db403d3e7f476f9caeb554` on 9 November 2026 at 20:31:42 ICT.
+The dated preparation-time pending-integration text above remains historical;
+its unchanged approvals are integrated documents, not runtime or independent
+review evidence. CT08 remains evidence-only at whole-Issue level.

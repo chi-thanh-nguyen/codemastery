@@ -1860,3 +1860,19 @@ locations and disabled-mode limits. No runtime configuration/default or .env.exa
 change is made here. Future implementation must bind/validate these required inputs
 and synchronize the placeholder template. Deployment tuning and actual timely
 finalization remain unverified; existing Auth/reset/storage configuration is unchanged.
+
+## Batch 4 runner and time-input decisions — 9 November 2026
+
+[ADR008](decisions/008-batch-04-contract-approvals.md) technically approves the
+existing pinned E2E runner and disposable setup interface; current shell inputs
+and reproduction commands remain as documented. External mode is only for an
+explicitly authorized disposable/local environment; it can mutate accounts and
+memberships and owns no external cleanup. No environment variable, production
+configuration or dependency changes here. SH07's E2E CI contract is approved for
+later separately authorized implementation; no job is added by this record.
+
+CT39 selects no shared Clock bean or shared consumer API. Existing reset and
+quiz local time seams retain their effective contracts. This does not configure
+fake time in AppConfig, activate TestClockConfig, alter JWT expiry or approve
+AS09/IN08 deadline/reminder behavior. Independent review, protected integration,
+implementation authorization and runtime/QA evidence remain separate.
