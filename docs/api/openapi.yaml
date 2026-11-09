@@ -4481,9 +4481,8 @@
           },
           "externalVideoUrl": {
             "type": "string",
-            "format": "uri",
-            "pattern": "^https://www\\.youtube-nocookie\\.com/embed/[A-Za-z0-9_-]+$",
-            "description": "Only the exact canonical URL; no query, fragment, port, credentials, escapes or additional segments. ADR006 \u00a76."
+            "minLength": 1,
+            "description": "Untrusted persisted video value. May contain a legacy or unsupported URL and is not guaranteed to be a valid URI. Consumers MUST validate against the exact canonical allowlist in ADR006 §6 before constructing any iframe or navigation URL. Unsupported values MUST render safe unavailable-video text without external requests."
           }
         },
         "required": [
