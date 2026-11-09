@@ -1082,7 +1082,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful contract operation"
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
           },
           "400": {
             "$ref": "#/components/responses/Batch1Invalid"
@@ -1104,7 +1104,15 @@
           }
         },
         "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
-        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
       }
     },
     "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}": {
@@ -1150,7 +1158,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful contract operation"
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
           },
           "400": {
             "$ref": "#/components/responses/Batch1Invalid"
@@ -1172,7 +1180,15 @@
           }
         },
         "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
-        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
       },
       "delete": {
         "operationId": "removeCoursePrerequisite",
@@ -1216,7 +1232,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful contract operation"
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
           },
           "400": {
             "$ref": "#/components/responses/Batch1Invalid"
@@ -1235,7 +1251,15 @@
           }
         },
         "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
-        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
       }
     },
     "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}": {
@@ -1281,7 +1305,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful contract operation"
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
           },
           "400": {
             "$ref": "#/components/responses/Batch1Invalid"
@@ -1300,7 +1324,15 @@
           }
         },
         "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
-        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
       },
       "delete": {
         "operationId": "unmapCourseLessonSkill",
@@ -1344,7 +1376,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful contract operation"
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
           },
           "400": {
             "$ref": "#/components/responses/Batch1Invalid"
@@ -1363,7 +1395,15 @@
           }
         },
         "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
-        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
       }
     },
     "/api/courses/{courseId}/adaptive-settings": {
@@ -1440,7 +1480,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Conditional full replacement under ADR005 section 13: owning Instructor only, required If-Match checked on fresh guarded configuration. Threshold changes permitted only before any submitted attempt and any stored mastery row; otherwise 409 with no replay. Same-policy toggles/n changes remain supported; every requested true requires fresh readiness. Settings use fail-fast admission on the same Course root (busy 409). No automatic retry, whole-Course recomputation or re-enable catch-up. Successful PUT returns the canonical body and no-store but MUST NOT include ETag, Last-Modified or other validator fields (RFC 9110 section 9.3.4; ADR005 section 15). Clients must subsequently GET the canonical body and its ETag before another update. Approved, not implemented.",
+        "description": "Conditional full replacement under ADR005 section 13: owning Instructor only, required If-Match (strong comparison), then optional If-None-Match (weak comparison), evaluated before effects against the same fresh guarded configuration under ADR005 section 16.1. Either failed condition is 412, never 304. Ignore If-Unmodified-Since when If-Match is present; ignore If-Modified-Since, Range and If-Range for this PUT. No pre-lock or post-write framework comparison may substitute for the guarded decision. Threshold changes permitted only before any submitted attempt and any stored mastery row; otherwise 409 with no replay. Same-policy toggles/n changes remain supported; every requested true requires fresh readiness. Settings use fail-fast admission on the same Course root (busy 409). No automatic retry, whole-Course recomputation or re-enable catch-up. Successful PUT returns the canonical body and no-store but MUST NOT include ETag, Last-Modified or other validator fields (RFC 9110 section 9.3.4; ADR005 section 15). Clients must subsequently GET the canonical body and its ETag before another update. Approved, not implemented.",
         "security": [
           {
             "bearerAuth": []
@@ -1464,7 +1504,16 @@
               "type": "string",
               "minLength": 1
             },
-            "description": "Required entity-tag list from the settings GET. Any matching strong member passes; weak members never match. Missing 428; malformed/empty or wildcard * 400; nonmatching/weak-only 412. Evaluate fresh state under Course guard before history/readiness work or writes. This is expected-current-state semantics, not an ABA-proof revision."
+            "description": "Required entity-tag list from the settings GET. Any matching strong member passes; weak members never match. Missing 428; malformed/empty or wildcard * 400; nonmatching/weak-only 412. Evaluate fresh state under Course guard before history/readiness work or writes. This is expected-current-state semantics, not an ABA-proof revision. Evaluate before accompanying If-None-Match using the same freshly locked snapshot. Passing If-Match does not bypass If-None-Match."
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional entity-tag list or standalone *. After If-Match passes, weakly compare every listed tag against the same fresh guarded configuration; strong or weak current-tag match, or * for this existing representation, fails 412 without effects. Nonmatching/empty list passes this condition; RFC list/empty-element parsing applies. Mixed wildcard/list or malformed tag syntax is 400. Does not substitute for mandatory If-Match. Never 304 for PUT; refresh and explicitly review conditions, no automatic replay."
           }
         ],
         "responses": {
@@ -1520,7 +1569,7 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           },
           "412": {
-            "description": "Precondition Failed. The settings have changed. Fetch the current settings before resubmitting. No changes; no current configuration or replacement ETag in the error. Authentication/ownership/concealment precedence preserved.",
+            "description": "Precondition Failed. The request preconditions are not satisfied. Fetch the current settings and review the request conditions before resubmitting. Failed If-Match or If-None-Match (including weak current-tag matches or *) produces no mutation, no current configuration or replacement ETag in the error; state need not have changed. Authentication/ownership/concealment precedence preserved; native safe ProblemDetail title/detail, no-store.",
             "headers": {
               "Cache-Control": {
                 "required": true,
@@ -2490,6 +2539,21 @@
         "scope": "Preserves CT06.enablement r2 approval provenance. Only GET emits a strong ETag; successful canonicalizing PUT emits no validator and clients GET again before another update. If-Match, wire fields, failure mappings and other approvals are unchanged.",
         "effectiveOnMain": false
       }
+    },
+    "independentReviewCorrection": {
+      "status": "DELEGATED_APPROVED",
+      "approvalDate": "2026-11-09",
+      "authority": "Codex independently selected under Project Leader explicit Resolve Independent Review Findings in PR #228 instruction; no personal Leader/module review implied.",
+      "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+      "revisions": [
+        "CT06-ENABLEMENT-R1-2026-11-09-r1",
+        "CT18-B1-ERRORS-2026-11-09-r3",
+        "CT16-B1-NO-CONTENT-2026-11-09-r1",
+        "CT14-B1-COVERAGE-2026-11-09-r3"
+      ],
+      "effectiveOnMain": false,
+      "scope": "Same-snapshot guarded PUT preconditions, generic safe 412 wording, explicit shared-client no-content mode for five unchanged 204 operations, existing verification allocations. Preserves N1 validator-free PUT success, original revisions and all other scopes. Approved, not implemented.",
+      "scopePrecedence": "ADR005 section 16 replaces only the listed conditional input/comparison/error clauses and adds bounded CT16 no-content handling; sections 13 and 15 continue to govern all unaffected scopes. Earlier currentRevisions fields identify their historical amendment, not blanket precedence."
     }
   }
 }

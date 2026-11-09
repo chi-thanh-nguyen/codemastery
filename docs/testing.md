@@ -2664,3 +2664,29 @@ replay or false rollback. A fresh GET can yield the same tag for unchanged state
 These are verification obligations, not implemented endpoint/browser tests or a new
 CT14/CT18 prerequisite approval. Current documentation/model results are recorded
 separately in ADR005 §15.
+
+
+### R1/R2 conditional HTTP and no-content verification amendment
+
+**CT14-B1-COVERAGE-2026-11-09-r3 — DELEGATED_APPROVED**, independently selected
+by Codex under the Leader's explicit PR #228 review-correction instruction.
+[ADR005 §16](decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026)
+preserves r2/N1's approval provenance, B1-O01–O17 and all paths/harness boundaries.
+B1-O18/O19 are future implementation acceptance obligations, not executed features:
+
+| Existing allocation | Exact added obligations |
+|---|---|
+| `modules/adaptive/mastery/AdaptiveSettingsServiceTest.java` | B1-O18a: combined If-Match/If-None-Match, strong vs weak comparisons, wildcard, nonmatching/empty lists, header grammar, missing mandatory header, early failure/no provider effects; no-op cannot bypass conditions. |
+| `integration/AdaptiveLearningFlowIntegrationTest.java` | B1-O18b/c: both checks against one fresh locked snapshot, A→B writer with If-Match {A,B} and exclusion B/A, real HTTP/application/DB, normal error and date/range precedence, generic safe 412, no post-write framework reversal and preserved N1. B1-O19c: final HTTP/ingress no-content 204 framing/no Content-Length. Preserve all F3 real guard/rollback/lock-order/deadline oracles. |
+| `frontend/src/shared/api/httpClient.test.ts` | B1-O19a/b: opt-in void 204 without JSON parsing/media requirement; exact success status; invalid option combinations before fetch; default JSON callers unchanged; typed overload positive/negative cases; valid/malformed error fallback, current-only 401 invalidation, abort/logout/expiry/replacement/supersession and no retries. Mock fetch through the real client; no feature-local substitute. |
+
+Backend entries are relative to `backend/src/test/java/com/codemastery/`; frontend
+entry is repository-relative and already in the approved six-file frontend inventory.
+FE18 consumer/browser review must cover all five OpenAPI operation IDs, successful
+mutation then failed/obsolete graph refresh, Course/session switch and uncertain
+completion, using existing approved allocations when feature execution is authorized.
+No new frontend test file, runner, browser route or Final coverage scope is approved.
+Mock Fetch null-body assertions cannot prove wire framing. Settings GET body/tag
+pairing, validator-free PUT, exact CT18 error envelope and CT36 small-sample scenarios
+remain required. Concrete results for this documentation revision are recorded in
+ADR005 §16 separately from these implementation obligations.

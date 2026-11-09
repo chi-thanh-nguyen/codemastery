@@ -1,5 +1,9 @@
 # ADR005: Batch 1 Contract Approvals
 
+> **Current scoped refinement:** [§16](#16-r1r3-independent-review-corrections--9-november-2026)
+> completes guarded PUT preconditions and the five 204 operations’ frontend transport
+> handoff. It preserves N1 and every original approval/history outside those scopes.
+
 > **N1 HTTP correction:** [§15](#15-n1-http-validator-correction) preserves
 > `CT06.enablement r2` provenance and changes only successful PUT validator handling
 > and its client/verification handoff. GET retains its strong ETag; PUT requires
@@ -482,6 +486,9 @@ policy is decided; implementation/integration is not certified or authorized her
 
 ### 8.1 Exact inventory and REST contract
 
+> **Consumer compatibility:** [§16.2](#162-r2-bounded-ct16-no-content-transport-extension)
+> adds the bounded CT16 no-content handoff for the five unchanged 204 operations.
+
 All paths below are existing files under `backend/src/main/java/com/codemastery/`;
 no new Java file/interface is authorized. Nested records listed above are explicitly
 selected additions to their owning files. Domain repositories are module-private;
@@ -660,6 +667,10 @@ not a new evidence rule or minimum sample size. All original IDs remain indexed;
 only the replaced clauses above cease to govern. The five HARD edges remain intact.
 
 ### 13.1 Conditional settings writes (F1)
+
+> **R1 refinement:** [§16.1](#161-r1-one-guarded-http-precondition-decision) replaces
+> only the historical expected-tag input/parsing channel and 412 detail below with
+> complete guarded tag conditions. The remaining F1/N1 decisions are preserved.
 
 Select **strong state ETag + required If-Match** for the existing settings GET/PUT.
 Keep the JSON request/response fields unchanged. GET emits `ETag`; GET and successful
@@ -966,6 +977,12 @@ submission/progress/system-actor integration remains CT04/CT08/CT22-owned.
 
 ## 14. Focused revalidation and independent final assessment
 
+> **Current assessment:** [§16](#16-r1r3-independent-review-corrections--9-november-2026)
+> records the R1/R2 refinements and current external CodeQL blocker. The assessments
+> and readiness conclusions below are retained as the historical F1–F4/N1 review,
+> through `4d8ac216`; they do not establish acceptance of its R1/R2 gaps or satisfy
+> current protected-integration gates. The current overall verdict is in §16.5.
+
 The fresh critical review considered the amended decisions and their direct
 consumers, including adverse schedules rather than treating successful parsing or
 the original approval as sufficient evidence:
@@ -1137,3 +1154,287 @@ The fresh review confirms §14's `READY_FOR_PROTECTED_REVIEW` verdict for this
 documentation correction. New endpoint/browser/provider behavior remains
 unimplemented and unverified; current-head CI and eligible protected review are
 separate gates. No implementation, deployment, release, bypass or merge is authorized.
+
+## 16. R1–R3 independent review corrections — 9 November 2026
+
+**DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED.** Codex independently
+selects these bounded corrections under the Project Leader's explicit
+“CodeMastery — Resolve Independent Review Findings in PR #228” instruction.
+Review evidence is the independent assessment of
+`4d8ac216dc22fdf5fd44182ac88ea4ff1e3a23ec`, completed 9 November 2026, session
+`01a1bddd-c749-7f53-9f59-6460e944ca3b`. It is local review evidence, not a
+submitted GitHub approval or personal Leader/module review.
+
+| Revision | Exact scope and predecessor |
+|---|---|
+| `CT06-ENABLEMENT-R1-2026-11-09-r1` | Amends only §13.1's `Set<String>` update input, parsing/comparison channel and conditional-failure wording. Both tag conditions reach one guarded decision as specified below. Retains `CT06-ENABLEMENT-2026-11-08-r2`, §15's `CT06-ENABLEMENT-N1-2026-11-08-r1`, lifecycle, schema, readiness, ABA semantics and all other clauses. |
+| `CT18-B1-ERRORS-2026-11-09-r3` | Amends only `CT18-B1-ERRORS-2026-11-08-r2`'s settings 412 detail and adds explicit optional-header validation; preserves its envelope, native error binding, 428 and all other mappings. |
+| `CT16-B1-NO-CONTENT-2026-11-09-r1` | Bounded extension of `CT16-2026-10-24-r1`'s JSON-only transport scope for the five existing §8.1 204 operations. Adds no-content success mode; preserves JSON callers, Auth/security and error/cancellation semantics. No new REST operation or response status. |
+| `CT14-B1-COVERAGE-2026-11-09-r3` | Extends `CT14-B1-COVERAGE-2026-11-08-r2` and N1's B1-O17 with B1-O18/O19 below in existing suites only. No new test location, harness or whole Final approval. |
+
+Original revisions, authority and historical assessments remain intact. These
+replacements govern only their named scopes. All nine checkpoint approvals and
+four prerequisite approval histories, five HARD edges, CT24 arithmetic, latest-
+attempt policy and CT36 small-sample obligation are preserved. CT05.bindings r1
+keeps its five 204 outcomes; its direct frontend consumer now requires the bounded
+CT16 extension below. No implementation, deployment, release, risk acceptance,
+GitHub approval, ruleset change, bypass or merge is authorized. PR #228 remains
+pending protected integration; none of these new revisions is integrated into main.
+
+### 16.1 R1: one guarded HTTP precondition decision
+
+For settings **PUT**, the adapter must convey every applicable parsed condition,
+not only the strong members of If-Match. Replace only the §13.1 update signature
+with these nested types in the existing `AdaptiveSettingsService.java`:
+
+```java
+public Configuration update(UUID courseId, WritePreconditions preconditions,
+        boolean adaptiveEnabled, Policy policy);
+public record WritePreconditions(Set<String> ifMatchStrongEtags,
+        Optional<IfNoneMatch> ifNoneMatch) {}
+public record IfNoneMatch(boolean any, Set<String> tags) {}
+```
+
+All collections are defensive immutable copies; fields/Optional are nonnull.
+`ifMatchStrongEtags` contains the complete quoted strong tags from the required
+valid list, as before; weak-only input gives an empty set and fails comparison.
+Optional.empty means If-None-Match was absent. For its list form, `tags` contains
+quoted tags with any `W/` prefix removed, preserving opaque bytes/case; this
+implements **weak comparison**, including weak tags received from clients.
+`any=true` represents standalone `*` and requires an empty tags set. An empty list
+has `any=false` and an empty set, so matches nothing. Preserve RFC 9110 §5.6.1
+list parsing/empty-element tolerance; do not split quoted opaque tags naively on
+commas. Multiple field lines form one list. Mixed wildcard/list or malformed
+entity-tag syntax is 400, with no state disclosure. The required If-Match profile
+(missing 428, malformed/empty or wildcard 400) is unchanged. A valid optional
+If-None-Match does not replace mandatory If-Match. Invalid internal record/caller
+invariants fail closed before effects; no caller may drop an applicable condition.
+
+After normal authentication, ownership/concealment and request validation, acquire
+§13's same fail-fast Course guard and freshly read **one** current configuration.
+Derive its canonical tag once. Evaluate in this order, before history/readiness
+queries or any side effect, and keep the guard through validation and commit:
+
+1. Evaluate If-Match with strong comparison. No member matches → 412; stop.
+2. If present, evaluate If-None-Match with weak comparison against that **same**
+   tag. Any matching list member → 412; standalone `*` → 412 because this authorized
+   existing Course always has a settings representation, including disabled/null
+   policy. Absent or nonmatching list → continue. Stop on failure.
+3. Only after both pass, perform the unchanged lifecycle/readiness checks and write
+   through Course's existing expected-state storage boundary.
+
+For this PUT profile, ignore If-Unmodified-Since whenever If-Match is present;
+missing If-Match still fails the mandatory 428 policy. Ignore If-Modified-Since
+because the method is PUT. Ignore Range and If-Range because this target does not
+support range updates. These ignored fields must not override tag conditions or
+produce spurious 304/412/400 results, including invalid date values. No modification
+date or persistence version is introduced. Follow
+[RFC 9110 §§13.1–13.2.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.2.2):
+normal early failures retain precedence; guard contention may return 409 before
+any snapshot exists. Conditional PUT never returns 304. Do not use the optional
+already-applied success exception for a failed condition, even for a no-op body.
+
+A framework/filter check before locking or against a separate read is insufficient.
+The binding must pass the complete conditions into the application decision and
+must not let automatic MVC/filter response processing reevaluate PUT conditions
+against a post-write snapshot and turn a committed success into 412/304. Verify
+this at the final HTTP boundary. Preserve N1: successful PUT has canonical body
+and no-store, **no ETag/Last-Modified/other validator**, followed by client GET.
+GET's body/tag representation is unchanged.
+
+**CT18 mapping:** either failed condition raises the same nested
+`ConfigurationPreconditionFailed`, mapped by the adapter through native sanitized
+ErrorResponseException handling to 412, title `Precondition Failed`, fixed detail
+**“The request preconditions are not satisfied. Fetch the current settings and
+review the request conditions before resubmitting.”** It must not assert that
+configuration necessarily changed: a matching If-None-Match can fail even without
+an intervening write. Keep the unchanged ProblemDetail shape, no-store and absence
+of replacement tags/configuration. Malformed applicable tag syntax is safe 400;
+missing mandatory If-Match remains 428 with its existing safe wording. Graph
+mappings and BusinessRuleException's 400/409 scope are unchanged.
+
+FE18 normally sends only If-Match. On any 412 retain the draft, GET a fresh paired
+snapshot and require deliberate review of both draft and request conditions.
+Do not automatically replay an unsatisfiable If-None-Match (especially `*`) after
+refresh, silently discard caller conditions, or clear Auth. CORS must permit
+If-None-Match if the approved-origin caller sends it, in addition to existing
+If-Match allowance/ETag exposure; no new origins or credentials are approved.
+
+Alternatives rejected: dropping or ignoring If-None-Match violates HTTP semantics;
+a controller-only comparison can race; evaluating after writing cannot undo a
+committed effect. A small parsed immutable input preserves all relevant information
+inside the existing transaction without another read, endpoint, lock or schema.
+
+### 16.2 R2: bounded CT16 no-content transport extension
+
+The existing `frontend/src/shared/api/httpClient.ts` always requires JSON media and
+calls `response.json()` for successful responses. Merely setting expectedStatus=204
+is insufficient; it currently produces a protocol failure after a server mutation
+could have committed. This record specifies the later authorized extension; no
+transport or application implementation is delivered here.
+
+In the existing file, retain `RequestOptions<T>`/its JSON defaults and add optional
+`responseMode?: 'json'`. Add a named `NoContentRequestOptions` based on the same
+request/security/cancellation fields, with `responseMode: 'no-content'`,
+`expectedStatus: 204` and `decode?: never`. Its exact additive shape and request
+entry-point overloads are:
+
+```typescript
+type NoContentRequestOptions =
+    Omit<RequestOptions<never>, 'responseMode' | 'expectedStatus' | 'decode'> &
+    { responseMode: 'no-content'; expectedStatus: 204; decode?: never };
+declare function request(path: string, options: NoContentRequestOptions): Promise<void>;
+declare function request<T>(path: string, options: RequestOptions<T>): Promise<T>;
+```
+
+The function returned by `createHttpClient` exposes those same two call signatures.
+
+No-content mode is explicitly selected only by approved 204 operations. Existing
+callers without responseMode still require exact status, JSON media, a nonempty
+valid JSON body and successful runtime decoding. They continue returning `Promise<T>`;
+204 remains a protocol failure for a JSON caller. No-content mode rejects a decoder
+or non-204 expectedStatus as a configuration error before fetch, including untyped
+callers. No inference from method, missing decoder, empty payload or response status
+may silently switch modes. Raw Response objects/credentials are not exposed.
+
+For an explicitly selected no-content request: validate options, capture/check
+session and operation generation, send through the same normalized path, bearer,
+credentials:'omit', redirect:'error' and cancellation policy. After fetch, perform
+all current-session/operation/expiry/abort checks and current authenticated-401
+invalidation **before** success handling. Only exact **204** succeeds, followed by
+a final current check immediately before returning `undefined`. Do not require
+Content-Type, read/parse JSON or invoke any DTO decoder for that success. Incidental
+Content-Type is not a JSON parsing instruction. Unexpected 200/201/202 successes
+are protocol failures, not synthetic void success. Non-success responses use the
+unchanged safe ProblemDetail/status/fallback logic even in no-content mode; a
+matching expected success must never suppress an HTTP error. No retries.
+
+Scope: `deleteCourseSkill`, `addCoursePrerequisite`, `removeCoursePrerequisite`,
+`mapCourseLessonSkill`, `unmapCourseLessonSkill` in OpenAPI (§8.1). All five retain
+204 with **no response content** and no fabricated JSON DTO. Server/final-ingress
+acceptance must verify actual empty 204 framing (including no Content-Length under
+[RFC 9110 §§8.6/15.3.5](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.3.5));
+a Fetch null body alone does not establish what was sent on the wire.
+
+FE18's existing `skill-graph-editor/api/skillGraphApi.ts` returns `Promise<void>`
+for these five operations through the shared no-content mode. The existing hook
+and page update mutation outcome only for the still-current Course/operation.
+An acknowledged current 204 is success and permits a deliberate graph GET to
+refresh canonical state; a failed refresh leaves the acknowledged mutation intact
+and the view requiring refresh. No optimistic fabricated graph, duplicate retry,
+false rollback or authentication reset. Cancelled/obsolete results cannot update
+a later Course/session; cancellation never proves the server rolled back.
+The response-metadata extension required for settings GET/N1 remains additive and
+separately verified; no-content support does not expose a PUT validator.
+
+Changing the five successes to JSON 200 would unnecessarily alter the approved API;
+a feature-local fetch duplicates security/cancellation logic; accepting empty JSON
+success globally weakens existing decoder guarantees. The explicit opt-in overload
+is the smallest compatible extension. It adds no dependency, file, framework,
+endpoint, generic binary/multipart/streaming transport or feature implementation.
+
+### 16.3 CT14 acceptance oracles and direct-consumer traceability
+
+These are required implementation tests, **not executed endpoint/client changes**.
+Keep all existing B1-O01–O17 and F3 lock/rollback/deadline obligations.
+
+| Oracle | Required observable result and existing allocation |
+|---|---|
+| B1-O18a combined conditions | `AdaptiveSettingsServiceTest.java`: matching If-Match plus matching strong/weak If-None-Match, mixed list containing current tag, or `*` → 412/no history/readiness/write. Nonmatching/empty optional list → normal lifecycle; failed If-Match stops before If-None-Match. Missing If-Match + valid optional header → 428; malformed tag syntax/mixed wildcard → 400; weak-only If-Match → 412. Same-body no-op does not bypass either condition. |
+| B1-O18b atomic HTTP decision | `integration/AdaptiveLearningFlowIntegrationTest.java`: real adapter/application/PostgreSQL, barriers/independent transactions. Another writer changes A→B before guard acquisition; submit If-Match list {A,B} and If-None-Match B: the strong match passes but the fresh exclusion fails 412 with no effects. Reverse exclusion to A: both pass against B if lifecycle/readiness permits. Prove a pre-lock read cannot decide either check and no post-write framework check changes an admitted success to a failed response. Verify final stored state, no callback/provider effects on 412, and N1 validator absence on success. |
+| B1-O18c precedence/errors | Same existing integration suite: ignored date/range headers never change PUT results; combined conditions never yield 304. Auth/role/concealed Course and ordinary malformed request errors retain precedence; busy root 409 remains possible before evaluation. 412 uses the exact safe generic detail above without old/new values, no-store and no replacement validator. Pairing/refresh and ABA remain unchanged. |
+| B1-O19a transport modes | `frontend/src/shared/api/httpClient.test.ts`: parameterize PUT/DELETE no-content 204 with absent or incidental Content-Type; Promise<void>/undefined, no body reader/decoder calls. Non-204 success fails; invalid mode/status/decoder options fail before fetch. Default JSON callers still reject 204 and malformed/empty/non-JSON successes and require decoders. Test overloads/type inference in the existing file/toolchain, including compile-time negative cases. |
+| B1-O19b errors/isolation | Same shared suite: no-content errors 400/401/403/404/409/412/428/5xx retain actual status with valid or malformed/HTML/empty ProblemDetail; only a current authenticated 401 invalidates its session. Test absent/expired session, caller abort, logout, replacement/expiry and superseded operation while fetch settles and immediately before return; no obsolete success/error/private state, no retries. Preserve namespace, credential/header, redirect and JSON regression checks. |
+| B1-O19c consumers/wire | FE18 consumer review exercises all five operation IDs, void success followed by canonical graph refresh, failed/obsolete refresh, Course switch and cancellation/uncertain server completion. Use the existing approved browser/QA route and test allocation when feature execution is separately approved; no new test path is selected here. Real endpoint/final-ingress checks in the existing Adaptive integration allocation verify bodyless 204 framing. Mock fetch cannot prove server framing or browser integration. |
+
+Producer/consumer chain: HTTP adapter → Adaptive conditions + fresh guarded Course
+configuration → unchanged Course expected-state write; native CT18 mapping → shared
+safe error transport → FE18 reconciliation. Graph endpoints → CT16 no-content mode
+→ existing FE18 API/hook/page → canonical graph GET. CT14 owns the above allocation;
+CT03's guard/signature and CT40/Assessment providers are unchanged. Downstream
+CT08/CT22/CT23/CT36 gates remain exactly as recorded in §13.
+
+### 16.4 R3 traceability and protected-integration condition
+
+Append N1 references only to the existing CT06 #24 and CT14 #27 decision histories,
+linking §15 at its finalized `4d8ac216` revision and PR #228's actual unmerged state.
+Preserve all previous Issue bytes, checkboxes and metadata. No unrelated Issue or
+Project fields are in this correction's scope.
+
+CodeQL is an external protected-integration blocker at the inspected head.
+GitHub's managed workflow `dynamic/github-code-scanning/codeql` (ID 378344353)
+exists, but there is no CodeQL run/check/status for `4d8ac216`. Its last observed
+successful run, 42481863204, is for `f226799a`, not the current revision. Both
+code-scanning default-setup and analyses APIs return 403 explicitly reporting
+“Code scanning is not enabled for this repository.” This does not establish why
+scanning is disabled or whether account/feature availability is the cause.
+
+Active `main-quality-gates` ruleset 24102200 requires CodeQL from integration 57789
+and CodeQL code-scanning results (medium-or-higher security alerts; errors/warnings).
+No repository CodeQL YAML controls the managed setup; editing ci.yml or rerunning
+an old-head scan would not establish the required current-head result. No synthetic
+status, replacement check or protection relaxation is permitted. An authorized
+repository/security administrator must restore/enable the intended scanning setup
+(and resolve feature access if necessary), then obtain the required CodeQL result
+and scanning qualification for the exact latest PR revision. Eligible CODEOWNER/
+independent last-push review and all other required checks remain mandatory.
+This correction changes no scanning settings, workflow, ruleset or review metadata.
+
+
+### 16.5 Fresh revalidation and current independent verdict
+
+The complete R1/R2 correction was reviewed against RFC 9110 §§9.3.4/13.1/13.2.2,
+the original approval scopes, current V002 storage, Course guard/expected-state
+boundary, native CT18 mapping, actual shared HTTP client and direct FE18 consumers.
+No code/schema/version field or new API is required. Conditions are no longer
+lost at the application boundary; exclusion checks cannot race or run after commit.
+No-content success is explicit and does not weaken JSON decoding or session guards.
+N1, bounded lifecycle, earned progress, F3 transaction obligations, CT36 limitations
+and all nine checkpoint/four prerequisite histories remain intact.
+
+Executed on 9 November 2026 against the full five-file correction from `4d8ac216`:
+
+- `git diff --check`: PASS. Only ADR005, decision index, OpenAPI, setup and testing
+  documentation changed; no application, migration, workflow or immutable reference.
+- 19 inspected static/reference-model checks: PASS. Duplicate-key rejection,
+  137 resolved OpenAPI internal references, unique operation IDs and ten secured
+  approved/unimplemented operations; unchanged paths/wire schemas, GET and N1 PUT
+  success. Exactly five 204s remain content-free. 195 relative Markdown links/anchors
+  resolve in the four changed Markdown files, excluding fenced examples.
+- Additional API metadata check: all ten operations' path parameters match their
+  routes. Of 24 explicit decision-reference occurrences, all Batch 1/current
+  references resolve; one unchanged CT01 metadata reference retains the baseline
+  obsolete `11-ct01-completion-proposal--pending-authoritative-integration` anchor.
+  Its current target is ADR001 §11; this unrelated historical metadata is preserved,
+  not represented as a passing reference or amended approval by this correction.
+- History/order checks: PASS. Original Markdown lines retained in order; all nine
+  checkpoint rows, five HARD edges, original revision-index entries and complete
+  N1 text preserved. Four bounded new amendment records are indexed with predecessors.
+- Conditional reference model: PASS for combined strong/weak/list/wildcard exclusions,
+  empty/absent optional lists, failed-match precedence, the A→B freshness counterexample,
+  early errors, busy guard and ignored date/range fields. Six retained N1 model tests
+  also pass, including six legal serial schedules/four stale-write refusals and failed
+  or intervening-writer refresh. These are specification models, not production
+  header parsing, HTTP, PostgreSQL concurrency or transaction verification.
+- TypeScript `tsc --ignoreConfig --strict --noEmit --lib es2022,dom` on an isolated
+  contract declaration model: PASS. Both entry-point call signatures retain typed
+  JSON results, return Promise<void> for explicit 204, and reject decoder/wrong-status/
+  missing-mode/unknown-mode cases at compile time. This does not implement the client.
+- `cd frontend && npm test -- src/shared/api/httpClient.test.ts src/features/catalogue/pages/CourseCataloguePage.test.tsx`:
+  PASS, 89 existing tests in two suites. These check the current JSON client and
+  OpenAPI-consuming catalogue, not future no-content or guarded endpoint execution.
+
+New endpoint/provider/browser/CORS/concurrency tests, full local backend verification
+and an external OpenAPI conformance validator were **NOT_RUN**. Their implementation
+acceptance obligations remain explicit; parsing/models and existing regressions do
+not establish those guarantees. R3 is a narrowly authorized append-only Issue-history
+update, separately verified by captured-original/body readback.
+
+**Contract review:** R1 and R2 are resolved within the declared documentation scope;
+no material contract contradiction remains in that scope. **Current overall verdict:
+REVISIONS_REQUIRED_BEFORE_MERGE**, because §16.4's required current-head CodeQL
+result/scanning qualification is unavailable. This supersedes only the earlier
+§§14–15 readiness conclusions for present merge assessment; it does not revoke or
+reapprove sound technical decisions. An authorized administrator must restore the
+intended scanning and obtain the exact-head result. Eligible protected human review,
+all required checks and separate implementation authorization remain outstanding.
