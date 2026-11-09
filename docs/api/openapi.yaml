@@ -1440,7 +1440,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Conditional full replacement under ADR005 section 13: owning Instructor only, required If-Match checked on fresh guarded configuration. Threshold changes permitted only before any submitted attempt and any stored mastery row; otherwise 409 with no replay. Same-policy toggles/n changes remain supported; every requested true requires fresh readiness. Settings use fail-fast admission on the same Course root (busy 409). No automatic retry, whole-Course recomputation or re-enable catch-up. Approved, not implemented.",
+        "description": "Conditional full replacement under ADR005 section 13: owning Instructor only, required If-Match checked on fresh guarded configuration. Threshold changes permitted only before any submitted attempt and any stored mastery row; otherwise 409 with no replay. Same-policy toggles/n changes remain supported; every requested true requires fresh readiness. Settings use fail-fast admission on the same Course root (busy 409). No automatic retry, whole-Course recomputation or re-enable catch-up. Successful PUT returns the canonical body and no-store but MUST NOT include ETag, Last-Modified or other validator fields (RFC 9110 section 9.3.4; ADR005 section 15). Clients must subsequently GET the canonical body and its ETag before another update. Approved, not implemented.",
         "security": [
           {
             "bearerAuth": []
@@ -1469,7 +1469,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful contract operation",
+            "description": "Canonical settings committed. No ETag, Last-Modified or other validator is emitted for this transforming PUT. Perform GET to obtain a paired canonical representation and ETag before another update.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1478,13 +1478,6 @@
               }
             },
             "headers": {
-              "ETag": {
-                "required": true,
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong SHA-256 state validator of canonical identity-encoded settings JSON; current-state semantics with documented ABA; not readiness, authorization or an audit revision."
-              },
               "Cache-Control": {
                 "required": true,
                 "schema": {
@@ -2190,7 +2183,7 @@
           "adaptiveEnabled",
           "policy"
         ],
-        "description": "Conditional full replacement; If-Match header required. Explicit valid policy even when disabling. Threshold changes require no submitted Course attempts and no stored mastery rows; otherwise 409 pending separately approved reclassification. Same normalized thresholds permit toggles/n edits, no replay. Requested true revalidates readiness."
+        "description": "Conditional full replacement; If-Match header required. Explicit valid policy even when disabling. Threshold changes require no submitted Course attempts and no stored mastery rows; otherwise 409 pending separately approved reclassification. Same normalized thresholds permit toggles/n edits, no replay. Requested true revalidates readiness. Successful PUT has no validator; obtain the next write snapshot through GET."
       },
       "AdaptiveSettings": {
         "type": "object",
@@ -2219,7 +2212,7 @@
           "adaptiveEnabled",
           "policy"
         ],
-        "description": "Canonical stored-intent/policy JSON, paired with ETag response metadata. Fixed key order/normalization/bytes per ADR005 section 13.1; ETag is not a JSON property. Disabled legacy policy may be null. Not a readiness or audit-revision assertion."
+        "description": "Canonical stored-intent/policy JSON. GET pairs this body with an ETag; successful canonicalizing PUT emits no validator and requires client follow-up GET before another update (ADR005 section 15). Fixed key order/normalization/bytes per section 13.1; ETag is not a JSON property. Disabled legacy policy may be null. Not a readiness or audit-revision assertion."
       }
     },
     "responses": {
@@ -2490,7 +2483,13 @@
         "CT18-B1-ERRORS-2026-11-08-r1": "CT18-B1-ERRORS-2026-11-08-r2"
       },
       "preserved": "All nine checkpoint approvals and four original prerequisite records retained; only named settings signatures/lifecycle/error/verification scopes amended. CT06.production arithmetic/latest-attempt policy and CT24 remain unchanged.",
-      "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+      "implementationStatus": "APPROVED_NOT_IMPLEMENTED",
+      "httpValidatorCorrection": {
+        "revision": "CT06-ENABLEMENT-N1-2026-11-08-r1",
+        "decisionReference": "../decisions/005-batch-01-contract-approvals.md#15-n1-http-validator-correction",
+        "scope": "Preserves CT06.enablement r2 approval provenance. Only GET emits a strong ETag; successful canonicalizing PUT emits no validator and clients GET again before another update. If-Match, wire fields, failure mappings and other approvals are unchanged.",
+        "effectiveOnMain": false
+      }
     }
   }
 }

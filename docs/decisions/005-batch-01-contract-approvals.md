@@ -1,5 +1,10 @@
 # ADR005: Batch 1 Contract Approvals
 
+> **N1 HTTP correction:** [§15](#15-n1-http-validator-correction) preserves
+> `CT06.enablement r2` provenance and changes only successful PUT validator handling
+> and its client/verification handoff. GET retains its strong ETag; PUT requires
+> If-Match, returns no validator, and requires a subsequent client GET before another update.
+
 > **Effective correction within this PR, 8 November 2026:** [§13](#13-focused-f1f4-amendments--8-november-2026)
 > narrowly amends the settings write/lifecycle and verification contracts under the
 > Leader's “PR #228 Focused Technical Corrections & Revalidation” instruction.
@@ -657,8 +662,12 @@ only the replaced clauses above cease to govern. The five HARD edges remain inta
 ### 13.1 Conditional settings writes (F1)
 
 Select **strong state ETag + required If-Match** for the existing settings GET/PUT.
-Keep the JSON request/response fields unchanged. GET and successful PUT emit
-`ETag` and `Cache-Control: no-store`. A tag represents this Course's **configuration**,
+Keep the JSON request/response fields unchanged. GET emits `ETag`; GET and successful
+PUT emit `Cache-Control: no-store`. Successful PUT MUST NOT emit validator fields,
+including ETag or Last-Modified, because this operation transforms the submitted
+representation. Clients must subsequently GET the canonical body and its ETag
+before another update ([N1 correction, §15](#15-n1-http-validator-correction)).
+A tag represents this Course's **configuration**,
 not readiness, history, mastery, an audit revision or a lasting authorization.
 
 Use the exact compact UTF-8 JSON response bytes, with keys in this order:
@@ -721,6 +730,9 @@ expected-state mismatch aborts as safe 500: it indicates an invalid guarded call
 or provider, not permission to persist stale state. The externally supplied stale
 tag has already been handled as 412. `read` returns etag for the same immutable
 snapshot/body; `etag` is response metadata, **not** an added JSON property.
+The application Configuration type is unchanged; only GET exposes its etag as an
+HTTP validator. The PUT adapter must omit validators even if the application result
+contains an internally derived tag.
 
 | Settings failure | HTTP and client behavior |
 |---|---|
@@ -913,6 +925,7 @@ readiness only. The former whole-Course recomputation oracle is historical.
 | B1-O14 transaction reality | Self-invocation, compatible/incompatible outer contexts, callback/outer/commit failures, rollback-only and stale managed state satisfy §13.3 on real PostgreSQL. Verify committed state and actual transaction/lock lifetime, not mocked callbacks. |
 | B1-O15 contention and duration | Enrollment holds root: settings NOWAIT→409/no change. Settings holds root: enrollment proceeds after commit/rollback; cancellation/deadline releases locks. Finite statement/transaction budgets are recorded; no history-sized loop, unbounded wait or connection-pool exhaustion is accepted. |
 | B1-O16 sample sensitivity | For explicit valid fixture policies, one correct→Mastered, next one incorrect→Weak; alternation and older larger samples behave exactly as latest-attempt policy. Changing bank n does not change the evidence ratio. CT36 must review these limitations independently. |
+| B1-O17 canonicalizing PUT | Apply §15's N1 cases: fraction normalization, successful PUT without any validator, subsequent GET body/tag pairing, stale If-Match refusal and intervening-writer/failed-refresh behavior. No endpoint execution is claimed here. |
 
 CT14 uses existing `AdaptiveSettingsServiceTest.java` for local conditional/lifecycle
 cases, `AdaptiveLearningFlowIntegrationTest.java` for O12–O15 real providers/guard/
@@ -926,6 +939,10 @@ only new producer location. FE18's `skillGraphApi.ts`, `useSkillGraph.ts` and
 `AdaptiveSettingsPanel.tsx` must keep body+ETag together, supply If-Match on **every**
 settings write and retain local drafts on 412/409. GET latest and require deliberate
 reconciliation; never replace the tag and automatically retry an old full body.
+After successful PUT, invalidate the client's previous write validator and GET again
+before permitting another update. Pair only that GET's body and ETag; never combine
+the PUT response body with a later GET's tag. A failed follow-up GET does not undo
+the committed PUT and does not authorize automatic PUT replay.
 Apply the owning feature's Course/request-generation checks to body and ETag together;
 an older response cannot replace either half of a newer snapshot.
 Do not clear Auth on 412/428/409 or show disabled stale switches as authoritative.
@@ -933,7 +950,7 @@ Persist no credentials/ETag-based authorization; the tag is not an access capabi
 
 The current shared HTTP client accepts request headers but returns decoded body
 only and lacks 412/428 ProblemDetail titles. Its later authorized implementation
-needs a bounded, additive way to observe the successful response's ETag (only after
+needs a bounded, additive way to observe the successful GET response's ETag (only after
 status/decoding/current-session checks), preserving existing body-returning callers,
 cancellation and generation isolation. Cross-origin consumers require explicit ETag
 exposure and If-Match allowance in the existing CORS configuration; localhost
@@ -959,10 +976,15 @@ the original approval as sufficient evidence:
 | F2 | Pre-history changes plus a conservative submitted-attempt/mastery barrier avoid mixed-policy persisted states without a replay job. Unchanged-policy enable/disable/n changes remain supported. The owner-only Assessment existence provider and CT08's first-evidence mutex participation are explicit; a missing producer cannot count as absent history. NOWAIT settings admission preserves the same physical lock and default graph behavior; finite query/transaction/cancellation qualification remains mandatory before runtime acceptance. |
 | F3 | Programmatic enforcement and adverse real-database obligations cover self-invocation, incompatible outer transactions, dirty/stale persistence contexts, root-first ordering and outer rollback. Confirmed rollback is distinguished from indeterminate commit/response loss. The boundary is retained; no implementation or tested transaction behavior is claimed for the empty service. |
 | F4 | Latest-attempt arithmetic/order is unchanged. One-item success/failure sensitivity is proven from the permitted threshold inequalities and required as a CT36 evaluation limitation. No sample floor, confidence claim or unapproved smoothing/routing rule is introduced. |
+| N1 | §15 corrects the successful-PUT validator requirement identified at `f226799a8cd1b8dbdc4621d03fe9c879f155bbb5`. GET retains the canonical strong ETag; canonicalizing PUT omits all validators; clients GET again before updating. If-Match comparison, Course serialization, history freeze and CT18 failure mappings are unchanged. |
 
 **Technical verdict: READY_FOR_PROTECTED_REVIEW** for the documentation contract
-as amended. No material contradiction remains in its declared scope. This is not
-GitHub approval or merge eligibility: current-head checks, eligible independent
+as corrected through §15, including the N1 HTTP correction. The earlier verdict
+at `f226799a` did not account for N1; it is not independent acceptance of the faulty
+PUT response rule. No material contradiction remains in the corrected declared scope.
+The complete five-file N1 diff was independently revalidated on 9 November 2026;
+the current results and limits are recorded at the end of §15.
+This is not GitHub approval or merge eligibility: current-head checks, eligible independent
 CODEOWNER/last-push review and the protected review route remain mandatory.
 Reclassification after history remains deliberately unsupported pending separate
 approval, rather than an implicitly approved unbounded operation. Producer completion,
@@ -970,7 +992,8 @@ deadline/workload qualification, CT04/CT08/CT22 execution approval and real inte
 verification remain implementation gates. No unrelated checkpoint is downgraded,
 reapproved or certified; no implementation, release, deployment or risk acceptance.
 
-Validation executed for the focused amendment on 8 November 2026:
+Historical validation for the F1–F4 amendment at `f226799a` on 8 November 2026
+(not reruns of the N1 correction; current validation is recorded in §15):
 
 - `git diff --check`: passed. Eight documentation files changed in this correction;
   original lines preserved in all six amended historical Markdown records.
@@ -991,3 +1014,126 @@ Validation executed for the focused amendment on 8 November 2026:
 Full backend/VM/browser/reclassification execution was not rerun by this focused
 documentation task. The independent review's historical verification remains tied
 to its own exact head/environment and is not evidence of new behavior here.
+
+## 15. N1 HTTP validator correction
+
+**CT06-ENABLEMENT-N1-2026-11-08-r1 — DELEGATED_TECHNICAL_APPROVAL;
+DELEGATED_APPROVED**, 8 November 2026. Authority is the Project Leader's explicit
+instruction to fix N1 in PR #228, retain GET ETags/PUT If-Match, and commit/push only
+the minimal contract correction. Codex records this bounded correction under that
+instruction; no personal Leader/module review or GitHub approval is asserted.
+
+**Finalization, 9 November 2026:** the existing five-file N1 draft and its
+`CT06-ENABLEMENT-N1-2026-11-08-r1` identifier are retained. Codex independently
+reviewed and finalized that work under the Leader's current explicit
+**“CodeMastery — Fix N1 and Finalize PR #228”** instruction. The draft's 8 November
+provenance is not a claim of a new personal Leader review or completed integration.
+
+**Predecessor:** `CT06-ENABLEMENT-2026-11-08-r2`, recorded in §13 at
+`f226799a8cd1b8dbdc4621d03fe9c879f155bbb5`. Its original approval, authority and
+history remain intact. Only the successful-PUT validator clause and corresponding
+frontend/CT14 handoff are corrected. The other eight Batch 1 checkpoint approvals,
+CT03/CT14/CT18 prerequisite approval provenance, CT24 reuse, application signatures,
+wire fields, failure mappings, history barrier and Course guard remain unchanged.
+
+### HTTP basis and minimal correction
+
+[RFC 9110 §9.3.4](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.4)
+prohibits a validator in a successful PUT response when the request representation
+was transformed. Here GCD normalization can change `2/4` into `1/2`, and the
+canonical response includes Course identity absent from the request. Returning the
+canonical body does not make a successful-PUT validator compliant.
+
+GET continues to return the canonical representation and its strong ETag.
+PUT continues to require If-Match, evaluated on fresh state inside the Course guard.
+Its successful 200 still returns the canonical body and no-store, but no ETag,
+Last-Modified or other validator field. No route, method, status or wire field is added.
+This prohibition applies to the final HTTP response, including applicable filters
+and ingress; omitting headers in the controller alone is insufficient evidence.
+CT18 r2's 400/401/403/404/409/412/428/500 mappings and safe error behavior are retained;
+this correction creates no new failure mapping or exception type.
+
+After successful PUT, the client must obtain another successful authorized GET's
+body and ETag as one current-generation snapshot before another update. The GET
+may observe a concurrent writer's newer state. A freshly obtained tag may equal
+the previous value for unchanged canonical state; it is not a monotonic revision.
+The server still checks current If-Match, without a new mechanism to track whether
+a particular client performed GET. No PUT is retried automatically. If the
+follow-up GET fails, the successful PUT is not reported as rolled back; the client
+has no usable write snapshot until a later GET succeeds. Existing session/Course/
+generation isolation applies to that refresh and to both halves of the snapshot.
+
+Omitting PUT validators and using the existing GET is the smallest correction.
+Making PUT input identical to the stored representation would expand the wire
+contract; adding a revision column or endpoint is unnecessary and not authorized.
+
+### B1-O17 verification cases and CT14 handoff
+
+These are required future implementation oracles in the existing suites allocated
+in docs/testing.md, supplemented by current documentation/model checks only:
+
+| Case | Required result |
+|---|---|
+| N1-01 canonicalized fraction | An authorized, matching-tag pre-history PUT with valid fixture weak `2/4` and mastered `4/5` stores/returns weak `1/2`. Its 200 contains no ETag/Last-Modified and retains no-store. Fixture values are not production defaults. |
+| N1-02 successful PUT variants | Reduced/equivalent fractions, ordinary JSON formatting and same-policy/no-op requests also return no validator. JSON response fields and success status remain unchanged. |
+| N1-03 subsequent GET | Following PUT, GET returns one canonical body with the matching strong SHA-256 ETag. Only this pair becomes the next write snapshot; an unchanged state can return the same tag. |
+| N1-04 stale If-Match | Two tabs read the same state; one changes/disables it. The other sends the old tag and receives 412/no effects. The mandatory follow-up GET never automatically replays the stale form. Existing missing/weak/malformed header cases remain unchanged. |
+| N1-05 intervening writer | Another writer commits between successful PUT and follow-up GET. The client uses the GET body/tag together, not its earlier PUT body. A further intervening configuration change causes the next stale-tag PUT to fail 412. |
+| N1-06 failed refresh | A failed/cancelled or obsolete follow-up GET supplies no write validator. Preserve the confirmed PUT outcome, require a later successful GET before updating, and do not replay PUT or infer rollback. |
+
+The correction and §14's verdict concern documentation readiness only. Real HTTP,
+Spring/PostgreSQL concurrency, CORS/browser and provider qualification remain
+implementation gates. Required CI and eligible protected review remain separate;
+no implementation, merge, bypass, release, deployment or risk acceptance is authorized.
+
+### Historical preparation validation — 8 November 2026
+
+Executed on 8 November 2026 against the `f226799a` predecessor and this correction:
+
+- `git diff --check`: passed; only the five authorized documentation files changed.
+- 189 relative documentation links/anchors resolve. All nine original checkpoint
+  rows, five HARD edges, existing prerequisite authority/records, application
+  signatures, history-freeze and guard clauses are preserved.
+- OpenAPI parses without duplicate keys and all 137 internal references resolve.
+  GET and PUT preconditions/security/request body are unchanged; only settings PUT
+  operation metadata/success-validator handling and explanatory schema/approval
+  metadata change. Other operations, wire fields and error mappings are unchanged.
+- 15 standalone documentation/reference-model checks passed, including the original
+  N1 counterexample, reduced/unreduced fraction normalization, validator-free PUT,
+  PUT→GET→PUT, unchanged-state tags, intervening writers and failed/obsolete refresh.
+  All six two-client serial schedules were checked; four stale writes were rejected
+  with no effects. This is specification validation, not a running HTTP or database test.
+- `cd frontend && npm test -- src/features/catalogue/pages/CourseCataloguePage.test.tsx`:
+  12 passed; existing OpenAPI-consuming catalogue regression only.
+
+Full backend verification, real settings endpoints, Spring/PostgreSQL races and
+browser/CORS tests were not rerun locally for this documentation-only correction.
+Current-head remote CI is evaluated separately after push. Historical results are
+not represented as current verification of unimplemented behavior.
+
+### Finalization validation — 9 November 2026
+
+Freshly executed against `f226799a` and the complete retained five-file N1 diff:
+
+- `git diff --check`: passed. No implementation, schema, unrelated documentation
+  or Issue changes were made; the incoming five files and patch were preserved
+  separately before finalization edits.
+- 182 relative Markdown links/anchors resolve in the four changed Markdown files,
+  excluding fenced examples. This fresh count uses that explicit scope; the older
+  preparation count above is retained as its historical report.
+- All 15 inspected documentation/reference-model checks passed again. OpenAPI
+  has no duplicate keys; all 137 internal references resolve. GET is unchanged,
+  PUT still requires If-Match, and its successful response declares only no-store,
+  with no ETag or Last-Modified. Other operations, schemas' wire fields, failure
+  mappings, application signatures and approved guard/history policies are unchanged.
+- All six legal two-client serial schedules were checked; four stale writes were
+  refused without effects. Follow-up GET pairing, normalization/no-op cases and
+  intervening-writer/failed-refresh scenarios passed in the reference model.
+  These are contract checks, not real HTTP or PostgreSQL concurrency verification.
+- `cd frontend && npm test -- src/features/catalogue/pages/CourseCataloguePage.test.tsx`:
+  **12 passed**, existing OpenAPI-consuming regression only.
+
+The fresh review confirms §14's `READY_FOR_PROTECTED_REVIEW` verdict for this
+documentation correction. New endpoint/browser/provider behavior remains
+unimplemented and unverified; current-head CI and eligible protected review are
+separate gates. No implementation, deployment, release, bypass or merge is authorized.

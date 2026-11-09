@@ -1718,6 +1718,9 @@ external Playwright requirements; the E2E directory still has no npm pipeline.
 [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026)
 (`CT06-ENABLEMENT-2026-11-08-r2`) governs FE18/AD08/CO14's current contract.
 This documents requirements only; it implements no client, CORS or UI behavior.
+The narrow [N1 correction](decisions/005-batch-01-contract-approvals.md#15-n1-http-validator-correction)
+preserves r2 approval provenance: only GET emits an ETag; successful canonicalizing
+PUT must omit all validator fields, including ETag and Last-Modified.
 
 The existing Instructor `skill-graph-editor/api/skillGraphApi.ts`,
 `hooks/useSkillGraph.ts` and `components/AdaptiveSettingsPanel.tsx` must retain the
@@ -1729,9 +1732,18 @@ and deliberate retry/review. None clears Auth. Same-policy disable, enable and n
 changes remain possible; thresholds may be changed only before submitted history
 and stored mastery. No whole-Course replay/catch-up progress indicator is promised.
 
+After successful PUT, invalidate the previous write validator and perform GET before
+another update. Retain only that GET's body and ETag as a paired snapshot: a concurrent
+writer may have changed the resource since PUT. Do not combine the PUT body with the
+GET tag, derive a tag in the client, or reuse the prior snapshot without this refresh.
+A no-op can yield the same freshly obtained ETag. Failed/cancelled or obsolete GET
+does not undo a successful PUT and must not trigger automatic PUT replay; wait for a
+successful current-generation GET before another write. Existing session isolation
+and explicit stale-draft reconciliation remain required.
+
 `shared/api/httpClient.ts` currently accepts custom request headers and returns only
 decoded bodies. A later authorized additive response-metadata capability is required
-to observe ETag only after successful status/decoding and current-generation checks;
+to observe GET's ETag only after successful status/decoding and current-generation checks;
 preserve existing callers, cancellation and session isolation. Its existing 412/428
 safe ProblemDetail title handling also needs implementation. Do not bypass shared
 transport, expose credentials, or introduce a store/framework for validators.

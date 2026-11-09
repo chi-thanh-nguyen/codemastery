@@ -2643,3 +2643,24 @@ Record actual statement/transaction timeout/cancellation behavior and query plan
 before implementation acceptance; NOWAIT alone does not bound all database work.
 Controlled models or parsing checks in this docs PR do not prove a real Spring
 proxy, PostgreSQL lock, HTTP precondition or browser implementation.
+
+### N1 successful-PUT validator correction
+
+[ADR005 §15](decisions/005-batch-01-contract-approvals.md#15-n1-http-validator-correction),
+`CT06-ENABLEMENT-N1-2026-11-08-r1`, preserves CT14 r2's approval and existing suite
+allocation while adding B1-O17/N1-01–N1-06. In
+`modules/adaptive/mastery/AdaptiveSettingsServiceTest.java`, cover canonicalized
+fractions and unchanged conditional-write results. In
+`integration/AdaptiveLearningFlowIntegrationTest.java`, verify actual HTTP GET ETag,
+successful PUT **absence** of ETag/Last-Modified for canonicalized and already-reduced
+fractions/no-ops, no-store, subsequent canonical GET and stale If-Match rejection.
+Use real participants for the intervening-writer schedule; no new test path is added.
+Assert validator absence on the final HTTP response through applicable filters and
+ingress, so a downstream layer cannot reintroduce ETag or Last-Modified after the controller.
+
+The later FE18 verification must also prove body/tag pairing after PUT→GET, a writer
+between those requests, and failed/cancelled/obsolete follow-up GET without PUT
+replay or false rollback. A fresh GET can yield the same tag for unchanged state.
+These are verification obligations, not implemented endpoint/browser tests or a new
+CT14/CT18 prerequisite approval. Current documentation/model results are recorded
+separately in ADR005 §15.
