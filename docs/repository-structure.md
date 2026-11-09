@@ -202,6 +202,8 @@ The tree below is unchanged until FE12 performs the move.
 
 ### Decision records directory record — 8 November 2026
 
+The Leader’s “Batch 1 Complete Contract Approval & Integration Preparation” instruction additionally authorizes `docs/decisions/005-batch-01-contract-approvals.md` under this established directory. [ADR005](decisions/005-batch-01-contract-approvals.md) uses existing Java/test locations and nested types only; no code file, module or directory is added by its approval.
+
 The Project Leader's 8 November 2026 instructions ("Pre-Approval Readiness Update" and the
 LD-01 decision recorded in [ADR004](decisions/004-leader-approval-of-delegated-records.md))
 authorize two new files under the existing `docs/decisions/` directory and ask for the
@@ -1856,6 +1858,8 @@ codemastery/
 │       ├── 003-postgresql-alpine-su-exec-image.md
 
 │       ├── 004-leader-approval-of-delegated-records.md
+
+│       ├── 005-batch-01-contract-approvals.md
 
 │       └── README.md
 

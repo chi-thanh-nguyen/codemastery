@@ -1107,6 +1107,10 @@ review, protected integration and separate implementation authority remain.
 | Router dependency | APPROVE the exact production dependency `react-router` version **7.18.4**, without a semver range, for declarative browser routing only | No react-router-dom compatibility wrapper, router Vite plugin, SSR/RSC, loaders/actions or framework packages. No dependency is installed or edited in this task. |
 | CT16 path correction | APPROVE correction of ADR002's mistaken courseApi.ts reference to `frontend/src/features/catalogue/api/catalogueApi.ts` | Verified canonical original tree, current inventory and existing file. Only that reference and correction provenance change; no rename, duplicate client or REST behavior change. |
 
+> **Bounded later extension:** [ADR005 §16.2](decisions/005-batch-01-contract-approvals.md#162-r2-bounded-ct16-no-content-transport-extension)
+> adds no-content success only for the five Batch 1 204 operations. The original
+> JSON-only scope below remains unchanged for its existing callers.
+
 The independently usable transport contract accepts an API-root-relative path,
 operation method, explicit authentication mode, expected success status, runtime
 DTO decoder, separate query/body and optional caller AbortSignal. Callers cannot
@@ -1711,3 +1715,86 @@ CORS admits PUT/DELETE for the selected authenticated flow while other protected
 routes remain denied. No token parameter is exposed to feature clients.
 See docs/testing.md for executed local PostgreSQL/browser evidence, fixture and
 external Playwright requirements; the E2E directory still has no npm pipeline.
+
+
+## Batch 1 conditional settings client handoff — F1–F4
+
+> **Current R1/R2 refinement:** [ADR005 §16](decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026) completes the precondition channel and adds the bounded CT16 no-content extension. It preserves the N1 handoff below.
+
+[ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026)
+(`CT06-ENABLEMENT-2026-11-08-r2`) governs FE18/AD08/CO14's current contract.
+This documents requirements only; it implements no client, CORS or UI behavior.
+The narrow [N1 correction](decisions/005-batch-01-contract-approvals.md#15-n1-http-validator-correction)
+preserves r2 approval provenance: only GET emits an ETag; successful canonicalizing
+PUT must omit all validator fields, including ETag and Last-Modified.
+
+The existing Instructor `skill-graph-editor/api/skillGraphApi.ts`,
+`hooks/useSkillGraph.ts` and `components/AdaptiveSettingsPanel.tsx` must retain the
+successful GET settings body and its strong ETag as one snapshot. All settings PUTs
+send If-Match; 412 retains the draft, refreshes latest state, and requires deliberate
+user reconciliation before resubmission. Never refresh the tag and automatically
+replay a stale full form. 428 requires fetching a tag; 409 requires safe explanation
+and deliberate retry/review. None clears Auth. Same-policy disable, enable and n
+changes remain possible; thresholds may be changed only before submitted history
+and stored mastery. No whole-Course replay/catch-up progress indicator is promised.
+
+After successful PUT, invalidate the previous write validator and perform GET before
+another update. Retain only that GET's body and ETag as a paired snapshot: a concurrent
+writer may have changed the resource since PUT. Do not combine the PUT body with the
+GET tag, derive a tag in the client, or reuse the prior snapshot without this refresh.
+A no-op can yield the same freshly obtained ETag. Failed/cancelled or obsolete GET
+does not undo a successful PUT and must not trigger automatic PUT replay; wait for a
+successful current-generation GET before another write. Existing session isolation
+and explicit stale-draft reconciliation remain required.
+
+`shared/api/httpClient.ts` currently accepts custom request headers and returns only
+decoded bodies. A later authorized additive response-metadata capability is required
+to observe GET's ETag only after successful status/decoding and current-generation checks;
+preserve existing callers, cancellation and session isolation. Its existing 412/428
+safe ProblemDetail title handling also needs implementation. Do not bypass shared
+transport, expose credentials, or introduce a store/framework for validators.
+The existing CORS policy must allow If-Match and expose ETag for approved origins,
+without changing origins, credentials or role policy. This is a bounded header
+requirement, not proof of current browser integration. Use a same-origin test and
+an approved-origin cross-origin test before FE18 acceptance. Current preview/local
+components do not prove backend readiness or conditional-write support.
+
+
+### R1/R2 current frontend transport handoff — 9 November 2026
+
+**CT16-B1-NO-CONTENT-2026-11-09-r1 — DELEGATED_APPROVED**, selected by Codex
+under the Leader's explicit PR #228 independent-review correction instruction.
+[ADR005 §16.2](decisions/005-batch-01-contract-approvals.md#162-r2-bounded-ct16-no-content-transport-extension)
+is the exact scoped amendment of `CT16-2026-10-24-r1`'s JSON-only restriction;
+all historical approval provenance, JSON/Auth/security behavior and unrelated
+slices remain effective. Protected integration and separate implementation
+remain required. This is contract documentation, not delivered client behavior.
+
+Extend existing `shared/api/httpClient.ts` additively: omitted responseMode (or
+`'json'`) preserves `RequestOptions<T>`'s decoder and Promise<T>. Explicit
+`NoContentRequestOptions` selects `responseMode: 'no-content'`, expectedStatus=204,
+no decoder, and Promise<void>, with overloads on both request/client entry points.
+Only exact 204 succeeds without media-type requirement/body parsing/DTO decoding;
+unexpected success is a protocol error. Invalid mode/status/decoder combinations
+fail before fetch. Non-success still uses CT18 safe ProblemDetail/status handling.
+Do not globally accept empty JSON, bypass transport or change approved 204s.
+Keep all session/operation/abort/expiry checks through the final return, current
+401 invalidation, credential/path/redirect rules and no retries.
+
+FE18's existing skillGraphApi/useSkillGraph/SkillGraphEditorPage use void success
+for deleteCourseSkill, addCoursePrerequisite, removeCoursePrerequisite,
+mapCourseLessonSkill and unmapCourseLessonSkill. Refresh the canonical graph only
+for a current Course/operation; a failed/obsolete refresh never undoes the confirmed
+mutation or triggers replay. Review actual exported types and consumer tests before
+binding. The existing client still needs this extension plus the already documented
+GET metadata/412/428 capability; none is claimed implemented here.
+
+Settings normally send If-Match alone. If an optional If-None-Match is sent, preserve
+it into the same guarded decision; 412 can mean either failed condition even with
+unchanged configuration. Preserve draft, obtain a fresh GET pair and require user
+review of draft **and conditions**; do not blindly replay a matching exclusion or
+`*`, discard it silently, or clear Auth. Approved-origin CORS must allow this header
+when used, plus If-Match and GET ETag exposure; no origin/credential change. Preserve
+N1's validator-free PUT and mandatory fresh GET body/tag pairing before another write.
+[CT14 B1-O18/O19](decisions/005-batch-01-contract-approvals.md#163-ct14-acceptance-oracles-and-direct-consumer-traceability)
+defines current tests and their existing allocation.

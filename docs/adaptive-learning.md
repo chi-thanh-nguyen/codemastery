@@ -1,5 +1,9 @@
 # CodeMastery Mastery-Based Adaptive Learning
 
+> **F1–F4 correction:** [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) supersedes only unconditional settings replacement and unrestricted threshold/re-enable recomputation. Settings writes require a matching state ETag; thresholds are frozen once submitted history or stored mastery exists. Same-policy toggles/n edits remain supported. Latest-attempt classification is unchanged; small-sample sensitivity is an explicit CT36 evaluation obligation.
+
+> **Current Batch 1 contract, 8 November 2026:** [ADR005](decisions/005-batch-01-contract-approvals.md) technically approves CT40’s three boundaries, CT05’s four graph checkpoints and CT06.production/enablement under explicit Leader delegation (DELEGATED_APPROVED; PR integration pending). Its §§3–8 supply the formerly deferred graph/policy/settings/coverage choices within that scope. Numeric thresholds and n are explicit per-Course configuration with no defaults. Unrelated routing, event/progress execution, diagnostic and evaluation decisions remain with their owning contracts. Historical text below is retained; this notice and ADR005 §9 identify the exact precedence.
+
 ## 1. Purpose and Scope
 
 Mastery-Based Adaptive Learning is CodeMastery's selected advanced component:
@@ -370,6 +374,8 @@ Use the existing calculator/classifier files with immutable nested types and exi
 
 
 ## 19. CT06 reconciliation and completion proposal
+
+> **Historical record:** the 19 October proposal and its dated observations are preserved below. [ADR005 §§6–7](decisions/005-batch-01-contract-approvals.md#6-ct06-production-mastery-policy) now supersede its recommendations within CT06.production/enablement, resolving LD-B1-1/2/3 through explicit delegated technical approval. U08/U09 are concretely approved there. This does not promote the prototype thresholds or certify implementation, runtime evidence or main integration of the new record.
 
 ### 19.1 Authority and historical reconciliation
 

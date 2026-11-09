@@ -858,6 +858,768 @@
           }
         }
       }
+    },
+    "/api/courses/{courseId}/skill-graph": {
+      "get": {
+        "operationId": "getOwnedSkillGraph",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Returns all valid Course skills, prerequisites and Lesson mappings. No pagination; empty graph valid for draft authoring. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillGraph"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/skills": {
+      "post": {
+        "operationId": "createCourseSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Creates one skill with server UUID. Nonblank name, optional null/nonblank description. Names are not unique; no invented length cap. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/skills/{skillId}": {
+      "put": {
+        "operationId": "updateCourseSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Replaces name/description; omitted description becomes null. Course/identity immutable. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCourseSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Rejects any prerequisite, mapping, Question or mastery reference (409); no cascade. Missing skill is 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Batch1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      }
+    },
+    "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}": {
+      "put": {
+        "operationId": "addCoursePrerequisite",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent add after both scoped endpoints validate. Self-edge 400, new cycle 409. Full DFS reachability and Course-row serialization required. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prerequisiteSkillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Batch1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      },
+      "delete": {
+        "operationId": "removeCoursePrerequisite",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent remove after validating both endpoints; absent pair succeeds, missing/foreign endpoint 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prerequisiteSkillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      }
+    },
+    "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}": {
+      "put": {
+        "operationId": "mapCourseLessonSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent mapping under Course-owned ancestry assertion and Adaptive same-Course skill check; no extra mapping structural read. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      },
+      "delete": {
+        "operationId": "unmapCourseLessonSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent unmap after validating Course Lesson/skill scope. May suspend effective readiness while preserving stored enabled intent and earned progress. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      }
+    },
+    "/api/courses/{courseId}/adaptive-settings": {
+      "get": {
+        "operationId": "getCourseAdaptiveSettings",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Reads Course-owned intent/policy and their strong ETag as one snapshot; disabled legacy policy may be null. Canonical response bytes and ABA scope are defined in ADR005 section 13.1. Owning Instructor only; not a readiness assertion. Approved, not implemented.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptiveSettings"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong SHA-256 state validator of canonical identity-encoded settings JSON; current-state semantics with documented ABA; not readiness, authorization or an audit revision."
+              },
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      },
+      "put": {
+        "operationId": "replaceCourseAdaptiveSettings",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Conditional full replacement under ADR005 section 13: owning Instructor only, required If-Match (strong comparison), then optional If-None-Match (weak comparison), evaluated before effects against the same fresh guarded configuration under ADR005 section 16.1. Either failed condition is 412, never 304. Ignore If-Unmodified-Since when If-Match is present; ignore If-Modified-Since, Range and If-Range for this PUT. No pre-lock or post-write framework comparison may substitute for the guarded decision. Threshold changes permitted only before any submitted attempt and any stored mastery row; otherwise 409 with no replay. Same-policy toggles/n changes remain supported; every requested true requires fresh readiness. Settings use fail-fast admission on the same Course root (busy 409). No automatic retry, whole-Course recomputation or re-enable catch-up. Successful PUT returns the canonical body and no-store but MUST NOT include ETag, Last-Modified or other validator fields (RFC 9110 section 9.3.4; ADR005 section 15). Clients must subsequently GET the canonical body and its ETag before another update. Approved, not implemented.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Required entity-tag list from the settings GET. Any matching strong member passes; weak members never match. Missing 428; malformed/empty or wildcard * 400; nonmatching/weak-only 412. Evaluate fresh state under Course guard before history/readiness work or writes. This is expected-current-state semantics, not an ABA-proof revision. Evaluate before accompanying If-None-Match using the same freshly locked snapshot. Passing If-Match does not bypass If-None-Match."
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional entity-tag list or standalone *. After If-Match passes, weakly compare every listed tag against the same fresh guarded configuration; strong or weak current-tag match, or * for this existing representation, fails 412 without effects. Nonmatching/empty list passes this condition; RFC list/empty-element parsing applies. Mixed wildcard/list or malformed tag syntax is 400. Does not substitute for mandatory If-Match. Never 304 for PUT; refresh and explicitly review conditions, no automatic replay."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canonical settings committed. No ETag, Last-Modified or other validator is emitted for this transforming PUT. Perform GET to obtain a paired canonical representation and ETag before another update.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptiveSettings"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "409": {
+            "description": "Frozen threshold change, failed readiness or busy Course root; no effects, no automatic retry. Refresh and require explicit user review. No historical replay is approved.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe provider/transaction/compatibility failure. Failures observed before commit roll back; indeterminate commit/response loss is not asserted to be rollback and must not be retried automatically. Refresh and reconcile current settings; no partial transaction is authorized.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "412": {
+            "description": "Precondition Failed. The request preconditions are not satisfied. Fetch the current settings and review the request conditions before resubmitting. Failed If-Match or If-None-Match (including weak current-tag matches or *) produces no mutation, no current configuration or replacement ETag in the error; state need not have changed. Authentication/ownership/concealment precedence preserved; native safe ProblemDetail title/detail, no-store.",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required. Fetch the current settings and supply If-Match. No changes; no current configuration or replacement ETag in the error. Authentication/ownership/concealment precedence preserved.",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdaptiveSettingsWrite"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1293,6 +2055,213 @@
           "totalElements",
           "totalPages"
         ]
+      },
+      "SkillWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Skill": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ]
+      },
+      "SkillPrerequisite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prerequisiteSkillId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "skillId",
+          "prerequisiteSkillId"
+        ]
+      },
+      "LessonSkillMapping": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "lessonId",
+          "skillId"
+        ]
+      },
+      "SkillGraph": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Skill"
+            }
+          },
+          "prerequisites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillPrerequisite"
+            }
+          },
+          "mappings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LessonSkillMapping"
+            }
+          }
+        },
+        "required": [
+          "courseId",
+          "skills",
+          "prerequisites",
+          "mappings"
+        ],
+        "description": "Complete owning-Instructor graph. Lists sorted by lowercase UUID text, pairs by first then second ID. Each skill and mapped Lesson belongs to courseId. Dependency direction is skillId -> prerequisiteSkillId. No canonical lesson order or learner mastery projection is implied."
+      },
+      "RationalThreshold": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "numerator": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "denominator": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "numerator",
+          "denominator"
+        ],
+        "description": "Exact positive bounded-int ratio <= 1. Responses reduce by greatest common divisor; comparisons use exact long cross-products."
+      },
+      "AdaptivePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "weak": {
+            "$ref": "#/components/schemas/RationalThreshold"
+          },
+          "mastered": {
+            "$ref": "#/components/schemas/RationalThreshold"
+          },
+          "minimumQuestionsPerSkill": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "weak",
+          "mastered",
+          "minimumQuestionsPerSkill"
+        ],
+        "description": "Explicit per-Course policy: 0 < weak < mastered <= 1; positive n counts distinct valid bank Questions per skill, not questions per attempt. All keys required; no defaults. Reject duplicate/unknown keys, nulls, numeric strings and non-integers. No supplied concrete production/demo values."
+      },
+      "AdaptiveSettingsWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AdaptivePolicy"
+          }
+        },
+        "required": [
+          "adaptiveEnabled",
+          "policy"
+        ],
+        "description": "Conditional full replacement; If-Match header required. Explicit valid policy even when disabling. Threshold changes require no submitted Course attempts and no stored mastery rows; otherwise 409 pending separately approved reclassification. Same normalized thresholds permit toggles/n edits, no replay. Requested true revalidates readiness. Successful PUT has no validator; obtain the next write snapshot through GET."
+      },
+      "AdaptiveSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdaptivePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "courseId",
+          "adaptiveEnabled",
+          "policy"
+        ],
+        "description": "Canonical stored-intent/policy JSON. GET pairs this body with an ETag; successful canonicalizing PUT emits no validator and requires client follow-up GET before another update (ADR005 section 15). Fixed key order/normalization/bytes per section 13.1; ETag is not a JSON property. Disabled legacy policy may be null. Not a readiness or audit-revision assertion."
       }
     },
     "responses": {
@@ -1321,6 +2290,46 @@
             "$ref": "#/components/headers/AuthenticationNoStore"
           }
         },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Invalid": {
+        "description": "Malformed UUID/body, invalid text/policy or self-prerequisite; safe field errors sorted by field then code",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Unavailable": {
+        "description": "Resource not available; concealed missing/foreign descendant or hidden non-owner Course",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Failure": {
+        "description": "Safe internal/provider/integrity/transaction failure; no partial effects",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Conflict": {
+        "description": "Cycle, referenced skill deletion or enablement/readiness rejection; no partial effects",
         "content": {
           "application/problem+json": {
             "schema": {
@@ -1444,7 +2453,15 @@
       "Protected CODEOWNERS/owner review, required checks/security scanning, last-push approval, resolved conversations and integration into main",
       "Full U07 requires an effective CT40.lesson-read structural contract or explicit no-extra-read disposition; no CT40 approval here",
       "Owning-Issue operation/REST/mutation approvals, implementation authorization and actual runtime verification remain separate"
-    ]
+    ],
+    "batch1Amendment": {
+      "contractRevision": "CT03-B1-2026-11-08-r2",
+      "decisionReference": "../decisions/005-batch-01-contract-approvals.md",
+      "approvalDisposition": "DELEGATED_APPROVED",
+      "effectiveOnMain": false,
+      "scope": "U07 structural/no-extra-read prerequisite technically resolved; bounded Course structure/guard/settings boundaries added. Original seven assertions, U03/U04 and access/error policy unchanged. New PR integration pending.",
+      "focusedCorrectionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026"
+    }
   },
   "x-fe07-delegated-approval": {
     "revision": "FE07-2026-10-27-r1",
@@ -1463,5 +2480,80 @@
       "CT22.atomic",
       "FE08"
     ]
+  },
+  "x-batch-01-contract-approval": {
+    "status": "DELEGATED_APPROVED",
+    "decisionReference": "../decisions/005-batch-01-contract-approvals.md",
+    "approvalDate": "2026-11-08",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "authority": "Codex independently selected and technically approved under explicit Project Leader Batch 1 delegation; no personal Leader/module review implied.",
+    "effectiveOnMain": false,
+    "integrationStatus": "PR_PENDING_INTEGRATION",
+    "implementationStatus": "NEW_OPERATIONS_APPROVED_NOT_IMPLEMENTED",
+    "checkpoints": [
+      "CT40.lesson-read",
+      "CT40.skill-tag",
+      "CT40.coverage",
+      "CT05.representation",
+      "CT05.mutation",
+      "CT05.mapping",
+      "CT05.bindings",
+      "CT06.production",
+      "CT06.enablement"
+    ],
+    "compatibilityAmendments": [
+      "CT03-B1-2026-11-08-r2",
+      "CT24-CALCULATION-2026-11-08-r2",
+      "CT14-B1-COVERAGE-2026-11-08-r1",
+      "CT18-B1-ERRORS-2026-11-08-r1"
+    ],
+    "internalBoundaries": "ADR005 sections 3, 5 and 7.1; Course/Adaptive/Assessment application surfaces in existing files only. These are not extra REST operations.",
+    "retainedGates": [
+      "Protected main integration; eligible CODEOWNER and independent last-push review, required checks and resolved threads",
+      "Separate implementation authorization and actual provider/PostgreSQL/security/concurrency verification",
+      "CT04/CT08/CT22 execution, evidence and atomic progress contracts; no implementation, deployment, release or risk acceptance authorized"
+    ],
+    "focusedCorrection": {
+      "status": "DELEGATED_APPROVED",
+      "authority": "Project Leader explicit PR #228 Focused Technical Corrections & Revalidation; independently selected by Codex.",
+      "decisionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026",
+      "approvalDate": "2026-11-08",
+      "effectiveOnMain": false,
+      "currentRevisions": [
+        "CT06-ENABLEMENT-2026-11-08-r2",
+        "CT03-B1-2026-11-08-r3",
+        "CT14-B1-COVERAGE-2026-11-08-r2",
+        "CT18-B1-ERRORS-2026-11-08-r2"
+      ],
+      "predecessors": {
+        "CT06-ENABLEMENT-2026-11-08-r1": "CT06-ENABLEMENT-2026-11-08-r2",
+        "CT03-B1-2026-11-08-r2": "CT03-B1-2026-11-08-r3",
+        "CT14-B1-COVERAGE-2026-11-08-r1": "CT14-B1-COVERAGE-2026-11-08-r2",
+        "CT18-B1-ERRORS-2026-11-08-r1": "CT18-B1-ERRORS-2026-11-08-r2"
+      },
+      "preserved": "All nine checkpoint approvals and four original prerequisite records retained; only named settings signatures/lifecycle/error/verification scopes amended. CT06.production arithmetic/latest-attempt policy and CT24 remain unchanged.",
+      "implementationStatus": "APPROVED_NOT_IMPLEMENTED",
+      "httpValidatorCorrection": {
+        "revision": "CT06-ENABLEMENT-N1-2026-11-08-r1",
+        "decisionReference": "../decisions/005-batch-01-contract-approvals.md#15-n1-http-validator-correction",
+        "scope": "Preserves CT06.enablement r2 approval provenance. Only GET emits a strong ETag; successful canonicalizing PUT emits no validator and clients GET again before another update. If-Match, wire fields, failure mappings and other approvals are unchanged.",
+        "effectiveOnMain": false
+      }
+    },
+    "independentReviewCorrection": {
+      "status": "DELEGATED_APPROVED",
+      "approvalDate": "2026-11-09",
+      "authority": "Codex independently selected under Project Leader explicit Resolve Independent Review Findings in PR #228 instruction; no personal Leader/module review implied.",
+      "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+      "revisions": [
+        "CT06-ENABLEMENT-R1-2026-11-09-r1",
+        "CT18-B1-ERRORS-2026-11-09-r3",
+        "CT16-B1-NO-CONTENT-2026-11-09-r1",
+        "CT14-B1-COVERAGE-2026-11-09-r3"
+      ],
+      "effectiveOnMain": false,
+      "scope": "Same-snapshot guarded PUT preconditions, generic safe 412 wording, explicit shared-client no-content mode for five unchanged 204 operations, existing verification allocations. Preserves N1 validator-free PUT success, original revisions and all other scopes. Approved, not implemented.",
+      "scopePrecedence": "ADR005 section 16 replaces only the listed conditional input/comparison/error clauses and adds bounded CT16 no-content handling; sections 13 and 15 continue to govern all unaffected scopes. Earlier currentRevisions fields identify their historical amendment, not blanket precedence."
+    }
   }
 }

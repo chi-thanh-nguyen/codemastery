@@ -2595,3 +2595,98 @@ probe has no per-call timeout; the `node --test` lifecycle tests are not run in 
 | CI readiness steps extracted from `ci.yml` before and after, with a stub `docker` | Marker logged during the final sleep: before FAIL, after PASS; early marker, no marker and an exited container unchanged; `bash -n` PASS for both steps and the inner script |
 | `local-stack.ts` loaded through Playwright 1.63's TypeScript transform (scratch config; its default export not called) | PASS; no Docker resource created |
 | `npx playwright test`, `npm run test:browser` | Not run: the suite rebuilds and re-tags the shared `codemastery-e2e/backend:local` image; the harness is a visual check outside this change |
+
+
+## Batch 1 bounded verification allocation — 8 November 2026
+
+> **Current amendment:** [CT14-B1-COVERAGE-2026-11-08-r2](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) preserves the locations below but replaces the original whole-Course B1-O10 with lifecycle refusal/no-reclassification checks and adds B1-O12–O16. The earlier wording below is retained as r1 history.
+
+**CT14-B1-COVERAGE-2026-11-08-r1 — DELEGATED_APPROVED**, under the Leader's
+“Batch 1 Complete Contract Approval & Integration Preparation” instruction;
+Codex independently approves this allocation in [ADR005 §9](decisions/005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility).
+Only these Batch 1 obligations are added to the existing inventory, relative to
+`backend/src/test/java/com/codemastery/`:
+
+| Existing location | Required contract coverage |
+|---|---|
+| `modules/adaptive/skillgraph/SkillGraphTest.java` | B1-O01/O02/O11: representation/graph, invalid references, cycle/self/duplicate behavior, mapping consumption and deletion outcomes using explicit fixtures/doubles. |
+| `modules/adaptive/mastery/AdaptiveSettingsServiceTest.java` | B1-O05/O08/O09/O10: closed policy validation, coverage completeness, readiness, disabled-mode and settings-change orchestration with conforming producer doubles. |
+| `modules/adaptive/mastery/MasteryCalculatorTest.java`, `MasteryStateClassifierTest.java` | B1-O06: unchanged pure CT24 arithmetic, symbolic thresholds/equality/invalid/max-int oracles; CT36 independent review remains separate. |
+| `integration/AdaptiveLearningFlowIntegrationTest.java` | B1-O01/O03/O04/O05/O07/O08/O11: real Course/Adaptive/Assessment providers, authenticated scopes, PostgreSQL concurrent graph writes and coverage/publication races, FK and rollback evidence. Use independent transactions and barriers, not sleeps or mocks. |
+| `integration/MasteryProgressTransactionIntegrationTest.java` | B1-O07/O09/O10: actual evidence ordering/replay, policy reclassification and mastery/progress all-or-nothing behavior after CT08/CT22 execution contracts and providers exist. |
+
+Do not mistake allocated tests for implemented tests or runtime success. All paths
+already exist; no new suite, framework, fixture lifecycle, runner or whole Final
+CT14.coverage/E2E approval is granted. Preserve shared Testcontainers/Flyway lifecycle,
+synthetic identities and explicit cleanup/isolation. Real concurrency assertions
+must examine committed state after success/failure and prove guard participation;
+unit doubles cannot establish the PostgreSQL guarantees. The normative expected
+results are [ADR005 B1-O01–O11](decisions/005-batch-01-contract-approvals.md#82-required-oracles-specification-not-executed-tests).
+Application verification has not been executed by this documentation task.
+
+
+### F1–F4 focused Batch 1 verification amendment
+
+**CT14-B1-COVERAGE-2026-11-08-r2 — DELEGATED_APPROVED.** Authority, exact predecessor,
+expected results and limits: [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026).
+Use existing locations relative to `backend/src/test/java/com/codemastery/`:
+
+| Existing suite | Amended acceptance obligations; not executed functionality |
+|---|---|
+| `modules/adaptive/mastery/AdaptiveSettingsServiceTest.java` | B1-O10/O12/O13: full conditional-write cases, two-tab disable protection, canonical/GCD tags, documented ABA, frozen thresholds for submitted or any mastery history, n-only/toggle/re-enable without replay, provider failure. |
+| `integration/AdaptiveLearningFlowIntegrationTest.java` | B1-O12–O15 with real Spring/PostgreSQL: self-invocation, external entry, actual isolation/read-only checks, compatible joining, outer rollback/commit failure, stale preloaded JPA state and dirty queued flush, lock ordering and NOWAIT settings vs enrollment. Verify committed states, lock lifetime/release, independent Courses and bounded cancellation/deadlines. |
+| `integration/MasteryProgressTransactionIntegrationTest.java` | B1-O13/O14 after CT08/CT22 approval: first submission/mastery-row creation versus threshold edit shares Course root; outer failure cannot commit callback/mastery/progress effects. No reversed lower-level lock ordering. |
+| `modules/adaptive/evaluation/AdaptiveProfileScenarioTest.java` | B1-O16 required CT36 evaluation cases: one-question success/failure, alternation, one later failure replacing older larger success, unassessed preservation and same evidence with larger bank n. Outcomes follow current policy; no invented stability target, sample floor or Final dataset approval. |
+
+Finite test budgets are explicit fixtures, not production configuration approval.
+Record actual statement/transaction timeout/cancellation behavior and query plans
+before implementation acceptance; NOWAIT alone does not bound all database work.
+Controlled models or parsing checks in this docs PR do not prove a real Spring
+proxy, PostgreSQL lock, HTTP precondition or browser implementation.
+
+### N1 successful-PUT validator correction
+
+[ADR005 §15](decisions/005-batch-01-contract-approvals.md#15-n1-http-validator-correction),
+`CT06-ENABLEMENT-N1-2026-11-08-r1`, preserves CT14 r2's approval and existing suite
+allocation while adding B1-O17/N1-01–N1-06. In
+`modules/adaptive/mastery/AdaptiveSettingsServiceTest.java`, cover canonicalized
+fractions and unchanged conditional-write results. In
+`integration/AdaptiveLearningFlowIntegrationTest.java`, verify actual HTTP GET ETag,
+successful PUT **absence** of ETag/Last-Modified for canonicalized and already-reduced
+fractions/no-ops, no-store, subsequent canonical GET and stale If-Match rejection.
+Use real participants for the intervening-writer schedule; no new test path is added.
+Assert validator absence on the final HTTP response through applicable filters and
+ingress, so a downstream layer cannot reintroduce ETag or Last-Modified after the controller.
+
+The later FE18 verification must also prove body/tag pairing after PUT→GET, a writer
+between those requests, and failed/cancelled/obsolete follow-up GET without PUT
+replay or false rollback. A fresh GET can yield the same tag for unchanged state.
+These are verification obligations, not implemented endpoint/browser tests or a new
+CT14/CT18 prerequisite approval. Current documentation/model results are recorded
+separately in ADR005 §15.
+
+
+### R1/R2 conditional HTTP and no-content verification amendment
+
+**CT14-B1-COVERAGE-2026-11-09-r3 — DELEGATED_APPROVED**, independently selected
+by Codex under the Leader's explicit PR #228 review-correction instruction.
+[ADR005 §16](decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026)
+preserves r2/N1's approval provenance, B1-O01–O17 and all paths/harness boundaries.
+B1-O18/O19 are future implementation acceptance obligations, not executed features:
+
+| Existing allocation | Exact added obligations |
+|---|---|
+| `modules/adaptive/mastery/AdaptiveSettingsServiceTest.java` | B1-O18a: combined If-Match/If-None-Match, strong vs weak comparisons, wildcard, nonmatching/empty lists, header grammar, missing mandatory header, early failure/no provider effects; no-op cannot bypass conditions. |
+| `integration/AdaptiveLearningFlowIntegrationTest.java` | B1-O18b/c: both checks against one fresh locked snapshot, A→B writer with If-Match {A,B} and exclusion B/A, real HTTP/application/DB, normal error and date/range precedence, generic safe 412, no post-write framework reversal and preserved N1. B1-O19c: final HTTP/ingress no-content 204 framing/no Content-Length. Preserve all F3 real guard/rollback/lock-order/deadline oracles. |
+| `frontend/src/shared/api/httpClient.test.ts` | B1-O19a/b: opt-in void 204 without JSON parsing/media requirement; exact success status; invalid option combinations before fetch; default JSON callers unchanged; typed overload positive/negative cases; valid/malformed error fallback, current-only 401 invalidation, abort/logout/expiry/replacement/supersession and no retries. Mock fetch through the real client; no feature-local substitute. |
+
+Backend entries are relative to `backend/src/test/java/com/codemastery/`; frontend
+entry is repository-relative and already in the approved six-file frontend inventory.
+FE18 consumer/browser review must cover all five OpenAPI operation IDs, successful
+mutation then failed/obsolete graph refresh, Course/session switch and uncertain
+completion, using existing approved allocations when feature execution is authorized.
+No new frontend test file, runner, browser route or Final coverage scope is approved.
+Mock Fetch null-body assertions cannot prove wire framing. Settings GET body/tag
+pairing, validator-free PUT, exact CT18 error envelope and CT36 small-sample scenarios
+remain required. Concrete results for this documentation revision are recorded in
+ADR005 §16 separately from these implementation obligations.
