@@ -203,8 +203,14 @@ deferrable position uniqueness; no migration change.
 
 ## 6. CT23.publication
 
-PUT publication with `{published:true|false}` is an idempotent expected-current
-command under the Instructor root (no ETag rule is inherited from settings).
+PUT publication uses the existing closed `PublicationWrite` request:
+`{"publicationStatus":"published"}` or `{"publicationStatus":"hidden"}`.
+The adapter maps `publicationStatus="published"` to `published=true` and
+`publicationStatus="hidden"` to `published=false` for the existing module-local
+`QuizService.publish(UUID courseId, UUID quizId, boolean published)` parameter.
+Quiz response DTOs retain their existing `published` boolean field. This remains
+an idempotent expected-current command under the Instructor root (no ETag rule
+is inherited from settings).
 Publishing requires nonempty, valid, same-Course membership and positive time limit;
 invalid stored definitions are 500; a valid empty draft is 409. It need not cover
 every skill or satisfy n; bank readiness is not quiz publication. A hidden Course
