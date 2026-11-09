@@ -901,3 +901,17 @@ participation. Consumed CT01 identity and CT03 ownership assertions do not appro
 these missing data or mutation boundaries. Independently approved pure local
 calculation requires none of them; integrated execution must preserve atomic
 mastery/progress and the no-hard-block invariant.
+
+## 14. Batch 2 Course contract supplement — 9 November 2026
+
+[ADR006](006-batch-02-contract-approvals.md) records the exact eight-checkpoint
+Batch 2 dispositions under Codex's explicit delegated technical authority.
+Course owns manual completion, per-Course resume and Instructor relational
+authoring; existing CT01 identity, CT03 access predicates and ADR005's Course-root
+guard retain their exact audience, shapes and transaction requirements.
+Learner writes use private Course persistence on the same root row; the public
+configuration callback remains Instructor-only. No new cross-module facade,
+Admin mutation, file-storage interface, event/atomic execution or architecture
+change is implied. The Leader expressly authorized the reset-only email exception
+and bounded resume schema/read in ADR006 §7; CT02's detailed approval is in §9. Implementation, privileges, review and protected integration
+remain independent gates.

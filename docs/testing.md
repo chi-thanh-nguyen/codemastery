@@ -2690,3 +2690,35 @@ Mock Fetch null-body assertions cannot prove wire framing. Settings GET body/tag
 pairing, validator-free PUT, exact CT18 error envelope and CT36 small-sample scenarios
 remain required. Concrete results for this documentation revision are recorded in
 ADR005 §16 separately from these implementation obligations.
+
+## Batch 2 contract verification obligations — 9 November 2026
+
+[ADR006 §§8–9](decisions/006-batch-02-contract-approvals.md#8-shared-errors-acceptance-oracles-and-remaining-gates)
+specifies B2-O01–B2-O16. These are **NOT_RUN implementation oracles**, not executed
+results, CT14 placement approvals or independent QA acceptance. The documentation
+PR reports its actual static checks separately.
+
+Required later evidence: integer/empty progress and preserved rejoin semantics;
+true-only idempotent completion; per-Course concealment/fallback and global resume
+timestamp/tie/null filtering; coherent pagination; owner/role/ancestry denials;
+atomic reorder; root-lock races/rollback; unchanged B1 settings/readiness. Real
+PostgreSQL barriers must establish constraints/serialization/rollback; doubles
+cannot. Use existing approved test locations; necessary new files/allocations
+require separate approval, including any new reset test suite.
+
+Recovery tests must independently verify identical request responses for unknown,
+locked and known accounts; bounded queue/full/lost work; outstanding-row PT1M
+suppression; SMTP after commit and failure isolation; 32-byte entropy/digest-only
+storage; exact PT30M expiry; invalid/replaced/used/locked generic400; password rules;
+User-first request/confirm races and atomic capability consumption/hash update.
+Browser evidence must prove fragment erasure/no leakage, no auto-login, no token
+in history/query/storage/Referer and the unchanged existing JWT behavior.
+
+Frontend checks cover unchanged old decoders, backend-selected resume with no
+client ranking, generation-safe visit responses, Markdown literal HTML and embed
+host attacks. Real browser/provider evidence must show no external request before
+activation, usable player/link fallback and origin-only Referer after activation.
+No new Course write, reset, global resume, provider playback or atomic Adaptive
+integration was executed in this documentation task. Implementation authorization,
+NEW migrations/grants, SMTP/abuse qualification, residual-risk acceptance before
+exposure, independent owner/QA review, protected integration and CI are separate.

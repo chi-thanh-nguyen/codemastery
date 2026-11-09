@@ -1798,3 +1798,53 @@ when used, plus If-Match and GET ETag exposure; no origin/credential change. Pre
 N1's validator-free PUT and mandatory fresh GET body/tag pairing before another write.
 [CT14 B1-O18/O19](decisions/005-batch-01-contract-approvals.md#163-ct14-acceptance-oracles-and-direct-consumer-traceability)
 defines current tests and their existing allocation.
+
+## Batch 2 frontend and operator handoff — 9 November 2026
+
+[ADR006](decisions/006-batch-02-contract-approvals.md) records all eight delegated
+approvals and the Leader's two explicit additional scope authorizations.
+All 25 added operations in [OpenAPI](api/openapi.yaml) are **not implemented**.
+Existing CT16 shared transport, session/abort/generation isolation, safe errors,
+route guards and no automatic mutation retries remain effective.
+
+FE08 consumes Course progress/Lesson/resume JSON reads. After loading a Lesson,
+an explicit visit may write pointer/server time; GET/prefetch must not write.
+FE33 uses one paginated Course progress read and the backend's learner-level
+resume selection, keeping existing My Courses DTOs unchanged. Continue learning
+can activate only after the separately authorized migration, grants and producer
+delivery. CT33's Up next remains gated. FE14 text/video authoring uses owner-only
+DTOs; files, Admin and publication events retain CT09/CT12/CT26 gates.
+
+`CT37-EMBED-2026-11-09-r1` accepts only canonical
+`https://www.youtube-nocookie.com/embed/{videoId}` under
+[ADR006 §6](decisions/006-batch-02-contract-approvals.md#6-ct37embed).
+Existing LessonContent/MaterialForm create React elements; no iframe HTML,
+autoplay, SDK, API key or pre-activation request. Preserve provider-required origin
+Referer using strict-origin-when-cross-origin, without credentials or protected
+query parameters. Player minimum viewport and external-link fallback apply.
+No concrete video asset, licence or actual playback is approved by provider policy.
+
+CT02 is technically approved after the explicit reset-only email exception.
+The request is best effort and returns the same 202 even for unknown/locked/full
+queue; it proves no delivery. Auth's bounded single-worker queue holds up to 128
+pending canonical emails. Outstanding-token reissue interval is PT1M; token lifetime
+is explicitly PT30M. The dormant PASSWORD_RESET_TOKEN_TTL setting must equal this
+approved value when the feature is implemented; current configuration is not changed.
+The local service clock is testable, with no global CT39 binding. AppConfig may
+bind the feature-owned executor/validated settings in a later implementation task;
+do not assume a default executor, SMTP timeout, provider, sender or trusted origin.
+
+The reset link uses a configured approved HTTPS origin and /reset-password#token=…,
+never request Host/Forwarded. FE06 captures/erases the fragment before requests;
+no token in persistent storage, query, returnTo, DOM, analytics or logs. Reset page
+loads no third-party resources and sends no Referer. POST confirmation uses existing
+password validation and returns JSON with no JWT; ordinary sign-in follows.
+
+Required before exposure: NEW token/resume migrations, runtime read/write grants,
+SMTP adapter/dependency and file-placement qualification, certificate-verified TLS
+with finite network deadlines, configured sender/trusted origin/secrets, abuse/load
+qualification and independent security review. No concrete provider, host, credential,
+environment binding or runtime grant is introduced by this PR. Changing a password
+does not revoke existing JWTs under unchanged CT01: reset-specific residual-token
+risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public recovery
+exposure and is not inherited from the earlier logout acceptance.

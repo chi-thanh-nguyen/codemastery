@@ -2,7 +2,7 @@
 
 > **F1–F4 correction:** [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) supersedes only unconditional settings replacement and unrestricted threshold/re-enable recomputation. Settings writes require a matching state ETag; thresholds are frozen once submitted history or stored mastery exists. Same-policy toggles/n edits remain supported. Latest-attempt classification is unchanged; small-sample sensitivity is an explicit CT36 evaluation obligation.
 
-> **Current Batch 1 contract, 8 November 2026:** [ADR005](decisions/005-batch-01-contract-approvals.md) technically approves CT40’s three boundaries, CT05’s four graph checkpoints and CT06.production/enablement under explicit Leader delegation (DELEGATED_APPROVED; PR integration pending). Its §§3–8 supply the formerly deferred graph/policy/settings/coverage choices within that scope. Numeric thresholds and n are explicit per-Course configuration with no defaults. Unrelated routing, event/progress execution, diagnostic and evaluation decisions remain with their owning contracts. Historical text below is retained; this notice and ADR005 §9 identify the exact precedence.
+> **Current Batch 1 contract, 8 November 2026:** [ADR005](decisions/005-batch-01-contract-approvals.md) technically approves CT40’s three boundaries, CT05’s four graph checkpoints and CT06.production/enablement under explicit Leader delegation (DELEGATED_APPROVED; integrated via PR #228 on 9 November 2026). Its §§3–8 supply the formerly deferred graph/policy/settings/coverage choices within that scope. Numeric thresholds and n are explicit per-Course configuration with no defaults. Unrelated routing, event/progress execution, diagnostic and evaluation decisions remain with their owning contracts. Historical text below is retained; this notice and ADR005 §9 identify the exact precedence.
 
 ## 1. Purpose and Scope
 
@@ -569,3 +569,19 @@ The absence of these decisions does not reopen CT06.prototype or block independe
 CT14 preparation. No implementation change, approved-oracle verification, integrated
 verification, deployment or accepted academic result is claimed by this proposal. The limited
 PR #86 test execution above remains implementation evidence only.
+
+## Batch 2 compatibility handoff — 9 November 2026
+
+[ADR006](decisions/006-batch-02-contract-approvals.md) approves Course manual
+completion/progress, per-Course resume, text/video authoring and the embed policy
+only in its stated scope. Manual completion and video playback never update
+mastery. Course completion is not mastery; missing prerequisite mastery cannot
+deny admitted advanced Lessons. A true skip flag stays completed, but producing
+that flag with mastery remains unapproved CT07/CT08/CT22.atomic work.
+
+Course authoring uses ADR005's unchanged owner-only guard and current readiness
+semantics. Publishing an unmapped Lesson can suspend effective readiness without
+rewriting stored adaptive_enabled or causing history replay. Existing settings
+ETag/If-Match/N1/R1 and frozen-threshold rules remain effective. No routing,
+diagnostic, event execution, recommendation read or evaluation checkpoint is
+approved here. CT33 learner-home recommendation reads remain pending.

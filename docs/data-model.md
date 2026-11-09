@@ -623,3 +623,48 @@ finite duration/cancellation qualification remain real implementation obligation
 CT15/SD03 must configure policy before populating submitted history or mastery;
 legacy data cannot be cleared/relabelled merely to bypass the barrier. Post-history
 reclassification/repair requires separate approval. Evidence and progress remain intact.
+
+## Batch 2 progress, resume, authoring and recovery — 9 November 2026
+
+Authoritative decisions: [ADR006](decisions/006-batch-02-contract-approvals.md).
+All eight checkpoints are technically approved; **no migration or implementation
+is performed by the documentation task**. The Leader expressly authorized the
+bounded resume schema contract/read and reset-only email exception in this task.
+
+Existing V002 application semantics:
+
+- Required Lessons are current published Lessons in Chapter/Lesson position order.
+  Missing progress is incomplete; skipped implies completed. Nonempty completion
+  means all required Lessons completed; zero Lessons yields 0%, not complete.
+  Percentage is floor(100 × completed / required), without overflow.
+- Manual completion is idempotent, true-only and preserves an earned skip flag.
+  Completion/content-set writes reconcile joined status under the Course root;
+  LEFT history stays intact. FE07 rejoin remains LEFT → ACTIVE, without recalculation
+  during membership PUT. Stored membership and calculated completion stay separate.
+- Explicit admitted visit atomically updates the existing resume_lesson_id and the
+  newly authorized lifecycle time below. GET/prefetch never writes. A per-Course
+  read returns null for an inaccessible retained pointer, without deleting history.
+- Course creation fixes trusted Instructor ownership, hidden/disabled/null settings.
+  Chapter has no visibility; parent/type stays immutable in this slice. Reorder uses
+  existing deferrable positions. Materials have no position and use UUID display
+  order. Text/video payloads are exclusive; file payload/object lifecycle stays CT09.
+
+Additive physical design for later NEW Flyway migration(s), not V001–V006 edits:
+
+| Object | Approved design | Authority / remaining gate |
+|---|---|---|
+| enrollments.last_visited_at | nullable timestamptz, Java Instant, no default/backfill; legacy null means unknown; successful visit captures PostgreSQL clock_timestamp once under Course/Enrollment locks and writes pointer/time together | `CT22-RESUME-SCHEMA-2026-11-09-r1`, explicit additional Leader authorization; migration implementation and runtime grants still required |
+| password_reset_tokens | Auth-owned id uuid PK; user_id uuid unique FK users; token_digest bytea unique, exactly 32 bytes; issued_at/expires_at timestamptz NOT NULL, expires_at > issued_at; no defaults | `CT02-TOKEN-2026-11-09-r1`; exact constraint names and no-action/nondeferrable FK in [ADR006 §9.2](decisions/006-batch-02-contract-approvals.md#92-capability-storage-and-confirmation-transaction); separately authorized NEW migration required |
+
+One outstanding reset row per User; active eligible request replaces it, successful
+confirmation updates BCrypt hash and deletes matching capability atomically under
+User-first locking. No plaintext token, consumed-history column, copied email,
+new recovery entity abstraction or scheduler. Random 32-byte capability is Base64url
+without padding; only SHA-256 digest persists. PT30M is explicitly selected policy
+here, rather than authority inferred from the dormant configuration default.
+
+Learner-level resume selects only accessible recorded ACTIVE Course visits by time
+descending and Course UUID ascending on ties; legacy null times never become fake
+visits. No cross-course adaptive logic. CT01 membership/identity/JWT contracts and
+all existing physical constraints remain effective. NEW migrations, grants,
+implementation/security review and reset exposure risk acceptance stay separate.
