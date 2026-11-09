@@ -1,5 +1,11 @@
 # ADR005: Batch 1 Contract Approvals
 
+> **Integration confirmation, 9 November 2026:** PR #228 merged at
+> `81806fc837d0619f1d60bf5f670b915e2a02eab5`, 09:12:37 ICT. All nine
+> approvals and scoped amendments through §16 are on `main`. Dated pending-merge
+> statements below describe preparation history; they no longer describe current
+> integration. Approval scope and all historical clauses remain unchanged.
+
 > **Current scoped refinement:** [§16](#16-r1r3-independent-review-corrections--9-november-2026)
 > completes guarded PUT preconditions and the five 204 operations’ frontend transport
 > handoff. It preserves N1 and every original approval/history outside those scopes.

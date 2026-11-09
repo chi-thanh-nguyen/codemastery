@@ -503,3 +503,17 @@ architecture, test strategy, and all other stack choices remain unchanged.
 **Out-of-scope (giữ scope):** sandbox chạy code, ML/AI chatbot, chứng chỉ, thanh toán, hosting/transcoding video, email/SMS/push, chat real-time, native mobile app, adaptive xuyên nhiều course, phát hiện đạo văn.
 
 **Rủi ro chính:** chất lượng và khối lượng nội dung (bài học, question bank có gắn skill). Cách giảm: cắt số skill xuống 15–20 nếu chậm, và chốt skill graph sớm ở tuần 39–40.
+
+## Explicit reset-only email exception — 9 November 2026
+
+The Project Leader explicitly answered **“Authorize reset-only email exception and
+record”** during the Batch 2 task. `ARCH-RESET-EMAIL-2026-11-09-r1` in
+[ADR006 §7.1](decisions/006-batch-02-contract-approvals.md#71-reset-only-email-architecture-exception)
+supersedes only §10's email exclusion for transactional password-reset links to the
+stored account email. All other email/SMS/push stays excluded; learning notifications
+remain in-app. The canonical original is preserved as historical approved evidence,
+read with this expressly authorized exception. No additional backend service,
+provider, implementation, deployment or residual-risk acceptance is authorized.
+Auth owns reset orchestration; Interaction ownership and existing JWT contracts
+are unchanged. Detailed delegated technical approvals and exposure gates are in
+[ADR006 §9](decisions/006-batch-02-contract-approvals.md#9-ct02-recovery-chain--approved-after-the-explicit-exception).
