@@ -585,3 +585,16 @@ rewriting stored adaptive_enabled or causing history replay. Existing settings
 ETag/If-Match/N1/R1 and frozen-threshold rules remain effective. No routing,
 diagnostic, event execution, recommendation read or evaluation checkpoint is
 approved here. CT33 learner-home recommendation reads remain pending.
+
+
+## Batch 3 submitted-quiz evidence — 9 November 2026
+
+[ADR007 §12](decisions/007-batch-03-contract-approvals.md#12-ct08evidence-only)
+is the authoritative **CT08-EVIDENCE-2026-11-09-r1** schema/location approval.
+It carries complete captured correctness and stable skill/attempt/Course identities
+for manual and automatic submission. ADR005's latest-per-skill total order and
+immutable history remain unchanged; rounded quiz scores never substitute for
+evidence. CT08.execution/failure/verification-plan, CT22.atomic, CT07/CT25 and
+notification bindings retain their separate gates. Schema approval does not prove
+real-time mastery, delivery, replay or atomic progress. Earlier payload-deferral
+text is historical to the extent resolved by this explicit, bounded reference.

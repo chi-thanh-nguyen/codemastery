@@ -1848,3 +1848,15 @@ environment binding or runtime grant is introduced by this PR. Changing a passwo
 does not revoke existing JWTs under unchanged CT01: reset-specific residual-token
 risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public recovery
 exposure and is not inherited from the earlier logout acceptance.
+
+
+## Batch 3 expiry configuration specification — not implemented
+
+[ADR007 §3.2](decisions/007-batch-03-contract-approvals.md#32-ct38featurequiz-expiry)
+records **CT38-QUIZ-EXPIRY-2026-11-09-r1**: explicit backend
+APP_QUIZ_AUTO_SUBMIT_ENABLED, APP_QUIZ_AUTO_SUBMIT_DELAY_MS and
+APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE, their property bindings, validation, consumer
+locations and disabled-mode limits. No runtime configuration/default or .env.example
+change is made here. Future implementation must bind/validate these required inputs
+and synchronize the placeholder template. Deployment tuning and actual timely
+finalization remain unverified; existing Auth/reset/storage configuration is unchanged.

@@ -2722,3 +2722,14 @@ No new Course write, reset, global resume, provider playback or atomic Adaptive
 integration was executed in this documentation task. Implementation authorization,
 NEW migrations/grants, SMTP/abuse qualification, residual-risk acceptance before
 exposure, independent owner/QA review, protected integration and CI are separate.
+
+
+## Batch 3 contract acceptance obligations — specified, NOT_RUN
+
+[ADR007 §14](decisions/007-batch-03-contract-approvals.md#14-deterministic-acceptance-obligations-and-retained-gates)
+specifies B3-O01–O13 for question/quiz authoring, exact captured attempts, saved
+answers, deadline/manual/worker races, immutable grading, visibility and submitted
+evidence. These are future unit and real-PostgreSQL obligations in approved
+inventories, not executed tests or expanded CT14/CT34/QA04 approval. Assessment
+source remains empty at the starting baseline. No event atomicity, scheduler
+qualification, independent review, E2E or delivery result is claimed by this record.
