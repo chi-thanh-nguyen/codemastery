@@ -30,6 +30,19 @@ Analysis labels that appear inside reconciliation tables describe evidence, not
 approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPROVED`,
 `EFFECTIVE_APPROVAL`, `IMPLEMENTED_NOT_APPROVED` and similar.
 
+## CT17 Final follow-up — 9 November 2026
+
+[ADR009](009-ct17-final-runtime-recovery.md) records
+`CT17-F-RUNTIME-2026-11-09-r1` and `CT17-F-RECOVERY-2026-11-09-r1` as
+**DELEGATED_PARTIALLY_APPROVED**: Leader-confirmed resource/origin/responsibility
+selections, bounded runtime policy and recovery design objectives/protocol.
+Actual runtime/destination/cost bindings and executed MinIO/encryption qualification
+remain gates; Batch 4 is not 8/8 approved. The six ADR008 decisions remain in
+unmerged [PR #231](https://github.com/chi-thanh-nguyen/codemastery/pull/231),
+head `235bc237bcc1a55f7e6015f715d283991b307f76`, and are not copied or amended here.
+ADR009 is numbered after that reserved record and can be reviewed independently.
+Neither document establishes implementation, runtime acceptance or deployment authority.
+
 ## Architecture decision records
 
 | ADR | Subject | Status |

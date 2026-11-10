@@ -3857,3 +3857,38 @@ install` under `/etc/codemastery`) and was not run locally. This is local eviden
 the job must still pass on the CI runner.
 
 Anthropic's Claude Code (Claude Opus 5.5) diagnosed the failure, made the change and ran these checks.
+
+## CT17 Final runtime and recovery follow-up — 9 November 2026
+
+[ADR009](decisions/009-ct17-final-runtime-recovery.md) is the authoritative bounded
+follow-up for CP-033/034. `CT17-F-RUNTIME-2026-11-09-r1` and
+`CT17-F-RECOVERY-2026-11-09-r1` are **DELEGATED_PARTIALLY_APPROVED**; neither entire
+checkpoint is complete. All effective P1–P10/B1–B3/P6 and CT17-FINAL F1/F2 clauses
+above remain unchanged. The pending six-decision ADR008/#231 is not modified or
+treated as effective main integration by this follow-up.
+
+The Leader personally confirmed retaining the existing Azure VM,
+**https://codemastery.app**, primary operator/secret/key/recovery custody and public
+access in principle after all gates. Actual resource identity, capacity, existing
+permissions/configuration custody, served TLS/renewal and Final artifact admission
+remain unverified. DNS resolved the domain and historical Azure hostname to
+20.205.56.236; TCP 22/443 checks timed out. No cause or current VM state is inferred.
+Local `061102e3` archive/OCI checks passed for historical limited-preview packaging,
+not production identity, authenticity or Final admission.
+
+The delegated recovery **design** selects RPO 24h/RTO 48h, capture every 8h,
+three intraday + seven daily + four weekly qualified points and pre-change/demo
+capture. Targets include publication delay/missed-run analysis and the complete
+incident-to-reopen interval; none is measured capability or incident data-loss
+acceptance. Actual private off-VM and independent non-Azure destinations/cost/access
+bindings remain pending. Keep the previous known-good point on any partial/failing
+capture or publication. No new configuration value, backup scheduler or command is
+implemented in this task.
+
+Full MinIO/version/IAM/config capture and concrete authenticated encryption remain
+**PROPOSED_NOT_EFFECTIVE / BLOCKED_BY_MISSING_EVIDENCE** pending the existing
+compatibility/security/isolated-round-trip gates. A mirror, PG-only dump, preview
+admission or qualification plan alone cannot pass them. See ADR009 for alternatives,
+current public price-meter estimates, complete-set/restore protocol and Q01–Q09.
+Runtime/source/workflow/Compose/permissions are unchanged. No production operation,
+new spending, access/exposure change, residual-risk acceptance or merge is authorized.

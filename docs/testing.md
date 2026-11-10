@@ -505,6 +505,24 @@ test-count or coverage-percentage claim is made for them.
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
 
+## CT17 Final recovery qualification handoff — 9 November 2026
+
+[ADR009 Q01–Q09](decisions/009-ct17-final-runtime-recovery.md#71-reproducible-qualification-plan--not_run)
+defines the remaining actual-resource, coordinated-cut, PostgreSQL/MinIO complete
+restore, encryption/key/provenance, publication/retention, RPO/RTO/resource and
+product/security evidence. This is **NOT_RUN** planning, not a new test file,
+framework, infrastructure grant or completed approval-level round trip. Existing
+CT17-FINAL F1/F2, class B mechanism/compatibility gates, test inventories and
+feature-specific prerequisites remain effective.
+
+Read-only checks obtained public DNS and verified local historical release
+checksums/OCI mappings; SSH/HTTPS/TLS access attempts timed out. No live VM,
+certificate, resource capacity, backup, key recovery, encryption or restore test
+passed. Public retail price retrieval supports estimates only. The selected
+RPO 24h/RTO 48h and 8h capture cadence are future design targets, not measured
+guarantees. Full MinIO/crypto and actual product qualification still block whole
+CP-034 approval; actual bindings still block whole CP-033 approval.
+
 ## Authorized Interim verification contracts
 
 > **Dated records.** This section and those after it keep the wording of their

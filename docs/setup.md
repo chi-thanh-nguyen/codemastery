@@ -71,6 +71,19 @@ frontend test dependencies. Playwright Test 1.63.0 is pinned in `e2e/package.jso
 browser harness, and `npx playwright install chromium firefox webkit` installs the
 browsers it expects. The E2E suite also needs Docker.
 
+## CT17 Final binding status — 9 November 2026
+
+[ADR009](decisions/009-ct17-final-runtime-recovery.md) records the Leader-selected
+existing Azure VM and intended **https://codemastery.app** origin, with Leader
+operator/secret/key/recovery custody. This is not permission to change a runtime
+origin, access grant, key, .env or public listener. The current host resource ID,
+disk/capacity/credit, checkout/environment custody, TLS/renewal, grants and exact
+running release still need non-secret operational evidence. Historical paths and
+preview artifacts are not adopted as verified Final bindings. Existing P6/B3,
+configuration variables, topology and reproduction commands remain unchanged.
+CP-033/034 remain partially approved; no recovery mechanism or deployment is
+implemented by this documentation follow-up.
+
 ## Environment File
 
 The root [`.env.example`](../.env.example) is a catalogue of backend configuration
