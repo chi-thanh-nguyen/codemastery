@@ -1,5 +1,20 @@
 # Testing
 
+**10 November 2026 fixture amendment:**
+[ADR008 §10](decisions/008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026)
+records CP-030 `CT34-FIXTURES-2026-11-10-r2`. It adds pre-Playwright checkout/output
+exclusivity and persistent ownership-safe recovery. Current scripts do not implement
+these requirements; the commands below describe the existing implementation.
+
+**Batch 4 contract update — 9 November 2026:**
+[ADR008](decisions/008-batch-04-contract-approvals.md) is the authoritative record
+for CT34 runner/fixtures/future CI, CT14.coverage's placement and explicit gaps,
+and CT39's selection of no shared Clock binding. Six decisions are
+**DELEGATED_APPROVED**; the documentary PR still needs independent review, exact-head
+checks and protected integration. This records design, not newly executed tests.
+CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
+Earlier dated records below retain their approval scope and history.
+
 ## Purpose
 
 This document describes CodeMastery's current testing contract, based on
@@ -2733,3 +2748,57 @@ evidence. These are future unit and real-PostgreSQL obligations in approved
 inventories, not executed tests or expanded CT14/CT34/QA04 approval. Assessment
 source remains empty at the starting baseline. No event atomicity, scheduler
 qualification, independent review, E2E or delivery result is claimed by this record.
+
+## Batch 4 testing contract handoff — specified, not newly executed
+
+[ADR008 §§3–7](decisions/008-batch-04-contract-approvals.md#3-ct34runner) approves
+the existing pinned Playwright 1.63.0 runner and its five projects, disposable
+per-run fixture lifecycle, Final test placement/gap map and a future SH07 CI job
+contract. The current commands and local suite described above remain valid;
+**there is still no E2E CI job**. Runner adoption is not CT19/CT35 case selection,
+CT20.F release allocation or acceptance of historical test results.
+
+CT14-COVERAGE-2026-11-09-r1 adds the complete placement/gap map without changing
+CT14.interim, the October records or ADR005's latest
+CT14-B1-COVERAGE-2026-11-09-r3/N1 allocation. Existing Surefire/Failsafe,
+singleton PostgreSQL, explicit cleanup and scheduler-disabled profile remain.
+Dedicated authoring, storage and Interaction/Admin integration placements not
+present in the approved inventory are explicit gaps requiring bounded structural
+authorization before creating files. Feature-specific storage configuration,
+remaining runtime/oracle approvals and independent QA execution stay pending.
+
+CT39-BINDING-2026-11-09-r1 and CT39-CONSUMERS-2026-11-09-r1 select no shared Clock
+bean or shared consumers. AS08 retains ADR007's local injected UTC Clock and
+deterministic tests; AS09/IN08 require their owning deadline/reminder contracts.
+No AppConfig/TestClockConfig implementation, global clock override or SH04
+Issue closure follows. Use approved local inputs, not sleeps or public time controls.
+
+FE24/SH07, owning feature teams and QA03/04/05/06/08/10/12 have the distinct
+implementation, oracle and evidence responsibilities in ADR008. No new automated
+business-test, browser, Docker, CI, recovery or deployment result is claimed.
+
+### CP-030 r2 concurrency and recovery handoff — 10 November 2026
+
+`CT34-FIXTURES-2026-11-10-r2` amends only the r1 concurrency/recovery contract.
+Keep the five-project runner and fixed outputs: one active invocation owns its
+canonical checkout/output roots. The future launcher must acquire exclusivity and
+write its persistent private inventory **before invoking Playwright**, not in
+globalSetup after output cleanup can begin. A conflict fails without touching
+outputs/resources; independently isolated checkouts may run concurrently.
+
+[ADR008 §§10.2–10.4](decisions/008-batch-04-contract-approvals.md#102-f1-exclusive-checkout-and-output-ownership-before-runner-entry)
+specifies the stable OS lock, durable run inventory, process-birth/host/namespace
+checks, private cooperative preview shutdown, exact Docker daemon/resource
+identity, exclusive volumes, safe temporary-path removal and acceptance cases.
+Owner death releases the OS lock but does not clear an incomplete inventory.
+Uncertain ownership, unavailable process control, partial cleanup or unaccounted
+resources must be preserved/reported and block reuse of that checkout. PID
+existence/absence or Docker-only cleanup cannot establish full recovery success.
+
+FE24 and QA08 must implement/qualify that protocol separately: current direct
+Playwright scripts and PID-labelled `stack:down` are not r2-conformant. No new
+command or runtime result is supplied here. CP-035 r1 consumes §4 **as amended by
+r2**; [§10.5](decisions/008-batch-04-contract-approvals.md#105-m1-downstream-ci-execution-budget-guidance)
+adds nonessential measured-budget guidance reserving teardown/report time, without
+new timeout numbers. CP-029/031/032/036 and effective predecessor contracts remain
+unchanged; CT19/CT35 feature cases and CT20.F allocation retain their own scope.
