@@ -3868,9 +3868,16 @@ is **DELEGATED_APPROVED** for the destination/custody/scheduler design and teste
 identity-bounded MinIO cold-copy, CMS authenticated encryption and provenance/
 publication mechanisms. Batch 4 has **8/8 technical approvals**; operational acceptance remains pending.
 
+ADR008 and CP-030 r2 are integrated by #231 at main `b6fa24b`; ADR009 awaits
+#233's own independent review/protected integration. The dated paragraphs below
+retain their original scope and cannot reopen the eight technical approvals.
+
 The supplied operational packet's affirmative host/platform/operator/TLS-path
-facts are current **LEADER_CONFIRMED** within their exact scope. Actual remaining
-credit/expiry and missing disk facts remain unverified; the old-hostname certificate is not evidence
+facts are current **LEADER_CONFIRMED** within their exact scope. The newly supplied
+Education Hub observation is **$88 remaining**, expiring **31 October 2027**, dated
+10 November approximately 11:05 ICT; [ADR009 section 10](decisions/009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026)
+updates the former balance/expiry evidence gap without changing r2. Current cost
+feasibility and disk/capacity/access remain execution gates; the old-hostname certificate is not evidence
 for codemastery.app. Technical selections include root-only runtime env/immutable
 checkout, guarded acme.sh TLS-ALPN renewal and measured resource admission; native
 8h captures, private Azure StorageV2 Hot/LRS East Asia staging/archive separation,

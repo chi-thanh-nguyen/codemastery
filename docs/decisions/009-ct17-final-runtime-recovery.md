@@ -1,5 +1,12 @@
 # ADR009: CT17 Final Runtime and Recovery — Bounded Approvals
 
+**Post-PR231 current-state addendum (10 November 2026): see
+[§10](#10-post-pr231-integration-and-azure-evidence--10-november-2026).** ADR008,
+including CP-030 r2, is merged; ADR009 awaits PR #233 protected integration. The
+new dated Leader attestation supplies credit balance/expiration previously missing.
+Sections 1–9 retain their original decision/evidence chronology; §10 updates only
+integration and financial-evidence status, not the two r2 technical decisions.
+
 **Current disposition (10 November 2026): see [§9](#9-continuation-attestation-delegated-selections-and-executed-qualification).**
 Both r2 checkpoints are technically approved, including the Leader-supplied
 resource/financial binding and qualified identity-bounded recovery mechanisms.
@@ -557,6 +564,11 @@ approvals**. Neither PR is claimed merged or independently approved.
 
 ### 9.2 Evidence reconciliation and blocker classification
 
+**Evidence timing:** the ledger below preserves the r2 publication-time evidence.
+Its missing credit balance/expiration statements are superseded for the dated
+10 November observation only by [§10.2](#102-leader-attested-azure-ui-observations).
+No earlier availability of that evidence is implied.
+
 | Former blocker | Current classification and disposition |
 |---|---|
 | VM/platform/operator facts previously labelled historical solely by date | **(2) `LEADER_CONFIRMED`**: `vm-codemastery`, reported IP `20.205.56.236`; Ubuntu 24.04 LTS, linux/amd64, 2 vCPU, 8 GiB; Docker 29.9.2, Compose 5.6.1; `azureuser`, existing `sudo docker`, SSH restricted to operator. These are attested facts, not independently inspected grants or cloud allocation |
@@ -863,6 +875,11 @@ for actual command shapes and fixture interpretation.
 
 ### 9.7 Remaining execution gates and publication
 
+**Current-state correction:** [§10](#10-post-pr231-integration-and-azure-evidence--10-november-2026)
+records the subsequently merged predecessor and newly supplied credit evidence.
+The original publication text below remains dated history; actual execution still
+requires fresh financial/capacity/access qualification and separate authorization.
+
 **No remaining CP-033/034 technical approval blocker.** The Leader's supplemental
 resource ID and explicit credit-only/no-new-billable-resource boundary resolve the
 last actual account/financial policy input; runtime and recovery r2 are both
@@ -896,3 +913,82 @@ Additional primary references: [Azure Entra Blob authorization](https://learn.mi
 Documentation/vendor capabilities support design review, not the unexecuted cloud
 or production claims above. Codex performed this synthetic qualification and
 authored the continuation under the stated delegation; no AI runtime is added.
+
+## 10. Post-PR231 integration and Azure evidence — 10 November 2026
+
+### 10.1 Integration and unchanged technical authority
+
+Under the Project Leader's explicit **“CodeMastery — PR #233 Post-PR231
+Integration, Conflict Resolution and Azure Evidence Reconciliation”** instruction,
+the existing PR #233 is synchronized with freshly fetched main
+`b6fa24b396d08e323ea54882af0a008077301ab6`. PR #231 merged into that commit on
+10 November 2026. ADR008 and its six delegated technical decisions, including
+`CT34-FIXTURES-2026-11-10-r2` in §10, are preserved unchanged. CP-035 continues
+to consume that amended fixture contract; its own revision remains r1.
+
+CP-033 **`CT17-F-RUNTIME-2026-11-10-r2`** and CP-034
+**`CT17-F-RECOVERY-2026-11-10-r2`** remain **DELEGATED_APPROVED**, under §9's
+existing delegation. This addendum neither reopens them nor issues a new revision.
+Batch 4 is **8/8 technically approved by delegated authority**. ADR008 is integrated;
+ADR009 remains pending PR #233's own independent review and protected integration.
+The [current eight-checkpoint inventory](README.md#current-batch-4-checkpoint-inventory--10-november-2026)
+distinguishes these states. Earlier open-PR, partial-count and missing-evidence
+statements in §§1–9 and dated handoffs retain their historical meaning only.
+
+The sole textual rebase conflict was the appended `docs/testing.md` handoffs:
+ADR008's runner/CP-030 r2 material and ADR009's executed mechanism record both
+remain. The other overlapping documents were checked after automatic merging.
+No approved content, predecessor contract, runtime implementation, main's unrelated
+backend changes or qualification result was replaced by this synchronization.
+
+### 10.2 Leader-attested Azure UI observations
+
+**Provenance: `LEADER_CONFIRMED`, not independently Azure-API-verified.** The
+Project Leader explicitly attests the following Azure Portal observations on
+10 November 2026. Only the minimum authorized identity/evidence is recorded;
+screenshots, student email and billing-account details are not included.
+
+| Source and observation time | Attested observation | Scope / interpretation |
+|---|---|---|
+| Azure subscription/VM views, 10 November | Subscription **Azure for Students**, status **Active**; Leader role **Owner**; **vm-codemastery** in **rg-codemastery**, same full VM Resource ID already recorded in §9.2 | Confirms the supplied account/resource identity within the attestation; does not prove current VM disk/capacity, OS permissions or resource-specific operating costs |
+| Education → Overview, approximately **11:05 ICT, 10 November** | Available promotional credit **$88 out of $100**; **355 days** until expiration as displayed; expiration **31 October 2027**; November costs **$12.00** | Dated UI evidence of balance/expiration; neither an API retrieval nor a guarantee of future balance/availability |
+| Earlier Azure Cost Analysis observation, same date | Actual cost **$10.12**; November forecast **$31.43**; Azure Budget **None** | Separate UI observations: do not add $12.00 and $10.12, derive another remaining balance from them, or treat forecast as incurred/guaranteed cost |
+| Separate Azure Sponsorships website, same date | “This account does not have an active Sponsorship” | Does not establish expiry of the student offer: the actual subscription was shown Active and Education Hub separately supplied its balance and expiration |
+
+**Current evidence disposition:** credit balance and expiration are now supplied
+as dated **LEADER_CONFIRMED** evidence. The former `MISSING_EVIDENCE` label for
+these two observations in §§9.1–9.3 and earlier handoffs is **HISTORICAL_ONLY**;
+it is not an unresolved request for the already supplied 10 November figures.
+The original r1/r2 records are retained rather than backdating the new evidence.
+
+The course Final deadline, **13 December 2026**, precedes the displayed expiration.
+That comparison and the $88 balance do **not** establish adequate credit through
+Final, measured capacity, operational funding approval or production admission.
+Before execution, refresh applicable balance/expiry evidence and assess actual
+VM/storage/network costs, forecast-to-Final feasibility, selected backup costs,
+available disk/workspace/capacity and required runtime access. Stop if unavailable
+or insufficient; do not silently replace the VM or switch to paid operation.
+
+The unchanged financial policy permits **existing Azure for Students promotional
+credit only**. Paid-subscription conversion and spending beyond approved credits
+remain prohibited. New billable storage/infrastructure/resources or privilege
+grants require separate authorization within that credit-only boundary.
+A confirmed balance grants none of these and
+supplies no residual-risk or actual incident data-loss acceptance.
+
+### 10.3 Qualification and independent-review boundary
+
+§9.6's Q01–Q06 and Q09 retain only their specifically documented fixture/mechanism
+PASS scopes; none is promoted to cloud or production evidence. Actual cloud/RBAC,
+real scheduler, Keychain and TLS renewal integration remain unexecuted. Q07 real
+RPO/RTO and Q08 full-product F2/real Flyway-engine/feature recovery remain **NOT_RUN**.
+Current VM capacity/TLS/config/grants, exact Final artifacts/security admission,
+real recovery readiness and deployment authorization remain separate execution gates.
+
+Only documentation/metadata reconciliation and safe local document checks occur
+in this continuation. No Azure API/VM operation, deployment, production restore,
+resource provisioning, secret inspection, new grant or mechanism requalification
+is performed. Self-check by this modifying session is not independent approval;
+an eligible independent reviewer must review PR #233's new exact HEAD before
+integration where required. No protection is bypassed and no merge is authorized.
+Known AI assistance: OpenAI Codex performed this documentation reconciliation.

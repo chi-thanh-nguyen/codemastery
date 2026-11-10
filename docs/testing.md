@@ -1,5 +1,13 @@
 # Testing
 
+**Post-PR231 integration update — 10 November 2026:** ADR008, including CP-030 r2,
+is merged; ADR009's two r2 approvals remain pending #233 protected integration.
+Batch 4 is **8/8 technically approved**. [ADR009 section 10](decisions/009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026)
+records the new Leader-attested Azure balance/expiration and unchanged execution
+gates. The 9 November status below is historical. Neither rebase/document checks
+nor financial attestation adds a runtime PASS: Q07 real RPO/RTO and Q08 full-product
+F2/Flyway remain NOT_RUN; Q01–Q06/Q09 retain their exact fixture/mechanism limits.
+
 **10 November 2026 fixture amendment:**
 [ADR008 §10](decisions/008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026)
 records CP-030 `CT34-FIXTURES-2026-11-10-r2`. It adds pre-Playwright checkout/output
