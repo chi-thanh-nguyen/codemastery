@@ -167,6 +167,15 @@ or earlier-contract amendment is introduced.
 | `CT34-CI-2026-11-09-r1` | CT34.ci: future job contract | [ADR008 §7](008-batch-04-contract-approvals.md#7-ct34ci) |
 | `CT39-CONSUMERS-2026-11-09-r1` | CT39.consumers: empty shared set; local alternatives/gates | [ADR008 §6](008-batch-04-contract-approvals.md#6-ct39binding-and-ct39consumers) |
 
+**10 November 2026 bounded amendment:** CP-030's current revision is
+`CT34-FIXTURES-2026-11-10-r2` — **DELEGATED_APPROVED** under the Leader's explicit
+PR #231 remediation instruction. [ADR008 §10](008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026)
+amends only r1's concurrent-invocation/output ownership and interrupted-resource
+recovery; the r1 row above retains its history. CP-035 r1 consumes that amended
+fixture contract and retains its own revision; M1 is downstream budget guidance.
+The other five decision revisions, predecessor contracts and separate
+implementation/verification obligations remain unchanged.
+
 Batch 3 present-state confirmation: PR #230 merged as
 `3eeacc8f5b3244c6d3db403d3e7f476f9caeb554` on 9 November 2026 at 20:31:42 ICT.
 The dated preparation-time pending-integration text above remains historical;

@@ -1,5 +1,10 @@
 # ADR008: Batch 4 Test Contracts and Pending Operational Inputs
 
+**Current CP-030 revision:** `CT34-FIXTURES-2026-11-10-r2`, in
+[§10](#10-f1f2-fixture-amendment--10-november-2026). Sections 1–9 and their r1
+inventory retain the 9 November record. Only the fixture concurrency/recovery
+clauses identified in §10 are amended; the other five decisions retain their revisions.
+
 ## 1. Authority, baseline and provenance
 
 Recorded **9 November 2026 (Asia/Ho_Chi_Minh)** under the Project Leader
@@ -404,3 +409,215 @@ Implementation guidance was checked against primary documentation:
 Those documents explain tool capability, not project approval or current runtime proof.
 Known AI assistance: OpenAI Codex inspected sources and authored these contract
 decisions/documentation under the explicit delegation; no AI runtime is introduced.
+
+## 10. F1/F2 fixture amendment — 10 November 2026
+
+### 10.1 Authority, revision and bounded supersession
+
+**DELEGATED_APPROVED — `CT34-FIXTURES-2026-11-10-r2` (CP-030).** On 10 November
+2026 (Asia/Ho_Chi_Minh), Project Leader @chi-thanh-nguyen explicitly instructed
+Codex, **“CodeMastery — PR #231 | Remediate Independent Technical Review Findings”**,
+to select and record the smallest documentation-only correction of F1/F2 in this
+existing PR, with scoped Issue/Project synchronization, commit and push. This is
+delegated technical selection under that instruction, not a claim of personal
+Leader review, implementation authorization or runtime verification.
+
+The complete independent review was read. Both findings were rechecked against
+PR HEAD `235bc237bcc1a55f7e6015f715d283991b307f76`: Playwright config lines 20–21
+share artifact/JSON/HTML paths; local-stack lines 176–187 retain preview/temp
+ownership only in memory; stack-down lines 44–49 enumerate Docker resources only.
+No newer CP-030 amendment was found in this PR, the current decision index or
+CT34 #150. These are specification defects, not a reason to replace the stack.
+
+r2 supersedes **only** §4's incomplete cross-invocation isolation and interrupted
+recovery interface, together with the corresponding acceptance claims. Its
+disposable DB, catalogue, account, image-ID, origin/CORS, readiness, external-mode,
+storage and per-test rules remain. §§3/5/6 remain unchanged; CP-029/031/032/036 keep
+their exact revisions. CP-035 keeps `CT34-CI-2026-11-09-r1`, consumes **§4 as amended
+by r2**, and receives only the nonessential M1 guidance in §10.5. The existing
+CP-029/030→035 and CP-032→036 dependencies remain; no prerequisite slice is added.
+ADR001–ADR007 and §8's historical CP-033/034 disposition are not amended.
+
+### 10.2 F1: exclusive checkout and output ownership before runner entry
+
+Keep CP-029's three output paths. **One active Playwright invocation owns the
+canonical `e2e/` directory and all three output roots**, across projects, worker
+counts, browser subsets and disposable/external modes. Browser contexts isolate
+tests, not reporter files. All output-producing invocations must enter through a
+future lifecycle launcher **before starting the Playwright CLI**, including its
+output cleanup, discovery/report generation when configured to write, and setup.
+A globalSetup check is too late and does not satisfy this boundary.
+
+Select a host-local, same-OS-user coordinator with an exclusive nonblocking POSIX
+advisory file lock. Store its stable lock file and run inventory in a private
+`~/.codemastery-e2e/` registry, outside the checkout, test-results and disposable
+build tree. This is generated local tooling state, not a new tracked repository
+path, service or production configuration. Resolve `~` from the effective UID's
+OS account home, not a caller's HOME override; all invocations use this one registry.
+Require owner UID, directory mode 0700, record/lock mode 0600, no symlink
+traversal and a local filesystem with verified
+locking semantics. Reject unsupported/network-shared state or output filesystems.
+The inspected macOS host provides Python 3's standard-library `fcntl`; Ubuntu
+supports the same OS facility. Qualify the launcher binding on each supported host;
+this decision selects no new package, Node built-in flock API or Linux-only CLI.
+
+Key the lock by the canonical directory's device/inode identity; record its real
+path and the resolved output roots. Path aliases to the same directory contend
+for the same lock. Output roots must be ordinary directories/files below that
+checkout, with no symlink/bind-mount sharing with another checkout. Reject an
+overlap or an identity/ownership check that cannot be established. Separately
+isolated checkouts may run concurrently with independent outputs and inventories.
+
+Acquire the lock atomically before reading/changing active ownership, then persist
+the new run record before runner entry. Each key has one current-inventory record;
+a nonterminal record cannot be displaced by another run. Keep the same lock inode
+permanently:
+never unlink/replace it, steal it by age, or release it between runner execution,
+teardown and final report completion. Do not inherit its descriptor into children.
+A lock conflict exits nonzero, reporting only the non-secret lock key;
+it must not start Playwright, truncate outputs, signal an owner or clean resources.
+
+The supervisor retains the lock through success/failure cleanup and reporting.
+Its death releases the OS lock, **not** the recorded ownership obligation. After
+acquiring a released lock, a launcher finding a nonterminal inventory refuses a
+new run until serialized recovery verifies completion under §10.3. Timestamps or
+PID absence alone never permit stale-record deletion. Missing/corrupt ownership
+records with evidence of a previous incomplete run block automatic reuse. A
+verified completed record can be archived without deleting outputs or resources;
+only the next admitted invocation performs normal Playwright output cleanup.
+
+### 10.3 F2: persistent inventory and safe recovery
+
+Use one bounded, versioned inventory per fresh, collision-checked run ID in that
+registry. Under the exclusive lock, atomically write and flush the initial record
+before creating resources;
+write each creation intent before the action and persist its observed identity
+before proceeding. Updates use a same-directory atomic replacement and durable
+file/directory flush. A crash leaves either the old or new valid record; an
+unresolved intent remains pending, never assumed absent. No journal is kept only
+in memory, in Playwright output, or in the temporary build being removed.
+
+Allowlist only non-secret fields: revision/run ID, owner UID, host/boot and PID
+namespace identity, supervisor/runner/preview PID **plus OS process-birth identity**,
+canonical checkout/output identities, exact temporary directory identity and run
+marker, private local control-channel reference, Docker endpoint/context and daemon
+ID, immutable container/network IDs, volume IDs and their creating-container/mount
+association, creation intents, and per-resource pending/removed/absent/preserved/
+failed observations. Do not store credentials, environment dumps, account tokens,
+request bodies or arbitrary executable cleanup commands. Bound record cardinality
+to resources intended or created by this run and reject malformed/oversized records.
+
+Only the trusted same-UID launcher writes inventories. Validate registry/record
+ownership, permissions, schema and path ancestry before using any field. Record
+the real preview process, not merely an `npx` wrapper; all processes that can keep
+writing outputs/builds must be accounted for. Use platform process-birth data
+(Linux process start ticks with boot/PID-namespace identity; macOS native process
+start time with boot identity), not a PID or rounded display timestamp alone.
+If that identity cannot be obtained reliably, automatic process recovery is
+unsupported and the run remains preserved/incomplete.
+
+Recovery and normal cleanup use the **same lock and inventory protocol**. A
+conflicting live coordinator is preserved. With the lock acquired, classify each
+recorded process as exact/live, verified exited, unreadable, or ambiguous. A PID
+now belonging to another birth identity is unrelated: never signal it; resolve
+the recorded process as exited only when the same host/boot/namespace and reliable
+OS birth data prove replacement. Failure to inspect
+is not proof of exit. Different host/boot/namespace requires explicit reconciliation,
+not a local `kill(pid, 0)` verdict. Never kill by port, name pattern or process group
+inferred from an old PID.
+
+For a live orphan preview, select **cooperative self-termination over a private
+run-scoped Unix-domain control channel**, protected by the registry's same-UID
+filesystem boundary. The preview process itself must acknowledge its run/birth
+identity and close its own server; a stale or mismatching endpoint is refused.
+The existing Node local-socket facility and pinned Vite preview API support this
+without a production HTTP route or new dependency. A recovered numeric PID is
+never a signal target. If the channel is unavailable/unresponsive, preserve the
+process and build, report incomplete recovery and require explicit local operator
+reconciliation; no automatic PID-based fallback is authorized. Normal supervision
+may use an owned process handle with a qualified lifetime guarantee; a JavaScript
+ChildProcess object alone is not proof against PID reuse after exit. Confirm all
+runner/build/preview writers have exited before removing their build or admitting
+another invocation. A hard kill cannot be promised automatic full recovery.
+
+For Docker, pin the endpoint/context **and daemon ID** throughout setup/cleanup;
+support only a daemon local to the recorded client host (including its local
+Docker Desktop VM). Reject remote/shared-client contexts for automatic lifecycle
+management. A context name is not daemon identity. Context/daemon drift or unknown
+client-host ownership preserves resources and fails cleanup; never enumerate and
+delete every resource carrying the generic disposable label. Recovery targets the
+selected inventory's IDs, corroborated by exact run/owner labels and creation
+intents. Other runs, shared image caches and developer volumes are untouched.
+
+After a crash between create and ID recording, reconcile the exact run-labelled
+creation intent on that daemon; no or multiple inconsistent matches are unresolved
+until absence/ownership can be proven. Discover anonymous PostgreSQL volumes from
+the owned container's mounts and durably record their IDs/association **before
+removing that container**. Remove only volumes created exclusively by this run;
+reject bind mounts/pre-existing volumes. If the container vanished before its
+volume association was recorded, report an unaccounted volume intent rather than
+searching/pruning unrelated volumes or declaring full success.
+
+Stop verified writers first. Validate the recorded temporary directory's parent,
+owner, device/inode and run marker without following replacement symlinks; delete
+only that directory. Remove verified run containers, their exclusive volumes and
+then their network. Inspect every target again after each action: distinguish
+confirmed absence from permission errors, daemon errors and timeouts. Persist
+partial results, continue independent safe cleanup within its budget, return
+nonzero for unresolved/failed resources, and retain the inventory for retry.
+An uncertain process/path/container/volume is preserved, never guessed disposable.
+
+Completion requires verified absence of every owned process, temporary build,
+container, volume and network; all creation intents resolved; no remaining writer;
+and final safe evidence emitted. An acknowledged stop or successful Docker command
+alone is insufficient. Mark complete durably before releasing exclusivity. Keep
+ordinary reporter output until the next admitted run. An incomplete record blocks
+that checkout's reuse, but not an independently isolated checkout. Missing legacy
+inventories/PID-only labels cannot establish ownership for destructive recovery;
+report them for explicit operator reconciliation without automatic removal.
+
+### 10.4 Acceptance and implementation boundary
+
+These are future acceptance obligations, **not executed tests**:
+
+| Case | Required observation |
+|---|---|
+| Same checkout, simultaneous invocations including path aliases/browser subsets | Exactly one is admitted before any Playwright output access; loser exits nonzero; existing output sentinels and winner resources remain intact. |
+| Independent checkouts, concurrent runs | Both proceed; image IDs, outputs, ports, markers, identities and cleanup remain distinct. |
+| Normal success, setup failure, assertion failure, graceful interruption | Writers exit; every resource is verified cleaned; results and cleanup failures remain distinguishable; only a complete record permits reuse. |
+| Owner lost before teardown, including before ID persistence | Lock can be acquired but journal blocks new execution; intents reconcile; cooperating preview exits through its verified channel; inventory survives and accounts for build and Docker resources. |
+| PID reuse, forged/replaced path, unreadable process, corrupt record, unavailable preview channel | Unrelated PID/path is untouched; uncertain resources are preserved, reported and block completion. |
+| Foreign host/namespace, changed daemon/context, live other run, legacy PID-only resources | No foreign/live/unverifiable resource is removed; recovery fails closed without global prune. |
+| Removal timeout/failure or volume not yet inventoried | Persist leftovers and nonzero result; bounded retry of the same run is idempotent; never report Docker-only cleanup as full recovery. |
+
+FE24 implements/reconciles this protocol only after a separate authorized task;
+QA08 independently verifies it. Existing `npm test`/`test:chromium` call Playwright
+directly, and current `stack:down` has no r2 inventory/control-channel behavior.
+They are historical callable commands, **not r2-conformant entrypoints today**.
+No launcher command, new tracked file, OS binding implementation, test or workflow
+is added/claimed here. Future scoped implementation must route the existing
+commands through pre-entry exclusivity and reconcile the existing lifecycle paths;
+new tracked paths/dependencies still need their normal authorization. This is not
+retrospective acceptance of PID-only cleanup or swallowed teardown errors.
+
+### 10.5 M1: downstream CI execution-budget guidance
+
+Retain CP-035 r1. Record M1 as a **downstream implementation consideration**, not
+an additional CP-035 approval/acceptance gate or a new numeric timeout selection.
+Recommend finite setup/build, browser execution, teardown and evidence budgets,
+with their sum and termination overhead below the outer job timeout. Reserve
+cleanup/report time before admitting setup/testing work; account for subprocess
+and readiness-probe deadlines, since a polling timeout cannot bound a probe that
+never resolves. On timeout the existing failure/ownership rules still apply:
+stop only verified owned work, retain nonzero outcome and use r2 recovery. Safe
+partial counts can replace unfinished reports. An `always` step is best effort,
+not a guarantee after forced runner loss. Choose/justify actual budgets and test
+the failure paths using measured host/suite evidence in the separately authorized
+implementation task. CP-035's trigger, platform, browser/worker/retry policies,
+artifact boundary and existing acceptance obligations are unchanged.
+
+Facility references: [Python's Unix flock interface](https://docs.python.org/3/library/fcntl.html#fcntl.flock),
+[Node local IPC](https://nodejs.org/api/net.html#ipc-support), and
+[Vite preview API](https://vite.dev/guide/api-javascript#preview). The pinned local
+Vite declarations expose `preview()` and `PreviewServer.close()`; capability does
+not establish an implemented or qualified recovery protocol.

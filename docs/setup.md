@@ -1876,3 +1876,13 @@ quiz local time seams retain their effective contracts. This does not configure
 fake time in AppConfig, activate TestClockConfig, alter JWT expiry or approve
 AS09/IN08 deadline/reminder behavior. Independent review, protected integration,
 implementation authorization and runtime/QA evidence remain separate.
+
+**10 November 2026 fixture amendment:** CP-030 is now
+`CT34-FIXTURES-2026-11-10-r2`, specified in
+[ADR008 §10](decisions/008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026).
+The future launcher must establish checkout/output exclusivity before Playwright
+entry and retain a private, non-secret inventory outside test outputs and temporary
+builds. Current direct Playwright commands and PID-only `stack:down` do not yet
+implement r2; do not infer concurrent-output protection or full interrupted-run
+recovery from them. New lifecycle behavior requires separate implementation and
+qualification; no environment variable or runnable command is added here.
