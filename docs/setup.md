@@ -73,6 +73,20 @@ browsers it expects. The E2E suite also needs Docker.
 
 ## CT17 Final binding status — 9 November 2026
 
+**10 November update:** [ADR009 §9](decisions/009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification)
+is the current r2 record. CP-033/034 are technically approved, with the Leader's
+exact existing VM resource and credit-only financial binding plus
+executed synthetic qualification. Host/platform/operator facts in the supplied
+report are now Leader-attested, not stale solely by date. Select future root-only
+`/etc/codemastery/runtime/.env`, immutable root-owned checkout under
+`/opt/codemastery/releases/<full-source-sha>`, and the existing TLS directory.
+These are technical conventions, not existing configured paths or new sudo grants.
+Actual remaining credit/expiry is unverified and must be checked before execution.
+The selected acme.sh TLS-ALPN renewal timer, real certificate for codemastery.app,
+secrets/custody, Final artifacts, resource capacity and deployment still require
+separately authorized implementation/inspection. No setup command or configuration
+file is changed. The paragraph below retains the r1 evidence state.
+
 [ADR009](decisions/009-ct17-final-runtime-recovery.md) records the Leader-selected
 existing Azure VM and intended **https://codemastery.app** origin, with Leader
 operator/secret/key/recovery custody. This is not permission to change a runtime

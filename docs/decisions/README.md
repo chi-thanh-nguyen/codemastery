@@ -32,6 +32,17 @@ approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPR
 
 ## CT17 Final follow-up — 9 November 2026
 
+**Current:** [ADR009 §9](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification)
+records `CT17-F-RUNTIME-2026-11-10-r2` and
+`CT17-F-RECOVERY-2026-11-10-r2` **DELEGATED_APPROVED** (technical design,
+Leader-confirmed resource/credit-only funding policy and identity-bounded mechanisms).
+The Leader's current factual attestation and expanded technical delegation,
+executed synthetic qualification and remaining operational gates are explicit.
+Batch 4 is **8/8 technically approved**; actual credit balance/expiry and
+implementation/runtime/recovery acceptance remain gates; Readiness stays Bounded.
+PR #233 is the existing follow-up; no new ADR/PR or change to #231 is introduced.
+The paragraph below preserves the original r1 preparation state.
+
 [ADR009](009-ct17-final-runtime-recovery.md) records
 `CT17-F-RUNTIME-2026-11-09-r1` and `CT17-F-RECOVERY-2026-11-09-r1` as
 **DELEGATED_PARTIALLY_APPROVED**: Leader-confirmed resource/origin/responsibility
@@ -60,6 +71,8 @@ Neither document establishes implementation, runtime acceptance or deployment au
 
 | Revision | Subject | Record | Status | Introduced by |
 |---|---|---|---|---|
+| `CT17-F-RUNTIME-2026-11-10-r2` | CP-033 runtime attestation, custody/paths/TLS/resource policy | [ADR009 §9](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) | `DELEGATED_APPROVED`; actual credit/expiry and runtime acceptance pending | PR #233 |
+| `CT17-F-RECOVERY-2026-11-10-r2` | CP-034 destination/custody design; qualified cold MinIO/CMS/provenance protocol | [ADR009 §9](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) | `DELEGATED_APPROVED`; provisioning/implementation/F2/operational acceptance pending | PR #233 |
 | ADR002 slices (11 Oct 2026) | CT20.I, CT18.minimum, CT01.core, CT16.minimum, CT38.core, CT03.catalogue, CT21.catalogue, CT06.prototype, CT24.calculation, CT15.I-data, CT14.interim, CT36.I-results, NC-EVIDENCE-MODE, CT17.I-scope, CT17.I-access | [ADR002 approved slices](002-interim-delegated-contracts.md#approved-slices) | `DELEGATED_APPROVED` | PR #73 |
 | CT01.identity (18 Oct 2026) | Cross-module identity facade, U01 | [ADR001 §11.4](001-modular-monolith-module-boundaries.md#114-ct01identity-exact-public-boundary-and-u01-disposition) | Leader approval, reaffirmed in CT01-2026-10-21-r1 | PR #83 |
 | `CT01-2026-10-21-r1` | Login/JWT lifecycle, logout, authorization handoff | [ADR001 §11](001-modular-monolith-module-boundaries.md#11-ct01-approved-technical-contract--protected-integration-pending) | `LEADER_APPROVED` | PR #91 |

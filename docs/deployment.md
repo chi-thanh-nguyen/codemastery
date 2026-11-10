@@ -3860,6 +3860,33 @@ Anthropic's Claude Code (Claude Opus 5.5) diagnosed the failure, made the change
 
 ## CT17 Final runtime and recovery follow-up — 9 November 2026
 
+**Current r2 update, 10 November:** [ADR009 §9](decisions/009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification)
+extends the exact r1 decisions below. `CT17-F-RUNTIME-2026-11-10-r2` is
+**DELEGATED_APPROVED**, including the Leader-supplied full VM resource ID and
+credit-only/no-new-billable-resource funding boundary. `CT17-F-RECOVERY-2026-11-10-r2`
+is **DELEGATED_APPROVED** for the destination/custody/scheduler design and tested,
+identity-bounded MinIO cold-copy, CMS authenticated encryption and provenance/
+publication mechanisms. Batch 4 has **8/8 technical approvals**; operational acceptance remains pending.
+
+The supplied operational packet's affirmative host/platform/operator/TLS-path
+facts are current **LEADER_CONFIRMED** within their exact scope. Actual remaining
+credit/expiry and missing disk facts remain unverified; the old-hostname certificate is not evidence
+for codemastery.app. Technical selections include root-only runtime env/immutable
+checkout, guarded acme.sh TLS-ALPN renewal and measured resource admission; native
+8h captures, private Azure StorageV2 Hot/LRS East Asia staging/archive separation,
+an independently retrievable encrypted workstation copy, separate key escrow and
+signed manifest/monotonic ledger. No resource/grant/cost is claimed authorized or
+existing. All production use requires separately authorized implementation,
+actual bindings, changed-build qualification, exact Final security admission and
+F2/product/capacity/RPO/RTO acceptance. The deployment script is not extended.
+
+Synthetic full cold-volume restore and CMS/key/corruption tests passed within
+ADR009's stated fixture/build limits; cloud behavior, current VM/TLS, full-product
+QA and real 24h/48h capability did not run. See the detailed Q01–Q09 disposition
+and [reproduction record](testing.md#ct17-r2-executed-mechanism-qualification--10-november-2026).
+The paragraphs below are the retained **r1 historical preparation state**, not
+current whole-recovery blockers.
+
 [ADR009](decisions/009-ct17-final-runtime-recovery.md) is the authoritative bounded
 follow-up for CP-033/034. `CT17-F-RUNTIME-2026-11-09-r1` and
 `CT17-F-RECOVERY-2026-11-09-r1` are **DELEGATED_PARTIALLY_APPROVED**; neither entire

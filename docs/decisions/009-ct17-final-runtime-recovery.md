@@ -1,5 +1,12 @@
 # ADR009: CT17 Final Runtime and Recovery — Bounded Approvals
 
+**Current disposition (10 November 2026): see [§9](#9-continuation-attestation-delegated-selections-and-executed-qualification).**
+Both r2 checkpoints are technically approved, including the Leader-supplied
+resource/financial binding and qualified identity-bounded recovery mechanisms.
+Batch 4 has **8/8 technical approvals**; deployment/recovery readiness is not claimed.
+Sections 1–8 retain the r1 decision and evidence history; their then-current
+missing-input/NOT_RUN statements are updated only by the explicit §9 deltas.
+
 ## 1. Authority, baseline and exact dispositions
 
 Recorded **9 November 2026 (Asia/Ho_Chi_Minh)** under the Project Leader
@@ -513,3 +520,379 @@ inventory/link/arithmetic/diff checks as reported in the PR. No recovery,
 encryption, Docker feature, runtime-capacity or production test PASS is claimed.
 Known AI use: OpenAI Codex investigated evidence and authored this technical
 record/documentation under explicit delegation; no AI runtime is introduced.
+
+## 9. Continuation: attestation, delegated selections and executed qualification
+
+### 9.1 Authority and exact revised disposition
+
+On **10 November 2026**, the same Project Leader explicitly delegated **all remaining
+compatible technical decisions** in CP-033/034, including runtime conventions,
+certificate lifecycle, destinations, authenticated encryption, key recovery,
+MinIO completeness and qualification. The Leader authorized disposable local
+synthetic qualification and scoped documentation/Issue/Project/commit/push on
+the existing PR #233 branch. This expands r1's technical delegation, not financial,
+cloud/OS permission, risk-acceptance, production execution or merge authority.
+
+The Leader supplied the **9 November, approximately 22:59 ICT operational Decision
+Packet** in the continuation's answer and explicitly attested its affirmative facts
+as current within their stated scope. Its old recommendations, missing values,
+unexecuted tests and read-only conclusions are not affirmative facts or new
+approvals. The new delegation resolves technical choices that packet had reserved.
+
+| CP | Current revision | Disposition | Exact newly resolved scope / remainder |
+|---|---|---|---|
+| CP-033 `CT17.F-runtime` | `CT17-F-RUNTIME-2026-11-10-r2` | **DELEGATED_APPROVED** | Attested host/platform/operator facts, §9.2 explicit resource and credit-only financial binding; approved §9.3 custody, locations, TLS lifecycle and capacity/release policies. Actual credit balance/expiry, runtime measurements and Final artifact admission remain execution/acceptance gates |
+| CP-034 `CT17.F-recovery` | `CT17-F-RECOVERY-2026-11-10-r2` | **DELEGATED_APPROVED** | §9.4 destination/custody/scheduler design and §9.5 identity-bounded MinIO, CMS, provenance/publication mechanisms; synthetic executed evidence in §9.6. Provisioning, grants, measured operational feasibility and actual F2 product acceptance remain execution gates, not undecided mechanisms |
+
+These r2 revisions extend the exact r1 revisions in §1. They replace only r1's
+unapproved technical candidates and the obsolete whole-checkpoint dispositions;
+approved r1 objectives, alternatives and predecessor F1/F2 remain intact. No
+predecessor contract, production admission or residual-risk disposition is changed.
+The corrected Batch 4 register defines CP-033 as **concrete VM/account/budget**
+inputs. The Leader subsequently supplied the exact binding below before this r2
+revision was published; it is not inferred from technical delegation. CP-034's
+new-resource **design** is approved before provisioning under the explicit new
+authority. The six ADR008 approvals plus CP-033/034 now total **8/8 technical
+approvals**. Neither PR is claimed merged or independently approved.
+
+### 9.2 Evidence reconciliation and blocker classification
+
+| Former blocker | Current classification and disposition |
+|---|---|
+| VM/platform/operator facts previously labelled historical solely by date | **(2) `LEADER_CONFIRMED`**: `vm-codemastery`, reported IP `20.205.56.236`; Ubuntu 24.04 LTS, linux/amd64, 2 vCPU, 8 GiB; Docker 29.9.2, Compose 5.6.1; `azureuser`, existing `sudo docker`, SSH restricted to operator. These are attested facts, not independently inspected grants or cloud allocation |
+| TLS/filesystem/source facts in report and deployment record | **(2) `LEADER_CONFIRMED`** within exact scope: `/etc/codemastery` root 0700; TLS directory UID101/0700, `privkey.pem` UID101/0400, `fullchain.pem` root/0644; read-only directory mount. Existing acme.sh TLS-ALPN-01 certificate is for the **old Azure hostname**, expiry 28 January 2027; renewal was not configured. This positively identifies a renewal gap, not a valid certificate for `codemastery.app` |
+| Topology/paths, existing release integrity and historical admission | **(2)/(3)** report attestation plus existing source/local verification in §§2–3. All five OCI identities and archive checksum retained. Preview admission stays preview-only; HC-U21 and Final security admission stay unresolved. Source topology is not observed running topology |
+| Env/checkout/renewal/resource policy; destination, key and mechanism choices | **(1) delegated technical decisions**, selected/approved in §§9.3–9.5; no repeated Leader choice required |
+| Complete MinIO, CMS/keys, corruption/provenance and publication semantics | **(4) mandatory mechanism-level qualification**, executed with the bounded results in §9.6. No claim that every Q01–Q09 case passed |
+| Exact served certificate, deployed identities/config/grants, current disk/free space, numeric capacity, actual Final artifacts, scheduler/cloud integration, full F2/QA and measured 24h/48h capability | **(3)/(5) `MISSING_EVIDENCE`**, runtime/implementation/acceptance gates. Failed earlier SSH/HTTPS probes mean inspection unavailable, not incorrect runtime. No repeat probe or replacement VM is required for this decision |
+| Subscription/resource group/full VM ID and funding/cost authority | **(2)/(6) resolved by the Leader's supplemental answer below**, with an explicit credit-only/no-new-paid-resource boundary. Credit balance/expiration remain **(3)/(5) `MISSING_EVIDENCE`** before operational reliance; no full $100 balance is inferred |
+| New Blob resources/managed identity/RBAC, independent-device provisioning, production backup/restore, actual data loss/security risk, exposure/deployment and merge | **(5)/(6)** separate explicit execution/financial/access/risk gates. No resource, permission, successful deployment or accepted loss is fabricated |
+
+**Supplemental current `LEADER_CONFIRMED` resource/financial binding:**
+
+```text
+/subscriptions/72a2b9e9-4347-4912-8c1e-7e927f79ef61/resourceGroups/rg-codemastery/providers/Microsoft.Compute/virtualMachines/vm-codemastery
+```
+
+The Leader explicitly selects that existing VM for Final. Funding is **Azure for
+Students, $100 promotional-credit entitlement**; reported November 2026 actual
+cost **$10.12**, forecast **$31.43**, Cost Analysis resource group
+**rg-codemastery**; Azure Budget **not configured**. These are Leader-confirmed
+observations, not independently queried Azure billing or verified future funding.
+**Remaining promotional-credit balance and expiration are `MISSING_EVIDENCE`.**
+No amount remaining is calculated from actual cost or the $100 entitlement.
+
+The explicit financial boundary is **existing granted credit only**: no cost beyond
+credit, paid-subscription conversion or new billable provisioning is authorized.
+Select fail-closed operational admission: verify balance/expiration and projected
+existing-VM/backup costs through Final before execution; if unavailable or
+insufficient, stop and retain the independent recovery copy, without switching to
+paid operation or replacing the VM. This completes the account/financial **policy
+binding**, not proof the VM is funded through Final. An actual Azure Budget/alert
+may be configured only with separately authorized account access; a budget is not
+assumed to stop spending. New storage design still needs specific cost/resource
+permission even if a quote might fit unused credit.
+
+The Leader-decision register's LD-05 is reconciled at clause level by this table;
+its earlier blanket “Leader decision” wording does not negate current delegation.
+No external handoff/register is edited. Host disk characteristics, SKU and region
+remain missing where the supplied report says missing. The primary storage region
+selected below is a **new design choice**, not a claim about the VM's region.
+
+### 9.3 Runtime technical selections — approved extension
+
+- Retain §3's one-VM/private-services topology, sole frontend HTTPS 443 ingress,
+  same-origin `/api`, exact `https://codemastery.app` origin, P6 separation and
+  existing Compose override. No new numeric CPU/memory limit is justified by RAM
+  alone: resource admission uses measured startup/peak workload plus simultaneous
+  capture/restore workspace against actual available bytes/inodes/RAM/CPU. Record
+  numeric budgets from those measurements before deployment; never lower BCrypt
+  cost or drop a store to fit. Off-host builds, no on-VM dependency downloads.
+- **Select future runtime custody**: root-owned `/etc/codemastery/runtime` 0700,
+  `.env` inside it root-owned 0600, single link, trusted non-writable ancestors;
+  explicit env-file parsing, never shell-source or print values. Select immutable
+  root-owned checkout `/opt/codemastery/releases/<full-source-sha>` (directories
+  0755, no other writer), using the existing deployment script and explicit source
+  revision. Keep archives under root-only `/var/lib/codemastery/releases`.
+  These are approved intended bindings, not claims the directories already exist.
+  Root-run script is compatible with the existing Docker/TLS preflight; use only
+  independently verified existing sudo authority. `sudo docker` alone does not
+  establish authority to run an arbitrary root script. No Docker-group grant,
+  permissive key modes, global Git trust exception or new account is selected.
+- **Select renewal design using the existing acme.sh TLS-ALPN-01 mechanism**,
+  avoiding a new DNS API secret/provider and port 80 ingress. Root custody at
+  `/etc/codemastery/acme` 0700; daily systemd renewal check at 03:30 UTC, persistent
+  missed-run handling and exclusive renewal/deploy/capture lock. Attempt renewal
+  when remaining validity is at most 30 days; expiry warnings at 30/14/7 days,
+  any failed renewal is visible immediately. Only a due challenge briefly stops
+  frontend to free 443; it must preserve other services/state and restart the
+  previous frontend on challenge failure. No unconditional daily frontend stop.
+  First qualify the actual pinned acme.sh version and staging challenge, including
+  deadline/failure cleanup, before enabling this timer. No DNS-01 plugin or DNS
+  grant is assumed. Demo/change freeze prohibits an unplanned challenge outage.
+- Validate new leaf SAN `codemastery.app`, trusted full chain, key correspondence,
+  validity and permissions in root-only staging before atomically replacing
+  `fullchain.pem`/`privkey.pem` under the existing directory bind. Keep key UID101
+  0400; do not replace only a bind-mounted single file. Nginx config test and
+  reload/restart then verified served-certificate readback must pass; retain the
+  prior unexpired pair for recovery. No validity of the old-hostname certificate
+  is extended to this domain. No TLS secret or actual renewal is changed here.
+- Keep P8 health/start/restart and P9 update/rollback rules. Stop on config/init/
+  migration/health failure; do not expose public health or MinIO. Pre-update
+  qualified coordinated recovery point and schema/image compatibility evidence
+  are mandatory. An image rollback cannot undo Flyway or accept actual data loss.
+  Final feature grants remain consumer-owned P6 extensions, never blanket grants.
+
+All runtime technical choices and the actual account/financial policy binding are
+resolved. CP-033 is technically approved; unknown current credit/expiry remains
+an explicit execution gate, as do actual measurements, grants and Final admission.
+
+### 9.4 Recovery destinations, scheduling and custody — approved design
+
+Retain **24h RPO / 48h RTO targets, 8h coordinated capture, 3 intraday + 7 daily +
+4 weekly qualified points** and pre-change/migration/demo points. Daily capture
+leaves no publication/missed-run margin; 2h capture adds unsupported overhead.
+No synthetic timing is promoted to a demonstrated objective. Retention selects
+the newest qualified cut in each class, deduplicates shared points and retains
+extra incident/pre-change sets until explicit compatible-recovery release.
+
+Select **Azure StorageV2, standard block Blob, flat namespace, Hot/LRS, East Asia**,
+private containers, HTTPS/TLS1.2+ only, public blob access disabled. Restrict
+account network rules to the verified VM/operator egress addresses before use;
+no paid private endpoint or new public application listener is selected. Prefer an
+existing authorized matching account; otherwise this is the exact service design
+to provision **only after** separate resource/cost authorization. Do not claim an
+account name, container resource ID, VM region or remaining student credit.
+LRS plus an independently retrievable non-Azure copy is proportionate for this
+single-VM academic system; GRS/ZRS alone still share cloud/account failure and add
+cost. Archive-tier rehydration and a new permanent backup service are rejected.
+
+Separate candidate ingestion from known-good custody: a VM managed identity may
+write/read only a **staging container**, with no access to the archive container,
+role management, keys or history deletion. The off-VM Leader-operated publisher
+uses Entra authentication scoped to the **archive container** for write/readback;
+restore is read-only, pruning a separate explicitly invoked custodian operation.
+The publisher uses unique set IDs and conditional create (`If-None-Match: *`),
+never replacement of an existing point. RBAC write access alone is **not** claimed
+to enforce append-only/WORM; the qualified client protocol, trust ledger and
+independent custody are required. Actual RBAC/conditional-write tests are a
+provisioning gate; no account-wide key, public SAS or new grant is authorized.
+
+The **independent destination is the Leader's workstation filesystem** at
+`~/CodeMasteryRecovery/sets` (owner-only directory 0700, encrypted sets 0600),
+outside the VM and Azure account. Copy **every** qualified point, not only weekly
+points. Do not call two directories on one disk independent storage; the local
+two-directory qualification tests the protocol only. Actual device/free space,
+backup custody and availability must be bound before operational reliance. No
+new device purchase is authorized. The independent copy, tools/artifacts, trust
+record and escrow key must be retrievable with VM/Azure unavailable.
+
+Select root-only `/run/codemastery` 0700 and
+`/run/codemastery/operations.lock` for shared exclusive operation coordination.
+Select native **systemd timer** capture at 00:00/08:00/16:00 UTC with Persistent
+missed-run handling, one exclusive capture/renewal/deploy/prune lock and no catch-up
+burst. Select an operator-workstation scheduled publisher polling every 15 minutes;
+it must authenticate/decrypt to protected staging, verify the complete set, retain
+an independent copy, publish the completion record last and advance its external
+trust ledger. Sleep/offline/locked-key conditions are explicit failures/age warnings,
+never successful backup. No permanent application service is added. Persistent
+timers do not prove uptime. Capture/publisher integration needs later implementation
+and failure qualification; workstation availability is part of Q07's real bound.
+
+Use journald plus private owner-only run/status records at
+`/var/lib/codemastery/backup` on the VM and `~/CodeMasteryRecovery/ledger` off-VM.
+Record each deadline/result, both destination point ages and operator acknowledgment;
+failed/missing/late jobs alert the operator immediately, warning at age 16h, breach
+above 24h. No new email/SMS/push product channel is selected. The primary operator
+checks private status daily and before important demos; notification delivery and
+response availability need actual operational qualification. No success on a
+missed poll or unobserved monitor. Lock contention skips with a visible failure,
+not concurrency; stale-lock recovery is manual after inspecting process/state.
+
+Qualified primary history is at most **14S + R**, independent history another
+14S + R; allow separately for up to two staged full sets, protected plaintext
+validation workspace, failed/pre-change/incident sets and transient transfer copies.
+Primary base storage remains `14*S*$0.024` at the cited public first-tier meter;
+staging up to `2*S*$0.024` is additional, as are actual requests/egress/local capacity.
+Approximately 90S/month per full-copy path excludes retries/extras. This is a cost
+model, not a spending ceiling or statement that credit/resources exist. Provisioning
+requires measured S, total estimate, actual funding/expiry and explicit cost authority.
+
+### 9.5 Qualified mechanisms and security boundaries
+
+**MinIO:** approve opaque complete **cold** `/data` volume capture, including
+`.minio.sys`, restored with numeric UID/GID/modes into an empty volume with the
+**identical server binary/image, topology and external configuration/dependencies**.
+Stop server and every writer, prevent restart, then tar the entire volume; no
+live copy, selective internal-file edit, cross-version import or current-only mirror.
+Bind approval to server SHA256
+`3c3d615241314c531e15e57485c053e60dc1af04e87b20424d2db8bdec8a49b2`
+and mc SHA256
+`025691d43adb653c6ce34723c76450153f2c024bfa232edaca6906fe3e221809`.
+The tested binaries, image identities and fixture scope are below. This is executed
+project compatibility evidence, **not vendor support certification or Final security
+admission**. A changed build/topology/feature or external KMS/identity/replication
+dependency requires affected qualification again. Actual dependency inventory is
+mandatory before any production set; never infer unused KMS/versioning from silence.
+
+**Encryption:** approve OpenSSL 3 CMS `AuthEnvelopedData`, explicit AES-256-GCM,
+RSA-3072 recipient with OAEP/SHA256 and MGF1/SHA256, binary streaming envelope.
+Each encrypted component plaintext starts with the exact 7 bytes `CMREC1\n` then
+the component bytes; record format/version/length and plaintext/ciphertext SHA256
+in the signed manifest. This mandatory framing handles the tested build's failure
+on raw empty input. Test empty *payload*, binary and large inputs; do not silently
+publish a zero-length failed envelope. No `openssl enc`, default cipher or CBC-only
+payload encryption is approved. Algorithm/provider/version must be recorded and
+qualified on the execution host; host LibreSSL is not interchangeable evidence.
+
+Use pipefail and every producer exit status. Decrypt only to owner-only **tmpfs
+staging**, bounded by measured capacity; OpenSSL can write unauthenticated plaintext
+before its final failure. No `decrypt | tar`, application import or side effect
+until full success, expected format/length/hash checks and safe path validation.
+For larger-than-proven tmpfs capacity, stop: encrypted scratch/disk redesign needs
+separate qualification. No plaintext production spill to an ordinary host directory.
+
+Recipient private key stays off the VM: Leader workstation
+`~/CodeMasteryRecovery/keys/recipient.encrypted.pem`, PKCS8 encrypted using
+AES-256-CBC/PBKDF2-HMAC-SHA256, 600,000 iterations, strong generated independent
+passphrase and owner-only files/directories. This key-wrap choice is not payload
+authentication; wrong/corrupt keys must fail GCM/manifest checks. Workstation
+Keychain supplies the passphrase through a private descriptor for authorized
+scheduled validation, never argv/log/env. Qualify the actual Keychain/scheduler
+binding later without real secrets in test evidence. An encrypted offline key
+copy on separate Leader-held media plus separately recoverable passphrase is
+required before reliance; neither media nor key availability is asserted here.
+Retain old keys until all referencing sets expire. The VM holds only the pinned
+public recipient certificate at `/etc/codemastery/backup/recipient.crt`.
+
+**Provenance:** a separate RSA-3072 producer signing key, root-only 0400 at
+`/etc/codemastery/backup/producer-signing.key`, signs the exact manifest bytes
+using RSA-PSS/SHA256, salt length digest. This grants no runtime application access.
+The Leader pins its public-key fingerprint independently in
+`~/CodeMasteryRecovery/trust`, together with an off-VM monotonic point/cut ledger.
+Authenticate any rotation out of band; no key from an uploaded set is trusted.
+The signed manifest binds source/config/image/tool identities, all required
+components/dependencies, lengths/hashes, conservative UTC cut, writer-exclusion
+evidence, custody references and qualification status. AEAD alone does not prove
+producer identity. A valid old signature does not authorize rollback: compare
+against the independent ledger and require explicit Leader recovery-point choice.
+Source/VM compromise cannot be detected merely by its own signing key; protect
+previous off-VM history and stop on suspected compromise for separate security
+investigation/risk authority. No residual-risk acceptance is supplied here.
+
+**Transfer/publication/retention:** certificate-verified authenticated HTTPS;
+Azure uses Entra tokens, not the fixture's synthetic bearer token. Verify signatures
+against the pinned key before trusting manifest filenames; reject duplicate keys,
+absolute/traversing/link paths, unknown/missing components, wrong lengths/hashes,
+partial/corrupt ciphertext and stale/substituted sets. Complete readback and local
+authenticated validation precede completion-marker publication and external-ledger
+advance. Interrupted upload, marker/ledger disagreement, full destination, failed
+resumption or missing independent copy cannot replace the prior qualified point
+or trigger prune. No age-only storage lifecycle rule may delete qualified history.
+Pruning requires explicit custodian invocation, no active lock, both destination
+coverage and recoverable key/artifact dependencies; keep the prior point on failure.
+The local reference model qualifies protocol semantics; actual Azure/OS implementation
+must rerun these faults. It is not falsely marked implemented or cloud-tested.
+
+### 9.6 Actual qualification record — 10 November 2026
+
+**Environment:** local Docker Desktop 4.93.0 / Engine 29.8.1, Linux arm64 kernel
+7.0.14-linuxkit, `linux/amd64` images emulated. Internal-only disposable network
+`ct17q-20261110a`; **zero published ports**, six task-owned containers/four task-owned
+volumes, all removed after evidence capture. No production data, credentials,
+volumes, cloud resource, dependency download or public service was used.
+
+| Artifact/tool | Actually executed identity |
+|---|---|
+| MinIO | RELEASE.2026-10-23T20-06-51Z, commit `76c06ff1d2cc844050fdeb1d54bf8fa70db72278`; image config `sha256:271fe69df3d41e8431dddc158678e920b1acd05cb3ebf8c40f46323131eddd16` |
+| mc | Project source `7394ce0dd2a80935aded936b09fa12cbb3cb8096`, patched dependencies; reports DEVELOPMENT.GOGET, Go1.27.3; config `sha256:41ff90c8099be21d6626a0f9f602f3563b5fcd8585ddcd3598b7178b9c015ff2` |
+| PostgreSQL/client | 17.11 Alpine; config `sha256:43ebe9dbb13e6afd71c8e643f0d47c8ae2abd438f899088aa1bcc130410da74a` |
+| OpenSSL/tar helper | OpenSSL 3.0.13, Ubuntu package build `3.0.13-0ubuntu3.16`; existing backend config `sha256:e492780c800084e8a763bdd53d6f4a0955bbba4061c15043a38ebd82da6c7457` |
+| HTTPS reference | Existing Python3.13-slim arm64 config `sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb`; ssl OpenSSL3.5.7 |
+
+Config IDs above are the local Docker identity kind; they are **not** replacements
+for §2.3's OCI manifests or proof of Final admission. Source baseline is
+`4cb600e425bc39e182d5f9e9fac399a9579d025d`; no implementation files changed.
+
+Inputs: fresh synthetic root/user/service-account credentials and ephemeral RSA
+keys; recovery/private/locked buckets; two versions of `versioned.bin`, a deleted
+object and marker, zero-byte object, metadata/tag fixture, 17 MiB binary object,
+5 MiB in-progress multipart part, versioning/lifecycle/quota/governance-lock
+settings, user/group/read-policy/service-account dependencies. No external KMS,
+LDAP/OIDC, replication or real secrets. Applied actual V001–V006 SQL; added
+`synthetic_history` with migration filenames/SHA256 and a `recovery_refs` row/
+identity sequence linking the current object's SHA256. **No Flyway-engine history
+or actual feature execution is claimed.** Conservative cut: **03:48:29 UTC**.
+PG dump **67,673 bytes**; complete cold tar **23,275,520 bytes**. Framed encrypted
+components **68,363** and **23,298,874 bytes** respectively; not measured Final S.
+
+| Case | Actual result and exact limit |
+|---|---|
+| Q01 | **PASS for fixture inventory**, including hidden tree and IAM/config dependencies; actual Final/external-dependency inventory **NOT_RUN** |
+| Q02 | **PASS for isolated fixture boundary**: disconnected writer client, read-only DB default, no other active DB writer; attempted late INSERT rejected; cut held through dump/cold capture. A read-only default is not a security fence against a privileged writer. Actual HTTP/jobs/admin drain and hostile/privileged-writer detection **NOT_RUN** |
+| Q03 | **PASS for PG17 mechanism**: actual project SQL/constraints, fixture history/data/sequence/owner/role equivalence after restore, bounded migrator flags, runtime SELECT allowed/DDL denied. Flyway-engine checksum validation, incompatible-version and privilege-drift injection **NOT_RUN** |
+| Q04 | **PASS on exact tested fixture/builds**: full tree bytes/numeric ownership/modes matched before boot; seven listed versions/marker, old and current reads, tags/metadata, zero/large objects, bucket settings, IAM/group/service-account credentials and allow/deny behavior matched; pending multipart part survived and completed with correct bytes. CORS PUT returned **501 NotImplemented**, no CORS state was installed; no CORS-recovery PASS. Actual external-state variants require requalification |
+| Q05 | **PASS on tested OpenSSL**: empty framed payload, binary and 16 MiB round trips; actual PG/tar encrypt/decrypt byte equality; wrong/missing key, corrupt/truncated envelope, wrong escrow passphrase, forged manifest/substituted trust key and failed producer rejected. Recovered from encrypted PKCS8 copy. Actual workstation Keychain/offline-media availability **NOT_RUN** |
+| Q06 | **PASS local protocol model**: eight interruption boundaries preserve prior point/ledger; corruption/truncation/missing/stale part, replaced manifest/signature, incomplete marker and hidden-state omission rejected before restore; path/duplicate-key rejection, exclusive lock and second-directory readback. Actual Azure/RBAC/atomic cloud behavior **NOT_RUN** |
+| Q07 | **NOT_RUN** for real RPO/RTO, replacement compute, actual cost/capacity/operator availability and physical independent-copy loss. Fixture bytes/command timings recorded, not a 24h/48h guarantee |
+| Q08 | **NOT_RUN** for actual Auth/Course/Assessment/Adaptive/Interaction/Admin/file QA/Flyway; fixture PG object-reference SHA and storage/private-network denials passed. No full-product F2 PASS |
+| Q09 | **PASS only local overlap/provenance/failure preservation** above; actual restart/timers/renewal/keychain/pre-demo/product compatibility **NOT_RUN** |
+| Transport | **PASS isolated HTTPS** encrypted component byte equality; trusted chain/hostname required, unknown/wrong CA, wrong hostname and wrong bearer token rejected. Actual Azure Entra endpoint/permissions/Internet transfer **NOT_RUN** |
+
+Evidence is preserved locally at
+`/private/tmp/codemastery-ct17-qualification-20261110/`: sanitized `commands.jsonl`
+(actual UTC commands, exits, durations, stdout hashes/errors), script/result
+`evidence-index.json`, restored inventories and private synthetic input archives.
+No private key, credential, dump or binary artifact is added to Git. Selected
+result SHA256 values are:
+
+```text
+restore-result.json      5f678d62d085bce59fa470fb47d890ef3d1fdf3543103355db06c06d8a972c06
+crypto-result.txt        476e1c7ddfc1810f5fd2506423f134c3340adc87eda694db39bd8e4a9c560527
+publication-result.json d09cbd699a71f24b6ec83304c252e43b2c22226bb61cda380fde63488ea97e50
+tls-result.json          cf15cac17593eb53bcb665743b280030f91f7baf04bbfa514812173e74a42020
+```
+
+The preserved journal includes unsuccessful harness attempts (read-only mc home,
+synthetic service-key length and display URL/action-order comparison), corrected
+without changing the production images; these are not recovery PASS assertions.
+The raw-empty CMS failure and unsupported CORS call remain explicit findings.
+The final bounded results above passed; no blanket Q01–Q09 PASS is asserted.
+See [testing reproduction](../testing.md#ct17-r2-executed-mechanism-qualification--10-november-2026)
+for actual command shapes and fixture interpretation.
+
+### 9.7 Remaining execution gates and publication
+
+**No remaining CP-033/034 technical approval blocker.** The Leader's supplemental
+resource ID and explicit credit-only/no-new-billable-resource boundary resolve the
+last actual account/financial policy input; runtime and recovery r2 are both
+`DELEGATED_APPROVED`. Existing VM/platform/domain/operator/resource/funding facts
+need no reconfirmation. Before execution, verify actual remaining credit/expiry
+and feasibility through Final, current disk/workspace/capacity, config/grants,
+served certificate/renewal and exact Final artifact admission. Unknown balances
+or failed acceptance stop execution; they are not treated as approved spending or
+as unresolved technical choices. No guaranteed availability is inferred.
+
+**CP-034 execution remainder:** bind/provision the selected private destinations
+and independent device, authorize costs/grants, protect/recover real keys, implement
+and qualify the actual timers/publisher/cloud fault handling, inventory actual
+MinIO external dependencies and requalify changed Final builds. Then execute F2,
+real Flyway/grants/features/security QA, representative capacity/capture/restore,
+both-copy age and whole-incident RTO drill before claiming recovery ready. These
+are implementation/operational gates; no technical mechanism remains unselected.
+Current Final artifact admission/risk provenance is separate and still required.
+
+Issue #70 stays open; only exact fulfilled existing checklist conditions may tick.
+Project Approval records **Delegated approved** for the completed technical scope,
+Readiness remains **Bounded**; Checkpoint/Gate summary point to these r2 decisions. Status and all other metadata remain.
+PR #233 gets one focused continuation commit, no duplicate ADR/PR. PR #231/six
+decisions and all predecessors remain unchanged. Independent CODEOWNER/last-push
+review, exact-head required CI/security and protected integration still apply.
+
+Additional primary references: [Azure Entra Blob authorization](https://learn.microsoft.com/en-us/azure/storage/blobs/authorize-access-azure-active-directory),
+[custom RBAC](https://learn.microsoft.com/en-us/azure/role-based-access-control/custom-roles),
+[Docker volume capture](https://docs.docker.com/engine/storage/volumes/),
+[OpenSSL CMS](https://docs.openssl.org/3.0/man1/openssl-cms/).
+Documentation/vendor capabilities support design review, not the unexecuted cloud
+or production claims above. Codex performed this synthetic qualification and
+authored the continuation under the stated delegation; no AI runtime is added.
