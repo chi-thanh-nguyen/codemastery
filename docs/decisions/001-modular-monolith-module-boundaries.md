@@ -928,3 +928,17 @@ resolves only the submitted-quiz **payload schema/location** deferral in §9
 mastery/progress participation remain unapproved Batch 6 contracts. These records
 are technical approvals pending independent review/CI/protected integration, not
 implementation or real transaction verification.
+
+
+## 15. Batch 5 storage and learner-name boundaries — 12 November 2026
+
+[ADR010](010-batch-05-contract-approvals.md) records the delegated Batch 5
+decisions. The shared `infrastructure/storage/FileStorage` port (§7 there) is used
+only by Course `LearningMaterialService` and Assessment `SubmissionService`, after
+their own CT03-based admission; no module reaches another module's data through
+storage, and object keys never cross the REST boundary. Assignment writes serialize
+on Assessment's own Assignment row and do not use or widen ADR005/ADR007 Course
+guards. `CT01-LEARNER-NAMES-2026-11-12-r1` adds one read-only Auth method that only
+Course calls, plus a Course owner-scoped method for Assessment, preserving the
+Assessment → Course → Auth direction in §12.6. No event, Admin mutation or
+architecture change is introduced; review, integration and implementation remain gates.

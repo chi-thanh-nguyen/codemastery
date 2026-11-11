@@ -3006,3 +3006,17 @@ This resolves the tested Q03/P6 discrepancy, subject to independent re-review.
 Flyway-engine validation/full-product F2/Q08 and real Q07 RPO/RTO remain NOT_RUN.
 MinIO/CMS/cloud/renewal/Keychain/scheduler results retain their previous limits and
 were not rerun. No deployment, risk acceptance or spending permission is supplied.
+
+## Batch 5 contract acceptance obligations — specified, NOT_RUN
+
+[ADR010 §14](decisions/010-batch-05-contract-approvals.md#14-errors-acceptance-obligations-and-retained-gates)
+specifies oracles B5-O01–B5-O12 for authorization before storage, object keys,
+type/filename/size validation, store-then-commit compensation, the exclusive
+deadline, Assignment-row serialization, grading precision and preconditions,
+download headers, no mastery effect of grading and the shared widget. They use
+ADR008 §5's existing placements (`SubmissionServiceTest`,
+`AuthorizationIntegrationTest`, existing Course and frontend suites). Real MinIO
+success, rollback and recovery tests still need qualified isolated storage
+configuration and the dedicated storage integration placement that ADR008 records
+as a gap; no MinIO testcontainer, new test file or dependency is approved, and no
+result is claimed.

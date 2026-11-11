@@ -4799,6 +4799,1431 @@
         "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials": {
+      "post": {
+        "operationId": "b5CreateFileMaterial",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; multipart parts title and file only. Admission precedes reading the part; PDF only by extension and leading bytes; store then commit inside the existing Course configuration guard. Creates a hidden file material; no key, filename or URL in JSON. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMaterialMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "413": {
+            "$ref": "#/components/responses/B5TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/B5MaterialUpload"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}": {
+      "put": {
+        "operationId": "b5UpdateFileMaterialTitle",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; replaces the trimmed nonblank title of a file material only. Course guard. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMaterialMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B5FileMaterialTitleWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}/file": {
+      "put": {
+        "operationId": "b5ReplaceFileMaterialFile",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; multipart part file only. New object key; superseded object deleted after commit, new object deleted after rollback. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMaterialMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "413": {
+            "$ref": "#/components/responses/B5TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/B5FileUpload"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}/publication": {
+      "put": {
+        "operationId": "b5SetFileMaterialPublication",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; explicit hidden or published for a file material. Course guard; no cascade. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMaterialMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/file": {
+      "get": {
+        "operationId": "b5DownloadMaterialFile",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Admitted Learner (published Course, Lesson and material; ACTIVE/COMPLETED membership) or owning Instructor preview, through the CT03 material read predicate. Streams through the backend; no pre-signed URL. Missing object for an existing row is 500. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete file body, attachment disposition; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "Content-Disposition": {
+                "$ref": "#/components/headers/B5AttachmentDisposition"
+              },
+              "X-Content-Type-Options": {
+                "$ref": "#/components/headers/B5NoSniff"
+              },
+              "Content-Length": {
+                "$ref": "#/components/headers/B5ContentLength"
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/pdf"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/assignments": {
+      "post": {
+        "operationId": "b5CreateAssignment",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor (Lesson ownership when lessonId is set); creates a hidden Assignment. Deadline is an RFC 3339 instant with at most microsecond precision. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B5AssignmentWrite"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "b5ListLearnerAssignments",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Self Learner with current visibility; published assignments only, ordered by deadlineAt then UUID. open is derived from server time. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5LearnerAssignmentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/assignments/{assignmentId}": {
+      "get": {
+        "operationId": "b5ReadLearnerAssignment",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Self Learner with current visibility; own submission and own grade only. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5LearnerAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/assignments/{assignmentId}/submission": {
+      "put": {
+        "operationId": "b5PutOwnSubmission",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Self Learner; multipart part file only (PDF or ZIP). Admitted only if server now is before deadlineAt (equality is late), sampled after the Assignment row lock, and the current submission is ungraded. 201 when created, 200 when replaced. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5LearnerSubmission"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5LearnerSubmission"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B5Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/B5TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/B5FileUpload"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/assignments/{assignmentId}/submission/file": {
+      "get": {
+        "operationId": "b5DownloadOwnSubmission",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Self Learner with current visibility; own current submission file only. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete file body, attachment disposition; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "Content-Disposition": {
+                "$ref": "#/components/headers/B5AttachmentDisposition"
+              },
+              "X-Content-Type-Options": {
+                "$ref": "#/components/headers/B5NoSniff"
+              },
+              "Content-Length": {
+                "$ref": "#/components/headers/B5ContentLength"
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/pdf"
+                }
+              },
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/zip"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments": {
+      "get": {
+        "operationId": "b5ListOwnedAssignments",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; hidden and published, ordered by title COLLATE C then UUID, with submission and graded counts. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignmentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}": {
+      "get": {
+        "operationId": "b5ReadOwnedAssignment",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; hidden or published Assignment. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      },
+      "put": {
+        "operationId": "b5ReplaceAssignment",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; full replacement of title, instructions, deadlineAt and lessonId. Locks the Assignment row; affects only later admissions. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B5AssignmentWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}/publication": {
+      "put": {
+        "operationId": "b5SetAssignmentPublication",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; explicit hidden or published. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}/submissions": {
+      "get": {
+        "operationId": "b5ListSubmissions",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; current submissions ordered by submittedAt then UUID, learner display names resolved through Course and Auth. No object keys. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5SubmissionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}/submissions/{submissionId}/file": {
+      "get": {
+        "operationId": "b5DownloadSubmission",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; submission of an Assignment in the owned Course. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "submissionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete file body, attachment disposition; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "Content-Disposition": {
+                "$ref": "#/components/headers/B5AttachmentDisposition"
+              },
+              "X-Content-Type-Options": {
+                "$ref": "#/components/headers/B5NoSniff"
+              },
+              "Content-Length": {
+                "$ref": "#/components/headers/B5ContentLength"
+              }
+            },
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/pdf"
+                }
+              },
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/zip"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}/submissions/{submissionId}/grade": {
+      "put": {
+        "operationId": "b5GradeSubmission",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; grade 0-100 with at most two decimals, nonblank feedback and the reviewed submittedAt as a precondition (mismatch 409). Regrade replaces all three fields. Publishes no quiz event and changes no mastery or progress; the graded event is CT27. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "submissionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5SubmissionSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B5Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B5GradeWrite"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7046,6 +8471,505 @@
           }
         ],
         "description": "Active/overdue captured view or submitted immutable result; never null correctness or keys."
+      },
+      "B5FileUpload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "description": "Exactly one part named file. Extension and leading bytes decide the type; the part Content-Type is ignored."
+      },
+      "B5MaterialUpload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream"
+          }
+        },
+        "required": [
+          "title",
+          "file"
+        ],
+        "description": "Exactly the parts title and file; PDF only."
+      },
+      "B5FileMaterialTitleWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "B5AssignmentWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "instructions": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "deadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "title",
+          "instructions",
+          "deadlineAt",
+          "lessonId"
+        ]
+      },
+      "B5OwnedAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "instructions": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "deadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "submissionCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "gradedCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "lessonId",
+          "title",
+          "instructions",
+          "deadlineAt",
+          "publicationStatus",
+          "submissionCount",
+          "gradedCount"
+        ]
+      },
+      "B5OwnedAssignmentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B5OwnedAssignment"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B5LearnerAssignmentSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "deadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "submissionStatus": {
+            "type": "string",
+            "enum": [
+              "none",
+              "submitted",
+              "graded"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "lessonId",
+          "title",
+          "deadlineAt",
+          "open",
+          "submissionStatus"
+        ],
+        "description": "open is true when server now is before deadlineAt."
+      },
+      "B5LearnerAssignmentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B5LearnerAssignmentSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B5LearnerSubmission": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "originalFilename": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Verbatim client filename; at most 255 UTF-8 bytes, no path separators or control characters."
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "graded": {
+            "type": "boolean"
+          },
+          "gradePercentage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "feedback": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          },
+          "gradedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "originalFilename",
+          "submittedAt",
+          "graded",
+          "gradePercentage",
+          "feedback",
+          "gradedAt"
+        ],
+        "description": "Own current submission. Grade, feedback and gradedAt are all null before grading and all present after."
+      },
+      "B5LearnerAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "instructions": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "deadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "submission": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B5LearnerSubmission"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "lessonId",
+          "title",
+          "instructions",
+          "deadlineAt",
+          "open",
+          "submission"
+        ]
+      },
+      "B5SubmissionSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "learnerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "learnerDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "originalFilename": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Verbatim client filename; at most 255 UTF-8 bytes, no path separators or control characters."
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "graded": {
+            "type": "boolean"
+          },
+          "gradePercentage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "feedback": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          },
+          "gradedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "assignmentId",
+          "learnerId",
+          "learnerDisplayName",
+          "originalFilename",
+          "submittedAt",
+          "graded",
+          "gradePercentage",
+          "feedback",
+          "gradedAt"
+        ],
+        "description": "Owner view; never an object key. learnerDisplayName is null when the name lookup omits the learner."
+      },
+      "B5SubmissionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B5SubmissionSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B5GradeWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gradePercentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "feedback": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gradePercentage",
+          "feedback",
+          "submittedAt"
+        ],
+        "description": "submittedAt must equal the current submission's submittedAt."
       }
     },
     "responses": {
@@ -7241,6 +9165,96 @@
             }
           }
         }
+      },
+      "B5Invalid": {
+        "description": "Malformed identifier, JSON, page, multipart parts, filename, file type or signature, empty file, grade, precision or deadline; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5Unavailable": {
+        "description": "Safe unavailable resource: missing, hidden or foreign Course, Lesson, material, assignment or submission; no identifiers or keys.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5Conflict": {
+        "description": "Valid request in an invalid lifecycle state: deadline reached, graded submission, or stale submittedAt grade precondition.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5TooLarge": {
+        "description": "File part exceeds the configured upload limit (CT18-B5-ERRORS-2026-11-12-r1); no storage write.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5UnsupportedMedia": {
+        "description": "Request media type does not match the operation (multipart versus JSON); no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5Failure": {
+        "description": "Safe storage, integrity, clock or transaction failure. Database work rolls back and a new object is compensated; no automatic retry.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
       }
     },
     "headers": {
@@ -7256,6 +9270,27 @@
         "schema": {
           "type": "string",
           "const": "Bearer"
+        }
+      },
+      "B5AttachmentDisposition": {
+        "description": "attachment; filename=\"<ASCII fallback>\"; filename*=UTF-8''<percent-encoded original filename> (RFC 6266/8187).",
+        "schema": {
+          "type": "string",
+          "pattern": "^attachment; "
+        }
+      },
+      "B5NoSniff": {
+        "description": "Prevents content sniffing of downloaded files.",
+        "schema": {
+          "type": "string",
+          "const": "nosniff"
+        }
+      },
+      "B5ContentLength": {
+        "description": "Exact stored object length in bytes.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }
