@@ -598,3 +598,28 @@ evidence. CT08.execution/failure/verification-plan, CT22.atomic, CT07/CT25 and
 notification bindings retain their separate gates. Schema approval does not prove
 real-time mastery, delivery, replay or atomic progress. Earlier payload-deferral
 text is historical to the extent resolved by this explicit, bounded reference.
+
+## Batch 6 adaptive runtime — 12 November 2026
+
+[ADR011](decisions/011-batch-06-contract-approvals.md) technically approves the
+adaptive runtime under explicit delegation; nothing is implemented. Submitting a
+quiz publishes `QuizSubmittedEvent` synchronously inside the guarded submission
+transaction; Adaptive recomputes each assessed skill from its latest evidence under
+the Course policy and, when the Course is enabled and ready, applies test-out and
+records recommendations. Result, mastery, `LessonProgress` and recommendation history
+commit or roll back together; an unconfigured Course gets no Adaptive effect, and a
+disabled or not-ready Course gets mastery updates only (ADR005 §7.2).
+
+Routing (ADR011 §7): Lessons whose mapped skills are all Mastered are tested out
+(completed and marked mastery-skipped, never reversed); a Weak skill with an
+unmastered direct prerequisite yields a remedial recommendation for that
+prerequisite's Lesson; otherwise the learner continues with the first incomplete
+Lesson in canonical order. Prerequisite gaps only produce warnings. Reasons use fixed
+English templates (§9). Practice difficulty maps Unknown/Weak to easy, Learning to
+medium and Mastered to hard (§8); applying it to quiz capture awaits a Leader-reserved
+amendment of CT04/CT08 evidence rules. The placement diagnostic is an ordinary quiz
+whose scope is its questions' skills; skipping is a navigation, not a server write.
+The Mastery Map, learner guidance, learner-home recommendations and Instructor
+insights are read contracts (§§12–15). Mastery states reflect the latest submitted
+quiz evidence for each skill; screens must say so. Earlier deferral text above is
+historical to the extent resolved by these bounded revisions.

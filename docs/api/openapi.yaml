@@ -6224,6 +6224,581 @@
           }
         }
       }
+    },
+    "/api/courses/{courseId}/mastery-map": {
+      "get": {
+        "operationId": "b6ReadMasteryMap",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Self Learner with ACTIVE/COMPLETED membership in a published Course. Every Course skill with stored state (absent is unknown), direct prerequisites, published related Lessons and latest per-skill score from the latest eligible attempt. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6MasteryMap"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/adaptive-guidance": {
+      "get": {
+        "operationId": "b6ReadAdaptiveGuidance",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Self Learner. Placement offer condition, current continue/remedial recommendation (null when adaptation is off, none exists or the target is not a published Lesson) and per-Lesson prerequisite warnings. Guidance only; never blocks access. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6AdaptiveGuidance"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/me/recommendations": {
+      "get": {
+        "operationId": "b6ListMyRecommendations",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Self Learner. One row per ACTIVE membership of a published Course, same population, order and paging as /api/me/course-progress, with the unaltered current recommendation or null. No cross-Course ranking. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6MyRecommendationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners": {
+      "get": {
+        "operationId": "b6ListCourseLearners",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Owning Instructor; ACTIVE/COMPLETED learners ordered by learner UUID, with CT22 progress, mastery state counts and current recommendation marker. Display names via the ADR010 learner-name read. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6CourseLearnerPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners/{learnerId}": {
+      "get": {
+        "operationId": "b6ReadCourseLearner",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "One learner row. Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "learnerId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6CourseLearner"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners/{learnerId}/mastery-map": {
+      "get": {
+        "operationId": "b6ReadLearnerMasteryMap",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Mastery Map of that learner. Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "learnerId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6MasteryMap"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners/{learnerId}/recommendations": {
+      "get": {
+        "operationId": "b6ListLearnerRecommendations",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Full recommendation history (continue, skip, remedial) with target Lesson, reason and time, newest first. Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "learnerId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6RecommendationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners/{learnerId}/attempts": {
+      "get": {
+        "operationId": "b6ListLearnerAttempts",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Submitted quiz attempts of that learner in the Course, newest first, without answer keys. Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "learnerId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6LearnerAttemptPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
     }
   },
   "components": {
@@ -8971,6 +9546,572 @@
           "submittedAt"
         ],
         "description": "submittedAt is an opaque token: echo the exact RFC 3339 string received in the submission row (microsecond digits included, never round-tripped through a millisecond Date). It must equal the current submittedAt instant; a stale value is 409, nonzero sub-microsecond digits are 400. Every replacement records a strictly later value."
+      },
+      "B6MasterySkill": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "learning",
+              "mastered",
+              "weak"
+            ]
+          },
+          "prerequisiteSkillIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          },
+          "relatedLessonIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          },
+          "latestScore": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "latestAssessedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "state",
+          "prerequisiteSkillIds",
+          "relatedLessonIds",
+          "latestScore",
+          "latestAssessedAt"
+        ],
+        "description": "prerequisiteSkillIds: direct prerequisites (skill depends on them), sorted. relatedLessonIds: published mapped Lessons in canonical order. latestScore/latestAssessedAt null without evidence."
+      },
+      "B6MasteryMap": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "learnerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6MasterySkill"
+            }
+          }
+        },
+        "required": [
+          "courseId",
+          "learnerId",
+          "adaptiveEnabled",
+          "skills"
+        ],
+        "description": "Skills ordered by lowercase UUID. States reflect the latest submitted quiz evidence for each skill."
+      },
+      "B6CurrentRecommendation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "remedial"
+            ]
+          },
+          "targetLessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "recommendedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "targetCompleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "targetLessonId",
+          "reason",
+          "recommendedAt",
+          "targetCompleted"
+        ],
+        "description": "Latest continue/remedial row; reason verbatim."
+      },
+      "B6LessonGuidance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "unmasteredPrerequisiteSkillIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "lessonId",
+          "unmasteredPrerequisiteSkillIds"
+        ],
+        "description": "Warning only; never an access rule."
+      },
+      "B6AdaptiveGuidance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "placementOffered": {
+            "type": "boolean"
+          },
+          "currentRecommendation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B6CurrentRecommendation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lessons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6LessonGuidance"
+            }
+          }
+        },
+        "required": [
+          "courseId",
+          "adaptiveEnabled",
+          "placementOffered",
+          "currentRecommendation",
+          "lessons"
+        ],
+        "description": "lessons covers every published Lesson in canonical order."
+      },
+      "B6MyRecommendation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recommendation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B6CurrentRecommendation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "courseId",
+          "recommendation"
+        ]
+      },
+      "B6MyRecommendationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6MyRecommendation"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B6RecommendationEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "skip",
+              "remedial"
+            ]
+          },
+          "targetLessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "recommendedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "targetLessonId",
+          "reason",
+          "recommendedAt"
+        ]
+      },
+      "B6RecommendationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6RecommendationEntry"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B6MasteryCounts": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "unknown": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "learning": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mastered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "weak": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "unknown",
+          "learning",
+          "mastered",
+          "weak"
+        ]
+      },
+      "B6RecommendationMarker": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "remedial"
+            ]
+          },
+          "recommendedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "type",
+          "recommendedAt"
+        ]
+      },
+      "B6CourseLearner": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "learnerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "membershipStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed"
+            ]
+          },
+          "completedLessons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalLessons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "progressPercentage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "masteryCounts": {
+            "$ref": "#/components/schemas/B6MasteryCounts"
+          },
+          "currentRecommendation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B6RecommendationMarker"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "learnerId",
+          "displayName",
+          "membershipStatus",
+          "completedLessons",
+          "totalLessons",
+          "progressPercentage",
+          "masteryCounts",
+          "currentRecommendation"
+        ]
+      },
+      "B6CourseLearnerPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6CourseLearner"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B6LearnerAttempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizTitle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quizKind": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "practice",
+              "test"
+            ]
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scorePercentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          }
+        },
+        "required": [
+          "attemptId",
+          "quizId",
+          "quizTitle",
+          "quizKind",
+          "attemptNumber",
+          "submittedAt",
+          "scorePercentage"
+        ]
+      },
+      "B6LearnerAttemptPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6LearnerAttempt"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
       }
     },
     "responses": {
@@ -9244,6 +10385,51 @@
       },
       "B5Failure": {
         "description": "Safe storage, integrity, clock or transaction failure; no automatic retry. A failure before the commit phase rolls back and deletes the new object; an unknown commit outcome keeps both objects and the client must reload the resource before another attempt (ADR010 §5).",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B6Invalid": {
+        "description": "Malformed identifier or page; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B6Unavailable": {
+        "description": "Safe unavailable resource: missing or hidden Course, or a learner without an ACTIVE/COMPLETED Enrollment in the owned Course; no identifiers.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B6Failure": {
+        "description": "Safe provider, integrity or snapshot failure; no partial representation.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/AuthenticationNoStore"

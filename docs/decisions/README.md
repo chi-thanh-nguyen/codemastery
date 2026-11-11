@@ -99,6 +99,7 @@ Neither document establishes implementation, runtime acceptance or deployment au
 | [ADR008](008-batch-04-contract-approvals.md) | Six Batch 4 testing/clock decisions; CP-030 r2 | `DELEGATED_APPROVED`; integrated via #231 on 10 November. Its original CT17 pending dispositions are historical, subsequently resolved by ADR009 r2 |
 | [ADR009](009-ct17-final-runtime-recovery.md) | CP-033/034 r2 runtime/recovery decisions, bounded qualification and dated Azure evidence | Two `DELEGATED_APPROVED`; integrated via #233 on 11 November (no approving review recorded); execution/admission gates retained |
 | [ADR010](010-batch-05-contract-approvals.md) | Ten Batch 5 checkpoints CP-037–046: protected files, assignments, file widget; CT01/CT18 bounded prerequisites | `DELEGATED_APPROVED` (12 November 2026); pending independent review, CI and protected integration; implementation/exposure gates retained |
+| [ADR011](011-batch-06-contract-approvals.md) | Seventeen Batch 6 checkpoints CP-047–063: atomic quiz-to-mastery execution, routing, reasons, difficulty, placement, Mastery Map and insights | `DELEGATED_APPROVED` (12 November 2026); stacked on ADR010 (learner names); pending independent review, CI and protected integration after ADR010; adaptive practice capture amendment `PENDING_LEADER_APPROVAL` |
 
 ## Contract decision records by revision
 
@@ -278,3 +279,32 @@ downloads, lazy multipart binding); scopes and IDs are unchanged.
 LD-07 (reminder deadline query ownership) is not resolved by CT10.deadline and stays
 with CT11.reminders (Batch 7). Submission-download hostile-content residual risk is
 `PENDING_LEADER_RISK_ACCEPTANCE` before public exposure.
+
+### Batch 6 revisions — 12 November 2026
+
+[ADR011](011-batch-06-contract-approvals.md) is the authoritative record for these
+**DELEGATED_APPROVED** revisions (Claude Code under the same explicit delegation).
+They depend on ADR010 only for CT33.insights learner names and must be integrated
+after it; no runtime behavior is implemented by the approvals.
+
+| Revision | Exact slice | Record |
+|---|---|---|
+| `CT22-ATOMIC-2026-11-12-r1` | CT22.atomic: Course execution state and monotonic mastery skips under the held root | [ADR011 §3](011-batch-06-contract-approvals.md#3-ct22atomic--course-participation-and-execution-reads) |
+| `CT08-EXECUTION-2026-11-12-r1` | CT08.execution: synchronous in-transaction event, one unit for result, mastery, progress and recommendations | [ADR011 §4](011-batch-06-contract-approvals.md#4-ct08execution) |
+| `CT08-FAILURE-2026-11-12-r1` | CT08.failure: rollback visibility, idempotence, no replay infrastructure | [ADR011 §5](011-batch-06-contract-approvals.md#5-ct08failure) |
+| `CT24-DECISION-2026-11-12-r1` | CT24.decision: pure decision callable and output | [ADR011 §6](011-batch-06-contract-approvals.md#6-ct24decision) |
+| `CT07-ROUTING-2026-11-12-r1` | CT07.routing: test-out, remedial, continue, warnings | [ADR011 §7](011-batch-06-contract-approvals.md#7-ct07routing) |
+| `CT07-DIFFICULTY-2026-11-12-r1` | CT07.difficulty: state mapping, U06 port, selection rule (capture amendment pending) | [ADR011 §8](011-batch-06-contract-approvals.md#8-ct07difficulty) |
+| `CT07-REASONS-2026-11-12-r1` | CT07.reasons: fixed templates and recommendation time | [ADR011 §9](011-batch-06-contract-approvals.md#9-ct07reasons) |
+| `CT07-BINDING-ORACLES-2026-11-12-r1` | CT07.binding-oracles: consumed shapes and rule oracles | [ADR011 §10](011-batch-06-contract-approvals.md#10-ct07binding-oracles) |
+| `CT25-SCOPE-2026-11-12-r1` / `CT25-SKIP-2026-11-12-r1` / `CT25-INIT-2026-11-12-r1` / `CT25-BINDING-2026-11-12-r1` | Placement diagnostic scope, skip, initialization and exposure/binding | [ADR011 §11](011-batch-06-contract-approvals.md#11-ct25--placement-diagnostic) |
+| `CT33-RESULTS-2026-11-12-r1` | CT33.results: latest per-skill evidence and owner attempt list | [ADR011 §12](011-batch-06-contract-approvals.md#12-ct33results) |
+| `CT33-MAP-2026-11-12-r1` | CT33.map: learner and owner Mastery Map | [ADR011 §13](011-batch-06-contract-approvals.md#13-ct33map) |
+| `CT33-INSIGHTS-2026-11-12-r1` | CT33.insights: owner-only joined-learner insights | [ADR011 §14](011-batch-06-contract-approvals.md#14-ct33insights) |
+| `CT08-VERIFICATION-PLAN-2026-11-12-r1` | CT08.verification-plan: real PostgreSQL cases B6-V01–V10 | [ADR011 §16](011-batch-06-contract-approvals.md#16-ct08verification-plan) |
+| `CT33-REST-2026-11-12-r1` | CT33.rest: eight read operations, including learner-home recommendations | [ADR011 §15](011-batch-06-contract-approvals.md#15-ct33rest) |
+
+The recommended amendment of `CT04-START-2026-11-09-r1` and
+`CT08-EVIDENCE-2026-11-09-r1` for adaptive practice capture (ADR011 §17) is not
+approved and awaits the Leader. LD-11 ordering is honoured; owners' joint review
+remains a review gate.

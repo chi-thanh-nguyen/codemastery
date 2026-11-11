@@ -3050,3 +3050,17 @@ success, rollback and recovery tests still need qualified isolated storage
 configuration and the dedicated storage integration placement that ADR008 records
 as a gap; no MinIO testcontainer, new test file or dependency is approved, and no
 result is claimed.
+
+## Batch 6 verification plan — specified, NOT_RUN
+
+[ADR011 §16](decisions/011-batch-06-contract-approvals.md#16-ct08verification-plan)
+specifies real-PostgreSQL cases B6-V01–B6-V10 for the atomic submission unit,
+rollback on injected faults, scheduler finalization, duplicates, evidence ordering,
+disabled/not-ready/unconfigured Courses, left learners, same-Course concurrency,
+held-root enforcement and the diagnostic gate. QA04 owns
+`MasteryProgressTransactionIntegrationTest`, QA03 `AdaptiveLearningFlowIntegrationTest`;
+unit doubles live in the existing Adaptive, Assessment and Course suites. Rule
+oracles B6-R01–B6-R12 (ADR011 §10) belong to the existing decision and mastery unit
+tests; CT36.F keeps the evaluation scenarios. Faults come only from test-scoped bean
+overrides, outcomes from independent committed reads and concurrency from barriers.
+No new test file, dependency or result is claimed.
