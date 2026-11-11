@@ -130,23 +130,28 @@ an existing user flow.
 ## CI Expectations
 
 [The CI workflow](.github/workflows/ci.yml) defines independent Backend and
-Frontend validation jobs on `ubuntu-24.04`. It runs for pull requests targeting
-`main`, pushes to `main`, and manual dispatch. Backend uses Temurin 25 with
-`./mvnw verify`; frontend uses Node 22 with `npm ci` and `npm run build`, which
-already includes typechecking.
+Frontend validation jobs on `ubuntu-24.04`, plus VM deployment-script, ingress and
+MinIO-initializer qualification jobs. It runs for pull requests targeting `main`,
+pushes to `main`, and manual dispatch. Backend uses Temurin 25 with
+`./mvnw verify`; frontend uses Node 22 with `npm ci`, `npm test` and
+`npm run build`, which includes typechecking.
 
 Run relevant supported local checks and report their results. Resolve failures
 from the actual workflow, and report remote CI success only when a run has
-completed successfully. There are no executable backend feature tests yet, so
-CI build success does not prove business behavior or PostgreSQL integration.
-Do not invent required branch-protection status checks. E2E CI and deployment
-automation remain unimplemented.
+completed successfully. Backend verification runs the existing unit tests and
+Testcontainers PostgreSQL integration tests, which cover only the implemented
+capabilities ([docs/testing.md](docs/testing.md)); CI success does not prove
+unimplemented business behavior. Do not invent required branch-protection status
+checks. E2E CI remains unimplemented: the Playwright suite in `e2e/` runs locally.
+The VM jobs check the Interim deployment script; CI performs no deployment.
 
 ## Backend Guidelines
 
 The approved backend is one Spring Boot 4.1.1 application on Java 25 LTS.
 The six modules are `auth`, `course`, `assessment`, `adaptive`,
-`interaction`, and `admin`. Their implementation remains scaffolded.
+`interaction`, and `admin`. `auth` and `course` hold the implemented Interim
+capabilities and `adaptive` its local mastery calculation; the other modules and
+the remaining files are still scaffolds (see the [README status](README.md#current-project-status)).
 Follow [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md) for
 ownership, encapsulation, approved interactions, and layering:
 
@@ -163,8 +168,8 @@ use centralized error handling where applicable. Cross-module communication
 requires an approved public application interface, port, or event; do not access
 internals or invent a new interface to avoid a blocker.
 
-REST contracts must be approved before dependent implementation. The current
-OpenAPI file is empty. When public API behavior changes, synchronize controllers,
+REST contracts must be approved before dependent implementation.
+`docs/api/openapi.yaml` specifies the eight implemented operations. When public API behavior changes, synchronize controllers,
 DTOs, frontend clients/types, and OpenAPI.
 
 Before a dependency change, inspect `pom.xml`, check existing capability,
@@ -191,10 +196,13 @@ details remain deferred. Update the adaptive design when approved behavior chang
 
 ## Frontend Guidelines
 
-React + TypeScript + Vite + Material UI and React Flow are approved. Frontend
-build/package configuration and the minimal Material UI bootstrap are
-implemented. React Flow is installed but unused. Routes, guards, authentication
-UI, API clients/integration, feature pages, and Mastery Map remain unimplemented.
+React + TypeScript + Vite + Material UI and React Flow are approved. The frontend
+implements the routed screens listed in the [README status](README.md#current-project-status)
+(landing page, sign in, registration, Profile, catalogue and course detail with
+membership, Learner home and My courses) with React Router, route guards and the
+shared HTTP client. React Flow draws the landing page's example Mastery Map and the
+preview graphs. Screens whose contracts are pending exist only in the sample-data
+design preview at `/preview`. [DESIGN.md](DESIGN.md) is the UI/UX specification.
 
 Use Node.js satisfying `^22.12.0 || ^24.0.0` and npm. Install and validate from
 `frontend/`:
@@ -202,6 +210,7 @@ Use Node.js satisfying `^22.12.0 || ^24.0.0` and npm. Install and validate from
 ```bash
 cd frontend
 npm ci
+npm test
 npm run build
 ```
 
@@ -211,12 +220,13 @@ alone for a narrower check when a production build is unnecessary.
 Run `npm run dev` from that directory for local development, or
 `npm run preview` after building to inspect the production bundle. Keep
 `package-lock.json` tracked with the manifest; dependencies and build output
-remain ignored. No lint or frontend test script is configured, and frontend
-automated tests remain pending. Initial CI validates installation and build.
+remain ignored. No lint script is configured. `npm test` runs the Vitest suites, and
+`npm run test:browser` is the optional browser harness ([docs/testing.md](docs/testing.md)).
+CI runs `npm ci`, `npm test` and `npm run build`.
 
 `VITE_API_BASE_URL` is optional public build-time configuration. Vite loads
-environment files from the repository root; the bootstrap makes no API requests
-and supplies no fallback URL.
+environment files from the repository root; the shared HTTP client sends every API
+request to it and supplies no fallback URL ([setup](docs/setup.md)).
 
 Follow the approved feature-oriented structure; place only genuinely shared code
 under `shared/`. Reuse implemented components and routing mechanisms when they
@@ -304,7 +314,8 @@ unnecessary. Use the approved JUnit Jupiter 6 + Mockito backend stack. The exact
 JUnit Jupiter version follows Spring Boot 4.1.1 dependency management (currently
 6.0.3). Use integration tests for persistence, transactions, module integration,
 configuration, or infrastructure behavior. Adaptive tests must be deterministic.
-Playwright is approved for main E2E flows when E2E configuration is implemented.
+Playwright is approved for main E2E flows; `e2e/` holds the Playwright Test
+configuration and the learner-flow suite, run locally and not yet in CI.
 
 Use the Maven Wrapper for backend validation:
 
@@ -322,10 +333,10 @@ Future integration tests should extend/use `AbstractIntegrationTest` when
 applicable, preserving its shared container lifecycle instead of introducing
 incompatible per-class container management or persistent reuse.
 
-Docker is required once concrete Testcontainers tests execute. The abstract
-foundation and test profile exist, but feature test files and E2E configuration
-remain empty. Current verification compiles the harness without exercising
-PostgreSQL. See [docs/testing.md](docs/testing.md) for lifecycle, isolation,
+Docker is required for the Testcontainers integration tests, which run against
+PostgreSQL for authorization, the catalogue, enrollment, the Course repository,
+shared REST infrastructure and sample data. `AdaptiveLearningFlowIntegrationTest`
+and `MasteryProgressTransactionIntegrationTest` are still empty scaffolds. See [docs/testing.md](docs/testing.md) for lifecycle, isolation,
 coverage limitations, and planned suites, and [docs/setup.md](docs/setup.md) for
 prerequisites. `./mvnw verify -DskipITs` skips Failsafe execution while still
 compiling integration-test sources; CI uses full `verify`.

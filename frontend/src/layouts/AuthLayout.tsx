@@ -1,12 +1,17 @@
 import type { ReactNode } from 'react';
 import { useLayoutEffect, useRef } from 'react';
-import { Container, Box, Paper, Typography } from '@mui/material';
-import { presentationTokens } from '../app/theme/theme';
-import { BrandLogo } from '../shared/components/BrandLogo';
+import { Box, Typography } from '@mui/material';
+import { Link, useInRouterContext } from 'react-router';
+import { color, pathLine, radius } from '../app/theme/theme';
+import { BrandWordmark } from '../shared/components/BrandLogo';
 
-export interface AuthLayoutProps { title?: string; subtitle?: string; children: ReactNode }
-export function AuthLayout({ title = 'CodeMastery', subtitle = 'Mastery-Based Programming Learning Platform', children }: AuthLayoutProps) {
+export interface AuthLayoutProps { title?: string; subtitle?: string; notice?: ReactNode; children: ReactNode }
+
+/** Split auth layout: ink brand panel + white form panel (DESIGN.md › S2). */
+export function AuthLayout({ title = 'CodeMastery', subtitle = 'Mastery-based programming learning platform', notice, children }: AuthLayoutProps) {
     const surface = useRef<HTMLDivElement>(null);
+    // A router link keeps the in-memory session; a plain anchor would reload the document.
+    const routed = useInRouterContext();
     useLayoutEffect(() => {
         const element = surface.current;
         const blurInput = () => {
@@ -20,15 +25,42 @@ export function AuthLayout({ title = 'CodeMastery', subtitle = 'Mastery-Based Pr
             window.removeEventListener('pagehide', blurInput);
         };
     }, []);
-    return <Box ref={surface} sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', p: { xs: 2, sm: 3 }, background: presentationTokens.outerGradient }}>
-        <Container maxWidth="xs" disableGutters>
-            <Paper sx={{ p: { xs: 2.5, sm: 4 }, boxShadow: presentationTokens.frameShadow }}>
-                <Box sx={{ mb: 3 }}><BrandLogo size={64} /></Box>
-                <Typography variant="h4" component="h1">{title}</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>{subtitle}</Typography>
+    return <Box ref={surface} sx={{ minHeight: '100dvh', display: 'grid', bgcolor: color.ink950, gridTemplateColumns: { xs: '1fr', md: '5fr 7fr' } }}>
+        <Box sx={{ color: 'common.white', px: { xs: 3, sm: 5, lg: 8 }, py: { xs: 3, md: 6 }, display: 'flex', flexDirection: 'column', gap: 4, minHeight: { xs: 120, md: 'auto' } }}>
+            <Box {...(routed ? { component: Link, to: '/' } : { component: 'a', href: import.meta.env.BASE_URL })} aria-label="CodeMastery home" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, color: 'inherit', textDecoration: 'none', alignSelf: 'flex-start',
+                borderRadius: `${radius.sm}px`, '&:focus-visible': { outline: `2px solid ${color.focusOnChrome}`, outlineOffset: 4 } }}>
+                <BrandWordmark size={40} textSize="1.5rem" />
+            </Box>
+            <Box sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', flex: 1, justifyContent: 'center', gap: 5, maxWidth: 440 }}>
+                <Typography component="p" sx={{ fontSize: '2.5rem', fontWeight: 600, lineHeight: 1.1, letterSpacing: '-0.025em', textWrap: 'balance' }}>
+                    Learn programming at the pace of what you actually know.
+                </Typography>
+                <BrandPath />
+                <Typography sx={{ color: color.chromeMuted, maxWidth: '40ch' }}>
+                    Courses follow one shared path. Quizzes show which skills you have mastered, and CodeMastery suggests the next step with a reason.
+                </Typography>
+            </Box>
+        </Box>
+        <Box component="main" id="main-content" tabIndex={-1} sx={{ bgcolor: color.surface, borderRadius: { xs: `${radius.lg}px ${radius.lg}px 0 0`, md: `${radius.xl}px 0 0 ${radius.xl}px` },
+            display: 'flex', alignItems: 'center', justifyContent: 'center', px: { xs: 3, sm: 5 }, py: { xs: 5, md: 8 } }}>
+            <Box sx={{ width: '100%', maxWidth: 440 }}>
+                <Typography variant="h1">{title}</Typography>
+                {subtitle && <Typography sx={{ mt: 1.5, mb: 4, color: 'text.secondary' }}>{subtitle}</Typography>}
+                {notice && <Box sx={{ mb: 3 }}>{notice}</Box>}
                 {children}
-            </Paper>
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block', textAlign: 'center' }}>CodeMastery · Learn at your own pace</Typography>
-        </Container>
+            </Box>
+        </Box>
+    </Box>;
+}
+
+/** Crisp vector echo of the logo's three linked skill nodes. Decorative. */
+function BrandPath() {
+    return <Box component="svg" aria-hidden viewBox="0 0 320 120" sx={{ width: '100%', maxWidth: 320, height: 'auto', display: 'block' }}>
+        <path d="M24 92 H120 Q148 92 160 64 Q172 36 200 36 H296" fill="none" stroke={color.brand400} strokeWidth="2" strokeDasharray={pathLine.dasharray} strokeLinecap="round" />
+        <circle cx="24" cy="92" r="12" fill={color.mint700} />
+        <path d="m18 92 4.5 4.5L31 88" fill="none" stroke={color.surface} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="160" cy="64" r="14" fill={color.brand600} />
+        <circle cx="160" cy="64" r="20" fill="none" stroke={color.brand600} strokeOpacity=".35" strokeWidth="4" />
+        <circle cx="296" cy="36" r="11" fill="none" stroke={color.chromeMuted} strokeWidth="2" />
     </Box>;
 }

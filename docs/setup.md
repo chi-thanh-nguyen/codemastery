@@ -8,18 +8,39 @@ This document describes the current development setup contract, based on
 [`frontend/package.json`](../frontend/package.json), and
 [`docker-compose.yml`](../infrastructure/docker-compose.yml). It covers local
 Compose startup/provisioning, variable scopes, configuration loading, and
-foundation validation. Production deployment and E2E remain pending.
+local build and test commands. The one-VM release deployment is documented
+separately in [deployment.md](deployment.md); test suites and their evidence are
+in [testing.md](testing.md).
 
-The frontend build, custom MUI presentation foundation, demonstration dashboard
-and bounded FE01 unit/component regressions are implemented.
-The backend integration-test foundation and initial CI workflow are implemented;
-integrated frontend features and browser API integration remain pending. Standalone
-multi-stage Docker image builds and frontend Nginx static serving configuration
-are implemented, with non-root runtimes. The local Compose foundation defines
-PostgreSQL, MinIO, a one-shot storage initializer, backend, and frontend. V001–V006
-implement the approved initial PostgreSQL schema. This runtime foundation does
-not implement feature APIs, authentication, JPA mappings, the backend storage
-adapter, or browser API integration. E2E and deployment remain empty scaffolds.
+The sections from [Prerequisites](#prerequisites) through
+[CI](#ci) describe the current repository. The later dated sections, from
+[Authorized Interim configuration targets](#authorized-interim-configuration-targets-implementation-pending)
+onward, are decision and implementation records. They keep the wording of their
+date and are not rewritten when the implementation changes.
+
+### Implemented capabilities on `main`
+
+Status as inspected on 31 October 2026 at `main`
+`614f3260a2df640dcfa47c166e4a5325f56bd1a7`. Implemented code and passing tests are
+not acceptance: QA01, QA02, QA07, QA13, DP01–DP03 and the other verification
+Issues remain open.
+
+| Area | Implemented in the repository | Not implemented |
+| --- | --- | --- |
+| Auth | Registration and login (`POST /api/auth/register`, `/api/auth/login`), BCrypt password storage, stateless JWT bearer authentication with Learner/Instructor/Administrator role claims (registration creates Learners only) and locked-account rejection | Logout endpoint, password reset, account administration |
+| Course | Public published-course catalogue with search, prerequisite filter and pagination (`GET /api/courses`); published course detail (`GET /api/courses/{courseId}`); Learner membership (`GET`/`PUT`/`DELETE /api/courses/{courseId}/membership`) and My Courses (`GET /api/me/courses`) | Course authoring, lesson content delivery, lesson progress |
+| Security | Anonymous `GET /actuator/health` (nondetailed, for the private probe); every other route, including the rest of `/actuator/**`, `/v3/api-docs` and Swagger UI, is denied by Spring Security | — |
+| Adaptive | Pure mastery calculator and state classifier (no database, events or API) | Skill graph, mastery persistence, routing, recommendations |
+| Assessment, Interaction, Admin | — | Source files are empty scaffolds |
+| Object storage | Local MinIO and its least-privilege initializer | Backend storage adapter and file delivery (CT09) |
+| Frontend | Router with the public landing page at `/`, `/courses`, `/courses/:courseId`, `/login`, `/register`, Learner-only `/home` and `/my-courses`, authenticated `/profile` and the design preview at `/preview` (sample data for every designed screen, including the React Flow Mastery Map and Instructor/Administrator screens); shared HTTP client; memory-only session | Production routes and API integration for lessons, assessments, Mastery Map, notifications, Instructor and Administrator screens (their contracts are pending) |
+| Sample data | SD01 Users and SD02 Courses in `sample-data/seed/01-…` and `02-…`, with a disposable-target loader procedure in [sample-data/README.md](../sample-data/README.md) | Seeds 03–05 are empty; no object is uploaded to MinIO |
+| Runtime | Local Docker Compose stack (this guide) and the one-VM release tooling `infrastructure/vm/deploy.sh`, `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` image target ([deployment.md](deployment.md)) | No deployment has been performed |
+| E2E | Local Playwright Test suite in `e2e/` with a disposable Docker stack and deterministic fixture ([testing.md](testing.md#browser-harness-and-e2e-suite)) | An E2E CI job; `e2e/tests/adaptive-flow.spec.ts` |
+
+Exact request and response shapes are in [the OpenAPI document](api/openapi.yaml);
+approved behavior is in [ADR002](decisions/002-interim-delegated-contracts.md) and
+[ADR001](decisions/001-modular-monolith-module-boundaries.md).
 
 ## Prerequisites
 
@@ -33,10 +54,11 @@ adapter, or browser API integration. E2E and deployment remain empty scaffolds.
   and ports 5432, 9000, 9001, 8080, and 5173 must be free on loopback. Compose
   supplies PostgreSQL and MinIO; no host installations of those services are needed.
 - Docker is required for standalone image builds and container smoke checks,
-  and when concrete PostgreSQL Testcontainers integration tests execute. The
-  abstract harness alone does not start a container during Maven validation.
-  No exact Docker version is specified. Host Java/Node are needed only for host
-  development commands, not for the Compose multi-stage image builds.
+  and for `./mvnw verify`: its concrete integration tests start a PostgreSQL
+  Testcontainer (see [Backend Validation](#backend-validation)). `./mvnw test`
+  does not need Docker. No exact Docker version is specified. Host Java/Node are
+  needed only for host development commands, not for the Compose multi-stage
+  image builds.
 - For host frontend development, Node.js satisfying `^22.12.0 || ^24.0.0`, as declared in
   `frontend/package.json`, with npm as the package manager. No npm engine
   requirement is declared.
@@ -44,10 +66,45 @@ adapter, or browser API integration. E2E and deployment remain empty scaffolds.
 React, TypeScript, Vite, Material UI, and React Flow dependencies are pinned in
 the frontend manifest and tracked `frontend/package-lock.json`. React Flow
 feature usage remains pending. Vitest `5.0.5` and jsdom `27.4.0` are development-only
-FE01 test dependencies. Repository E2E Playwright setup remains pending; the empty
-E2E package files define no executable commands. The optional FE01 browser harness
-instead requires an explicitly supplied existing Playwright module and installed
-Chromium browser; frontend `npm ci` does not provide them.
+frontend test dependencies. Playwright Test 1.63.0 is pinned in `e2e/package.json`;
+`npm ci` in `e2e/` installs it for both the E2E suite and the optional frontend
+browser harness, and `npx playwright install chromium firefox webkit` installs the
+browsers it expects. The E2E suite also needs Docker.
+
+## CT17 Final binding status — 9 November 2026
+
+**10 November update:** [ADR009 §9](decisions/009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification)
+is the current r2 record. CP-033/034 are technically approved, with the Leader's
+exact existing VM resource and credit-only financial binding plus
+executed synthetic qualification. Host/platform/operator facts in the supplied
+report are now Leader-attested, not stale solely by date. Select future root-only
+`/etc/codemastery/runtime/.env`, immutable root-owned checkout under
+`/opt/codemastery/releases/<full-source-sha>`, and the existing TLS directory.
+These are technical conventions, not existing configured paths or new sudo grants.
+The Leader supplied dated **$88 remaining / 31 October 2027 expiration** evidence
+from Education Hub on 10 November, approximately 11:05 ICT; see
+[ADR009 section 10](decisions/009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026).
+This supersedes only the former missing balance/expiry status. Fresh credit/cost
+feasibility through Final still requires qualification before execution.
+The selected acme.sh TLS-ALPN renewal timer, real certificate for codemastery.app,
+secrets/custody, Final artifacts, resource capacity and deployment still require
+separately authorized implementation/inspection. No setup command or configuration
+file is changed. The paragraph below retains the r1 evidence state.
+
+ADR008, including CP-030 r2, is merged through #231; ADR009 r2 remains pending
+#233 independent review and protected integration. Batch 4 is 8/8 technically
+approved, without implementation, production admission or deployment authorization.
+
+[ADR009](decisions/009-ct17-final-runtime-recovery.md) records the Leader-selected
+existing Azure VM and intended **https://codemastery.app** origin, with Leader
+operator/secret/key/recovery custody. This is not permission to change a runtime
+origin, access grant, key, .env or public listener. The current host resource ID,
+disk/capacity/credit, checkout/environment custody, TLS/renewal, grants and exact
+running release still need non-secret operational evidence. Historical paths and
+preview artifacts are not adopted as verified Final bindings. Existing P6/B3,
+configuration variables, topology and reproduction commands remain unchanged.
+CP-033/034 remain partially approved; no recovery mechanism or deployment is
+implemented by this documentation follow-up.
 
 ## Environment File
 
@@ -65,11 +122,14 @@ cp .env.example .env
 
 Replace every active placeholder before startup: PostgreSQL initialization
 database/user/password, matching backend database/user/password, MinIO root
-user/password, a separate application storage user/secret, and a JWT secret with
-at least 256 random bits. Use non-production local credentials. Uncomment optional
+user/password, a separate application storage user/secret, and a JWT secret of
+exactly 64 hexadecimal characters (32 random bytes, for example from the
+`openssl rand -hex 32` command below). The backend's JWT provider rejects any
+other secret format and any `JWT_EXPIRATION` other than `PT15M`, so the backend
+does not start with them. Use non-production local credentials. Uncomment optional
 settings only when needed; Compose forwards only its explicit allowlist.
 `VITE_API_BASE_URL` remains optional public build-time configuration. E2E entries
-remain commented until their configuration is implemented.
+stay commented: the E2E suite reads them from the shell, never from `.env`.
 
 Real `.env` files must remain untracked. The current `.gitignore` excludes `.env`
 and `.env.*` while retaining `.env.example`. Never commit secrets, actual storage
@@ -133,10 +193,14 @@ Production values are embedded at build time; changing an environment variable
 after building does not reconfigure the static bundle. Restart the development
 server after changing environment files.
 
-The foundation runs and builds without this variable or an environment file.
-There is no fallback URL, API client, or network request in the bootstrap. Its
-standalone build has no URL default; Compose supplies `http://localhost:8080`.
-Never put backend secrets or other sensitive values in `VITE_*` variables.
+The shared HTTP client (`src/shared/api/httpClient.ts`) sends every API request to
+this value. It accepts only `/api` (same origin, used by the VM `release` image),
+or an `https://` origin, or an `http://` origin on `localhost`, `127.0.0.1` or
+`[::1]`, with no path. The application builds without the variable, but every API
+request then fails with "The API address is not configured correctly." There is
+no fallback URL. The standalone Docker build has no default; Compose supplies
+`http://localhost:8080`. Never put backend secrets or other sensitive values in
+`VITE_*` variables.
 
 ## Variable Scopes
 
@@ -151,8 +215,9 @@ The approved Option A contract uses these names:
 | Backend security/CORS | `JWT_SECRET`, `JWT_EXPIRATION`, `PASSWORD_RESET_TOKEN_TTL`, `CORS_ALLOWED_ORIGINS` | Referenced by backend security configuration. |
 | Backend runtime/operations | `SERVER_PORT`, `MAX_UPLOAD_SIZE`, `LOG_LEVEL_ROOT`, `LOG_LEVEL_APP`, `SCHEDULING_ENABLED`, `ATTEMPT_AUTO_SUBMIT_DELAY`, `DEADLINE_REMINDER_DELAY`, `DEADLINE_REMINDER_LEAD_TIME` | Referenced by backend runtime configuration. |
 | Spring profile selection | `SPRING_PROFILES_ACTIVE` | Supported through Spring profile selection, rather than a `${...}` placeholder in `application.yml`. |
-| Frontend | `VITE_API_BASE_URL` | Optional public build-time configuration; Compose passes a build ARG defaulting to http://localhost:8080. No API consumer yet. |
-| E2E | `E2E_BASE_URL`, `E2E_USERNAME`, `E2E_PASSWORD` | Pending Playwright/E2E configuration; accounts and authentication flow are undefined. |
+| Frontend | `VITE_API_BASE_URL` | Public build-time API address read by the shared HTTP client; Compose passes a build ARG defaulting to http://localhost:8080. Required for any API request. |
+| VM deployment only | `SPRING_FLYWAY_URL`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` | Separate Flyway migrator identity required by `deploy.sh` and the VM override. Local Compose ignores them; see [deployment.md](deployment.md#current-status-and-reproduction-summary). |
+| E2E | `E2E_BASE_URL`, `E2E_API_URL`, `E2E_USERNAME`, `E2E_PASSWORD` | Read from the shell by `e2e/` only, to target an already running environment (`E2E_USERNAME`/`E2E_PASSWORD`: an existing synthetic Instructor). Unset, the suite starts a disposable stack ([testing.md](testing.md#browser-harness-and-e2e-suite)). Not loaded from `.env`. |
 
 PostgreSQL initialization credentials and backend datasource credentials are
 conceptually distinct and are not implicitly interchangeable. The backend does
@@ -204,7 +269,9 @@ validate the schema rather than create it.
 For host development, use the reachable host addresses from the template and
 supply backend credentials explicitly. The local Compose workflow provides the
 approved dependencies, but Compose's backend uses Docker DNS rather than host
-addresses. Feature persistence and storage adapter behavior remain unimplemented.
+addresses. Auth and Course persistence are implemented through JPA and native
+SQL repositories. The backend object-storage adapter is not implemented: no
+backend Java code reads the `storage` properties that the `STORAGE_*` values feed.
 
 ## Local Docker Compose Runtime
 
@@ -213,11 +280,24 @@ and replace every required placeholder. The Compose project is `codemastery`;
 there are five services on its default network, with no source bind mounts,
 custom networks, fixed container names, or explicit restart policies.
 
-The foundation has been validated locally: both image builds, PostgreSQL
-authentication/Flyway checksums, idempotent MinIO provisioning and application-key
-object operations, backend Actuator UP, frontend serving, and named-volume
-persistence across `down`/`up`. These checks establish runtime infrastructure,
-not feature behavior or completed backend storage/browser integrations.
+This file is the **local development** runtime only. It publishes every port on
+loopback and builds the images locally. The one-VM release reuses it as a base,
+but only through `infrastructure/vm/deploy.sh` and the
+`infrastructure/vm/docker-compose.vm.yml` override, which remove the local ports
+and builds and add HTTPS ingress. Do not start the override by hand; see
+[deployment.md](deployment.md#current-status-and-reproduction-summary).
+
+The runtime foundation was validated locally before Auth was integrated: both
+image builds, PostgreSQL authentication/Flyway checksums, idempotent MinIO
+provisioning and application-key object operations, backend Actuator UP, frontend
+serving, and named-volume persistence across `down`/`up`. The Actuator result no
+longer applies; see [Initialization and Startup Ordering](#initialization-and-startup-ordering).
+On 30 October 2026 the
+[sample-data procedure](../sample-data/README.md) was also run against an isolated
+Compose project: Flyway applied V001–V006, both seeds loaded, sign-in succeeded
+and the catalogue hid the draft Course
+([record](testing.md#sd01sd02-seed-verification--30-october-2026)). None of these
+local runs is QA07, QA13 or DP02 acceptance.
 
 ```bash
 docker compose --env-file .env \
@@ -238,24 +318,85 @@ builds use the existing backend/frontend Dockerfiles and relative contexts
 `../backend` and `../frontend`. Both runtimes remain non-root. Downloads require
 registry/package access; host Java/Maven/Node/npm are unnecessary for this workflow.
 
+After startup, the stack has no users or courses. To use the application:
+
+1. Load the synthetic dataset into the local database by following
+   [sample-data/README.md](../sample-data/README.md) (Steps 1–5). It includes a
+   database check and a `curl` catalogue check.
+2. Open http://localhost:5173/courses. Sign in at `/login` with
+   `learner@example.test` or `instructor@example.test` and the synthetic password
+   you chose for the hash. As the Learner, join a Course from its detail page and
+   open `/my-courses`.
+
+The frontend keeps the session in memory only; reloading the page signs you out.
+
 ### Services and Local URLs
 
 All published ports bind only to `127.0.0.1`.
 
 | Service | Local address | Container address / purpose |
 | --- | --- | --- |
-| frontend | http://localhost:5173 | Nginx on 8080; built presentation-only demo |
-| backend | http://localhost:8080 | Spring Boot on 8080; Actuator health at `/actuator/health` |
+| frontend | http://localhost:5173 | Nginx on 8080; the built single-page application, calling the backend at the build-time `VITE_API_BASE_URL` |
+| backend | http://localhost:8080 | Spring Boot on 8080; the REST API under `/api`. `/actuator/health` answers nondetailed `UP`/`DOWN` (see below) |
 | postgres | localhost:5432 | `postgres:5432`; local relational database |
 | minio | http://localhost:9000 | `minio:9000`; S3-compatible API |
 | MinIO Console | http://localhost:9001 | MinIO administration; use local root credentials |
 
-PostgreSQL uses `postgres:17.11-bookworm` for LOCAL development only. MinIO uses
+PostgreSQL is built locally from `infrastructure/postgres/Dockerfile`
+(`postgres:17.11-alpine3.24` with `su-exec` replacing `gosu`; see
+[ADR003](decisions/003-postgresql-alpine-su-exec-image.md)) for LOCAL
+development only. MinIO uses
 `ghcr.io/golithus/minio:RELEASE.2025-10-15T17-29-55Z`, a third-party build of tagged
 upstream Community source. The initializer uses
 `ghcr.io/golithus/mc:RELEASE.2025-08-13T08-35-41Z`. Both MinIO images are pinned to
 verified immutable multi-platform index digests in Compose and support amd64 and
 arm64. These choices establish no production database/storage infrastructure.
+
+### Existing PostgreSQL Volumes
+
+The PostgreSQL image starts only on an empty data volume or on one it initialized
+itself (it writes `codemastery-cluster-libc` into the data directory after
+`initdb`). A volume created by the earlier `postgres:17.11-bookworm` image, or by
+an earlier build of this image, is refused with exit code 78 and the message
+`codemastery-postgres: refusing to start`. Nothing in the volume is changed.
+glibc and Alpine's musl order text differently, so such a cluster's indexes would
+otherwise return inconsistent results without any error.
+
+Keep the old volume and migrate it by logical backup and restore. Use your `.env`
+values for `<POSTGRES_USER>` and `<POSTGRES_DB>`; no port is published.
+
+```bash
+# 1. Stop the stack, keeping every volume (never use `down -v`).
+docker compose --env-file .env -f infrastructure/docker-compose.yml down
+
+# 2. Back up with the image that initialized the volume, then stop it.
+docker run -d --name codemastery-pg-bookworm \
+  -v codemastery_postgres-data:/var/lib/postgresql/data postgres:17.11-bookworm
+docker exec codemastery-pg-bookworm pg_isready -U <POSTGRES_USER> -d <POSTGRES_DB>  # repeat until accepting
+docker exec codemastery-pg-bookworm \
+  pg_dump -U <POSTGRES_USER> -d <POSTGRES_DB> -Fc > codemastery-postgres.dump
+docker stop codemastery-pg-bookworm && docker rm codemastery-pg-bookworm
+pg_restore --list codemastery-postgres.dump | head  # or run it inside any postgres image
+
+# 3. Keep a byte-for-byte copy of the old volume.
+docker volume create codemastery_postgres-data-bookworm-backup
+docker run --rm -v codemastery_postgres-data:/from:ro \
+  -v codemastery_postgres-data-bookworm-backup:/to alpine:3.24 cp -a /from/. /to/
+
+# 4. Only after checking the backup and the copy, remove the original yourself.
+docker volume rm codemastery_postgres-data
+
+# 5. Initialize a fresh volume with this image and restore into it.
+docker compose --env-file .env -f infrastructure/docker-compose.yml up -d --wait postgres
+docker compose --env-file .env -f infrastructure/docker-compose.yml exec -T postgres \
+  pg_restore -U <POSTGRES_USER> -d <POSTGRES_DB> --no-owner --exit-on-error < codemastery-postgres.dump
+```
+
+Restoring rebuilds every index under musl. Text ordering that relies on the
+database's default collation may change; the catalogue's explicit `COLLATE C`
+ordering does not. Delete the dump and the backup volume only when you no longer
+need them. The VM release is out of scope here: an existing VM volume is never
+migrated by an image swap (see [deployment.md](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026)).
 
 ### Initialization and Startup Ordering
 
@@ -282,23 +423,40 @@ The backend environment explicitly supplies Docker-internal DB/storage addresses
 required application credentials, the shared bucket/region, `SERVER_PORT=8080`,
 and `CORS_ALLOWED_ORIGINS=http://localhost:5173`. Other valid Spring defaults are
 left absent from Compose. Optional values set only in `.env` are not automatically
-forwarded. Compose has no backend health check; inspect container state and probe
-`http://localhost:8080/actuator/health` for the current scaffold. Future application
-retry/resilience remains necessary; startup ordering does not replace it.
+forwarded. Compose has no backend health check. Spring Security permits only
+the public Auth and catalogue operations and anonymous `GET /actuator/health`,
+which answers 200
+`{"groups":["liveness","readiness"],"status":"UP"}` or 503 `DOWN` without details
+([deployment.md](deployment.md#dp01-private-health-probe-remediation--1-november-2026)).
+Health alone proves no feature. To check a local
+backend, run the Compose `ps -a` and `logs backend` subcommands with the same
+`--env-file`/`-f` options as above, and call a public operation, for example
+`curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/courses`,
+which returns `200`. Future application retry/resilience remains necessary;
+startup ordering does not replace it.
 
 Flyway remains enabled and normally applies V001–V006 on first backend startup,
 then validates their checksums on later starts. These are implemented schema
 migrations, not empty placeholders. Never edit an applied migration or run repair
 to hide a mismatch; subsequent changes require NEW Flyway migrations. Hibernate
-retains `ddl-auto=validate`, but absent feature entities mean startup does not prove
-entity mappings. This foundation does not create sample users/courses.
+retains `ddl-auto=validate`, so startup checks the existing Auth, Course and
+Adaptive entity mappings against the migrated schema. The empty Assessment,
+Interaction and Admin modules have no entities to check. Startup does not create
+sample users/courses; to load
+the synthetic local/test dataset into a disposable database, follow
+[sample-data/README.md](../sample-data/README.md).
 
 Frontend startup is independent of backend. Its health check uses the existing
 Nginx image's `wget` to probe `/`. Compose passes public `VITE_API_BASE_URL` as a
 build ARG, defaulting to `http://localhost:8080`; browser code cannot resolve
 `http://backend:8080`. Changing this value requires rebuilding the frontend image.
-No runtime Nginx environment substitution exists. The frontend currently makes no
-API calls, and configured CORS origins do not prove implemented CORS handling.
+No runtime Nginx environment substitution exists. The browser calls the backend
+directly at that origin, so the backend's CORS configuration must admit the
+frontend origin. Compose sets `CORS_ALLOWED_ORIGINS=http://localhost:5173` as a
+literal value in the backend service of `infrastructure/docker-compose.yml`; it is
+not forwarded from `.env`, so a `CORS_ALLOWED_ORIGINS` entry in `.env` affects
+only a backend started on the host. Serving the containerised frontend from
+another origin requires a different value in that Compose file.
 
 ### Persistence, Shutdown, and Reset
 
@@ -332,7 +490,8 @@ docker compose --env-file .env \
 ```
 
 The next startup initializes fresh volumes using the current `.env` inputs.
-This is a local development workflow; production deployment remains undefined.
+This is a local development workflow. The VM release deployment, its persistent
+state and its recovery prerequisites are documented in [deployment.md](deployment.md).
 
 ## Frontend Setup and Validation
 
@@ -349,43 +508,98 @@ Run the following commands from `frontend/`:
 | --- | --- |
 | `npm run dev` | Start the Vite development server. |
 | `npm run typecheck` | Check application source and Vite configuration without emitting files. |
-| `npm test` | Run FE01 and the approved FE03 HTTP/provider/router regressions with Vitest/jsdom. |
+| `npm test` | Run the Vitest/jsdom suite: utilities and shared presentation, HTTP client, Auth provider and router, catalogue, detail, My courses, assessment and course-management components, Mastery Map layout and the design preview (15 files). |
 | `npm run build` | Run type-checking and build production assets in `frontend/dist/`. |
 | `npm run preview` | Preview an existing production build locally; run after building. |
-| `npm run test:browser -- "<installed-playwright-module>" "<evidence-directory>" "<preview-url>"` | Run optional Chromium presentation checks against a running frontend, with actual prerequisite paths and URL substituted. |
+| `npm run test:browser [-- --engine all] [--url <frontend-url>] [--out <evidence-dir>]` | Optional real-browser presentation checks; builds and serves the app itself unless `--url` is given ([details](testing.md#browser-harness-and-e2e-suite)). |
 
 Keep `frontend/package-lock.json` tracked with the manifest. `node_modules/`
 and `frontend/dist/` are generated, ignored local state. No lint script is declared.
-For browser prerequisites, outputs, timezone cases and bounded authority, see
-[the FE01 testing record](testing.md#bounded-fe01-decisions-and-regression-coverage).
-Use the actual URL printed by Vite; the harness's fallback port is not a project
-configuration decision. Required Frontend CI still runs install and build only,
-not either regression command. Build success does not establish behavioral
-coverage, frontend/backend integration or deployment readiness.
+For browser prerequisites and outputs see
+[Browser harness and E2E suite](testing.md#browser-harness-and-e2e-suite); for the
+timezone cases see [the FE01 testing record](testing.md#bounded-fe01-decisions-and-regression-coverage).
+The required Frontend CI job runs `npm ci`, `npm test`
+and `npm run build`; it does not run `test:browser` or the E2E suite. Passing unit/component tests
+and a successful build do not establish frontend/backend integration in a real
+browser or deployment readiness.
 
-The custom light MUI theme and `presentationTokens` live in
-`frontend/src/app/theme/theme.ts`: primary `#1F6BE8`, light accent `#52A5F7`, canvas
-`#F9FAFC`, white surfaces, text `#101418`/`#4A5458`, warm `#996F1F` and restrained
-green/orange/pink tints. Muted `#A8A6AF` is decorative only. The foundation uses
-8px spacing, 12px cards, 8px controls, a 224px sidebar and 64px header; primary
-actions are near-black and selected navigation uses light gray with dark text.
-Inter is used only when locally available, with system fallbacks and no font CDN.
+The MUI theme and `presentationTokens` live in `frontend/src/app/theme/theme.ts`
+and implement the root `DESIGN.md` specification (“The Lit Path”; first revision
+`DESIGN-2026-11-06-r1`, current revision `DESIGN-2026-11-08-r6`, tracked in Git from r6). An ink frame `#0A0B0F` holds the top bar
+(80 px, 64 px below 600 px) and a `#F6F6F7` canvas that rises under the current
+navigation item; asides use `#EEEEF0`, tiles are white at a 24 px radius, buttons
+are pills and icon actions 44 px circles. Text is ink `#15171C`/`#50545C`; the logo
+blue `#0866F2` (and `#0652C4` for small text) marks interaction and focus. Pastel
+sky, mint, butter, lilac and rose families carry Learning, Mastered/Completed,
+Weak/warnings, recommendations and errors, always with a text label and glyph;
+Unknown is a dashed outline. Typography uses exactly one UI face, Google Sans Flex
+4.005, with JetBrains Mono 2.211 for code and Poppins ExtraBold 800 only for the
+"CodeMastery" wordmark; all three are self-hosted variable or single-weight WOFF2
+files in `src/app/theme/` (Fontsource 5.3.x builds of the Google Fonts releases,
+SIL Open Font License 1.1, licence texts `public/google-sans-flex-OFL.txt`,
+`public/jetbrains-mono-OFL.txt`, `public/poppins-OFL.txt`). The UI and code faces
+ship Latin, Latin Extended and Vietnamese subsets selected by `unicode-range`. The
+theme exports `fontStack`, `codeFontStack` and `brandFontStack`. No font CDN is used.
+The logo artwork is `public/favicon.svg` (its palette was tuned for the ink frame on
+7 November 2026); `public/favicon.ico` is generated from it. The top-bar lockup uses a
+40 px mark from 600 px, 36 px below and 32 px below 390 px (`presentationTokens.brandMark`,
+fixed steps), with the wordmark at 0.625 × the mark. Course tiles show a course mark
+(`src/shared/components/CourseMark.tsx`): the official full-colour logo of the
+programming language that the course's own title, or else its description, names
+(exactly one language); otherwise a Deep Logo Blue (`#0652C4`) code glyph. Every mark
+uses the same neutral `#F6F6F7` container with a hairline (48 px on tiles, 32 px in
+Learner home rows). The course API has no language field, so no logo is inferred
+beyond that text. The signed-in account avatar (top bar and profile) is solid Deep
+Logo Blue with a white initial; no gradient is used. The design preview at `/preview` has no preview chrome: each screen is
+opened by link, `/preview?screen=<id>`, and the index lists them all. The logo files are the unaltered official artwork:
+`course-logo-python.svg` (python.org `python-logo-only.svg`, with a `viewBox` added so
+it can scale; "Python" and the Python logos are trademarks of the Python Software
+Foundation) and `course-logo-typescript.svg` (`ts-logo-256.svg` from the TypeScript
+branding asset pack; TypeScript is a trademark of Microsoft Corporation). Both are
+used only to name the language a course teaches.
 `PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
 
-`App.tsx` is an explicitly labelled, local presentation showcase with overview,
-component and Auth-layout previews. Search, tabs, retry and confirmation controls
-operate only on demonstration state; fixtures are not production metrics or
-learner data. Routing/guards, authentication/session UI, role-driven navigation,
-HTTP/API integration, feature pages and the React Flow Mastery Map remain outside
-this implementation. The Auth-layout preview does not implement sign-in.
+`src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
+in `src/routes/index.tsx`, listed in
+[Implemented capabilities on `main`](#implemented-capabilities-on-main). `/` is
+the public landing page (S25) for visitors without a session; its example Mastery
+Map is a fixed illustration loaded in its own chunk, and a signed-in visitor is
+sent to their start page instead (`/home` for Learners, `/courses` for other
+roles; the logo links there too). Navigation shows Catalogue for everyone, plus
+Home (`/home`) and My courses for Learners; Profile and Sign out are in the
+account menu. `/home` lists the Learner's active courses from `GET /api/me/courses`
+only. After a session ends without signing out (15-minute expiry or a current-session
+401), the sign-in page says “Your session ended. Sign in again to continue.” once.
+After sign-in a Learner lands on `/home` and other roles on `/courses`; the one-use
+`/profile` return (CT16-PROFILE P1) still takes precedence and is consumed once. This
+changes only the Learner's fallback destination, at the Leader's instruction of
+7 November 2026; P1's capture, consumption and open-redirect rules are unchanged. `/preview` lazily loads the design
+preview from `src/app/preview/` in its own chunk: every designed screen for the
+Learner, Instructor and Administrator workspaces and the proposed public screens,
+with synthetic sample data. Since 7 November 2026 it shows no preview notice or
+switcher: screens open by link and the account menu keeps “Preview index” and
+“Reset sample data”. It never calls the API, reads the session or writes browser storage, and
+it adds no route: screens change through `?screen=` query parameters. Screens
+whose contracts are pending exist only there.
 
-**Visual inspiration:** [LMS Admin Dashboard UI/UX Design for EdTech SaaS Platforms —
+**Visual inspiration (6 November 2026 redesign):** [E-learning Platform – Learning
+Plan Dashboard — Nixtio](https://dribbble.com/shots/23956256). The redesign
+follows its visual language (ink frame, canvas, pastel tiles); its composition,
+screens and assets are not copied, the logo is CodeMastery's own, and no affiliation
+is implied (see the `DESIGN.md` fidelity contract).
+Known AI assistance: Anthropic's Claude Code (Claude Opus 5.5) wrote the
+`DESIGN.md` revisions (r1 on 6 November 2026 through r6 on 8 November 2026) and implemented and verified the redesign and its 7 November
+2026 typography, logo-palette and navigation-indicator refinement, with the locally
+installed Impeccable skill for design review and Playwright CLI for browser
+inspection.
+
+**Earlier FE01 visual inspiration (historical):** [LMS Admin Dashboard UI/UX Design for EdTech SaaS Platforms —
 Rakibul Ism / Panze UX Design Studio](https://dribbble.com/shots/27183809-LMS-Admin-Dashboard-UI-UX-Design-for-EdTech-SaaS-Platforms).
-CodeMastery's implementation uses general dashboard principles and was independently
-developed; no proprietary assets or complete reference composition are reused,
+The FE01 implementation used general dashboard principles and was independently
+developed; no proprietary assets or complete reference composition were reused,
 and no affiliation is implied. Known AI assistance: OpenAI Codex for FE01
-implementation, test/verification preparation and this documentation reconciliation.
-This disclosure does not describe an AI-powered product feature.
+implementation, test/verification preparation and that documentation reconciliation.
+These disclosures do not describe an AI-powered product feature.
 
 ## Backend Validation
 
@@ -418,21 +632,24 @@ in `IntegrationTest.java`, matching the current Failsafe selection.
 
 The reusable `AbstractIntegrationTest` loads `CodeMasteryApplication` in a mock
 web environment with the `test` profile. When initialized by a concrete test,
-it starts a singleton `postgres:17.11-bookworm` container and supplies datasource
+it starts a singleton container, built from `infrastructure/postgres/Dockerfile`
+through Testcontainers' `ImageFromDockerfile`, and supplies datasource
 properties dynamically. This image is for integration testing only; it does
 not select the deployed PostgreSQL version. No local database credentials are
 required by this wiring. The profile only disables the scheduling setting;
 Flyway and Hibernate validation retain the normal application configuration.
 
-Auth, catalogue and local mastery test scaffolds are empty on this baseline.
-Concrete SH01 local/MVC tests and CourseFixturesTest exist, but do not initialize
-the PostgreSQL harness. These commands alone therefore do not establish real
-feature/PostgreSQL integration. Docker and access to the test image are required
-when a concrete test initializes the harness; Compose is not required for it.
-See [the CT14 placement and isolation proposal](testing.md#ct14-coverage-and-isolation-reconciliation--proposal)
-for exact approved paths, feature-specific configuration gates and separate
-execution/independent-verification prerequisites. No harness/profile or runtime
-configuration is changed by that proposal.
+Concrete integration tests for Auth, Course catalogue and membership, Course
+persistence, the sample-data seeds and the shared REST infrastructure now exist.
+All except `SharedRestInfrastructureIntegrationTest` initialize the PostgreSQL
+harness, so `./mvnw verify` needs a running Docker Engine able to build
+`infrastructure/postgres/Dockerfile`; Compose is not required.
+`SampleDataSeedIntegrationTest` also runs the image's own `psql` 17 inside that
+container, so no host `psql` is needed. `./mvnw test` runs
+only unit tests and needs no Docker. See
+[testing.md](testing.md#test-layers-and-evidence) for the suite inventory, what
+each suite establishes and the latest recorded results. No harness, profile or
+runtime configuration is changed by that inventory.
 
 ## Standalone Container Builds
 
@@ -451,12 +668,12 @@ not required for these image builds.
 ### Backend Image
 
 The build context is `backend/`. The builder uses
-`eclipse-temurin:25.0.4.1_1-jdk-noble` and the checked-in Maven Wrapper to run
+`eclipse-temurin:25.0.5_8-jdk-noble` and the checked-in Maven Wrapper to run
 `./mvnw package -DskipTests`. Tests are not executed, but their sources are still
 compiled. The image does not consume a host-built `target/` directory; normal
 CI continues to run `./mvnw verify` separately.
 
-The runtime uses `eclipse-temurin:25.0.4.1_1-jre-noble` and contains only the
+The runtime uses `eclipse-temurin:25.0.5_8-jre-noble` and contains only the
 application artifact copied from the builder:
 `/app/codemastery-backend.jar`. Java runs as the dedicated non-root
 `codemastery:codemastery` account. The JAR is root-owned and read-only to the
@@ -486,11 +703,22 @@ return HTTP 404 instead of the HTML fallback. No API proxy, TLS, authentication,
 custom caching, or project-specific security-header policy is configured. The
 internal port is distinct from a host-published port and Vite's development port.
 
+This local image is the Dockerfile's default (last) target. A separate
+`release` target exists only for the one-VM HTTPS deployment: it builds the
+bundle with `VITE_API_BASE_URL=/api`, uses the non-slim
+`nginxinc/nginx-unprivileged` Alpine variant pinned by digest to Nginx 1.30.6
+with Alpine security updates applied, serves TLS on `8080`,
+proxies `/api`, and bakes an HTTPS healthcheck. It requires the public
+`PUBLIC_ORIGIN` build argument and a mounted certificate directory; see
+[DP01 HTTPS ingress integration](deployment.md#dp01-https-ingress-integration--31-october-2026).
+Local builds and Compose are unaffected.
+
 ### Optional Frontend Build Configuration
 
 `VITE_API_BASE_URL` is an optional public Docker build argument, made available
-to Vite during `npm run build` when supplied. There is no default URL, and the
-foundation builds without the argument. The root `.env` is outside both service
+to Vite during `npm run build` when supplied. There is no default URL. The image
+builds without the argument, but its API requests then fail (see
+[Current Frontend Loading Behavior](#current-frontend-loading-behavior)). The root `.env` is outside both service
 build contexts; `.dockerignore` also excludes local environment files, generated
 output, host dependencies, and Git/IDE/OS metadata where applicable.
 
@@ -508,24 +736,36 @@ independently; backend packaging can be checked without starting Spring Boot.
 
 The local Compose workflow above coordinates PostgreSQL, MinIO provisioning,
 backend startup, and frontend serving. Successful startup/migration and MC storage
-checks do not prove the unimplemented backend S3 adapter, JPA mappings, feature
-logic, browser API integration, or production deployment. Compose has PostgreSQL
-and frontend health checks; neither Dockerfile adds a HEALTHCHECK.
+checks do not prove the unimplemented backend S3 adapter, feature behavior,
+browser API integration or the VM release deployment. Compose has PostgreSQL
+and frontend health checks; the backend image and the default local frontend
+target add no HEALTHCHECK. Only the frontend `release` target bakes one.
 
-## Initial CI
+## CI
 
-[The GitHub Actions workflow](../.github/workflows/ci.yml) now defines separate
-Backend and Frontend jobs on `ubuntu-24.04`, triggered by pull requests targeting
-`main`, pushes to `main`, and manual dispatch. Backend uses Temurin 25 and runs
-`./mvnw verify` from `backend/`; frontend uses Node 22 and runs `npm ci` followed
-by `npm run build` from `frontend/`. Build already includes frontend typechecking.
-Both jobs cache package-manager downloads using the committed build inputs.
+[The GitHub Actions workflow](../.github/workflows/ci.yml) runs on pull requests
+targeting `main`, pushes to `main`, and manual dispatch, on `ubuntu-24.04`.
+Backend uses Temurin 25 and runs `./mvnw verify` from `backend/`, including the
+Testcontainers integration tests. Frontend uses Node 22 and runs `npm ci`,
+`npm test` and `npm run build` from `frontend/`. Both jobs cache package-manager
+downloads using the committed build inputs. Six further jobs test
+`infrastructure/vm/deploy.sh`, the VM override, the frontend `release` image and
+the MinIO initializer image against real containers on the runner; they do not
+deploy anywhere. CodeQL code
+scanning runs through GitHub's default setup, which has no workflow file in this
+repository.
 
-This workflow configuration does not establish successful remote CI execution or
-backend feature-test coverage. CI does not run Compose. E2E and deployment
-commands remain pending until their configuration is implemented.
+The job list, the required checks and the latest recorded results are in
+[testing.md](testing.md#ci). A workflow definition alone does not establish a
+successful run. CI does not start the full local Compose stack and has no E2E
+job.
 
 ## Authorized Interim configuration targets (implementation pending)
+
+> **Dated record.** This heading and the sections below keep the wording of
+> their date. For example, the JWT, CORS and datasource settings named here are
+> now consumed by the implemented Auth and Course code. The current setup is
+> described in the sections above.
 
 See [ADR002](decisions/002-interim-delegated-contracts.md) for CT38.core/CT01.core. SH01 now defaults JWT_EXPIRATION to PT15M. AppConfig validates active datasource settings and exposes lazy, typed JWT/CORS/scheduler settings. Consuming JwtSettings requires a runtime64-hex-character JWT_SECRET, the fixed issuer/audience and exactly15-minute lifetime; an eager consumer fails initialization for invalid settings. Keep local host/Compose addresses as currently documented; only VITE_API_BASE_URL is public frontend configuration. Consumed secrets have no defaults and fail validation if absent/placeholder. Optional unused integrations are not made prerequisites for a pure local calculator. Generate test secrets ephemerally. Production origins/credentials require separate authority.
 
@@ -848,7 +1088,7 @@ verification is claimed by this contract selection or documentation validation.
 ### Authority, revision and effective-scope boundary
 
 **CT16-2026-10-24-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Project Leader
+[LEADER_APPROVED](decisions/README.md#approval-status-labels).** The Project Leader
 @chi-thanh-nguyen's explicit instruction **“CodeMastery — Bounded Technical
 Approval Under Explicit Leader Delegation”**, dated 24 October 2026 (ICT),
 authorizes Codex to investigate, select, reconcile and technically approve only
@@ -901,6 +1141,10 @@ review, protected integration and separate implementation authority remain.
 | CT16.shell | APPROVE declarative BrowserRouter/Routes/Route/Outlet, one router and AuthProvider above route consumers, existing layouts and guards | URL/history/deep-link behavior without a framework/data-router/server stack or extra provider technology. |
 | Router dependency | APPROVE the exact production dependency `react-router` version **7.18.4**, without a semver range, for declarative browser routing only | No react-router-dom compatibility wrapper, router Vite plugin, SSR/RSC, loaders/actions or framework packages. No dependency is installed or edited in this task. |
 | CT16 path correction | APPROVE correction of ADR002's mistaken courseApi.ts reference to `frontend/src/features/catalogue/api/catalogueApi.ts` | Verified canonical original tree, current inventory and existing file. Only that reference and correction provenance change; no rename, duplicate client or REST behavior change. |
+
+> **Bounded later extension:** [ADR005 §16.2](decisions/005-batch-01-contract-approvals.md#162-r2-bounded-ct16-no-content-transport-extension)
+> adds no-content success only for the five Batch 1 204 operations. The original
+> JSON-only scope below remains unchanged for its existing callers.
 
 The independently usable transport contract accepts an API-root-relative path,
 operation method, explicit authentication mode, expected success status, runtime
@@ -1010,7 +1254,7 @@ by this bounded technical approval.
 
 **CT16-INTERIM-COVERAGE-2026-10-24-r1** certifies
 **CT16_INTERIM_TECHNICAL_SCOPE_COMPLETE**, limited to technical decision coverage
-for the selected Interim Minimum. **APPROVED_PENDING_PROTECTED_INTEGRATION**;
+for the selected Interim Minimum. **LEADER_APPROVED**;
 this is neither effective main integration nor whole-Issue, implementation, QA,
 runtime or deployment acceptance.
 
@@ -1068,7 +1312,7 @@ protection bypass or personal Leader review is asserted.
 ### Authority, provenance and canonical review path
 
 **CT16-FINAL-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Leader's explicit instruction
+LEADER_APPROVED.** The Leader's explicit instruction
 **“CodeMastery — Consolidate Contract Approval PRs and Complete Eligible Final
 Technical Approvals”**, supplied 25 October 2026 (ICT), authorizes consolidation
 and actual bounded Final technical approval. Codex is the delegated technical
@@ -1188,7 +1432,7 @@ No reviewer, merge, implementation permission or actual QA success is invented.
 ### Authority, revision and inspected baseline
 
 **CT16-PROFILE-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Project Leader
+LEADER_APPROVED.** The Project Leader
 @chi-thanh-nguyen explicitly authorizes actual technical selection and approval
 in **“CodeMastery — Complete Additional CT16, CT17 and CT14 Technical Approvals in
 Existing PRs”**, supplied 25 October 2026 (ICT). Codex, the delegated technical
@@ -1241,6 +1485,14 @@ redirect must not re-arm that destination from the discarded Profile. A new
 deliberate protected-route visit can establish a new return intent. Reuse CT16's
 external/API/asset/traversal rejection; no open redirect. A fresh document load loses both session and return memory; a new
 anonymous /profile entry may capture /profile again, not restore an old session.
+
+*Amendment, 7 November 2026 (Leader instruction, recorded here without changing the
+approved text above):* when no `/profile` return is pending, a Learner's sign-in
+fallback is `/home` (Learner home) instead of `/courses`; Instructors and
+Administrators keep `/courses`. The return capture, one-time consumption, rejection
+of caller-supplied targets and logout behavior are unchanged.
+
+*Amendment, 8 November 2026 (`CT16-ROUTES-2026-11-08-r1`, delegated technical approval; see [the CT16 route map](#ct16routes--ct16-routes-2026-11-08-r1--delegated_approved)):* Instructors start at `/teach` and Administrators at `/admin` once those screens are routed in production; until then both keep `/courses`. The Learner fallback, return capture and one-time consumption are unchanged.
 
 Expiry, logout or current-generation authenticated 401 invalidates the session
 before personal content can be published and replaces the active protected route
@@ -1334,6 +1586,95 @@ and [React state ownership/reset](https://react.dev/learn/preserving-and-resetti
 these support the existing-stack mechanism, not new backend authority.
 
 
+## CT16 route map, Learner home composition and CT37 Markdown policy — 8 November 2026
+
+These records were approved on 8 November 2026 by delegated technical approval, as each record states; this section is their authoritative repository location. Earlier CT16 records above are unchanged; where a record below resolves or amends one, it says so.
+
+### `CT16.routes` — CT16-ROUTES-2026-11-08-r1 — DELEGATED_APPROVED
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+**Scope.** Browser paths, guard roles, navigation destinations, active navigation item and role start pages for the Final screens of [DESIGN.md r6](https://github.com/chi-thanh-nguyen/codemastery/blob/4eb5b70be0c98df14e162b34d2c0314b02ab47b5/DESIGN.md#information-architecture). It resolves the "routes, menu destinations" part of the CT16-FINAL disposition "Concrete feature APIs, routes, menu destinations and role/resource policies — D — DEFER" (`docs/setup.md`); feature APIs and role/resource policies stay with their owning contracts.
+
+| Path | Screen | Guard (navigation only) | Active item | Owning Issue |
+|---|---|---|---|---|
+| `/forgot-password`, `/reset-password` | Recovery | anonymous | — | FE06 (how the reset capability is carried is CT02's decision) |
+| `/courses/:courseId/learn` | S7 Path | Learner | My courses | FE08 |
+| `/courses/:courseId/lessons/:lessonId` | S8 Lesson | Learner | My courses | FE08 |
+| `/courses/:courseId/diagnostic` | S9 entry and result | Learner | My courses | FE09 |
+| `/courses/:courseId/mastery` | S14 Mastery Map | Learner | My courses | FE12 |
+| `/courses/:courseId/assessments` | S10 | Learner | My courses | FE10 (quizzes), FE11 (assignments) |
+| `/courses/:courseId/quizzes/:quizId`, `…/quizzes/:quizId/attempt`, `…/quizzes/:quizId/history` | Quiz intro, S11, S12 history | Learner | My courses | FE10 |
+| `/courses/:courseId/attempts/:attemptId` | S12 result | Learner | My courses | FE10 |
+| `/courses/:courseId/assignments/:assignmentId` | S13 | Learner | My courses | FE11 |
+| `/notifications` | S15 | Learner, Instructor (only where CT11 grants the read) | bell (current) | FE28 |
+| `/teach` | S17 Teaching home | Instructor | Teaching | FE14 |
+| `/teach/courses/:courseId` with tabs `/content` (default), `/settings` | S18 | Instructor | Teaching | FE14 |
+| `/teach/courses/:courseId/lessons/:lessonId` | S18 lesson editor | Instructor | Teaching | FE14 |
+| `/teach/courses/:courseId/skills` | S20 | Instructor | Teaching | FE18 |
+| `/teach/courses/:courseId/assessments`, `…/quizzes/:quizId` | S19 bank, quiz editor | Instructor | Teaching | FE15 |
+| `/teach/courses/:courseId/assignments/:assignmentId` | S19 assignment editor | Instructor | Teaching | FE16 |
+| `/teach/courses/:courseId/qa` | Lesson Q&A | Instructor | Teaching | FE13 |
+| `/teach/courses/:courseId/learners`, `…/learners/:learnerId` | S22 | Instructor | Teaching | FE19 |
+| `/teach/learners` | S22 entry (choose an owned course) | Instructor | Learners | FE19 |
+| `/teach/grading`, `/teach/grading/:submissionId` | S21 | Instructor | Grading | FE17 |
+| `/admin` | S23 Platform overview | Administrator | Overview | FE23 |
+| `/admin/users`, `/admin/courses`, `/admin/reports`, `/admin/audit` | S24 | Administrator | Users, Courses, Reports, Audit log | FE20, FE21, FE22, FE23 |
+
+Creation screens use the literal segment `new` in the identifier position (for example `/teach/courses/new`, `…/lessons/new`, `…/quizzes/new`); identifiers are UUIDs, so `new` cannot collide. Record detail in Administrator tables opens in a side sheet without a route. Query parameters inside a screen belong to its owning Issue.
+
+**Navigation.** Learner: Home, Catalogue, My courses, bell. Instructor: Teaching, Grading, Learners, Catalogue, bell. Administrator: Overview, Users, Courses, Reports, Audit log, Catalogue. Every signed-in role keeps the account menu (Profile, Sign out). Roles never inherit each other's items. `/courses/:courseId` (detail) keeps Catalogue active; the Learner course-workspace paths above make My courses active.
+
+**Activation rule.** A path is registered in production, and its navigation item rendered, only when its screen's consumed contracts are approved, its Issue is authorized for implementation and the screen is delivered. Until then the path shows the existing Page not found state; no preview component, placeholder or sample data is routed.
+
+**Start pages.** Learner: `/home` (unchanged). Instructor: `/teach` once Teaching home is routed in production; Administrator: `/admin` once Platform overview is routed; until then both keep `/courses`. The one-use `/profile` return of CT16-PROFILE P1 keeps precedence and is consumed once; `/` and the logo use the same start page. This amends P1's fallback (as amended on 7 November 2026) for Instructor and Administrator only, conditional on activation; the earlier text is preserved.
+
+**Guards.** Wrong role shows Access denied from the session role; anonymous visits replace to `/login`, and return capture stays limited to `/profile`. Guards are navigation conveniences; backend authorization in each owning contract stays authoritative.
+
+**Alternatives considered.** A new contract Issue for routes (rejected: duplicates CT16's ownership of routing); deferring each path to its feature contract (rejected: 18 Issues gated on an unowned decision and inconsistent namespaces); the sitemap verbatim (adopted, with its "…" segments resolved directly under `/courses/:courseId/` and `/teach/courses/:courseId/`, and a `/teach/learners` entry for the Learners navigation item).
+
+**Exclusions.** No API, payload, permission, role, dependency or new provider; no extension of return capture; no route for preview-only behavior.
+
+**Owners for review.** Frontend lane CODEOWNER; Leader. **Unlocks.** Removes the route/navigation gate from FE06, FE08–FE23 and FE28 (each stays gated on its own contracts); consumed by FE32. **Retained gates.** Repository record in `docs/setup.md`, implementation authorization, CODEOWNER review, protected integration and verification.
+
+### `CT16.learner-home` — CT16-LEARNER-HOME-2026-11-08-r1 — DELEGATED_APPROVED
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+**Scope.** Which parts of [S6 Learner home](https://github.com/chi-thanh-nguyen/codemastery/blob/4eb5b70be0c98df14e162b34d2c0314b02ab47b5/DESIGN.md#s6-learner-home--implemented-active-courses--preview-full-design-high-fidelity) enter Final and from which owners, under CT16.final-state (F1: routes compose features; no cross-feature internal import or shared store). It approves no API of another contract.
+
+1. **Your courses** stays the implemented list of active memberships (`GET /api/me/courses`). Each row may add the progress line ("N of M lessons · P%") and the canonical next lesson only when CT22.progress/CT22.resume approve a learner-scoped read that returns them for the listed memberships in one request. The page never loops one request per course.
+2. **Continue learning** appears only if CT22.resume approves a learner-level "most recent position" read (US-04). The frontend never compares or ranks courses itself; without that read the tile is omitted.
+3. **Up next** keeps only recommendation entries: at most one per active course, that course's current recommendation from an approved course-scoped Adaptive read (CT33 read, CT07 semantics), shown unaltered — type, target lesson, the backend reason verbatim, time — and labelled with its course. Entries follow the "Your courses" order returned by the API. No cross-course ranking, merging, scoring, filtering or selection; courses without adaptive mode or a current recommendation show none. Without an approved learner-scoped read returning per-enrollment items, the aside is omitted.
+4. **Deadline, result-available and reply/announcement entries are not part of the Final Learner home** and stay Preview. Learners reach them through Notifications (CT11) and the course Assessments page.
+5. Each element loads and fails independently and never hides "Your courses"; no sample data reaches `/home`.
+
+**Alternatives considered.** A dedicated aggregated home endpoint (rejected: no single module owner and a path to cross-course adaptive logic); per-course requests from the browser (rejected: unbounded requests and partial failures); the full r6 design (rejected: no approved data for deadlines, results or typed notifications).
+
+**Consumer requirements (recorded in CT22 and CT33; not approvals of those contracts).** CT22: a learner-scoped progress/next-lesson summary and a learner-level most-recent resume read. CT33: a learner-scoped read of each active enrollment's current recommendation without aggregation.
+
+**Exclusions.** Cross-course adaptive learning remains a non-goal; no CT22/CT33 shape is approved. **Owners for review.** Course (CT22), Adaptive (CT33/CT07), frontend lane, Leader. **Unlocks.** FE33 (still gated on the CT22/CT33 reads).
+
+### `CT37.markdown` — CT37-MARKDOWN-2026-11-08-r1 — DELEGATED_APPROVED
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+**Scope.** Rendering of `lessons.content_markdown` and `learning_materials.text_content` (text materials). `CT37.embed` and `CT37.widget` stay pending.
+
+- **Syntax.** CommonMark with GitHub-style tables and fenced code; no other extensions.
+- **No HTML path.** Source is parsed to a syntax tree and rendered as React elements in `frontend/src/shared/components/MarkdownRenderer.tsx`. Raw HTML in the source (block or inline) is never interpreted: it is displayed as literal text. No `dangerouslySetInnerHTML`, `innerHTML` or HTML-string rendering is used anywhere in the path, so no HTML sanitiser is needed.
+- **Links.** A link target is accepted only if it is (a) an absolute URL whose scheme is exactly `https` or `http`, or (b) a relative reference limited to a root-relative path (`/` followed by a character other than `/` or `\`) or an in-page fragment (`#…`). Everything else renders as plain text, including `javascript:`, `data:`, `vbscript:`, `file:` and any other scheme, protocol-relative `//host` and backslash forms (`\host`, `/\host`). The check runs after decoding character references and percent-encoding and removing whitespace and control characters, compares the scheme case-insensitively, and uses the standard URL parser rather than string prefixes, so encoded or obfuscated variants (for example `jav&#x61;script:` or `%6Aavascript:`) cannot pass. External links carry `rel="noopener noreferrer"`.
+- **Images.** Markdown images are not loaded; they render as a link labelled by their alt text whose target follows the same link rule (otherwise the alt text is plain text), so lesson text makes no third-party requests.
+- **Structure.** Markdown headings start at `h2` under the lesson's `h1`; fenced code renders with `CodeBlock` (no execution, no highlighting dependency); tables use the shared table style.
+- **Backend.** Stores and returns Markdown source only; no server-side HTML rendering.
+- **Verification.** Renderer tests must cover `<script>`, event-handler attributes, raw HTML blocks, `javascript:` and `data:` links and images.
+
+**Dependency.** This policy is library-independent. Choosing a parser/renderer is a separate decision under the Dependency Policy at implementation time; any candidate must render without raw HTML and must not enable a raw-HTML plugin.
+
+**Alternatives considered.** HTML string plus a sanitiser (rejected: keeps an HTML injection path and adds a dependency); plain text only (rejected: loses the approved text-material formatting); an in-house parser (not chosen here: maintenance and correctness risk; still allowed if it meets every rule above).
+
+**Owners for review.** Course (CO09), frontend lane, Leader. **Unlocks.** FE08 lesson rendering and the FE14 Markdown preview tab (still gated on their other contracts).
+
 ## FE03 implementation in PR #98 — 25 October 2026
 
 This is an implementation record, not a new technical decision or acceptance of
@@ -1409,3 +1750,174 @@ CORS admits PUT/DELETE for the selected authenticated flow while other protected
 routes remain denied. No token parameter is exposed to feature clients.
 See docs/testing.md for executed local PostgreSQL/browser evidence, fixture and
 external Playwright requirements; the E2E directory still has no npm pipeline.
+
+
+## Batch 1 conditional settings client handoff — F1–F4
+
+> **Current R1/R2 refinement:** [ADR005 §16](decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026) completes the precondition channel and adds the bounded CT16 no-content extension. It preserves the N1 handoff below.
+
+[ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026)
+(`CT06-ENABLEMENT-2026-11-08-r2`) governs FE18/AD08/CO14's current contract.
+This documents requirements only; it implements no client, CORS or UI behavior.
+The narrow [N1 correction](decisions/005-batch-01-contract-approvals.md#15-n1-http-validator-correction)
+preserves r2 approval provenance: only GET emits an ETag; successful canonicalizing
+PUT must omit all validator fields, including ETag and Last-Modified.
+
+The existing Instructor `skill-graph-editor/api/skillGraphApi.ts`,
+`hooks/useSkillGraph.ts` and `components/AdaptiveSettingsPanel.tsx` must retain the
+successful GET settings body and its strong ETag as one snapshot. All settings PUTs
+send If-Match; 412 retains the draft, refreshes latest state, and requires deliberate
+user reconciliation before resubmission. Never refresh the tag and automatically
+replay a stale full form. 428 requires fetching a tag; 409 requires safe explanation
+and deliberate retry/review. None clears Auth. Same-policy disable, enable and n
+changes remain possible; thresholds may be changed only before submitted history
+and stored mastery. No whole-Course replay/catch-up progress indicator is promised.
+
+After successful PUT, invalidate the previous write validator and perform GET before
+another update. Retain only that GET's body and ETag as a paired snapshot: a concurrent
+writer may have changed the resource since PUT. Do not combine the PUT body with the
+GET tag, derive a tag in the client, or reuse the prior snapshot without this refresh.
+A no-op can yield the same freshly obtained ETag. Failed/cancelled or obsolete GET
+does not undo a successful PUT and must not trigger automatic PUT replay; wait for a
+successful current-generation GET before another write. Existing session isolation
+and explicit stale-draft reconciliation remain required.
+
+`shared/api/httpClient.ts` currently accepts custom request headers and returns only
+decoded bodies. A later authorized additive response-metadata capability is required
+to observe GET's ETag only after successful status/decoding and current-generation checks;
+preserve existing callers, cancellation and session isolation. Its existing 412/428
+safe ProblemDetail title handling also needs implementation. Do not bypass shared
+transport, expose credentials, or introduce a store/framework for validators.
+The existing CORS policy must allow If-Match and expose ETag for approved origins,
+without changing origins, credentials or role policy. This is a bounded header
+requirement, not proof of current browser integration. Use a same-origin test and
+an approved-origin cross-origin test before FE18 acceptance. Current preview/local
+components do not prove backend readiness or conditional-write support.
+
+
+### R1/R2 current frontend transport handoff — 9 November 2026
+
+**CT16-B1-NO-CONTENT-2026-11-09-r1 — DELEGATED_APPROVED**, selected by Codex
+under the Leader's explicit PR #228 independent-review correction instruction.
+[ADR005 §16.2](decisions/005-batch-01-contract-approvals.md#162-r2-bounded-ct16-no-content-transport-extension)
+is the exact scoped amendment of `CT16-2026-10-24-r1`'s JSON-only restriction;
+all historical approval provenance, JSON/Auth/security behavior and unrelated
+slices remain effective. Protected integration and separate implementation
+remain required. This is contract documentation, not delivered client behavior.
+
+Extend existing `shared/api/httpClient.ts` additively: omitted responseMode (or
+`'json'`) preserves `RequestOptions<T>`'s decoder and Promise<T>. Explicit
+`NoContentRequestOptions` selects `responseMode: 'no-content'`, expectedStatus=204,
+no decoder, and Promise<void>, with overloads on both request/client entry points.
+Only exact 204 succeeds without media-type requirement/body parsing/DTO decoding;
+unexpected success is a protocol error. Invalid mode/status/decoder combinations
+fail before fetch. Non-success still uses CT18 safe ProblemDetail/status handling.
+Do not globally accept empty JSON, bypass transport or change approved 204s.
+Keep all session/operation/abort/expiry checks through the final return, current
+401 invalidation, credential/path/redirect rules and no retries.
+
+FE18's existing skillGraphApi/useSkillGraph/SkillGraphEditorPage use void success
+for deleteCourseSkill, addCoursePrerequisite, removeCoursePrerequisite,
+mapCourseLessonSkill and unmapCourseLessonSkill. Refresh the canonical graph only
+for a current Course/operation; a failed/obsolete refresh never undoes the confirmed
+mutation or triggers replay. Review actual exported types and consumer tests before
+binding. The existing client still needs this extension plus the already documented
+GET metadata/412/428 capability; none is claimed implemented here.
+
+Settings normally send If-Match alone. If an optional If-None-Match is sent, preserve
+it into the same guarded decision; 412 can mean either failed condition even with
+unchanged configuration. Preserve draft, obtain a fresh GET pair and require user
+review of draft **and conditions**; do not blindly replay a matching exclusion or
+`*`, discard it silently, or clear Auth. Approved-origin CORS must allow this header
+when used, plus If-Match and GET ETag exposure; no origin/credential change. Preserve
+N1's validator-free PUT and mandatory fresh GET body/tag pairing before another write.
+[CT14 B1-O18/O19](decisions/005-batch-01-contract-approvals.md#163-ct14-acceptance-oracles-and-direct-consumer-traceability)
+defines current tests and their existing allocation.
+
+## Batch 2 frontend and operator handoff — 9 November 2026
+
+[ADR006](decisions/006-batch-02-contract-approvals.md) records all eight delegated
+approvals and the Leader's two explicit additional scope authorizations.
+All 25 added operations in [OpenAPI](api/openapi.yaml) are **not implemented**.
+Existing CT16 shared transport, session/abort/generation isolation, safe errors,
+route guards and no automatic mutation retries remain effective.
+
+FE08 consumes Course progress/Lesson/resume JSON reads. After loading a Lesson,
+an explicit visit may write pointer/server time; GET/prefetch must not write.
+FE33 uses one paginated Course progress read and the backend's learner-level
+resume selection, keeping existing My Courses DTOs unchanged. Continue learning
+can activate only after the separately authorized migration, grants and producer
+delivery. CT33's Up next remains gated. FE14 text/video authoring uses owner-only
+DTOs; files, Admin and publication events retain CT09/CT12/CT26 gates.
+
+`CT37-EMBED-2026-11-09-r1` accepts only canonical
+`https://www.youtube-nocookie.com/embed/{videoId}` under
+[ADR006 §6](decisions/006-batch-02-contract-approvals.md#6-ct37embed).
+Existing LessonContent/MaterialForm create React elements; no iframe HTML,
+autoplay, SDK, API key or pre-activation request. Preserve provider-required origin
+Referer using strict-origin-when-cross-origin, without credentials or protected
+query parameters. Player minimum viewport and external-link fallback apply.
+No concrete video asset, licence or actual playback is approved by provider policy.
+
+CT02 is technically approved after the explicit reset-only email exception.
+The request is best effort and returns the same 202 even for unknown/locked/full
+queue; it proves no delivery. Auth's bounded single-worker queue holds up to 128
+pending canonical emails. Outstanding-token reissue interval is PT1M; token lifetime
+is explicitly PT30M. The dormant PASSWORD_RESET_TOKEN_TTL setting must equal this
+approved value when the feature is implemented; current configuration is not changed.
+The local service clock is testable, with no global CT39 binding. AppConfig may
+bind the feature-owned executor/validated settings in a later implementation task;
+do not assume a default executor, SMTP timeout, provider, sender or trusted origin.
+
+The reset link uses a configured approved HTTPS origin and /reset-password#token=…,
+never request Host/Forwarded. FE06 captures/erases the fragment before requests;
+no token in persistent storage, query, returnTo, DOM, analytics or logs. Reset page
+loads no third-party resources and sends no Referer. POST confirmation uses existing
+password validation and returns JSON with no JWT; ordinary sign-in follows.
+
+Required before exposure: NEW token/resume migrations, runtime read/write grants,
+SMTP adapter/dependency and file-placement qualification, certificate-verified TLS
+with finite network deadlines, configured sender/trusted origin/secrets, abuse/load
+qualification and independent security review. No concrete provider, host, credential,
+environment binding or runtime grant is introduced by this PR. Changing a password
+does not revoke existing JWTs under unchanged CT01: reset-specific residual-token
+risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public recovery
+exposure and is not inherited from the earlier logout acceptance.
+
+
+## Batch 3 expiry configuration specification — not implemented
+
+[ADR007 §3.2](decisions/007-batch-03-contract-approvals.md#32-ct38featurequiz-expiry)
+records **CT38-QUIZ-EXPIRY-2026-11-09-r1**: explicit backend
+APP_QUIZ_AUTO_SUBMIT_ENABLED, APP_QUIZ_AUTO_SUBMIT_DELAY_MS and
+APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE, their property bindings, validation, consumer
+locations and disabled-mode limits. No runtime configuration/default or .env.example
+change is made here. Future implementation must bind/validate these required inputs
+and synchronize the placeholder template. Deployment tuning and actual timely
+finalization remain unverified; existing Auth/reset/storage configuration is unchanged.
+
+## Batch 4 runner and time-input decisions — 9 November 2026
+
+[ADR008](decisions/008-batch-04-contract-approvals.md) technically approves the
+existing pinned E2E runner and disposable setup interface; current shell inputs
+and reproduction commands remain as documented. External mode is only for an
+explicitly authorized disposable/local environment; it can mutate accounts and
+memberships and owns no external cleanup. No environment variable, production
+configuration or dependency changes here. SH07's E2E CI contract is approved for
+later separately authorized implementation; no job is added by this record.
+
+CT39 selects no shared Clock bean or shared consumer API. Existing reset and
+quiz local time seams retain their effective contracts. This does not configure
+fake time in AppConfig, activate TestClockConfig, alter JWT expiry or approve
+AS09/IN08 deadline/reminder behavior. Independent review, protected integration,
+implementation authorization and runtime/QA evidence remain separate.
+
+**10 November 2026 fixture amendment:** CP-030 is now
+`CT34-FIXTURES-2026-11-10-r2`, specified in
+[ADR008 §10](decisions/008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026).
+The future launcher must establish checkout/output exclusivity before Playwright
+entry and retain a private, non-secret inventory outside test outputs and temporary
+builds. Current direct Playwright commands and PID-only `stack:down` do not yet
+implement r2; do not infer concurrent-output protection or full interrupted-run
+recovery from them. New lifecycle behavior requires separate implementation and
+qualification; no environment variable or runnable command is added here.

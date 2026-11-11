@@ -1,39 +1,201 @@
-import type { ReactNode } from 'react';
-import { AppBar, Toolbar, Typography, IconButton, Box, Avatar } from '@mui/material';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
+import { Box, ButtonBase, Divider, IconButton, Menu, Tooltip, Typography, useMediaQuery, useTheme } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
-import { presentationTokens } from '../../app/theme/theme';
+import type { PresentationIconName } from './PresentationIcon';
+import { BrandWordmark } from './BrandLogo';
+import { isPlainClick } from './SidebarNav';
+import type { NavItem } from './SidebarNav';
+import { color, motion, presentationTokens, radius, focusRingOnChrome } from '../../app/theme/theme';
 
 export interface AppHeaderProps {
+    /** Retained for API compatibility; the wordmark names the product. */
     title?: string;
     onMenuToggle?: () => void;
-    userDisplayName?: string;
-    actions?: ReactNode;
     menuOpen?: boolean;
+    navItems?: NavItem[];
+    selectedNavId?: string;
+    onNavSelect?: (id: string) => void;
+    /** Utilities on the right (notifications, account menu, sign-in actions). */
+    actions?: ReactNode;
     search?: ReactNode;
+    brandHref?: string;
+    onBrandSelect?: () => void;
 }
 
-export function AppHeader({ title = 'CodeMastery', onMenuToggle, userDisplayName, actions, menuOpen, search }: AppHeaderProps) {
-    return (
-        <AppBar position="sticky" color="inherit" elevation={0} sx={{ border: 0, borderBottom: 1, borderColor: 'divider', zIndex: 'appBar', bgcolor: 'background.paper' }}>
-            <Toolbar sx={{ minHeight: `${presentationTokens.headerHeight}px !important`, px: { xs: 2, md: 3 }, py: 1.5,
-                columnGap: { xs: 1, md: 3 }, rowGap: 1.5, flexWrap: 'wrap' }}>
-                {onMenuToggle && <IconButton aria-label="Toggle navigation" aria-expanded={menuOpen} onClick={onMenuToggle}
-                    sx={{ display: { md: 'none' }, flexShrink: 0 }}><PresentationIcon name="menu" /></IconButton>}
-                <Box sx={{ flex: { xs: 1, lg: '0 1 auto' }, minWidth: 0 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', lg: 'block' } }}>Your workspace</Typography>
-                    <Typography variant="h5" component="p" sx={{ typography: { xs: 'subtitle1', sm: 'h5' }, overflowWrap: 'anywhere' }}>{title}</Typography>
+const REACH = presentationTokens.reachWidth, REACH_RISE = presentationTokens.reachHeight;
+
+/**
+ * Concave curved bottom-edge indicator ("canvas reach", DESIGN.md › Top bar): the
+ * navbar's lower edge bends up under the active item in one symmetric bell. The
+ * profile was traced from the reference (width ≈ 6.2 × height): long concave
+ * shoulders that leave the edge tangentially, an inflection near mid-height and a
+ * rounded convex crest. y(u) = ((1 − cos πu) / 2)^1.2 for each half, drawn as a
+ * Catmull-Rom spline converted to cubic Béziers, so it is C1-smooth with no corners.
+ * The shape is mirrored point for point, so it is exactly symmetric.
+ */
+export function canvasReachPath(width: number, rise: number, samples = 12): string {
+    const half = Array.from({ length: samples + 1 }, (_, i) => {
+        const u = i / samples;
+        return [u * width / 2, rise * (1 - ((1 - Math.cos(Math.PI * u)) / 2) ** 1.2)] as const;
+    });
+    const points = [...half, ...half.slice(0, -1).reverse().map(([x, y]) => [width - x, y] as const)];
+    const f = (n: number) => Number(n.toFixed(3));
+    let d = `M${f(points[0][0])} ${f(points[0][1])}`;
+    for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[Math.max(0, i - 1)], p1 = points[i], p2 = points[i + 1], p3 = points[Math.min(points.length - 1, i + 2)];
+        // Ends keep a horizontal tangent so the curve meets the straight edge without a kink.
+        const t1 = i === 0 ? [p2[0] - p1[0], 0] : [(p2[0] - p0[0]) / 2, (p2[1] - p0[1]) / 2];
+        const t2 = i === points.length - 2 ? [p2[0] - p1[0], 0] : [(p3[0] - p1[0]) / 2, (p3[1] - p1[1]) / 2];
+        d += ` C${f(p1[0] + t1[0] / 3)} ${f(p1[1] + t1[1] / 3)} ${f(p2[0] - t2[0] / 3)} ${f(p2[1] - t2[1] / 3)} ${f(p2[0])} ${f(p2[1])}`;
+    }
+    // Close below the edge (1 px overlap with the canvas) so no seam shows.
+    return `${d} V${rise + 1} H0 Z`;
+}
+const REACH_PATH = canvasReachPath(REACH, REACH_RISE);
+/**
+ * The bell as a mask layer (88 × 15: the curve plus 1 px below the bar edge). It is subtracted from the
+ * header, so the bar itself is cut and the surface underneath (the canvas, or content scrolling under the
+ * sticky bar) shows through. Nothing is painted to fake the cut-out.
+ */
+export const REACH_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${REACH}" height="${REACH_RISE + 1}" viewBox="0 0 ${REACH} ${REACH_RISE + 1}"><path d="${REACH_PATH}"/></svg>`)}")`;
+
+/** Ink top bar with the "canvas reach" under the active destination (DESIGN.md › Top bar). */
+export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId, onNavSelect, actions, search, brandHref, onBrandSelect }: AppHeaderProps) {
+    const theme = useTheme();
+    const wide = useMediaQuery(theme.breakpoints.up('lg'));
+    const bar = useRef<HTMLDivElement>(null), header = useRef<HTMLElement>(null);
+    const [reach, setReach] = useState<number | null>(null);
+    const measure = useCallback(() => {
+        const host = bar.current, frame = header.current, active = host?.querySelector<HTMLElement>('[data-nav-item][aria-current="page"]');
+        if (!host || !frame || !active || active.offsetParent === null) { setReach(null); return; }
+        // Relative to the header element, which carries the mask (the bar is centred inside it).
+        const a = active.getBoundingClientRect(), h = frame.getBoundingClientRect();
+        setReach(Math.round(a.left - h.left + a.width / 2 - REACH / 2));
+    }, []);
+    useLayoutEffect(() => {
+        measure();
+        const host = bar.current;
+        // Web fonts swap in after first paint and change item widths, so remeasure when they finish loading.
+        const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+        fonts?.addEventListener?.('loadingdone', measure);
+        void fonts?.ready?.then(measure);
+        if (!host || typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', measure);
+            return () => { window.removeEventListener('resize', measure); fonts?.removeEventListener?.('loadingdone', measure); };
+        }
+        // The item list moves without resizing when a sibling changes width (for example when the
+        // wordmark face swaps in), so observe the bar, every slot in it and the list itself.
+        const observer = new ResizeObserver(measure); observer.observe(host);
+        if (header.current) observer.observe(header.current);
+        for (const slot of [...host.children, ...host.querySelectorAll('nav ul')]) observer.observe(slot);
+        return () => { observer.disconnect(); fonts?.removeEventListener?.('loadingdone', measure); };
+    }, [measure, selectedNavId, navItems, wide]);
+    const brand = <BrandWordmark size={presentationTokens.brandMark} hideTextBelow={360} />;
+    // Canvas reach: the bar's own ink is cut by the bell (mask-composite: exclude), so the shape is a real
+    // opening in the header, not a painted patch. Below 900 px there is no reach (the drawer marks the page).
+    const cut = reach !== null ? {
+        maskImage: `linear-gradient(#000, #000), ${REACH_MASK}`, WebkitMaskImage: `linear-gradient(#000, #000), ${REACH_MASK}`,
+        maskSize: `100% 100%, ${REACH}px ${REACH_RISE + 1}px`, WebkitMaskSize: `100% 100%, ${REACH}px ${REACH_RISE + 1}px`,
+        maskRepeat: 'no-repeat', WebkitMaskRepeat: 'no-repeat',
+        maskPosition: `0 0, ${reach}px calc(100% + 1px)`, WebkitMaskPosition: `0 0, ${reach}px calc(100% + 1px)`,
+        WebkitMaskComposite: 'xor', maskComposite: 'exclude',
+        transition: `mask-position ${motion.reach}ms ${motion.easeIn}, -webkit-mask-position ${motion.reach}ms ${motion.easeIn}`,
+    } : {};
+    return <Box component="header" ref={header} data-canvas-reach={reach !== null ? '' : undefined} data-reach-for={reach !== null ? selectedNavId : undefined}
+        data-reach-x={reach ?? undefined}
+        sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: 'common.white', [theme.breakpoints.up('md')]: cut }}>
+        <Box ref={bar} sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 },
+            height: { xs: presentationTokens.topBarHeightCompact, sm: presentationTokens.topBarHeight }, px: { xs: 1.5, sm: 2.5, md: 3 },
+            maxWidth: 1600, mx: 'auto', '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>
+            {onMenuToggle && <IconButton aria-label="Toggle navigation" aria-expanded={!!menuOpen} onClick={onMenuToggle}
+                sx={{ display: { md: 'none' }, color: 'common.white', '&:hover': { bgcolor: color.chromeRaised } }}><PresentationIcon name="menu" /></IconButton>}
+            <Box sx={{ flexShrink: 0, minWidth: 0, display: 'flex' }}>
+                {brandHref ? <ButtonBase component="a" href={brandHref} aria-label="CodeMastery home"
+                    onClick={(event: MouseEvent) => { if (!onBrandSelect || !isPlainClick(event)) return; event.preventDefault(); onBrandSelect(); }}
+                    sx={{ borderRadius: `${radius.sm}px`, p: .5 }}>{brand}</ButtonBase> : brand}
+            </Box>
+            {navItems.length > 0 && <Box component="nav" aria-label="Main navigation" sx={{ display: { xs: 'none', md: 'flex' }, flex: 1, justifyContent: 'center', minWidth: 0 }}>
+                <Box component="ul" sx={{ display: 'flex', gap: .5, m: 0, p: 0, listStyle: 'none' }}>
+                    {navItems.map((item) => <Box component="li" key={item.id}>
+                        <TopNavItem item={item} current={item.id === selectedNavId} iconOnly={!wide && item.id !== selectedNavId && !!item.icon} onSelect={onNavSelect} />
+                    </Box>)}
                 </Box>
-                {search && <Box sx={{ order: { xs: 3, lg: 0 }, flex: { xs: '1 0 100%', lg: '1 1 240px' }, minWidth: 0, maxWidth: { lg: 420 }, mx: { lg: 'auto' } }}>{search}</Box>}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0, ml: 'auto' }}>
-                    {actions}
-                    {userDisplayName && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Avatar aria-hidden sx={{ width: 32, height: 32, bgcolor: presentationTokens.softBlue, color: 'primary.dark', fontSize: '.75rem', fontWeight: 700 }}>
-                            {userDisplayName.charAt(0).toUpperCase()}
-                        </Avatar>
-                        <Typography variant="body2" sx={{ display: { xs: 'none', sm: 'block' } }}>{userDisplayName}</Typography>
-                    </Box>}
-                </Box>
-            </Toolbar>
-        </AppBar>
-    );
+            </Box>}
+            {navItems.length === 0 && <Box sx={{ flex: 1 }} />}
+            {search && <Box sx={{ flex: '0 1 320px', minWidth: 0, display: { xs: 'none', md: 'block' } }}>{search}</Box>}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1 }, flexShrink: 0, ml: { xs: 'auto', md: 0 } }}>{actions}</Box>
+        </Box>
+    </Box>;
+}
+
+function TopNavItem({ item, current, iconOnly, onSelect }: { item: NavItem; current: boolean; iconOnly: boolean; onSelect?: (id: string) => void }) {
+    const content = <ButtonBase component={item.href ? 'a' : 'button'} href={item.href} data-nav-item aria-current={current ? 'page' : undefined}
+        onClick={(event: MouseEvent) => {
+            // A link is routed in-app only when a handler exists and the click is plain; otherwise the
+            // browser follows the href natively (including Cmd/Ctrl-click into a new tab).
+            if (!onSelect || (item.href && !isPlainClick(event))) return;
+            if (item.href) event.preventDefault();
+            onSelect(item.id);
+        }}
+        sx={{ position: 'relative', height: 44, px: iconOnly ? 1.25 : 2, gap: 1, borderRadius: `${radius.pill}px`, fontSize: '0.9375rem', fontWeight: current ? 600 : 500,
+            color: current ? 'common.white' : color.chromeMuted, whiteSpace: 'nowrap', transition: `background-color ${motion.fast}ms, color ${motion.fast}ms`,
+            '&:hover': { bgcolor: color.chromeRaised, color: 'common.white' }, '& svg': { fontSize: 20 } }}>
+        {item.icon}
+        <Box component="span" className={iconOnly ? 'cm-visually-hidden' : undefined}>{item.label}</Box>
+        {item.badge !== undefined && item.badge !== '' && item.badge !== 0 && <Box component="span" sx={{ minWidth: 20, px: .625, borderRadius: `${radius.pill}px`,
+            bgcolor: color.brand600, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center' }}>{item.badge}</Box>}
+    </ButtonBase>;
+    return iconOnly ? <Tooltip title={item.label}>{content}</Tooltip> : content;
+}
+
+export interface AccountMenuProps {
+    displayName: string;
+    role: string;
+    /** Menu entries (rendered as MenuItem children). Receives a close callback. */
+    renderItems: (close: () => void) => ReactNode;
+}
+/** Monogram account button with a menu. Shows only display name and role (CT16-PROFILE P2). */
+export function AccountMenu({ displayName, role, renderItems }: AccountMenuProps) {
+    const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+    const initial = Array.from(displayName.trim())[0]?.toUpperCase() ?? '?';
+    return <>
+        <ButtonBase aria-haspopup="menu" aria-expanded={!!anchor} aria-label={`Account menu, ${displayName}, ${role}`}
+            onClick={(event) => setAnchor(event.currentTarget)}
+            sx={{ display: 'flex', alignItems: 'center', gap: 1.25, height: 52, pl: .75, pr: { xs: .75, md: 1.5 }, borderRadius: `${radius.pill}px`, color: 'common.white',
+                '&:hover': { bgcolor: color.chromeRaised } }}>
+            <Monogram name={displayName} initial={initial} tone="brand" />
+            <Box sx={{ display: { xs: 'none', md: 'block' }, textAlign: 'left', minWidth: 0, maxWidth: 180 }}>
+                <Typography component="span" sx={{ display: 'block', fontSize: '0.9375rem', fontWeight: 600, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</Typography>
+                <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: color.chromeMuted, lineHeight: 1.3 }}>{role}</Typography>
+            </Box>
+            <PresentationIcon name="chevron-down" sx={{ fontSize: 18, display: { xs: 'none', md: 'block' } }} />
+        </ButtonBase>
+        <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            slotProps={{ paper: { sx: { minWidth: 220 } } }}>
+            {renderItems(() => setAnchor(null))}
+        </Menu>
+    </>;
+}
+
+/** `brand` (solid Deep Logo Blue) is the signed-in account's own avatar (top bar, profile); `ink` marks other people (Q&A authors). */
+export function Monogram({ name, initial, size = 40, tone = 'chrome' }: { name: string; initial?: string; size?: number; tone?: 'chrome' | 'ink' | 'brand' }) {
+    const letter = initial ?? Array.from(name.trim())[0]?.toUpperCase() ?? '?';
+    return <Box component="span" aria-hidden data-monogram={tone} sx={{ width: size, height: size, borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0,
+        bgcolor: tone === 'brand' ? color.brand700 : tone === 'chrome' ? color.chromeRaised : color.ink950, color: 'common.white', fontSize: size * 0.42, fontWeight: 600 }}>{letter}</Box>;
+}
+
+export function AccountMenuDivider() { return <Divider sx={{ my: .5 }} />; }
+
+/** Utility button on the frame. `current` marks the page it opens (as the drawer marks its active row). */
+export function HeaderIconButton({ label, icon, badge, onClick, href, current = false }: { label: string; icon: PresentationIconName; badge?: number; onClick?: () => void; href?: string; current?: boolean }) {
+    const name = badge ? `${label}, ${badge} unread` : label;
+    return <Tooltip title={label}>
+        <IconButton aria-label={name} aria-current={current ? 'page' : undefined} onClick={onClick} {...(href ? { component: 'a', href } : {})}
+            sx={{ position: 'relative', color: 'common.white', bgcolor: current ? color.chromeRaised : undefined, '&:hover': { bgcolor: color.chromeRaised } }}>
+            <PresentationIcon name={icon} />
+            {!!badge && <Box component="span" aria-hidden sx={{ position: 'absolute', top: 0, right: -2, minWidth: 20, height: 20, px: .5, borderRadius: `${radius.pill}px`,
+                bgcolor: color.brand600, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center', border: `2px solid ${color.ink950}`, boxSizing: 'content-box' }}>{badge}</Box>}
+        </IconButton>
+    </Tooltip>;
 }

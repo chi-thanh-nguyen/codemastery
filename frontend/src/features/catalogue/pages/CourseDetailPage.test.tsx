@@ -18,7 +18,14 @@ async function mount(courseId = id, back = vi.fn()) { await act(async () => root
 describe('course detail integration', () => {
     it('renders approved detail, prerequisites and syllabus without membership controls', async () => {
         const back = await mount(); expect(host.textContent).toContain('Read the introduction'); expect(host.textContent).toContain('1. Lesson'); expect(host.textContent).not.toContain('Enroll Now');
-        await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Back to Catalogue')!.click()); expect(back).toHaveBeenCalledOnce();
+        await act(async () => [...host.querySelectorAll('a')].find((link) => link.textContent === 'Catalogue')!.click()); expect(back).toHaveBeenCalledOnce();
+    });
+    it('names the instructor once, in the title meta, and keeps Course facts to prerequisites and published content', async () => {
+        await mount();
+        expect(host.textContent?.match(/Instructor Demo/g)).toHaveLength(1);
+        expect(host.querySelector('header')?.textContent).toContain('Instructor · Instructor Demo');
+        const facts = host.querySelector('section[aria-labelledby="course-facts"]')!;
+        expect([...facts.querySelectorAll('dt')].map((node) => node.textContent)).toEqual(['Prerequisites', 'Published content']);
     });
     it('links multiple chapter controls to uniquely identified regions and keeps associations stable', async () => {
         const secondId = '00000000-0000-4000-8000-000000000002';
@@ -36,14 +43,17 @@ describe('course detail integration', () => {
             const panel = document.getElementById(panelId!);
             expect(panel?.getAttribute('role')).toBe('region');
             expect(panel?.getAttribute('aria-labelledby')).toBe(control.id);
-            expect(control.getAttribute('aria-expanded')).toBe('true');
             return [control.id, panelId];
         });
         expect(new Set(ids).size).toBe(4);
         expect(document.getElementById(ids[1]!)?.textContent).toContain('1. Lesson');
         expect(document.getElementById(ids[3]!)?.textContent).toContain('1. Apply concepts');
+        // DESIGN.md S4: the first chapter starts open; later chapters are collapsed disclosures.
+        expect(controls.map((control) => control.getAttribute('aria-expanded'))).toEqual(['true', 'false']);
         await act(async () => controls[0].click());
         expect(controls[0].getAttribute('aria-expanded')).toBe('false');
+        expect(controls[1].getAttribute('aria-expanded')).toBe('false');
+        await act(async () => controls[1].click());
         expect(controls[1].getAttribute('aria-expanded')).toBe('true');
         await act(async () => controls[0].click());
         await mount();
@@ -60,7 +70,7 @@ describe('course detail integration', () => {
     });
     it('shows the uniform missing/hidden 404 and retries the current read', async () => {
         vi.mocked(getPublishedCourseById).mockRejectedValueOnce(new ApiError('http', 'The requested resource is unavailable.', 404));
-        await mount(); expect(host.textContent).toContain('The requested resource is unavailable.');
-        await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!.click()); expect(host.querySelector('h1')?.textContent).toBe('Programming');
+        await mount(); expect(host.textContent).toContain("This course doesn't exist or isn't published."); expect(host.querySelector('h1')?.textContent).toBe('Course not available');
+        await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Try again')!.click()); expect(host.querySelector('h1')?.textContent).toBe('Programming');
     });
 });

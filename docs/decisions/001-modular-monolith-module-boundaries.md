@@ -174,7 +174,7 @@ documents or immutable reference artifacts.
 ### 11.1 Authority and unchanged baseline
 
 **CT01-2026-10-21-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** On 2026-10-21 (Asia/Ho_Chi_Minh),
+[LEADER_APPROVED](README.md#approval-status-labels).** On 2026-10-21 (Asia/Ho_Chi_Minh),
 the Project Leader @chi-thanh-nguyen explicitly delegated actual technical
 approval, reaffirmation and justified refinement of CT01/CT03 in the instruction
 “CodeMastery — Complete CT01/CT03 Technical Approval Under Explicit Leader
@@ -462,10 +462,10 @@ rewrite ADR002's historical project-specific statuses.
 |---|---|---|
 | CT01.core / AU04, AU05, AU06, FE03, QA01 | REAFFIRM ADR002's 11 October approval: canonical validation, BCrypt, HS256/claims/lifetime, locked-account exclusion, DTOs and generic failures. Correct, compatible with V001 and no replacement needed. | PREVIOUSLY_APPROVED; EFFECTIVE_APPROVAL via PR #73. No implementation or host-capacity proof. |
 | CT01.identity, limited U01 / Auth and protected consumers, Course public names | REAFFIRM the Leader's 18 October approval and exact §11.4 facade. Minimal trusted read surface; public catalogue still has no identity dependency. | PREVIOUSLY_APPROVED; EFFECTIVE_APPROVAL recorded through PR #83. CT21 display-name REST extension, CT02 recovery and CT12 mutations excluded. |
-| Login/registration edge semantics and JWT lifecycle / AU05/AU06 | CLARIFY and APPROVE §11.3: malformed requests versus generic credential failure, no BCrypt truncation, fixed JWT validation and current-account reads. Extends pending detail without changing effective CT01.core payloads/policy. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. |
-| Logout/session / AU05, FE03, QA01/QA07 | APPROVE client-local logout after evaluating durable and ephemeral revocation alternatives (§11.2); no new state, dependency or endpoint. §11.3 separately records actual Leader risk acceptance. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. No server revocation, global logout or production readiness claim. |
-| Role/resource/default-deny and exception handoff / all selected protected consumers | APPROVE §11.5: Auth establishes current identity; owning module checks permission/ancestry; CT18 exceptions propagate through security handling. No duplicate policy, role inheritance or fabricated protected route. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. CT03's exact predicates retain their own approval; other operations remain owner-controlled. |
-| CT16/CT18/CT38 interoperability / Auth, shared infrastructure, FE03 | REUSE effective minimum/core slices; APPROVE CT01-side generation/expiry/401/403, error and runtime obligations in §11.5. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION for new CT01 detail only. Full other-Issue contracts DEFERRED. |
+| Login/registration edge semantics and JWT lifecycle / AU05/AU06 | CLARIFY and APPROVE §11.3: malformed requests versus generic credential failure, no BCrypt truncation, fixed JWT validation and current-account reads. Extends pending detail without changing effective CT01.core payloads/policy. | DELEGATED_TECHNICAL_APPROVAL; LEADER_APPROVED. |
+| Logout/session / AU05, FE03, QA01/QA07 | APPROVE client-local logout after evaluating durable and ephemeral revocation alternatives (§11.2); no new state, dependency or endpoint. §11.3 separately records actual Leader risk acceptance. | DELEGATED_TECHNICAL_APPROVAL; LEADER_APPROVED. No server revocation, global logout or production readiness claim. |
+| Role/resource/default-deny and exception handoff / all selected protected consumers | APPROVE §11.5: Auth establishes current identity; owning module checks permission/ancestry; CT18 exceptions propagate through security handling. No duplicate policy, role inheritance or fabricated protected route. | DELEGATED_TECHNICAL_APPROVAL; LEADER_APPROVED. CT03's exact predicates retain their own approval; other operations remain owner-controlled. |
+| CT16/CT18/CT38 interoperability / Auth, shared infrastructure, FE03 | REUSE effective minimum/core slices; APPROVE CT01-side generation/expiry/401/403, error and runtime obligations in §11.5. | DELEGATED_TECHNICAL_APPROVAL; LEADER_APPROVED for new CT01 detail only. Full other-Issue contracts DEFERRED. |
 
 **CT01 verdict: FULLY TECHNICALLY APPROVED; new approvals pending protected
 integration.** No previously approved contract is superseded. The pending-selection
@@ -487,10 +487,14 @@ service is added to the application.
 
 ## 12. CT03 access and consumer contract reconciliation
 
+> **Focused amendment:** [CT03-B1-2026-11-08-r3](005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) adds expected-state settings storage and fail-fast settings admission on the same Course guard, with explicit transaction/cache/rollback acceptance. The r2 U07/structure and seven original assertions remain unchanged; only the named r2 write signature is superseded.
+
+> **8 November 2026 amendment:** [ADR005 §§3/5/7/9](005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility), `CT03-B1-2026-11-08-r2` (DELEGATED_APPROVED), completes the former U07 structural/no-extra-read gate and adds only the named Course structure/guard/settings boundaries. The original r1 text below is preserved; its U07 pending and combined checklist dispositions are historical where replaced by that amendment. All seven assertions, U03/U04, access/error policy and approval provenance remain unchanged. The new amendment is pending PR integration; r1 is already effective under ADR004.
+
 ### 12.1 Status, authority and inspected baseline
 
 **CT03-2026-10-21-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION for the CT03-owned scope.** On
+LEADER_APPROVED for the CT03-owned scope.** On
 2026-10-21 (Asia/Ho_Chi_Minh), Project Leader @chi-thanh-nguyen explicitly
 delegated actual technical approval, reaffirmation and justified refinement of
 CT01/CT03 in “CodeMastery — Complete CT01/CT03 Technical Approval Under Explicit
@@ -846,11 +850,11 @@ facade, not an unapproved Auth implementation or the entire CT01 family.
 |---|---|---|
 | CT03.catalogue / CO04/CO05, FE07, QA02 | REAFFIRM ADR002's 11 October approval: anonymous published metadata, scoped syllabus and uniform missing/hidden 404. No technical reason to redesign it. | PREVIOUSLY_APPROVED; EFFECTIVE_APPROVAL via PR #73. CT21 REST search/display-name extensions remain separate. |
 | CT01.identity/U01 / protected Course services | REAFFIRM existing facade, exact nested types and trusted self/current-role semantics in §11.4; no infrastructure principal or caller actor input. | PREVIOUSLY_APPROVED; EFFECTIVE_APPROVAL recorded in PR #83. Course policy is separately approved here. |
-| CT03.learning-access / Course learning, enrolment prerequisite, materials, owner preview | EXTEND and APPROVE §12.4: ACTIVE/COMPLETED membership, LEFT/absent denial, publication/ancestry, strict roles, concealment/error precedence, coherent read snapshots and no mastery hard block. Compatible with V002 and architectural ownership. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. No mutation/transition/transaction propagation, CT09 delivery or operation-level locking approved. |
-| Seven CourseAccessService assertions / §12.5 consumers | APPROVE exact existing location, five public/two package-private split and six unchanged signatures. REFINE unapproved general-read signature to the single Lesson ID; privately derived ancestry resolves actual V006 context. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. No extra overload, entity/projection, interface/file or repository signature. |
-| U03 Assessment / §12.6 named services | APPROVE complete Course-side context/authorization binding: use stored resource context and exactly the strongest Course/Lesson learner or ownership assertion. Assessment retains its independent rules. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. CT04/CT10/CT23/CT40 operation and structural choices excluded. |
-| U04 Interaction / DiscussionService, ContentReportService | APPROVE Course-side lesson-only authorization and private ancestry resolution with uniform resource-dependent 404. No invented Course field, structural export or Course internal access. | DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. Interaction owns post/report context and policies; no Admin moderation or complete REST workflow approval. |
-| U07 Adaptive / SkillGraphService | APPROVE Course/lesson ownership assertions and Course-owned ancestry responsibility. DEFER the exact consumed structural contract/no-extra-read disposition to CT40.lesson-read (§12.6). | CT03 half: DELEGATED_TECHNICAL_APPROVAL; APPROVED_PENDING_PROTECTED_INTEGRATION. Full U07: BLOCKED_OR_UNRESOLVED, cross-Issue authority not delegated. |
+| CT03.learning-access / Course learning, enrolment prerequisite, materials, owner preview | EXTEND and APPROVE §12.4: ACTIVE/COMPLETED membership, LEFT/absent denial, publication/ancestry, strict roles, concealment/error precedence, coherent read snapshots and no mastery hard block. Compatible with V002 and architectural ownership. | DELEGATED_TECHNICAL_APPROVAL; LEADER_APPROVED. No mutation/transition/transaction propagation, CT09 delivery or operation-level locking approved. |
+| Seven CourseAccessService assertions / §12.5 consumers | APPROVE exact existing location, five public/two package-private split and six unchanged signatures. REFINE unapproved general-read signature to the single Lesson ID; privately derived ancestry resolves actual V006 context. | DELEGATED_TECHNICAL_APPROVAL; LEADER_APPROVED. No extra overload, entity/projection, interface/file or repository signature. |
+| U03 Assessment / §12.6 named services | APPROVE complete Course-side context/authorization binding: use stored resource context and exactly the strongest Course/Lesson learner or ownership assertion. Assessment retains its independent rules. | DELEGATED_TECHNICAL_APPROVAL; LEADER_APPROVED. CT04/CT10/CT23/CT40 operation and structural choices excluded. |
+| U04 Interaction / DiscussionService, ContentReportService | APPROVE Course-side lesson-only authorization and private ancestry resolution with uniform resource-dependent 404. No invented Course field, structural export or Course internal access. | DELEGATED_TECHNICAL_APPROVAL; LEADER_APPROVED. Interaction owns post/report context and policies; no Admin moderation or complete REST workflow approval. |
+| U07 Adaptive / SkillGraphService | APPROVE Course/lesson ownership assertions and Course-owned ancestry responsibility. DEFER the exact consumed structural contract/no-extra-read disposition to CT40.lesson-read (§12.6). | CT03 half: DELEGATED_TECHNICAL_APPROVAL; LEADER_APPROVED. Full U07: BLOCKED_OR_UNRESOLVED, cross-Issue authority not delegated. |
 | CT18/CT21/CT22 and no-hard-block coherence | REUSE effective errors, REST catalogue DTOs, scalar membership lifecycle facts and architectural invariants. CLARIFY that access checks neither mutate lifecycle nor authorize unrelated APIs. | Existing approvals retained; no other-Issue supersession or technical approval. |
 
 | Issue #22 acceptance criterion | Actual disposition / permissible checklist action |
@@ -876,6 +880,8 @@ are retained; none was performed by this documentation change.
 
 ## 13. CT06 settings and coverage boundary reconciliation — proposal
 
+> **Historical proposal, superseded within Batch 1 scope on 8 November 2026.** [ADR005](005-batch-01-contract-approvals.md) is the normative delegated approval for CT40, CT05 and CT06.production/enablement, including U08/U09 and exact existing locations. The original proposal below remains verbatim as history; its unresolved bindings are replaced by ADR005, whose PR integration and implementation remain separate.
+
 The detailed [CT06 reconciliation and proposal](../adaptive-learning.md#19-ct06-reconciliation-and-completion-proposal)
 records Codex's scoped technical selection, prepared/revalidated 2026-10-19
 under Leader delegation;
@@ -895,3 +901,30 @@ participation. Consumed CT01 identity and CT03 ownership assertions do not appro
 these missing data or mutation boundaries. Independently approved pure local
 calculation requires none of them; integrated execution must preserve atomic
 mastery/progress and the no-hard-block invariant.
+
+## 14. Batch 2 Course contract supplement — 9 November 2026
+
+[ADR006](006-batch-02-contract-approvals.md) records the exact eight-checkpoint
+Batch 2 dispositions under Codex's explicit delegated technical authority.
+Course owns manual completion, per-Course resume and Instructor relational
+authoring; existing CT01 identity, CT03 access predicates and ADR005's Course-root
+guard retain their exact audience, shapes and transaction requirements.
+Learner writes use private Course persistence on the same root row; the public
+configuration callback remains Instructor-only. No new cross-module facade,
+Admin mutation, file-storage interface, event/atomic execution or architecture
+change is implied. The Leader expressly authorized the reset-only email exception
+and bounded resume schema/read in ADR006 §7; CT02's detailed approval is in §9. Implementation, privileges, review and protected integration
+remain independent gates.
+
+
+## 14. Batch 3 companion boundaries — 9 November 2026
+
+[ADR007 §3](007-batch-03-contract-approvals.md#3-additional-necessary-prerequisite-slices)
+records the separately delegated **CT03-ASSESSMENT-GUARD-2026-11-09-r1**
+Learner/expiry companion entries. Existing assertions and ADR005's Instructor-only
+configuration guard are unchanged. [ADR007 §12](007-batch-03-contract-approvals.md#12-ct08evidence-only)
+resolves only the submitted-quiz **payload schema/location** deferral in §9
+(**CT08-EVIDENCE-2026-11-09-r1**). Execution, publication coupling, replay and atomic
+mastery/progress participation remain unapproved Batch 6 contracts. These records
+are technical approvals pending independent review/CI/protected integration, not
+implementation or real transaction verification.

@@ -1,5 +1,9 @@
 # CodeMastery Mastery-Based Adaptive Learning
 
+> **F1–F4 correction:** [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) supersedes only unconditional settings replacement and unrestricted threshold/re-enable recomputation. Settings writes require a matching state ETag; thresholds are frozen once submitted history or stored mastery exists. Same-policy toggles/n edits remain supported. Latest-attempt classification is unchanged; small-sample sensitivity is an explicit CT36 evaluation obligation.
+
+> **Current Batch 1 contract, 8 November 2026:** [ADR005](decisions/005-batch-01-contract-approvals.md) technically approves CT40’s three boundaries, CT05’s four graph checkpoints and CT06.production/enablement under explicit Leader delegation (DELEGATED_APPROVED; integrated via PR #228 on 9 November 2026). Its §§3–8 supply the formerly deferred graph/policy/settings/coverage choices within that scope. Numeric thresholds and n are explicit per-Course configuration with no defaults. Unrelated routing, event/progress execution, diagnostic and evaluation decisions remain with their owning contracts. Historical text below is retained; this notice and ADR005 §9 identify the exact precedence.
+
 ## 1. Purpose and Scope
 
 Mastery-Based Adaptive Learning is CodeMastery's selected advanced component:
@@ -371,6 +375,8 @@ Use the existing calculator/classifier files with immutable nested types and exi
 
 ## 19. CT06 reconciliation and completion proposal
 
+> **Historical record:** the 19 October proposal and its dated observations are preserved below. [ADR005 §§6–7](decisions/005-batch-01-contract-approvals.md#6-ct06-production-mastery-policy) now supersede its recommendations within CT06.production/enablement, resolving LD-B1-1/2/3 through explicit delegated technical approval. U08/U09 are concretely approved there. This does not promote the prototype thresholds or certify implementation, runtime evidence or main integration of the new record.
+
 ### 19.1 Authority and historical reconciliation
 
 **PROPOSED_NOT_EFFECTIVE — prepared/revalidated 2026-10-19, Asia/Ho_Chi_Minh.**
@@ -404,6 +410,8 @@ and recommendation history; V006 owns Interaction/audit, not an Adaptive policy.
 | `CT06.production`, `CT06.enablement`, U08 and U09; CT06 [#24](https://github.com/chi-thanh-nguyen/codemastery/issues/24), CT40 [#46](https://github.com/chi-thanh-nguyen/codemastery/issues/46) | UNRESOLVED baseline; the scoped selections below are PROPOSED_NOT_EFFECTIVE and remaining named prerequisites are not approved here | EXTEND with explicit limitations; DEFER missing educational values and cross-module callables |
 
 ### 19.2 Prototype implementation reconciliation
+
+> **Status note, 8 November 2026.** PR #86 was merged on 24 October 2026 as `0b29672`. On `main` at `5a83a00`, `MasteryCalculator` declares `SkillEvidence` and `MasteryEvidenceRate` (with `isUnknown()`), and `MasteryStateClassifier` declares `ClassificationThresholds` and `RationalThreshold(int numerator, int denominator)`; invalid input raises `IllegalArgumentException`. The discrepancies listed below describe the PR #86 head of 19 October and are historical. This note changes no proposal and no approval; CT06.production and CT06.enablement remain `PROPOSED_NOT_EFFECTIVE`.
 
 The effective CT24 contract remains
 `MasteryCalculator.calculate(SkillEvidence) -> MasteryEvidenceRate`, including
@@ -561,3 +569,32 @@ The absence of these decisions does not reopen CT06.prototype or block independe
 CT14 preparation. No implementation change, approved-oracle verification, integrated
 verification, deployment or accepted academic result is claimed by this proposal. The limited
 PR #86 test execution above remains implementation evidence only.
+
+## Batch 2 compatibility handoff — 9 November 2026
+
+[ADR006](decisions/006-batch-02-contract-approvals.md) approves Course manual
+completion/progress, per-Course resume, text/video authoring and the embed policy
+only in its stated scope. Manual completion and video playback never update
+mastery. Course completion is not mastery; missing prerequisite mastery cannot
+deny admitted advanced Lessons. A true skip flag stays completed, but producing
+that flag with mastery remains unapproved CT07/CT08/CT22.atomic work.
+
+Course authoring uses ADR005's unchanged owner-only guard and current readiness
+semantics. Publishing an unmapped Lesson can suspend effective readiness without
+rewriting stored adaptive_enabled or causing history replay. Existing settings
+ETag/If-Match/N1/R1 and frozen-threshold rules remain effective. No routing,
+diagnostic, event execution, recommendation read or evaluation checkpoint is
+approved here. CT33 learner-home recommendation reads remain pending.
+
+
+## Batch 3 submitted-quiz evidence — 9 November 2026
+
+[ADR007 §12](decisions/007-batch-03-contract-approvals.md#12-ct08evidence-only)
+is the authoritative **CT08-EVIDENCE-2026-11-09-r1** schema/location approval.
+It carries complete captured correctness and stable skill/attempt/Course identities
+for manual and automatic submission. ADR005's latest-per-skill total order and
+immutable history remain unchanged; rounded quiz scores never substitute for
+evidence. CT08.execution/failure/verification-plan, CT22.atomic, CT07/CT25 and
+notification bindings retain their separate gates. Schema approval does not prove
+real-time mastery, delivery, replay or atomic progress. Earlier payload-deferral
+text is historical to the extent resolved by this explicit, bounded reference.

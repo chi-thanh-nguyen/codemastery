@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, StrictMode } from 'react';
+import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { BrowserRouter, useNavigate } from 'react-router';
@@ -11,7 +11,7 @@ import { AuthProvider } from '../app/providers/AuthProvider';
 import type { AuthContextValue } from '../app/providers/AuthProvider';
 import { useAuth } from '../features/auth/hooks/useAuth';
 import { appTheme } from '../app/theme/theme';
-import App, { PresentationPreview } from '../app/App';
+import App from '../app/App';
 import { request } from '../shared/api/httpClient';
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root, host: HTMLDivElement, auth: AuthContextValue, navigate: NavigateFunction, fetcher: ReturnType<typeof vi.fn>;
@@ -40,12 +40,20 @@ async function change(name: string, value: string) {
     const input = host.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
 }
-async function formLogin(name = 'Person A') {
-    await change('email', 'learner@example.com'); await change('password', 'synthetic'); fetcher.mockResolvedValueOnce(json(loginResponse(name)));
+async function formLogin(name = 'Person A', role = 'Learner') {
+    await change('email', 'learner@example.com'); await change('password', 'synthetic'); fetcher.mockResolvedValueOnce(json(loginResponse(name, role)));
     await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 }
 async function click(text: string) {
     const node = [...host.querySelectorAll<HTMLElement>('button,a')].find((element) => element.textContent === text)!; expect(node).toBeTruthy(); await act(async () => node.click());
+}
+async function openAccountMenu() {
+    const button = host.querySelector<HTMLButtonElement>('header [aria-label^="Account menu"]')!; expect(button).toBeTruthy(); await act(async () => button.click());
+    return document.querySelector<HTMLElement>('[role="menu"]')!;
+}
+async function signOutFromMenu() {
+    const menu = await openAccountMenu();
+    const item = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((node) => node.textContent === 'Sign out')!; expect(item).toBeTruthy(); await act(async () => item.click());
 }
 describe('real declarative routing and Profile', () => {
     it.each([['/login', 'email'], ['/login', 'password'], ['/register', 'displayName'], ['/register', 'email'], ['/register', 'password'], ['/register', 'confirmPassword']])('blurs %s %s while connected before Back removes its form', async (path, name) => {
@@ -76,7 +84,7 @@ describe('real declarative routing and Profile', () => {
         expect(input.value).toBe('Local sample password'); expect(document.activeElement).not.toBe(input);
         expect(fetcher).not.toHaveBeenCalled();
     });
-    it.each([['/', '/courses', 'Course Catalogue'], ['/login', '/login', 'Welcome back'], ['/register', '/register', 'Create account'], ['/courses', '/courses', 'Course Catalogue'], ['/courses/course-one', '/courses/course-one', 'Course details'], ['/missing', '/missing', 'Page not found']])('direct entry %s', async (path, finalPath, title) => {
+    it.each([['/', '/', 'Learn programming at the pace of what you actually know.'], ['/login', '/login', 'Sign in'], ['/register', '/register', 'Create account'], ['/courses', '/courses', 'Course catalogue'], ['/courses/course-one', '/courses/course-one', 'Course details'], ['/missing', '/missing', 'Page not found']])('direct entry %s', async (path, finalPath, title) => {
         await mount(path); expect(location.pathname).toBe(finalPath); expect(host.querySelector('main h1')?.textContent).toBe(title); expect(fetcher.mock.calls.every(([url]) => new URL(url).pathname.startsWith('/api/courses'))).toBe(true); expect(document.activeElement).toBe(host.querySelector('main h1'));
     });
     it('anonymous /profile never mounts personal fields and replaces with login', async () => {
@@ -85,21 +93,26 @@ describe('real declarative routing and Profile', () => {
     });
     it('consumes literal Profile return once, ignoring query/fragment/history redirect payloads', async () => {
         await mount('/profile?returnTo=https://outside.test#secret'); window.history.replaceState({ returnTo: 'https://outside.test' }, '', '/login?returnTo=//outside.test');
-        await formLogin(); expect(location.pathname).toBe('/profile'); expect(location.search + location.hash).toBe(''); expect(auth.consumeReturn()).toBe('/courses'); expect(host.querySelector('dl')?.textContent).toContain('Person A');
+        await formLogin(); expect(location.pathname).toBe('/profile'); expect(location.search + location.hash).toBe(''); // Consumed once: a second read falls back to the Learner's start page, never /profile again.
+        expect(auth.consumeReturn()).toBe('/home'); expect(host.querySelector('dl')?.textContent).toContain('Person A');
     });
-    it('login defaults to Courses for arbitrary supplied return targets', async () => {
-        await mount('/login?returnTo=/api/secrets'); await formLogin(); expect(location.pathname).toBe('/courses');
+    // Leader instruction, 7 November 2026: a Learner's default destination is Learner home; other roles keep the
+    // CT16 /courses fallback. A caller-supplied return target is still never authority.
+    it.each([['Learner', '/home'], ['Instructor', '/courses'], ['Administrator', '/courses']])('login sends a %s to %s for arbitrary supplied return targets', async (role, start) => {
+        await mount('/login?returnTo=/api/secrets'); await formLogin('Person A', role); expect(location.pathname).toBe(start); expect(location.search + location.hash).toBe('');
     });
     it.each(['Learner', 'Instructor', 'Administrator'])('shows exactly the validated three fields for %s without any Profile request', async (role) => {
         await mount('/courses'); await login('Person A', role); await go('/profile');
-        expect([...host.querySelectorAll('dt')].map((node) => node.textContent)).toEqual(['User ID', 'Display name', 'Role']);
-        expect([...host.querySelectorAll('dd')].map((node) => node.textContent)).toEqual([id, 'Person A', role]); expect(host.querySelector('form')).toBeNull();
-        const links = host.querySelectorAll('nav[aria-label="Account navigation"] a[href="/profile"]'); expect(links).toHaveLength(1);
+        expect([...host.querySelectorAll('dt')].map((node) => node.textContent)).toEqual(['Display name', 'Role', 'User ID']);
+        expect([...host.querySelectorAll('dd')].map((node) => node.textContent)).toEqual(['Person A', role, id]); expect(host.querySelector('form')).toBeNull();
+        expect(host.textContent).not.toMatch(/email|permissions|password|accessToken/i);
+        const menu = await openAccountMenu(); expect(menu.querySelectorAll('a[href="/profile"]')).toHaveLength(1);
+        await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
         expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/auth/login')).toHaveLength(1); expect(host.textContent).not.toMatch(/email|permissions|password|accessToken/i);
     });
     it('renders hostile display names as plain text and preserves snapshot after leaving Profile', async () => {
         await mount('/courses'); await login('<img src=x onerror=alert(1)>'); await go('/profile');
-        const displayName = host.querySelector('dd:nth-of-type(2)')!;
+        const displayName = host.querySelectorAll('dd')[0]!;
         expect(displayName.textContent).toBe('<img src=x onerror=alert(1)>'); expect(displayName.children).toHaveLength(0);
         expect(host.querySelector('img[src="x"], [onerror]')).toBeNull();
         expect([...host.querySelectorAll('img')].every((image) => image.getAttribute('src') === '/favicon.svg')).toBe(true);
@@ -111,7 +124,7 @@ describe('real declarative routing and Profile', () => {
     });
     it('explicit logout clears Profile, does not re-arm return, and deliberate revisit can set it', async () => {
         await mount('/courses'); await login(); await go('/profile'); await act(async () => auth.logout()); expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('Person A');
-        await formLogin('Person B'); expect(location.pathname).toBe('/courses'); await click('Sign out'); await go('/profile'); await formLogin('Person C'); expect(location.pathname).toBe('/profile'); expect(host.textContent).not.toContain('Person B');
+        await formLogin('Person B'); expect(location.pathname).toBe('/home'); await signOutFromMenu(); expect(location.pathname).toBe('/login'); await go('/profile'); await formLogin('Person C'); expect(location.pathname).toBe('/profile'); expect(host.textContent).not.toContain('Person B');
     });
     it.each(['timer', 'pageshow'])('expiry via %s removes active Profile before redirect', async (mode) => {
         await mount('/courses'); await login(); await go('/profile');
@@ -130,230 +143,16 @@ describe('real declarative routing and Profile', () => {
         async function travel(action: () => void) { await act(async () => { const popped = new Promise<void>((done) => window.addEventListener('popstate', () => done(), { once: true })); action(); await popped; }); }
         await travel(() => window.history.back()); expect(location.pathname).toBe('/profile'); expect(host.querySelector('dl')).not.toBeNull(); await travel(() => window.history.forward()); expect(location.pathname).toBe('/courses/one'); await act(async () => auth.logout()); await travel(() => window.history.back()); expect(location.pathname).toBe('/login'); expect(host.querySelector('dl')).toBeNull();
     });
-    it('preserves current-main FE01 dashboard, formatter runtime and utilities as an independent preview', async () => {
-        window.history.replaceState(null, '', '/courses');
-        await act(async () => root.render(<ThemeProvider theme={appTheme}><BrowserRouter><AuthProvider><AppRouter catalogue={<PresentationPreview />} /></AuthProvider></BrowserRouter></ThemeProvider>)); expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Your learning, in focus.'); expect(host.textContent).toContain('Demo workspace'); expect(host.textContent).not.toContain('Demo learner');
-        await click('Explore components'); expect(host.textContent).toContain('October 23, 2026'); expect(host.textContent).toContain('88.5%'); expect(host.textContent).toContain('1h 2m 5s'); expect(fetcher).not.toHaveBeenCalled();
-        await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('main h1')?.textContent).toBe('Welcome back');
-    });
-    it('keeps the hovered chart tooltip across column gaps without changing the selected day', async () => {
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<App />));
-        const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
-        const day = (name: string) => chart.querySelector<HTMLButtonElement>(`button[aria-label^="${name}:"]`)!;
-        const sun = day('Sun'), tue = day('Tue'), wed = day('Wed'), plot = tue.parentElement!;
-        await act(async () => sun.click());
-        await act(async () => tue.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
-        await act(async () => tue.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: plot })));
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
-        expect(sun.getAttribute('aria-pressed')).toBe('true');
-        await act(async () => {
-            plot.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: wed }));
-            wed.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: plot }));
-        });
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
-        await act(async () => wed.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Sun · 25 min');
-        expect(sun.getAttribute('aria-pressed')).toBe('true'); expect(fetcher).not.toHaveBeenCalled();
-    });
-    it.each(['card heading', 'column gap', 'page heading'] as const)('clears chart selection when clicking the %s and supports selecting again', async (target) => {
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<App />));
-        const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
-        const tue = chart.querySelector<HTMLButtonElement>('button[aria-label^="Tue:"]')!;
-        await act(async () => tue.click());
-        await act(async () => tue.querySelector('[data-study-bar]')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
-        expect(tue.getAttribute('aria-pressed')).toBe('true');
-        const outside = target === 'card heading' ? host.querySelector('#learning-rhythm-title')!
-            : target === 'column gap' ? tue.parentElement! : host.querySelector('main h1')!;
-        await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
-        expect(chart.querySelector('[aria-pressed="true"]')).toBeNull();
-        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
-        await act(async () => tue.click());
-        expect(tue.getAttribute('aria-pressed')).toBe('true');
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Tue · 45 min');
-        await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
-        const wed = chart.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
-        await act(async () => wed.focus());
-        expect(wed.getAttribute('aria-pressed')).toBe('true');
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
-        expect(fetcher).not.toHaveBeenCalled();
-    });
-    it('focuses each local preview heading after its initiating control is removed, without changing routes', async () => {
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<App />));
-        await click('Explore components'); expect(document.activeElement).toBe(host.querySelector('main h1'));
-        const authPreview = [...host.querySelectorAll<HTMLElement>('[role="button"]')].find((node) => node.textContent === 'Auth layout preview')!;
-        expect(authPreview).toBeTruthy(); await act(async () => authPreview.click());
-        expect(document.activeElement).toBe(host.querySelector('main h1'));
-        await click('Back to demo workspace'); expect(document.activeElement).toBe(host.querySelector('main h1'));
-        const search = host.querySelector<HTMLInputElement>('input[aria-label="Search sample lessons"]')!;
-        await act(async () => {
-            search.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'variables');
-            search.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-        await act(async () => vi.advanceTimersByTime(400));
-        expect(document.activeElement).toBe(search); expect(location.pathname).toBe('/preview'); expect(fetcher).not.toHaveBeenCalled();
-    });
-    it.each(['heading', 'search'] as const)('dismisses a hover tooltip with Escape while focus stays on the %s', async (target) => {
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<StrictMode><App /></StrictMode>));
-        const chart = host.querySelector('[aria-label="Sample weekly study minutes"]')!;
-        const day = chart.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
-        const focus = host.querySelector<HTMLElement>(target === 'heading' ? 'main h1' : 'input[aria-label="Search sample lessons"]')!;
-        const selected = chart.querySelector('[aria-pressed="true"]');
-        await act(async () => focus.focus());
-        await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
-        expect(document.activeElement).toBe(focus);
-        await act(async () => focus.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
-        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
-        expect(chart.querySelector('[aria-pressed="true"]')).toBe(selected);
-        expect(document.activeElement).toBe(focus);
-        await act(async () => vi.advanceTimersByTime(1000));
-        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
-        await act(async () => day.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
-        await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
-        expect(chart.querySelector('[role="tooltip"]')).toBeNull();
-        await act(async () => day.dispatchEvent(new MouseEvent('mousemove', { bubbles: true })));
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
-        expect(chart.querySelector('[aria-pressed="true"]')).toBe(selected);
-        await act(async () => focus.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-        await act(async () => day.focus());
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Wed · 25 min');
-        expect(document.activeElement).toBe(day);
-        expect(fetcher).not.toHaveBeenCalled();
-    });
-    it('cleans up the chart Escape listener on dismissal, invisible hover state and unmount under StrictMode', async () => {
-        const add = vi.spyOn(document, 'addEventListener'), remove = vi.spyOn(document, 'removeEventListener');
-        const keyCalls = (spy: typeof add | typeof remove) => spy.mock.calls.filter(([type, , options]) => type === 'keydown' && options === undefined);
-        const activeCount = () => keyCalls(add).length - keyCalls(remove).length;
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<StrictMode><App /></StrictMode>));
-        expect(activeCount()).toBe(1);
-        const initial = keyCalls(add).at(-1)![1];
-        const heading = host.querySelector<HTMLElement>('main h1')!;
-        await act(async () => heading.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-        expect(remove).toHaveBeenCalledWith('keydown', initial); expect(activeCount()).toBe(0);
-        const day = host.querySelector<HTMLButtonElement>('button[aria-label^="Wed:"]')!;
-        const outside = host.querySelector('#learning-rhythm-title')!;
-        await act(async () => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
-        await act(async () => day.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })));
-        await act(async () => day.dispatchEvent(new MouseEvent('mousemove', { bubbles: true })));
-        expect(activeCount()).toBe(1);
-        const hover = keyCalls(add).at(-1)![1];
-        await act(async () => day.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })));
-        expect(host.querySelector('[role="tooltip"]')).toBeNull();
-        expect(remove).toHaveBeenCalledWith('keydown', hover); expect(activeCount()).toBe(0);
-        await act(async () => day.focus()); expect(activeCount()).toBe(1);
-        const reopened = keyCalls(add).at(-1)![1];
-        await act(async () => root.render(null));
-        expect(remove).toHaveBeenCalledWith('keydown', reopened); expect(activeCount()).toBe(0);
-    });
-    it('observes Escape without consuming unrelated keys or overriding a handler that stops propagation', async () => {
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<App />));
-        const heading = host.querySelector<HTMLElement>('main h1')!, observer = vi.fn();
-        const stop = (event: Event) => event.stopPropagation();
-        document.addEventListener('keydown', observer);
-        try {
-            const other = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
-            await act(async () => heading.dispatchEvent(other));
-            expect(other.defaultPrevented).toBe(false); expect(observer).toHaveBeenCalledTimes(1);
-            expect(host.querySelector('[role="tooltip"]')).not.toBeNull();
-            heading.addEventListener('keydown', stop);
-            await act(async () => heading.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-            expect(host.querySelector('[role="tooltip"]')).not.toBeNull(); expect(observer).toHaveBeenCalledTimes(1);
-            heading.removeEventListener('keydown', stop);
-            const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-            await act(async () => heading.dispatchEvent(escape));
-            expect(host.querySelector('[role="tooltip"]')).toBeNull();
-            expect(escape.defaultPrevented).toBe(false); expect(observer).toHaveBeenCalledTimes(2);
-        } finally { heading.removeEventListener('keydown', stop); document.removeEventListener('keydown', observer); }
-    });
-    it('keeps sample-week arithmetic and keyboard day selection consistent in actual App', async () => {
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<App />));
-        const chart = host.querySelector('[role="group"][aria-label="Sample weekly study minutes"]')!;
-        const days = [...chart.querySelectorAll<HTMLButtonElement>('button')];
-        expect(days).toHaveLength(7);
-        expect(days.map((day) => day.getAttribute('aria-label'))).toEqual([30, 45, 25, 60, 40, 35, 25].map((minutes, i) => `${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i]}: ${minutes} sample study minutes`));
-        expect(host.textContent).toContain('4h 20m'); expect(host.textContent).toContain('260');
-        expect(days[3].getAttribute('aria-pressed')).toBe('true');
-        await act(async () => { days[3].focus(); days[3].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
-        expect(document.activeElement).toBe(days[4]); expect(days[4].getAttribute('aria-pressed')).toBe('true');
-        expect(chart.querySelector('[role="tooltip"]')?.textContent).toBe('Fri · 40 min');
-        await act(async () => days[4].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-        expect(chart.querySelector('[role="tooltip"]')).toBeNull(); expect(days[4].getAttribute('aria-describedby')).toBeNull();
-        expect(days[4].getAttribute('aria-pressed')).toBe('true');
-        expect(days[4].getAttribute('aria-label')).toBe('Fri: 40 sample study minutes');
-        await act(async () => days[4].dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })));
-        expect(document.activeElement).toBe(days[0]);
-        await act(async () => days[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
-        expect(document.activeElement).toBe(days[6]);
-        await act(async () => days[6].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })));
-        expect(document.activeElement).toBe(days[6]); expect(fetcher).not.toHaveBeenCalled();
-    });
-    it('shares one header search with debounced sample results, clear, Escape and empty recovery', async () => {
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<App />));
-        expect(host.querySelectorAll('input[aria-label="Search sample lessons"]')).toHaveLength(1);
-        const input = host.querySelector<HTMLInputElement>('input[aria-label="Search sample lessons"]')!;
-        const setQuery = async (value: string) => act(async () => {
-            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-        await setQuery('decisions');
-        expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
-        await act(async () => vi.advanceTimersByTime(399)); expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
-        await act(async () => vi.advanceTimersByTime(1)); expect(host.querySelectorAll('tbody tr')).toHaveLength(1);
-        expect(host.querySelector('tbody')?.textContent).toContain('Making decisions');
-        await act(async () => {
-            const clear = host.querySelector<HTMLButtonElement>('[aria-label="Clear sample lesson search"]')!;
-            clear.focus(); clear.click();
-        });
-        expect(document.activeElement).toBe(input);
-        expect(input.value).toBe(''); await act(async () => vi.advanceTimersByTime(400)); expect(host.querySelectorAll('tbody tr')).toHaveLength(3);
-        await setQuery('no such lesson'); await act(async () => vi.advanceTimersByTime(400)); expect(host.textContent).toContain('No sample lessons match');
-        await click('Clear filters'); await act(async () => vi.advanceTimersByTime(400)); expect(input.value).toBe('');
-        await setQuery('variables'); await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-        expect(input.value).toBe(''); expect(fetcher).not.toHaveBeenCalled();
-    });
-    it.each(['form submit', 'search button'])('%s focuses its local result section and static recommendations make no requests', async (trigger) => {
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<App />));
-        const section = host.querySelector<HTMLElement>('#sample-learning-path')!;
-        section.scrollIntoView = vi.fn();
-        await act(async () => {
-            if (trigger === 'search button') host.querySelector<HTMLButtonElement>('button[aria-label="Search sample lessons"]')!.click();
-            else host.querySelector('form[role="search"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        });
-        expect(document.activeElement).toBe(section); expect(section.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' });
-        expect(host.textContent).toContain('No live mastery calculation is performed.'); expect(fetcher).not.toHaveBeenCalled();
-        expect(location.pathname).toBe('/preview'); expect(localStorage.length + sessionStorage.length).toBe(0);
-    });
     it('composes the actual public catalogue/detail with current Auth navigation', async () => {
+        window.history.replaceState(null, '', '/courses');
         await act(async () => root.render(<App />));
-        expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Course Catalogue');
-        await click('View Syllabus'); expect(location.pathname).toBe(`/courses/${id}`); expect(host.querySelector('h1')?.textContent).toBe('Course details');
-        await click('Back to Catalogue'); expect(location.pathname).toBe('/courses');
+        expect(location.pathname).toBe('/courses'); expect(host.textContent).toContain('Course catalogue');
+        await act(async () => host.querySelector<HTMLAnchorElement>('a[data-tile-link]')!.click()); expect(location.pathname).toBe(`/courses/${id}`); expect(host.querySelector('h1')?.textContent).toBe('Course details');
+        expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Catalogue');
+        const back = [...host.querySelectorAll<HTMLAnchorElement>('main a')].find((link) => link.textContent === 'Catalogue')!;
+        await act(async () => back.click()); expect(location.pathname).toBe('/courses');
         expect(fetcher.mock.calls.every(([, init]) => !new Headers((init as RequestInit).headers).has('Authorization'))).toBe(true);
-        await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('h1')?.textContent).toBe('Welcome back');
-    });
-
-    it('associates the active sample filter tab with its result panel', async () => {
-        window.history.replaceState(null, '', '/preview');
-        await act(async () => root.render(<App />));
-        const panel = host.querySelector('[role="tabpanel"]')!;
-        for (const label of ['All lessons', 'Completed', 'To explore']) {
-            const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((node) => node.textContent === label)!;
-            await act(async () => tab.click());
-            expect(tab.getAttribute('aria-selected')).toBe('true');
-            expect(tab.getAttribute('aria-controls')).toBe(panel.id);
-            expect(panel.getAttribute('aria-labelledby')).toBe(tab.id);
-        }
-        expect(fetcher).not.toHaveBeenCalled();
+        await click('Sign in'); expect(location.pathname).toBe('/login'); expect(host.querySelector('h1')?.textContent).toBe('Sign in');
     });
 
 });
@@ -361,15 +160,108 @@ describe('real declarative routing and Profile', () => {
 
 it.each(['Instructor', 'Administrator'])('denies %s before mounting My Courses or issuing private requests', async (role) => {
     await mount('/courses'); await login('Role test', role); await go('/my-courses');
-    expect(host.querySelector('main h1')?.textContent).toBe('Access is denied.');
+    expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
+    expect(host.textContent).toContain('This page is for learners.');
     expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/me/courses')).toHaveLength(0);
-    expect(host.querySelector('nav[aria-label="Account navigation"] a[href="/my-courses"]')).toBeNull();
+    expect(host.querySelector('header a[href="/my-courses"]')).toBeNull();
 });
 it('mounts real learner My Courses with authenticated transport and removes it at expiry', async () => {
     await mount('/courses'); await login();
     fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? { ...page, content: [], totalElements: 0, totalPages: 0 } : page)));
-    await go('/my-courses'); expect(host.querySelector('main h1')?.textContent).toBe('My Courses'); expect(host.textContent).toContain('No courses found');
+    await go('/my-courses'); expect(host.querySelector('main h1')?.textContent).toBe('My courses'); expect(host.textContent).toContain("You haven't joined a course yet");
+    expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('My courses');
     const [, init] = fetcher.mock.calls.find(([url]) => new URL(url).pathname === '/api/me/courses')!;
     expect(init.headers.has('Authorization')).toBe(true);
-    await act(async () => vi.advanceTimersByTime(900000)); expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('My Courses');
+    await act(async () => vi.advanceTimersByTime(900000)); expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('My courses');
+});
+
+const membershipPage = (status: 'active' | 'left' = 'active') => ({ ...page, content: [{ ...course, title: 'Active course', status }] });
+class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
+it('serves the public landing page at / with public navigation and no request', async () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub); vi.stubGlobal('DOMMatrixReadOnly', class { m22 = 1; });
+    await mount('/');
+    for (let attempt = 0; attempt < 50 && !host.textContent?.includes('Illustration'); attempt++) await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(host.querySelector('main h1')?.textContent).toBe('Learn programming at the pace of what you actually know.');
+    const nav = host.querySelector('nav[aria-label="Main navigation"]')!;
+    expect([...nav.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([['Catalogue', '/courses'], ['Sign in', '/login'], ['Create account', '/register']]);
+    expect(host.querySelector('a[href="#main-content"]')?.textContent).toBe('Skip to main content');
+    expect(host.textContent).toContain('Illustration · not learner data');
+    expect(fetcher).not.toHaveBeenCalled();
+    await click('Catalogue'); expect(location.pathname).toBe('/courses');
+    expect(host.querySelector('header a[aria-label="CodeMastery home"]')?.getAttribute('href')).toBe('/');
+});
+it.each([['Learner', '/home'], ['Instructor', '/courses'], ['Administrator', '/courses']])('sends a signed-in %s from / to %s and points the logo there', async (role, start) => {
+    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? membershipPage() : page)));
+    await mount('/courses'); await login('Role test', role); await go('/');
+    expect(location.pathname).toBe(start);
+    expect(host.querySelector('header a[aria-label="CodeMastery home"]')?.getAttribute('href')).toBe(start);
+});
+it('shows a Learner home of active courses from the membership API only', async () => {
+    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? membershipPage() : page)));
+    await mount('/courses'); await login();
+    expect([...host.querySelectorAll('header nav a')].map((link) => link.textContent)).toEqual(['Home', 'Catalogue', 'My courses']);
+    await go('/home');
+    expect(host.querySelector('main h1')?.textContent).toBe('Welcome back, Person A');
+    expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Home');
+    const call = fetcher.mock.calls.find(([url]) => new URL(url).pathname === '/api/me/courses')!;
+    expect(new URL(call[0]).searchParams.get('status')).toBe('active'); expect(call[1].headers.has('Authorization')).toBe(true);
+    const list = host.querySelector('ul[aria-label="Your active courses"]')!;
+    expect(list.textContent).toContain('Active course'); expect(list.textContent).toContain('Instructor · Instructor Demo');
+    expect(list.querySelector('a')?.getAttribute('href')).toBe(`/courses/${id}`);
+    // Resume, progress and recommendations have no contract yet, so their sections are absent.
+    expect(host.textContent).not.toMatch(/Continue learning|Up next|lessons ·|Resume/);
+    expect(fetcher.mock.calls.every(([url]) => ['/api/auth/login', '/api/courses', '/api/me/courses'].includes(new URL(url).pathname))).toBe(true);
+});
+it('links "See all N active courses" to My courses filtered by Active, which reads ?status= and keeps Joined as the default', async () => {
+    // 25 active memberships: Home lists the first 20 and links to the rest.
+    const statusOf = (url: string) => new URL(url).searchParams.get('status');
+    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses'
+        ? { ...membershipPage(), totalElements: statusOf(url) === 'active' ? 25 : 28, totalPages: 2 } : page)));
+    await mount('/courses'); await login(); await go('/home');
+    const more = [...host.querySelectorAll<HTMLAnchorElement>('main a')].find((link) => link.textContent === 'See all 25 active courses in My courses')!;
+    expect(more.getAttribute('href')).toBe('/my-courses?status=active');
+    fetcher.mockClear(); await act(async () => more.click());
+    expect(location.pathname + location.search).toBe('/my-courses?status=active');
+    const lastStatus = () => statusOf(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/me/courses').at(-1)![0]);
+    const pressed = () => host.querySelector('[aria-label="Membership status"] [aria-pressed="true"]')?.textContent;
+    expect(lastStatus()).toBe('active'); expect(pressed()).toBe('Active'); expect(host.textContent).toContain('25 courses');
+    // Choosing a filter updates the URL; Joined removes the parameter again.
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Membership status"] button')].find((b) => b.textContent === 'Completed')!.click());
+    expect(location.search).toBe('?status=completed'); expect(lastStatus()).toBe('completed');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Membership status"] button')].find((b) => b.textContent === 'Joined')!.click());
+    expect(location.search).toBe(''); expect(lastStatus()).toBe('joined');
+    // No or unknown values fall back to Joined.
+    for (const search of ['', '?status=none', '?status=ACTIVE', '?status=']) {
+        // Arrive fresh each time (from the catalogue), as a link or typed URL would.
+        await go('/courses'); fetcher.mockClear(); await go(`/my-courses${search}`);
+        expect(lastStatus(), search).toBe('joined'); expect(pressed(), search).toBe('Joined');
+    }
+});
+it('guards Learner home: anonymous visitors sign in, other roles are denied without a request', async () => {
+    await mount('/home'); expect(location.pathname).toBe('/login');
+    await mount('/courses'); await login('Teacher', 'Instructor'); await go('/home');
+    expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
+    expect(fetcher.mock.calls.filter(([url]) => new URL(url).pathname === '/api/me/courses')).toHaveLength(0);
+});
+it('says the session ended on the sign-in page after expiry, once, but not after signing out', async () => {
+    await mount('/courses'); await login(); await go('/profile');
+    await act(async () => vi.advanceTimersByTime(900000));
+    expect(location.pathname).toBe('/login');
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('Your session ended. Sign in again to continue.');
+    await go('/courses'); await go('/login');
+    expect(host.textContent).not.toContain('Your session ended');
+    await go('/courses'); await login(); await signOutFromMenu();
+    expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('Your session ended');
+});
+it('shows Learner home empty and retryable error states', async () => {
+    let fail = true;
+    fetcher.mockImplementation((url: string) => {
+        if (new URL(url).pathname !== '/api/me/courses') return Promise.resolve(json(page));
+        return Promise.resolve(fail ? json({ type: 'about:blank', title: 'Internal Server Error', status: 500, detail: 'Unavailable.', instance: '/api/me/courses' }, 500)
+            : json({ ...page, content: [], totalElements: 0, totalPages: 0 }));
+    });
+    await mount('/courses'); await login(); await go('/home');
+    expect(host.textContent).toContain("Couldn't load your courses");
+    fail = false; await click('Try again');
+    expect(host.textContent).toContain("You haven't joined a course yet"); expect(host.querySelector('a[href="/courses"]')?.textContent).toBeTruthy();
 });

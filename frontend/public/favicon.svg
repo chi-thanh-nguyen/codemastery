@@ -1,20 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254">
 <title>CodeMastery logo</title>
 <defs>
-    <linearGradient id="cBlue" gradientUnits="userSpaceOnUse" x1="230" y1="600" x2="965" y2="600">
-      <stop offset="0" stop-color="#0866F2"/><stop offset="0.5" stop-color="#0967F2"/><stop offset="1" stop-color="#0B68F2"/>
+    <!-- Palette tuned for the ink frame (#0A0B0F): an electric-blue C, sky outer nodes and one
+         violet focal node. Geometry is unchanged. See DESIGN.md › Logo. -->
+    <linearGradient id="cBlue" gradientUnits="userSpaceOnUse" x1="260" y1="170" x2="900" y2="1050">
+      <stop offset="0" stop-color="#5A96FF"/><stop offset="0.55" stop-color="#3A76FA"/><stop offset="1" stop-color="#2A62F0"/>
     </linearGradient>
     <linearGradient id="barBlue" gradientUnits="userSpaceOnUse" x1="607" y1="870" x2="1037" y2="870">
-      <stop offset="0" stop-color="#0866F2"/><stop offset="1" stop-color="#0A67F2"/>
+      <stop offset="0" stop-color="#2A62F0"/><stop offset="1" stop-color="#4C8BFF"/>
     </linearGradient>
-    <linearGradient id="nodeDark" gradientUnits="userSpaceOnUse" x1="630" y1="625" x2="781" y2="625">
-      <stop offset="0" stop-color="#0866F1"/><stop offset="1" stop-color="#0A67F2"/>
+    <linearGradient id="nodeDark" gradientUnits="userSpaceOnUse" x1="640" y1="560" x2="775" y2="690">
+      <stop offset="0" stop-color="#B9A4FF"/><stop offset="1" stop-color="#8C6DFA"/>
     </linearGradient>
-    <linearGradient id="nodeLight" gradientUnits="userSpaceOnUse" x1="410" y1="620" x2="1038" y2="620">
-      <stop offset="0" stop-color="#3B9CFA"/><stop offset="1" stop-color="#3D9CFA"/>
+    <linearGradient id="nodeLight" gradientUnits="userSpaceOnUse" x1="410" y1="430" x2="1038" y2="810">
+      <stop offset="0" stop-color="#46C6FA"/><stop offset="1" stop-color="#1FA0F0"/>
     </linearGradient>
     <linearGradient id="connector" gradientUnits="userSpaceOnUse" x1="550" y1="630" x2="885" y2="630">
-      <stop offset="0" stop-color="#0B68F2"/><stop offset="1" stop-color="#0866F2"/>
+      <stop offset="0" stop-color="#7BA6FF"/><stop offset="1" stop-color="#5A96FF"/>
     </linearGradient>
   </defs>
   <g id="hexagonal-c">

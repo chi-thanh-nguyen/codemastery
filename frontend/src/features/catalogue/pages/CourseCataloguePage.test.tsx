@@ -20,8 +20,9 @@ async function mount(select = vi.fn()) { await act(async () => root.render(<Cour
 describe('catalogue page on the merged client contract', () => {
     it('renders server totals, detail navigation and approved page size', async () => {
         const select = await mount(); expect(getPublishedCourses).toHaveBeenCalledWith(0, 20, expect.objectContaining({ signal: expect.any(AbortSignal), isCurrent: expect.any(Function) }));
-        expect(host.textContent).toContain('Showing 1 of 21');
-        await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'View Syllabus')!.click()); expect(select).toHaveBeenCalledWith(id);
+        expect(host.textContent).toContain('Showing 1 of 21 published courses');
+        await act(async () => host.querySelector<HTMLAnchorElement>('a[data-tile-link]')!.click()); expect(select).toHaveBeenCalledWith(id);
+        expect(host.querySelector('a[data-tile-link]')?.textContent).toBe('Programming');
         await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click()); expect(vi.mocked(getPublishedCourses).mock.calls.at(-1)?.slice(0, 2)).toEqual([1, 20]);
     });
     it('shows loading, ignores a superseded page, and cancels work on unmount', async () => {
@@ -39,9 +40,9 @@ describe('catalogue page on the merged client contract', () => {
     });
     it('renders empty results and permits an explicit retry after safe errors', async () => {
         vi.mocked(getPublishedCourses).mockRejectedValueOnce(new ApiError('network', 'Unable to connect. Please try again.'));
-        await mount(); expect(host.textContent).toContain('Could not load catalogue');
+        await mount(); expect(host.textContent).toContain("Couldn't load the catalogue");
         vi.mocked(getPublishedCourses).mockResolvedValue({ ...page, content: [], totalElements: 0, totalPages: 0 });
-        await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!.click()); expect(host.textContent).toContain('No published courses found');
+        await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Try again')!.click()); expect(host.textContent).toContain('No published courses yet');
     });
 });
 
@@ -51,6 +52,20 @@ it('submits search/filter criteria and resets a later page to zero', async () =>
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, ' basics '); input.dispatchEvent(new Event('input', { bubbles: true })); });
     await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(vi.mocked(getPublishedCourses).mock.calls.at(-1)).toEqual([0, 20, expect.objectContaining({ q: 'basics', prerequisites: 'any' })]);
+});
+
+it('applies a prerequisite filter with the last submitted search, never unsent text (submit-only search)', async () => {
+    await mount();
+    const input = host.querySelector<HTMLInputElement>('input:not([aria-hidden])')!;
+    const type = (value: string) => act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    const filter = (label: string) => act(async () => [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Prerequisites"] button')].find((button) => button.textContent === label)!.click());
+    const last = () => vi.mocked(getPublishedCourses).mock.calls.at(-1)![2];
+    await type('loops'); await filter('No prerequisites');
+    expect(last()).toEqual(expect.objectContaining({ q: '', prerequisites: 'none' }));
+    await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(last()).toEqual(expect.objectContaining({ q: 'loops', prerequisites: 'none' }));
+    await type('draft text'); await filter('Prerequisites described');
+    expect(last()).toEqual(expect.objectContaining({ q: 'loops', prerequisites: 'described' }));
 });
 
 function catalogueResult(total: number, index: number): CoursePage {
@@ -73,10 +88,12 @@ it.each([[21, 20], [61, 21]])('recovers catalogue pagination when %i results shr
         await act(async () => host.querySelector<HTMLButtonElement>(`[aria-label="Go to page ${oldLast + 1}"]`)!.click());
         expect(vi.mocked(getPublishedCourses).mock.calls.map(([index]) => index)).toEqual([0, oldLast, last]);
         expect(host.textContent).toContain('Loading available courses');
-        expect(host.textContent).not.toContain('No published courses found');
+        expect(host.textContent).not.toContain('No published courses yet');
         await act(async () => recover(catalogueResult(after, last)));
-        expect(host.textContent).toContain(`Showing ${Math.min(20, after - last * 20)} of ${after}`);
-        expect(seen.every((text) => !text.includes('No published courses found'))).toBe(true);
+        const shown = Math.min(20, after - last * 20), first = last * 20 + 1;
+        expect(host.textContent).toContain(`Showing ${shown === 1 ? first : `${first}–${first + shown - 1}`} of ${after}`);
+        expect(host.querySelectorAll('a[data-tile-link]')).toHaveLength(shown);
+        expect(seen.every((text) => !text.includes('No published courses yet'))).toBe(true);
         expect(getPublishedCourses).toHaveBeenCalledTimes(3);
     } finally { observer.disconnect(); }
 });
@@ -84,16 +101,16 @@ it.each([21, 0])('does not issue an extra catalogue request for valid or zero re
     vi.mocked(getPublishedCourses).mockResolvedValueOnce(catalogueResult(21, 0)).mockResolvedValueOnce(catalogueResult(total, 1));
     await mount(); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click());
     expect(vi.mocked(getPublishedCourses).mock.calls.map(([index]) => index)).toEqual([0, 1]);
-    expect(host.textContent?.includes('No published courses found')).toBe(total === 0);
+    expect(host.textContent?.includes('No published courses yet')).toBe(total === 0);
     expect(host.textContent).not.toContain('Loading available courses');
 });
 it('retries a failed catalogue recovery on the corrected page', async () => {
     vi.mocked(getPublishedCourses).mockResolvedValueOnce(catalogueResult(21, 0)).mockResolvedValueOnce(catalogueResult(20, 1))
         .mockRejectedValueOnce(new ApiError('network', 'Unable to connect. Please try again.')).mockResolvedValueOnce(catalogueResult(20, 0));
     await mount(); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Go to page 2"]')!.click());
-    expect(host.textContent).toContain('Could not load catalogue'); expect(host.textContent).not.toContain('No published courses found');
-    await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Retry')!.click());
-    expect(host.textContent).toContain('Showing 20 of 20');
+    expect(host.textContent).toContain("Couldn't load the catalogue"); expect(host.textContent).not.toContain('No published courses yet');
+    await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Try again')!.click());
+    expect(host.textContent).toContain('Showing 1–20 of 20');
     expect(vi.mocked(getPublishedCourses).mock.calls.map(([index]) => index)).toEqual([0, 1, 0, 0]);
 });
 it('cancels catalogue recovery and ignores its late result after filters change', async () => {
@@ -105,7 +122,7 @@ it('cancels catalogue recovery and ignores its late result after filters change'
     await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(options.signal?.aborted).toBe(true); expect(options.isCurrent?.()).toBe(false);
     await act(async () => recover(catalogueResult(20, 0)));
-    expect(host.textContent).toContain('Showing 1 of 1'); expect(getPublishedCourses).toHaveBeenCalledTimes(4);
+    expect(host.textContent).toContain('Showing 1 of 1 published course'); expect(getPublishedCourses).toHaveBeenCalledTimes(4);
 });
 
 it('keeps OpenAPI and the search input on the approved UTF-16-unit limit', async () => {

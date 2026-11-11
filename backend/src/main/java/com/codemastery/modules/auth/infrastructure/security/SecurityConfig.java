@@ -75,6 +75,9 @@ public class SecurityConfig {
                         .accessDeniedHandler(restSecurityErrorHandler))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(PUBLIC_OPERATIONS).permitAll()
+                        // CT17 P4: nondetailed health for the private operator probe only. Ingress does not
+                        // proxy /actuator; probe groups and other Actuator endpoints retain default-deny.
+                        .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/me/courses", "/api/courses/{courseId}/membership").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/membership").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/membership").hasRole("LEARNER")

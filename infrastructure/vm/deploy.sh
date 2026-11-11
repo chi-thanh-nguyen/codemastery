@@ -463,7 +463,7 @@ def env_of(s):
 
 allowed_environment = {
     "postgres": {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"},
-    "minio": {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"},
+    "minio": {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_BROWSER"},
     "minio-init": {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "STORAGE_ACCESS_KEY",
                    "STORAGE_SECRET_KEY", "STORAGE_BUCKET", "STORAGE_REGION"},
     "backend": {"DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
@@ -479,24 +479,52 @@ names = {"postgres", "minio", "minio-init", "backend", "frontend"}
 if set(svc) != names:
     problems.append("effective configuration must contain exactly the five approved services")
 
-# The local Compose foundation uses only these service options. Keep the release
-# model closed to hooks, deploy extensions, log sinks, tmpfs mounts, secrets,
-# configs, and future options that could change execution or security policy.
+# The local Compose foundation uses only these service options, plus the release
+# runtime hardening below. Keep the release model closed to hooks, deploy
+# extensions, log sinks, secrets, configs, and future options that could change
+# execution or security policy.
+hardening_options = {"cap_drop", "read_only", "security_opt", "tmpfs"}
 allowed_service_options = {
-    "postgres": {"command", "depends_on", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"},
-    "minio": {"command", "entrypoint", "environment", "image", "networks", "ports", "restart", "volumes"},
-    "minio-init": {"command", "depends_on", "entrypoint", "environment", "image", "networks", "restart"},
-    "backend": {"build", "command", "depends_on", "entrypoint", "environment", "image", "networks", "ports", "restart"},
-    "frontend": {"build", "command", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"},
+    "postgres": {"cap_add", "command", "depends_on", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"} | hardening_options,
+    "minio": {"command", "entrypoint", "environment", "image", "networks", "ports", "restart", "volumes"} | hardening_options,
+    "minio-init": {"command", "depends_on", "entrypoint", "environment", "image", "networks", "restart"} | hardening_options,
+    "backend": {"build", "command", "depends_on", "entrypoint", "environment", "image", "networks", "ports", "restart"} | hardening_options,
+    "frontend": {"build", "command", "entrypoint", "environment", "healthcheck", "image", "networks", "ports", "restart", "volumes"} | hardening_options,
 }
 for n, s in svc.items():
     extra = set(s) - allowed_service_options.get(n, set())
     if extra:
         problems.append("service '%s' contains unsupported Compose options: %s" % (n, ", ".join(sorted(extra))))
     executable_or_unapproved = {"pre_start", "post_start", "pre_stop", "post_stop",
-                                "deploy", "logging", "tmpfs", "configs", "secrets"}
+                                "deploy", "logging", "configs", "secrets"}
     if executable_or_unapproved.intersection(s):
-        problems.append("service '%s' contains an unapproved lifecycle, deploy, logging, tmpfs, config or secret option" % n)
+        problems.append("service '%s' contains an unapproved lifecycle, deploy, logging, config or secret option" % n)
+
+# Release runtime hardening (docs/deployment.md, "DP01 pre-release security
+# hardening"): each service needs exactly no-new-privileges, cap_drop ALL and a
+# read-only root filesystem, with only its reviewed capabilities and tmpfs paths.
+# PostgreSQL's entrypoint needs these five as root to prepare its directories and
+# hand off through su-exec; nothing else keeps a capability.
+runtime_hardening = {
+    "postgres": (["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"], ["/var/run/postgresql"]),
+    "minio": ([], []),
+    "minio-init": ([], ["/tmp"]),
+    "backend": ([], ["/tmp"]),
+    "frontend": ([], ["/tmp"]),
+}
+for n, s in svc.items():
+    want_caps, want_tmpfs = runtime_hardening.get(n, ([], []))
+    security_opt = s.get("security_opt") or []
+    cap_add = s.get("cap_add") or []
+    if set(security_opt) - {"no-new-privileges:true"} or set(cap_add) - set(want_caps):
+        problems.append("service '%s' requests an unapproved privilege, host namespace, identity or external environment" % n)
+    if (security_opt != ["no-new-privileges:true"] or s.get("cap_drop") != ["ALL"]
+            or sorted(cap_add) != want_caps or s.get("read_only") is not True):
+        problems.append("service '%s' must run with exactly no-new-privileges, cap_drop ALL, %s and a read-only root filesystem"
+                        % (n, "cap_add " + ", ".join(want_caps) if want_caps else "no cap_add"))
+    if sorted(s.get("tmpfs") or []) != want_tmpfs:
+        problems.append("service '%s' contains unsupported Compose options: %s"
+                        % (n, "tmpfs must be exactly " + ", ".join(want_tmpfs) if want_tmpfs else "tmpfs"))
 
 if set(cfg) - {"name", "services", "networks", "volumes"}:
     problems.append("effective configuration contains unsupported top-level Compose options")
@@ -531,8 +559,9 @@ for n, s in svc.items():
     # A release cannot smuggle another service into an up/run dependency traversal.
     if set(s.get("depends_on", {})) - names:
         problems.append("service '%s' has an unapproved dependency" % n)
-    elevated_options = ('cap_add', 'cap_drop', 'devices', 'device_cgroup_rules',
-                        'security_opt', 'userns_mode', 'cgroup', 'cgroup_parent',
+    # cap_add, cap_drop and security_opt are checked exactly above.
+    elevated_options = ('devices', 'device_cgroup_rules',
+                        'userns_mode', 'cgroup', 'cgroup_parent',
                         'uts', 'volumes_from', 'group_add', 'runtime',
                         'use_api_socket', 'env_file', 'user', 'sysctls')
     if (s.get("privileged") or s.get("pid") or s.get("ipc")
@@ -550,8 +579,11 @@ for n, s in svc.items():
 minio = svc.get("minio", {})
 if minio.get("entrypoint") is not None or minio.get("command") != ["server", "/data", "--console-address", ":9001"]:
     problems.append("minio must use the approved server command and image entrypoint")
-if set(env_of(minio)) - {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"}:
+if set(env_of(minio)) - {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_BROWSER"}:
     problems.append("minio contains unapproved environment bindings")
+# The release disables the embedded Console; only the exact value is accepted.
+if env_of(minio).get("MINIO_BROWSER") != "off":
+    problems.append("minio must disable the embedded Console with MINIO_BROWSER=off")
 
 # P2/B2: only the frontend ingress is published; data/backend stay private.
 for n in ("postgres", "minio", "minio-init", "backend"):
@@ -825,6 +857,10 @@ try:
                 raise ValueError()
             if key.startswith(('SPRING_', 'SERVER_', 'CODEMASTERY_', 'HIBERNATE_')) and key not in expected:
                 raise ValueError()
+    # A baked MINIO_* default (for example MINIO_CONFIG_ENV_FILE) could re-enable
+    # the Console or replace the configured credentials behind the Compose model.
+    if service == 'minio' and any(key.startswith('MINIO_') for key in environment):
+        raise ValueError()
     if not image.get('Entrypoint') and not image.get('Cmd'):
         raise ValueError()
     if service == 'frontend':
@@ -1043,6 +1079,8 @@ expected = cfg["services"][sys.argv[1]].get("environment",{})
 if any(actual.get(k) != str(v) for k,v in expected.items()):
     sys.exit(1)
 if sys.argv[1] == "backend" and any(forbidden_backend_key(k) or (k.startswith(("SPRING_", "SERVER_", "CODEMASTERY_", "HIBERNATE_")) and k not in expected) for k in actual):
+    sys.exit(1)
+if sys.argv[1] == "minio" and {k for k in actual if k.startswith("MINIO_")} != {k for k in expected if k.startswith("MINIO_")}:
     sys.exit(1)
 if sys.argv[1] in ("backend", "postgres", "minio", "minio-init", "frontend"):
     service = cfg["services"][sys.argv[1]]
@@ -1622,7 +1660,8 @@ contain_failure() {
     fi
   fi
   if [[ -n "${STAGED_FRONTEND_CID}" ]]; then
-    docker stop --time "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
+    [[ "${STAGED_FRONTEND_CID}" =~ ^[0-9a-f]{64}$ ]] \
+      && timeout --signal=KILL "${WAIT_TIMEOUT}" docker stop --timeout "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
       || { printf 'ERROR: Private frontend probe cleanup failed; inspect the one-off container.\n' >&2; rc=1; }
   fi
   exit "${rc}"
@@ -1749,6 +1788,40 @@ wait_backend_health() {
   log "SERVICE_HEALTH: ${HEALTH_RESULT}"
 }
 
+staged_frontend_present() {
+  local inventory
+  # A successful empty inventory proves absence; a failed inspect does not.
+  # Full IDs avoid prefix matches, and unexpected/multiple results fail closed.
+  inventory="$(timeout --signal=KILL "$1" docker container ls --all --quiet --no-trunc \
+    --filter "id=${STAGED_FRONTEND_CID}" 2>/dev/null)" \
+    || fail "Cannot verify private frontend probe inventory; ingress remains closed."
+  [[ -n "${inventory}" ]] || return 1
+  [[ "${inventory}" == "${STAGED_FRONTEND_CID}" ]] \
+    || fail "Private frontend probe inventory is inconsistent; ingress remains closed."
+}
+
+remove_staged_frontend() {
+  [[ "${STAGED_FRONTEND_CID}" =~ ^[0-9a-f]{64}$ ]] \
+    || fail "Private frontend probe identity is not a full container ID."
+  # Each phase is bounded by the existing operator-supplied readiness timeout:
+  # initial inventory, stop request, then the entire auto-removal polling window.
+  if staged_frontend_present "${WAIT_TIMEOUT}"; then
+    timeout --signal=KILL "${WAIT_TIMEOUT}" docker stop --timeout "${WAIT_TIMEOUT}" "${STAGED_FRONTEND_CID}" >/dev/null 2>&1 \
+      || fail "Could not stop private frontend probe; ingress remains closed."
+    local deadline=$(( SECONDS + WAIT_TIMEOUT )) remaining
+    while :; do
+      remaining=$(( deadline - SECONDS ))
+      (( remaining > 0 )) \
+        || fail "Private frontend probe was not removed; ingress remains closed."
+      if ! staged_frontend_present "${remaining}"; then
+        break
+      fi
+      sleep 1
+    done
+  fi
+  STAGED_FRONTEND_CID=""
+}
+
 run_deploy() {
   verify_images
   verify_private_dependencies
@@ -1775,6 +1848,8 @@ SQL
   verify_images
   assert_release_configuration
   verify_private_tls
+  log "Removing private frontend probe before public ingress."
+  remove_staged_frontend
   log "Private release checks passed. Starting the sole HTTPS ingress."
   "${COMPOSE[@]}" up -d --no-build --pull never --no-deps --wait --wait-timeout "${WAIT_TIMEOUT}" frontend \
     || fail "Frontend startup failed; stopping application services."

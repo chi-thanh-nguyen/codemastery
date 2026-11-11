@@ -1,67 +1,20 @@
-import React from 'react';
-import {
-    Card,
-    CardContent,
-    CardActions,
-    Typography,
-    Button,
-    Box,
-} from '@mui/material';
+import type { ReactNode } from 'react';
 import type { CourseSummary } from '../types/catalogueTypes';
+import { CourseTile } from '../../../shared/components/Tile';
+
+/** FE07: a missing public display name renders this fallback; never an invented name. */
+export const instructorLabel = (name: string | null) => name ?? 'Instructor name unavailable';
 
 export interface CourseCardProps {
-    course: CourseSummary;
+    course: Pick<CourseSummary, 'id' | 'title' | 'description' | 'instructorDisplayName'>;
     onViewDetails: (courseId: string) => void;
+    href?: string;
+    status?: ReactNode;
+    headingLevel?: 'h2' | 'h3';
 }
 
-export const CourseCard: React.FC<CourseCardProps> = ({
-    course,
-    onViewDetails,
-}) => {
-    return (
-        <Card
-            sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                height: '100%',
-                transition: 'transform 0.2s, box-shadow 0.2s',
-                '&:hover': {
-                    transform: 'translateY(-2px)',
-                    boxShadow: 3,
-                },
-            }}
-        >
-            <CardContent sx={{ flexGrow: 1 }}>
-                <Typography variant="h6" component="h2" sx={{ fontWeight: 'bold', mb: 1, overflowWrap: 'anywhere' }}>
-                    {course.title}
-                </Typography>
-                <Typography
-                    variant="body2"
-                    color="text.secondary"
-                    sx={{
-                        display: '-webkit-box',
-                        WebkitLineClamp: 3,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
-                    }}
-                >
-                    {course.description}
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 2, overflowWrap: 'anywhere' }}>
-                    Instructor: {course.instructorDisplayName ?? 'Instructor name unavailable'}
-                </Typography>
-            </CardContent>
-            <CardActions sx={{ px: 2, pb: 2 }}>
-                <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button
-                        size="small"
-                        variant="contained"
-                        onClick={() => onViewDetails(course.id)}
-                    >
-                        View Syllabus
-                    </Button>
-                </Box>
-            </CardActions>
-        </Card>
-    );
-};
+/** Catalogue course tile with real published data only. */
+export function CourseCard({ course, onViewDetails, href, status, headingLevel = 'h2' }: CourseCardProps) {
+    return <CourseTile title={course.title} description={course.description} byline={`Instructor · ${instructorLabel(course.instructorDisplayName)}`}
+        href={href ?? `/courses/${encodeURIComponent(course.id)}`} onOpen={() => onViewDetails(course.id)} status={status} headingLevel={headingLevel} />;
+}

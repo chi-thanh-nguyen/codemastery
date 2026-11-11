@@ -76,6 +76,150 @@ remain pending. This does not retroactively satisfy pre-merge documentation
 timing, rewrite the immutable canonical tree, change ownership/hierarchy, approve
 unrelated CT14/CT37 scope or establish Issue #37 completion.
 
+## Bounded UI/UX r1 frontend and E2E inventory additions — 6 November 2026
+
+On 6 November 2026 (Asia/Ho_Chi_Minh) the Project Leader/Owner's instruction
+“CodeMastery — Finalize UI/UX Implementation, Verification & Local Commit”
+approved the frontend structure needed for the UI/UX redesign of the local
+`DESIGN.md` revision `DESIGN-2026-11-06-r1`, including `frontend/src/app/preview/`,
+and the Playwright E2E infrastructure. The additions, now shown in the tree below,
+are:
+
+- `frontend/src/app/preview/` — the isolated design preview served by the existing
+  `/preview` route as a lazily loaded chunk: `PreviewApp.tsx` (screen registry and
+  shell), `LearnerPreview.tsx`, `InstructorPreview.tsx`, `AdminPreview.tsx`,
+  `PublicPreview.tsx`, `DesignReference.tsx` (S26), `previewKit.tsx` (query-parameter
+  navigation, sample-data banner), `fixtures.ts` (synthetic sample data) and
+  `PreviewApp.test.tsx`. Only the lazy import in `App.tsx` reaches it; it calls no
+  API and reads no session.
+- `frontend/src/app/theme/figtree-latin-wght.woff2` and `frontend/public/figtree-OFL.txt`
+  — the self-hosted Figtree variable font (`@fontsource-variable/figtree` 5.2.10,
+  SIL Open Font License 1.1) and its licence.
+- `frontend/src/shared/components/` — `CodeBlock.tsx`, `DataTable.tsx`,
+  `GuidanceStack.tsx`, `PathSpine.tsx`, `StatusPill.tsx`, `Tile.tsx`, `ViewRail.tsx`:
+  presentation primitives used by several features.
+- `frontend/src/features/catalogue/pages/LandingPage.tsx` (S25) and
+  `frontend/src/features/learning/pages/LearnerHomePage.tsx` (S6) — presentation for
+  routes that remain unapproved; neither is routed in production.
+- Tests: `frontend/src/features/assessment/components/assessment.test.tsx`,
+  `frontend/src/features/instructor/course-management/components/QuestionForm.test.ts`,
+  `frontend/src/features/mastery/utils/masteryGraphLayout.test.ts`.
+- `e2e/fixtures/local-stack.ts` (Playwright global setup for a disposable local
+  stack), `e2e/fixtures/catalogue-fixture.sql` (deterministic catalogue fixture for
+  that stack only) and `e2e/fixtures/stack-down.mjs` (removes leftovers of an
+  interrupted run). The existing `e2e/package.json`, `package-lock.json`,
+  `playwright.config.ts`, `fixtures/auth-fixture.ts` and `tests/learner-flow.spec.ts`
+  now hold the suite; `tests/adaptive-flow.spec.ts` stays empty.
+
+Removed as verified unused: `frontend/src/app/theme/plus-jakarta-sans-latin-wght.woff2`
+and `frontend/public/plus-jakarta-sans-OFL.txt` (neither was listed in the tree).
+`presentation.browser.cjs` keeps its path with new contents. [The testing record](testing.md#uiux-r1-implementation-verification--6-november-2026)
+holds the decisions and verification. No top-level directory, backend module,
+package, migration or API path changes. The immutable canonical tree is unchanged;
+this is an explicit, prospective addition, not a reinterpretation of its original
+inventory. CODEOWNERS is unchanged: the existing `/frontend/src/app/`,
+`/frontend/src/shared/`, feature and `/e2e/` rules cover the additions, except
+`frontend/public/figtree-OFL.txt`, which (like the existing `favicon.ico`) matches
+no rule; adding one is a separate ownership decision.
+
+### Production activation addition — 6 November 2026
+
+The Leader's follow-up instruction of the same date (activate every component that
+works on approved contracts) adds one file:
+`frontend/src/features/mastery/components/ExampleMasteryMap.tsx`, the fixed,
+labelled example map of the public landing page, loaded as its own chunk. No other
+path changes; the existing `/frontend/src/features/mastery/` CODEOWNERS rule covers it.
+
+### Typography and brand asset change — 7 November 2026
+
+The Leader's instruction “CodeMastery — PR #209 CI Remediation, Typography, Premium
+Brand Identity & Navigation Indicator Refinement” (7 November 2026) replaces the
+Figtree assets listed above. Added in `frontend/src/app/theme/`:
+`google-sans-flex-{latin,latin-ext,vietnamese}-wght.woff2`,
+`jetbrains-mono-{latin,latin-ext,vietnamese}-wght.woff2` and `poppins-latin-800.woff2`;
+added in `frontend/public/`: `google-sans-flex-OFL.txt`, `jetbrains-mono-OFL.txt` and
+`poppins-OFL.txt`. Removed: `frontend/src/app/theme/figtree-latin-wght.woff2` and
+`frontend/public/figtree-OFL.txt`. `favicon.svg` and `favicon.ico` keep their paths with
+a new palette. The three new licence files, like `favicon.ico`, match no CODEOWNERS
+rule; the theme files are covered by `/frontend/src/app/`. No other path changes.
+
+### PR #209 review regression tests — 7 November 2026
+
+The repository owner's instruction of 7 November 2026 to fix the PR #209
+independent-review findings with regression tests, and to record the files they
+add, adds three test files, now shown in the tree below:
+
+- `frontend/src/shared/components/presentation.browser.test.ts` — Vitest lifecycle
+  tests for `presentation.browser.cjs` (build marker, readiness, cleanup after a
+  failed start); it runs with `npm test`.
+- `e2e/fixtures/local-stack.test.mjs` — `node --test` tests for the readiness and
+  backend-diagnostics helpers and the failure path of `fixtures/local-stack.ts`.
+- `e2e/fixtures/stack-down.test.mjs` — `node --test` tests for `fixtures/stack-down.mjs`.
+
+Both E2E tests use stub `docker` and `npx` executables and touch no Docker resource;
+Playwright does not collect them (its `testDir` is `tests/`). The existing
+`/frontend/src/shared/` and `/e2e/` CODEOWNERS rules cover them. No other path
+changes; the immutable canonical tree is unchanged.
+
+### Design specification and shared brand components record — 8 November 2026
+
+The Leader's instruction "CodeMastery — Design Specification R6, Backlog Coverage and
+Documentation Alignment" (8 November 2026) asks for the root UI/UX specification to be
+tracked and for the following existing files to be recorded. The tree below now shows them:
+
+- `DESIGN.md` — the root UI/UX specification (revision `DESIGN-2026-11-08-r6`). It was a
+  local file excluded from Git; it is now tracked at the repository root. It matches no
+  CODEOWNERS rule; adding one is a separate ownership decision.
+- `frontend/src/shared/components/CourseMark.tsx` and its two official logo assets,
+  `course-logo-python.svg` and `course-logo-typescript.svg` — the course mark and logo
+  registry described in [setup](setup.md#frontend-setup-and-validation). They have been on
+  `main` since 7 November 2026 and were not recorded here before.
+- `frontend/src/shared/components/BrandLogo.tsx` — the logo artwork and wordmark lockup
+  components (`BrandLogo`, `BrandWordmark`). The file has been on `main` since
+  29 October 2026 and was not recorded here before.
+
+This records files that already exist. It changes no code, path, ownership or
+hierarchy, grants no retrospective approval, and leaves the immutable canonical tree
+unchanged. The existing `/frontend/src/shared/` CODEOWNERS rule covers the frontend files.
+
+### Shared read-only Mastery Map location — STRUCT-MASTERY-MAP-2026-11-08-r1 — DELEGATED_APPROVED structure decision, not yet implemented
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+Resolves [DESIGN.md r6](https://github.com/chi-thanh-nguyen/codemastery/blob/4eb5b70be0c98df14e162b34d2c0314b02ab47b5/DESIGN.md#open-questions-do-not-block-design) open question 5.
+
+**Decision.** The read-only Mastery Map graph presentation becomes shared presentation:
+- `frontend/src/features/mastery/components/MasteryGraph.tsx` → `frontend/src/shared/components/MasteryGraph.tsx`;
+- `frontend/src/features/mastery/utils/masteryGraphLayout.ts` and `masteryGraphLayout.test.ts` → `frontend/src/shared/utils/`.
+
+The shared graph takes data through props only and defines its own node and edge view types; it imports no API, hook or feature type. The page, `SkillDetailPanel`, `NextRecommendedCard`, `PlacementPrompt`, `MasteryStateChip`, `ExampleMasteryMap`, hooks, API and types stay in `features/mastery`. Instructor learner detail composes the shared graph with its own CT33.insights data, the shared `DataTable` as its list equivalent and the shared `MasteryLegend`. The skill-graph editor canvas is unchanged; merging it is not decided.
+
+**Implementation.** FE12 performs the move when it is authorized and records it in the tree; FE19 consumes the shared component. The `/frontend/src/shared/` CODEOWNERS rule covers the new paths.
+
+**Alternatives considered.** Importing `features/mastery` from `features/instructor` (rejected: cross-feature internal import, CT16.final-state F1); a second read-only graph in learner-insights (rejected: duplication); a new shared feature directory (rejected: unnecessary structure level).
+
+The tree below is unchanged until FE12 performs the move.
+
+### Decision records directory record — 8 November 2026
+
+The Leader’s “Batch 1 Complete Contract Approval & Integration Preparation” instruction additionally authorizes `docs/decisions/005-batch-01-contract-approvals.md` under this established directory. [ADR005](decisions/005-batch-01-contract-approvals.md) uses existing Java/test locations and nested types only; no code file, module or directory is added by its approval.
+
+The Project Leader's 8 November 2026 instructions ("Pre-Approval Readiness Update" and the
+LD-01 decision recorded in [ADR004](decisions/004-leader-approval-of-delegated-records.md))
+authorize two new files under the existing `docs/decisions/` directory and ask for the
+decision documentation to be indexed. The tree below now shows all of them:
+
+- `docs/decisions/002-interim-delegated-contracts.md` and
+  `docs/decisions/003-postgresql-alpine-su-exec-image.md` — existing ADRs, on `main` since
+  PR #73 (11 October 2026) and 2 November 2026 respectively, not recorded here before.
+- `docs/decisions/004-leader-approval-of-delegated-records.md` — new: the Leader's
+  `LEADER-APPROVED-2026-11-08-r1` record.
+- `docs/decisions/README.md` — new: index of decision records and definitions of the
+  approval status labels.
+
+This adds no directory, module or code path and moves no record. The existing
+`/docs/decisions/` CODEOWNERS rule covers the files.
+
 ## Bounded Course unit-test placement correction
 
 On 2026-10-26 (Asia/Ho_Chi_Minh), the Project Leader manually relocated
@@ -101,6 +245,38 @@ records the exact instruction and supersession of its former `modules/course/`
 path by `modules/course/application/service/EnrollmentServiceTest.java`.
 Existing test responsibilities, package-private access and Course CODEOWNERS
 remain unchanged; no production behavior or other inventory change is approved.
+
+## Bounded DP01 VM Compose override addition
+
+On 2026-10-31 (Asia/Ho_Chi_Minh), the Project Leader/Owner explicitly approved
+`infrastructure/vm/docker-compose.vm.yml` as the DP01 Interim release override,
+together with the read-only `/etc/codemastery/tls` → `/etc/nginx/tls` certificate
+directory bind it declares. `infrastructure/vm/deploy.sh` applies the override
+on top of the unchanged local `infrastructure/docker-compose.yml`. [The DP01 record](deployment.md#leader-approved-path-bindings--31-october-2026)
+preserves the exact authority and exclusions.
+
+This single addition is shown in the infrastructure inventory below. The existing
+`/infrastructure/` CODEOWNERS rule (@tihh647-ui and @chi-thanh-nguyen) already
+covers it and is unchanged. The immutable canonical tree remains unchanged; this is
+an explicit addition, not a reinterpretation of its original inventory. No other
+file, host path, deployment, exposure or protected-review requirement is approved.
+
+## Bounded DP01 MinIO initializer addition
+
+On 2026-10-31 (Asia/Ho_Chi_Minh), the Project Leader @chi-thanh-nguyen directed
+that the DP01 MinIO initializer executable and Dockerfile be placed under
+`infrastructure/minio/`. The directory holds exactly `Dockerfile`, the image's
+`minio-init.sh` executable and its `test-minio-init.sh` qualification suite.
+[The DP01 MinIO record](deployment.md#dp01-minio-community-initializer--31-october-2026)
+preserves the authority, behavior and exclusions.
+
+These files are shown in the infrastructure inventory below. The existing
+`/infrastructure/` CODEOWNERS rule (@tihh647-ui and @chi-thanh-nguyen) covers them
+and is unchanged. The service Dockerfile rule for the backend and frontend is
+unaffected: this image is storage provisioning infrastructure, not an application
+service. The immutable canonical tree remains unchanged; this is an explicit
+addition, not a reinterpretation of its original inventory. No release artifact,
+storage technology change, deployment or protected-review exception is approved.
 
 ```text
 codemastery/
@@ -1003,7 +1179,13 @@ codemastery/
 
 │   ├── public/
 
-│   │   └── favicon.svg
+│   │   ├── favicon.svg
+
+│   │   ├── google-sans-flex-OFL.txt
+
+│   │   ├── jetbrains-mono-OFL.txt
+
+│   │   └── poppins-OFL.txt
 
 │   └── src/
 
@@ -1019,7 +1201,41 @@ codemastery/
 
 │       │   │   └── AuthProvider.tsx
 
+│       │   ├── preview/
+
+│       │   │   ├── AdminPreview.tsx
+
+│       │   │   ├── DesignReference.tsx
+
+│       │   │   ├── InstructorPreview.tsx
+
+│       │   │   ├── LearnerPreview.tsx
+
+│       │   │   ├── PreviewApp.tsx
+
+│       │   │   ├── PreviewApp.test.tsx
+
+│       │   │   ├── PublicPreview.tsx
+
+│       │   │   ├── fixtures.ts
+
+│       │   │   └── previewKit.tsx
+
 │       │   └── theme/
+
+│       │       ├── google-sans-flex-latin-ext-wght.woff2
+
+│       │       ├── google-sans-flex-latin-wght.woff2
+
+│       │       ├── google-sans-flex-vietnamese-wght.woff2
+
+│       │       ├── jetbrains-mono-latin-ext-wght.woff2
+
+│       │       ├── jetbrains-mono-latin-wght.woff2
+
+│       │       ├── jetbrains-mono-vietnamese-wght.woff2
+
+│       │       ├── poppins-latin-800.woff2
 
 │       │       └── theme.ts
 
@@ -1089,7 +1305,9 @@ codemastery/
 
 │       │   │   │   ├── CourseCataloguePage.tsx
 
-│       │   │   │   └── CourseDetailPage.tsx
+│       │   │   │   ├── CourseDetailPage.tsx
+
+│       │   │   │   └── LandingPage.tsx
 
 │       │   │   └── types/
 
@@ -1115,6 +1333,8 @@ codemastery/
 
 │       │   │   │   ├── CourseLearningPage.tsx
 
+│       │   │   │   ├── LearnerHomePage.tsx
+
 │       │   │   │   ├── LessonPage.tsx
 
 │       │   │   │   └── MyCoursesPage.tsx
@@ -1135,7 +1355,9 @@ codemastery/
 
 │       │   │   │   ├── QuestionRenderer.tsx
 
-│       │   │   │   └── QuizTimer.tsx
+│       │   │   │   ├── QuizTimer.tsx
+
+│       │   │   │   └── assessment.test.tsx
 
 │       │   │   ├── hooks/
 
@@ -1167,6 +1389,8 @@ codemastery/
 
 │       │   │   ├── components/
 
+│       │   │   │   ├── ExampleMasteryMap.tsx
+
 │       │   │   │   ├── MasteryGraph.tsx
 
 │       │   │   │   ├── MasteryStateChip.tsx
@@ -1191,7 +1415,9 @@ codemastery/
 
 │       │   │   └── utils/
 
-│       │   │       └── masteryGraphLayout.ts
+│       │   │       ├── masteryGraphLayout.ts
+
+│       │   │       └── masteryGraphLayout.test.ts
 
 │       │   ├── interaction/
 
@@ -1243,7 +1469,9 @@ codemastery/
 
 │       │   │   │   │   ├── PublishToggle.tsx
 
-│       │   │   │   │   └── QuestionForm.tsx
+│       │   │   │   │   ├── QuestionForm.tsx
+
+│       │   │   │   │   └── QuestionForm.test.ts
 
 │       │   │   │   ├── hooks/
 
@@ -1457,21 +1685,45 @@ codemastery/
 
 │           │   ├── AppHeader.tsx
 
+│           │   ├── BrandLogo.tsx
+
+│           │   ├── CodeBlock.tsx
+
 │           │   ├── ConfirmDialog.tsx
 
+│           │   ├── CourseMark.tsx
+
+│           │   ├── DataTable.tsx
+
 │           │   ├── FileUploadField.tsx
+
+│           │   ├── GuidanceStack.tsx
 
 │           │   ├── MarkdownRenderer.tsx
 
 │           │   ├── PageHeader.tsx
 
+│           │   ├── PathSpine.tsx
+
 │           │   ├── PresentationIcon.tsx
 
 │           │   ├── SidebarNav.tsx
 
+│           │   ├── StatusPill.tsx
+
 │           │   ├── StatusViews.tsx
 
+│           │   ├── Tile.tsx
+
+│           │   ├── ViewRail.tsx
+
+│           │   ├── course-logo-python.svg
+
+│           │   ├── course-logo-typescript.svg
+
 │           │   ├── presentation.browser.cjs
+
+│           │   ├── presentation.browser.test.ts
 
 │           │   └── presentation.test.tsx
 
@@ -1513,6 +1765,16 @@ codemastery/
 
 │       ├── auth-fixture.ts
 
+│       ├── catalogue-fixture.sql
+
+│       ├── local-stack.test.mjs
+
+│       ├── local-stack.ts
+
+│       ├── stack-down.mjs
+
+│       ├── stack-down.test.mjs
+
 │       └── files/
 
 │           └── sample-submission.txt
@@ -1521,9 +1783,19 @@ codemastery/
 
 │   ├── docker-compose.yml
 
+│   ├── minio/
+
+│   │   ├── Dockerfile
+
+│   │   ├── minio-init.sh
+
+│   │   └── test-minio-init.sh
+
 │   └── vm/
 
-│       └── deploy.sh
+│       ├── deploy.sh
+
+│       └── docker-compose.vm.yml
 
 ├── sample-data/
 
@@ -1579,13 +1851,25 @@ codemastery/
 
 │   └── decisions/
 
-│       └── 001-modular-monolith-module-boundaries.md
+│       ├── 001-modular-monolith-module-boundaries.md
+
+│       ├── 002-interim-delegated-contracts.md
+
+│       ├── 003-postgresql-alpine-su-exec-image.md
+
+│       ├── 004-leader-approval-of-delegated-records.md
+
+│       ├── 005-batch-01-contract-approvals.md
+
+│       └── README.md
 
 ├── .env.example
 
 ├── .gitignore
 
 ├── AGENTS.md
+
+├── DESIGN.md
 
 ├── README.md
 
@@ -1595,7 +1879,7 @@ codemastery/
 ## Bounded Interim FE03/FE07 test inventory
 
 **CT14-INTERIM-FE03-FE07-2026-10-24-r1 —
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Leader's explicit
+[LEADER_APPROVED](decisions/README.md#approval-status-labels).** The Leader's explicit
 “CodeMastery — Complete Interim Technical Contract Approvals (CT16, CT17, CT14)”,
 24 October 2026, delegates technical approval of the smallest FE03/FE07 test
 inventory. Codex acts as the delegated approval authority for exactly:
@@ -1632,3 +1916,16 @@ Existing CourseCatalogue API/page tests and routes/index.test.tsx cover the othe
 FE07 changes. e2e/tests/learner-flow.spec.ts is the existing browser-flow location;
 the external Playwright installation used for local execution is not a dependency
 or E2E pipeline change.
+
+
+### SD01/SD02 delegated test placement — 30 October 2026
+
+The Leader's explicit SD01/SD02 completion task authorizes the single test addition
+below within the existing integration directory (ADR002 `CT15-SD-2026-10-30-r3`,
+V1). It verifies the existing `sample-data/seed/` files; no seed, material,
+loader-script or helper path is added.
+
+- backend/src/test/java/com/codemastery/integration/SampleDataSeedIntegrationTest.java
+
+The approved `sample-data/` inventory is unchanged: `README.md`,
+`materials/sample-slides.pdf` and `seed/01`–`05` keep their existing paths.

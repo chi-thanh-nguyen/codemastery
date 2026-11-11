@@ -1,40 +1,98 @@
 # Testing
 
+**Post-PR231 integration update — 10 November 2026:** ADR008, including CP-030 r2,
+is merged; ADR009's two r2 approvals remain pending #233 protected integration.
+Batch 4 is **8/8 technically approved**. [ADR009 section 10](decisions/009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026)
+records the new Leader-attested Azure balance/expiration and unchanged execution
+gates. The 9 November status below is historical. Neither rebase/document checks
+nor financial attestation adds a runtime PASS: Q07 real RPO/RTO and Q08 full-product
+F2/Flyway remain NOT_RUN; Q01–Q06/Q09 retain their exact fixture/mechanism limits.
+
+**10 November 2026 fixture amendment:**
+[ADR008 §10](decisions/008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026)
+records CP-030 `CT34-FIXTURES-2026-11-10-r2`. It adds pre-Playwright checkout/output
+exclusivity and persistent ownership-safe recovery. Current scripts do not implement
+these requirements; the commands below describe the existing implementation.
+
+**Batch 4 contract update — 9 November 2026:**
+[ADR008](decisions/008-batch-04-contract-approvals.md) is the authoritative record
+for CT34 runner/fixtures/future CI, CT14.coverage's placement and explicit gaps,
+and CT39's selection of no shared Clock binding. Six decisions are
+**DELEGATED_APPROVED**; the documentary PR still needs independent review, exact-head
+checks and protected integration. This records design, not newly executed tests.
+CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
+Earlier dated records below retain their approval scope and history.
+
 ## Purpose
 
 This document describes CodeMastery's current testing contract, based on
 [the backend build](../backend/pom.xml), [the frontend manifest](../frontend/package.json),
 and [the CI workflow](../.github/workflows/ci.yml).
 
-The reusable backend integration-test foundation and initial CI configuration
-are implemented. CourseFixtures provides representation-only Course construction,
-with CourseFixturesTest as its pure structural consumer. Course business/service
-and PostgreSQL integration test scaffolds remain empty. SH01 has executable
-shared-infrastructure unit and Spring MVC
-integration tests. Frontend typechecking
-and build validation exist; bounded FE01 automated regressions are implemented,
-while integrated E2E remains planned.
-Successful compilation or builds do not establish tested business behavior.
+The sections from [Test Layers and Evidence](#test-layers-and-evidence) through
+[Remaining Gaps](#remaining-gaps) describe the current repository. The later dated
+sections, from [Authorized Interim verification contracts](#authorized-interim-verification-contracts)
+onward, are decision and execution records. They keep the wording of their date.
 
-## Backend Test Layers
+Backend unit tests, Testcontainers PostgreSQL integration tests and frontend
+Vitest/jsdom tests exist for the implemented Auth, Course catalogue and
+membership, sample-data and shared REST slices, and run in CI. A local
+Playwright Test suite in `e2e/` runs the implemented learner flows against a
+disposable stack built from the checkout; it is not run in CI. A passing test
+establishes only what that test exercises. It is not acceptance of a verification Issue: QA01 #61, QA02 #62,
+QA07 #63, QA13 #64, QA14 #65 and DP02 #66 remain open, and their independent
+verification is separate work.
 
-- **Unit tests:** isolated business logic and deterministic adaptive rules,
-  using Mockito where appropriate. Maven Surefire executes eligible tests
-  outside the integration path.
-- **Integration tests:** Spring configuration, persistence, transactions, and
-  approved module interactions. Maven Failsafe executes concrete tests under
-  the integration path. The foundation exists; feature suites are unimplemented.
-- **Future E2E tests:** Playwright will exercise main user flows through the
-  frontend and backend. Files under `e2e/` remain empty scaffolds and define no
-  executable E2E commands or CI job.
+## Test Layers and Evidence
+
+| Layer | Tool and location | Runs in CI | What a pass establishes | What it does not establish |
+| --- | --- | --- | --- | --- |
+| Backend unit | JUnit Jupiter 6, Mockito; Maven Surefire; module test packages outside `integration/` | Yes (`Backend`) | Isolated service, mapper, adapter, validation, JWT, settings and pure mastery logic | Real PostgreSQL behavior, Spring Security wiring or HTTP serialization |
+| Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency. Auth, Enrollment and sample-data suites dispatch through MockMvc with the configured Spring Security chain; the other suites do not (see [Integration-Test Lifecycle](#integration-test-lifecycle)) | A running server, real browser, network/CORS from a browser, deployment |
+| Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
+| Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
+| E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`fixtures/local-stack.test.mjs`, `fixtures/stack-down.test.mjs`); stub `docker` and `npx` first on `PATH`; Node 22.18+ or 24 (they load `local-stack.ts` natively) | No | Frontend readiness requires this run's build marker; backend start failures fail promptly with state and redacted log tail captured before teardown; `stack:down` keeps live-owner and unreadable-owner resources and survives concurrently removed ones | Real Docker, Vite, browsers or the E2E flows themselves |
+| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
+| VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
+| Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
+
+### Backend integration suites
+
+| Suite | Added by | What it exercises |
+| --- | --- | --- |
+| `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). Uses an ephemeral JWT secret. |
+| `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations |
+| `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
+| `EnrollmentIntegrationTest` | FE07, PR #101 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods |
+| `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
+| `SharedRestInfrastructureIntegrationTest` | SH01, PR #78 | Spring MVC ProblemDetail, validation and paging with test-only routes; it does not start PostgreSQL or the security chain |
+
+`AdaptiveLearningFlowIntegrationTest.java` and
+`MasteryProgressTransactionIntegrationTest.java` are empty scaffolds.
+
+Merged test code does not complete QA01 or QA02: each Issue's own acceptance
+criteria, independent review and any environment-specific evidence remain open.
+
+### Latest recorded results
+
+| Date (ICT) | Revision | Where | Command | Result |
+| --- | --- | --- | --- | --- |
+| 31 October 2026 | `main` `614f326` | GitHub Actions CI [run 41191743079](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191743079); CodeQL [run 41191742751](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41191742751) | All CI jobs; CodeQL default setup | All seven CI jobs and CodeQL passed. Backend: Surefire 468 tests, Failsafe 150 tests, 0 failures, errors or skips. Frontend: 390 tests in 11 files, then a successful build |
+| 31 October 2026 | `main` `614f326` | Local, macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1, Node 24.21.0, npm 11.19.0 | `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 468, Failsafe 150, 0 failures, errors or skips |
+| 31 October 2026 | `main` `614f326` | Same machine | `cd frontend && npm ci && npm test && npm run build` | 390 tests in 11 files passed; build succeeded |
+| 6 November 2026 (activation) | `feat/uiux-design-r1-implementation`, production-activation commit after `17cc444` | Same machine | Same commands | 422 tests in 15 files passed; build succeeded. Harness: Chromium and WebKit 34/34 each; Firefox did not launch in the agent sandbox. E2E: 53 passed, 4 skipped by design, Firefox 13 failed at browser launch ([record](#production-activation-of-eligible-uiux-components--6-november-2026)) |
+| 6 November 2026 | `feat/uiux-design-r1-implementation` at `b2e9035` (code; base `061102e`) | Local, macOS 27.2 arm64, Node 24.21.0, npm 11.19.0, Docker 29.8.1 | `cd frontend && npm test && npm run build`; `npm run test:browser -- --engine all`; `cd e2e && npm ci && npx playwright test` | 414 tests in 15 files passed; build succeeded. Harness: Chromium 153 and WebKit 26.6 30/30 each; Firefox did not launch in the agent sandbox. E2E: 41 passed, 4 skipped by design, Firefox 10 failed at browser launch ([record](#uiux-r1-implementation-verification--6-november-2026)) |
+
+The two local runs were made for the DO01 documentation update. They confirm that
+the documented commands work on that machine; they are not independent QA
+verification. No coverage percentage is claimed.
 
 ## JUnit / Mockito Baseline
 
 Backend tests use JUnit Jupiter 6. Its exact version is managed by Spring Boot
 4.1.1 and currently resolves to 6.0.3. Do not override the managed JUnit version
 without a separately approved dependency decision. Mockito remains the backend
-mocking tool where appropriate. This selected toolchain does not imply that
-feature tests have been implemented.
+mocking tool where appropriate.
 
 ## Unit-Test Lifecycle
 
@@ -49,8 +107,11 @@ The command compiles application and test sources and executes eligible Surefire
 tests. Surefire uses its standard `Test*`, `*Test`, `*Tests`, and `*TestCase`
 naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
-SH01 unit tests execute from the existing shared support test package. The
-integration base class is compiled but is not initialized by this unit-test lifecycle.
+Current unit suites are under `modules/auth/`, `modules/course/` (including
+`application/service/`), `modules/adaptive/mastery/` and the shared `support/`
+package. The other module test files are empty scaffolds. The integration base
+class is compiled but is not initialized by this unit-test lifecycle, so
+`./mvnw test` needs no Docker.
 
 [CourseFixturesTest](../backend/src/test/java/com/codemastery/modules/course/CourseFixturesTest.java)
 is the authorized FT01 structural consumer of the accepted CO01 records and enums.
@@ -76,26 +137,32 @@ provides `@SpringBootTest` with `CodeMasteryApplication`, a mock web environment
 without a listening HTTP server, and `@ActiveProfiles("test")`.
 
 It manually starts one singleton PostgreSQL Testcontainer before Spring
-initializes its datasource. The approved image is `postgres:17.11-bookworm`;
-this selects an integration-test database only, not the production/deployment
-PostgreSQL version. No persistent container reuse is enabled. The singleton is
-not managed by per-class `@Container` callbacks.
+initializes its datasource. The approved image is built from
+`infrastructure/postgres/Dockerfile` (PostgreSQL 17.11 Alpine 3.24 with
+`su-exec` replacing `gosu`; see [ADR003](decisions/003-postgresql-alpine-su-exec-image.md)
+and [deployment.md](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026))
+through Testcontainers' `ImageFromDockerfile`, so no developer-specific local
+tag is required; this selects an integration-test database only, not the
+production/deployment PostgreSQL version. No persistent container reuse is
+enabled. The singleton is not managed by per-class `@Container` callbacks.
 
 An inherited `@DynamicPropertySource` registers `spring.datasource.url`,
 `spring.datasource.username`, and `spring.datasource.password` from the running
 container. No fixed host port or developer-local database credentials are used.
 The profile only sets `codemastery.scheduling.enabled: false`; scheduler
-implementation is still pending. No JWT or storage consumer is currently
-implemented, so the profile supplies no fake secrets or storage services.
+implementation is still pending. The profile supplies no secrets or storage
+services. Suites that need the JWT provider register their own ephemeral
+64-hex-character `JWT_SECRET` through `@DynamicPropertySource`; no secret is
+committed. No storage consumer exists.
 
 The normal application Flyway settings remain enabled against this datasource,
 using `classpath:db/migration`. Hibernate retains `ddl-auto: validate`, and
 does not generate a test schema. V001–V006 now implement the approved initial
 23-table PostgreSQL schema. Migration execution, checksum/restart validation, and
 constraint checks are part of persistence/integration validation on disposable
-databases. Accepted Course/Adaptive scalar entity mappings now exist, but concrete
-PostgreSQL feature suites remain empty. Successful schema migration alone proves
-neither an entity round trip nor feature behavior.
+databases. Every suite that extends the base runs against this migrated schema;
+see [Backend integration suites](#backend-integration-suites). Successful schema
+migration alone proves neither an entity round trip nor feature behavior.
 
 Concrete integration tests belong under
 `backend/src/test/java/com/codemastery/integration/`, including its approved
@@ -111,9 +178,10 @@ Run broader verification from `backend/`:
 
 This includes compilation, unit tests, application packaging/repackaging,
 Failsafe integration-test execution and verification, and JaCoCo reporting when
-execution data exists. Docker and access to the test image are required once
-concrete tests initialize the Testcontainers foundation. Compose and a manually
-provisioned PostgreSQL service are not required for that foundation.
+execution data exists. Because concrete suites initialize the Testcontainers
+foundation, a running Docker Engine able to build
+`infrastructure/postgres/Dockerfile` is required. Compose and a manually
+provisioned PostgreSQL service are not required.
 
 To skip integration-test execution while retaining the other verification work:
 
@@ -124,11 +192,25 @@ To skip integration-test execution while retaining the other verification work:
 This still compiles integration-test sources and runs eligible unit tests, but
 skips Failsafe execution. It is not the CI validation command.
 
-The abstract harness contains no executable tests, and its concrete feature
-test scaffolds remain empty. The SH01 MVC integration test executes a real Spring
-web context and dispatcher, but does not initialize this PostgreSQL harness or
-prove database integration.
-Runtime validation requires an actual concrete test that initializes the base.
+The abstract harness itself contains no tests. The SH01 MVC integration test
+executes a real Spring web context and dispatcher, but does not extend the base,
+so it neither starts PostgreSQL nor proves database integration. The suites
+exercise the Spring Security chain differently:
+
+- `AuthorizationIntegrationTest` (`DelegatingFilterProxy` on
+  `springSecurityFilterChain`), `EnrollmentIntegrationTest` and the consumer case
+  of `SampleDataSeedIntegrationTest` (`springSecurity()`) send requests through
+  MockMvc with the configured chain.
+- `CourseCatalogueIntegrationTest` uses no MockMvc. It takes the configured
+  chain's `JwtAuthenticationFilter` from `FilterChainProxy`, calls it directly
+  with a mock request, and runs its Course assertions inside the filter callback.
+- `repository/CourseRepositoryIntegrationTest` sends no HTTP request and uses no
+  security chain.
+- `SharedRestInfrastructureIntegrationTest` uses MockMvc with only
+  `CorrelationIdFilter`, so no security chain.
+
+None of them uses a listening server, so none exercises Tomcat, a browser or a
+reverse proxy.
 
 ## Test Isolation
 
@@ -142,17 +224,19 @@ Reuse Spring contexts where configuration is identical. The base class does
 not impose a transaction on every test. Suitable future persistence tests can
 use Spring test transactions with automatic rollback. Tests that commit, use
 independent transactions, perform HTTP work, or execute work in other threads
-must explicitly clean up changes that rollback does not cover. No generic
-truncation or schema reset infrastructure is implemented. CourseFixtures only
+must explicitly clean up changes that rollback does not cover. The current suites
+do this themselves, for example by deleting the rows they committed after each
+test; `SampleDataSeedIntegrationTest` creates a separate database per scenario.
+No generic truncation or schema reset infrastructure is implemented. CourseFixtures only
 constructs in-memory representations; it does not load or reset a database.
 
 ## JaCoCo
 
 JaCoCo 0.8.15 is configured to attach its agent during Maven initialization and
 generate a report at `verify` when execution data is available. No coverage
-threshold or coverage enforcement goal is configured. SH01 coverage reports
-concern shared infrastructure; meaningful feature coverage is not established.
-A successful build or report goal alone is not evidence of feature coverage.
+threshold or coverage enforcement goal is configured, and no coverage percentage
+is recorded or claimed. A successful build or report goal alone is not evidence of
+feature coverage.
 
 ## Frontend Validation
 
@@ -172,34 +256,104 @@ Vite configuration without emitting files. The `build` script already runs
 Build output goes to `frontend/dist/`. Development-only Vitest `5.0.5` and jsdom
 `27.4.0` execute the bounded frontend suite through `npm test` (`vitest run`).
 No lint script is implemented. The required Frontend CI job runs `npm ci`, `npm test`, then `npm run build`.
-The optional browser harness is separate and is not run by that job.
+The optional browser harness and the E2E suite are separate and are not run by CI.
 Build success alone does not establish behavioral coverage or deployment readiness.
 
-For the existing optional `npm run test:browser` script, supply an installed
-Playwright module, artifact directory, preview URL and `chromium` or `webkit`.
-No browser is downloaded by this script. When validating a standalone frontend
-configured with the approved `/api` base and no API proxy, append `--standalone`.
-That mode verifies the Course error view and records exactly the two detail-read
-404s and one cold catalogue-read 404 separately from unexpected console errors.
-It does not establish real browser → REST → PostgreSQL integration. Backend
-connectivity/CORS, successful Auth/Course transactions and assistive-technology
-acceptance require their independent evidence.
+### Browser harness and E2E suite
 
-The optional `--test-catalogue-filter` harness mode measures search, prerequisite
-and apply-button bounds while menus open, options change and filters are applied.
-It covers empty and scrollable catalogue fixtures at 320, 390, 768, 900, 1024 and
-1440 pixels, plus keyboard selection and unchanged explicit-submit semantics.
-These controlled responses verify presentation and client criteria, not live API
-integration.
+Both use the Playwright Test package pinned in `e2e/package.json` (1.63.0, matching
+the Chromium 153, Firefox 155 and WebKit 26.6 builds it expects). Install it once;
+`npm ci` never downloads browsers, so install the pinned builds when missing:
 
-The optional `--test-auth-focus` harness mode runs bounded Login/Register focus
-checks, including catalogue-to-Auth CSS insertion order, pointer/keyboard and
-validation focus, Back/Forward, persisted `pagehide`, and connected-input blur
-before route/form removal. Catalogue and registration responses in that mode
-are controlled fixtures. Unit regressions also cover StrictMode listener cleanup,
-ordinary rerenders and focus outside the owning layout. AutoComplete semantics
-remain enabled. Headless DOM/focus checks do not inspect native operating-system
-AutoFill/password-manager popup rendering; that requires separate manual evidence.
+```bash
+cd e2e
+npm ci
+npx playwright install chromium firefox webkit   # only when the browsers are missing
+```
+
+**Browser harness** (from `frontend/`). Without `--url` it builds the frontend with
+`VITE_API_BASE_URL=/api` into a temporary directory, writes a per-run marker into
+that copy's `index.html`, serves it with `vite preview` on a free 127.0.0.1 port
+chosen right before the preview starts, runs the checks and removes both. It is
+ready only when the port answers with that marker while the preview process is
+still running, so another server on the same port is never tested. With `--url`
+no build is made and no marker is required. API responses are
+`page.route` test doubles; no backend is contacted.
+
+```bash
+npm run test:browser                                   # Chromium
+npm run test:browser -- --engine all                   # chromium, webkit, firefox
+npm run test:browser -- --url <running-frontend-url> --out <evidence-dir> --engine webkit
+npm run test:browser -- --playwright <path-to-@playwright/test>
+```
+
+It visits every `/preview` screen at 1280 and 390 px, the live pages and three
+preview screens at 320, 360, 600, 768, 900, 1024, 1200, 1280, 1440 and 1536 px,
+200% zoom (640 CSS px at 2×) and 200% text size, and checks: no page-level
+horizontal scroll; the navigation mode per breakpoint; Google Sans Flex, JetBrains
+Mono and the wordmark face served from the app with their OFL texts, Vietnamese,
+code and wordmark text rendered without fallback glyphs (Chromium font inspection),
+and the logo's colour regions distinct on the ink frame at 16–40 px; the active-tab
+reach centred, symmetric and following clicks, child routes and history; production routes never loading the preview chunk; the
+preview sending no API request and writing no storage; computed text contrast on
+twelve screens; skip link, route focus and visible focus on every catalogue tab
+stop; drawer and dialog focus behavior including the full-screen sheet below
+600 px; form labels, required markers and error focus; `pagehide` input blur;
+catalogue submit-only search and error states; the 1.2 s skeleton shimmer and its
+reduced-motion static form; the landing page's public navigation, example-map chunk
+and absence of API requests; Learner home and My courses tile membership actions;
+and the Mastery Map's 220 × 72 nodes, initial viewport and keyboard operation. It writes
+screenshots, accessibility snapshots and `browser-report.json` to `--out`
+(default: a new directory under the OS temporary directory), and exits non-zero
+on any failed check or browser that cannot launch. Positional FE01 arguments
+(`<playwright-module> <evidence-dir> <url> [engine]`) are still accepted.
+
+**E2E suite** (from `e2e/`):
+
+```bash
+npm test                         # all five projects
+npm run test:chromium            # chromium-desktop and chromium-mobile
+npm run stack:down               # remove leftovers of an interrupted run (skips stacks whose run is still alive)
+node --test fixtures/*.test.mjs  # stub-based lifecycle tests for local-stack.ts and stack-down.mjs (no Docker)
+```
+
+`fixtures/local-stack.ts` (Playwright global setup) needs Docker. It builds
+`codemastery-e2e/backend:local` and `codemastery-e2e/postgres:local` from
+`backend/` and `infrastructure/postgres/` (kept for layer reuse), starts them on a
+private network with random database, JWT and storage values passed through the
+environment, builds the production frontend pointed at that backend and serves it
+with `vite preview`, waits for `/actuator/health`, registers an Instructor through
+the API and promotes that account in the disposable database only, and applies
+`fixtures/catalogue-fixture.sql` (21 published courses, one hidden course, hidden
+lessons and an empty chapter). Containers run the exact image IDs this run built, so
+a concurrent run from another checkout that rebuilds the shared tags cannot swap
+them. The two loopback ports are distinct. The frontend port is chosen right before
+`vite preview` starts, and the backend starts afterwards because it needs that
+origin for CORS. The temporary build carries a per-run marker in its `index.html`:
+the preview counts as ready only when the port answers with that marker while the
+preview process is still running, and it is checked again before the tests start.
+A port collision therefore fails setup (at once with Vite's message if the preview
+exits) instead of testing another server. If the backend container stops while
+setup waits for health, setup fails at once; on that or on the 180 s timeout the
+error carries the container state (status, exit code, OOM, error) and its last 100
+log lines, with the generated secrets redacted, captured before the teardown removes
+the container. Containers and the network carry the run ID and the owning process
+ID, so `stack:down` removes only resources whose owner is gone; it inspects and
+removes each resource on its own, counts one already removed by a concurrent
+teardown as gone, keeps (and reports, exiting 1) one whose owner cannot be read or
+that cannot be removed, and continues with the rest. The teardown stops the preview
+server, removes the containers, network and temporary directory. Each test registers its own synthetic Learner,
+so tests are independent. Projects: `chromium-desktop`, `firefox-desktop`,
+`webkit-desktop` (1280 × 900), `chromium-mobile` (Pixel 7) and `webkit-mobile`
+(iPhone 14). Results go to `e2e/test-results/` (ignored), including
+`results.json` and an HTML report.
+
+To target an already running environment instead, set `E2E_BASE_URL` (and
+`E2E_API_URL` when the API has another origin); fixture-dependent tests are then
+skipped, and the Instructor check needs `E2E_USERNAME`/`E2E_PASSWORD` for an
+existing synthetic Instructor. `E2E_WORKERS`, `E2E_BACKEND_IMAGE` and
+`E2E_POSTGRES_IMAGE` are optional tooling overrides. Never point the suite at
+production: it registers accounts and changes memberships.
 
 ### Bounded FE01 decisions and regression coverage
 
@@ -252,7 +406,13 @@ are:
 | `src/shared/utils/format.test.ts` | Explicit locale/timezone/precision/rounding, invalid dates, duration boundaries and reconstruction. |
 | `src/shared/hooks/useDebounce.test.tsx` | Function identity, Strict Mode, timing/rescheduling, rapid updates and unmount cleanup. |
 | `src/shared/components/presentation.test.tsx` | Controlled navigation/current state, zero badges, named loaders, status content, callbacks and confirmation semantics. |
-| `src/shared/components/presentation.browser.cjs` | Optional Chromium checks, screenshots, accessibility tree, computed contrast, focus, dialogs, drawers, overflow and reduced motion. |
+| `src/shared/components/presentation.browser.cjs` | Optional Chromium checks, screenshots, accessibility tree, computed contrast, focus, dialogs, drawers, overflow and reduced motion. Its contents were replaced on 6 November 2026 ([current interface](#browser-harness-and-e2e-suite)). |
+
+**Superseded harness interface (6 November 2026).** The paragraph after the
+timezone commands records the FE01 harness as it was. That harness and its modes
+(`--standalone`, `--test-catalogue-filter`, `--test-auth-focus`, `--test-api-errors`,
+`--test-chart-escape`) targeted the retired FE01 preview; the UI/UX r1 record below
+replaces them and maps their retained checks.
 
 To reproduce host-timezone checks from `frontend/`, run
 `TZ=UTC npm test -- src/shared/utils/format.test.ts` and
@@ -289,46 +449,99 @@ before binding, documentation integration and both FE01 checkpoint/Issue #37
 acceptance remain distinct from implementation merge and test success. Broader
 CT14/CT37 approval and frontend/backend integration are not implied.
 
-## Initial CI
+## CI
 
 The `CI` GitHub Actions workflow runs on pull requests targeting `main`, pushes
 to `main`, and manual `workflow_dispatch`. It uses `contents: read` permissions
-and two independent jobs on `ubuntu-24.04`:
+and eight independent jobs on `ubuntu-24.04`:
 
-| Job ID / display name | Setup | Commands and working directory |
-| --- | --- | --- |
-| `backend` / `Backend` | `actions/checkout@v7`, `actions/setup-java@v6`, Temurin 25 | `./mvnw verify` from `backend/` |
-| `frontend` / `Frontend` | `actions/checkout@v7`, `actions/setup-node@v7`, Node 22 | `npm ci`, then `npm run build` from `frontend/` |
+| Job display name (ID) | What it runs |
+| --- | --- |
+| Backend (`backend`) | Temurin 25; `./mvnw verify` from `backend/`, including the Testcontainers integration tests on the runner's Docker |
+| Frontend (`frontend`) | Node 22; `npm ci`, `npm test`, then `npm run build` from `frontend/` |
+| VM deployment script (`deployment-script`) | Checks of `infrastructure/vm/deploy.sh` without starting the application: shell syntax, authorization gates, Compose and provisioning guards, the runtime privilege matrix, env-file custody, preflight against rendered Compose, release-archive identity models and image identity through a real `docker save`/`load` round trip |
+| VM deployment PostgreSQL and containment tests (`deployment-script-postgres`) | The runtime privilege matrix on the real migrated schema, failure containment and published-port verification against real containers |
+| VM runtime privileges with the real backend (`deployment-script-runtime`) | Builds the backend image and exercises real Auth, catalogue and membership under the approved privilege matrix |
+| VM deployment containerd image store (`deployment-script-containerd`) | Release-archive verification through real `docker save`/`load` round trips with the containerd image store |
+| VM HTTPS ingress (`deployment-ingress`) | Builds the release and local frontend images; exercises the HTTPS ingress against a stub and the real backend; runs `deploy.sh preflight` with the committed override |
+| VM MinIO initializer qualification (`minio-initializer`) | Pulls the digest-pinned Golithus server, `mc` (the suite's test client) and Chainguard candidate server images, builds `infrastructure/minio` for linux/amd64 on its digest-pinned Chainguard `minio-client` base (pulled by the build) and runs `infrastructure/minio/test-minio-init.sh` against disposable MinIO servers and the effective VM Compose model, first with the Golithus server and then with `MINIO_INIT_TEST_SERVER=chainguard`. It then builds `infrastructure/vm/Dockerfile.minio-server` for linux/amd64 as the local non-release tag `codemastery-test/minio-server:qualification`, without pushing it, and runs the suite with `MINIO_INIT_TEST_SERVER=minimal`. The later suites run even when an earlier suite fails, provided the pull, and for the minimal suite its build, succeeded; any failure fails the job ([record](deployment.md#dp01-minio-community-initializer--31-october-2026), [candidate](deployment.md#dp01-chainguard-minio-release-server-candidate--1-november-2026), [minimal](deployment.md#dp01-minimal-minio-server-candidate--1-november-2026)) |
 
 The Java setup enables Maven caching using `backend/pom.xml` and
 `backend/.mvn/wrapper/maven-wrapper.properties` as dependency inputs. The Node
 setup enables npm caching keyed by `frontend/package-lock.json`. Caches do not
-replace installation or validation. The backend runs directly on the hosted
-runner, whose Docker support is needed when concrete Testcontainers tests exist.
+replace installation or validation. CodeQL code scanning runs separately through
+GitHub's default setup, with no workflow file in this repository.
 
-CI currently validates build foundations and prepares the future test lifecycle;
-it does not validate backend business behavior or exercise PostgreSQL through
-the abstract harness alone. There is no E2E job, Compose invocation, deployment,
-Docker image build, or artifact upload. No remote branch-protection settings or
-required status-check names are defined here. Workflow configuration does not
-prove a successful remote run; actual GitHub Actions results must be reported
-from executed runs.
+The `main-quality-gates` repository ruleset requires `CodeQL` and every job above
+to pass before merging into `main`. A later read of the GitHub API on 1 November
+2026 lists “VM MinIO initializer qualification” as required too; an earlier read
+that day did not. That job therefore keeps its single check name. The VM jobs run only on the
+CI runner: they deploy nothing and do not reach the real VM. No job starts the
+full local Compose stack. The VM jobs start their containers with `docker run`;
+only the MinIO initializer job uses Compose, starting just the `minio` and
+`minio-init` services (and a placeholder backend under the VM override) in
+disposable projects. There is no E2E job or artifact upload. Workflow configuration does not prove a successful run; see
+[Latest recorded results](#latest-recorded-results).
 
-## Planned Testing
+## Remaining Gaps
 
-The following remain planned, with no test-count or coverage-percentage claim:
+The following are not covered by any executable test in the repository. No
+test-count or coverage-percentage claim is made for them.
 
-- Feature unit tests, including deterministic adaptive-learning cases.
-- Feature integration tests for persistence, transactions, configuration, and
-  approved module interactions.
-- Frontend automated tests if a framework is later approved.
-- Playwright E2E flows and fixtures.
-- E2E CI.
+- **Empty scaffolds.** Assessment, Interaction and Admin unit tests; Adaptive
+  decision, evaluation, listener, settings, mastery-update, placement and skill-graph
+  tests; `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
+  `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
+  `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
+  their features and approved contracts.
+- **E2E.** The Playwright suite exists but has no CI job; it runs locally with
+  Docker. `e2e/tests/adaptive-flow.spec.ts` is empty until Adaptive, Assessment and
+  lesson-content contracts exist. Firefox has not yet completed a recorded run
+  (see the 6 November 2026 record).
+- **Real-browser and runtime integration.** No CI job drives a real browser
+  against a running backend and PostgreSQL. Local runs are recorded in the dated
+  sections below; QA07 and DP02 acceptance are open. Group B/C design-preview
+  screens have no backend to integrate with yet.
+- **Deployment.** No test reaches the real VM or checks outside-network access
+  (DP01 #71, DP03 #72). The private `/actuator/health` probe is verified only
+  locally and in CI ([record](#dp01-private-health-probe-verification--1-november-2026)).
+- **Object storage.** No backend storage adapter exists, so no test covers file
+  upload or delivery (CT09).
+- **Assistive technology.** No test establishes actual screen-reader output; no
+  manual VoiceOver, NVDA or TalkBack session has been recorded.
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
 
+## CT17 Final recovery qualification handoff — 9 November 2026
+
+**Current update:** the following r1 NOT_RUN statements are historical. Executed
+mechanism-level results and still-unexecuted operational/product obligations are
+recorded in [ADR009 §9.6](decisions/009-ct17-final-runtime-recovery.md#96-actual-qualification-record--10-november-2026)
+and the reproduction section below. CP-034 r2 is technically approved; no blanket
+Q01–Q09, full-product F2 or production readiness PASS is asserted.
+
+[ADR009 Q01–Q09](decisions/009-ct17-final-runtime-recovery.md#71-reproducible-qualification-plan--not_run)
+defines the remaining actual-resource, coordinated-cut, PostgreSQL/MinIO complete
+restore, encryption/key/provenance, publication/retention, RPO/RTO/resource and
+product/security evidence. This is **NOT_RUN** planning, not a new test file,
+framework, infrastructure grant or completed approval-level round trip. Existing
+CT17-FINAL F1/F2, class B mechanism/compatibility gates, test inventories and
+feature-specific prerequisites remain effective.
+
+Read-only checks obtained public DNS and verified local historical release
+checksums/OCI mappings; SSH/HTTPS/TLS access attempts timed out. No live VM,
+certificate, resource capacity, backup, key recovery, encryption or restore test
+passed. Public retail price retrieval supports estimates only. The selected
+RPO 24h/RTO 48h and 8h capture cadence are future design targets, not measured
+guarantees. Full MinIO/crypto and actual product qualification still block whole
+CP-034 approval; actual bindings still block whole CP-033 approval.
+
 ## Authorized Interim verification contracts
+
+> **Dated records.** This section and those after it keep the wording of their
+> date. Statements in them such as "scaffolds remain empty" or "CI runs install
+> and build only" describe that date. The current state is in the sections above.
 
 [ADR002](decisions/002-interim-delegated-contracts.md) remains authoritative for
 `CT14.interim`, `CT36.I-results` and `NC-EVIDENCE-MODE`. The detailed placement,
@@ -658,7 +871,7 @@ and [Testcontainers singleton lifecycle](https://java.testcontainers.org/test_fr
 ### Authority, exact revision and pending dependencies
 
 **CT14-INTERIM-FE03-FE07-2026-10-24-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** The Project Leader explicitly delegates
+[LEADER_APPROVED](decisions/README.md#approval-status-labels).** The Project Leader explicitly delegates
 actual Interim CT14 technical selection/approval in **“CodeMastery — Complete
 Interim Technical Contract Approvals (CT16, CT17, CT14)”**, supplied 24 October 2026
 (ICT). Codex, as the delegated technical decision-maker, **approves the exact six
@@ -784,7 +997,7 @@ is created or executed, and no implementation is authorized.
 Current #98/#101 have no corresponding automated behavior suites; that is missing
 implementation/evidence, not a reason to weaken CT01/CT16. Their scope discrepancies
 must be remediated separately; CT22 remains excluded. Every new determination
-stays APPROVED_PENDING_PROTECTED_INTEGRATION, with #102's dependency explicit.
+stays LEADER_APPROVED, with #102's dependency explicit.
 The sole-Leader-CODEOWNER PR-authorship conflict, eligible independent human
 review, last-push approval, checks and exact-revision integration remain unresolved;
 non-owner review or another contributor's push alone cannot substitute. Issue #27
@@ -807,7 +1020,7 @@ executed test result; only one canonical test class is retained.
 ### Authority, predecessor and canonical scope
 
 **CT14-FINAL-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Leader's explicit
+LEADER_APPROVED.** Under the Leader's explicit
 **“CodeMastery — Consolidate Contract Approval PRs and Complete Eligible Final
 Technical Approvals”**, supplied 25 October 2026 (ICT), Codex acts as delegated
 technical decision-maker and **approves F1/F2 below only**. This does not authorize
@@ -935,7 +1148,7 @@ self-approved or satisfied by an unrelated non-owner review/push alone.
 ### Authority, revision and behavioral dependency
 
 **CT14-PROFILE-AUTH-2026-10-25-r1: DELEGATED_TECHNICAL_APPROVAL;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** Under the Leader's explicit
+LEADER_APPROVED.** Under the Leader's explicit
 **“CodeMastery — Complete Additional CT16, CT17 and CT14 Technical Approvals in
 Existing PRs”**, supplied 25 October 2026 (ICT), Codex acts as delegated technical
 decision-maker and **approves the specification below only**. Test creation/run,
@@ -1065,7 +1278,7 @@ is not a failing executed test and is not acceptance. CT20.I remains unchanged:
 Profile is additional capability, not a new Interim completion prerequisite.
 
 **Additional bounded Profile/Auth test specification: technically approved;
-APPROVED_PENDING_PROTECTED_INTEGRATION.** Whole CT14/Final remains partially
+LEADER_APPROVED.** Whole CT14/Final remains partially
 approved. CT16/CT01 integration, separately authorized implementation, actual
 producers, current-head checks, eligible independent CODEOWNER/last-push review
 and real QA evidence remain required. No unrelated Final testing contract is
@@ -1416,3 +1629,1373 @@ and result.json. Task-owned resources and ephemeral credentials were cleaned up;
 no dependencies or generated artifacts were added. These focused checks do not
 claim a comprehensive accessibility audit or replace protected review. Codex
 assisted this scoped accessibility correction and regression execution.
+
+
+## SD01/SD02 seed verification — 30 October 2026
+
+Authority: ADR002 `CT15-SD-2026-10-30-r3` (V1 placement, T1–T3, M1–M2). The
+operator procedure is [sample-data/README.md](../sample-data/README.md).
+
+### Automated test
+
+`backend/src/test/java/com/codemastery/integration/SampleDataSeedIntegrationTest.java`
+runs the committed `01-users.sql` and `02-course-python-fundamentals.sql` with the
+real psql 17 inside the existing Testcontainers PostgreSQL container. Each scenario
+uses its own new database migrated by Flyway from `classpath:db/migration`. The
+test reads the cluster identity from `pg_controldata`, as operators do, and
+generates synthetic passwords and `$2b$14$` hashes in memory. It never prints or
+commits them.
+
+| Case group | What is asserted |
+| --- | --- |
+| Fresh load | Exact Users, Courses, Chapters, Lessons and text materials, with every ID re-derived as UUIDv5 from its logical key; instructor references, publication states, positions, adaptive values and NULL Lesson Markdown; exclusive text payloads, no file or video rows, no draft Chapters; every other V001–V006 table empty |
+| Identical rerun | Environment and psql-variable inputs both succeed; row values and `xmin` row versions are unchanged |
+| Conflicts (9) | Learner email, changed hash, Course ID, Chapter position, Lesson ID, Lesson position, edited material, missing Instructor, Instructor with the wrong role. Each stops with status 3 and leaves the database byte-identical, including rows that sort before the conflict in the same transaction |
+| Invalid inputs (9) | Missing, empty or non-numeric target identifier; missing hashes; plaintext, `$2a$`, cost-12 and truncated hashes. Rejected before any write |
+| Untrusted targets (14) | Unattested database, wrong expected identifier, attestation for another cluster, unbound attestation, role-scoped attestation, `PGOPTIONS` session impersonation, and a non-superuser denied `pg_control_system()`, each with an inherited READ COMMITTED and REPEATABLE READ default. Both seeds are rejected while the test holds `ACCESS EXCLUSIVE` locks with a 5-second lock timeout, which proves verification precedes locking |
+| Concurrency (3) | With an inherited READ COMMITTED, REPEATABLE READ and SERIALIZABLE database default (confirmed in effect for new sessions), two loaders of each file start while the test blocks the seed lock. Both reach the lock after running the guard, then both succeed with exactly one dataset; reruns leave row values and `xmin` versions unchanged |
+| Consumers | On the harness database: POST `/api/auth/login` succeeds for both seeded accounts with their roles and display names and returns 401 for a wrong password; the catalogue lists exactly the two published Courses with “Instructor Demo”; detail returns the canonical syllabus; the hidden draft returns 404. Seeded rows and the attestation are removed afterwards |
+| Redaction | No output of any run contains a password, hash or salt |
+| Failure diagnostics (3) | With sentinel passwords and BCrypt hashes, failed row and snapshot comparisons and failed process checks (wrong exit code, missing error, leaking output) throw errors whose message, string form, stack trace and attached values contain no sentinel, salt, checksum or BCrypt-shaped text, while still naming the context and the differing row |
+| Slides | `sample-slides.pdf` matches the recorded SHA-256, has PDF header and trailer markers, contains 12 page objects and records the author “CodeMastery Project Team” |
+
+### Executed commands and results
+
+Executed on 30 October 2026 (ICT) with OpenJDK 25.0.4.1 and Docker 29.8.1, on the
+ADR002 r3 revision:
+
+- `cd backend && ./mvnw -B verify`: BUILD SUCCESS. 468 unit tests and 135
+  integration tests passed, including 42 `SampleDataSeedIntegrationTest` cases.
+- `./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false
+  -Dfailsafe.runOrder=reversealphabetical`: BUILD SUCCESS. With the seed test
+  ordered before `EnrollmentIntegrationTest` and `CourseCatalogueIntegrationTest`,
+  their exact catalogue totals still pass, which confirms that cleanup leaves the
+  harness database unchanged.
+- The three concurrency cases were repeated three further times; all passed. No
+  test container remained afterwards.
+- Before the r3 seed fix, the same new test failed under an inherited REPEATABLE
+  READ default (`duplicate key value violates unique constraint "pk_users"`) and
+  under SERIALIZABLE (`could not serialize access`); READ COMMITTED passed.
+  After the one-line fix in each seed, all three pass.
+- Disclosure check: with the Learner display name changed temporarily in
+  `01-users.sql`, the r2 test's failure report contained two complete BCrypt
+  hashes. The r3 test's report for the same defect contained no BCrypt-shaped text
+  and showed redaction markers instead. The seed was restored afterwards.
+
+On the r2 revision, `cd frontend && npm ci && npm test && npm run build` succeeded
+with 390 tests in 11 files; r3 does not change the frontend. Fault injection on the
+r1 revision, reverted afterwards, showed that reading the attestation through
+`current_setting()`, locking before verification and removing the SD01 table lock
+each made the corresponding cases fail.
+
+The README procedure was executed verbatim in zsh on the r1 revision, against an
+isolated Compose project built from this branch with throwaway volumes. Flyway
+applied V001–V006 at backend startup, both seeds loaded, and the database check
+matched. HTTP sign-in succeeded for both accounts, with 401 for a wrong password.
+The catalogue returned the two published Courses, the draft returned 404, and a
+seed run after removing the attestation was refused. Earlier rehearsals of the
+identity, attestation, hash, load and rerun steps passed in both zsh and bash on
+fresh volumes whose migrations were applied by psql instead of the backend. The
+procedure's commands are unchanged since; r3 changes only each seed's `BEGIN`
+statement, which the automated tests above execute with the same psql 17. The
+Compose walkthrough was not repeated on r3. Project containers, volumes, the image
+and the synthetic credentials were removed after the walkthrough.
+
+The r2 slides were inspected page by page as rendered images and checked with
+`pdfinfo`, `pdffonts`, `pdfimages` and `pdftotext`. For r3, slides 1 and 4 were
+inspected as rendered images, the other ten were confirmed pixel-identical to r2 at
+90 dpi, and the same tools report 12 pages, PDF 1.4, no encryption, forms or
+JavaScript, only the two declared fonts and no extraction errors. The Unicode
+identifier examples, the leading-digit rule and the keyword count were checked on
+Python 3.12.16.
+
+### Evidence boundaries
+
+These results establish SQL correctness, disposable PostgreSQL loading and actual
+Auth/catalogue consumption on local disposable databases. They do not establish
+QA13 acceptance on the team's verification environment, frontend sign-in, MinIO
+object provisioning or file-material delivery. Those gates remain open. This
+implementation and its verification were AI-assisted under the Leader's
+delegation; review remains with the CODEOWNERs.
+
+## DP01 private health probe verification — 1 November 2026
+
+Scope: the change in
+[DP01 private health probe remediation](deployment.md#dp01-private-health-probe-remediation--1-november-2026).
+Run on macOS arm64 with Docker Engine 29.8.1 and OpenJDK 25.0.4.1, from the
+`fix/dp01-release-readiness` working tree based on `main` at `204483c`.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Reproduction before the change | Prod-profile backend image from `204483c` with PostgreSQL 17.11 on a private network; `wget -S -O - http://backend:8080/actuator/health` from `nginx-unprivileged:1.30.5-alpine` | 401 `application/problem+json`, `WWW-Authenticate: Bearer`, from `RestSecurityErrorHandler` |
+| Focused suite | `./mvnw -Dtest=AuthorizationIntegrationTest test` | 28 tests, 0 failures |
+| Regression detection | The same two health tests with the new rule removed | Both fail: 401 instead of 200/503 |
+| Full backend | `./mvnw -B verify` | BUILD SUCCESS; 468 + 167 tests, 0 failures, errors or skips |
+| Real HTTP after the change | Same topology, image built from the change | Probe 200 `{"groups":["liveness","readiness"],"status":"UP"}`; 401 for `/actuator`, `/actuator/health/`, `liveness`, `readiness`, `db`, `info`, `metrics`, `/v3/api-docs`; 403 for `POST /actuator/health`; 401 for a malformed JWT on `/api/me/courses`; 200 for the public catalogue |
+| Unhealthy dependency | PostgreSQL stopped, then probed | 503 after about 30 s, not `UP`; `UP` again after restart |
+| CI gate logic | The new probe assertions of job **VM HTTPS ingress**, run against the same local stack | All assertions passed |
+
+Not covered: the real VM, a linux/amd64 release backend, `deploy.sh deploy` and
+outside-network access.
+
+## DP01 minimal MinIO server qualification — 1 November 2026
+
+Scope: the `minimal` server mode of `infrastructure/minio/test-minio-init.sh` and
+its CI steps, described in
+[DP01 minimal MinIO server candidate](deployment.md#dp01-minimal-minio-server-candidate--1-november-2026).
+Run on macOS 27.2 arm64 (linux/amd64 under emulation) with Docker Engine 29.8.1,
+Compose v5.5.1 and host bash 3.2.57, on branch `chore/dp01-minio-server-minimal`
+at `8db0473` plus this change. To reproduce, pull the three pins as the CI job does, then:
+
+```bash
+infrastructure/minio/test-minio-init.sh
+MINIO_INIT_TEST_SERVER=chainguard infrastructure/minio/test-minio-init.sh
+docker build --platform linux/amd64 -t codemastery-test/minio-server:qualification - < infrastructure/vm/Dockerfile.minio-server
+MINIO_INIT_TEST_SERVER=minimal infrastructure/minio/test-minio-init.sh
+```
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Shell syntax | `bash -n infrastructure/minio/test-minio-init.sh` | Passed |
+| Workflow structure | Parsed with Ruby's YAML library and compared with the previous revision | Trigger, permissions and the other seven jobs unchanged. Job `minio-initializer` keeps its name and runner; its three existing steps are unchanged; two steps were added |
+| Golithus, variable unset | `infrastructure/minio/test-minio-init.sh` | 24/24 checks passed (288 s) |
+| Chainguard | `MINIO_INIT_TEST_SERVER=chainguard …` | 24/24 checks passed (291 s) |
+| Minimal | The CI build command above, then `MINIO_INIT_TEST_SERVER=minimal …` | Build succeeded; 24/24 checks passed (294 s) |
+| Selection | `MINIO_INIT_TEST_SERVER=` (empty), `Minimal`, or `minimal` with `MINIO_INIT_TEST_PLATFORM=linux/arm64` | Each failed with exit 1 before testing |
+| Missing candidate | `minimal` with the tag removed | Exit 1 with the build instruction; nothing was pulled |
+| Wrong candidate | The Chainguard image, or a variant with `/bin/sh` added, under the candidate tag | Exit 1: configuration mismatch or filesystem mismatch |
+| Suite constants (scratch copy, tracked file unchanged) | A mutable Chainguard reference; a wrong expected binary hash; a wrong Golithus version | Exit 1: not digest-pinned (Chainguard) or Dockerfile pin mismatch (minimal); binary mismatch; version mismatch (Golithus) |
+| Cleanup | Containers, networks and volumes compared before and after | Unchanged apart from the removed test resources |
+
+The rows above tested the original two-stage Dockerfile. Its first native run in
+GitHub Actions ([run 41306581519](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41306581519),
+`bfa06f9`) failed the minimal suite at check 3: `/data` and `/tmp` were `0755` on
+the runner's builder. Golithus and Chainguard passed 24/24 natively there. After
+the [staging-stage correction](deployment.md#native-ci):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Shell syntax | `bash -n infrastructure/minio/test-minio-init.sh` | Passed |
+| Minimal, corrected Dockerfile, local | The CI build command, then `MINIO_INIT_TEST_SERVER=minimal …` | Build succeeded; 24/24 checks passed, including `/data` and `/tmp` at `0700 65532:65532` |
+| Root directory | Layers of the corrected image, read from `docker save` on the local builder only | No layer has an entry for `/` |
+
+Native result: on PR #126 head `a23436b`, GitHub Actions
+[run 41308772749](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/41308772749)
+(job 124854577665, native linux/amd64) passed Golithus, Chainguard and minimal
+24/24 each ([Native CI](deployment.md#native-ci)). The root-directory row was not
+repeated natively.
+
+Not covered: any vulnerability scan or security admission of the minimal image,
+a release archive, and the Azure VM.
+
+## DP01 MinIO initializer base qualification — 1 November 2026
+
+Scope: the initializer base change in
+[DP01 MinIO initializer base remediation](deployment.md#dp01-minio-initializer-base-remediation--1-november-2026).
+Run on macOS 27.2 arm64 (linux/amd64 under emulation) with Docker Engine 29.8.1,
+Compose v5.5.1 and host bash 3.2.57, on branch `chore/dp01-minio-init-security`
+based on `main` at `36c2b98`. The reproduction commands are unchanged from
+[DP01 minimal MinIO server qualification](#dp01-minimal-minio-server-qualification--1-november-2026).
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Shell syntax | `bash -n` on `minio-init.sh` and `test-minio-init.sh` | Passed |
+| Golithus, variable unset | `infrastructure/minio/test-minio-init.sh` | 24/24 checks passed (301 s) |
+| Chainguard | `MINIO_INIT_TEST_SERVER=chainguard …` | 24/24 checks passed (304 s) |
+| Minimal | CI build command, then `MINIO_INIT_TEST_SERVER=minimal …` | Build succeeded; 24/24 checks passed (384 s) |
+| Selection | `MINIO_INIT_TEST_SERVER=` (empty) or `other` | Exit 1 before testing |
+| Base pin | Scratch copy of the suite expecting another `FROM` | Exit 1 at check 2 |
+| Previous image | The Golithus-based initializer as `IMAGE` | Exit 1 at check 4 (configuration) |
+| `mc` identity | A test-only candidate copy whose package record names another `mc` release, as `IMAGE` | Exit 1 at check 5 |
+| Vulnerability comparison | Grype 0.121.0, one database snapshot, both initializer archives | Golithus base 151 matches (4 critical, 41 high); candidate 0 |
+| Supply chain | cosign v3.1.4 `verify` and `verify-attestation` | Signatures, SPDX SBOM and SLSA v1 provenance verified for the candidate |
+| Cleanup | Labelled containers, networks and volumes | Removed; other resources untouched |
+
+The rows above used the suite at PR #127 head `2c87571`. Review found that it
+accepted mis-sourced initializer images. After the
+[artifact identity remediation](deployment.md#dp01-minio-initializer-base-remediation--1-november-2026):
+
+| Check | Command | Earlier suite | Current suite |
+| --- | --- | --- | --- |
+| A1: Golithus `mc` copied over `/usr/bin/mc`, package record kept | `test-minio-init.sh <image>` | 24/24 passed | Exit 1 at check 4: not the base plus one layer |
+| A1b: the same substitution and the script in one added layer | Same | 24/24 passed | Exit 1 at check 4: `usr/bin/mc` in the added layer |
+| A2b: unchanged Dockerfile on the `:latest-dev` digest, same package record | Same | 24/24 passed | Exit 1 at check 4: base diff IDs differ |
+| `mc` hash alone | A1b with layer verification disabled in a test-only copy | — | Exit 1 at check 4: `mc` SHA-256 is Golithus `6c79b743…` |
+| Stale constant | Wrong expected `mc` hash in a test-only copy | — | Exit 1 at check 4 on the pinned base |
+| Golithus, Chainguard, minimal | As above, with the current suite | — | 24/24 each (328 s, 343 s, 335 s) |
+
+Not covered: a GitHub Actions run of this change (results belong to the pull
+request), `govulncheck`, security admission, a release artifact and the Azure VM.
+
+## DP01 MinIO Console hardening verification — 2 November 2026
+
+Scope: the release-only Console setting in
+[DP01 MinIO Console hardening](deployment.md#dp01-minio-console-hardening--2-november-2026).
+Run on macOS 27.2 arm64 (linux/amd64 under emulation) with Docker Engine 29.8.1
+and Compose v5.5.1, on branch `fix/dp01-pre-release-hardening` based on `main` at
+`902cd89`. The suite now has 26 checks per server: check 12 is a control showing
+the Console listener with the base command, check 13 runs the initializer and
+application S3 access against a server with `MINIO_BROWSER=off`, and checks 24–25
+cover the release Compose model and its running server.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Shell syntax | `bash -n` on `deploy.sh` and `test-minio-init.sh`; `git diff --check` | Passed |
+| Compose models | `docker compose … config --format json` with and without the VM override | Local: Console on, `127.0.0.1:9000` and `:9001`. VM: `MINIO_BROWSER=off`, only the frontend publishes (443) |
+| Minimal | CI build command, then `MINIO_INIT_TEST_SERVER=minimal infrastructure/minio/test-minio-init.sh` | 26/26 checks passed |
+| Golithus, variable unset | `infrastructure/minio/test-minio-init.sh` | 26/26 checks passed (307 s) |
+| Chainguard | `MINIO_INIT_TEST_SERVER=chainguard …` | 26/26 checks passed (311 s) |
+| Console behavior | Minimal image with the base command and `MINIO_BROWSER` unset, `on`, `off`, `maybe` | Ports 9000+9001, 9000+9001, 9000 only, and exit 1 respectively |
+| CVE-2026-97731 probe | Presigned PUT plus unsigned `x-amz-copy-source` against the minimal image with `MINIO_BROWSER=off` | HTTP 400 `AccessDenied`; nothing copied |
+| Policy cases | The CI steps "Check offline Compose and provisioning safety guards" and "Check image identity through a real save/load round trip", run locally | Passed. Against `deploy.sh` from `main` both fail on the new cases, as expected |
+| Preflight cases | The Compose policy on the rendered CI fixture and its new `minio-*` overrides, run locally | Fixture accepted apart from certificates (not created locally); `MINIO_BROWSER: "on"`, a missing setting and `MINIO_CONFIG_ENV_FILE` rejected with the expected messages |
+| Cleanup | Labelled containers, networks and volumes | Removed |
+
+Not covered locally: `deploy.sh preflight` itself (it requires the Ubuntu 24.04
+linux/amd64 host; CI runs it), GitHub Actions results (they belong to the pull
+request), a release artifact and the Azure VM.
+
+## DP01 PostgreSQL Alpine/su-exec image qualification — 2 November 2026
+
+Scope: [ADR003](decisions/003-postgresql-alpine-su-exec-image.md) and
+[deployment.md, "DP01 PostgreSQL Alpine/su-exec image hardening"](deployment.md#dp01-postgresql-alpinesu-exec-image-hardening--2-november-2026),
+which holds the measured details. Run on 2 November 2026 on macOS 27.2 arm64
+(Docker Desktop, Engine 29.8.1; `linux/amd64` runs use Rosetta), Trivy 0.76.1
+(database 2026-11-01), Maven Wrapper, OpenJDK 25.0.4.1. Sources: the audit
+remediation measured on the tree committed as `cc5cb95`; the `su-exec` pin rows
+on `55902cc` plus that pin. Artifact: local `linux/amd64` `--no-cache` build with
+the pin, image ID
+`sha256:f7cccf3d0c3f03268d18d1ca519bb1c23170cb65239b7ddad62972739af359bd`.
+
+| Check | Command/method | Result |
+| --- | --- | --- |
+| Image identity | `postgres --version`; `readlink /usr/local/bin/gosu`; `gosu postgres id` | `17.11`; `/sbin/su-exec`; `uid=70(postgres)` |
+| Trivy | `docker save --platform linux/amd64`, `trivy image --input` | This image (with and without the pin) 0 findings; Bookworm 4 CRITICAL / 88 HIGH (amd64 and arm64); Alpine base 1 / 25, all `gosu` |
+| OCI layers | Each layer tar of the saved image | Base layer 2 keeps the 1,769,900-byte `gosu`; layer 11 is its whiteout; layer 12 the symlink; layer 13 the volume boundary. Residual risk pending acceptance |
+| `su-exec` pin | `apk policy`, `apk fetch`, `apk verify`, APKINDEX entry, `apk add su-exec=0.3-r0` (amd64 and arm64) | Only `0.3-r0` offered; signatures verify; checksums recorded in deployment.md; an absent version fails the build |
+| Reproducibility | Two `--no-cache` builds, layer-by-layer comparison | Different image IDs; base layers identical; ours differ only in `var/log/apk.log` and mtimes; `su-exec` binary identical. Not bit-for-bit reproducible |
+| Byte-clean experiment (not adopted) | Flattened `FROM scratch` copy; every layer blob searched for `gosu`; Trivy; volume-boundary CI step | No `gosu` bytes; 0 findings; step passes. Awaiting a Leader decision |
+| Foreign data volume | Bookworm-initialized and pre-marker volumes, direct `docker run` and `docker compose up --wait` | Exit 78, `refusing to start`, volume content unchanged; reproduced the silent start and `amcheck` failure at `b4c36bb` first |
+| Fresh volume | Init, marker, write, restart | Marker `musl`; data kept |
+| Local migration | [setup.md procedure](setup.md#existing-postgresql-volumes) on a throwaway project with 600 indexed rows | All rows identical by md5; `bt_index_check` clean; index and sort order agree |
+| `deploy.sh preflight` | Ubuntu 24.04 `linux/amd64` container, committed override, synthetic env and TLS pair | `PREFLIGHT OK`; remote Git context, privileged, host-network and insecure-entitlement PostgreSQL builds rejected (all accepted at `b4c36bb`) |
+| CI steps, run locally | Preflight against rendered Compose; containerd round trip (isolated `linux/amd64` Engine 29.8.1); new volume-boundary step | Pass. Containerd ran with the PostgreSQL image built on the host and `--provenance=false` fixtures, because emulated BuildKit cannot run `RUN` and Engine 29 adds attestations that Engine 28 on the runner does not. The volume-boundary step fails against the `b4c36bb` image |
+| Credential inspection | Five `psqlVariables*` tests; mutation run with the old heuristic; real Rosetta run | Pass; old heuristic fails the translated (`0 0`) and decoy (`1 0`) cases; Rosetta: `1 0` clean, `1 1` leaking, as root and `postgres` |
+| Backend suite | `cd backend && ./mvnw verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures, 0 errors; no per-run `postgres-it` image left |
+
+Not covered: GitHub Actions results for this revision, a release archive, and
+the Azure VM.
+
+## DP01 pre-release security hardening verification — 2 November 2026
+
+Scope: [deployment.md, "DP01 pre-release security hardening"](deployment.md#dp01-pre-release-security-hardening--2-november-2026),
+which holds the scan details. Run on 2–3 November 2026 on macOS 27.2 arm64 with
+Docker Engine 29.8.1 (containerd image store; `linux/amd64` under emulation),
+OpenJDK 25.0.4.1, Trivy 0.76.1 (database 2026-11-01 19:08 UTC), govulncheck
+v1.9.0 and cosign v3.1.4, on branch `fix/pre-release-security-hardening` based on
+`main` at `b2984a1`. Candidates used `codemastery-candidate/*` tags, never a
+`codemastery.invalid/*:release` name. `deploy.sh` code paths ran in disposable
+Ubuntu 24.04 `linux/amd64` or Alpine tool containers on the host Docker daemon,
+because macOS has bash 3.2 and `deploy.sh` enforces the B1 host.
+
+| Check | Command/method | Result |
+| --- | --- | --- |
+| Images and scans | `docker build --platform linux/amd64`; `docker save --platform linux/amd64`; `trivy image --input --scanners vuln`, default and `--detection-priority comprehensive` | Release frontend 0/0 (base: 1 CRITICAL, 2 HIGH); backend 0 CRITICAL/HIGH, 24 MEDIUM unfixable; PostgreSQL 0 (merged view); minimal MinIO GO-2026-5932 only |
+| Pinned Alpine set | Sorted `apk list -I` versus the `main` recipe on the same day | Identical |
+| govulncheck | `-mode=binary` on `mc`, `minio`, the inherited `gosu`, a stripped and unstripped control binary | As recorded; the stripped control reproduces the `openpgp/*` wildcard without `openpgp` |
+| Upstream signatures | `cosign verify`, Chainguard release workflow identity | Initializer base and server pins verify |
+| Image CI checks | Nginx ownership and setuid/setgid assertions | Fail on `main` images, pass on the candidates |
+| Compose policy, offline | CI step "Check offline Compose and provisioning safety guards" | Passes; its new hardening cases fail against `main`'s `deploy.sh` |
+| Compose policy, rendered | 21 override mutations of the committed model through `deploy.sh`'s policy code | Committed model accepted; every mutation rejected (a tmpfs over the PostgreSQL data volume is refused by Compose itself) |
+| Preflight, rendered fixture | CI step "Check preflight against rendered Compose" (Ubuntu 24.04 amd64 container) | `PREFLIGHT OK`, all rejection cases including the 7 new ones; `main`'s `deploy.sh` rejects the hardened fixture |
+| Preflight, committed override | CI step "Run DP01 preflight with the committed override and certificate layout" (non-root operator with `sudo`) | Passes, including the new hardening assertions |
+| Archive identity | CI steps "Check release archive identity models" and "Check image identity through a real save/load round trip" | Pass |
+| Five-image release path | Real `deploy.sh` `run_provision`/`run_deploy` on the hardened model with candidate images; archive, image-identity, port and host-TLS checks stubbed (no release archive; macOS cannot reach container addresses) | Completed: role provisioning and privilege matrix, initializer, private backend health, Flyway V001–V006, role separation, staged `nginx -t`, frontend healthy. Containers: read-only, `NoNewPrivs` 1, `CapBnd` 0 (PostgreSQL `0xcb`) |
+| Behavior on that stack | HTTPS through the frontend | SPA 200; register 201 (approved origin) / 403 (foreign); login; `/api/me/courses` 401/200; `/actuator/health` is the SPA HTML, not proxied |
+| Restart and recovery | Stop all, start in order, rerun initializer, log in again | Healthy; initializer `changes: 0`; account persisted |
+| Foreign volume, hardened | PostgreSQL with the release restrictions on a non-empty unmarked volume | Exit 78; volume unchanged |
+| Initializer writability | Release restrictions, UID 65532 | Only `/tmp` writable |
+| MinIO initializer suite | `test-minio-init.sh` for `golithus`, `chainguard`, `minimal` (after the CI build of `Dockerfile.minio-server`) | 26/26 each. First round 321/355/441 s; second round, with the hardening checks, 372/364 s; the minimal run's elapsed time is not meaningful because the host slept during it |
+| Ingress job | Its steps run locally with native images (CA store with an OpenSSL 3.5 container) | Build/origin rejection, CA store, stub and real-backend ingress passed |
+| PostgreSQL volume boundary | CI step on the committed image | Passes |
+| Backend suite | `cd backend && ./mvnw verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures |
+| Frontend | `npm ci`, `npm test`, `npm run typecheck`, `npm run build`, `npm audit` in `node:22.23.3-bookworm-slim` (pinned) | 390 tests; typecheck and build passed; 0 vulnerabilities |
+| F1 Option B experiment | Disposable build; three builds compared; test-only suite copy (identity assertions retargeted) | `mc` bit-identical in all three; 26/26 against all three servers; not adopted |
+| F4 flattened experiment | Disposable build; layer search; volume-boundary step; `./mvnw verify` with it as the Testcontainers Dockerfile; hardened five-image release path | No `gosu` bytes; merged filesystem identical; all pass; not adopted |
+| Whitespace | `git diff --check` | Passed |
+
+Not run: Playwright end-to-end tests (not available), the CI containerd registry
+step (GitHub Actions runs it), a release archive with the
+`codemastery.invalid/*:release` names, and the Azure VM. GitHub Actions results
+belong to the pull request.
+
+## DP01 final security remediation verification — 3 November 2026
+
+Scope: [deployment.md, "DP01 final security remediation"](deployment.md#dp01-final-security-remediation--3-november-2026).
+Run on 3 November 2026 on macOS 27.2 arm64 with Docker Engine 29.8.1 (containerd
+image store; `linux/amd64` under emulation), OpenJDK 25.0.4.1 on the host,
+Trivy 0.76.1 (database 2026-11-03 01:30 UTC), govulncheck v1.9.0 (database
+2026-11-02T22:01:43Z) and cosign v3.1.4, on `fix/pre-release-security-hardening`
+at `72e4786` plus the changes recorded there. Candidates used
+`codemastery-candidate/*` tags; `test-minio-init.sh` used its own
+`codemastery-test/minio-init:qualification` tag. `deploy.sh` code ran in
+disposable Ubuntu 24.04 `linux/amd64` tool containers.
+
+| Check | Command/method | Result |
+| --- | --- | --- |
+| Trivy, five candidates | `docker save --platform linux/amd64`; `trivy image --input --scanners vuln`, default and comprehensive | Initializer 0/0 (2 November image: 1 HIGH and 3 UNKNOWN distinct, comprehensive); PostgreSQL 0/0; backend 0 CRITICAL/HIGH, 24 MEDIUM and 4 LOW without a fix (unchanged); frontend 0/0 (2 November candidate with today's database: 2 HIGH, 1 MEDIUM, 1 UNKNOWN in `libexpat`); minimal MinIO GO-2026-5932 only |
+| govulncheck | `-mode=binary` on both `mc` binaries | Project-built: none; Chainguard: GO-2026-5841 (package), GO-2026-5932, GO-2026-6107, GO-2026-6860, GO-2026-6866 (module) |
+| `mc` reproducibility | BuildKit build (arm64 builder, cross-compiled); offline rebuild from the exported archive with its README command in an emulated `linux/amd64` Go container; the source archive from two separate BuildKit builds | `mc` `025691d4…` and archive `ed6f972e…` identical each time |
+| `x/crypto` fix version | `diff -r` of the `v0.58.0` and `v0.58.1-0.20261009181718-2f1f834330b2` module trees | Only the `openpgp` directory differs (removed) |
+| Initializer identity model | `test-minio-init.sh IMAGE` on the 2 November image, the Option B experiment and three mutated builds | All rejected with the expected assertion |
+| MinIO initializer suite | `test-minio-init.sh` for `golithus`, `chainguard`, `minimal` | 27/27 each (474, 364 and 360 s) |
+| Local initializer argv | Base Compose initializer with an argument-logging `mc` wrapper; `main`'s file and this branch's | `main`: both secrets in `mc` arguments; branch: neither, initialization succeeds; a secret with a tab is refused before any `mc` call |
+| PostgreSQL equivalence | New CI step "Check the PostgreSQL image is byte-clean and equivalent to its layered build"; also against a classic-builder build | Passes: configuration equal except the two variables, 3,887 entries equal, one layer, no `gosu` |
+| PostgreSQL volume boundary | CI step on the byte-clean image | Passes |
+| Backend suite | `cd backend && ./mvnw -B verify` (Testcontainers builds the byte-clean image) | BUILD SUCCESS: 468 unit, 171 integration, 0 failures |
+| Frontend | `npm ci`, `npm test`, `npm run typecheck`, `npm run build`, `npm audit` in `node:22.23.3-bookworm-slim` (pinned) | Typecheck, build and audit (0 vulnerabilities) passed. `npm test`: first run 389/390 with one failure while the host ran two Docker suites (failing test name not captured); rerun 390/390. The frontend source is unchanged by this branch |
+| Frontend package set | `apk info -v` of the candidate versus `apk upgrade` on the pinned base the same day | Identical |
+| Ingress job | Its first four steps locally with native images (CA store with an OpenSSL 3.5 container) | Build and origin rejection with the Nginx ownership and setuid/setgid checks (backend on Temurin 25.0.5), CA store, stub ingress, real backend: all passed |
+| Deployment-script job | Shell syntax and authorization gates; offline Compose guards; runtime privilege matrix; env-file custody and committed-override preflight (non-root operator with `sudo`); rendered preflight; archive identity models | All passed |
+| Five-image release path | Real `deploy.sh` `run_provision`/`run_deploy` on the hardened model with the five candidates; archive, image-identity, port and host-TLS checks stubbed | Completed. Read-only roots, `cap_drop` ALL, `no-new-privileges`; `NoNewPrivs` 1; `CapBnd` 0 (PostgreSQL `0xcb`); initializer `changes: 4`; PostgreSQL 1 layer, marker `musl`, server as `postgres`; backend on Java 25.0.5 |
+| Behavior on that stack | HTTPS through the frontend | SPA 200; register 201 (approved origin) / 403 (foreign); login token; `/api/me/courses` 401 without, 200 with it; `/actuator/health` is the SPA HTML, not proxied |
+| Restart | Stop all; start PostgreSQL and MinIO, rerun the initializer, start backend and frontend | Initializer `changes: 0`; frontend healthy; the account logs in again |
+| tmpfs usage | `df`/`du` in the running containers | Backend `/tmp` 32 KiB, frontend 4 KiB, PostgreSQL socket directory 4 KiB; 3.9 GiB available each |
+| Signatures and provenance | `cosign verify` of the Chainguard initializer base; BuildKit provenance of the Go, Alpine and Temurin pins | Signature verifies; provenance read, unsigned |
+| SBOM evidence | `trivy image --format spdx-json` for the five candidates | Generated (not committed) |
+| Whitespace | `git diff --check` | Passed |
+
+Not run: Playwright end-to-end tests (not available); the CI steps "Exercise
+the runtime privilege matrix on the real schema and failure containment",
+"Exercise published-port verification against real containers", "Exercise
+real Auth, catalogue and membership under the approved matrix" and the
+containerd registry step (GitHub Actions runs them); a release archive with the
+`codemastery.invalid/*:release` names; the Azure VM. GitHub Actions results
+belong to the pull request.
+
+## DP01 final qualification, second pass — 3 November 2026
+
+Scope: the second task recorded in
+[deployment.md, "DP01 final security remediation"](deployment.md#dp01-final-security-remediation--3-november-2026).
+Same host and tools as the section above (Trivy database 2026-11-03 01:30 UTC,
+govulncheck database 2026-11-02T22:01:43Z). The five candidates were built from
+this branch's final files, all `linux/amd64`:
+
+| Image | Candidate | Image ID | Layers |
+| --- | --- | --- | --- |
+| PostgreSQL | `codemastery-candidate/postgres:r5` | `sha256:d2780e42…` | 1 |
+| Minimal MinIO server | `codemastery-candidate/minio-server:r5` | `sha256:fe27b3c4…` | 5 |
+| MinIO initializer | `codemastery-candidate/minio-init:r5` | `sha256:fffa4d57…` | 4 |
+| Backend | `codemastery-candidate/backend:r5` | `sha256:587ad4ad…` | 8 |
+| Frontend (release) | `codemastery-candidate/frontend:r5` | `sha256:fdf3e288…` | 13 |
+
+**Test-host correction.** In the first pass, the operator-container runs of the
+env-file custody and committed-override preflight steps began with
+`sudo chmod 666` on the Docker socket the container saw. On Docker Desktop that
+path is the VM's `/run/host-services/docker.proxy.sock`; its change time matched
+that run, and every other socket Docker Desktop created in the same directory at
+the same boot is `0660 root:root`. It was set back to `0660` (owner and group
+unchanged, the VM's own `/run/docker.sock` was never touched). The host CLI and
+root containers still work, a container user without group 0 is refused, and the
+operator image's user, which has supplementary group 0, works without any
+permission change. Both steps were rerun that way. No repository file contains
+the `chmod`; it was only in the local command line.
+
+| Check | Method | Result |
+| --- | --- | --- |
+| Trivy, exact set | `docker save --platform linux/amd64`, default and comprehensive | PostgreSQL 0/0; initializer 0/0; frontend 0/0; backend 0 CRITICAL/HIGH, 24 MEDIUM and 4 LOW without a fix; minimal server GO-2026-5932 (UNKNOWN) only |
+| govulncheck | `-mode=binary` | `mc`: none. `minio`: GO-2026-5932 at symbol level, the stripped-binary artifact shown with a control binary on 2 November |
+| JDK trust store | OpenJDK `CheckCerts.java` compiled with the pinned JDK, run on Temurin 25.0.4.1+1, 25.0.5+8 and the candidate | Two, one and no listed roots; the build-time assertion fails on both unpatched stores |
+| `mc` Corresponding Source | Exported archive versus the suite's hash and the image's `SOURCE`; archived Dockerfile versus the committed one; offline rebuild with the README command in an emulated `linux/amd64` Go container | All equal; rebuilt `mc` `025691d4…` |
+| MinIO initializer suite | `test-minio-init.sh` for `golithus`, `chainguard`, and `minimal` with the `r5` server tagged as the suite's qualification image (tags restored afterwards) | 27/27 each (427, 505 and 369 s) |
+| CI-equivalent steps | The deployment-script, PostgreSQL and ingress job steps listed in the first-pass section, plus "Run DP01 preflight with the committed override and certificate layout" after the ingress build; operator steps without any socket change | All 13 passed |
+| Five-image release path | Real `deploy.sh` `run_provision`/`run_deploy` with the five `r5` images; archive, image-identity, port and host-TLS checks stubbed | Completed; privileges and roles as in the first pass; containers read-only, `cap_drop` ALL, `no-new-privileges`; PostgreSQL 1 layer, marker `musl`, server as `postgres`, `CapBnd` `0xcb`; initializer `changes: 4`; backend Java 25.0.5 |
+| Behavior on that stack | HTTPS through the frontend | SPA 200; register 201 / 403 (foreign origin); login token; `/api/me/courses` 401 / 200; `/actuator/health` not proxied; a 2 MB body 413, a 0.9 MB body reaches the backend (400) |
+| Restart | Stop all, start in order, rerun the initializer | Initializer `changes: 0`; frontend healthy; login 200 |
+| tmpfs | `df`/`du` in the running containers; `nginx -T` | 32 KiB / 4 KiB / 4 KiB used; Nginx temp paths under `/tmp`, `worker_processes auto`, 1,024 connections |
+| PostgreSQL capability sets | Fresh volume, restart with data, refused Bookworm volume, under the release restrictions | As tabulated in deployment.md |
+| Backend suite | `cd backend && ./mvnw -B verify` | BUILD SUCCESS: 468 unit, 171 integration, 0 failures |
+| Whitespace | `git diff --check` | Passed |
+
+Not run: Playwright end-to-end tests (not available); the CI steps for the
+runtime privilege matrix with failure containment, published-port verification,
+real-backend Auth/catalogue/membership and the containerd registry (GitHub
+Actions runs them); a release archive with the `codemastery.invalid/*:release`
+names; the Azure VM. The frontend source is unchanged and its tests were not
+rerun in this pass.
+
+## DP01 independent-review remediation verification — 3 November 2026
+
+Scope: the two P2 defects in the independent review of PR #132 at `d6a4eeb`,
+corrected under the Leader's remediation task. See the
+[implementation and corrected claims](deployment.md#dp01-independent-review-remediation--3-november-2026).
+Earlier results above remain historical; successful old certificate-inventory
+checks did not prove that inspection failures stopped the build, and ordinary
+stdin credentials did not prove long-value preservation.
+
+Local environment: macOS arm64, Docker Engine 29.8.1, Compose v5.5.1;
+linux/amd64 containers run under emulation. Maven uses host Temurin 25.0.4.1;
+the actual backend image remains pinned Temurin 25.0.5+8. All test state is
+synthetic and disposable. No Docker socket permission was changed, production
+resource accessed, or release tag created.
+
+| Check | Exact command or method | Actual result |
+| --- | --- | --- |
+| Baseline F10 reproduction | Actual local Compose initializer, 5,000-byte synthetic secret; authenticate through private JSON aliases with full and truncated values | Before: exit 0, full value rejected with `SignatureDoesNotMatch`, 4,096-byte prefix accepted; server control accepts intact 5,000 bytes |
+| Baseline F11 reproduction | Actual old negated pipeline with `keytool` returning 42 | Before: guard exits 0 |
+| Corrected backend build | `docker build --platform linux/amd64 -t codemastery-pr132-remediation/backend:f11 backend` | PASS; 117 complete X.509 trust entries, no prohibited root |
+| Trust-store build regressions | `bash infrastructure/vm/tests/test-java-truststore.sh codemastery-pr132-remediation/backend:f11` | PASS, 13 uncached build cases: published store rejected; final store accepted; all four introduced real roots rejected; keytool error, malformed/incomplete successful output, validator error, invalid and unreadable stores rejected; unrelated same-CN certificate accepted |
+| Backend tests | `cd backend && ./mvnw -B verify` | BUILD SUCCESS; 468 unit and 171 integration tests, zero failures/errors/skips |
+| Runtime restrictions and build-only files | Read-only backend with `/tmp` tmpfs, `cap_drop ALL`, `no-new-privileges`; inspect runtime and verifier/inventory paths | PASS: Temurin 25.0.5+8, UID 999, effective/bounding capabilities zero, NoNewPrivs 1; helper class and temporary inventory absent |
+| Syntax/whitespace | `bash -n infrastructure/minio/minio-init.sh infrastructure/minio/test-minio-init.sh infrastructure/vm/tests/test-java-truststore.sh`; `git diff --check` | PASS |
+| MinIO image and three-server qualification | Commands below, supplied candidate image | PASS, 28/28 for each of Golithus, Chainguard and minimal; the suite-build form additionally checks the unchanged Corresponding Source archive |
+| Deployment/HTTPS regression checks | Existing CI-derived scripts; limitations below | PASS: cleanup, authorization, offline Compose, 24-relation matrix sync, archive fixtures and rendered Compose mutations; 65 real-backend HTTPS assertions |
+
+The MinIO suite adds actual local Compose cases at 4,095/4,096 bytes and
+repeats them against the existing identity. Full-value authentication must
+succeed and a shortened value must fail. At 4,097/5,000 bytes, each credential
+field is rejected before any `mc` call; server inspection must find no bucket,
+policy or application identity. UTF-8 cases distinguish bytes from characters.
+Control characters remain rejected. A wrapper records every `mc` argument list,
+and initializer logs are checked for credential disclosure. Existing bucket
+permissions, server Console checks, persistence, release conflict refusal and
+idempotency remain in the same suite. The release additionally proves its
+4,096-byte application-secret boundary, early overflow refusal and continued
+5,000-byte root-password support through JSON.
+
+Commands:
+
+```bash
+docker build --platform linux/amd64 \
+  -t codemastery-pr132-remediation/minio-init:f10 infrastructure/minio
+MINIO_INIT_TEST_SERVER=golithus bash infrastructure/minio/test-minio-init.sh codemastery-pr132-remediation/minio-init:f10
+MINIO_INIT_TEST_SERVER=chainguard bash infrastructure/minio/test-minio-init.sh codemastery-pr132-remediation/minio-init:f10
+MINIO_INIT_TEST_SERVER=minimal bash infrastructure/minio/test-minio-init.sh codemastery-pr132-remediation/minio-init:f10
+```
+
+The existing deployment CI steps are executed against this worktree for shell
+and authorization gates, frontend cleanup, offline Compose guards, runtime
+privilege-matrix synchronization and archive identity fixtures. Rendered Compose
+mutation checks execute the actual policy but omit Linux-only host/env-custody
+gates on macOS; they are not a full host preflight. The real-backend HTTPS CI
+script uses the corrected backend, unchanged frontend/PostgreSQL candidates,
+private synthetic PKI and the approved runtime restrictions. Its disposable
+PostgreSQL probe waits for the final TCP server rather than the temporary
+initialization socket.
+
+GitHub CI on the published HEAD is recorded on PR #132 separately from these
+local executions. Not independently repeated here: Linux host/env-custody gates,
+archive save/load/containerd round trips, Playwright, vulnerability rescans or
+upstream signatures. No Azure deployment or production admission is tested or
+authorized by these corrections.
+
+## DP01 post-merge security requalification — 3 November 2026
+
+Baseline: `origin/main` `0535ec4f3ad9939f532648a78296516e7e61801e` (PR #132),
+compared with the requested previous baseline `b2984a1`. Follow-up implementation
+changes only the default local Nginx target and extends the existing ingress
+image checks; the dated [deployment record](deployment.md#dp01-post-merge-security-requalification--3-november-2026)
+holds the F1–F11 dispositions. No governance source is changed.
+
+### Artifacts and scanners
+
+All candidates were built for **linux/amd64**, under the separate namespace
+`codemastery-followup-20261103/`. Docker Desktop runs on arm64, so these are
+emulated-amd64 results, not native-amd64 or Azure evidence. Raw logs, scripts,
+inspect JSON, archives, complete scanner JSON and the exported Corresponding
+Source are retained outside Git in
+`/private/tmp/codemastery-security-evidence-20261103/`.
+
+Docker's containerd image store reports a local **index ID** from `image inspect
+.Id`; Trivy archive metadata reports the **platform image configuration digest**.
+They are different identities, recorded separately below. These are disposable
+candidate bindings, not release identities or admission records.
+
+| Artifact / tag suffix | Local index ID (`sha256:`) | Saved amd64 configuration digest (`sha256:`) |
+| --- | --- | --- |
+| `frontend:local-amd64` | `4fe800e7cfe38c769bb90ff743784cded682f752267242aad9f35d7a3aa2330f` | `a22a2e60dbf40a760760a6bbb83abbaff2d5624e9376f80e2891d23d8ec02910` |
+| `frontend:ingress-amd64` | `35087fd059062d4d0705c3c2a93228562714fad43029836ec253a3ff770ae890` | `0bc1c72816f8ad6a186200874ba1e59ee2188df42f31d6828263e97e2cfb6cf7` |
+| `backend:amd64` | `14bb9b03ff27289d326db605ecac9388911087243a1a179656d2a4a01349a052` | `705cb677d127988e24e40b2bf3f5ea8d802b56ebb61072ec6dd45ed382c2271d` |
+| `postgres:candidate` | `4444bcb2c93d83b3afe2dfa308a6d5b2d7d73698f6030ac2c596178eb7dde0cf` | `ca3e326296afb43df89659d1b0e25eb6d6505e634a652bd269a0bebf11ca63ec` |
+| `minio-init:candidate` | `f68f896394e7d2b09b096183f1d2f6ed166e60ad83b762c0c86cf0f84108bc50` | `fc72160eefd08e471aa31fcd0f4d367ff7c8e062fef31596ce0d4b04942cf245` |
+| `minio:candidate` | `1348e6be5cdcf6f5b21cee6e6d3334bfc35f43b7059b683eb0166942f72e6398` | `1f7051c4b7fb3d9237e3fc35ca91e9fea2fe1062c8fac3bd44642056e61270ed` |
+
+Trivy **0.76.1**, vulnerability DB updated `2026-11-03T01:30:30Z`;
+`trivy image --input <single-image.tar> --scanners vuln --detection-priority
+precise --format json --output <report.json>` and the same command with
+`--detection-priority comprehensive`. Both flags are supported by the installed
+CLI. No ignore, severity exclusion or suppression is used. Counts below are
+finding rows, including separate affected installed packages.
+
+| Artifact | Precise C/H/M/L/U | Comprehensive C/H/M/L/U |
+| --- | --- | --- |
+| frontend-baseline-local | 0/3/4/0/2 | 0/3/4/0/2 |
+| frontend-local | 0/0/0/0/0 | 0/0/0/0/0 |
+| frontend-ingress | 0/0/0/0/0 | 0/0/0/0/0 |
+| backend-final | 0/0/24/4/0 | 0/0/24/4/0 |
+| postgres | 0/0/0/0/0 | 0/0/0/0/0 |
+| minio-init | 0/0/0/0/0 | 0/0/0/0/0 |
+| minio | 0/0/0/0/1 | 0/0/0/0/1 |
+
+The local image's Nginx executable is SHA-256
+`97f9898b94114a136bd87e1eb7759aa2a15d5007154b670c447ee710e629f54b`
+and reports 1.30.6. Layer inspection also recovered base-layer zlib
+(`a1e2c03d…44e57`) and musl (`38d022ce…72806`) alongside the patched runtime
+replacements (`ecc8b9df…7c5f2`, `095b047c…0de5`). All full hashes and layer
+positions are in `frontend-local-layer-binaries.json` in the evidence directory.
+These upgrades fix the merged runtime; the inherited library bytes remain.
+
+The original local frontend's nine rows are enumerated in deployment.md. No
+CRITICAL/HIGH finding remains in these candidate scans. The minimal server's
+one UNKNOWN is `GO-2026-5932`, x/crypto v0.58.0, fixed-module version
+`0.58.1-0.20261009181718-2f1f834330b2`. Runtime reachability remains
+`NOT_VERIFIED`; this is not proof that every server CVE is absent.
+
+The backend's complete residual inventory is below. Trivy reports no fixed
+version for any row. A disposable runtime container's `apt-get update` followed
+by `apt list --upgradable` lists no available upgrades; the current Temurin tag
+still resolves to the consumed `sha256:a98128a5…` index. No packages were
+installed, and no unbounded apt upgrade or Ubuntu distribution change was
+introduced. The same counts/inventory occur in both detection modes.
+
+| Package / installed version | Severity | All reported CVEs |
+| --- | --- | --- |
+| `dash` 0.5.12-6ubuntu5 | MEDIUM | `CVE-2026-102473`, `CVE-2026-102474` |
+| `libc-bin` 2.39-0ubuntu8.9 | MEDIUM | `CVE-2026-18374`, `CVE-2026-89092` |
+| `libc6` 2.39-0ubuntu8.9 | MEDIUM | `CVE-2026-18374`, `CVE-2026-89092` |
+| `libexpat1` 2.6.1-2ubuntu0.6 | MEDIUM | `CVE-2025-66382` |
+| `libgnutls30t64` 3.8.3-1.1ubuntu3.6 | MEDIUM | `CVE-2026-67693`, `CVE-2026-88647`, `CVE-2026-88648`, `CVE-2026-95184`, `CVE-2026-95209`, `CVE-2026-95210` |
+| `libpcre2-8-0` 10.42-4ubuntu2.1 | MEDIUM | `CVE-2026-103111`, `CVE-2026-86145`, `CVE-2026-89156`, `CVE-2026-89157`, `CVE-2026-89158`, `CVE-2026-89160`, `CVE-2026-89161` |
+| `libsystemd0` 255.4-1ubuntu8.18 | LOW | `CVE-2026-40228` |
+| `libudev1` 255.4-1ubuntu8.18 | LOW | `CVE-2026-40228` |
+| `locales` 2.39-0ubuntu8.9 | MEDIUM | `CVE-2026-18374`, `CVE-2026-89092` |
+| `login` 1:4.13+dfsg1-4ubuntu3.2 | LOW | `CVE-2024-56433` |
+| `passwd` 1:4.13+dfsg1-4ubuntu3.2 | LOW | `CVE-2024-56433` |
+| `tar` 1.35+dfsg-3ubuntu0.4 | MEDIUM | `CVE-2026-18477`, `CVE-2026-18508` |
+
+`govulncheck@v1.9.0` (Go 1.27.3), `-mode=binary -json`, DB
+`https://vuln.go.dev` modified `2026-11-02T22:01:43Z`: exact candidate `mc`
+SHA-256 `025691d43adb653c6ce34723c76450153f2c024bfa232edaca6906fe3e221809`
+has no findings. Exact server SHA-256
+`3c3d615241314c531e15e57485c053e60dc1af04e87b20424d2db8bdec8a49b2`
+has only GO-2026-5932 (15 reported traces, one distinct advisory). JSON mode
+returns zero even when findings exist; the finding objects, rather than exit
+status, determine this result. No new source-mode/reachability claim is made.
+
+The exported `mc-source.tar.gz` equals the existing suite assertion:
+`a42400d4703c265258952b44bfd997a53dcca55bf47b691f48a1f2f483e98b50`.
+No new independent offline binary rebuild was performed; prior reproducibility
+evidence is historical, while the fresh archive/binary identity comparisons
+passed. Cosign **3.1.4** freshly verifies both consumed Chainguard pins and the
+new current upstream indexes. It also verifies the current indexes' SLSA v1
+attestations with exact subjects and the issuer/workflow identity in
+deployment.md. Nginx's unsigned BuildKit statement was inspected, not
+independently authenticated. No project-image signing workflow was added.
+
+### Executed functional and security checks
+
+| Check / executed command or existing CI scenario | Result |
+| --- | --- |
+| `cd backend && ./mvnw verify` (Java 25.0.4.1 host; isolated Testcontainers build) | PASS: 468 unit + 171 integration, zero failures/errors/skips; runtime candidate separately uses Temurin 25.0.5+8 |
+| `cd frontend && npm ci`; `npm test`; `npm run build` | PASS: 390 tests; build includes `npm run typecheck`; only the existing bundle-size advisory |
+| `cd frontend && npm audit --json` | PASS: 0 vulnerabilities |
+| `cd frontend && npm run test:browser` | NOT_RUN: attempted, exits 1 before browser execution because module `playwright` is unavailable; no E2E PASS claimed |
+| `docker build --platform linux/amd64 ...` for all five candidates and both frontend targets; `docker save --platform linux/amd64 ...` per scan artifact | PASS; separate candidate tags, inspect JSON and archives retained |
+| New version/ownership checks against the original local image | Expected FAIL (Red): both assertions exit 1; patched local target PASS (Green) |
+| Ingress CI image step, including `bash infrastructure/vm/tests/test-java-truststore.sh <backend>` and invalid release origins | PASS: both frontend targets have Nginx 1.30.6, root-owned non-writable configuration, usable cache and no setuid/setgid files; backend also has no such files; trust-store suite 13/13 |
+| `infrastructure/minio/test-minio-init.sh <candidate>` assertions, Golithus / Chainguard / minimal | PASS: 28/28 each, including exact OCI/binary identity, IAM, least privilege, persistence/idempotency, Console-off, credential boundaries and failure propagation |
+| Existing deployment-script CI steps: shell/authorization, cleanup, offline Compose/provisioning, privilege-record consistency, env custody, rendered Compose, archive models, real save/load round trip | PASS: all eight steps; Linux-specific custody checks passed on the harness's native filesystem |
+| Existing PostgreSQL CI privilege-matrix, foreign-volume and byte-clean equivalence steps | PASS: SQL privilege/failure cases; exit 78 and unchanged glibc data; musl marker/restart/persistence; single-layer content/configuration equivalence and no inherited gosu |
+| Existing HTTPS stub-backend ingress scenario | PASS: 126 assertions, including local HTTP deep link/404/healthcheck behavior, TLS rejection, forwarding restrictions and unavailable-backend behavior |
+| Existing public-chain CA-store fixture | PASS with Ubuntu OpenSSL 3: expected chain trusted, missing cross-sign and wrong hostname rejected; no Azure connection |
+| Existing committed-override preflight and image-policy scenario | PASS: effective five-service model/hardening, certificate rejection cases, release-image acceptance and local-image rejection |
+| Disposable hardened five-image scenario, extending the existing real-backend ingress scenario | PASS: 65 HTTPS/Auth/CORS/management/failure assertions; real Flyway V001–V006 under migrator, exact runtime/bootstrap/migrator separation; all five hardening configurations; full restart retains PostgreSQL data/marker/privileges and MinIO repeat initialization |
+| Runtime `/proc/1/status` after restart | PASS: PostgreSQL UID/GID 70, CapEff 0, CapBnd 0xcb; MinIO UID/GID 65532, backend 999, frontend 101, each CapEff/CapBnd 0; all NoNewPrivs 1 |
+| YAML parsing and `bash -n` for all Bash workflow blocks; `git diff --check` | PASS |
+
+### Harness adaptations, failures and limits
+
+CI blocks were extracted into the external evidence directory. Only disposable
+image/resource names and explicit linux/amd64 builds were substituted for this
+host; PostgreSQL role/ingress fixtures used the actual hardened candidate instead
+of Bookworm. The MinIO harness changed only its repository root and minimal
+candidate tag, preserving every qualification assertion. Supplied-image mode
+omits the build-only source-archive assertion; that archive was independently
+exported and hash-checked above.
+
+The five-image extension uses new volumes/network, synthetic TLS and disposable
+credentials, the actual `deploy.sh` provisioning/privilege functions, and the
+approved read-only/capability/tmpfs controls. Curl trusts a test-only root through
+a fixture mount. No VM command, production preflight, public port publication,
+release promotion or end-to-end `deploy.sh deploy` execution is claimed.
+
+Initial harness failures were preserved and corrected: native Docker builds
+selected arm64 before an amd64 trust-store/export check; shared macOS filesystem
+ownership failed strict Linux env-custody checks; macOS LibreSSL lacked the CA
+fixture verification option; one preflight invocation omitted image variables;
+and the first five-image extension queried PostgreSQL after the existing test
+intentionally stopped it for the 503 assertion. Corrected invocations passed,
+without weakening production tests. Multi-image Trivy input was also rejected;
+all reported scans use separate single-image archives.
+
+The daemon was not reconfigured. The full containerd job's setup and ID-removal
+round trip were NOT_RUN to preserve existing daemon/image state; the existing
+single-image save/load identity scenario did pass against the current containerd
+store. A native-amd64 run and published-HEAD CI remain separate evidence. Browser
+E2E and exact modified-server source reproduction/runtime OpenPGP reachability
+remain NOT_VERIFIED. Production security admission and the Leader decisions in
+deployment.md remain pending.
+
+OpenAI Codex assisted this follow-up implementation, test execution and evidence
+record. No application module, API, schema or adaptive behavior was changed.
+
+## UI/UX r1 implementation verification — 6 November 2026
+
+### Authority and scope
+
+On 6 November 2026 (Asia/Ho_Chi_Minh) the Project Leader/Owner instructed
+“CodeMastery — Complete Frontend Redesign & Implementation” and then
+“CodeMastery — Finalize UI/UX Implementation, Verification & Local Commit”. The
+second instruction approves, for this UI/UX task only: documentation and
+repository-structure synchronization, the `frontend/src/app/preview/` structure,
+frontend component/test/fixture changes, removal of verified-obsolete assets,
+replacement of the browser harness, Playwright configuration and E2E
+infrastructure with justified dependencies, and local commits. It excludes changes
+to API endpoints or contracts, backend logic, schema, JWT/session policy, security
+or authorization rules, deferred contracts, and any push, PR, merge, release or
+deployment. The design source is the local, untracked root `DESIGN.md`, revision
+`DESIGN-2026-11-06-r1`. These approvals are prospective from that date; no earlier
+approval is implied.
+
+### Decisions applied under that authority
+
+| ID | Decision | Rationale |
+| --- | --- | --- |
+| UX-R1-T1 | `@playwright/test` 1.63.0 and `@types/node` 22.20.5 as `e2e/` dev dependencies, with a regenerated `e2e/package-lock.json` | One Playwright for E2E and the harness; 1.63.0 matches the browser builds already used by earlier recorded runs (Chromium 153.0.8010.12); `npm audit`: 0 vulnerabilities. No frontend or backend dependency changed. |
+| UX-R1-T2 | Disposable local stack in Playwright global setup, deterministic `fixtures/catalogue-fixture.sql`, Instructor created through the API and promoted only in the disposable database | Reruns never depend on a developer database; generated secrets stay out of argv, logs and the repository. |
+| UX-R1-T3 | `presentation.browser.cjs` rewritten for the new UI; FE01-only modes retired | The FE01 preview it targeted no longer exists. |
+| UX-R1-T4 | `plus-jakarta-sans-latin-wght.woff2` and `public/plus-jakarta-sans-OFL.txt` deleted | No source, test, script or workflow referenced them after the switch to Figtree. Sample-material PDFs that embed Plus Jakarta Sans are unrelated and unchanged. |
+| UX-R1-T5 | Design deviations closed in code: My courses tile overflow menu (Leave course / Re-enroll, reusing the approved CT22.membership calls); full-screen confirmation sheet below 600 px; 1.2 s skeleton shimmer, static with reduced motion; Mastery Map nodes 220 × 72 px with a fit-when-readable initial viewport (0.85 floor, a preselected node pulled into view at no less than 0.75); preview navigation per role as specified | Bring the implementation to the specification rather than amend it. |
+| UX-R1-T6 | Keyboard focus ring restored on every MUI `ButtonBase` (the global ring lost to ButtonBase's `outline: 0`), with the light ring on the ink header, drawer footer and quiz header | Found by the new harness: contained buttons had no visible focus indicator. |
+
+### Regression mapping for the 15 removed unit tests
+
+`frontend/src/routes/index.test.tsx` lost 8 `it` and 3 `it.each` blocks (15 runtime
+tests), all bound to the FE01 dashboard preview that the design preview replaced.
+
+| Removed test | Disposition | Current coverage |
+| --- | --- | --- |
+| preserves current-main FE01 dashboard, formatter runtime and utilities as an independent preview | Isolation retained; formatter showcase retired | `PreviewApp.test.tsx`: sample-data label, no request, no storage; a real sign-in never reaches the preview. Harness: production routes never load the preview chunk. `format.test.ts` (11) is unchanged; no current screen consumes the formatter. |
+| focuses each local preview heading after its initiating control is removed, without changing routes | Retained | `PreviewApp.test.tsx`: query-parameter navigation keeps `/preview` and focuses the new `h1`. |
+| shares one header search with debounced sample results, clear, Escape and empty recovery | Retained on the Users search | `PreviewApp.test.tsx`: 300 ms debounce, clear keeps focus, Escape clears, “Clear filters” recovers; `presentation.test.tsx`: SearchPill Escape/clear focus. |
+| associates the active sample filter tab with its result panel | Retained on course-editor sections | `PreviewApp.test.tsx`: pressed section button `aria-controls` the labelled region. |
+| form submit / search button focuses its local result section (2) | Replaced | Catalogue submit-only search in `CourseCataloguePage.test.tsx`, the harness and E2E; every preview test asserts no request. |
+| keeps the hovered chart tooltip across column gaps; clears chart selection (3); dismisses a hover tooltip with Escape (2); cleans up the chart Escape listener; observes Escape without consuming unrelated keys; keeps sample-week arithmetic and keyboard day selection | Retired with the interactive FE01 chart | Charts are now static bars with “Show as table”. Escape is tested where it exists: SearchPill, dialogs and drawer (harness), Mastery Map selection (harness). |
+
+`presentation.test.tsx` renamed one test to “exposes controlled current navigation in
+the top bar and the mobile drawer, and wraps zero badges” and kept its assertions.
+Totals moved from 390 tests in 11 files to 414 tests in 15 files. Added coverage:
+`app/preview/PreviewApp.test.tsx` (13), `features/assessment/components/assessment.test.tsx`
+(4), `features/instructor/course-management/components/QuestionForm.test.ts` (3),
+`features/mastery/utils/masteryGraphLayout.test.ts` (5), three My courses tile
+membership tests and eleven new `presentation.test.tsx` cases (state pills, path
+spine, guidance stack, search pill, data table, pagination, segmented control,
+aside, confirmation sheet). No behavioral assertion of a still-existing feature was
+removed.
+
+The FE01 harness checks map as follows: favicon, logo, self-hosted font and licence,
+overflow by width, contrast, focus visibility, skip link, drawer, destructive
+dialog, reduced motion, form focus, `pagehide` blur and course error views are
+retained against the new UI; the anonymous Profile guard, account links and deep
+links moved to E2E against the real backend; chart, tooltip, KPI-card and
+TextField notch checks retired with their components; the response-classifier
+mode retired (classification stays covered by `httpClient.test.ts`).
+
+### Executed checks and results
+
+Revision: code commits `a1ed70e` and `b2e9035` on `feat/uiux-design-r1-implementation`
+(the checks ran on the identical working tree before committing). Environment:
+macOS 27.2 arm64, Node 24.21.0, npm 11.19.0, Docker 29.8.1, OpenJDK 25.0.4.1.
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck`, `npm test`, `npm run build` in `frontend/` | PASS: 414 tests, 15 files; build succeeded with the existing >500 kB chunk warning (main 701.11 kB, preview 444.08 kB minified) |
+| Preview isolation in `frontend/dist` | PASS: sample names, preview copy and React Flow appear only in the lazily loaded `PreviewApp` chunk |
+| `npm run test:browser -- --engine all` | PASS Chromium 153.0.8010.12 30/30; PASS WebKit 26.6 30/30; BLOCKED Firefox 155: the browser exits with “Could not find profile folder” inside the agent's command sandbox, and running it outside the sandbox was refused |
+| `npx playwright test` in `e2e/` (disposable stack) | PASS 41: chromium-desktop 11, chromium-mobile 10, webkit-desktop 10, webkit-mobile 10; 4 skipped by design (the API-only smoke runs once); BLOCKED firefox-desktop: 10 failed at browser launch with the same error. Stack removed afterwards (no labelled container, network or temp directory left) |
+| Impeccable detector on 39 rendered URLs at 1280 × 900 and 390 × 844 (78 scans) | 5 warnings, each verified: dashed drop zone and dashed empty slot reported as nested cards (both specified); the sticky full-height lesson aside reported as a column imbalance |
+| `npm audit` (`frontend --omit=dev`, `e2e`) | PASS: 0 vulnerabilities |
+| Figtree font provenance | PASS: SHA-256 `4ba7d3d0…7462dd` equals `files/figtree-latin-wght-normal.woff2` in `@fontsource-variable/figtree@5.2.10` (OFL-1.1); `public/figtree-OFL.txt` is the OFL 1.1 text |
+| Manual screen-reader session (VoiceOver) | NOT RUN: no interactive assistive-technology session was available to the agent; accessibility-tree snapshots are not a substitute |
+| CI on the branch | NOT RUN: nothing was pushed |
+
+These are local results on synthetic data. They are not production acceptance,
+QA07/QA01 acceptance, WCAG conformance or a measured visual-similarity score.
+Residual risks: Firefox and real assistive technology are unverified; the suite
+has no CI job; the disposable stack uses the local HTTP model (cross-origin API
+with CORS), not the VM's single-origin HTTPS ingress; and the 15-minute JWT with
+no refresh can expire during a long timed quiz once Assessment is integrated,
+which the Assessment contract must resolve without changing CT38 here.
+
+Anthropic's Claude Code (Claude Opus 5.5) implemented these changes and ran the
+checks, using the locally installed Impeccable skill (rendered detector) and
+Playwright CLI for browser inspection. No human review is claimed.
+
+## Production activation of eligible UI/UX components — 6 November 2026
+
+### Authority
+
+The Leader's instruction of 6 November 2026 asked to activate in production every
+component that works on approved contracts or needs no backend, keeping everything
+else in `/preview`, and approved the frontend routing decisions this needs without
+any API or backend change. It supersedes, for these routes only, the CT16 shell's
+root redirect (`/` → `/courses`) and resolves the `DESIGN.md` open questions on the
+landing page (S25), a Learner home route (S6) and the session-ended notice (F2).
+Post-sign-in navigation (`/courses`, or the one-use `/profile` return), the memory
+session, expiry, 401 handling, guards and every API call are unchanged.
+
+### Disposition by component
+
+| Component | Disposition | Basis |
+| --- | --- | --- |
+| S25 landing page at `/` | Activated | Static content; public navigation (Catalogue, Sign in, Create account) and skip link; the example map is a fixed illustration labelled “Illustration · not learner data” in its own lazily loaded chunk (`ExampleMasteryMap`), below 600 px as a list. A signed-in visitor is redirected to `/home` (Learner) or `/courses`. |
+| Public navigation | Activated | Logo → `/` for visitors, → start page when signed in; Catalogue for everyone; Sign in / Create account (drawer footer below 900 px); the sign-in and registration logo links to `/`. |
+| S6 Learner home at `/home` | Activated (active memberships only) | Learner-only guard; reads `GET /api/me/courses?status=active` (CT22.membership). Rows link to course detail. Resume, progress and Up next are not rendered: CT22 progress/resume, Adaptive, Assessment and Interaction are pending; the full design stays in `/preview`. |
+| F2 session-ended notice | Activated | After a session present in this tab ends without signing out (timer, resume/focus checks or a current-session 401), `/login` shows “Your session ended. Sign in again to continue.” once. Observed in the router from `useAuth()`; the provider and session policy are untouched. Not shown after sign-out or for a fresh document. |
+| Learner navigation | Activated | Home · Catalogue · My courses (the bell stays omitted). |
+| Instructor and Administrator navigation | Unchanged | Only Catalogue is implemented; Teaching, Grading, Learners and every Administrator page remain preview-only. |
+| Password recovery (F1), lessons and progress (S7, S8), diagnostic and assessments (S9–S13), Mastery Map (S14), notifications and Q&A (S15), Instructor (S17–S22) and Administrator (S24) screens | Kept preview-only | Their contracts (CT02, CT21, CT22 progress/resume, CT09, CT04/CT10/CT23, Adaptive, Interaction, CT12/CT31, reporting) are pending. |
+| S23 reporting, Markdown lesson rendering | Kept preview-only / blocked | No reporting definitions; no approved Markdown sanitisation decision. |
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| `tsc --noEmit` (also with `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 422 tests in 15 files (8 new routing/home/landing/notice tests); build succeeded. Main chunk 532.06 kB plus a shared UI chunk 181.66 kB; the example map (186.10 kB, React Flow) and preview (250.97 kB) load on demand |
+| Chunk isolation | PASS: no preview copy, sample names, React Flow or illustration text in the main or shared chunk; the landing page loads `ExampleMasteryMap` and never `PreviewApp` |
+| Browser harness, `--engine all` | PASS Chromium 153 and WebKit 26.6, 34/34 each (adds landing, mobile landing header and Learner home checks; `/` joins the width, zoom and contrast sets). BLOCKED Firefox (same sandbox launch error) |
+| E2E, five projects | PASS 53 (chromium-desktop 14, chromium-mobile 13, webkit-desktop 13, webkit-mobile 13), 4 skipped by design; BLOCKED firefox-desktop 13 at launch. New: landing with no API request, Learner home with a real enrolment, session-ended notice after a 15-minute clock fast-forward |
+| Impeccable detector on `/`, `/courses`, `/login`, `/register` and the preview landing, session-ended and Learner-home screens at 1280 and 390 px | PASS: no findings. `/home` needs a session and was checked through harness screenshots instead |
+
+The landing copy follows `DESIGN.md` S25 and describes the product's learning model
+(diagnostic, quizzes, skill states, instructor tools). Several of those features are
+not available until their contracts are implemented; the Leader may want that copy
+reviewed before a public release. Anthropic's Claude Code (Claude Opus 5.5) made and
+verified these changes.
+
+## PR #209 CI remediation, typography, brand and navigation indicator — 7 November 2026
+
+### Authority
+
+The Leader's instruction “CodeMastery — PR #209 CI Remediation, Typography, Premium
+Brand Identity & Navigation Indicator Refinement” (7 November 2026) asked to fix the
+two CI failures on PR head `0ba1db0`, select one UI typeface from a ranked list,
+keep JetBrains Mono for code, give the wordmark its own display face, refine the
+logo palette for dark backgrounds and replace the active-tab indicator with the
+reference's concave curved bottom edge. No commit was requested; the changes are
+uncommitted on `feat/uiux-design-r1-implementation`.
+
+### CI failures and root causes
+
+| Job | Root cause (reproduced) | Fix |
+| --- | --- | --- |
+| Frontend: `PreviewApp.test.tsx` › “never reads the signed-in session …” (`/login` instead of `/courses`) | The test signs in through the real client but did not supply `VITE_API_BASE_URL`. Vite loads the developer's untracked root `.env`, so it passed locally; CI has no `.env`, the client refused the request with a configuration error and the page stayed on `/login`. Reproduced locally with `VITE_API_BASE_URL= npx vitest run src/app/preview`. Not an Auth or navigation regression. | The test stubs the API base (as `routes/index.test.tsx` does) and restores it; a bounded `waitUntil` (3 s, real timers) replaces the 200 ms loop and fails with the route and any visible alert; it also asserts one `POST /api/auth/login`. Full suite passes with and without the local API base. |
+| VM HTTPS ingress: `Build the release and local images …` (`apk add`, exit 18) | Deterministic: the Alpine v3.24 index no longer serves `alpine-release=3.24.3-r0` and `zlib=1.3.2-r1` ([deployment record](deployment.md#frontend-alpine-package-pins-refreshed--7-november-2026)). | Pins raised to `3.24.4-r0` and `zlib 1.4-r0` in both targets; the CI step prints the build log tail on failure. |
+
+### Typography, brand and indicator decisions
+
+- **UI face:** Google Sans Flex 4.005 (Fontsource `@fontsource-variable/google-sans-flex`
+  5.3.2, Google Fonts v23, SIL OFL 1.1). PP Neue Montreal 3 and Suisse Int'l, ranked
+  higher, are commercial and the project holds no licence that permits bundling them
+  for all team members and visitors; Google Sans Flex was the highest-ranked eligible
+  candidate, so Inter and Be Vietnam Pro were not evaluated further or installed.
+  Shipped: Latin (50.8 kB), Latin Extended (26.3 kB) and Vietnamese (11.1 kB) weight-axis
+  WOFF2 files with Google Fonts `unicode-range`s. fontTools confirmed every Vietnamese
+  base and tone-marked letter (Đ/đ, ă, â, ê, ô, ơ, ư, U+1EA0–U+1EF9) and combining marks;
+  `₫` (U+20AB) is absent and unused.
+- **Code face:** JetBrains Mono 2.211 (`@fontsource-variable/jetbrains-mono` 5.3.0, OFL),
+  same three subsets, complete Vietnamese coverage. `codeFontStack` is the only code
+  stack; the platform monospace stack is gone.
+- **Wordmark face:** Poppins ExtraBold 800 4.004 (`@fontsource/poppins` 5.3.0, OFL), one
+  Latin file (7.8 kB) declared as “CodeMastery Wordmark”, used only by `BrandWordmark`,
+  now also in the auth brand panel.
+- **Logo:** palette of `favicon.svg` retuned (electric-blue C, sky outer nodes, violet
+  focal node, lighter links); `favicon.ico` regenerated from it at 16/32/48/64 px.
+- **Indicator:** `canvasReachPath` draws an 88 × 14 px symmetric bell traced from the
+  reference (concave shoulders, convex crest); it re-centres on font swaps and sibling
+  resizes and takes the colour of the surface below the bar.
+- Figtree assets removed; no hardcoded font stack remains outside the theme tokens.
+
+A real defect found by the new harness check: in WebKit the reach stayed 2.4 px off
+centre because the item list moved without resizing when the wordmark font swapped
+in; the header now also observes its slots.
+
+### Executed checks and results
+
+Environment: macOS 27.2 arm64, Node 24.21.0, npm 11.19.0, Docker 29.8.1.
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (and `--noUnusedLocals`), `npm test`, `npm run build` (frontend; manifest and lockfile unchanged, so `npm ci` was not rerun) | PASS: 424 tests in 15 files; also 424/424 with `VITE_API_BASE_URL` empty (CI condition); build succeeded |
+| Preview isolation in `dist` | PASS: no preview copy, sample names, React Flow, Figtree or Plus Jakarta in the main chunk |
+| `docker build --no-cache` release and local targets, linux/amd64 and native | PASS (before the fix: release target failed with the apk error above) |
+| Ingress job steps 1–4, extracted from `ci.yml`, linux/amd64, OpenSSL 3 for step 2 | PASS: trust store 13/13, UID 101/Nginx 1.30.6/read-only configuration, no setuid/setgid, 8/8 invalid origins rejected; CA chain checks; `INGRESS_STUB_TESTS_PASS`; `INGRESS_BACKEND_TESTS_PASS`. The new failure-log path was exercised with a deliberately stale pin |
+| Ingress job step 5 (DP01 preflight) | NOT RUN: needs root on the host (`sudo install` under `/etc/codemastery`) |
+| Trivy, all severities, both frontend images | PASS: 0 findings |
+| `npm run test:browser -- --engine all` | PASS Chromium 153 38/38 and WebKit 26.6 38/38, including: only the three bundled faces load; the Vietnamese subset is fetched; Chromium font inspection shows Vietnamese text in Google Sans Flex, code in JetBrains Mono and the wordmark in Poppins with no fallback; logo regions ≥ 3:1 on ink and distinct at 16–40 px; reach centred (±1 px), 88 × 15 incl. 1 px overlap, symmetric, not focusable, following clicks, back/forward and child screens across Administrator, Instructor, Learner and anonymous navigation, present at 1024 px and absent at 390 px without overflow. BLOCKED Firefox (sandbox launch error, as before) |
+| E2E, five projects, disposable stack | PASS 53 (chromium-desktop 14, chromium-mobile 13, webkit-desktop 13, webkit-mobile 13), 4 skipped by design; BLOCKED firefox-desktop 13 at launch |
+| Impeccable detector, live pages and 20 preview screens at 1280 and 390 px | Live pages: no findings. Preview: the same accepted findings as on 6 November (dashed slot and drop zone as nested cards; sticky lesson aside) |
+| CI on the PR | NOT RUN: nothing was pushed |
+
+Visual comparison of the indicator with the reference was done by tracing the
+reference profile and inspecting enlarged screenshots side by side; it is a
+judgement, not a pixel-diff metric. No WCAG conformance or similarity score is
+claimed. Anthropic's Claude Code (Claude Opus 5.5) made the changes and ran the
+checks, with the local Impeccable detector and Playwright CLI.
+
+## Preview band, header lockup and course marks — 7 November 2026
+
+### Authority and scope
+
+The Leader's follow-up instructions of 7 November 2026 asked to remove the light-blue
+band at the top of the design preview (the sample-data notice with the workspace
+switcher; nothing inside screens), enlarge the CodeMastery lockup in the top bars, and
+show courses with official full-colour language logos in consistent neutral containers
+with optical size normalisation, never on a dark ground. No commit was requested.
+
+### Changes
+
+- **Preview notice:** `SampleDataBanner` sits on `canvas-100` instead of `sky-100`
+  (neutral icon, hairline only above bare screens); the reach takes the canvas colour.
+  Its statement, workspace switcher, Preview index and Reset stay. In-content colours
+  (info alerts, Sky specimens, pills) are unchanged.
+- **Lockup:** `presentationTokens.brandMark` sets the mark to 40 px from 600 px and,
+  below 600 px, fluidly 32 px at 360 px to 36 px from about 382 px; the wordmark stays
+  0.625 × and the gap 0.3 × the mark. Bar heights (80/64 px) are unchanged. A fixed
+  36 px mark overflowed the 360 px Learner bar (bell + account) by 16 px; the harness
+  found it, hence the fluid phone size.
+- **Course marks:** `CourseMark` replaces the ink initial square in `CourseTile`
+  (catalogue, My courses, preview). One registry maps Python and TypeScript to their
+  official SVGs with a per-logo visible-artwork box and optical scale (Python 0.66,
+  TypeScript 0.56 of the 48 px container); the container is `canvas-100` with a
+  `line-200` inset hairline at `rounded.md`. The language is read only when the course's
+  title, else description, names exactly one language; otherwise the initial is shown
+  in the same container. No current seed, E2E or preview course names a language, so
+  live tiles show the neutral initial; the design reference shows the logo samples.
+
+### Executed checks and results
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit`, `npm test`, `npm run build` (frontend) | PASS: 429 tests in 15 files, also 429/429 with `VITE_API_BASE_URL` empty; build succeeded (Vite warns that the `index` chunk is 536 kB, over its 500 kB advisory limit) |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 41/41 and WebKit 26.6 41/41, including the new checks: lockup size and clearance at 1280/1024/390/360 px on `/courses`, `/preview` and `/`; neutral preview notice and reach colour; course marks decoded, inside their containers, on `canvas-100`, colours kept, no ink container on catalogue or My courses at 1280 and 390 px |
+| `npx playwright test` (chromium/webkit desktop and mobile, disposable stack) | PASS 53, 3 skipped by design; stack removed afterwards. Firefox not run (sandbox launch failure recorded above) |
+
+### Follow-up the same day: preview chrome, generic course mark and avatar
+
+The Leader then asked to remove the preview notice entirely (sample-data line,
+workspace switcher, Preview index and Reset buttons) so screens look as deployed and
+are opened by link; to replace the letter fallback with a white glyph on a coloured
+fill; and to recolour the account avatar. Changes: `SampleDataBanner` and the workspace
+switcher are removed from every screen, including the quiz attempt (its “Simulate time
+running out” button went with it; the auto-submit test now runs the full 10-minute
+sample timer); Preview index and Reset remain only in the preview account menu, and the
+brand link still opens the index. Courses without a language logo show the `code`
+glyph in white on `brandFill` (`#2A62F0` → `#0652C4`, white 5.12–6.97:1). The
+signed-in avatar (`Monogram` tone `brand`, top bar and profile) uses the same fill;
+Q&A author monograms stay on ink.
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 430 tests in 15 files, also with `VITE_API_BASE_URL` empty; build succeeded (same 536 kB `index` chunk advisory) |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 42/42, WebKit 26.6 42/42, including: no notice, switcher, index, reset or simulate button on six preview screens; avatar fill; generic marks on catalogue and My courses at 1280 and 390 px |
+| `npx playwright test` (chromium/webkit desktop and mobile, disposable stack) | PASS 53, 3 skipped by design; stack removed |
+
+### Consistency fixes C1–C14 — 7 November 2026
+
+The Leader approved the fixes for the 14 inconsistencies recorded in the local
+`DESIGN.md` review. Changes: one neutral course-mark container with a `brand-700`
+code glyph when no language logo applies (no gradient); shared sample-course
+descriptions in the preview; account avatar in solid `brand-700`; a Learner's sign-in
+fallback is `/home` (the one-use `/profile` return and other roles' `/courses` are
+unchanged; amendment recorded beside CT16-PROFILE P1 in `docs/setup.md`); 32 px
+course marks in Learner home rows; fixed lockup steps (36 px, 32 px below 390 px) and
+a `display` type step for the landing hero; flat map nodes with a hairline and a
+`shadow.control` token; a `pathLine` 4/6 dash for the Path Spine, prerequisite edges,
+the legend and the auth brand path; the instructor named once on course detail; no
+spinner in loading states; `chromeHover` and `rose800` colour tokens; a dashed
+Proposed pill in the preview index; a current state for the preview bell; the lesson
+outline at `presentationTokens.outlineWidth`.
+
+Tests changed with the behavior: the routing tests and the preview sign-in test now
+expect `/home` for a Learner (and `/courses` for Instructor and Administrator); the
+loading tests assert a named status line, a skeleton and no spinner; E2E `signIn`
+takes the role's start page, the enrolment flow opens the catalogue from Home, the
+navigation test expects Home current after sign-in, and the reload check expects the
+protected route to send the visitor to Sign in. New tests cover course detail facts,
+the path-line dash, the shadow and type tokens, the current bell, Learner home course
+marks and the Proposed pill.
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 437 tests in 15 files, also with `VITE_API_BASE_URL` empty; build succeeded (536 kB `index` chunk advisory unchanged) |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 43/43, WebKit 26.6 43/43, including lockup steps at 1280/1024/600/599/390/389/375/360 px, solid avatar, neutral marks across catalogue, My courses, Teaching and Learner home, no loading spinner, flat nodes, 4/6 dashes, single instructor mention, current bell and the 280 px outline |
+| `npx playwright test` (chromium/webkit desktop and mobile, disposable stack) | PASS 53, 3 skipped by design; stack removed |
+
+### Button system hierarchy — 7 November 2026
+
+The Leader asked for a clearer button hierarchy with fewer black buttons. Primary
+buttons, primary circles and chosen controls now use graphite (`chrome-raised`,
+hover `chrome-hover`) instead of the frame's ink; secondary buttons and circles are
+neutral outlined surfaces (white, `line-200` border, hover `fill-150`); tertiary
+stays a Logo Blue text button; destructive stays `rose-700`. The roles are theme
+tokens (`control`) and button variants (including `color="onChrome"` for the frame),
+replacing local styles. Competing primaries were demoted: the placement prompt's
+"Start diagnostic", the Teaching and skill-graph empty-state actions that repeat
+their title-row action, and the error block's "Try again".
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 440 tests in 15 files, also with `VITE_API_BASE_URL` empty; build succeeded |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 44/44, WebKit 26.6 44/44, including button ranks, hover, keyboard focus and disabled states, focus visibility and text contrast |
+| `npx playwright test` (chromium/webkit desktop and mobile) | PASS 53, 3 skipped by design |
+
+### Tile arrows and the mask-cut canvas reach — 7 November 2026
+
+Course and lesson tile arrows (`CircleAffordance`) are now secondary by default (white,
+`line-200` border, graphite arrow, `fill-150` while the tile is hovered); graphite stays
+only on the Learner home "Continue learning" tile and the resume lesson. The canvas
+reach no longer paints a canvas-coloured shape: the bell path is a CSS mask layer
+subtracted from the header (`mask-composite: exclude`), and the canvas starts 14 px
+under the bar with a `clip-path` outline whose visible corners begin at the bar edge,
+so the opening shows the real canvas, or content scrolling under the sticky bar.
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 442 tests in 15 files; build succeeded |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 45/45, WebKit 26.6 45/45: reach centred and symmetric from the mask geometry; pixels show canvas inside the bell, ink beside and above it, no seam at the bar edge; a white tile scrolled under the bar shows through the opening |
+| `npx playwright test` (chromium/webkit desktop and mobile) | PASS 53, 3 skipped by design |
+
+### PR #209 self-review fixes — 7 November 2026
+
+A logic-only self-review of PR #209 found no P0–P2 defects; these P3 items were fixed:
+
+- **My courses filter from the URL:** `/my-courses?status=active|completed|left|all`
+  preselects the filter (missing or unknown values mean Joined), the control keeps the
+  URL in step, and Learner home's "See all N active courses" links to `?status=active`.
+- **Catalogue:** a prerequisite filter change keeps the last submitted search instead of
+  applying unsent text (submit-only search).
+- **Navigation links:** top-bar and drawer items route in-app only on a plain click with
+  a handler; Cmd/Ctrl/Shift/Alt-clicks and items without a handler follow the native link.
+- **Browser harness:** startup is inside `try/finally`, so a failed build or preview still
+  stops the preview process and removes the temporary build; probes are time-bounded and
+  stop at once when the preview exits.
+- **E2E stack:** run-scoped labels and owner-aware `stack:down`, image IDs instead of shared
+  tags, distinct ports, bounded probes and a fast failure with Vite's message.
+
+Not changed: cleanup after `SIGKILL` of the test runner (no handler can run;
+`stack:down` removes the containers and network afterwards).
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` (also `--noUnusedLocals`), `npm test`, `npm run build` | PASS: 445 tests in 15 files, also with `VITE_API_BASE_URL` empty; build succeeded |
+| `npm run test:browser -- --engine chromium,webkit` | PASS Chromium 153 45/45, WebKit 26.6 45/45; no preview process or temporary build left |
+| Harness with a forced preview port conflict | Failed in 4 s with Vite's "Port … is already in use"; no preview process or temporary build left |
+| `stack-down.mjs` with synthetic labelled resources | Removed the dead-owner and unlabelled-owner container and network; kept the ones owned by a live process |
+| `npx playwright test` (chromium/webkit desktop and mobile) | PASS 53, 3 skipped by design; no container, network, preview process or temporary directory left |
+
+### PR #209 independent review fixes — 7 November 2026
+
+An independent logic review of PR #209 at `39fce76` found no P0–P2 defects. Commit
+`a9d9dac` fixes its confirmed P3 findings and two further reliability items:
+
+- **Native links:** the brand link, course tiles (catalogue, My courses, Learner home),
+  the course-detail back link, Learner home's "Browse the catalogue" and "See all N
+  active courses" links and the My courses "View course details" menu item route in-app
+  only on a plain primary click with a handler (shared `isPlainClick`, as the top bar
+  and drawer already did). Cmd/Ctrl/Shift/Alt, middle and already-handled clicks, and
+  links without a handler, follow the browser's native behavior.
+- **My courses paging:** any filter change (control, `?status=` URL or history) starts
+  at page 0; returning to a filter no longer restores its earlier page, and no request
+  is made for the previous filter's page.
+- **Frontend readiness (E2E stack and browser harness):** readiness requires a per-run
+  marker in the temporary build and a still-running preview process, so HTTP 200 from
+  another server on the port is not accepted; the frontend port is chosen right before
+  the preview starts.
+- **E2E backend start:** a stopped container fails setup at once, and its state and
+  redacted log tail are kept in the error before teardown removes it.
+- **`stack:down`:** per-resource inspection and removal, resilient to resources that a
+  concurrent teardown removes first; an unreadable owner is never treated as orphaned.
+- **CI:** both backend readiness loops read the log once more after the last poll, so a
+  start marker logged during the final sleep is not missed.
+
+Not changed: PID reuse or a different PID namespace (runner in a container or remote
+Docker) can still mislead the owner check of `stack:down`; the PostgreSQL readiness
+probe has no per-call timeout; the `node --test` lifecycle tests are not run in CI.
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck`; `npx vitest run --exclude 'src/app/preview/**'`; `vite build` (local, Node 24.21.0) | PASS: 444 tests in 15 files; build succeeded |
+| GitHub Actions `Frontend` on `a9d9dac` ([run 42361109743](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/42361109743), Ubuntu 24.04, Node 22.23.4): `npm ci`, `npm test`, `npm run build` | PASS: 458 tests in 16 files (including `presentation.browser.test.ts`, 8 tests); build succeeded. All 12 checks of that run passed |
+| `node --test fixtures/stack-down.test.mjs fixtures/local-stack.test.mjs` (from `e2e/`) | PASS 15/15; no container, network or Vite process touched |
+| New regression tests against the previous code (each fixed file reverted in turn, or the fix removed) | FAIL as expected: modified clicks at each of the five link sites, page restore on a filter round trip (control and history), HTTP 200 without the marker, exit during a successful probe, and the old `stack-down.mjs` |
+| CI readiness steps extracted from `ci.yml` before and after, with a stub `docker` | Marker logged during the final sleep: before FAIL, after PASS; early marker, no marker and an exited container unchanged; `bash -n` PASS for both steps and the inner script |
+| `local-stack.ts` loaded through Playwright 1.63's TypeScript transform (scratch config; its default export not called) | PASS; no Docker resource created |
+| `npx playwright test`, `npm run test:browser` | Not run: the suite rebuilds and re-tags the shared `codemastery-e2e/backend:local` image; the harness is a visual check outside this change |
+
+
+## Batch 1 bounded verification allocation — 8 November 2026
+
+> **Current amendment:** [CT14-B1-COVERAGE-2026-11-08-r2](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) preserves the locations below but replaces the original whole-Course B1-O10 with lifecycle refusal/no-reclassification checks and adds B1-O12–O16. The earlier wording below is retained as r1 history.
+
+**CT14-B1-COVERAGE-2026-11-08-r1 — DELEGATED_APPROVED**, under the Leader's
+“Batch 1 Complete Contract Approval & Integration Preparation” instruction;
+Codex independently approves this allocation in [ADR005 §9](decisions/005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility).
+Only these Batch 1 obligations are added to the existing inventory, relative to
+`backend/src/test/java/com/codemastery/`:
+
+| Existing location | Required contract coverage |
+|---|---|
+| `modules/adaptive/skillgraph/SkillGraphTest.java` | B1-O01/O02/O11: representation/graph, invalid references, cycle/self/duplicate behavior, mapping consumption and deletion outcomes using explicit fixtures/doubles. |
+| `modules/adaptive/mastery/AdaptiveSettingsServiceTest.java` | B1-O05/O08/O09/O10: closed policy validation, coverage completeness, readiness, disabled-mode and settings-change orchestration with conforming producer doubles. |
+| `modules/adaptive/mastery/MasteryCalculatorTest.java`, `MasteryStateClassifierTest.java` | B1-O06: unchanged pure CT24 arithmetic, symbolic thresholds/equality/invalid/max-int oracles; CT36 independent review remains separate. |
+| `integration/AdaptiveLearningFlowIntegrationTest.java` | B1-O01/O03/O04/O05/O07/O08/O11: real Course/Adaptive/Assessment providers, authenticated scopes, PostgreSQL concurrent graph writes and coverage/publication races, FK and rollback evidence. Use independent transactions and barriers, not sleeps or mocks. |
+| `integration/MasteryProgressTransactionIntegrationTest.java` | B1-O07/O09/O10: actual evidence ordering/replay, policy reclassification and mastery/progress all-or-nothing behavior after CT08/CT22 execution contracts and providers exist. |
+
+Do not mistake allocated tests for implemented tests or runtime success. All paths
+already exist; no new suite, framework, fixture lifecycle, runner or whole Final
+CT14.coverage/E2E approval is granted. Preserve shared Testcontainers/Flyway lifecycle,
+synthetic identities and explicit cleanup/isolation. Real concurrency assertions
+must examine committed state after success/failure and prove guard participation;
+unit doubles cannot establish the PostgreSQL guarantees. The normative expected
+results are [ADR005 B1-O01–O11](decisions/005-batch-01-contract-approvals.md#82-required-oracles-specification-not-executed-tests).
+Application verification has not been executed by this documentation task.
+
+
+### F1–F4 focused Batch 1 verification amendment
+
+**CT14-B1-COVERAGE-2026-11-08-r2 — DELEGATED_APPROVED.** Authority, exact predecessor,
+expected results and limits: [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026).
+Use existing locations relative to `backend/src/test/java/com/codemastery/`:
+
+| Existing suite | Amended acceptance obligations; not executed functionality |
+|---|---|
+| `modules/adaptive/mastery/AdaptiveSettingsServiceTest.java` | B1-O10/O12/O13: full conditional-write cases, two-tab disable protection, canonical/GCD tags, documented ABA, frozen thresholds for submitted or any mastery history, n-only/toggle/re-enable without replay, provider failure. |
+| `integration/AdaptiveLearningFlowIntegrationTest.java` | B1-O12–O15 with real Spring/PostgreSQL: self-invocation, external entry, actual isolation/read-only checks, compatible joining, outer rollback/commit failure, stale preloaded JPA state and dirty queued flush, lock ordering and NOWAIT settings vs enrollment. Verify committed states, lock lifetime/release, independent Courses and bounded cancellation/deadlines. |
+| `integration/MasteryProgressTransactionIntegrationTest.java` | B1-O13/O14 after CT08/CT22 approval: first submission/mastery-row creation versus threshold edit shares Course root; outer failure cannot commit callback/mastery/progress effects. No reversed lower-level lock ordering. |
+| `modules/adaptive/evaluation/AdaptiveProfileScenarioTest.java` | B1-O16 required CT36 evaluation cases: one-question success/failure, alternation, one later failure replacing older larger success, unassessed preservation and same evidence with larger bank n. Outcomes follow current policy; no invented stability target, sample floor or Final dataset approval. |
+
+Finite test budgets are explicit fixtures, not production configuration approval.
+Record actual statement/transaction timeout/cancellation behavior and query plans
+before implementation acceptance; NOWAIT alone does not bound all database work.
+Controlled models or parsing checks in this docs PR do not prove a real Spring
+proxy, PostgreSQL lock, HTTP precondition or browser implementation.
+
+### N1 successful-PUT validator correction
+
+[ADR005 §15](decisions/005-batch-01-contract-approvals.md#15-n1-http-validator-correction),
+`CT06-ENABLEMENT-N1-2026-11-08-r1`, preserves CT14 r2's approval and existing suite
+allocation while adding B1-O17/N1-01–N1-06. In
+`modules/adaptive/mastery/AdaptiveSettingsServiceTest.java`, cover canonicalized
+fractions and unchanged conditional-write results. In
+`integration/AdaptiveLearningFlowIntegrationTest.java`, verify actual HTTP GET ETag,
+successful PUT **absence** of ETag/Last-Modified for canonicalized and already-reduced
+fractions/no-ops, no-store, subsequent canonical GET and stale If-Match rejection.
+Use real participants for the intervening-writer schedule; no new test path is added.
+Assert validator absence on the final HTTP response through applicable filters and
+ingress, so a downstream layer cannot reintroduce ETag or Last-Modified after the controller.
+
+The later FE18 verification must also prove body/tag pairing after PUT→GET, a writer
+between those requests, and failed/cancelled/obsolete follow-up GET without PUT
+replay or false rollback. A fresh GET can yield the same tag for unchanged state.
+These are verification obligations, not implemented endpoint/browser tests or a new
+CT14/CT18 prerequisite approval. Current documentation/model results are recorded
+separately in ADR005 §15.
+
+
+### R1/R2 conditional HTTP and no-content verification amendment
+
+**CT14-B1-COVERAGE-2026-11-09-r3 — DELEGATED_APPROVED**, independently selected
+by Codex under the Leader's explicit PR #228 review-correction instruction.
+[ADR005 §16](decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026)
+preserves r2/N1's approval provenance, B1-O01–O17 and all paths/harness boundaries.
+B1-O18/O19 are future implementation acceptance obligations, not executed features:
+
+| Existing allocation | Exact added obligations |
+|---|---|
+| `modules/adaptive/mastery/AdaptiveSettingsServiceTest.java` | B1-O18a: combined If-Match/If-None-Match, strong vs weak comparisons, wildcard, nonmatching/empty lists, header grammar, missing mandatory header, early failure/no provider effects; no-op cannot bypass conditions. |
+| `integration/AdaptiveLearningFlowIntegrationTest.java` | B1-O18b/c: both checks against one fresh locked snapshot, A→B writer with If-Match {A,B} and exclusion B/A, real HTTP/application/DB, normal error and date/range precedence, generic safe 412, no post-write framework reversal and preserved N1. B1-O19c: final HTTP/ingress no-content 204 framing/no Content-Length. Preserve all F3 real guard/rollback/lock-order/deadline oracles. |
+| `frontend/src/shared/api/httpClient.test.ts` | B1-O19a/b: opt-in void 204 without JSON parsing/media requirement; exact success status; invalid option combinations before fetch; default JSON callers unchanged; typed overload positive/negative cases; valid/malformed error fallback, current-only 401 invalidation, abort/logout/expiry/replacement/supersession and no retries. Mock fetch through the real client; no feature-local substitute. |
+
+Backend entries are relative to `backend/src/test/java/com/codemastery/`; frontend
+entry is repository-relative and already in the approved six-file frontend inventory.
+FE18 consumer/browser review must cover all five OpenAPI operation IDs, successful
+mutation then failed/obsolete graph refresh, Course/session switch and uncertain
+completion, using existing approved allocations when feature execution is authorized.
+No new frontend test file, runner, browser route or Final coverage scope is approved.
+Mock Fetch null-body assertions cannot prove wire framing. Settings GET body/tag
+pairing, validator-free PUT, exact CT18 error envelope and CT36 small-sample scenarios
+remain required. Concrete results for this documentation revision are recorded in
+ADR005 §16 separately from these implementation obligations.
+
+## Batch 2 contract verification obligations — 9 November 2026
+
+[ADR006 §§8–9](decisions/006-batch-02-contract-approvals.md#8-shared-errors-acceptance-oracles-and-remaining-gates)
+specifies B2-O01–B2-O16. These are **NOT_RUN implementation oracles**, not executed
+results, CT14 placement approvals or independent QA acceptance. The documentation
+PR reports its actual static checks separately.
+
+Required later evidence: integer/empty progress and preserved rejoin semantics;
+true-only idempotent completion; per-Course concealment/fallback and global resume
+timestamp/tie/null filtering; coherent pagination; owner/role/ancestry denials;
+atomic reorder; root-lock races/rollback; unchanged B1 settings/readiness. Real
+PostgreSQL barriers must establish constraints/serialization/rollback; doubles
+cannot. Use existing approved test locations; necessary new files/allocations
+require separate approval, including any new reset test suite.
+
+Recovery tests must independently verify identical request responses for unknown,
+locked and known accounts; bounded queue/full/lost work; outstanding-row PT1M
+suppression; SMTP after commit and failure isolation; 32-byte entropy/digest-only
+storage; exact PT30M expiry; invalid/replaced/used/locked generic400; password rules;
+User-first request/confirm races and atomic capability consumption/hash update.
+Browser evidence must prove fragment erasure/no leakage, no auto-login, no token
+in history/query/storage/Referer and the unchanged existing JWT behavior.
+
+Frontend checks cover unchanged old decoders, backend-selected resume with no
+client ranking, generation-safe visit responses, Markdown literal HTML and embed
+host attacks. Real browser/provider evidence must show no external request before
+activation, usable player/link fallback and origin-only Referer after activation.
+No new Course write, reset, global resume, provider playback or atomic Adaptive
+integration was executed in this documentation task. Implementation authorization,
+NEW migrations/grants, SMTP/abuse qualification, residual-risk acceptance before
+exposure, independent owner/QA review, protected integration and CI are separate.
+
+
+## Batch 3 contract acceptance obligations — specified, NOT_RUN
+
+[ADR007 §14](decisions/007-batch-03-contract-approvals.md#14-deterministic-acceptance-obligations-and-retained-gates)
+specifies B3-O01–O13 for question/quiz authoring, exact captured attempts, saved
+answers, deadline/manual/worker races, immutable grading, visibility and submitted
+evidence. These are future unit and real-PostgreSQL obligations in approved
+inventories, not executed tests or expanded CT14/CT34/QA04 approval. Assessment
+source remains empty at the starting baseline. No event atomicity, scheduler
+qualification, independent review, E2E or delivery result is claimed by this record.
+
+## Batch 4 testing contract handoff — specified, not newly executed
+
+[ADR008 §§3–7](decisions/008-batch-04-contract-approvals.md#3-ct34runner) approves
+the existing pinned Playwright 1.63.0 runner and its five projects, disposable
+per-run fixture lifecycle, Final test placement/gap map and a future SH07 CI job
+contract. The current commands and local suite described above remain valid;
+**there is still no E2E CI job**. Runner adoption is not CT19/CT35 case selection,
+CT20.F release allocation or acceptance of historical test results.
+
+CT14-COVERAGE-2026-11-09-r1 adds the complete placement/gap map without changing
+CT14.interim, the October records or ADR005's latest
+CT14-B1-COVERAGE-2026-11-09-r3/N1 allocation. Existing Surefire/Failsafe,
+singleton PostgreSQL, explicit cleanup and scheduler-disabled profile remain.
+Dedicated authoring, storage and Interaction/Admin integration placements not
+present in the approved inventory are explicit gaps requiring bounded structural
+authorization before creating files. Feature-specific storage configuration,
+remaining runtime/oracle approvals and independent QA execution stay pending.
+
+CT39-BINDING-2026-11-09-r1 and CT39-CONSUMERS-2026-11-09-r1 select no shared Clock
+bean or shared consumers. AS08 retains ADR007's local injected UTC Clock and
+deterministic tests; AS09/IN08 require their owning deadline/reminder contracts.
+No AppConfig/TestClockConfig implementation, global clock override or SH04
+Issue closure follows. Use approved local inputs, not sleeps or public time controls.
+
+FE24/SH07, owning feature teams and QA03/04/05/06/08/10/12 have the distinct
+implementation, oracle and evidence responsibilities in ADR008. No new automated
+business-test, browser, Docker, CI, recovery or deployment result is claimed.
+
+### CP-030 r2 concurrency and recovery handoff — 10 November 2026
+
+`CT34-FIXTURES-2026-11-10-r2` amends only the r1 concurrency/recovery contract.
+Keep the five-project runner and fixed outputs: one active invocation owns its
+canonical checkout/output roots. The future launcher must acquire exclusivity and
+write its persistent private inventory **before invoking Playwright**, not in
+globalSetup after output cleanup can begin. A conflict fails without touching
+outputs/resources; independently isolated checkouts may run concurrently.
+
+[ADR008 §§10.2–10.4](decisions/008-batch-04-contract-approvals.md#102-f1-exclusive-checkout-and-output-ownership-before-runner-entry)
+specifies the stable OS lock, durable run inventory, process-birth/host/namespace
+checks, private cooperative preview shutdown, exact Docker daemon/resource
+identity, exclusive volumes, safe temporary-path removal and acceptance cases.
+Owner death releases the OS lock but does not clear an incomplete inventory.
+Uncertain ownership, unavailable process control, partial cleanup or unaccounted
+resources must be preserved/reported and block reuse of that checkout. PID
+existence/absence or Docker-only cleanup cannot establish full recovery success.
+
+FE24 and QA08 must implement/qualify that protocol separately: current direct
+Playwright scripts and PID-labelled `stack:down` are not r2-conformant. No new
+command or runtime result is supplied here. CP-035 r1 consumes §4 **as amended by
+r2**; [§10.5](decisions/008-batch-04-contract-approvals.md#105-m1-downstream-ci-execution-budget-guidance)
+adds nonessential measured-budget guidance reserving teardown/report time, without
+new timeout numbers. CP-029/031/032/036 and effective predecessor contracts remain
+unchanged; CT19/CT35 feature cases and CT20.F allocation retain their own scope.
+
+## CT17 r2 executed mechanism qualification — 10 November 2026
+
+**Q03 correction:** the original PostgreSQL run below used excess database-level
+CREATE and did not prove P6 compliance. Preserve its history and result hashes;
+the [new focused reproduction](#q03p6-focused-reproduction--10-november-2026)
+supplies the corrected evidence. Other qualification scopes remain unchanged.
+
+Authority, exact image/binary/platform identities, synthetic input inventory,
+results/hashes and limitations: [ADR009 §§9.5–9.6](decisions/009-ct17-final-runtime-recovery.md#95-qualified-mechanisms-and-security-boundaries).
+The existing approved test inventories are unchanged. All harness scripts and
+synthetic artifacts are local-only in
+`/private/tmp/codemastery-ct17-qualification-20261110/`, protected by directory
+0700; no new source/test path, dependency or production implementation was added.
+`evidence-index.json` identifies preserved scripts/results by SHA256;
+`commands.jsonl` records actual UTC commands, exit codes, durations and stdout
+hashes. It retains failed initial attempts and corrections rather than hiding them.
+Ephemeral credentials/keys and plaintext fixture archives must remain private.
+
+The executed harness used the exact existing candidates, `--pull never`, isolated
+internal Docker networking, no port publication and fresh uniquely labelled volumes.
+It created V001–V006 schema using the actual migration SQL, a clearly synthetic
+migration-digest history (not Flyway-engine history), object-reference/sequence
+fixtures, version/delete-marker/metadata/bucket/IAM/service-account fixtures and
+an incomplete multipart upload. No frontend/backend application ran. Source and
+restored cold tree hashes/UID/GID/modes matched; PostgreSQL constraints/history/
+sequence/ownership and object-reference content matched. Restored user and service
+account could read authorized versions, could not write, and could not list the
+private bucket. The restored in-progress multipart upload completed correctly.
+
+Core **actually executed command shapes** (names and ephemeral credentials are
+redacted; source/target aliases refer only to the disposable fixture):
+
+```bash
+# Exact candidate MC has bash, not /bin/sh; read-only root needs a writable config.
+mc --config-dir /tmp/mc --json mb q/recovery
+mc --config-dir /tmp/mc --json version enable q/recovery
+mc --config-dir /tmp/mc --json pipe q/recovery/versioned.bin
+mc --config-dir /tmp/mc --json tag set q/recovery/versioned.bin 'course=synthetic&purpose=recovery'
+mc --config-dir /tmp/mc --json ls --recursive --versions q/recovery
+mc --config-dir /tmp/mc --json admin group info q fixturegroup
+mc --config-dir /tmp/mc --json admin user svcacct info q fixtureservice
+mc --config-dir /tmp/mc --json admin config export q
+# Raw signed S3 CreateMultipartUpload/UploadPart/ListParts/CompleteMultipartUpload
+# used urllib/HMAC-SHA256 in the isolated Python helper (s3.py).
+
+# Source was drained; client disconnected; late fixture INSERT failed read-only.
+pg_dump -U fixture_migrator -d fixture -Fc
+# Stop exact MinIO server; prevent restart. Mount source /data READ-ONLY in helper.
+cd /data && tar --numeric-owner -cpf - .
+# Mount a different empty target volume; preserve entire tree including .minio.sys.
+cd /data && tar --numeric-owner -xpf -
+# Original PG target: excess database CREATE; see the Q03/P6 correction below.
+pg_restore -U fixture_migrator -d fixture --no-owner --no-acl --exit-on-error
+# Provision bounded runtime SELECT separately, assert runtime CREATE TABLE denied.
+# Compare all recorded inventories; test old/current versions and denied access.
+
+# Existing OpenSSL 3 helper, synthetic recipient/signing keys only.
+set -euo pipefail
+{ printf 'CMREC1\n'; cat component; } |
+  openssl cms -encrypt -binary -aes-256-gcm -outform DER -stream \
+    -recip recipient.crt -keyopt rsa_padding_mode:oaep \
+    -keyopt rsa_oaep_md:sha256 -keyopt rsa_mgf1_md:sha256 -out component.cms
+openssl cms -decrypt -binary -inform DER -in component.cms \
+  -inkey recipient.key -out component.staging
+# Only after exit 0: validate 7-byte header, strip it, compare length/SHA256.
+# Production uses capacity-bounded protected tmpfs; local plaintext was synthetic.
+openssl dgst -sha256 -sign signer.key -sigopt rsa_padding_mode:pss \
+  -sigopt rsa_pss_saltlen:digest -out manifest.sig manifest.json
+openssl dgst -sha256 -verify signer.pub -sigopt rsa_padding_mode:pss \
+  -sigopt rsa_pss_saltlen:digest -signature manifest.sig manifest.json
+```
+
+`qualify.py` records setup/fixture inputs; `capture.py` and `verify-restored.py`
+record the cold capture/PG restore and exact comparisons. `crypto.sh` tests framed
+empty/binary/16-MiB input, wrong/missing key, ciphertext mutation/truncation, producer
+failure and forged signature/trust-key rejection. `bundle.sh` applies the same
+crypto to the real **synthetic** PG/tar components and recovers with an encrypted
+PKCS8 escrow copy; wrong passphrase fails. `publication.py` tests actual local
+file copies and eight interrupted-boundary states, incomplete/corrupt/stale/forged
+sets and safe retention/locking. `tls-server.py`/`tls-client.py` transfer ciphertext
+over isolated authenticated TLS; unknown/wrong CA, hostname mismatch and wrong
+bearer token fail. These are reference harnesses, not deployed implementations.
+
+Reproduction requires an authorized disposable environment with the recorded
+already-available images and preserved scripts, new unique task names/volumes,
+synthetic credentials generated anew, and no production mounts. The corrected
+fixture flow is `qualify.py init help fixture`, `capture.py prepare`,
+`capture.py capture`, then the OpenSSL helper runs of `crypto.sh`/`bundle.sh`,
+`publication.py` and isolated TLS helpers. The original interrupted fixture used
+`resume-fixture.py`; command history identifies that recovery explicitly.
+Never rerun `init` over an occupied namespace or claim the harness is a repository
+production command. Remove only the new labelled task resources after readback;
+the executed run removed its six containers, four volumes and one internal network.
+
+Important observed limits: raw-empty CMS streaming failed on this OpenSSL build;
+the selected mandatory framing round-tripped empty payload successfully. MinIO
+CORS PUT returned 501; no configured-CORS recovery was tested. Default read-only
+transactions do not exclude privileged writers. Native-VM performance, actual
+Keychain/systemd/acme integration, Azure Entra/RBAC/transfer, physical independent
+copy, Flyway-engine validation, full feature QA and complete incident RTO remain
+**NOT_RUN**. Completion-marker/ledger checks used two local directories, not two
+independent failure domains. Changed artifacts/dependencies require affected
+qualification again. These limits are retained in CP-034's operational F2 gates;
+they are not fabricated PASS or unresolved routine mechanism selections.
+
+## Q03/P6 focused reproduction — 10 November 2026
+
+[ADR009 §11](decisions/009-ct17-final-runtime-recovery.md#11-q03p6-evidence-correction--10-november-2026)
+records authority, original F1/P2, exact identities, results and new hashes. This
+is a new PostgreSQL-only reproduction, not a replay: the original temporary
+harness is unavailable. The local private evidence root is
+`/private/tmp/codemastery-q03-p6-20261110/`; no tracked test or production code changed.
+
+Actually executed launcher: `python3 /private/tmp/codemastery-q03-p6-20261110/qualify.py`.
+It used the original recorded linux/amd64 image ID, `--pull never`, two fresh
+network-none containers and tmpfs database storage. PostgreSQL/server/dump/restore
+all reported **17.11**. Actual qualified command shapes, with synthetic passwords
+supplied through process environment and SQL through stdin:
+
+```bash
+# Unchanged deploy.sh is sourced for SQL generation only; no deployment entrypoint.
+role_policy_sql
+application_grants_sql
+runtime_privilege_violations_sql present
+runtime_privilege_violations_sql complete
+# Authenticated sessions: verify current_user, then execute the recorded probes.
+psql -X -qAt -v ON_ERROR_STOP=1 -v VERBOSITY=verbose \
+  -h 127.0.0.1 -U fixture_migrator -d fixture
+pg_dump -h 127.0.0.1 -U fixture_migrator -d fixture -Fc
+pg_restore --list
+pg_restore -h 127.0.0.1 -U fixture_migrator -d fixture \
+  --no-owner --no-acl --exit-on-error
+```
+
+Bootstrap kept database ownership; neither role received database CREATE,
+TEMPORARY, elevated attributes or memberships. PUBLIC database/schema rights were
+revoked; schema public belongs to the migrator, runtime has USAGE only. Actual
+P6 role policy, reviewed application grants and full matrix queries ran before
+and after import. Catalog ACL/ownership/default/membership snapshots complement
+execution denials; `rolcreatedb=false` alone is never treated as sufficient.
+
+**PASS: 75 recorded cases**, including actual `42501` permission denials (exit 3),
+`P0001` rejections of direct/PUBLIC/indirect/ownership drift, allowed schema DDL,
+raw V001–V006 migrations, custom dump/restore and approved runtime access. Separate
+`23505`/`23514`/`23503` failures prove restored unique/CHECK/FK enforcement. Role
+identity was authenticated before negative probes. Both populated source and
+restored target pass the actual complete runtime matrix; all table data,
+structure/index/constraint/owner comparisons and synthetic object references match.
+The history fixture uses a clearly synthetic layout in the reserved migrator-only
+`flyway_schema_history` slot, not a Flyway-generated history. The project schema
+has zero sequences; separate transactional sequence probes leave no archived object.
+
+The first attempt's checks reached completion, but cleanup assertion casing caused
+an overall failed command; its journal and exact-container reconciliation remain
+under `initial-attempt/`. The corrected full run completed at **09:39:59 UTC**;
+both task containers were verified absent, with no persistent volumes or network
+created. `commands.jsonl`, `result.json`, emitted SQL and comparison artifacts are
+indexed separately from the old §9.6 evidence. Reproduction needs fresh names and
+new synthetic credentials; never reuse occupied namespaces or production mounts.
+
+This resolves the tested Q03/P6 discrepancy, subject to independent re-review.
+Flyway-engine validation/full-product F2/Q08 and real Q07 RPO/RTO remain NOT_RUN.
+MinIO/CMS/cloud/renewal/Keychain/scheduler results retain their previous limits and
+were not rerun. No deployment, risk acceptance or spending permission is supplied.

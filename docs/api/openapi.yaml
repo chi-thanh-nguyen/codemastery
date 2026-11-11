@@ -858,6 +858,3947 @@
           }
         }
       }
+    },
+    "/api/courses/{courseId}/skill-graph": {
+      "get": {
+        "operationId": "getOwnedSkillGraph",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Returns all valid Course skills, prerequisites and Lesson mappings. No pagination; empty graph valid for draft authoring. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillGraph"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/skills": {
+      "post": {
+        "operationId": "createCourseSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Creates one skill with server UUID. Nonblank name, optional null/nonblank description. Names are not unique; no invented length cap. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/skills/{skillId}": {
+      "put": {
+        "operationId": "updateCourseSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Replaces name/description; omitted description becomes null. Course/identity immutable. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCourseSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Rejects any prerequisite, mapping, Question or mastery reference (409); no cascade. Missing skill is 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Batch1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      }
+    },
+    "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}": {
+      "put": {
+        "operationId": "addCoursePrerequisite",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent add after both scoped endpoints validate. Self-edge 400, new cycle 409. Full DFS reachability and Course-row serialization required. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prerequisiteSkillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Batch1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      },
+      "delete": {
+        "operationId": "removeCoursePrerequisite",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent remove after validating both endpoints; absent pair succeeds, missing/foreign endpoint 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "prerequisiteSkillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      }
+    },
+    "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}": {
+      "put": {
+        "operationId": "mapCourseLessonSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent mapping under Course-owned ancestry assertion and Adaptive same-Course skill check; no extra mapping structural read. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      },
+      "delete": {
+        "operationId": "unmapCourseLessonSkill",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Idempotent unmap after validating Course Lesson/skill scope. May suspend effective readiness while preserving stored enabled intent and earned progress. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skillId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful contract operation. No response content or Content-Length. Shared frontend transport must explicitly select no-content mode and return void without JSON parsing (ADR005 section 16.2); existing JSON-only client requires separately authorized extension."
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "x-frontend-transport": {
+          "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
+          "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+          "responseMode": "no-content",
+          "expectedStatus": 204,
+          "returnType": "Promise<void>",
+          "implementationStatus": "APPROVED_NOT_IMPLEMENTED"
+        }
+      }
+    },
+    "/api/courses/{courseId}/adaptive-settings": {
+      "get": {
+        "operationId": "getCourseAdaptiveSettings",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Reads Course-owned intent/policy and their strong ETag as one snapshot; disabled legacy policy may be null. Canonical response bytes and ABA scope are defined in ADR005 section 13.1. Owning Instructor only; not a readiness assertion. Approved, not implemented.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful contract operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptiveSettings"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong SHA-256 state validator of canonical identity-encoded settings JSON; current-state semantics with documented ABA; not readiness, authorization or an audit revision."
+              },
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch1Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
+      },
+      "put": {
+        "operationId": "replaceCourseAdaptiveSettings",
+        "tags": [
+          "Batch 1 contracts"
+        ],
+        "description": "Conditional full replacement under ADR005 section 13: owning Instructor only, required If-Match (strong comparison), then optional If-None-Match (weak comparison), evaluated before effects against the same fresh guarded configuration under ADR005 section 16.1. Either failed condition is 412, never 304. Ignore If-Unmodified-Since when If-Match is present; ignore If-Modified-Since, Range and If-Range for this PUT. No pre-lock or post-write framework comparison may substitute for the guarded decision. Threshold changes permitted only before any submitted attempt and any stored mastery row; otherwise 409 with no replay. Same-policy toggles/n changes remain supported; every requested true requires fresh readiness. Settings use fail-fast admission on the same Course root (busy 409). No automatic retry, whole-Course recomputation or re-enable catch-up. Successful PUT returns the canonical body and no-store but MUST NOT include ETag, Last-Modified or other validator fields (RFC 9110 section 9.3.4; ADR005 section 15). Clients must subsequently GET the canonical body and its ETag before another update. Approved, not implemented.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Required entity-tag list from the settings GET. Any matching strong member passes; weak members never match. Missing 428; malformed/empty or wildcard * 400; nonmatching/weak-only 412. Evaluate fresh state under Course guard before history/readiness work or writes. This is expected-current-state semantics, not an ABA-proof revision. Evaluate before accompanying If-None-Match using the same freshly locked snapshot. Passing If-Match does not bypass If-None-Match."
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional entity-tag list or standalone *. After If-Match passes, weakly compare every listed tag against the same fresh guarded configuration; strong or weak current-tag match, or * for this existing representation, fails 412 without effects. Nonmatching/empty list passes this condition; RFC list/empty-element parsing applies. Mixed wildcard/list or malformed tag syntax is 400. Does not substitute for mandatory If-Match. Never 304 for PUT; refresh and explicitly review conditions, no automatic replay."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canonical settings committed. No ETag, Last-Modified or other validator is emitted for this transforming PUT. Perform GET to obtain a paired canonical representation and ETag before another update.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptiveSettings"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch1Invalid"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch1Unavailable"
+          },
+          "409": {
+            "description": "Frozen threshold change, failed readiness or busy Course root; no effects, no automatic retry. Refresh and require explicit user review. No historical replay is approved.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe provider/transaction/compatibility failure. Failures observed before commit roll back; indeterminate commit/response loss is not asserted to be rollback and must not be retried automatically. Refresh and reconcile current settings; no partial transaction is authorized.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "412": {
+            "description": "Precondition Failed. The request preconditions are not satisfied. Fetch the current settings and review the request conditions before resubmitting. Failed If-Match or If-None-Match (including weak current-tag matches or *) produces no mutation, no current configuration or replacement ETag in the error; state need not have changed. Authentication/ownership/concealment precedence preserved; native safe ProblemDetail title/detail, no-store.",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required. Fetch the current settings and supply If-Match. No changes; no current configuration or replacement ETag in the error. Authentication/ownership/concealment precedence preserved.",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdaptiveSettingsWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/progress": {
+      "get": {
+        "operationId": "getCourseProgress",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current self Learner ACTIVE/COMPLETED membership; all published Lessons only, canonical order. Floor integer percentage; empty Course 0%, not complete. REPEATABLE READ; no write. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseProgress"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/courses/{courseId}/lessons/{lessonId}/completion": {
+      "put": {
+        "operationId": "completeCourseLesson",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Self Learner; explicit CT03 Lesson access rechecked after locking Course root. True-only idempotent completion preserves skip; recompute joined status atomically; no mastery update. No automatic retry. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseProgress"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LessonCompletionWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/course-progress": {
+      "get": {
+        "operationId": "listMyCourseProgress",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current self Learner ACTIVE/published Courses only. Existing title COLLATE C/UUID order and page limits; coherent list/count/progress; no per-Course frontend fan-out. Existing /api/me/courses unchanged. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseProgressPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ]
+      }
+    },
+    "/api/courses/{courseId}/resume": {
+      "get": {
+        "operationId": "getCourseResume",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Self ACTIVE/COMPLETED Learner, published Course. Pointer is null unless currently published same-Course Lesson; canonical next is separate. Read-only REPEATABLE READ, never clears history. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseResume"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "recordCourseVisit",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Explicit admitted self Learner visit only, after content loaded; root-first READ COMMITTED unit updates pointer/server visit time atomically. Same-Course writes serialize. Repeat refreshes visit time; no automatic retries. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseResume"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CourseVisitWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/resume": {
+      "get": {
+        "operationId": "getMyResume",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Self Learner; latest currently accessible recorded visit among ACTIVE/published Courses, descending last_visited_at then Course UUID ascending. Null historical times excluded; no valid candidate returns position:null. Needs separately authorized NEW migration and grants; no adaptive ranking. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearnerResume"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses": {
+      "get": {
+        "operationId": "listOwnedCourses",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Self Courses including drafts; title COLLATE C/UUID order, REPEATABLE READ list/count. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedCoursePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createOwnedCourse",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Trusted Instructor owner, hidden, adaptive disabled and null settings; no supplied owner/adaptive fields. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedCourse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnedCourseWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}": {
+      "get": {
+        "operationId": "getOwnedCourse",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Coherent full owner tree; hidden descendants visible; no storage payloads or adaptive internals. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedCourse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "updateOwnedCourse",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full metadata replacement under unchanged ADR005 Course guard; serialized last commit wins; no settings precondition extension or auto-retry. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedCourse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnedCourseWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/publication": {
+      "put": {
+        "operationId": "setOwnedCoursePublication",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Explicit hidden/published, no cascade. Same B1 guard and completion reconciliation; event/notification integration remains CT26. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedCourse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/chapters": {
+      "post": {
+        "operationId": "createCourseChapter",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Append max sibling position+1, first=1; no parent change or chapter visibility. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedChapter"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Batch2PositionConflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChapterWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/chapters/{chapterId}": {
+      "put": {
+        "operationId": "updateCourseChapter",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Scoped ancestry checked under guard; title only. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedChapter"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "chapterId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChapterWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/chapters/order": {
+      "put": {
+        "operationId": "orderCourseChapters",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Complete sibling permutation, each UUID exactly once; duplicates/missing 400, foreign 404. Existing deferrable uniqueness; atomically assign 1..N. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiblingOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiblingOrder"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/chapters/{chapterId}/lessons": {
+      "post": {
+        "operationId": "createCourseLesson",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Scoped parent; append max+1; hidden; optional Markdown. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedLesson"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/Batch2PositionConflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "chapterId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LessonWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}": {
+      "get": {
+        "operationId": "getOwnedLesson",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Owner preview; scoped descendants, both visibility states; coherent snapshot. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedLesson"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "updateCourseLesson",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full title/Markdown replacement; parent/position/publication immutable here. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedLesson"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LessonWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/chapters/{chapterId}/lessons/order": {
+      "put": {
+        "operationId": "orderChapterLessons",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full same-Chapter permutation, 1..N atomically; no cross-parent move. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiblingOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "chapterId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiblingOrder"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/publication": {
+      "put": {
+        "operationId": "setCourseLessonPublication",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Explicit hidden/published; Course guard, reconcile required-Lesson completion and preserve B1 effective-readiness semantics; no cascade/mapping invention/history replay. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnedLesson"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/materials": {
+      "post": {
+        "operationId": "createRelationalMaterial",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Text or canonical CT37 external_video only; hidden and server UUID. No file object registration/upload. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelationalMaterial"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelationalMaterialWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/materials/{materialId}": {
+      "put": {
+        "operationId": "updateRelationalMaterial",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full title/content replacement within existing text/video type; type/parent immutable. File mutation outside this slice is rejected 400. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelationalMaterial"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelationalMaterialWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/publication": {
+      "put": {
+        "operationId": "setRelationalMaterialPublication",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Text/video only; scoped ancestry; files remain CT09. File mutation rejected 400. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelationalMaterial"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/lessons/{lessonId}": {
+      "get": {
+        "operationId": "getLearnerLesson",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Current self Learner ACTIVE/COMPLETED, published Course/Lesson. CT03 explicit-Course Lesson/material predicates; published materials only in UUID order. No storage payload/hidden metadata. Read-only coherent snapshot; visit is separate PUT. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearnerLesson"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/Batch2Unavailable"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/auth/password-reset-requests": {
+      "post": {
+        "operationId": "requestPasswordReset",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Public no bearer consumed. Canonical CT01 email; same 202 for known/unknown/locked/full queue. Auth FIFO capacity128, one worker; no lookup/SMTP on response path. Best-effort processing, no delivery guarantee. Active-account PT1M issuance interval; send only after commit. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [],
+        "responses": {
+          "202": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetRequestReceived"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/password-resets": {
+      "post": {
+        "operationId": "confirmPasswordReset",
+        "tags": [
+          "Batch 2 contracts"
+        ],
+        "description": "Public no bearer consumed. Opaque 32-byte/43-character Base64url capability, digest-only storage, exact PT30M validity. Generic400 invalid/replaced/used/expired/locked; password CT01 predicate. User-first lock and atomic password-update/token-delete; no auto-login/JWT. Existing tokens retain CT01 validity; reset-specific risk acceptance before exposure is pending. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetCompleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Batch2Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Batch2Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetConfirm"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/questions": {
+      "post": {
+        "operationId": "b3CreateQuestion",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor Course owner; validate same-Course skill under original Instructor guard. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3QuestionWrite"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "b3ListQuestions",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner only; answer keys permitted. UUID ascending; coherent scope/count/page. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuestionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/questions/{questionId}": {
+      "get": {
+        "operationId": "b3ReadQuestion",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; scoped Question, includes key. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "questionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      },
+      "put": {
+        "operationId": "b3ReplaceUnusedQuestion",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; full replacement only if no AttemptAnswer references. Used definition 409; POST new replacement explicitly. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "questionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3QuestionWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "b3DeleteUnusedQuestion",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; no QuizQuestion/AttemptAnswer reference. Returns deleted definition after commit. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "questionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes": {
+      "post": {
+        "operationId": "b3CreateQuiz",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; hidden Quiz, exact explicit ordered same-Course membership. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3QuizWrite"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "b3ListLearnerQuizzes",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Current self Learner ACTIVE/COMPLETED membership; published Course/Quiz only. Title COLLATE C then UUID. Metadata only, no keys. Diagnostic workflow/start remains CT25 gated. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizSummaryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-quizzes": {
+      "get": {
+        "operationId": "b3ListOwnedQuizzes",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; hidden and published, includes question definitions/keys. Title COLLATE C then UUID. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwnedPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}": {
+      "get": {
+        "operationId": "b3ReadOwnedQuiz",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner only; full ordered definition including keys. Learners read metadata list and captured attempt only. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      },
+      "put": {
+        "operationId": "b3ReplaceUnusedHiddenQuiz",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; hidden and zero Attempts; replace complete title/kind/time/membership. Any Attempt freezes definitions. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3QuizWrite"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "b3DeleteUnusedHiddenQuiz",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; hidden and zero Attempts; deletes own membership only, returns deleted definition. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/publication": {
+      "put": {
+        "operationId": "b3SetQuizPublication",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner; idempotent explicit state command; publish validates nonempty same-Course membership; hiding never cancels captured expiry. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3QuizOwned"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts": {
+      "post": {
+        "operationId": "b3StartAttempt",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner; no request body; fixed practice/test only. Return existing active attempt 200 without timer reset; create next committed number 201. Overdue unsubmitted or diagnostic exposure gate 409. Server UTC microsecond time, captured full membership/order/all-false masks. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Attempt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          },
+          "200": {
+            "description": "Existing active Attempt; no new timer/number; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Attempt"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      },
+      "get": {
+        "operationId": "b3AttemptHistory",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner, current Course/Quiz visibility; all own attempts, descending attemptNumber. No key; submittedAt/score null together until submitted. GET never finalizes. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}": {
+      "get": {
+        "operationId": "b3ReadAttempt",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner current access; own captured active/overdue view or immutable result. No key, GET never finalizes. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptRead"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/answers": {
+      "put": {
+        "operationId": "b3SaveAnswers",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner full answer replacement; root/Quiz/Attempt locks then server time strictly before expiry. No grade/event. Terminal/overdue 409. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3Attempt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3AnswersWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/submission": {
+      "post": {
+        "operationId": "b3SubmitAttempt",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner full validated answers; strictly before expiry grade/persist atomically. Already submitted returns immutable result, ignores new selections. Overdue unsubmitted 409 accepts no late masks. No automatic mutation retry/event execution approval. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B3AnswersWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/result": {
+      "get": {
+        "operationId": "b3ReadAttemptResult",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Self Learner current access; submitted only, active/overdue 409. Per-question correctness, no answer key. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/quizzes/{quizId}/owned-attempts/{attemptId}/result": {
+      "get": {
+        "operationId": "b3ReadOwnedAttemptResult",
+        "tags": [
+          "Batch 3 contracts"
+        ],
+        "description": "Instructor owner of admitted Course; submitted scoped Attempt including hidden Quiz. No learner impersonation/aggregate reporting; result omits keys. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quizId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attemptId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B3AttemptResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B3Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B3Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B3Failure"
+          },
+          "409": {
+            "$ref": "#/components/responses/B3Conflict"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
     }
   },
   "components": {
@@ -1293,6 +5234,1818 @@
           "totalElements",
           "totalPages"
         ]
+      },
+      "SkillWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Skill": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ]
+      },
+      "SkillPrerequisite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prerequisiteSkillId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "skillId",
+          "prerequisiteSkillId"
+        ]
+      },
+      "LessonSkillMapping": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "lessonId",
+          "skillId"
+        ]
+      },
+      "SkillGraph": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Skill"
+            }
+          },
+          "prerequisites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillPrerequisite"
+            }
+          },
+          "mappings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LessonSkillMapping"
+            }
+          }
+        },
+        "required": [
+          "courseId",
+          "skills",
+          "prerequisites",
+          "mappings"
+        ],
+        "description": "Complete owning-Instructor graph. Lists sorted by lowercase UUID text, pairs by first then second ID. Each skill and mapped Lesson belongs to courseId. Dependency direction is skillId -> prerequisiteSkillId. No canonical lesson order or learner mastery projection is implied."
+      },
+      "RationalThreshold": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "numerator": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "denominator": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "numerator",
+          "denominator"
+        ],
+        "description": "Exact positive bounded-int ratio <= 1. Responses reduce by greatest common divisor; comparisons use exact long cross-products."
+      },
+      "AdaptivePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "weak": {
+            "$ref": "#/components/schemas/RationalThreshold"
+          },
+          "mastered": {
+            "$ref": "#/components/schemas/RationalThreshold"
+          },
+          "minimumQuestionsPerSkill": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "weak",
+          "mastered",
+          "minimumQuestionsPerSkill"
+        ],
+        "description": "Explicit per-Course policy: 0 < weak < mastered <= 1; positive n counts distinct valid bank Questions per skill, not questions per attempt. All keys required; no defaults. Reject duplicate/unknown keys, nulls, numeric strings and non-integers. No supplied concrete production/demo values."
+      },
+      "AdaptiveSettingsWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AdaptivePolicy"
+          }
+        },
+        "required": [
+          "adaptiveEnabled",
+          "policy"
+        ],
+        "description": "Conditional full replacement; If-Match header required. Explicit valid policy even when disabling. Threshold changes require no submitted Course attempts and no stored mastery rows; otherwise 409 pending separately approved reclassification. Same normalized thresholds permit toggles/n edits, no replay. Requested true revalidates readiness. Successful PUT has no validator; obtain the next write snapshot through GET."
+      },
+      "AdaptiveSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdaptivePolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "courseId",
+          "adaptiveEnabled",
+          "policy"
+        ],
+        "description": "Canonical stored-intent/policy JSON. GET pairs this body with an ETag; successful canonicalizing PUT emits no validator and requires client follow-up GET before another update (ADR005 section 15). Fixed key order/normalization/bytes per section 13.1; ETag is not a JSON property. Disabled legacy policy may be null. Not a readiness or audit-revision assertion."
+      },
+      "LessonCompletionWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "completed"
+        ]
+      },
+      "CourseVisitWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "lessonId"
+        ]
+      },
+      "LessonProgressEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "masterySkipped": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "lessonId",
+          "completed",
+          "masterySkipped"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "masterySkipped": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "completed": {
+                  "const": true
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CourseProgressSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "membershipStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed"
+            ]
+          },
+          "completedLessons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalLessons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "progressPercentage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "isComplete": {
+            "type": "boolean"
+          },
+          "nextLessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "courseId",
+          "title",
+          "membershipStatus",
+          "completedLessons",
+          "totalLessons",
+          "progressPercentage",
+          "isComplete",
+          "nextLessonId"
+        ]
+      },
+      "CourseProgress": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "membershipStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed"
+            ]
+          },
+          "completedLessons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalLessons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "progressPercentage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "isComplete": {
+            "type": "boolean"
+          },
+          "nextLessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "lessons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LessonProgressEntry"
+            }
+          }
+        },
+        "required": [
+          "courseId",
+          "title",
+          "membershipStatus",
+          "completedLessons",
+          "totalLessons",
+          "progressPercentage",
+          "isComplete",
+          "nextLessonId",
+          "lessons"
+        ]
+      },
+      "CourseProgressPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CourseProgressSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "CourseResume": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resumeLessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "nextLessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "courseId",
+          "resumeLessonId",
+          "nextLessonId"
+        ]
+      },
+      "LearnerResumePosition": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lastVisitedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "courseId",
+          "lessonId",
+          "lastVisitedAt"
+        ]
+      },
+      "LearnerResume": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "position": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LearnerResumePosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "position"
+        ]
+      },
+      "OwnedCourseWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "prerequisiteDescription": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "title",
+          "description",
+          "prerequisiteDescription"
+        ]
+      },
+      "ChapterWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "LessonWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "contentMarkdown": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S",
+            "description": "Nonblank when present; stored/returned verbatim, preserving Markdown indentation."
+          }
+        },
+        "required": [
+          "title",
+          "contentMarkdown"
+        ]
+      },
+      "PublicationWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          }
+        },
+        "required": [
+          "publicationStatus"
+        ]
+      },
+      "SiblingOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "orderedIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "orderedIds"
+        ]
+      },
+      "TextMaterialWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "materialType": {
+            "const": "text",
+            "type": "string"
+          },
+          "textContent": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Nonblank when present; stored/returned verbatim, preserving Markdown indentation."
+          }
+        },
+        "required": [
+          "title",
+          "materialType",
+          "textContent"
+        ]
+      },
+      "VideoMaterialWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "materialType": {
+            "const": "external_video",
+            "type": "string"
+          },
+          "externalVideoUrl": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://www\\.youtube-nocookie\\.com/embed/[A-Za-z0-9_-]+$",
+            "description": "Only the exact canonical URL; no query, fragment, port, credentials, escapes or additional segments. ADR006 \u00a76."
+          }
+        },
+        "required": [
+          "title",
+          "materialType",
+          "externalVideoUrl"
+        ]
+      },
+      "RelationalMaterialWrite": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TextMaterialWrite"
+          },
+          {
+            "$ref": "#/components/schemas/VideoMaterialWrite"
+          }
+        ]
+      },
+      "TextMaterial": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "materialType": {
+            "type": "string",
+            "const": "text"
+          },
+          "textContent": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "publicationStatus",
+          "materialType",
+          "textContent"
+        ]
+      },
+      "VideoMaterial": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "materialType": {
+            "type": "string",
+            "const": "external_video"
+          },
+          "externalVideoUrl": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Untrusted persisted video value. May contain a legacy or unsupported URL and is not guaranteed to be a valid URI. Consumers MUST validate against the exact canonical allowlist in ADR006 §6 before constructing any iframe or navigation URL. Unsupported values MUST render safe unavailable-video text without external requests."
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "publicationStatus",
+          "materialType",
+          "externalVideoUrl"
+        ]
+      },
+      "FileMaterialMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "materialType": {
+            "type": "string",
+            "const": "file"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "publicationStatus",
+          "materialType"
+        ],
+        "description": "Relational metadata only; no object key, filename or delivery URL. CT09 payload/delivery remains unapproved."
+      },
+      "RelationalMaterial": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TextMaterial"
+          },
+          {
+            "$ref": "#/components/schemas/VideoMaterial"
+          },
+          {
+            "$ref": "#/components/schemas/FileMaterialMetadata"
+          }
+        ]
+      },
+      "OwnedLesson": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chapterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentMarkdown": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelationalMaterial"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "chapterId",
+          "title",
+          "contentMarkdown",
+          "position",
+          "publicationStatus",
+          "materials"
+        ]
+      },
+      "OwnedChapter": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "lessons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OwnedLesson"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "position",
+          "lessons"
+        ]
+      },
+      "OwnedCourseSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "publicationStatus"
+        ]
+      },
+      "OwnedCourse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "prerequisiteDescription": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "chapters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OwnedChapter"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "publicationStatus",
+          "prerequisiteDescription",
+          "chapters"
+        ]
+      },
+      "OwnedCoursePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OwnedCourseSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "LearnerLesson": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chapterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentMarkdown": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelationalMaterial"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "chapterId",
+          "title",
+          "contentMarkdown",
+          "materials"
+        ],
+        "description": "Only published Lesson/materials for admitted self Learner; material publicationStatus is always published; file metadata supplies no payload."
+      },
+      "PasswordResetRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Trim outer whitespace, ASCII lowercase, then validate ASCII email with no remaining whitespace; no provider dot/plus rewriting."
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "PasswordResetConfirm": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "writeOnly": true
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Minimum15 Unicode code points, maximum72 UTF-8 bytes; never trim/normalize.",
+            "minLength": 15,
+            "x-max-utf8-bytes": 72
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ]
+      },
+      "PasswordResetRequestReceived": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string",
+            "const": "If an account matches, a password reset link will be sent."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "PasswordResetCompleted": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string",
+            "const": "Password reset. Sign in with your new password."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "B3QuestionWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prompt": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "single_choice",
+              "multiple_choice",
+              "true_false"
+            ]
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ]
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "minItems": 2
+          },
+          "correctOptions": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "skillId",
+          "prompt",
+          "kind",
+          "difficulty",
+          "options",
+          "correctOptions"
+        ],
+        "description": "V004 masks/kinds apply. true_false labels exactly True, False. Single/true_false one true key, multiple at least one. No null, unknown or duplicate JSON properties."
+      },
+      "B3Question": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prompt": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "single_choice",
+              "multiple_choice",
+              "true_false"
+            ]
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ]
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "minItems": 2
+          },
+          "correctOptions": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "skillId",
+          "prompt",
+          "kind",
+          "difficulty",
+          "options",
+          "correctOptions"
+        ]
+      },
+      "B3QuestionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B3Question"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B3QuizWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "practice",
+              "test"
+            ]
+          },
+          "timeLimitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "questionIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "title",
+          "kind",
+          "timeLimitSeconds",
+          "questionIds"
+        ],
+        "description": "Full explicit ordered membership. Empty hidden draft allowed. No random/adaptive selection."
+      },
+      "B3QuizSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "practice",
+              "test"
+            ]
+          },
+          "timeLimitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "published": {
+            "type": "boolean"
+          },
+          "questionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "title",
+          "kind",
+          "timeLimitSeconds",
+          "published",
+          "questionCount"
+        ]
+      },
+      "B3QuizOwned": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "practice",
+              "test"
+            ]
+          },
+          "timeLimitSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "published": {
+            "type": "boolean"
+          },
+          "questionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "question": {
+                  "$ref": "#/components/schemas/B3Question"
+                }
+              },
+              "required": [
+                "position",
+                "question"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "title",
+          "kind",
+          "timeLimitSeconds",
+          "published",
+          "questionCount",
+          "questions"
+        ]
+      },
+      "B3QuizOwnedPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B3QuizOwned"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B3QuizSummaryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B3QuizSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B3AnswersWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "questionId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "selectedOptions": {
+                  "type": "array",
+                  "minItems": 2,
+                  "items": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "required": [
+                "questionId",
+                "selectedOptions"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "answers"
+        ],
+        "description": "Exactly every captured Question once. No missing/extra IDs, wrong mask lengths or multi-true single_choice/true_false. All-false explicitly unanswered."
+      },
+      "B3Attempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "overdue"
+            ]
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "questionId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "prompt": {
+                  "type": "string",
+                  "pattern": "\\S"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "single_choice",
+                    "multiple_choice",
+                    "true_false"
+                  ]
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  },
+                  "minItems": 2
+                },
+                "selectedOptions": {
+                  "type": "array",
+                  "minItems": 2,
+                  "items": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "required": [
+                "questionId",
+                "position",
+                "prompt",
+                "kind",
+                "options",
+                "selectedOptions"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "attemptId",
+          "quizId",
+          "courseId",
+          "attemptNumber",
+          "startedAt",
+          "expiresAt",
+          "status",
+          "questions"
+        ],
+        "description": "Unsubmitted only; derived DTO status, never persisted. No answer keys, correctness or score."
+      },
+      "B3AttemptSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "overdue",
+              "submitted"
+            ]
+          },
+          "submittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scorePercentage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          }
+        },
+        "required": [
+          "attemptId",
+          "quizId",
+          "courseId",
+          "attemptNumber",
+          "startedAt",
+          "expiresAt",
+          "status",
+          "submittedAt",
+          "scorePercentage"
+        ]
+      },
+      "B3AttemptHistory": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B3AttemptSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B3AttemptResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "const": "submitted"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scorePercentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "questionId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "prompt": {
+                  "type": "string",
+                  "pattern": "\\S"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "single_choice",
+                    "multiple_choice",
+                    "true_false"
+                  ]
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  },
+                  "minItems": 2
+                },
+                "selectedOptions": {
+                  "type": "array",
+                  "minItems": 2,
+                  "items": {
+                    "type": "boolean"
+                  }
+                },
+                "correct": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "questionId",
+                "position",
+                "prompt",
+                "kind",
+                "options",
+                "selectedOptions",
+                "correct"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "attemptId",
+          "quizId",
+          "courseId",
+          "attemptNumber",
+          "startedAt",
+          "expiresAt",
+          "status",
+          "submittedAt",
+          "scorePercentage",
+          "answers"
+        ],
+        "description": "Immutable exact-mask result. All captured rows, no correctOptions. Expiry finalization uses submittedAt=expiresAt."
+      },
+      "B3AttemptRead": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/B3Attempt"
+          },
+          {
+            "$ref": "#/components/schemas/B3AttemptResult"
+          }
+        ],
+        "description": "Active/overdue captured view or submitted immutable result; never null correctness or keys."
       }
     },
     "responses": {
@@ -1316,6 +7069,166 @@
       },
       "ProtectedForbidden": {
         "description": "Protected operation: active authenticated account denied by its selected role/resource rule. Access is denied.; preserve session and produce no business effects. No implicit role inheritance.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Invalid": {
+        "description": "Malformed UUID/body, invalid text/policy or self-prerequisite; safe field errors sorted by field then code",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Unavailable": {
+        "description": "Resource not available; concealed missing/foreign descendant or hidden non-owner Course",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Failure": {
+        "description": "Safe internal/provider/integrity/transaction failure; no partial effects",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch1Conflict": {
+        "description": "Cycle, referenced skill deletion or enablement/readiness rejection; no partial effects",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch2Invalid": {
+        "description": "Malformed/unknown/duplicate input or invalid feature payload. Recovery capability failures are indistinguishable: Reset link is invalid or expired. No sensitive values.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch2Unavailable": {
+        "description": "Safe missing/hidden/foreign scoped resource under CT03 precedence.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch2Failure": {
+        "description": "Safe provider/transaction/internal failure; no sensitive values.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch2PositionConflict": {
+        "description": "Positive position range exhausted; no partial write.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B3Invalid": {
+        "description": "Malformed identifier/body/page, duplicate or unknown JSON members, invalid question/mask/order; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B3Unavailable": {
+        "description": "Safe unavailable resource, hidden or foreign scope, or another learner's Attempt; no identifiers or keys.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B3Conflict": {
+        "description": "Valid request conflicts with lifecycle: used definition, published edit, empty publication, overdue attempt, active result, diagnostic exposure gate or positive-int exhaustion.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B3Failure": {
+        "description": "Safe provider, integrity, clock, grading or transaction failure. No partial success; mutation rolls back. No automatic retry.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/AuthenticationNoStore"
@@ -1421,20 +7334,22 @@
         "Integration/security verification"
       ]
     },
-    "approvalDisposition": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "approvalDisposition": "LEADER_APPROVED",
     "contractRevision": "CT01-2026-10-21-r1",
     "approvalDate": "2026-10-21",
     "timezone": "Asia/Ho_Chi_Minh",
-    "effectiveOnMain": false
+    "effectiveOnMain": true,
+    "effectivenessRecord": "LEADER-APPROVED-2026-11-08-r1 (docs/decisions/004-leader-approval-of-delegated-records.md); effectiveOnMain was false until 2026-11-08"
   },
   "x-ct03-access-proposal": {
     "status": "DELEGATED_APPROVED",
     "decisionReference": "../decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation",
-    "approvalDisposition": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "approvalDisposition": "LEADER_APPROVED",
     "contractRevision": "CT03-2026-10-21-r1",
     "approvalDate": "2026-10-21",
     "timezone": "Asia/Ho_Chi_Minh",
-    "effectiveOnMain": false,
+    "effectiveOnMain": true,
+    "effectivenessRecord": "LEADER-APPROVED-2026-11-08-r1 (docs/decisions/004-leader-approval-of-delegated-records.md); effectiveOnMain was false until 2026-11-08",
     "authority": "Project Leader @chi-thanh-nguyen instruction CodeMastery — Complete CT01/CT03 Technical Approval Under Explicit Leader Delegation; Codex approves CT03-owned scope only.",
     "scope": "ADR001 section 12: learning/ownership/visibility/ancestry predicates, seven assertions, U03/U04 Course-side bindings and U07 authorization. Public catalogue and REST DTOs unchanged.",
     "u04Resolution": "Existing CourseAccessService.requireLessonReadAccess(UUID lessonId), void; Course privately derives ancestry. No new structural lookup or schema field. Exact concealment/error behavior in ADR001 section 12.4.",
@@ -1442,11 +7357,20 @@
       "Protected CODEOWNERS/owner review, required checks/security scanning, last-push approval, resolved conversations and integration into main",
       "Full U07 requires an effective CT40.lesson-read structural contract or explicit no-extra-read disposition; no CT40 approval here",
       "Owning-Issue operation/REST/mutation approvals, implementation authorization and actual runtime verification remain separate"
-    ]
+    ],
+    "batch1Amendment": {
+      "contractRevision": "CT03-B1-2026-11-08-r2",
+      "decisionReference": "../decisions/005-batch-01-contract-approvals.md",
+      "approvalDisposition": "DELEGATED_APPROVED",
+      "effectiveOnMain": false,
+      "scope": "U07 structural/no-extra-read prerequisite technically resolved; bounded Course structure/guard/settings boundaries added. Original seven assertions, U03/U04 and access/error policy unchanged. New PR integration pending.",
+      "focusedCorrectionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026"
+    }
   },
   "x-fe07-delegated-approval": {
     "revision": "FE07-2026-10-27-r1",
-    "status": "APPROVED_PENDING_PROTECTED_INTEGRATION",
+    "status": "LEADER_APPROVED",
+    "effectivenessRecord": "LEADER-APPROVED-2026-11-08-r1 (docs/decisions/004-leader-approval-of-delegated-records.md)",
     "reference": "../decisions/002-interim-delegated-contracts.md#fe07-full-implementation--delegated-approval-27-october-2026",
     "scope": [
       "CT22.membership",
@@ -1459,6 +7383,133 @@
       "CT22.resume",
       "CT22.atomic",
       "FE08"
+    ]
+  },
+  "x-batch-01-contract-approval": {
+    "status": "DELEGATED_APPROVED",
+    "decisionReference": "../decisions/005-batch-01-contract-approvals.md",
+    "approvalDate": "2026-11-08",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "authority": "Codex independently selected and technically approved under explicit Project Leader Batch 1 delegation; no personal Leader/module review implied.",
+    "effectiveOnMain": false,
+    "integrationStatus": "PR_PENDING_INTEGRATION",
+    "implementationStatus": "NEW_OPERATIONS_APPROVED_NOT_IMPLEMENTED",
+    "checkpoints": [
+      "CT40.lesson-read",
+      "CT40.skill-tag",
+      "CT40.coverage",
+      "CT05.representation",
+      "CT05.mutation",
+      "CT05.mapping",
+      "CT05.bindings",
+      "CT06.production",
+      "CT06.enablement"
+    ],
+    "compatibilityAmendments": [
+      "CT03-B1-2026-11-08-r2",
+      "CT24-CALCULATION-2026-11-08-r2",
+      "CT14-B1-COVERAGE-2026-11-08-r1",
+      "CT18-B1-ERRORS-2026-11-08-r1"
+    ],
+    "internalBoundaries": "ADR005 sections 3, 5 and 7.1; Course/Adaptive/Assessment application surfaces in existing files only. These are not extra REST operations.",
+    "retainedGates": [
+      "Protected main integration; eligible CODEOWNER and independent last-push review, required checks and resolved threads",
+      "Separate implementation authorization and actual provider/PostgreSQL/security/concurrency verification",
+      "CT04/CT08/CT22 execution, evidence and atomic progress contracts; no implementation, deployment, release or risk acceptance authorized"
+    ],
+    "focusedCorrection": {
+      "status": "DELEGATED_APPROVED",
+      "authority": "Project Leader explicit PR #228 Focused Technical Corrections & Revalidation; independently selected by Codex.",
+      "decisionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026",
+      "approvalDate": "2026-11-08",
+      "effectiveOnMain": false,
+      "currentRevisions": [
+        "CT06-ENABLEMENT-2026-11-08-r2",
+        "CT03-B1-2026-11-08-r3",
+        "CT14-B1-COVERAGE-2026-11-08-r2",
+        "CT18-B1-ERRORS-2026-11-08-r2"
+      ],
+      "predecessors": {
+        "CT06-ENABLEMENT-2026-11-08-r1": "CT06-ENABLEMENT-2026-11-08-r2",
+        "CT03-B1-2026-11-08-r2": "CT03-B1-2026-11-08-r3",
+        "CT14-B1-COVERAGE-2026-11-08-r1": "CT14-B1-COVERAGE-2026-11-08-r2",
+        "CT18-B1-ERRORS-2026-11-08-r1": "CT18-B1-ERRORS-2026-11-08-r2"
+      },
+      "preserved": "All nine checkpoint approvals and four original prerequisite records retained; only named settings signatures/lifecycle/error/verification scopes amended. CT06.production arithmetic/latest-attempt policy and CT24 remain unchanged.",
+      "implementationStatus": "APPROVED_NOT_IMPLEMENTED",
+      "httpValidatorCorrection": {
+        "revision": "CT06-ENABLEMENT-N1-2026-11-08-r1",
+        "decisionReference": "../decisions/005-batch-01-contract-approvals.md#15-n1-http-validator-correction",
+        "scope": "Preserves CT06.enablement r2 approval provenance. Only GET emits a strong ETag; successful canonicalizing PUT emits no validator and clients GET again before another update. If-Match, wire fields, failure mappings and other approvals are unchanged.",
+        "effectiveOnMain": false
+      }
+    },
+    "independentReviewCorrection": {
+      "status": "DELEGATED_APPROVED",
+      "approvalDate": "2026-11-09",
+      "authority": "Codex independently selected under Project Leader explicit Resolve Independent Review Findings in PR #228 instruction; no personal Leader/module review implied.",
+      "decisionReference": "../decisions/005-batch-01-contract-approvals.md#16-r1r3-independent-review-corrections--9-november-2026",
+      "revisions": [
+        "CT06-ENABLEMENT-R1-2026-11-09-r1",
+        "CT18-B1-ERRORS-2026-11-09-r3",
+        "CT16-B1-NO-CONTENT-2026-11-09-r1",
+        "CT14-B1-COVERAGE-2026-11-09-r3"
+      ],
+      "effectiveOnMain": false,
+      "scope": "Same-snapshot guarded PUT preconditions, generic safe 412 wording, explicit shared-client no-content mode for five unchanged 204 operations, existing verification allocations. Preserves N1 validator-free PUT success, original revisions and all other scopes. Approved, not implemented.",
+      "scopePrecedence": "ADR005 section 16 replaces only the listed conditional input/comparison/error clauses and adds bounded CT16 no-content handling; sections 13 and 15 continue to govern all unaffected scopes. Earlier currentRevisions fields identify their historical amendment, not blanket precedence."
+    }
+  },
+  "x-batch-02-contracts": {
+    "decisionReference": "../decisions/006-batch-02-contract-approvals.md",
+    "status": "DELEGATED_APPROVED",
+    "implementation": "NOT_IMPLEMENTED",
+    "checkpoints": [
+      "CT22.progress",
+      "CT22.resume",
+      "CT37.embed",
+      "CT02.delivery",
+      "CT21.authoring",
+      "CT02.workflow",
+      "CT02.token",
+      "CT02.rest"
+    ],
+    "authority": "Codex delegated technical approval under explicit Project Leader Batch 2 instruction, 9 November 2026; Leader separately authorized reset-only email exception and bounded visit-time schema/read.",
+    "retainedGates": [
+      "Independent owner/CODEOWNER review, CI and protected merge",
+      "Separate implementation authorization, NEW migrations and runtime privilege qualification",
+      "SMTP adapter/provider/trusted origin and abuse/load qualification",
+      "Reset-specific residual-token risk acceptance before public recovery exposure",
+      "CT09/CT12/CT26/CT22.atomic/CT33 remain separately governed",
+      "CT22 schema/read explicitly authorized; no migration or privilege change performed"
+    ]
+  },
+  "x-batch-03-contracts": {
+    "decisionReference": "../decisions/007-batch-03-contract-approvals.md",
+    "status": "DELEGATED_APPROVED",
+    "implementation": "NOT_IMPLEMENTED",
+    "checkpoints": [
+      "CT23.questions",
+      "CT23.composition",
+      "CT23.publication",
+      "CT23.bindings",
+      "CT04.start",
+      "CT04.submission",
+      "CT04.expiry",
+      "CT04.results",
+      "CT08.evidence",
+      "CT04.bindings"
+    ],
+    "prerequisites": [
+      "CT03-ASSESSMENT-GUARD-2026-11-09-r1",
+      "CT38-QUIZ-EXPIRY-2026-11-09-r1"
+    ],
+    "retainedGates": [
+      "Independent review, required CI and protected integration",
+      "Separate implementation authorization and actual artifacts/tests",
+      "CT08.execution/failure/verification-plan and CT22.atomic remain pending",
+      "CT25 diagnostic and CT28 notification binding remain pending",
+      "Configuration values and scheduler/deadline/privilege qualification"
     ]
   }
 }

@@ -465,7 +465,7 @@ in this foundation supplies application records.
 The [CT01 technical contract](decisions/001-modular-monolith-module-boundaries.md#11-ct01-completion-proposal--pending-authoritative-integration)
 records **CT01-2026-10-21-r1**, technically approved on 2026-10-21 under the
 Project Leader's explicit CT01/CT03 delegation. New detail is
-APPROVED_PENDING_PROTECTED_INTEGRATION; existing effective approvals retain
+[LEADER_APPROVED](decisions/README.md#approval-status-labels); existing effective approvals retain
 their own provenance. Protected review and merge remain required. Preserve
 ADR002 `CT01.core` and the immutable V001 schema without change: Auth owns
 `users.id/email/password_hash/display_name/role/account_status`; role literals
@@ -504,7 +504,7 @@ instructor acceptance.
 [ADR001 §12](decisions/001-modular-monolith-module-boundaries.md#12-ct03-access-and-consumer-contract-reconciliation)
 records **CT03-2026-10-21-r1**, technically approved on 2026-10-21 under the
 Project Leader's explicit CT01/CT03 delegation; new CT03-owned decisions are
-APPROVED_PENDING_PROTECTED_INTEGRATION. Effective catalogue/identity approvals
+LEADER_APPROVED. Effective catalogue/identity approvals
 retain their existing scope. Full U07 remains unresolved for CT40.lesson-read.
 It consumes V002's existing membership states and Course/Chapter/Lesson/Material
 references without changing schema, state catalogues or lifecycle invariants in
@@ -515,6 +515,18 @@ lookup contracts. Interaction's existing lesson_id suffices for the approved
 lesson-only read assertion: Course derives ancestry privately; no Course field,
 structural projection or repository access is added to Interaction. Access rules,
 failure precedence and all seven Java signatures are defined only in ADR001.
+
+### Notification fields — `CT11.read` (field set only) — CT11-READ-FIELDS-2026-11-08-r1 — DELEGATED_PARTIALLY_APPROVED
+
+Delegated technical approval by Claude Code under the Project Leader's explicit authorization for this task, “CodeMastery — Design Alignment Standardization, Contract Reconciliation & Issue Publication” (8 November 2026). It is not personal Leader review, CODEOWNER approval, implementation authorization, protected integration or runtime verification; those gates stay independent. No owner was consulted during this run; the owners named below review the record afterwards.
+
+**Decision.** The notification representation keeps the approved V006 baseline: message, read state and creation time (with the identifier that CT11.read selects). No `type` and no `link`/source field are added, and no migration is required. Messages are plain text written by the creating module through CT11.create and name the course or lesson in words where useful. The frontend renders them as plain text and never infers a type or link from the text.
+
+**Effect on DESIGN r6 S15.** Final notification rows are message-only with one neutral glyph and the unread indicator; the per-type tint circles and source links stay Preview.
+
+**Alternatives considered.** A `type` enum column (rejected now: migration for presentation only); `type` plus a stored internal link (rejected now: migration and an open-redirect validation surface); deriving the type in the UI from the text (rejected: fragile, invented semantics). Either column may be proposed later as a CT11 amendment with its migration.
+
+**Still pending in CT11.** List, paging and mark-read operations (rest of CT11.read), CT11.create and CT11.reminders. **Owners for review.** Interaction, frontend lane, Leader. **Unlocks.** FE28 presentation; IN07 representation.
 
 ## 13. References
 
@@ -542,6 +554,8 @@ governance or immutable reference artifacts.
 
 ## CT06 production and enablement proposal — no physical change
 
+> **8 November 2026 scope update:** the following proposal is historical. [ADR005 §§3–7/9](decisions/005-batch-01-contract-approvals.md#9-amendments-prerequisites-and-compatibility) now approves Course-owned closed JSON settings, latest-per-skill evidence policy, U08/U09 and the Course-row transaction guard. Its new PR remains unmerged. No SQL column, migration or numeric mastery/history ledger is added.
+
 The [CT06 reconciliation and proposal](adaptive-learning.md#19-ct06-reconciliation-and-completion-proposal)
 is the detailed pending policy record. It preserves V002 Course-owned JSONB settings,
 V003 skill/mapping ownership, V004 Assessment evidence and V005 categorical mastery;
@@ -565,3 +579,104 @@ Course-root locking serializes mutations and publication changes. Hidden members
 remain stored but are concealed from learner REST reads/counts/mutations. No dates,
 progress/resume policy, atomic mastery participation or schema changes are selected.
 See ADR002 and OpenAPI for exact operations, precedence, representations and filters.
+
+
+## Batch 1 integrity and configuration contract — 8 November 2026
+
+> **Current correction:** [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026) supplies conditional expected-state writes and the pre-history-only threshold lifecycle. Earlier whole-Course reclassification requirements are historical and no longer approved as settings-endpoint behavior.
+
+[ADR005](decisions/005-batch-01-contract-approvals.md) is the normative delegated
+approval; these are documentation contracts awaiting implementation and PR integration.
+
+| Guarantee | Database baseline | Required application owner and contract |
+|---|---|---|
+| Prerequisite endpoint Course, duplicate and self-edge protection | V003 composite FKs, UNIQUE and CHECK | Adaptive additionally rejects arbitrary cycles under the Course-owned row guard; deterministic DFS reachability, not a DDL guarantee. |
+| Lesson–skill same-Course consistency | V003 independent FKs do not enforce it | Course proves Lesson ancestry; Adaptive proves skill scope before pair mutations. Referenced identities cannot move across Courses in place. |
+| Question Course and complete coverage | V004 has skill_id, no course_id or publication flag | Adaptive supplies scoped skill validation; Assessment counts distinct valid Question IDs including zero for requested skills. Reused quiz membership does not multiply counts. |
+| Policy and readiness | V002 checks JSON-object presence only when enabled | Course stores intent/configuration; Adaptive validates the closed weak/mastered rational pairs and positive minimumQuestionsPerSkill, applies complete coverage and published-Lesson mapping checks. No production defaults. |
+| Concurrency | No DDL acyclicity/coverage trigger | CourseManagementService owns SELECT FOR UPDATE on its Course row at explicitly selected READ COMMITTED; all relevant Course/Adaptive/Assessment writers must participate before readiness is verified. |
+| Mastery history | V005 stores categorical state only; V004 retains attempt/answer evidence | Latest eligible submitted attempt per assessed skill, equal question weight/no decay, deterministic existing-field ordering. Complete capture/immutability, replay and atomic policy reclassification require real implementation under CT04/CT08/CT22. |
+
+The exact JSON schema and bounds are in ADR005 §6.2 and OpenAPI's AdaptivePolicy;
+they refine the existing JSONB object, not the SQL schema. Missing legacy policy
+is readable only on a disabled Course; new settings writes require explicit valid
+policy. No schema migration is made or authorized by this contract approval.
+
+
+### Settings state validators and history barrier — focused correction
+
+**CT06-ENABLEMENT-2026-11-08-r2 / CT03-B1-2026-11-08-r3** are the scoped delegated
+approvals in [ADR005 §13](decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026).
+V002 still has only adaptive_enabled and JSONB adaptive_settings for configuration;
+there is no settings revision column. The strong ETag hashes the canonical response
+and is recomputed, not persisted. Identical A→B→A state has the same validator;
+it is not an audit/monotonic revision. No xmin/ctid/process-local version is used.
+
+Under the Course guard, Adaptive checks the current validator and later passes
+Course's freshly read raw snapshot as expected state for its own guarded write.
+Threshold changes require both no submitted Assessment attempts in the Course and
+no stored mastery rows for its skills. Assessment supplies an owner-only boolean
+existence read from existing AttemptService; Adaptive reads its own mastery/skill
+data. Missing/unavailable providers fail closed. No foreign repository access,
+COUNT/history loading, new table/index or migration is selected. Query-plan and
+finite duration/cancellation qualification remain real implementation obligations.
+CT15/SD03 must configure policy before populating submitted history or mastery;
+legacy data cannot be cleared/relabelled merely to bypass the barrier. Post-history
+reclassification/repair requires separate approval. Evidence and progress remain intact.
+
+## Batch 2 progress, resume, authoring and recovery — 9 November 2026
+
+Authoritative decisions: [ADR006](decisions/006-batch-02-contract-approvals.md).
+All eight checkpoints are technically approved; **no migration or implementation
+is performed by the documentation task**. The Leader expressly authorized the
+bounded resume schema contract/read and reset-only email exception in this task.
+
+Existing V002 application semantics:
+
+- Required Lessons are current published Lessons in Chapter/Lesson position order.
+  Missing progress is incomplete; skipped implies completed. Nonempty completion
+  means all required Lessons completed; zero Lessons yields 0%, not complete.
+  Percentage is floor(100 × completed / required), without overflow.
+- Manual completion is idempotent, true-only and preserves an earned skip flag.
+  Completion/content-set writes reconcile joined status under the Course root;
+  LEFT history stays intact. FE07 rejoin remains LEFT → ACTIVE, without recalculation
+  during membership PUT. Stored membership and calculated completion stay separate.
+- Explicit admitted visit atomically updates the existing resume_lesson_id and the
+  newly authorized lifecycle time below. GET/prefetch never writes. A per-Course
+  read returns null for an inaccessible retained pointer, without deleting history.
+- Course creation fixes trusted Instructor ownership, hidden/disabled/null settings.
+  Chapter has no visibility; parent/type stays immutable in this slice. Reorder uses
+  existing deferrable positions. Materials have no position and use UUID display
+  order. Text/video payloads are exclusive; file payload/object lifecycle stays CT09.
+
+Additive physical design for later NEW Flyway migration(s), not V001–V006 edits:
+
+| Object | Approved design | Authority / remaining gate |
+|---|---|---|
+| enrollments.last_visited_at | nullable timestamptz, Java Instant, no default/backfill; legacy null means unknown; successful visit captures PostgreSQL clock_timestamp once under Course/Enrollment locks and writes pointer/time together | `CT22-RESUME-SCHEMA-2026-11-09-r1`, explicit additional Leader authorization; migration implementation and runtime grants still required |
+| password_reset_tokens | Auth-owned id uuid PK; user_id uuid unique FK users; token_digest bytea unique, exactly 32 bytes; issued_at/expires_at timestamptz NOT NULL, expires_at > issued_at; no defaults | `CT02-TOKEN-2026-11-09-r1`; exact constraint names and no-action/nondeferrable FK in [ADR006 §9.2](decisions/006-batch-02-contract-approvals.md#92-capability-storage-and-confirmation-transaction); separately authorized NEW migration required |
+
+One outstanding reset row per User; active eligible request replaces it, successful
+confirmation updates BCrypt hash and deletes matching capability atomically under
+User-first locking. No plaintext token, consumed-history column, copied email,
+new recovery entity abstraction or scheduler. Random 32-byte capability is Base64url
+without padding; only SHA-256 digest persists. PT30M is explicitly selected policy
+here, rather than authority inferred from the dormant configuration default.
+
+Learner-level resume selects only accessible recorded ACTIVE Course visits by time
+descending and Course UUID ascending on ties; legacy null times never become fake
+visits. No cross-course adaptive logic. CT01 membership/identity/JWT contracts and
+all existing physical constraints remain effective. NEW migrations, grants,
+implementation/security review and reset exposure risk acceptance stay separate.
+
+
+## Batch 3 assessment lifecycle contract — no physical change
+
+[ADR007](decisions/007-batch-03-contract-approvals.md) defines question/quiz
+authoring, captured attempts, saved answers, grading and results over unchanged
+V004. Used definitions (including skill tags) and attempted quiz definitions are
+frozen; replacements use new existing-entity identities, without revision tables.
+Auto-submission records logical expiry as submitted_at and grades saved masks.
+See ADR007 §§4–13 for normative decisions, errors, concurrency and evidence schema.
+Its DTO status is derived, never a new persisted enum. Physical schema and prior
+approvals remain intact; no migration or application implementation is supplied.

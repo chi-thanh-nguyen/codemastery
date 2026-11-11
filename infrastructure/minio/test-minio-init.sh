@@ -1,0 +1,1173 @@
+#!/usr/bin/env bash
+# CodeMastery - infrastructure/minio/test-minio-init.sh   (DP01 initializer qualification)
+#
+# Integration tests for the MinIO initializer image against disposable MinIO
+# servers. Each scenario uses its own private Docker network and server;
+# everything created is labelled and removed.
+#
+#   infrastructure/minio/test-minio-init.sh            build infrastructure/minio and test it
+#   infrastructure/minio/test-minio-init.sh IMAGE      test an existing image reference or ID
+#
+# MINIO_INIT_TEST_SERVER selects the server under test:
+#   golithus    (default) the digest-pinned local Community server from the base Compose file
+#   chainguard  the digest-pinned DP01 release-server candidate below (not admitted)
+#   minimal     infrastructure/vm/Dockerfile.minio-server, built beforehand from that
+#               Chainguard pin under a non-release tag (not admitted; linux/amd64 only):
+#                 docker build --platform linux/amd64 \
+#                   -t codemastery-test/minio-server:qualification - < infrastructure/vm/Dockerfile.minio-server
+# An unset variable selects golithus; any other value, including an empty one, fails.
+#
+# The built image is tagged codemastery-test/minio-init:qualification, never a
+# codemastery.invalid/*:release name. MINIO_INIT_TEST_PLATFORM (default
+# linux/amd64, the VM platform) selects the platform. Requires Docker with
+# Compose v2.24+ and python3. The selected server image must already be present
+# (and, for minimal, the Chainguard pin it is built from); Docker pulls the
+# digest-pinned initializer base and test-client mc images on demand.
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PLATFORM="${MINIO_INIT_TEST_PLATFORM:-linux/amd64}"
+RUN_ID="mi$$x${RANDOM}"
+LABEL="codemastery.minio-init-test=${RUN_ID}"
+WORK="$(mktemp -d)"
+PROJECTS=()
+
+BASE_COMPOSE="${ROOT}/infrastructure/docker-compose.yml"
+VM_COMPOSE="${ROOT}/infrastructure/vm/docker-compose.vm.yml"
+# The approved local pins are the single source of truth for both images. The
+# local mc image is the suite's independent test client, not the initializer base.
+LOCAL_SERVER_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/minio:.*\)$/\1/p' "${BASE_COMPOSE}")"
+MC_IMAGE="$(sed -n 's/^    image: \(ghcr\.io\/golithus\/mc:.*\)$/\1/p' "${BASE_COMPOSE}")"
+# Initializer runtime filesystem: Chainguard's mc image, selected only by this
+# index digest, whose mc binary the initializer replaces (docs/deployment.md, F1).
+INIT_BASE_IMAGE='cgr.dev/chainguard/minio-client@sha256:3b67177c0e12f44f646a5cf21b20fc5a79dd2d7a6b4db632b436f0b9e2e46717'
+# Digest of the base's linux/amd64 filesystem as the suite inventories it (every
+# entry's path, type, mode, owner, link target and content hash, in path order),
+# independent of the image store and of layer timestamps.
+INIT_BASE_FS_SHA256='8ce62ec8dad58f70239e9b2ea715339bd347087b2f5c12cf4c54180d6e68dab5'
+# The base's replaced mc (package 0.20250813.083541-r27): no layer may contain it.
+INIT_BASE_MC_SHA256='8842390a4419ff18ec9c43aa71b41beb69030ea56df4f449c03b9623af0bc34a'
+INIT_BASE_MC_PATHS='usr/bin/mc var/lib/db/sbom/mc-0.20250813.083541-r27.spdx.json'
+# Build-stage images of infrastructure/minio/Dockerfile, selected only by digest.
+INIT_GO_IMAGE='golang:1.27.3-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9'
+INIT_ROOTFS_TOOL_IMAGE='alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a'
+# The project-built linux/amd64 mc and the files the build derives from it and
+# from its Corresponding Source archive (mc-source-archive target). The build is
+# reproducible, so these are exact: a different toolchain, module or source
+# changes them. The archive holds infrastructure/minio/Dockerfile and SOURCE names
+# the archive's SHA-256, so any Dockerfile edit changes the archive, SOURCE and
+# README hashes, while the mc hash changes only with what is compiled.
+INIT_MC_SHA256='025691d43adb653c6ce34723c76450153f2c024bfa232edaca6906fe3e221809'
+INIT_MC_SOURCE_SHA256='a42400d4703c265258952b44bfd997a53dcca55bf47b691f48a1f2f483e98b50'
+INIT_MC_DOCS='44ab3614640388cb516de279d50712ed4bee04dc7fe96b983fef5283629c6340 BUILDINFO
+4ead58181c478e2f449d5778165684f4fceb1e7b8b3ee150051c8e7adfe4f337 CREDITS
+0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0 LICENSE
+56635f1740e8c33231e76ba8fbe098e7e9cc95d28b7b4abb98fed6270405810e NOTICE
+51677c6c845b9d77a93f9fb437122470167178400dd44446f86f0a546e20435d README
+50a5fa59ecfcc4c1dabd46742c09b545757fc63b6cf73344c8de383b1e48aa73 SOURCE
+d7634df3afa9d85da2f53f3df092fa4afd8777b21136303d0700105b62e918f7 THIRD_PARTY_NOTICES'
+# DP01 release-server candidate: Chainguard's build of the chainguard-forks/minio
+# fork, selected only by this immutable index digest (docs/deployment.md).
+CHAINGUARD_SERVER_IMAGE='cgr.dev/chainguard/minio@sha256:3b6e40c30ecd5cea627e382ff0b82ca841f58c52294578787043ee80c8ef7c82'
+# DP01 minimal server candidate: a local build with no registry digest, so it is
+# identified by its content, checked against the Chainguard pin it copies from.
+MINIMAL_SERVER_IMAGE='codemastery-test/minio-server:qualification'
+MINIMAL_DOCKERFILE="${ROOT}/infrastructure/vm/Dockerfile.minio-server"
+# /usr/bin/minio of the pin's linux/amd64 manifest, which the image copies unchanged.
+MINIMAL_SERVER_BINARY_SHA256='3c3d615241314c531e15e57485c053e60dc1af04e87b20424d2db8bdec8a49b2'
+# The base Compose server command; the Chainguard image has no default command.
+SERVER_CMD=(server /data --console-address :9001)
+SERVER="${MINIO_INIT_TEST_SERVER-golithus}"
+
+ROOT_USER="cm-root-admin"
+ROOT_PASS='root pass/with:"odd"\chars é'
+APP_KEY="cm-storage-app"
+APP_SECRET='app secret@with/odd:"chars"\ é'
+BUCKET="codemastery"
+REGION="us-east-1"
+POLICY_NAME="codemastery-local-storage"
+# Expected server-normalized policy, written out independently of the initializer.
+EXPECTED_POLICY='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::codemastery"]},{"Effect":"Allow","Action":["s3:DeleteObject","s3:GetObject","s3:PutObject"],"Resource":["arn:aws:s3:::codemastery/*"]}]}'
+
+passed=0
+
+cleanup() {
+  local p
+  for p in ${PROJECTS[@]+"${PROJECTS[@]}"}; do
+    docker compose -p "${p}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" \
+      down -v --remove-orphans >/dev/null 2>&1 || true
+  done
+  local ids
+  ids="$(docker ps -aq --filter "label=${LABEL}")"
+  [[ -z "${ids}" ]] || docker rm -fv ${ids} >/dev/null 2>&1 || true
+  ids="$(docker network ls -q --filter "label=${LABEL}")"
+  [[ -z "${ids}" ]] || docker network rm ${ids} >/dev/null 2>&1 || true
+  ids="$(docker volume ls -q --filter "label=${LABEL}")"
+  [[ -z "${ids}" ]] || docker volume rm ${ids} >/dev/null 2>&1 || true
+  rm -rf "${WORK}"
+}
+trap cleanup EXIT
+
+die() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
+pass() { passed=$((passed + 1)); printf 'ok %d - %s\n' "${passed}" "$1"; }
+section() { printf '\n== %s\n' "$1"; }
+
+[[ -n "${LOCAL_SERVER_IMAGE}" && -n "${MC_IMAGE}" ]] || die "Cannot read the pinned MinIO images from ${BASE_COMPOSE}."
+
+# Expected container defaults (user|entrypoint|command), binary version and
+# owner of the server's data directory, per supported server.
+case "${SERVER}" in
+  golithus)
+    SERVER_IMAGE="${LOCAL_SERVER_IMAGE}"
+    SERVER_CONFIG='|["/minio"]|["server","/data","--console-address",":9001"]'
+    SERVER_VERSION='minio version DEVELOPMENT.2025-10-15T17-29-55Z (commit-id=9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a)'
+    SERVER_DATA_UID=0
+    ;;
+  chainguard)
+    SERVER_IMAGE="${CHAINGUARD_SERVER_IMAGE}"
+    SERVER_CONFIG='65532|["/usr/bin/minio"]|null'
+    SERVER_VERSION='minio version RELEASE.2026-10-23T20-06-51Z (commit-id=76c06ff1d2cc844050fdeb1d54bf8fa70db72278)'
+    SERVER_DATA_UID=65532
+    ;;
+  minimal)
+    [[ "${PLATFORM}" == linux/amd64 ]] || die "The minimal server is qualified for linux/amd64 only, not ${PLATFORM}."
+    SERVER_IMAGE="${MINIMAL_SERVER_IMAGE}"
+    SERVER_CONFIG='65532:65532|["/usr/bin/minio"]|null'
+    # The Chainguard binary, copied unchanged.
+    SERVER_VERSION='minio version RELEASE.2026-10-23T20-06-51Z (commit-id=76c06ff1d2cc844050fdeb1d54bf8fa70db72278)'
+    SERVER_DATA_UID=65532
+    ;;
+  *) die "MINIO_INIT_TEST_SERVER must be golithus, chainguard or minimal, not '${SERVER}'." ;;
+esac
+
+# ------------------------------------------------------------------ helpers
+
+# Runs mc --json as the given identity, inside the pinned mc image. Credentials
+# go into a private config file in the container, so any character works.
+MC_SHIM='set -u
+d="$(mktemp -d)"
+e() { local s="$1"; s="${s//\\/\\\\}"; printf "%s" "${s//\"/\\\"}"; }
+printf "{\"version\":\"10\",\"aliases\":{\"t\":{\"url\":\"http://minio:9000\",\"accessKey\":\"%s\",\"secretKey\":\"%s\",\"api\":\"S3v4\",\"path\":\"on\"}}}" \
+  "$(e "${CM_AK}")" "$(e "${CM_SK}")" > "${d}/config.json"
+export MC_CONFIG_DIR="${d}"
+if [ -n "${CM_TIMEOUT:-}" ]; then exec timeout "${CM_TIMEOUT}" mc --json "$@"; fi
+exec mc --json "$@"'
+
+mc_as() {  # network access-key secret mc-args... (stdin is passed through)
+  local net="$1" ak="$2" sk="$3"; shift 3
+  CM_AK="${ak}" CM_SK="${sk}" docker run --rm -i --platform "${PLATFORM}" --network "${net}" \
+    --label "${LABEL}" -e CM_AK -e CM_SK -e CM_TIMEOUT --entrypoint /bin/bash "${MC_IMAGE}" \
+    -c "${MC_SHIM}" mc-shim "$@" 2>&1 || true
+}
+admin() { local net="$1"; shift; mc_as "${net}" "${ROOT_USER}" "${ROOT_PASS}" "$@" </dev/null; }
+app() { local net="$1"; shift; mc_as "${net}" "${APP_KEY}" "${APP_SECRET}" "$@"; }
+
+expect_ok() { [[ "$2" != *'"status":"error"'* ]] || die "$1: ${2:0:300}"; }
+expect_code() {  # description code output
+  [[ "$3" == *"\"Code\":\"$2\""* ]] || die "$1: expected $2, got ${3:0:300}"
+}
+# mc reports some S3 denials without a code ("Insufficient permissions ...").
+expect_denied() {  # description output
+  [[ "$2" == *'"status":"error"'* ]] || die "$1: not denied: ${2:0:300}"
+  [[ "$2" == *'"Code":"AccessDenied"'* || "$2" == *'Insufficient permissions'* ]] \
+    || die "$1: failed for another reason: ${2:0:300}"
+}
+expect_eq() { [[ "$2" == "$3" ]] || die "$1:"$'\n'"  expected: $3"$'\n'"  actual:   $2"; }
+expect_contains() { [[ "$2" == *"$3"* ]] || die "$1: missing '$3' in: ${2:0:400}"; }
+
+# Runs the selected server with the base Compose command and waits until ready.
+run_server() {  # network container-name [docker run options...]
+  local net="$1" name="$2"; shift 2
+  docker run -d --platform "${PLATFORM}" \
+    --name "${name}" --label "${LABEL}" --network "${net}" --network-alias minio \
+    -e MINIO_ROOT_USER="${ROOT_USER}" -e MINIO_ROOT_PASSWORD="${ROOT_PASS}" \
+    "$@" "${SERVER_IMAGE}" "${SERVER_CMD[@]}" >/dev/null
+  local out
+  out="$(CM_TIMEOUT=60 admin "${net}" ready t)"
+  [[ "${out}" == *'"healthy":true'* ]] || die "MinIO test server ${name} did not become ready."
+}
+
+# Starts a fresh server on a new private network; prints the network name.
+start_server() {  # name [docker run options...]
+  local net="cm-${RUN_ID}-$1"
+  docker network create --label "${LABEL}" "${net}" >/dev/null
+  run_server "${net}" "${net}-minio" "${@:2}"
+  printf '%s' "${net}"
+}
+
+stop_server() { docker rm -fv "$1-minio" >/dev/null 2>&1 || true; docker network rm "$1" >/dev/null 2>&1 || true; }
+
+# TCP ports a server container listens on, read by a sidecar in its network
+# namespace (the server images have no shell). Docker's embedded DNS listener on
+# 127.0.0.11 belongs to the network, not the server, and is left out.
+listening_ports() {  # container
+  docker run --rm --platform "${PLATFORM}" --network "container:$1" --label "${LABEL}" \
+    --entrypoint /bin/bash "${MC_IMAGE}" -c '
+    for f in /proc/net/tcp /proc/net/tcp6; do
+      [ -r "$f" ] || continue
+      while read -r _ addr _ state _; do
+        [ "${state}" = 0A ] && [ "${addr%%:*}" != 0B00007F ] && printf "%d\n" "0x${addr##*:}"
+      done < <(tail -n +2 "$f")
+    done | sort -nu | paste -sd " " -'
+}
+
+# Waits up to 30 seconds for the listening ports to equal the expected list.
+expect_listening() {  # description container expected
+  local i got=""
+  for i in $(seq 1 30); do
+    got="$(listening_ports "$2")"
+    [[ "${got}" != "$3" ]] || break
+    sleep 1
+  done
+  expect_eq "$1" "${got}" "$3"
+}
+
+# A plain TCP connection to minio:PORT from the private network: open or refused.
+tcp_probe() {  # network port
+  docker run --rm --platform "${PLATFORM}" --network "$1" --label "${LABEL}" \
+    --entrypoint /bin/bash "${MC_IMAGE}" -c \
+    'if timeout 5 bash -c "exec 3<>/dev/tcp/minio/$1" 2>/dev/null; then echo open; else echo refused; fi' \
+    tcp-probe "$2"
+}
+
+INIT_OUT=""
+INIT_RC=0
+# Runs the image exactly as the VM Compose model does: no entrypoint, command,
+# user or volume override, only the six approved environment variables.
+run_init() {  # network [VAR=value ...]
+  local net="$1"; shift
+  local -a envs=(
+    "MINIO_ROOT_USER=${ROOT_USER}" "MINIO_ROOT_PASSWORD=${ROOT_PASS}"
+    "STORAGE_ACCESS_KEY=${APP_KEY}" "STORAGE_SECRET_KEY=${APP_SECRET}"
+    "STORAGE_BUCKET=${BUCKET}" "STORAGE_REGION=${REGION}")
+  local kv args=()
+  for kv in "${envs[@]}" "$@"; do args+=(-e "${kv}"); done
+  INIT_RC=0
+  INIT_OUT="$(docker run --rm --platform "${PLATFORM}" --network "${net}" --label "${LABEL}" \
+    "${args[@]}" "${IMAGE}" 2>&1)" || INIT_RC=$?
+  [[ "${INIT_OUT}" != *"${ROOT_PASS}"* && "${INIT_OUT}" != *"${APP_SECRET}"* ]] \
+    || die "initializer output disclosed a secret"
+}
+
+expect_init_ok() {
+  [[ ${INIT_RC} -eq 0 ]] || die "$1: initializer exited ${INIT_RC}: ${INIT_OUT}"
+}
+expect_init_fail() {  # description expected-message
+  [[ ${INIT_RC} -ne 0 ]] || die "$1: initializer unexpectedly succeeded: ${INIT_OUT}"
+  expect_contains "$1" "${INIT_OUT}" "$2"
+}
+
+# MinIO returns Action/Resource set members in varying order; sort them so
+# documents compare exactly otherwise (same rule as the initializer).
+canonical_sets() {  # json -> stdout
+  local LC_ALL=C delim='":[' s="$1" out="" before key inner item i j n
+  local -a items
+  while [[ "${s}" == *"${delim}"* ]]; do
+    before="${s%%"${delim}"*}"
+    s="${s#*"${delim}"}"
+    key="${before##*\"}"
+    case "${key}" in
+      Action|NotAction|Resource|NotResource)
+        inner="${s%%]*}"
+        s="${s#*]}"
+        IFS=, read -r -a items <<< "${inner}"
+        n=${#items[@]}
+        for ((i = 1; i < n; i++)); do
+          item="${items[i]}"
+          for ((j = i - 1; j >= 0; j--)); do
+            [[ "${items[j]}" > "${item}" ]] || break
+            items[j + 1]="${items[j]}"
+          done
+          items[j + 1]="${item}"
+        done
+        inner="$(IFS=,; printf '%s' "${items[*]-}")"
+        out="${out}${before}${delim}${inner}]"
+        ;;
+      *) out="${out}${before}${delim}" ;;
+    esac
+  done
+  printf '%s' "${out}${s}"
+}
+
+strip_timestamp() {  # blanks the volatile "timestamp":"..." value
+  local s="$1" pre post
+  [[ "${s}" == *'"timestamp":"'* ]] || { printf '%s' "${s}"; return; }
+  pre="${s%%\"timestamp\":\"*}"; post="${s#*\"timestamp\":\"}"; post="${post#*\"}"
+  printf '%s"timestamp":""%s' "${pre}" "${post}"
+}
+
+# Full identity/policy snapshot; UpdateDate also proves a policy was not rewritten.
+snapshot() {  # network
+  printf '%s\n' "$(admin "$1" admin user info t "${APP_KEY}")" \
+    "$(canonical_sets "$(admin "$1" admin policy info t "${POLICY_NAME}")")" \
+    "$(strip_timestamp "$(admin "$1" admin policy entities t --policy "${POLICY_NAME}")")" \
+    "$(admin "$1" anonymous get "t/${BUCKET}")" \
+    "$(admin "$1" admin user svcacct ls t "${APP_KEY}")"
+}
+
+expect_initialized_state() {  # description network
+  local net="$2" out
+  out="$(admin "${net}" admin user info t "${APP_KEY}")"
+  expect_eq "$1: identity" "${out}" \
+    '{"status":"success","accessKey":"'"${APP_KEY}"'","policyName":"'"${POLICY_NAME}"'","userStatus":"enabled"}'
+  out="$(canonical_sets "$(admin "${net}" admin policy info t "${POLICY_NAME}")")"
+  expect_contains "$1: policy document" "${out}" \
+    '"policyInfo":{"PolicyName":"'"${POLICY_NAME}"'","Policy":'"${EXPECTED_POLICY}"',"CreateDate"'
+  out="$(strip_timestamp "$(admin "${net}" admin policy entities t --policy "${POLICY_NAME}")")"
+  expect_eq "$1: policy bindings" "${out}" \
+    '{"status":"success","result":{"timestamp":"","policyMappings":[{"policy":"'"${POLICY_NAME}"'","users":["'"${APP_KEY}"'"],"groups":null}]}}'
+  out="$(admin "${net}" anonymous get "t/${BUCKET}")"
+  expect_contains "$1: bucket is private" "${out}" '"permission":"private"'
+  out="$(admin "${net}" admin user svcacct ls t "${APP_KEY}")"
+  expect_eq "$1: no service accounts" "${out}" ""
+}
+
+expect_nothing_created() {  # description network
+  expect_code "$1: identity absent" XMinioAdminNoSuchUser "$(admin "$2" admin user info t "${APP_KEY}")"
+  expect_code "$1: policy absent" XMinioAdminNoSuchPolicy "$(admin "$2" admin policy info t "${POLICY_NAME}")"
+  expect_code "$1: bucket absent" NoSuchBucket "$(admin "$2" anonymous get "t/${BUCKET}")"
+}
+
+# Minimal server only. Its expected contents follow Dockerfile.minio-server; Docker
+# adds the runtime entries skipped below to every container. Modification times
+# and build metadata differ between builds and are not compared.
+MINIMAL_INVENTORY='d 0700 65532:65532 data
+d 0700 65532:65532 data/.minio.sys
+d 0700 65532:65532 data/.minio.sys/buckets
+d 0700 65532:65532 data/.minio.sys/config
+d 0700 65532:65532 data/.minio.sys/multipart
+d 0700 65532:65532 data/.minio.sys/tmp
+d 0700 65532:65532 data/.minio.sys/tmp-old
+d 0700 65532:65532 data/.minio.sys/tmp/.trash
+d 0755 0:0 etc
+f 0644 0:0 etc/group
+f 0644 0:0 etc/passwd
+d 0755 0:0 etc/ssl
+d 0755 0:0 etc/ssl/certs
+f 0444 0:0 etc/ssl/certs/.ca-certificates.crt.sha256
+l 0777 0:0 etc/ssl/certs/ca-bundle.crt -> ca-certificates.crt
+f 0644 0:0 etc/ssl/certs/ca-certificates.crt
+d 0700 65532:65532 tmp
+d 0755 0:0 usr
+d 0755 0:0 usr/bin
+f 0755 0:0 usr/bin/minio'
+
+binary_sha256() {  # image path -> SHA-256 of that regular file in the image
+  local cid
+  cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "$1")"
+  docker cp "${cid}:$2" - | python3 -c '
+import hashlib, os, sys, tarfile
+with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as t:
+    m = next(iter(t))
+    assert m.isreg() and m.name == os.path.basename(sys.argv[1]), (m.name, m.type)
+    print(hashlib.sha256(t.extractfile(m).read()).hexdigest())' "$2"
+  docker rm "${cid}" >/dev/null
+}
+
+# The initializer image itself, built here or supplied as IMAGE, against its
+# trusted identity. Package metadata, Dockerfile text and layer counts are not
+# proof. Every layer is re-hashed and read: none may hold a whiteout or the
+# replaced mc. The first layer is the pinned base's filesystem, entry for entry
+# (type, owner, mode, link target, content), without its mc files and apk
+# record; the others hold only the project-built mc, its notices and the
+# reviewed script, each with its exact content.
+verify_initializer_artifact() {
+  [[ "${PLATFORM}" == linux/amd64 ]] \
+    || die "Initializer artifact identity is recorded for linux/amd64 only, not ${PLATFORM}."
+  # docker create pulls the pin by digest if it is missing; an unavailable pin fails.
+  local cid
+  cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "${INIT_BASE_IMAGE}")"
+  docker export -o "${WORK}/base.tar" "${cid}"
+  docker rm "${cid}" >/dev/null
+  docker save -o "${WORK}/initializer.tar" "${IMAGE}" || die "Cannot export ${IMAGE} for verification."
+  python3 - "${WORK}/initializer.tar" "${WORK}/base.tar" "${ROOT}/infrastructure/minio/minio-init.sh" \
+      "${INIT_MC_SHA256}" "${INIT_BASE_MC_SHA256}" "${INIT_BASE_MC_PATHS}" "${INIT_MC_DOCS}" "${INIT_BASE_FS_SHA256}" <<'PY' \
+    || die "${IMAGE} is not the pinned base filesystem with only the reviewed mc, notices and script."
+import gzip, hashlib, io, json, sys, tarfile
+archive, base_export, script, mc_sha, old_mc_sha, removed, docs, base_fs = sys.argv[1:9]
+removed = set(removed.split())
+docs = {"usr/share/doc/mc/" + name: sha for sha, name in (l.split() for l in docs.splitlines())}
+with open(script, "rb") as f:
+    script_sha = hashlib.sha256(f.read()).hexdigest()
+script_path = "usr/local/bin/codemastery-minio-init"
+apk_db = "usr/lib/apk/db/installed"
+runtime = {".dockerenv", "dev", "proc", "sys", "etc/hostname", "etc/hosts", "etc/mtab", "etc/resolv.conf"}
+
+def entries(t):  # name -> (kind, mode, uid, gid, symlink target, sha256)
+    out, hard = {}, {}
+    for m in t:
+        name = (m.name[2:] if m.name.startswith("./") else m.name).strip("/")
+        if m.islnk():  # which name of a hard-link group comes first varies by builder
+            hard[name] = m.linkname.strip("/")
+            continue
+        kind = ("d" if m.isdir() else "l" if m.issym() else "f" if m.isreg()
+                else "c%d:%d" % (m.devmajor, m.devminor) if m.ischr() else "?" + m.type.decode())
+        sha = hashlib.sha256(t.extractfile(m).read()).hexdigest() if m.isreg() else None
+        out[name] = (kind, m.mode & 0o7777, m.uid, m.gid, m.linkname if m.issym() else "", sha)
+    for name, target in hard.items():
+        out[name] = out[target[2:] if target.startswith("./") else target]
+    return out
+
+with tarfile.open(archive) as o:
+    manifest = json.load(o.extractfile("manifest.json"))
+    assert len(manifest) == 1, "expected one image in the archive, found %d" % len(manifest)
+    config = json.load(o.extractfile(manifest[0]["Config"]))
+    assert (config.get("os"), config.get("architecture")) == ("linux", "amd64"), (config.get("os"), config.get("architecture"))
+    diff_ids, paths = config["rootfs"]["diff_ids"], manifest[0]["Layers"]
+    assert len(paths) == len(diff_ids) == 4, "expected 4 layers, found %d" % len(diff_ids)
+    layers = []
+    for path, diff_id in zip(paths, diff_ids):
+        data = o.extractfile(path).read()
+        if data[:2] == b"\x1f\x8b":
+            data = gzip.decompress(data)
+        assert "sha256:" + hashlib.sha256(data).hexdigest() == diff_id, "layer %s does not match %s" % (path, diff_id)
+        layers.append(entries(tarfile.open(fileobj=io.BytesIO(data))))
+for i, layer in enumerate(layers):
+    for name, e in layer.items():
+        assert ".wh." not in name.rsplit("/", 1)[-1], "layer %d has a whiteout: %s" % (i + 1, name)
+        assert e[5] != old_mc_sha, "layer %d still holds the replaced mc as %s" % (i + 1, name)
+        assert e[0] in ("d", "f", "l") or (i == 0 and name.startswith("dev/")), (i + 1, name, e[0])
+
+with tarfile.open(base_export, mode="r|") as t:
+    base = {k: v for k, v in entries(t).items() if k and k not in runtime and not k.startswith("dev/")}
+digest = hashlib.sha256(json.dumps(sorted(base.items())).encode()).hexdigest()
+assert digest == base_fs, "the pinned base filesystem is not the reviewed one: %s" % digest
+assert base["usr/bin/mc"][5] == old_mc_sha, "the pinned base is not the reviewed mc image"
+assert removed <= set(base), sorted(removed - set(base))
+# The base apk database without the mc stanza, as the Dockerfile's awk writes it.
+with tarfile.open(base_export) as t:
+    stanzas = t.extractfile(apk_db).read().decode().split("\n\n")
+kept = [x for x in stanzas if x.strip() and "\nP:mc\n" not in "\n" + x + "\n"]
+assert len(kept) == len([x for x in stanzas if x.strip()]) - 1, "expected exactly one mc package record"
+expected_db = hashlib.sha256(("\n\n".join(kept) + "\n\n").encode()).hexdigest()
+
+rootfs = {k: v for k, v in layers[0].items() if k and k not in runtime and not k.startswith("dev/")}
+# The base's baselayout ships these; a container export shows the runtime's instead.
+special = {k: v for k, v in layers[0].items() if k in runtime or k.startswith("dev/")}
+assert special == {
+    "dev": ("d", 0o755, 0, 0, "", None), "dev/console": ("c5:1", 0o620, 0, 0, "", None),
+    "dev/null": ("c1:3", 0o666, 0, 0, "", None), "dev/random": ("c1:8", 0o666, 0, 0, "", None),
+    "dev/urandom": ("c1:9", 0o666, 0, 0, "", None), "dev/zero": ("c1:5", 0o666, 0, 0, "", None),
+    "etc/hosts": ("f", 0o644, 0, 0, "", "e3998dbe02b51dada33de87ae43d18a93ab6915b9e34f5a751bf2b9b25a55492"),
+    "etc/mtab": ("l", 0o777, 0, 0, "/proc/mounts", None),
+    "proc": ("d", 0o555, 0, 0, "", None), "sys": ("d", 0o755, 0, 0, "", None)}, special
+expected = {k: v for k, v in base.items() if k not in removed}
+expected[apk_db] = expected[apk_db][:5] + (expected_db,)
+missing, extra = sorted(set(expected) - set(rootfs)), sorted(set(rootfs) - set(expected))
+assert not missing and not extra, "first layer differs from the base: missing %s, extra %s" % (missing[:5], extra[:5])
+changed = sorted(k for k in expected if expected[k] != rootfs[k])
+assert not changed, "first layer differs from the base at %s: %s != %s" % (changed[0], rootfs[changed[0]], expected[changed[0]])
+
+def added(layer, files):  # exact files plus root-owned, non-writable parent directories
+    names = {k for k in layer if k}
+    parents = {"/".join(f.split("/")[:i]) for f in files for i in range(1, f.count("/") + 1)}
+    assert names == set(files) | parents, sorted(names ^ (set(files) | parents))
+    for name in parents:
+        kind, mode, uid, gid = layer[name][:4]
+        # Directory modes vary by builder; they must be root-owned and not writable by others.
+        assert kind == "d" and (uid, gid) == (0, 0) and not mode & 0o022, (name, layer[name])
+    for name, (mode, sha) in files.items():
+        assert layer[name][:4] == ("f", mode, 0, 0) and layer[name][5] == sha, (name, layer[name][:4], layer[name][5])
+
+added(layers[1], {"usr/bin/mc": (0o755, mc_sha)})
+added(layers[2], {name: (0o444, sha) for name, sha in docs.items()})
+assert layers[2]["usr/share/doc/mc"][1] == 0o755, oct(layers[2]["usr/share/doc/mc"][1])
+added(layers[3], {script_path: (0o555, script_sha)})
+for name in ("usr/share", "usr/share/doc", "usr/local", "usr/local/bin"):
+    assert name in base or name in layers[2] or name in layers[3], name
+PY
+  rm -f "${WORK}/initializer.tar" "${WORK}/base.tar"
+}
+
+# Only for an image this suite built: the Corresponding Source archive the same
+# Dockerfile produces, which its mc is built from.
+verify_initializer_source() {
+  docker build -q --platform "${PLATFORM}" --target mc-source-archive \
+    --output "type=local,dest=${WORK}/mc-source" "${ROOT}/infrastructure/minio" >/dev/null
+  local sum
+  sum="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "${WORK}/mc-source/mc-source.tar.gz")"
+  expect_eq "mc Corresponding Source archive" "${sum}" "${INIT_MC_SOURCE_SHA256}"
+  python3 - "${WORK}/mc-source/mc-source.tar.gz" "${ROOT}/infrastructure/minio/Dockerfile" <<'PY' || die "the mc source archive lacks a required part."
+import sys, tarfile
+archive = tarfile.open(sys.argv[1])
+names = set(archive.getnames())
+with open(sys.argv[2], "rb") as f:
+    assert archive.extractfile("mc-source/Dockerfile").read() == f.read(), "archived Dockerfile differs"
+for need in ("mc-source/README", "mc-source/dependency-changes.diff", "mc-source/mc/LICENSE",
+             "mc-source/mc/NOTICE", "mc-source/mc/go.mod", "mc-source/mc/go.sum", "mc-source/mc/main.go"):
+    assert need in names, need
+assert any(n.startswith("mc-source/goproxy/") and n.endswith(".zip") for n in names)
+assert not any("/.git/" in n or n.endswith("/.git") for n in names)
+PY
+  rm -rf "${WORK}/mc-source"
+}
+
+verify_minimal_server() {
+  docker image inspect "${SERVER_IMAGE}" | python3 -c '
+import json, sys
+image = json.load(sys.stdin)[0]
+c = image["Config"]
+assert (image["Os"], image["Architecture"]) == ("linux", "amd64"), (image["Os"], image["Architecture"])
+assert c.get("User") == "65532:65532", c.get("User")
+assert c.get("Entrypoint") == ["/usr/bin/minio"], c.get("Entrypoint")
+default_path = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+env = [e for e in c.get("Env") or [] if e != default_path]
+assert env == ["SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"], c.get("Env")
+for key in ("Cmd", "ExposedPorts", "Volumes", "Healthcheck", "OnBuild", "Labels", "Shell"):
+    assert not c.get(key), (key, c[key])
+' || die "minimal server image configuration differs from ${MINIMAL_DOCKERFILE}"
+
+  local cid inventory
+  cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "${SERVER_IMAGE}")"
+  inventory="$(docker export "${cid}" | python3 -c '
+import sys, tarfile
+runtime = {".dockerenv", "dev", "proc", "sys", "etc/hostname", "etc/hosts", "etc/mtab", "etc/resolv.conf"}
+rows = []
+with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as t:
+    for m in t:
+        name = m.name[2:] if m.name.startswith("./") else m.name
+        name = name.strip("/")
+        if not name or name in runtime or name.startswith("dev/"):
+            continue
+        kind = "d" if m.isdir() else "l" if m.issym() else "f" if m.isreg() else "?" + m.type.decode()
+        link = " -> " + m.linkname if m.issym() or m.islnk() else ""
+        rows.append("%s %04o %d:%d %s%s" % (kind, m.mode & 0o7777, m.uid, m.gid, name, link))
+print("\n".join(sorted(rows, key=lambda r: r.split(" ", 3)[3])))')"
+  docker rm "${cid}" >/dev/null
+  # Exact contents: no shell, mc or other tool, no setuid/setgid bit; private data and tmp.
+  expect_eq "minimal server filesystem" "${inventory}" "${MINIMAL_INVENTORY}"
+
+  # The pin is trusted by digest; the local build only by matching it.
+  expect_eq "Chainguard pin binary" "$(binary_sha256 "${CHAINGUARD_SERVER_IMAGE}" /usr/bin/minio)" "${MINIMAL_SERVER_BINARY_SHA256}"
+  expect_eq "minimal server binary" "$(binary_sha256 "${SERVER_IMAGE}" /usr/bin/minio)" "${MINIMAL_SERVER_BINARY_SHA256}"
+
+  # The image has no shell: read the running server's status from a sidecar
+  # in its PID namespace.
+  local name="cm-${RUN_ID}-minimal-process" status
+  docker run -d --platform "${PLATFORM}" --name "${name}" --label "${LABEL}" --network none \
+    -e MINIO_ROOT_USER="${ROOT_USER}" -e MINIO_ROOT_PASSWORD="${ROOT_PASS}" \
+    "${SERVER_IMAGE}" "${SERVER_CMD[@]}" >/dev/null
+  status="$(docker run --rm --platform "${PLATFORM}" --pid "container:${name}" --network none \
+    --label "${LABEL}" --entrypoint /bin/bash "${MC_IMAGE}" -c '
+    while read -r k v; do case "$k" in Uid:|Gid:|Groups:|CapInh:|CapPrm:|CapEff:|CapAmb:) echo $k $v;; esac; done </proc/1/status' 2>&1)"
+  docker rm -fv "${name}" >/dev/null
+  expect_eq "minimal server process identity and capabilities" "${status}" \
+    $'Uid: 65532 65532 65532 65532\nGid: 65532 65532 65532 65532\nGroups: 65532\nCapInh: 0000000000000000\nCapPrm: 0000000000000000\nCapEff: 0000000000000000\nCapAmb: 0000000000000000'
+}
+
+# ------------------------------------------------------------------ image
+
+section "Image build and static properties (${PLATFORM})"
+if [[ $# -ge 1 ]]; then
+  IMAGE="$1"
+  docker image inspect "${IMAGE}" >/dev/null 2>&1 || die "Image ${IMAGE} is not present locally."
+else
+  IMAGE="codemastery-test/minio-init:qualification"
+  docker build -q --platform "${PLATFORM}" -t "${IMAGE}" "${ROOT}/infrastructure/minio" >/dev/null
+  BUILT_HERE=1
+fi
+IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${IMAGE}")"
+printf 'image under test: %s (%s)\n' "${IMAGE}" "${IMAGE_ID}"
+printf 'server under test: %s (%s)\nmc image: %s\n' "${SERVER}" "${SERVER_IMAGE}" "${MC_IMAGE}"
+if [[ "${SERVER}" == minimal ]]; then
+  # Never pulled or substituted: a missing candidate fails.
+  docker image inspect "${SERVER_IMAGE}" >/dev/null 2>&1 \
+    || die "Build the minimal server first: docker build --platform ${PLATFORM} -t ${SERVER_IMAGE} - < infrastructure/vm/Dockerfile.minio-server"
+  docker image inspect "${CHAINGUARD_SERVER_IMAGE}" >/dev/null 2>&1 \
+    || die "Pull its pinned source image first: docker pull --platform ${PLATFORM} ${CHAINGUARD_SERVER_IMAGE}"
+  printf 'minimal server image ID: %s\n' "$(docker image inspect --format '{{.Id}}' "${SERVER_IMAGE}")"
+else
+  docker image inspect "${SERVER_IMAGE}" >/dev/null 2>&1 \
+    || die "Pull the pinned server image first: docker pull --platform ${PLATFORM} ${SERVER_IMAGE}"
+fi
+
+bash -n "${ROOT}/infrastructure/minio/minio-init.sh"
+bash -n "${BASH_SOURCE[0]}"
+pass "shell syntax"
+
+from="$(sed -n 's/^FROM //p' "${ROOT}/infrastructure/minio/Dockerfile")"
+expect_eq "Dockerfile stages use only the approved pins" "${from}" \
+  "--platform=\$BUILDPLATFORM ${INIT_GO_IMAGE} AS mc-source"$'\n'"scratch AS mc-source-archive"$'\n'"--platform=\$BUILDPLATFORM ${INIT_GO_IMAGE} AS mc-build"$'\n'"${INIT_BASE_IMAGE} AS base"$'\n'"${INIT_ROOTFS_TOOL_IMAGE} AS rootfs"$'\n'"scratch"
+for pin in "${INIT_BASE_IMAGE}" "${INIT_GO_IMAGE}" "${INIT_ROOTFS_TOOL_IMAGE}"; do
+  [[ "${pin}" =~ @sha256:[0-9a-f]{64}$ ]] || die "initializer build image is not digest-pinned: ${pin}"
+done
+expect_contains "server pin" "${LOCAL_SERVER_IMAGE}" "@sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40"
+expect_contains "mc pin" "${MC_IMAGE}" "@sha256:dde55ccc0bc9e65dc582c8e652d652eea1438c6e60d774524f4da15d7b26a900"
+if [[ "${SERVER}" == minimal ]]; then
+  # A local build has no registry digest; its only source must be the Chainguard pin.
+  expect_eq "minimal server Dockerfile stages" "$(sed -n 's/^FROM //p' "${MINIMAL_DOCKERFILE}")" \
+    "${CHAINGUARD_SERVER_IMAGE} AS source"$'\n'"scratch AS layout"$'\n'"scratch"
+  pass "server and mc images keep the approved digest pins; the minimal server is built only from the Chainguard pin"
+else
+  [[ "${SERVER_IMAGE}" =~ @sha256:[0-9a-f]{64}$ ]] || die "server under test is not digest-pinned: ${SERVER_IMAGE}"
+  pass "server and mc images keep the approved digest pins"
+fi
+
+# The selected server must be exactly the expected artifact for this platform.
+cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "${SERVER_IMAGE}")"
+scfg="$(docker inspect --format '{{.Config.User}}|{{json .Config.Entrypoint}}|{{json .Config.Cmd}}' "${cid}")"
+# -v: the golithus image declares VOLUME /data, so create made an anonymous volume.
+docker rm -v "${cid}" >/dev/null
+expect_eq "${SERVER} server image configuration" "${scfg}" "${SERVER_CONFIG}"
+version="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LABEL}" "${SERVER_IMAGE}" --version 2>&1)"
+expect_contains "${SERVER} server version" "${version}" "${SERVER_VERSION}"
+expect_contains "${SERVER} server platform" "${version}" " ${PLATFORM}"
+if [[ "${SERVER}" == minimal ]]; then
+  verify_minimal_server
+  pass "minimal server has the expected configuration, exact filesystem, the pin's binary, and runs as UID 65532 with no capabilities"
+else
+  pass "${SERVER} server has the expected user, entrypoint, default command and binary version for ${PLATFORM}"
+fi
+
+cfg="$(docker image inspect --format '{{.Config.User}}|{{json .Config.Entrypoint}}|{{json .Config.Cmd}}|{{json .Config.Env}}|{{json .Config.ExposedPorts}}|{{json .Config.Volumes}}|{{json .Config.Healthcheck}}|{{.Os}}/{{.Architecture}}' "${IMAGE}")"
+expect_eq "image configuration" "${cfg}" \
+  '65532:65532|["/usr/local/bin/codemastery-minio-init"]|null|["PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin","SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"]|null|null|null|'"${PLATFORM}"
+verify_initializer_artifact
+pass "non-root user, own entrypoint, no command, secrets, ports, volumes or healthcheck; the pinned base filesystem without its mc, plus only the reproducible mc, its notices and the reviewed script; no layer holds the replaced mc"
+if [[ -n "${BUILT_HERE:-}" ]]; then
+  verify_initializer_source
+  pass "the build's mc Corresponding Source archive is the recorded one and holds the mc tree, its licence, the module zips, build instructions and this Dockerfile"
+fi
+
+runtime="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LABEL}" --entrypoint /bin/bash "${IMAGE}" -c '
+  printf "uid=%s gid=%s\n" "$(id -u)" "$(id -g)"
+  while read -r k v; do case "$k" in CapInh:|CapPrm:|CapEff:|CapAmb:) printf "%s%s\n" "$k" "$v";; esac; done </proc/self/status
+  [ -w /usr/local/bin/codemastery-minio-init ] && echo "entrypoint writable"
+  [ -w / ] && echo "root writable"
+  [ -w /tmp ] || echo "tmp not writable"
+  while IFS= read -r l; do case "$l" in P:*) p="${l#P:}";; V:*) [ "$p" = mc ] && echo "mc package ${l#V:}";; esac; done </usr/lib/apk/db/installed
+  mc --version | head -n 1
+  true')"
+expect_eq "runtime identity, capabilities and mc" "${runtime}" \
+  $'uid=65532 gid=65532\nCapInh:0000000000000000\nCapPrm:0000000000000000\nCapEff:0000000000000000\nCapAmb:0000000000000000\nmc version DEVELOPMENT.GOGET (commit-id=DEVELOPMENT.GOGET)'
+pass "runs as UID 65532 with no effective, permitted or ambient capabilities; mc runs and no apk record claims it"
+
+list_setid() {  # reads `tar -tv` lines; prints entries with a setuid/setgid bit
+  local mode rest
+  while read -r mode rest; do
+    case "${mode}" in
+      ???[sS]*|??????[sS]*) printf '%s %s\n' "${mode}" "${rest}" ;;
+    esac
+  done
+}
+cid="$(docker create --platform "${PLATFORM}" --label "${LABEL}" "${IMAGE}")"
+special="$(docker export "${cid}" | tar -tvf - | list_setid)"
+docker rm "${cid}" >/dev/null
+expect_eq "setuid/setgid files" "${special}" ""
+pass "image filesystem has no setuid or setgid files"
+
+# ------------------------------------------------------------------ inputs
+
+section "Input validation (no server contacted)"
+check_rejected() {  # description expected-message VAR=value...
+  local d="$1" m="$2"; shift 2
+  run_init none "$@"
+  expect_init_fail "${d}" "${m}"
+}
+check_rejected "application key equals root" "must differ from MinIO root identity" "STORAGE_ACCESS_KEY=${ROOT_USER}"
+check_rejected "application secret equals root password" "must differ from MINIO_ROOT_PASSWORD" "STORAGE_SECRET_KEY=${ROOT_PASS}"
+for var in MINIO_ROOT_USER MINIO_ROOT_PASSWORD STORAGE_ACCESS_KEY STORAGE_SECRET_KEY STORAGE_BUCKET STORAGE_REGION; do
+  check_rejected "empty ${var}" "${var} must be set" "${var}="
+done
+for b in ab UPPER a..b -abc abc- 192.168.1.10 'bad"name' a.-b a-.b 'with space' \
+         "$(printf 'a%.0s' {1..64})"; do
+  check_rejected "bucket '${b}'" "valid S3 bucket name" "STORAGE_BUCKET=${b}"
+done
+for k in ab 'has space' 'quo"te' 'back\slash' 'abcdefghijklmnopqrstu' 'cm=storage' 'cm,storage'; do
+  check_rejected "access key '${k}'" "STORAGE_ACCESS_KEY must be 3-20" "STORAGE_ACCESS_KEY=${k}"
+done
+check_rejected "7-byte secret" "STORAGE_SECRET_KEY must be at least 8 bytes" "STORAGE_SECRET_KEY=short7x"
+check_rejected "region with space" "STORAGE_REGION must contain" "STORAGE_REGION=us east"
+check_rejected "secret with newline" "must not contain control characters" $'STORAGE_SECRET_KEY=line1\nline2'
+pass "invalid configuration fails closed before contacting MinIO"
+
+# ------------------------------------------------------------------ first run
+
+section "First initialization, least privilege and repeat runs"
+net="$(start_server first)"
+# Unrelated state that must stay invisible to and untouched by the application.
+expect_ok "create other bucket" "$(admin "${net}" mb t/other-bucket)"
+expect_ok "seed other object" "$(printf 'private\n' | mc_as "${net}" "${ROOT_USER}" "${ROOT_PASS}" pipe t/other-bucket/secret.txt)"
+
+run_init "${net}"
+expect_init_ok "first run"
+expect_contains "first run" "${INIT_OUT}" "initialized (changes: 4)"
+expect_initialized_state "first run" "${net}"
+pass "first run creates bucket, exact policy, bound enabled identity; bucket private"
+
+# While the bucket is empty, so mc sends DeleteBucket rather than object deletes.
+expect_denied "bucket deletion" "$(app "${net}" rb "t/${BUCKET}" </dev/null)"
+out="$(printf 'payload\n' | app "${net}" pipe "t/${BUCKET}/lessons/a.txt")"; expect_ok "app put" "${out}"
+out="$(app "${net}" cat "t/${BUCKET}/lessons/a.txt" </dev/null)"; expect_eq "app get" "${out}" "payload"
+out="$(app "${net}" ls --recursive "t/${BUCKET}" </dev/null)"; expect_contains "app list" "${out}" '"key":"lessons/a.txt"'
+pass "application can put, get and list objects in its bucket"
+out="$(app "${net}" ls t </dev/null)"
+expect_contains "bucket listing" "${out}" "\"key\":\"${BUCKET}/\""
+[[ "${out}" != *other-bucket* ]] || die "application can see another bucket"
+expect_denied "other bucket read" "$(app "${net}" cat t/other-bucket/secret.txt </dev/null)"
+expect_denied "other bucket list" "$(app "${net}" ls t/other-bucket </dev/null)"
+expect_denied "other bucket write" "$(printf 'x\n' | app "${net}" pipe t/other-bucket/x.txt)"
+expect_denied "bucket creation" "$(app "${net}" mb t/new-bucket </dev/null)"
+expect_denied "anonymous policy change" "$(app "${net}" anonymous set public "t/${BUCKET}" </dev/null)"
+expect_denied "administration" "$(app "${net}" admin user list t </dev/null)"
+expect_contains "own bucket kept" "$(admin "${net}" anonymous get "t/${BUCKET}")" '"permission":"private"'
+expect_contains "other bucket write left nothing" "$(admin "${net}" stat t/other-bucket/x.txt)" "Object does not exist"
+expect_code "bucket creation left nothing" NoSuchBucket "$(admin "${net}" anonymous get t/new-bucket)"
+expect_eq "other object intact" "$(admin "${net}" cat t/other-bucket/secret.txt)" "private"
+pass "application cannot reach other buckets, create/delete buckets, change bucket policy or administer"
+
+before="$(snapshot "${net}")"
+run_init "${net}"
+expect_init_ok "second run"
+expect_contains "second run" "${INIT_OUT}" "initialized (changes: 0)"
+run_init "${net}"
+expect_init_ok "third run"
+expect_eq "state after repeat runs" "$(snapshot "${net}")" "${before}"
+expect_eq "object kept" "$(app "${net}" cat "t/${BUCKET}/lessons/a.txt" </dev/null)" "payload"
+out="$(app "${net}" rm "t/${BUCKET}/lessons/a.txt" </dev/null)"; expect_ok "app delete" "${out}"
+expect_contains "deleted" "$(admin "${net}" stat "t/${BUCKET}/lessons/a.txt")" "Object does not exist"
+pass "repeat runs change nothing (policy UpdateDate unchanged); application can delete its objects"
+# Control for the Console checks below: the base command alone serves it.
+expect_listening "listeners with the base command" "${net}-minio" "9000 9001"
+expect_eq "Console port with the base command" "$(tcp_probe "${net}" 9001)" "open"
+pass "with the base command alone the server listens on the S3 API (9000) and the Console (9001)"
+stop_server "${net}"
+
+# ------------------------------------------------------------------ Console
+
+# The VM release override adds MINIO_BROWSER=off to the same command.
+section "Console disabled (VM release environment)"
+net="$(start_server console-off -e MINIO_BROWSER=off)"
+run_init "${net}"
+expect_init_ok "first run, Console disabled"
+expect_contains "first run, Console disabled" "${INIT_OUT}" "initialized (changes: 4)"
+expect_initialized_state "Console disabled" "${net}"
+out="$(printf 'payload\n' | app "${net}" pipe "t/${BUCKET}/lessons/b.txt")"; expect_ok "app put" "${out}"
+expect_eq "app get" "$(app "${net}" cat "t/${BUCKET}/lessons/b.txt" </dev/null)" "payload"
+expect_contains "app list" "$(app "${net}" ls --recursive "t/${BUCKET}" </dev/null)" '"key":"lessons/b.txt"'
+out="$(app "${net}" rm "t/${BUCKET}/lessons/b.txt" </dev/null)"; expect_ok "app delete" "${out}"
+expect_eq "listeners with MINIO_BROWSER=off" "$(listening_ports "${net}-minio")" "9000"
+expect_eq "Console port with MINIO_BROWSER=off" "$(tcp_probe "${net}" 9001)" "refused"
+expect_eq "S3 API port with MINIO_BROWSER=off" "$(tcp_probe "${net}" 9000)" "open"
+pass "MINIO_BROWSER=off: no Console listener; initializer, identity, policy and application S3 access unchanged"
+stop_server "${net}"
+
+# ------------------------------------------------------------------ persistence
+
+# A clean first-time volume only; no existing data volume is migrated here.
+section "Named-volume persistence across container recreation"
+net="cm-${RUN_ID}-persist"
+vol="cm-${RUN_ID}-persist-data"
+docker network create --label "${LABEL}" "${net}" >/dev/null
+docker volume create --label "${LABEL}" "${vol}" >/dev/null
+run_server "${net}" "${net}-minio" -v "${vol}:/data"
+run_init "${net}"
+expect_init_ok "persistence first run"
+expect_contains "persistence first run" "${INIT_OUT}" "initialized (changes: 4)"
+payload="persist-${RUN_ID}-$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+expect_ok "persistence put" "$(printf '%s' "${payload}" | app "${net}" pipe "t/${BUCKET}/persist/object.txt")"
+docker rm -f "${net}-minio" >/dev/null
+expect_eq "named volume kept after container removal" "$(docker volume inspect --format '{{.Name}}' "${vol}")" "${vol}"
+run_server "${net}" "${net}-minio" -v "${vol}:/data"
+expect_eq "object after recreation" "$(app "${net}" cat "t/${BUCKET}/persist/object.txt" </dev/null)" "${payload}"
+run_init "${net}"
+expect_init_ok "persistence after recreation"
+expect_contains "persistence after recreation" "${INIT_OUT}" "initialized (changes: 0)"
+expect_initialized_state "persistence after recreation" "${net}"
+owner="$(docker run --rm --platform "${PLATFORM}" --network none --label "${LABEL}" -v "${vol}:/data:ro" \
+  --entrypoint /bin/bash "${MC_IMAGE}" -c 'stat -c %u /data/.minio.sys')"
+expect_eq "data directory owner" "${owner}" "${SERVER_DATA_UID}"
+stop_server "${net}"
+docker volume rm "${vol}" >/dev/null
+pass "object and IAM state survive container removal and recreation on a named volume written as UID ${SERVER_DATA_UID}"
+
+# ------------------------------------------------------------------ credentials
+
+section "Incorrect credentials"
+net="$(start_server wrong-root)"
+run_init "${net}" "MINIO_ROOT_PASSWORD=not-the-root-password"
+expect_init_fail "wrong root password" "MinIO rejected the administrator credentials"
+run_init "${net}" "MINIO_ROOT_USER=not-the-root-user"
+expect_init_fail "wrong root user" "MinIO rejected the administrator credentials"
+expect_nothing_created "wrong root credentials" "${net}"
+pass "wrong administrator credentials fail before any change"
+stop_server "${net}"
+
+net="$(start_server wrong-app)"
+expect_ok "pre-existing identity" "$(printf '%s\n' 'original-secret-1' | mc_as "${net}" "${ROOT_USER}" "${ROOT_PASS}" admin user add t "${APP_KEY}")"
+run_init "${net}"
+expect_init_fail "existing identity, other secret" "does not accept STORAGE_SECRET_KEY"
+expect_code "original secret still valid" AccessDenied "$(mc_as "${net}" "${APP_KEY}" original-secret-1 admin user list t </dev/null)"
+expect_code "configured secret not installed" SignatureDoesNotMatch "$(app "${net}" admin user list t </dev/null)"
+expect_eq "identity left unbound" "$(admin "${net}" admin user info t "${APP_KEY}")" \
+  '{"status":"success","accessKey":"'"${APP_KEY}"'","userStatus":"enabled"}'
+expect_code "no policy created" XMinioAdminNoSuchPolicy "$(admin "${net}" admin policy info t "${POLICY_NAME}")"
+expect_code "no bucket created" NoSuchBucket "$(admin "${net}" anonymous get "t/${BUCKET}")"
+pass "existing application identity with another secret is not reset; nothing is changed"
+stop_server "${net}"
+
+# MinIO itself rejects these only when creating the identity, after the bucket
+# and policy exist; the initializer must refuse them before any change.
+net="$(start_server invalid-app)"
+run_init "${net}" "STORAGE_ACCESS_KEY=cm=storage"
+expect_init_fail "access key with '='" "STORAGE_ACCESS_KEY must be 3-20"
+expect_nothing_created "access key with '='" "${net}"
+run_init "${net}" "STORAGE_SECRET_KEY=short7x"
+expect_init_fail "7-byte secret" "STORAGE_SECRET_KEY must be at least 8 bytes"
+expect_nothing_created "7-byte secret" "${net}"
+# MinIO counts bytes: seven characters encoded as eight UTF-8 bytes is accepted.
+run_init "${net}" "STORAGE_SECRET_KEY=abcdefé"
+expect_init_ok "8-byte secret"
+expect_initialized_state "8-byte secret" "${net}"
+pass "invalid application access key or short secret is refused on a live server with nothing changed; an 8-byte secret is accepted"
+stop_server "${net}"
+
+# ------------------------------------------------------------------ conflicts
+
+section "Conflicting IAM and bucket state"
+net="$(start_server broad-policy)"
+printf '%s' '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:*"],"Resource":["arn:aws:s3:::*"]}]}' > "${WORK}/broad.json"
+out="$(CM_AK="${ROOT_USER}" CM_SK="${ROOT_PASS}" docker run --rm --platform "${PLATFORM}" --network "${net}" \
+  --label "${LABEL}" -e CM_AK -e CM_SK -v "${WORK}/broad.json:/broad.json:ro" --entrypoint /bin/bash \
+  "${MC_IMAGE}" -c "${MC_SHIM}" mc-shim admin policy create t "${POLICY_NAME}" /broad.json 2>&1)"
+expect_ok "seed broad policy" "${out}"
+before="$(canonical_sets "$(admin "${net}" admin policy info t "${POLICY_NAME}")")"
+run_init "${net}"
+expect_init_fail "broad policy with the approved name" "differs from the approved bucket-scoped policy"
+expect_eq "broad policy untouched" "$(canonical_sets "$(admin "${net}" admin policy info t "${POLICY_NAME}")")" "${before}"
+expect_code "no identity created" XMinioAdminNoSuchUser "$(admin "${net}" admin user info t "${APP_KEY}")"
+pass "a same-named policy with other contents is refused, not overwritten"
+stop_server "${net}"
+
+net="$(start_server equivalent-policy)"
+printf '%s' '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:ListBucket","s3:GetBucketLocation"],"Resource":["arn:aws:s3:::codemastery"]},{"Effect":"Allow","Action":["s3:PutObject","s3:GetObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::codemastery/*"]}]}' > "${WORK}/reordered.json"
+out="$(CM_AK="${ROOT_USER}" CM_SK="${ROOT_PASS}" docker run --rm --platform "${PLATFORM}" --network "${net}" \
+  --label "${LABEL}" -e CM_AK -e CM_SK -v "${WORK}/reordered.json:/reordered.json:ro" --entrypoint /bin/bash \
+  "${MC_IMAGE}" -c "${MC_SHIM}" mc-shim admin policy create t "${POLICY_NAME}" /reordered.json 2>&1)"
+expect_ok "seed reordered policy" "${out}"
+before="$(admin "${net}" admin policy info t "${POLICY_NAME}")"
+run_init "${net}"
+expect_init_ok "equivalent policy"
+expect_contains "equivalent policy" "${INIT_OUT}" "initialized (changes: 3)"
+[[ "${INIT_OUT}" != *"Created policy"* ]] || die "equivalent policy was recreated"
+expect_eq "policy dates unchanged" "${before##*\"CreateDate\"}" \
+  "$(admin "${net}" admin policy info t "${POLICY_NAME}" | { read -r l; printf '%s' "${l##*\"CreateDate\"}"; })"
+expect_initialized_state "equivalent policy" "${net}"
+pass "an existing policy with the same permissions in another member order is accepted unchanged"
+stop_server "${net}"
+
+net="$(start_server public-bucket)"
+expect_ok "seed bucket" "$(admin "${net}" mb "t/${BUCKET}")"
+expect_ok "seed anonymous access" "$(admin "${net}" anonymous set download "t/${BUCKET}")"
+run_init "${net}"
+expect_init_fail "anonymous bucket" "allows anonymous access"
+expect_contains "anonymous access untouched" "$(admin "${net}" anonymous get "t/${BUCKET}")" '"permission":"download"'
+expect_code "no identity created" XMinioAdminNoSuchUser "$(admin "${net}" admin user info t "${APP_KEY}")"
+pass "an existing bucket with anonymous access is refused"
+stop_server "${net}"
+
+# Each case starts from correctly initialized state, then adds one conflict.
+conflict_case() {  # name expected-message setup-function verify-function
+  local net
+  net="$(start_server "$1")"
+  run_init "${net}"; expect_init_ok "$1 setup"
+  "$3" "${net}"
+  run_init "${net}"
+  expect_init_fail "$1" "$2"
+  "$4" "${net}"
+  stop_server "${net}"
+}
+extra_policy() { expect_ok "attach readwrite" "$(admin "$1" admin policy attach t readwrite --user "${APP_KEY}")"; }
+extra_policy_kept() {
+  expect_contains "readwrite still attached" "$(admin "$1" admin user info t "${APP_KEY}")" \
+    '"policyName":"'"${POLICY_NAME}"',readwrite"'
+}
+group_member() { expect_ok "add group" "$(admin "$1" admin group add t storage-team "${APP_KEY}")"; }
+group_kept() { expect_contains "membership kept" "$(admin "$1" admin user info t "${APP_KEY}")" '"memberOf":[{"name":"storage-team"}]'; }
+other_binding() {
+  expect_ok "other user" "$(printf '%s\n' 'other-secret-1' | mc_as "$1" "${ROOT_USER}" "${ROOT_PASS}" admin user add t other-user)"
+  expect_ok "bind other" "$(admin "$1" admin policy attach t "${POLICY_NAME}" --user other-user)"
+}
+other_binding_kept() { expect_contains "binding kept" "$(admin "$1" admin user info t other-user)" '"policyName":"'"${POLICY_NAME}"'"'; }
+disabled() { expect_ok "disable" "$(admin "$1" admin user disable t "${APP_KEY}")"; }
+disabled_kept() { expect_contains "still disabled" "$(admin "$1" admin user info t "${APP_KEY}")" '"userStatus":"disabled"'; }
+service_account() { expect_ok "service account" "$(admin "$1" admin user svcacct add t "${APP_KEY}")"; }
+service_account_kept() {
+  local out; out="$(admin "$1" admin user svcacct ls t "${APP_KEY}")"
+  [[ -n "${out}" ]] || die "service account was removed"
+}
+conflict_case extra-policy "Unexpected application policy bindings" extra_policy extra_policy_kept
+conflict_case group "must not inherit group policies" group_member group_kept
+conflict_case other-binding "bound to an unexpected user or group" other_binding other_binding_kept
+conflict_case disabled "identity is disabled" disabled disabled_kept
+conflict_case svcacct "has service accounts" service_account service_account_kept
+pass "extra policy, group membership, foreign binding, disabled identity and service accounts are refused and left as found"
+
+# ------------------------------------------------------------------ unavailable
+
+section "Unavailable server"
+net="cm-${RUN_ID}-no-server"
+docker network create --label "${LABEL}" "${net}" >/dev/null
+start=$(date +%s)
+run_init "${net}"
+expect_init_fail "no server" "did not become ready within 120 seconds"
+printf 'readiness failure after %ss\n' "$(( $(date +%s) - start ))"
+docker network rm "${net}" >/dev/null
+pass "an unreachable server fails after the readiness deadline"
+
+# ------------------------------------------------------------------ Compose
+
+section "VM Compose contract and failure propagation"
+cat > "${WORK}/compose.env" <<EOF
+POSTGRES_DB=codemastery
+POSTGRES_USER=bootstrap
+POSTGRES_PASSWORD=unused-in-this-test
+DB_NAME=codemastery
+DB_USER=runtime
+DB_PASSWORD=unused-in-this-test
+JWT_SECRET=unused-in-this-test-unused-in-this-test
+CORS_ALLOWED_ORIGINS=https://minio-init.codemastery.test
+SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
+SPRING_FLYWAY_USER=migrator
+SPRING_FLYWAY_PASSWORD=unused-in-this-test
+EOF
+# Compose's env file is not shell-quoted; pass credentials through the environment.
+export MINIO_ROOT_USER="${ROOT_USER}" MINIO_ROOT_PASSWORD="${ROOT_PASS}"
+export STORAGE_ACCESS_KEY="${APP_KEY}" STORAGE_SECRET_KEY="${APP_SECRET}"
+export STORAGE_BUCKET="${BUCKET}" STORAGE_REGION="${REGION}"
+export DOCKER_DEFAULT_PLATFORM="${PLATFORM}"
+# Test-only images: no admitted server exists (the selected server stands in),
+# and a sleeping placeholder stands in for the backend that waits on minio-init.
+# The local stack uses the same server, so its volume is never handed from one
+# server build to another.
+# The local initializer's mc is wrapped to record every argument list it gets.
+mkdir -m 0700 "${WORK}/argv"
+printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> /argv/log' 'exec /usr/bin/mc "$@"' > "${WORK}/mc-argv"
+chmod 0555 "${WORK}/mc-argv"
+cat > "${WORK}/local-ports.yml" <<EOF
+services:
+  minio:
+    image: ${SERVER_IMAGE}
+    ports: !reset []
+  minio-init:
+    volumes:
+      - ${WORK}/mc-argv:/usr/local/bin/mc:ro
+      - ${WORK}/argv:/argv
+EOF
+cat > "${WORK}/release-images.yml" <<EOF
+services:
+  minio:
+    image: ${SERVER_IMAGE}
+  minio-init:
+    image: ${IMAGE}
+  backend:
+    image: ${MC_IMAGE}
+    entrypoint: ["sleep", "600"]
+    depends_on: !override
+      minio-init:
+        condition: service_completed_successfully
+EOF
+project="cm-${RUN_ID}-compose"
+PROJECTS+=("${project}")
+local_compose=(docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" -f "${WORK}/local-ports.yml")
+vm_compose=(docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" -f "${VM_COMPOSE}" -f "${WORK}/release-images.yml")
+
+"${vm_compose[@]}" config --format json | python3 -c '
+import json, sys
+init = json.load(sys.stdin)["services"]["minio-init"]
+expected_env = {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "STORAGE_ACCESS_KEY",
+                "STORAGE_SECRET_KEY", "STORAGE_BUCKET", "STORAGE_REGION"}
+assert init.get("entrypoint") is None and init.get("command") is None, "inline initializer survived"
+assert init["image"] == sys.argv[1], init["image"]
+assert set(init.get("environment", {})) == expected_env, sorted(init.get("environment", {}))
+for key in ("user", "volumes", "ports", "cap_add", "privileged", "build"):
+    assert not init.get(key), key
+assert init.get("restart") in (None, "no")
+assert init.get("read_only") is True and init.get("tmpfs") == ["/tmp"], (init.get("read_only"), init.get("tmpfs"))
+assert init.get("cap_drop") == ["ALL"] and init.get("security_opt") == ["no-new-privileges:true"]
+' "${IMAGE}"
+pass "effective VM model runs the image entrypoint with only the six approved variables, read-only with /tmp, no capabilities and no-new-privileges"
+
+# The override keeps its abstract server name, inherits the base command and the
+# named data volume, and sets the approved restart policy. The test images then
+# run that model unchanged with the selected server.
+check_minio_model() {  # expected-image compose-command...
+  local want="$1"; shift
+  "$@" config --format json | python3 -c '
+import json, sys
+minio = json.load(sys.stdin)["services"]["minio"]
+assert minio["image"] == sys.argv[1], minio["image"]
+assert minio.get("command") == sys.argv[2:], minio.get("command")
+for key in ("entrypoint", "user", "ports", "cap_add", "privileged", "build"):
+    assert not minio.get(key), key
+volumes = [(v.get("type"), v.get("source"), v.get("target")) for v in minio.get("volumes", [])]
+assert volumes == [("volume", "minio-data", "/data")], minio.get("volumes")
+assert minio.get("restart") == "unless-stopped", minio.get("restart")
+environment = minio.get("environment", {})
+assert sorted(environment) == ["MINIO_BROWSER", "MINIO_ROOT_PASSWORD", "MINIO_ROOT_USER"], sorted(environment)
+assert environment["MINIO_BROWSER"] == "off", environment["MINIO_BROWSER"]
+assert minio.get("read_only") is True and not minio.get("tmpfs"), (minio.get("read_only"), minio.get("tmpfs"))
+assert minio.get("cap_drop") == ["ALL"] and minio.get("security_opt") == ["no-new-privileges:true"]
+' "${want}" "${SERVER_CMD[@]}"
+}
+check_minio_model codemastery.invalid/minio:release \
+  docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" -f "${VM_COMPOSE}"
+check_minio_model "${SERVER_IMAGE}" "${vm_compose[@]}"
+# Local development keeps the Console, published on loopback only.
+docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" config --format json | python3 -c '
+import json, sys
+minio = json.load(sys.stdin)["services"]["minio"]
+assert sorted(minio.get("environment", {})) == ["MINIO_ROOT_PASSWORD", "MINIO_ROOT_USER"], sorted(minio.get("environment", {}))
+assert minio.get("command") == sys.argv[1:], minio.get("command")
+ports = sorted((p.get("host_ip"), p.get("published"), p.get("target")) for p in minio.get("ports", []))
+assert ports == [("127.0.0.1", "9000", 9000), ("127.0.0.1", "9001", 9001)], ports
+' "${SERVER_CMD[@]}"
+pass "effective VM model keeps codemastery.invalid/minio:release, the base command, the named minio-data volume and restart unless-stopped, and adds only MINIO_BROWSER=off and the runtime hardening; the local model is unchanged"
+
+# State created by the existing local inline initializer must be accepted as-is.
+"${local_compose[@]}" up -d --no-build --pull never minio-init >"${WORK}/local-up.log" 2>&1 \
+  || die "local stack failed to start: $(tail -5 "${WORK}/local-up.log")"
+cid="$("${local_compose[@]}" ps -a -q minio-init)"
+expect_eq "local inline initializer exit" "$(docker wait "${cid}")" "0"
+python3 - "${WORK}/argv/log" "${ROOT_PASS}" "${APP_SECRET}" <<'PY' || die "the local initializer passed a secret to mc as an argument"
+import sys
+log = open(sys.argv[1], encoding="utf-8").read()
+assert "admin user add local-admin cm-storage-app\n" in log and "alias set " in log, "mc wrapper not used"
+for secret in sys.argv[2:]:
+    assert secret not in log
+PY
+expect_listening "local server listeners" "$("${local_compose[@]}" ps -q minio)" "9000 9001"
+"${vm_compose[@]}" up -d --no-build --pull never backend >"${WORK}/up.log" 2>&1 \
+  || die "release initializer path failed: $(tail -5 "${WORK}/up.log")"
+cid="$("${vm_compose[@]}" ps -a -q minio-init)"
+expect_eq "minio-init exit" "$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "${cid}")" "exited:0"
+expect_contains "release run on local state" "$(docker logs "${cid}" 2>&1)" "initialized (changes: 0)"
+# The release containers really run with the modelled restrictions.
+for service in minio minio-init; do
+  expect_eq "release ${service} runtime restrictions" \
+    "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}} {{json .HostConfig.SecurityOpt}}' "$("${vm_compose[@]}" ps -a -q "${service}")")" \
+    'true ["ALL"] null ["no-new-privileges:true"]'
+done
+expect_eq "backend placeholder" "$("${vm_compose[@]}" ps --format '{{.State}}' backend)" "running"
+expect_initialized_state "local-then-release" "${project}_default"
+# Compose recreated the server with the release environment on the same volume.
+cid="$("${vm_compose[@]}" ps -q minio)"
+expect_eq "release server Console setting" "$(docker inspect --format '{{json .Config.Env}}' "${cid}" \
+  | python3 -c 'import json, sys; print(" ".join(e for e in json.load(sys.stdin) if e.startswith("MINIO_BROWSER=")))')" \
+  "MINIO_BROWSER=off"
+expect_eq "release server listeners" "$(listening_ports "${cid}")" "9000"
+expect_eq "release Console port" "$(tcp_probe "${project}_default" 9001)" "refused"
+pass "local initializer keeps secrets out of mc arguments; the release image accepts its state unchanged and releases the dependent service; the release server has no Console listener"
+
+# The local client uses one 4096-byte stdin buffer. Exercise real authentication,
+# not merely the initializer's exit status; rejected input must reach no mc call.
+section "Local stdin credential byte boundary"
+saved_root_pass="${ROOT_PASS}"; saved_app_secret="${APP_SECRET}"
+local_credential_case() {  # label root-password application-secret accept|reject
+  local name="$1" outcome="$4" project cid output argv
+  ROOT_PASS="$2"; APP_SECRET="$3"
+  export MINIO_ROOT_PASSWORD="${ROOT_PASS}" STORAGE_SECRET_KEY="${APP_SECRET}"
+  project="cm-${RUN_ID}-boundary-${name}"
+  PROJECTS+=("${project}")
+  mkdir -m 0700 "${WORK}/argv-${name}"
+  cat > "${WORK}/boundary-${name}.yml" <<YAML
+services:
+  minio:
+    image: ${SERVER_IMAGE}
+    ports: !reset []
+  minio-init:
+    volumes:
+      - ${WORK}/mc-argv:/usr/local/bin/mc:ro
+      - ${WORK}/argv-${name}:/argv
+YAML
+  local -a cmd=(docker compose -p "${project}" --env-file "${WORK}/compose.env"
+    -f "${BASE_COMPOSE}" -f "${WORK}/boundary-${name}.yml")
+  "${cmd[@]}" config --quiet
+  "${cmd[@]}" up -d --no-build --pull never minio-init >"${WORK}/boundary-up.log" 2>&1 \
+    || die "local boundary ${name}: could not start fixture"
+  cid="$("${cmd[@]}" ps -a -q minio-init)"
+  output="$(docker wait "${cid}")"
+  if [[ "${outcome}" == reject ]]; then
+    expect_eq "local ${name} exit" "${output}" "1"
+    [[ ! -s "${WORK}/argv-${name}/log" ]] || die "local ${name}: mc was called before rejection"
+    expect_contains "local ${name}: server ready for state inspection" \
+      "$(CM_TIMEOUT=60 admin "${project}_default" ready t)" '"healthy":true'
+    expect_nothing_created "local ${name}: no mutation" "${project}_default"
+  else
+    expect_eq "local ${name} exit" "${output}" "0"
+    expect_initialized_state "local ${name}" "${project}_default"
+    expect_ok "local ${name}: full credential authenticates" \
+      "$(mc_as "${project}_default" "${APP_KEY}" "${APP_SECRET}" ls "t/${BUCKET}" </dev/null)"
+    expect_code "local ${name}: shortened credential rejected" SignatureDoesNotMatch \
+      "$(mc_as "${project}_default" "${APP_KEY}" "${APP_SECRET%?}" ls "t/${BUCKET}" </dev/null)"
+    # Repeat against the existing identity; the same full value must still work.
+    "${cmd[@]}" rm -sf minio-init >/dev/null 2>&1
+    "${cmd[@]}" up -d --no-build --pull never minio-init >"${WORK}/boundary-up.log" 2>&1
+    cid="$("${cmd[@]}" ps -a -q minio-init)"
+    expect_eq "local ${name}: repeat exit" "$(docker wait "${cid}")" "0"
+    expect_ok "local ${name}: full credential after repeat" \
+      "$(mc_as "${project}_default" "${APP_KEY}" "${APP_SECRET}" ls "t/${BUCKET}" </dev/null)"
+  fi
+  output="$("${cmd[@]}" logs --no-log-prefix minio-init 2>&1)"
+  argv="$(cat "${WORK}/argv-${name}/log" 2>/dev/null || true)"
+  [[ "${output}${argv}" != *"${ROOT_PASS}"* && "${output}${argv}" != *"${APP_SECRET}"* ]] \
+    || die "local ${name}: credential disclosed in logs or mc argv"
+  "${cmd[@]}" down -v --remove-orphans >/dev/null 2>&1
+}
+# All generated values are synthetic. Distinct final bytes catch truncation.
+pad_secret() { python3 -c 'import sys; print(sys.argv[1] * (int(sys.argv[2])-1) + sys.argv[3], end="")' "$@"; }
+for bytes in 4095 4096; do
+  local_credential_case "${bytes}" "$(pad_secret r "${bytes}" R)" "$(pad_secret a "${bytes}" A)" accept
+done
+for bytes in 4097 5000; do
+  local_credential_case "root-${bytes}" "$(pad_secret r "${bytes}" R)" "${saved_app_secret}" reject
+  local_credential_case "app-${bytes}" "${saved_root_pass}" "$(pad_secret a "${bytes}" A)" reject
+done
+utf8="$(python3 -c 'print("é" * 2047 + "aZ", end="")')"  # 4096 bytes, 2049 code points
+local_credential_case utf8-4096 "${saved_root_pass}" "${utf8}" accept
+local_credential_case utf8-4097 "${saved_root_pass}" "${utf8}Z" reject
+local_credential_case control "${saved_root_pass}" $'invalid\tsecret' reject
+ROOT_PASS="${saved_root_pass}"; APP_SECRET="${saved_app_secret}"
+export MINIO_ROOT_PASSWORD="${ROOT_PASS}" STORAGE_SECRET_KEY="${APP_SECRET}"
+pass "local 4095/4096-byte credentials authenticate intact and survive repeat initialization; 4097/5000-byte and control inputs fail before mc or mutation, without argv/log disclosure; UTF-8 is counted in bytes"
+
+# The release shares only the application-secret stdin reader; its administrator
+# alias is JSON and accepts a longer password without truncation.
+net="$(start_server release-boundary)"
+for bytes in 4097 5000; do
+  run_init "${net}" "STORAGE_SECRET_KEY=$(pad_secret a "${bytes}" A)"
+  expect_init_fail "release ${bytes}-byte app secret" "4096-byte stdin limit"
+  expect_nothing_created "release ${bytes}-byte secret" "${net}"
+done
+APP_SECRET="$(pad_secret a 4096 A)"
+run_init "${net}" "STORAGE_SECRET_KEY=${APP_SECRET}"
+expect_init_ok "release 4096-byte secret"
+expect_ok "release full 4096-byte credential" "$(app "${net}" ls "t/${BUCKET}" </dev/null)"
+run_init "${net}" "STORAGE_SECRET_KEY=${APP_SECRET}"
+expect_init_ok "release repeated 4096-byte secret"
+expect_contains "release repeat is unchanged" "${INIT_OUT}" "initialized (changes: 0)"
+APP_SECRET="${saved_app_secret}"
+stop_server "${net}"
+ROOT_PASS="$(pad_secret r 5000 R)"
+net="$(start_server release-long-root)"
+run_init "${net}" "MINIO_ROOT_PASSWORD=${ROOT_PASS}"
+expect_init_ok "release 5000-byte root password through JSON"
+expect_initialized_state "release full root password" "${net}"
+ROOT_PASS="${saved_root_pass}"
+stop_server "${net}"
+pass "release application-secret overflow fails before mutation; exact 4096-byte authentication and idempotency work; 5000-byte root password remains supported through JSON"
+
+# A conflict introduced later must stop the initializer and keep the dependent down.
+"${vm_compose[@]}" rm -sf backend minio-init >/dev/null 2>&1
+expect_ok "attach readwrite" "$(admin "${project}_default" admin policy attach t readwrite --user "${APP_KEY}")"
+rc=0
+"${vm_compose[@]}" up -d --no-build --pull never backend >"${WORK}/up.log" 2>&1 || rc=$?
+[[ ${rc} -ne 0 ]] || die "compose up succeeded despite a failing initializer"
+expect_contains "compose reports initializer failure" "$(cat "${WORK}/up.log")" "minio-init"
+cid="$("${vm_compose[@]}" ps -a -q minio-init)"
+expect_eq "minio-init exit" "$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "${cid}")" "exited:1"
+expect_eq "backend not started" "$("${vm_compose[@]}" ps --format '{{.State}}' backend)" ""
+pass "initializer failure propagates: non-zero exit and the dependent service is not started"
+
+printf '\nAll %d MinIO initializer checks passed for %s (%s) against the %s server %s.\n' \
+  "${passed}" "${IMAGE}" "${IMAGE_ID}" "${SERVER}" "${SERVER_IMAGE}"
