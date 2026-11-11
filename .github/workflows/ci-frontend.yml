@@ -31,3 +31,23 @@ jobs:
         run: npm test
       - name: Typecheck and build frontend
         run: npm run build
+      - name: Summarize frontend test evidence
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Informational only: the steps above are the gate. `npm test` writes no
+        # machine-readable report, so test counts are not summarized here.
+        run: |
+          {
+            echo '### Frontend test evidence'
+            echo
+            echo '| Item | Value |'
+            echo '| --- | --- |'
+            echo "| Tested commit (checked-out \`HEAD\`) | \`$(git rev-parse HEAD 2>/dev/null || echo unavailable)\` |"
+            echo "| Pull request head | \`${PR_HEAD_SHA:-n/a ($GITHUB_EVENT_NAME)}\` |"
+            echo "| Event, ref | \`$GITHUB_EVENT_NAME\`, \`$GITHUB_REF\` |"
+            echo "| Node, npm | \`$(node --version 2>/dev/null || echo unavailable)\`, \`$(npm --version 2>/dev/null || echo unavailable)\` |"
+            echo
+            echo 'Test counts are in the "Run frontend regression tests" step log. This summary is informational; the job result is the gate.'
+          } >> "$GITHUB_STEP_SUMMARY" || echo "::warning::Frontend test evidence summary could not be written."
