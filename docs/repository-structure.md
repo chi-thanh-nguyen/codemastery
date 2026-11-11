@@ -298,6 +298,50 @@ replacement, not a reinterpretation of its original inventory. No new job, test
 suite, E2E, release or deployment workflow, ruleset, required-check, CodeQL or
 protected-review change is approved.
 
+## Bounded VM CI test-script inventory addition — 12 November 2026
+
+On 2026-11-12 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen explicitly authorized, in the instruction “CodeMastery — Phase 2:
+CI Maintainability, Test Extraction & Evidence Hardening”, the bounded addition of
+CI-only test scripts under the existing `infrastructure/vm/tests/` directory. This
+record adds exactly 18 scripts. Each holds, verbatim, the former inline `run:`
+script of one step in `.github/workflows/ci-vm.yml`, and that step now invokes it
+with `bash infrastructure/vm/tests/<script>` from the repository root:
+
+| Job ID | Step | Script |
+| --- | --- | --- |
+| `deployment-script` | Check shell syntax and authorization gates | `test-deploy-syntax-and-authorization-gates.sh` |
+| `deployment-script` | Check offline Compose and provisioning safety guards | `test-deploy-offline-compose-guards.sh` |
+| `deployment-script` | Check the runtime privilege matrix and its contract record | `test-deploy-privilege-matrix-contract.sh` |
+| `deployment-script` | Check env-file custody | `test-deploy-env-file-custody.sh` |
+| `deployment-script` | Check preflight against rendered Compose | `test-deploy-preflight-rendered-compose.sh` |
+| `deployment-script` | Check release archive identity models | `test-deploy-release-archive-identity.sh` |
+| `deployment-script` | Check image identity through a real save/load round trip | `test-deploy-image-identity-roundtrip.sh` |
+| `deployment-script-postgres` | Exercise the runtime privilege matrix on the real schema and failure containment | `test-postgres-privilege-matrix-containment.sh` |
+| `deployment-script-postgres` | Exercise published-port verification against real containers | `test-postgres-published-ports.sh` |
+| `deployment-script-postgres` | Check the PostgreSQL image refuses a data volume it did not initialize | `test-postgres-foreign-volume-guard.sh` |
+| `deployment-script-postgres` | Check the PostgreSQL image is byte-clean and equivalent to its layered build | `test-postgres-image-layer-equivalence.sh` |
+| `deployment-script-runtime` | Exercise real Auth, catalogue and membership under the approved matrix | `test-runtime-real-backend-privileges.sh` |
+| `deployment-script-containerd` | Verify registry archives through real save/load round trips | `test-containerd-archive-roundtrip.sh` |
+| `deployment-ingress` | Build the release and local images; reject invalid release origins | `test-ingress-release-image-build.sh` |
+| `deployment-ingress` | Check the release image CA store against the deployed public chain | `test-ingress-release-ca-store.sh` |
+| `deployment-ingress` | Exercise the HTTPS ingress against a stub backend | `test-ingress-stub-backend.sh` |
+| `deployment-ingress` | Exercise the HTTPS ingress with the real backend | `test-ingress-real-backend.sh` |
+| `deployment-ingress` | Run DP01 preflight with the committed override and certificate layout | `test-ingress-dp01-preflight.sh` |
+
+These scripts are shown in the infrastructure inventory below. That listing shows
+only the files this record adds. The directory's earlier files,
+`test-frontend-stage-cleanup.sh` and `test-java-truststore.sh`, are not listed
+there and this record does not change their status. The existing
+`/infrastructure/` CODEOWNERS rule (@tihh647-ui and @chi-thanh-nguyen) covers the
+new scripts and is unchanged. The immutable canonical tree remains unchanged; this
+is an explicit addition, not a reinterpretation of its original inventory. Job IDs,
+display names, the existing step names and their order, conditions, assertions and
+required check names are unchanged. One step, “Check VM test script syntax”, is
+added after checkout in the `deployment-script` job; it runs `bash -n` on every
+script in the directory. No new job, test framework, directory, deployment, ruleset,
+required-check or protected-review change is approved.
+
 ```text
 codemastery/
 
@@ -1819,7 +1863,45 @@ codemastery/
 
 │       ├── deploy.sh
 
-│       └── docker-compose.vm.yml
+│       ├── docker-compose.vm.yml
+
+│       └── tests/
+
+│           ├── test-containerd-archive-roundtrip.sh
+
+│           ├── test-deploy-env-file-custody.sh
+
+│           ├── test-deploy-image-identity-roundtrip.sh
+
+│           ├── test-deploy-offline-compose-guards.sh
+
+│           ├── test-deploy-preflight-rendered-compose.sh
+
+│           ├── test-deploy-privilege-matrix-contract.sh
+
+│           ├── test-deploy-release-archive-identity.sh
+
+│           ├── test-deploy-syntax-and-authorization-gates.sh
+
+│           ├── test-ingress-dp01-preflight.sh
+
+│           ├── test-ingress-real-backend.sh
+
+│           ├── test-ingress-release-ca-store.sh
+
+│           ├── test-ingress-release-image-build.sh
+
+│           ├── test-ingress-stub-backend.sh
+
+│           ├── test-postgres-foreign-volume-guard.sh
+
+│           ├── test-postgres-image-layer-equivalence.sh
+
+│           ├── test-postgres-privilege-matrix-containment.sh
+
+│           ├── test-postgres-published-ports.sh
+
+│           └── test-runtime-real-backend-privileges.sh
 
 ├── sample-data/
 
