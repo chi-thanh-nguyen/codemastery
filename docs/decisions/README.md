@@ -30,6 +30,57 @@ Analysis labels that appear inside reconciliation tables describe evidence, not
 approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPROVED`,
 `EFFECTIVE_APPROVAL`, `IMPLEMENTED_NOT_APPROVED` and similar.
 
+## Current Batch 4 checkpoint inventory — 10 November 2026
+
+**8/8 technical checkpoints are DELEGATED_APPROVED.** ADR008 is integrated by
+[PR #231](https://github.com/chi-thanh-nguyen/codemastery/pull/231), main
+`b6fa24b396d08e323ea54882af0a008077301ab6`; ADR009 awaits existing
+[PR #233](https://github.com/chi-thanh-nguyen/codemastery/pull/233) independent review
+and protected integration. This is the current one-row-per-checkpoint inventory;
+the revision/history tables below retain their dated preparation states.
+
+| CP | Slice | Current revision | Authoritative record / integration |
+|---|---|---|---|
+| CP-029 | CT34.runner | `CT34-RUNNER-2026-11-09-r1` | [ADR008 section 3, merged #231](008-batch-04-contract-approvals.md#3-ct34runner) |
+| CP-030 | CT34.fixtures | `CT34-FIXTURES-2026-11-10-r2` | [ADR008 section 10, merged #231](008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026) |
+| CP-031 | CT14.coverage | `CT14-COVERAGE-2026-11-09-r1` | [ADR008 section 5, merged #231](008-batch-04-contract-approvals.md#5-ct14coverage) |
+| CP-032 | CT39.binding | `CT39-BINDING-2026-11-09-r1` | [ADR008 section 6, merged #231](008-batch-04-contract-approvals.md#6-ct39binding-and-ct39consumers) |
+| CP-033 | CT17.F-runtime | `CT17-F-RUNTIME-2026-11-10-r2` | [ADR009 section 9, pending #233 integration](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) |
+| CP-034 | CT17.F-recovery | `CT17-F-RECOVERY-2026-11-10-r2` | [ADR009 section 9, pending #233 integration](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) |
+| CP-035 | CT34.ci | `CT34-CI-2026-11-09-r1` | [ADR008 section 7, merged #231; consumes CP-030 r2](008-batch-04-contract-approvals.md#7-ct34ci) |
+| CP-036 | CT39.consumers | `CT39-CONSUMERS-2026-11-09-r1` | [ADR008 section 6, merged #231](008-batch-04-contract-approvals.md#6-ct39binding-and-ct39consumers) |
+
+The Leader's dated Education Hub evidence supplies **$88 remaining / 31 October
+2027 expiration**; [ADR009 section 10](009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026)
+preserves its attested UI provenance and earlier gaps. Forecast-to-Final funding,
+capacity, runtime access, Final security admission and actual recovery/deployment
+acceptance remain gates; no new spending or resource/grant authorization follows.
+
+## CT17 Final follow-up — 9 November 2026
+
+**Current:** [ADR009 §9](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification)
+records `CT17-F-RUNTIME-2026-11-10-r2` and
+`CT17-F-RECOVERY-2026-11-10-r2` **DELEGATED_APPROVED** (technical design,
+Leader-confirmed resource/credit-only funding policy and identity-bounded mechanisms).
+The Leader's current factual attestation and expanded technical delegation,
+executed synthetic qualification and remaining operational gates are explicit.
+Batch 4 is **8/8 technically approved**; section 10's new dated credit evidence supersedes
+the earlier balance/expiry gap. Fresh funding feasibility and
+implementation/runtime/recovery acceptance remain gates; Readiness stays Bounded.
+PR #233 is the existing follow-up; no new ADR/PR or change to #231 is introduced.
+The paragraph below preserves the original r1 preparation state.
+
+[ADR009](009-ct17-final-runtime-recovery.md) records
+`CT17-F-RUNTIME-2026-11-09-r1` and `CT17-F-RECOVERY-2026-11-09-r1` as
+**DELEGATED_PARTIALLY_APPROVED**: Leader-confirmed resource/origin/responsibility
+selections, bounded runtime policy and recovery design objectives/protocol.
+Actual runtime/destination/cost bindings and executed MinIO/encryption qualification
+remain gates; Batch 4 is not 8/8 approved. The six ADR008 decisions remain in
+unmerged [PR #231](https://github.com/chi-thanh-nguyen/codemastery/pull/231),
+head `235bc237bcc1a55f7e6015f715d283991b307f76`, and are not copied or amended here.
+ADR009 is numbered after that reserved record and can be reviewed independently.
+Neither document establishes implementation, runtime acceptance or deployment authority.
+
 ## Architecture decision records
 
 | ADR | Subject | Status |
@@ -41,12 +92,15 @@ approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPR
 | [ADR005](005-batch-01-contract-approvals.md) | Nine Batch 1 approvals and bounded CT03/CT24/CT14/CT18 prerequisites | `DELEGATED_APPROVED` (8 November 2026); integrated via PR #228 (9 November 2026) |
 | [ADR006](006-batch-02-contract-approvals.md) | Eight verified Batch 2 checkpoints: progress, resume, embed, authoring and recovery | Eight `DELEGATED_APPROVED`; integrated via PR #229, 9 November 2026; implementation/exposure gates retained |
 | [ADR007](007-batch-03-contract-approvals.md) | Ten verified Batch 3 checkpoints CP-019–028; two bounded prerequisite slices | `DELEGATED_APPROVED`; integrated via PR #230, 9 November 2026; implementation/verification gates retained |
-| [ADR008](008-batch-04-contract-approvals.md) | Eight verified Batch 4 checkpoints CP-029–036: test infrastructure/placement/clock and operational inputs | Six `DELEGATED_APPROVED` decisions (including no shared Clock binding); two CT17 checkpoints `PENDING_LEADER_INPUT`; new record awaits independent review/CI/protected integration |
+| [ADR008](008-batch-04-contract-approvals.md) | Six Batch 4 testing/clock decisions; CP-030 r2 | `DELEGATED_APPROVED`; integrated via #231 on 10 November. Its original CT17 pending dispositions are historical, subsequently resolved by ADR009 r2 |
+| [ADR009](009-ct17-final-runtime-recovery.md) | CP-033/034 r2 runtime/recovery decisions, bounded qualification and dated Azure evidence | Two `DELEGATED_APPROVED`; pending #233 independent review/protected integration; execution/admission gates retained |
 
 ## Contract decision records by revision
 
 | Revision | Subject | Record | Status | Introduced by |
 |---|---|---|---|---|
+| `CT17-F-RUNTIME-2026-11-10-r2` | CP-033 runtime attestation, custody/paths/TLS/resource policy | [ADR009 §9](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) | `DELEGATED_APPROVED`; dated balance/expiry supplied in section 10; funding feasibility/runtime acceptance pending | PR #233 |
+| `CT17-F-RECOVERY-2026-11-10-r2` | CP-034 destination/custody design; qualified cold MinIO/CMS/provenance protocol | [ADR009 §9](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) | `DELEGATED_APPROVED`; provisioning/implementation/F2/operational acceptance pending | PR #233 |
 | ADR002 slices (11 Oct 2026) | CT20.I, CT18.minimum, CT01.core, CT16.minimum, CT38.core, CT03.catalogue, CT21.catalogue, CT06.prototype, CT24.calculation, CT15.I-data, CT14.interim, CT36.I-results, NC-EVIDENCE-MODE, CT17.I-scope, CT17.I-access | [ADR002 approved slices](002-interim-delegated-contracts.md#approved-slices) | `DELEGATED_APPROVED` | PR #73 |
 | CT01.identity (18 Oct 2026) | Cross-module identity facade, U01 | [ADR001 §11.4](001-modular-monolith-module-boundaries.md#114-ct01identity-exact-public-boundary-and-u01-disposition) | Leader approval, reaffirmed in CT01-2026-10-21-r1 | PR #83 |
 | `CT01-2026-10-21-r1` | Login/JWT lifecycle, logout, authorization handoff | [ADR001 §11](001-modular-monolith-module-boundaries.md#11-ct01-approved-technical-contract--protected-integration-pending) | `LEADER_APPROVED` | PR #91 |
@@ -150,6 +204,10 @@ preparation state; documentation integration is now confirmed. All residual
 implementation, protected-review provenance, risk and exposure gates remain.
 
 ### Batch 4 revisions — 9 November 2026
+
+**Historical preparation state:** the paragraph/table below retain the original
+six-decision record. The current inventory above incorporates CP-030 r2, merged
+ADR008 and ADR009's two technically approved r2 decisions pending #233 integration.
 
 [ADR008](008-batch-04-contract-approvals.md) records the corrected CP-029–036
 inventory. The six decisions below are **DELEGATED_APPROVED** under the explicit

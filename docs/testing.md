@@ -1,5 +1,13 @@
 # Testing
 
+**Post-PR231 integration update — 10 November 2026:** ADR008, including CP-030 r2,
+is merged; ADR009's two r2 approvals remain pending #233 protected integration.
+Batch 4 is **8/8 technically approved**. [ADR009 section 10](decisions/009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026)
+records the new Leader-attested Azure balance/expiration and unchanged execution
+gates. The 9 November status below is historical. Neither rebase/document checks
+nor financial attestation adds a runtime PASS: Q07 real RPO/RTO and Q08 full-product
+F2/Flyway remain NOT_RUN; Q01–Q06/Q09 retain their exact fixture/mechanism limits.
+
 **10 November 2026 fixture amendment:**
 [ADR008 §10](decisions/008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026)
 records CP-030 `CT34-FIXTURES-2026-11-10-r2`. It adds pre-Playwright checkout/output
@@ -504,6 +512,30 @@ test-count or coverage-percentage claim is made for them.
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
+
+## CT17 Final recovery qualification handoff — 9 November 2026
+
+**Current update:** the following r1 NOT_RUN statements are historical. Executed
+mechanism-level results and still-unexecuted operational/product obligations are
+recorded in [ADR009 §9.6](decisions/009-ct17-final-runtime-recovery.md#96-actual-qualification-record--10-november-2026)
+and the reproduction section below. CP-034 r2 is technically approved; no blanket
+Q01–Q09, full-product F2 or production readiness PASS is asserted.
+
+[ADR009 Q01–Q09](decisions/009-ct17-final-runtime-recovery.md#71-reproducible-qualification-plan--not_run)
+defines the remaining actual-resource, coordinated-cut, PostgreSQL/MinIO complete
+restore, encryption/key/provenance, publication/retention, RPO/RTO/resource and
+product/security evidence. This is **NOT_RUN** planning, not a new test file,
+framework, infrastructure grant or completed approval-level round trip. Existing
+CT17-FINAL F1/F2, class B mechanism/compatibility gates, test inventories and
+feature-specific prerequisites remain effective.
+
+Read-only checks obtained public DNS and verified local historical release
+checksums/OCI mappings; SSH/HTTPS/TLS access attempts timed out. No live VM,
+certificate, resource capacity, backup, key recovery, encryption or restore test
+passed. Public retail price retrieval supports estimates only. The selected
+RPO 24h/RTO 48h and 8h capture cadence are future design targets, not measured
+guarantees. Full MinIO/crypto and actual product qualification still block whole
+CP-034 approval; actual bindings still block whole CP-033 approval.
 
 ## Authorized Interim verification contracts
 
@@ -2802,3 +2834,168 @@ r2**; [§10.5](decisions/008-batch-04-contract-approvals.md#105-m1-downstream-ci
 adds nonessential measured-budget guidance reserving teardown/report time, without
 new timeout numbers. CP-029/031/032/036 and effective predecessor contracts remain
 unchanged; CT19/CT35 feature cases and CT20.F allocation retain their own scope.
+
+## CT17 r2 executed mechanism qualification — 10 November 2026
+
+**Q03 correction:** the original PostgreSQL run below used excess database-level
+CREATE and did not prove P6 compliance. Preserve its history and result hashes;
+the [new focused reproduction](#q03p6-focused-reproduction--10-november-2026)
+supplies the corrected evidence. Other qualification scopes remain unchanged.
+
+Authority, exact image/binary/platform identities, synthetic input inventory,
+results/hashes and limitations: [ADR009 §§9.5–9.6](decisions/009-ct17-final-runtime-recovery.md#95-qualified-mechanisms-and-security-boundaries).
+The existing approved test inventories are unchanged. All harness scripts and
+synthetic artifacts are local-only in
+`/private/tmp/codemastery-ct17-qualification-20261110/`, protected by directory
+0700; no new source/test path, dependency or production implementation was added.
+`evidence-index.json` identifies preserved scripts/results by SHA256;
+`commands.jsonl` records actual UTC commands, exit codes, durations and stdout
+hashes. It retains failed initial attempts and corrections rather than hiding them.
+Ephemeral credentials/keys and plaintext fixture archives must remain private.
+
+The executed harness used the exact existing candidates, `--pull never`, isolated
+internal Docker networking, no port publication and fresh uniquely labelled volumes.
+It created V001–V006 schema using the actual migration SQL, a clearly synthetic
+migration-digest history (not Flyway-engine history), object-reference/sequence
+fixtures, version/delete-marker/metadata/bucket/IAM/service-account fixtures and
+an incomplete multipart upload. No frontend/backend application ran. Source and
+restored cold tree hashes/UID/GID/modes matched; PostgreSQL constraints/history/
+sequence/ownership and object-reference content matched. Restored user and service
+account could read authorized versions, could not write, and could not list the
+private bucket. The restored in-progress multipart upload completed correctly.
+
+Core **actually executed command shapes** (names and ephemeral credentials are
+redacted; source/target aliases refer only to the disposable fixture):
+
+```bash
+# Exact candidate MC has bash, not /bin/sh; read-only root needs a writable config.
+mc --config-dir /tmp/mc --json mb q/recovery
+mc --config-dir /tmp/mc --json version enable q/recovery
+mc --config-dir /tmp/mc --json pipe q/recovery/versioned.bin
+mc --config-dir /tmp/mc --json tag set q/recovery/versioned.bin 'course=synthetic&purpose=recovery'
+mc --config-dir /tmp/mc --json ls --recursive --versions q/recovery
+mc --config-dir /tmp/mc --json admin group info q fixturegroup
+mc --config-dir /tmp/mc --json admin user svcacct info q fixtureservice
+mc --config-dir /tmp/mc --json admin config export q
+# Raw signed S3 CreateMultipartUpload/UploadPart/ListParts/CompleteMultipartUpload
+# used urllib/HMAC-SHA256 in the isolated Python helper (s3.py).
+
+# Source was drained; client disconnected; late fixture INSERT failed read-only.
+pg_dump -U fixture_migrator -d fixture -Fc
+# Stop exact MinIO server; prevent restart. Mount source /data READ-ONLY in helper.
+cd /data && tar --numeric-owner -cpf - .
+# Mount a different empty target volume; preserve entire tree including .minio.sys.
+cd /data && tar --numeric-owner -xpf -
+# Original PG target: excess database CREATE; see the Q03/P6 correction below.
+pg_restore -U fixture_migrator -d fixture --no-owner --no-acl --exit-on-error
+# Provision bounded runtime SELECT separately, assert runtime CREATE TABLE denied.
+# Compare all recorded inventories; test old/current versions and denied access.
+
+# Existing OpenSSL 3 helper, synthetic recipient/signing keys only.
+set -euo pipefail
+{ printf 'CMREC1\n'; cat component; } |
+  openssl cms -encrypt -binary -aes-256-gcm -outform DER -stream \
+    -recip recipient.crt -keyopt rsa_padding_mode:oaep \
+    -keyopt rsa_oaep_md:sha256 -keyopt rsa_mgf1_md:sha256 -out component.cms
+openssl cms -decrypt -binary -inform DER -in component.cms \
+  -inkey recipient.key -out component.staging
+# Only after exit 0: validate 7-byte header, strip it, compare length/SHA256.
+# Production uses capacity-bounded protected tmpfs; local plaintext was synthetic.
+openssl dgst -sha256 -sign signer.key -sigopt rsa_padding_mode:pss \
+  -sigopt rsa_pss_saltlen:digest -out manifest.sig manifest.json
+openssl dgst -sha256 -verify signer.pub -sigopt rsa_padding_mode:pss \
+  -sigopt rsa_pss_saltlen:digest -signature manifest.sig manifest.json
+```
+
+`qualify.py` records setup/fixture inputs; `capture.py` and `verify-restored.py`
+record the cold capture/PG restore and exact comparisons. `crypto.sh` tests framed
+empty/binary/16-MiB input, wrong/missing key, ciphertext mutation/truncation, producer
+failure and forged signature/trust-key rejection. `bundle.sh` applies the same
+crypto to the real **synthetic** PG/tar components and recovers with an encrypted
+PKCS8 escrow copy; wrong passphrase fails. `publication.py` tests actual local
+file copies and eight interrupted-boundary states, incomplete/corrupt/stale/forged
+sets and safe retention/locking. `tls-server.py`/`tls-client.py` transfer ciphertext
+over isolated authenticated TLS; unknown/wrong CA, hostname mismatch and wrong
+bearer token fail. These are reference harnesses, not deployed implementations.
+
+Reproduction requires an authorized disposable environment with the recorded
+already-available images and preserved scripts, new unique task names/volumes,
+synthetic credentials generated anew, and no production mounts. The corrected
+fixture flow is `qualify.py init help fixture`, `capture.py prepare`,
+`capture.py capture`, then the OpenSSL helper runs of `crypto.sh`/`bundle.sh`,
+`publication.py` and isolated TLS helpers. The original interrupted fixture used
+`resume-fixture.py`; command history identifies that recovery explicitly.
+Never rerun `init` over an occupied namespace or claim the harness is a repository
+production command. Remove only the new labelled task resources after readback;
+the executed run removed its six containers, four volumes and one internal network.
+
+Important observed limits: raw-empty CMS streaming failed on this OpenSSL build;
+the selected mandatory framing round-tripped empty payload successfully. MinIO
+CORS PUT returned 501; no configured-CORS recovery was tested. Default read-only
+transactions do not exclude privileged writers. Native-VM performance, actual
+Keychain/systemd/acme integration, Azure Entra/RBAC/transfer, physical independent
+copy, Flyway-engine validation, full feature QA and complete incident RTO remain
+**NOT_RUN**. Completion-marker/ledger checks used two local directories, not two
+independent failure domains. Changed artifacts/dependencies require affected
+qualification again. These limits are retained in CP-034's operational F2 gates;
+they are not fabricated PASS or unresolved routine mechanism selections.
+
+## Q03/P6 focused reproduction — 10 November 2026
+
+[ADR009 §11](decisions/009-ct17-final-runtime-recovery.md#11-q03p6-evidence-correction--10-november-2026)
+records authority, original F1/P2, exact identities, results and new hashes. This
+is a new PostgreSQL-only reproduction, not a replay: the original temporary
+harness is unavailable. The local private evidence root is
+`/private/tmp/codemastery-q03-p6-20261110/`; no tracked test or production code changed.
+
+Actually executed launcher: `python3 /private/tmp/codemastery-q03-p6-20261110/qualify.py`.
+It used the original recorded linux/amd64 image ID, `--pull never`, two fresh
+network-none containers and tmpfs database storage. PostgreSQL/server/dump/restore
+all reported **17.11**. Actual qualified command shapes, with synthetic passwords
+supplied through process environment and SQL through stdin:
+
+```bash
+# Unchanged deploy.sh is sourced for SQL generation only; no deployment entrypoint.
+role_policy_sql
+application_grants_sql
+runtime_privilege_violations_sql present
+runtime_privilege_violations_sql complete
+# Authenticated sessions: verify current_user, then execute the recorded probes.
+psql -X -qAt -v ON_ERROR_STOP=1 -v VERBOSITY=verbose \
+  -h 127.0.0.1 -U fixture_migrator -d fixture
+pg_dump -h 127.0.0.1 -U fixture_migrator -d fixture -Fc
+pg_restore --list
+pg_restore -h 127.0.0.1 -U fixture_migrator -d fixture \
+  --no-owner --no-acl --exit-on-error
+```
+
+Bootstrap kept database ownership; neither role received database CREATE,
+TEMPORARY, elevated attributes or memberships. PUBLIC database/schema rights were
+revoked; schema public belongs to the migrator, runtime has USAGE only. Actual
+P6 role policy, reviewed application grants and full matrix queries ran before
+and after import. Catalog ACL/ownership/default/membership snapshots complement
+execution denials; `rolcreatedb=false` alone is never treated as sufficient.
+
+**PASS: 75 recorded cases**, including actual `42501` permission denials (exit 3),
+`P0001` rejections of direct/PUBLIC/indirect/ownership drift, allowed schema DDL,
+raw V001–V006 migrations, custom dump/restore and approved runtime access. Separate
+`23505`/`23514`/`23503` failures prove restored unique/CHECK/FK enforcement. Role
+identity was authenticated before negative probes. Both populated source and
+restored target pass the actual complete runtime matrix; all table data,
+structure/index/constraint/owner comparisons and synthetic object references match.
+The history fixture uses a clearly synthetic layout in the reserved migrator-only
+`flyway_schema_history` slot, not a Flyway-generated history. The project schema
+has zero sequences; separate transactional sequence probes leave no archived object.
+
+The first attempt's checks reached completion, but cleanup assertion casing caused
+an overall failed command; its journal and exact-container reconciliation remain
+under `initial-attempt/`. The corrected full run completed at **09:39:59 UTC**;
+both task containers were verified absent, with no persistent volumes or network
+created. `commands.jsonl`, `result.json`, emitted SQL and comparison artifacts are
+indexed separately from the old §9.6 evidence. Reproduction needs fresh names and
+new synthetic credentials; never reuse occupied namespaces or production mounts.
+
+This resolves the tested Q03/P6 discrepancy, subject to independent re-review.
+Flyway-engine validation/full-product F2/Q08 and real Q07 RPO/RTO remain NOT_RUN.
+MinIO/CMS/cloud/renewal/Keychain/scheduler results retain their previous limits and
+were not rerun. No deployment, risk acceptance or spending permission is supplied.

@@ -71,6 +71,41 @@ frontend test dependencies. Playwright Test 1.63.0 is pinned in `e2e/package.jso
 browser harness, and `npx playwright install chromium firefox webkit` installs the
 browsers it expects. The E2E suite also needs Docker.
 
+## CT17 Final binding status — 9 November 2026
+
+**10 November update:** [ADR009 §9](decisions/009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification)
+is the current r2 record. CP-033/034 are technically approved, with the Leader's
+exact existing VM resource and credit-only financial binding plus
+executed synthetic qualification. Host/platform/operator facts in the supplied
+report are now Leader-attested, not stale solely by date. Select future root-only
+`/etc/codemastery/runtime/.env`, immutable root-owned checkout under
+`/opt/codemastery/releases/<full-source-sha>`, and the existing TLS directory.
+These are technical conventions, not existing configured paths or new sudo grants.
+The Leader supplied dated **$88 remaining / 31 October 2027 expiration** evidence
+from Education Hub on 10 November, approximately 11:05 ICT; see
+[ADR009 section 10](decisions/009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026).
+This supersedes only the former missing balance/expiry status. Fresh credit/cost
+feasibility through Final still requires qualification before execution.
+The selected acme.sh TLS-ALPN renewal timer, real certificate for codemastery.app,
+secrets/custody, Final artifacts, resource capacity and deployment still require
+separately authorized implementation/inspection. No setup command or configuration
+file is changed. The paragraph below retains the r1 evidence state.
+
+ADR008, including CP-030 r2, is merged through #231; ADR009 r2 remains pending
+#233 independent review and protected integration. Batch 4 is 8/8 technically
+approved, without implementation, production admission or deployment authorization.
+
+[ADR009](decisions/009-ct17-final-runtime-recovery.md) records the Leader-selected
+existing Azure VM and intended **https://codemastery.app** origin, with Leader
+operator/secret/key/recovery custody. This is not permission to change a runtime
+origin, access grant, key, .env or public listener. The current host resource ID,
+disk/capacity/credit, checkout/environment custody, TLS/renewal, grants and exact
+running release still need non-secret operational evidence. Historical paths and
+preview artifacts are not adopted as verified Final bindings. Existing P6/B3,
+configuration variables, topology and reproduction commands remain unchanged.
+CP-033/034 remain partially approved; no recovery mechanism or deployment is
+implemented by this documentation follow-up.
+
 ## Environment File
 
 The root [`.env.example`](../.env.example) is a catalogue of backend configuration

@@ -3857,3 +3857,72 @@ install` under `/etc/codemastery`) and was not run locally. This is local eviden
 the job must still pass on the CI runner.
 
 Anthropic's Claude Code (Claude Opus 5.5) diagnosed the failure, made the change and ran these checks.
+
+## CT17 Final runtime and recovery follow-up — 9 November 2026
+
+**Current r2 update, 10 November:** [ADR009 §9](decisions/009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification)
+extends the exact r1 decisions below. `CT17-F-RUNTIME-2026-11-10-r2` is
+**DELEGATED_APPROVED**, including the Leader-supplied full VM resource ID and
+credit-only/no-new-billable-resource funding boundary. `CT17-F-RECOVERY-2026-11-10-r2`
+is **DELEGATED_APPROVED** for the destination/custody/scheduler design and tested,
+identity-bounded MinIO cold-copy, CMS authenticated encryption and provenance/
+publication mechanisms. Batch 4 has **8/8 technical approvals**; operational acceptance remains pending.
+
+ADR008 and CP-030 r2 are integrated by #231 at main `b6fa24b`; ADR009 awaits
+#233's own independent review/protected integration. The dated paragraphs below
+retain their original scope and cannot reopen the eight technical approvals.
+
+The supplied operational packet's affirmative host/platform/operator/TLS-path
+facts are current **LEADER_CONFIRMED** within their exact scope. The newly supplied
+Education Hub observation is **$88 remaining**, expiring **31 October 2027**, dated
+10 November approximately 11:05 ICT; [ADR009 section 10](decisions/009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026)
+updates the former balance/expiry evidence gap without changing r2. Current cost
+feasibility and disk/capacity/access remain execution gates; the old-hostname certificate is not evidence
+for codemastery.app. Technical selections include root-only runtime env/immutable
+checkout, guarded acme.sh TLS-ALPN renewal and measured resource admission; native
+8h captures, private Azure StorageV2 Hot/LRS East Asia staging/archive separation,
+an independently retrievable encrypted workstation copy, separate key escrow and
+signed manifest/monotonic ledger. No resource/grant/cost is claimed authorized or
+existing. All production use requires separately authorized implementation,
+actual bindings, changed-build qualification, exact Final security admission and
+F2/product/capacity/RPO/RTO acceptance. The deployment script is not extended.
+
+Synthetic full cold-volume restore and CMS/key/corruption tests passed within
+ADR009's stated fixture/build limits; cloud behavior, current VM/TLS, full-product
+QA and real 24h/48h capability did not run. See the detailed Q01–Q09 disposition
+and [reproduction record](testing.md#ct17-r2-executed-mechanism-qualification--10-november-2026).
+The paragraphs below are the retained **r1 historical preparation state**, not
+current whole-recovery blockers.
+
+[ADR009](decisions/009-ct17-final-runtime-recovery.md) is the authoritative bounded
+follow-up for CP-033/034. `CT17-F-RUNTIME-2026-11-09-r1` and
+`CT17-F-RECOVERY-2026-11-09-r1` are **DELEGATED_PARTIALLY_APPROVED**; neither entire
+checkpoint is complete. All effective P1–P10/B1–B3/P6 and CT17-FINAL F1/F2 clauses
+above remain unchanged. The pending six-decision ADR008/#231 is not modified or
+treated as effective main integration by this follow-up.
+
+The Leader personally confirmed retaining the existing Azure VM,
+**https://codemastery.app**, primary operator/secret/key/recovery custody and public
+access in principle after all gates. Actual resource identity, capacity, existing
+permissions/configuration custody, served TLS/renewal and Final artifact admission
+remain unverified. DNS resolved the domain and historical Azure hostname to
+20.205.56.236; TCP 22/443 checks timed out. No cause or current VM state is inferred.
+Local `061102e3` archive/OCI checks passed for historical limited-preview packaging,
+not production identity, authenticity or Final admission.
+
+The delegated recovery **design** selects RPO 24h/RTO 48h, capture every 8h,
+three intraday + seven daily + four weekly qualified points and pre-change/demo
+capture. Targets include publication delay/missed-run analysis and the complete
+incident-to-reopen interval; none is measured capability or incident data-loss
+acceptance. Actual private off-VM and independent non-Azure destinations/cost/access
+bindings remain pending. Keep the previous known-good point on any partial/failing
+capture or publication. No new configuration value, backup scheduler or command is
+implemented in this task.
+
+Full MinIO/version/IAM/config capture and concrete authenticated encryption remain
+**PROPOSED_NOT_EFFECTIVE / BLOCKED_BY_MISSING_EVIDENCE** pending the existing
+compatibility/security/isolated-round-trip gates. A mirror, PG-only dump, preview
+admission or qualification plan alone cannot pass them. See ADR009 for alternatives,
+current public price-meter estimates, complete-set/restore protocol and Q01–Q09.
+Runtime/source/workflow/Compose/permissions are unchanged. No production operation,
+new spending, access/exposure change, residual-risk acceptance or merge is authorized.
