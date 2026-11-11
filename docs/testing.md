@@ -2837,6 +2837,11 @@ unchanged; CT19/CT35 feature cases and CT20.F allocation retain their own scope.
 
 ## CT17 r2 executed mechanism qualification — 10 November 2026
 
+**Q03 correction:** the original PostgreSQL run below used excess database-level
+CREATE and did not prove P6 compliance. Preserve its history and result hashes;
+the [new focused reproduction](#q03p6-focused-reproduction--10-november-2026)
+supplies the corrected evidence. Other qualification scopes remain unchanged.
+
 Authority, exact image/binary/platform identities, synthetic input inventory,
 results/hashes and limitations: [ADR009 §§9.5–9.6](decisions/009-ct17-final-runtime-recovery.md#95-qualified-mechanisms-and-security-boundaries).
 The existing approved test inventories are unchanged. All harness scripts and
@@ -2881,7 +2886,7 @@ pg_dump -U fixture_migrator -d fixture -Fc
 cd /data && tar --numeric-owner -cpf - .
 # Mount a different empty target volume; preserve entire tree including .minio.sys.
 cd /data && tar --numeric-owner -xpf -
-# Empty PG target: pre-create bounded migrator/schema, no role/password dump.
+# Original PG target: excess database CREATE; see the Q03/P6 correction below.
 pg_restore -U fixture_migrator -d fixture --no-owner --no-acl --exit-on-error
 # Provision bounded runtime SELECT separately, assert runtime CREATE TABLE denied.
 # Compare all recorded inventories; test old/current versions and denied access.
@@ -2934,3 +2939,63 @@ copy, Flyway-engine validation, full feature QA and complete incident RTO remain
 independent failure domains. Changed artifacts/dependencies require affected
 qualification again. These limits are retained in CP-034's operational F2 gates;
 they are not fabricated PASS or unresolved routine mechanism selections.
+
+## Q03/P6 focused reproduction — 10 November 2026
+
+[ADR009 §11](decisions/009-ct17-final-runtime-recovery.md#11-q03p6-evidence-correction--10-november-2026)
+records authority, original F1/P2, exact identities, results and new hashes. This
+is a new PostgreSQL-only reproduction, not a replay: the original temporary
+harness is unavailable. The local private evidence root is
+`/private/tmp/codemastery-q03-p6-20261110/`; no tracked test or production code changed.
+
+Actually executed launcher: `python3 /private/tmp/codemastery-q03-p6-20261110/qualify.py`.
+It used the original recorded linux/amd64 image ID, `--pull never`, two fresh
+network-none containers and tmpfs database storage. PostgreSQL/server/dump/restore
+all reported **17.11**. Actual qualified command shapes, with synthetic passwords
+supplied through process environment and SQL through stdin:
+
+```bash
+# Unchanged deploy.sh is sourced for SQL generation only; no deployment entrypoint.
+role_policy_sql
+application_grants_sql
+runtime_privilege_violations_sql present
+runtime_privilege_violations_sql complete
+# Authenticated sessions: verify current_user, then execute the recorded probes.
+psql -X -qAt -v ON_ERROR_STOP=1 -v VERBOSITY=verbose \
+  -h 127.0.0.1 -U fixture_migrator -d fixture
+pg_dump -h 127.0.0.1 -U fixture_migrator -d fixture -Fc
+pg_restore --list
+pg_restore -h 127.0.0.1 -U fixture_migrator -d fixture \
+  --no-owner --no-acl --exit-on-error
+```
+
+Bootstrap kept database ownership; neither role received database CREATE,
+TEMPORARY, elevated attributes or memberships. PUBLIC database/schema rights were
+revoked; schema public belongs to the migrator, runtime has USAGE only. Actual
+P6 role policy, reviewed application grants and full matrix queries ran before
+and after import. Catalog ACL/ownership/default/membership snapshots complement
+execution denials; `rolcreatedb=false` alone is never treated as sufficient.
+
+**PASS: 75 recorded cases**, including actual `42501` permission denials (exit 3),
+`P0001` rejections of direct/PUBLIC/indirect/ownership drift, allowed schema DDL,
+raw V001–V006 migrations, custom dump/restore and approved runtime access. Separate
+`23505`/`23514`/`23503` failures prove restored unique/CHECK/FK enforcement. Role
+identity was authenticated before negative probes. Both populated source and
+restored target pass the actual complete runtime matrix; all table data,
+structure/index/constraint/owner comparisons and synthetic object references match.
+The history fixture uses a clearly synthetic layout in the reserved migrator-only
+`flyway_schema_history` slot, not a Flyway-generated history. The project schema
+has zero sequences; separate transactional sequence probes leave no archived object.
+
+The first attempt's checks reached completion, but cleanup assertion casing caused
+an overall failed command; its journal and exact-container reconciliation remain
+under `initial-attempt/`. The corrected full run completed at **09:39:59 UTC**;
+both task containers were verified absent, with no persistent volumes or network
+created. `commands.jsonl`, `result.json`, emitted SQL and comparison artifacts are
+indexed separately from the old §9.6 evidence. Reproduction needs fresh names and
+new synthetic credentials; never reuse occupied namespaces or production mounts.
+
+This resolves the tested Q03/P6 discrepancy, subject to independent re-review.
+Flyway-engine validation/full-product F2/Q08 and real Q07 RPO/RTO remain NOT_RUN.
+MinIO/CMS/cloud/renewal/Keychain/scheduler results retain their previous limits and
+were not rerun. No deployment, risk acceptance or spending permission is supplied.

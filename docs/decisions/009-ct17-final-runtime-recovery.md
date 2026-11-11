@@ -1,5 +1,9 @@
 # ADR009: CT17 Final Runtime and Recovery — Bounded Approvals
 
+**Q03/P6 evidence correction (10 November 2026): see [§11](#11-q03p6-evidence-correction--10-november-2026).**
+The original PostgreSQL fixture had excess database privileges. A new PostgreSQL-only
+qualification supplies the corrected evidence without revising either r2 decision.
+
 **Post-PR231 current-state addendum (10 November 2026): see
 [§10](#10-post-pr231-integration-and-azure-evidence--10-november-2026).** ADR008,
 including CP-030 r2, is merged; ADR009 awaits PR #233 protected integration. The
@@ -808,6 +812,10 @@ must rerun these faults. It is not falsely marked implemented or cloud-tested.
 
 ### 9.6 Actual qualification record — 10 November 2026
 
+**Historical Q03 limitation:** this original run did not establish P6-compatible
+restore privileges; see §11's correction and independently executed replacement.
+The other cases and all original result hashes retain their stated scope.
+
 **Environment:** local Docker Desktop 4.93.0 / Engine 29.8.1, Linux arm64 kernel
 7.0.14-linuxkit, `linux/amd64` images emulated. Internal-only disposable network
 `ct17q-20261110a`; **zero published ports**, six task-owned containers/four task-owned
@@ -842,7 +850,7 @@ components **68,363** and **23,298,874 bytes** respectively; not measured Final 
 |---|---|
 | Q01 | **PASS for fixture inventory**, including hidden tree and IAM/config dependencies; actual Final/external-dependency inventory **NOT_RUN** |
 | Q02 | **PASS for isolated fixture boundary**: disconnected writer client, read-only DB default, no other active DB writer; attempted late INSERT rejected; cut held through dump/cold capture. A read-only default is not a security fence against a privileged writer. Actual HTTP/jobs/admin drain and hostile/privileged-writer detection **NOT_RUN** |
-| Q03 | **PASS for PG17 mechanism**: actual project SQL/constraints, fixture history/data/sequence/owner/role equivalence after restore, bounded migrator flags, runtime SELECT allowed/DDL denied. Flyway-engine checksum validation, incompatible-version and privilege-drift injection **NOT_RUN** |
+| Q03 | **Historical PG17 fixture PASS, not P6-qualified**: actual project SQL/constraints, fixture history/data/sequence/owner/role equivalence after restore, custom restore flags, runtime SELECT allowed/ordinary DDL denied. The migrator had excess database-level CREATE; §11 supplies new P6 qualification. Original Flyway-engine checksum validation, incompatible-version and privilege-drift injection were **NOT_RUN** |
 | Q04 | **PASS on exact tested fixture/builds**: full tree bytes/numeric ownership/modes matched before boot; seven listed versions/marker, old and current reads, tags/metadata, zero/large objects, bucket settings, IAM/group/service-account credentials and allow/deny behavior matched; pending multipart part survived and completed with correct bytes. CORS PUT returned **501 NotImplemented**, no CORS state was installed; no CORS-recovery PASS. Actual external-state variants require requalification |
 | Q05 | **PASS on tested OpenSSL**: empty framed payload, binary and 16 MiB round trips; actual PG/tar encrypt/decrypt byte equality; wrong/missing key, corrupt/truncated envelope, wrong escrow passphrase, forged manifest/substituted trust key and failed producer rejected. Recovered from encrypted PKCS8 copy. Actual workstation Keychain/offline-media availability **NOT_RUN** |
 | Q06 | **PASS local protocol model**: eight interruption boundaries preserve prior point/ledger; corruption/truncation/missing/stale part, replaced manifest/signature, incomplete marker and hidden-state omission rejected before restore; path/duplicate-key rejection, exclusive lock and second-directory readback. Actual Azure/RBAC/atomic cloud behavior **NOT_RUN** |
@@ -992,3 +1000,93 @@ is performed. Self-check by this modifying session is not independent approval;
 an eligible independent reviewer must review PR #233's new exact HEAD before
 integration where required. No protection is bypassed and no merge is authorized.
 Known AI assistance: OpenAI Codex performed this documentation reconciliation.
+
+## 11. Q03/P6 evidence correction — 10 November 2026
+
+### 11.1 Authority and original limitation
+
+Under the Leader's **“CodeMastery — PR #233 Targeted P2 Remediation: PostgreSQL
+Q03 / P6 Compatibility”** instruction, independently validate and correct F1/P2
+using disposable synthetic PostgreSQL qualification and these two documentation
+records. This corrects evidence, not the contract: CP-033/034 keep their exact
+2026-11-10-r2 revisions, ADR008/CP-030 r2 and all predecessors remain unchanged.
+
+The original harness definitions and execution outputs confirm source and target
+`GRANT CONNECT, CREATE ON DATABASE fixture TO fixture_migrator`, plus ownership
+of `public`. Database CREATE violates the effective `role_policy_sql()` for both
+roles, including indirect grants; `rolcreatedb=false` does not check that ACL.
+Ownership of only `public` is permitted for the migrator and is not itself F1.
+The original restore succeeded with broader privileges; its hashes/history remain
+historical evidence, **not retroactive P6 compliance**. The original temporary
+harness is unavailable. The following is a **new independent reproduction**.
+
+### 11.2 Corrected fixture and actually executed results
+
+Executed **10 November 2026, completed 09:39:59 UTC / 16:39:59 ICT**, from source
+`11cee7ed00c604f410535fb5897fcb03781bc983`; Docker Engine **29.8.1**, local arm64
+host running the same emulated linux/amd64 PostgreSQL **17.11 Alpine** image ID
+`sha256:43ebe9dbb13e6afd71c8e643f0d47c8ae2abd438f899088aa1bcc130410da74a`.
+Server, `pg_dump` and `pg_restore` reported 17.11; their binary SHA256 values are
+retained in `src-binary-identities.txt` and the evidence index. No substitute
+image/pull, production data or new dependency was used.
+
+Run `cm-q03-p6-20261110-5fc99e18` used two fresh containers with `--network none`,
+no published ports, no persistent/bind mounts and tmpfs-only database storage.
+Bootstrap owns the database; both login roles have no elevated role attributes,
+memberships, database ownership, database CREATE or TEMPORARY. PUBLIC database
+rights and PUBLIC schema rights were revoked; explicit CONNECT is supplied to
+both roles, public-schema ownership/USAGE/CREATE only to the migrator and USAGE
+only to runtime. No default table/sequence grant supplies runtime access.
+
+The harness sources only function definitions from unchanged `deploy.sh`, emits
+and executes its actual `role_policy_sql()`, `application_grants_sql()` and
+`runtime_privilege_violations_sql()` (present/complete), without running deployment.
+All six actual V001–V006 SQL files run as migrator. Synthetic users/course/content
+and a file-object reference use the actual schema. A clearly synthetic digest
+table in the migrator-only `flyway_schema_history` inventory slot records migration
+filenames/SHA256; its fixture layout is **not Flyway's engine-managed history**.
+
+| Executed assertion | Actual result |
+|---|---|
+| Role flags, recursive membership policy, effective database/schema ACLs, defaults and ownership before/after restore | PASS; both database CREATE/TEMPORARY false, migrator schema CREATE true, runtime false; zero memberships/elevation |
+| Original direct CREATE grant, PUBLIC/inherited CREATE, runtime membership, database ownership and post-restore PUBLIC drift | Six expected policy rejections, SQLSTATE `P0001`, psql exit 3; transactions rolled back |
+| Both roles' unauthorized schema/role/temp creation; runtime table creation, history/material-payload reads, unapproved UPDATE and future-table/sequence access | Expected `42501`, psql exit 3; authenticated identity checked before each probe |
+| Migrator schema DDL, actual migrations and custom dump; restore with `--no-owner --no-acl --exit-on-error`; approved runtime SELECT/INSERT/Course row lock | PASS, exit 0; restore target empty and P6-qualified before import |
+| Restored structure/constraints/indexes, all table data, synthetic digest history, object key, ownership and exact runtime matrix | PASS; source/target comparisons equal; restore granted no runtime table rights before separate matrix provisioning |
+| Duplicate, CHECK and FK violations on source and restored target | Expected `23505`, `23514`, `23503`, exit 3; constraints remain enforced |
+
+**75 positive/negative cases passed**: 13 positive, 50 permission denials, six
+policy rejections and six constraint rejections. An additional deliberate history
+grant produced matrix violations and was rolled back. Current project migrations
+define zero sequences; that equality was checked, and transactional sequence
+creation/use plus runtime denial was tested without adding an unapproved object
+to the recovery archive. Final role policy and complete matrix checks passed.
+Both exact task containers were removed and independently observed absent.
+
+### 11.3 New evidence and retained limits
+
+Private local evidence: `/private/tmp/codemastery-q03-p6-20261110/`, mode 0700.
+`qualify.py`, emitted policy SQL, authenticated command/SQLSTATE journal, ACL/role
+snapshots, source/target comparisons, result and index remain available there.
+No credential value is retained in the journal or added to Git; only synthetic
+fixture archives exist locally. New hashes, separate from §9.6's original hashes:
+
+```text
+qualify.py    391db94ef1bff2f85b8d2b821fd511b22c5fff633aeff0c27ae1d7fa12f1b153
+result.json   4b3ca367c0ae64ca94d10c7f413c1cd048e59fe613dce68bdb05484e899cc86c
+commands.jsonl 0dcda799e66623f8bc30fa8c8007a4aa89eda8cfb598ad0fc99bd43e64c569d0
+postgres.dump 9fb8d496b12efd7a46c4e7f4427e45b395970a1d46ede2667c882b9e1d5f1634
+```
+
+The new dump is **68,313 bytes**. `initial-attempt/` preserves the first attempt:
+qualification reached its final checks, but the overall command failed on a
+case-sensitive Docker cleanup-message assertion. The remaining exact task
+container was reconciled/removed, the assertion corrected, and the complete new
+run above passed including cleanup. This intermediate command is not claimed PASS.
+
+Q03's tested P6 mismatch is corrected; independent exact-new-HEAD review remains
+required. Flyway-engine verification, incompatible-version recovery, full-product
+F2/Q08 and real RPO/RTO/Q07 remain **NOT_RUN**. No MinIO/CMS/cloud/TLS/Keychain/
+scheduler requalification or new production/financial/risk authority follows.
+OpenAI Codex reconstructed and executed this focused qualification under the
+stated instruction. See the [focused reproduction record](../testing.md#q03p6-focused-reproduction--10-november-2026).
