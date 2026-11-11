@@ -87,7 +87,7 @@ public class AttemptEntity{
 
     public Integer getAttemptNumber(){
         return attempt_number;
-    } 
+    }
 
     public void setAttemptNumber(Integer attempt_number){
         this.attempt_number = attempt_number;

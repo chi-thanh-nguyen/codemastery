@@ -19,7 +19,7 @@ public class AssignmentEntity{
     @Column(name = "course_id", nullable = false)
     private UUID course_id;
 
-    @Column(name = "lesson_id", nullable = false)
+    @Column(name = "lesson_id")
     private UUID lesson_id;
 
     @Column(name = "title", nullable = false)

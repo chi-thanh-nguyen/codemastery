@@ -61,7 +61,7 @@ public class QuizEntity {
     }
 
     public void setCourseId(UUID courseId) {
-        this.course_id = course_id;
+        this.course_id = courseId;
     }
 
     public String getTitle() {
