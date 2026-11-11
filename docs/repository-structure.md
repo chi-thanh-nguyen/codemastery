@@ -278,6 +278,26 @@ service. The immutable canonical tree remains unchanged; this is an explicit
 addition, not a reinterpretation of its original inventory. No release artifact,
 storage technology change, deployment or protected-review exception is approved.
 
+## Bounded CI workflow inventory replacement — 12 November 2026
+
+On 2026-11-12 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen explicitly authorized exactly one bounded workflow
+file-inventory change in the instruction “CodeMastery — Phase 1:
+Behavior-Preserving GitHub CI Workflow Reorganization”: `.github/workflows/ci.yml`
+is replaced by `.github/workflows/ci-backend.yml`, `.github/workflows/ci-frontend.yml`
+and `.github/workflows/ci-vm.yml`. The Backend job moves to `ci-backend.yml`, the
+Frontend job to `ci-frontend.yml` and the six VM jobs to `ci-vm.yml`. Job IDs,
+display names, steps, triggers and the `contents: read` permission are unchanged,
+so the eight existing required status-check names are preserved.
+[The CI section of the testing documentation](testing.md#ci) lists the jobs.
+
+This replacement is shown in the `.github/` inventory below. The existing
+`/.github/workflows/` CODEOWNERS rule (@chi-thanh-nguyen) covers the new files and
+is unchanged. The immutable canonical tree remains unchanged; this is an explicit
+replacement, not a reinterpretation of its original inventory. No new job, test
+suite, E2E, release or deployment workflow, ruleset, required-check, CodeQL or
+protected-review change is approved.
+
 ```text
 codemastery/
 
@@ -285,7 +305,11 @@ codemastery/
 
     ├── workflows/
 
-    │   └── ci.yml
+    │   ├── ci-backend.yml
+
+    │   ├── ci-frontend.yml
+
+    │   └── ci-vm.yml
 
     ├── ISSUE_TEMPLATE/
 

@@ -27,7 +27,8 @@ Earlier dated records below retain their approval scope and history.
 
 This document describes CodeMastery's current testing contract, based on
 [the backend build](../backend/pom.xml), [the frontend manifest](../frontend/package.json),
-and [the CI workflow](../.github/workflows/ci.yml).
+and the CI workflows: [CI Backend](../.github/workflows/ci-backend.yml),
+[CI Frontend](../.github/workflows/ci-frontend.yml) and [CI VM](../.github/workflows/ci-vm.yml).
 
 The sections from [Test Layers and Evidence](#test-layers-and-evidence) through
 [Remaining Gaps](#remaining-gaps) describe the current repository. The later dated
@@ -451,9 +452,15 @@ CT14/CT37 approval and frontend/backend integration are not implied.
 
 ## CI
 
-The `CI` GitHub Actions workflow runs on pull requests targeting `main`, pushes
-to `main`, and manual `workflow_dispatch`. It uses `contents: read` permissions
-and eight independent jobs on `ubuntu-24.04`:
+Three GitHub Actions workflows, `CI Backend` ([ci-backend.yml](../.github/workflows/ci-backend.yml)),
+`CI Frontend` ([ci-frontend.yml](../.github/workflows/ci-frontend.yml)) and `CI VM`
+([ci-vm.yml](../.github/workflows/ci-vm.yml)), each run on pull requests targeting
+`main`, pushes to `main`, and manual `workflow_dispatch`, with `contents: read`
+permissions. `CI Backend` holds the Backend job, `CI Frontend` the Frontend job and
+`CI VM` the six VM jobs. They replace the earlier single `CI` workflow (`ci.yml`)
+without changing any job ID, display name, step or trigger
+([record](repository-structure.md#bounded-ci-workflow-inventory-replacement--12-november-2026)).
+Together they define eight independent jobs on `ubuntu-24.04`:
 
 | Job display name (ID) | What it runs |
 | --- | --- |

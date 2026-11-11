@@ -129,12 +129,14 @@ an existing user flow.
 
 ## CI Expectations
 
-[The CI workflow](.github/workflows/ci.yml) defines independent Backend and
-Frontend validation jobs on `ubuntu-24.04`, plus VM deployment-script, ingress and
-MinIO-initializer qualification jobs. It runs for pull requests targeting `main`,
-pushes to `main`, and manual dispatch. Backend uses Temurin 25 with
-`./mvnw verify`; frontend uses Node 22 with `npm ci`, `npm test` and
-`npm run build`, which includes typechecking.
+The CI workflows define independent Backend
+([ci-backend.yml](.github/workflows/ci-backend.yml)) and Frontend
+([ci-frontend.yml](.github/workflows/ci-frontend.yml)) validation jobs on
+`ubuntu-24.04`, plus VM deployment-script, ingress and MinIO-initializer
+qualification jobs ([ci-vm.yml](.github/workflows/ci-vm.yml)). Each workflow runs
+for pull requests targeting `main`, pushes to `main`, and manual dispatch.
+Backend uses Temurin 25 with `./mvnw verify`; frontend uses Node 22 with
+`npm ci`, `npm test` and `npm run build`, which includes typechecking.
 
 Run relevant supported local checks and report their results. Resolve failures
 from the actual workflow, and report remote CI success only when a run has
