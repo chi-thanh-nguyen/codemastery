@@ -22,16 +22,16 @@ public class AssignmentEntity{
     @Column(name = "lesson_id")
     private UUID lesson_id;
 
-    @Column(name = "title", nullable = false)
+    @Column(name = "title", nullable = false, columnDefinition = "text")
     private String title;
 
-    @Column(name = "instructions", nullable = false)
+    @Column(name = "instructions", nullable = false, columnDefinition = "text")
     private String instructions;
 
     @Column(name = "deadline_at", nullable = false)
     private Instant deadline_at;
 
-    @Column(name = "publication_status", nullable = false)
+    @Column(name = "publication_status", nullable = false, columnDefinition = "text")
     private String publication_status;
 
     public AssignmentEntity(){

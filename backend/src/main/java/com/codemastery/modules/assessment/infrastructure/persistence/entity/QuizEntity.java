@@ -17,16 +17,16 @@ public class QuizEntity {
     @Column(name = "course_id", nullable = false)
     private UUID course_id;
 
-    @Column(name = "title", nullable = false)
+    @Column(name = "title", nullable = false, columnDefinition = "text")
     private String title;
 
-    @Column(name = "kind", nullable = false)
+    @Column(name = "kind", nullable = false, columnDefinition = "text")
     private String kind;
 
     @Column(name = "time_limit_seconds", nullable = false)
     private Integer time_limit_seconds;
 
-    @Column(name = "publication_status", nullable = false)
+    @Column(name = "publication_status", nullable = false, columnDefinition = "text")
     private String publication_status;
 
     public QuizEntity() {

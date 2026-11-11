@@ -21,10 +21,10 @@ public class QuestionEntity {
     @Column(name = "prompt", nullable = false, columnDefinition = "text")
     private String prompt;
 
-    @Column(name = "kind", nullable = false)
+    @Column(name = "kind", nullable = false, columnDefinition = "text")
     private String kind;
 
-    @Column(name = "difficulty", nullable = false)
+    @Column(name = "difficulty", nullable = false, columnDefinition = "text")
     private String difficulty;
 
     @Column(name = "options", columnDefinition = "text[]", nullable = false)

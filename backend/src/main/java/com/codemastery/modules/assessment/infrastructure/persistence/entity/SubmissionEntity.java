@@ -23,10 +23,10 @@ public class SubmissionEntity{
     @Column(name = "user_id", nullable = false)
     private UUID user_id;
 
-    @Column(name = "object_key", nullable = false)
+    @Column(name = "object_key", nullable = false, columnDefinition = "text")
     private String object_key;
 
-    @Column(name = "original_filename", nullable = false)
+    @Column(name = "original_filename", nullable = false, columnDefinition = "text")
     private String original_filename;
 
     @Column(name = "submitted_at", nullable = false)
@@ -35,7 +35,7 @@ public class SubmissionEntity{
     @Column(name = "grade_percentage", precision = 5, scale = 2)
     private BigDecimal grade_percentage;
 
-    @Column(name = "feedback")
+    @Column(name = "feedback", columnDefinition = "text")
     private String feedback;
 
     @Column(name = "graded_at")
