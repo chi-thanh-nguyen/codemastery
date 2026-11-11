@@ -743,12 +743,14 @@ target add no HEALTHCHECK. Only the frontend `release` target bakes one.
 
 ## CI
 
-[The GitHub Actions workflow](../.github/workflows/ci.yml) runs on pull requests
-targeting `main`, pushes to `main`, and manual dispatch, on `ubuntu-24.04`.
+Three GitHub Actions workflows, [CI Backend](../.github/workflows/ci-backend.yml),
+[CI Frontend](../.github/workflows/ci-frontend.yml) and [CI VM](../.github/workflows/ci-vm.yml),
+run on pull requests targeting `main`, pushes to `main`, and manual dispatch, on
+`ubuntu-24.04`.
 Backend uses Temurin 25 and runs `./mvnw verify` from `backend/`, including the
 Testcontainers integration tests. Frontend uses Node 22 and runs `npm ci`,
 `npm test` and `npm run build` from `frontend/`. Both jobs cache package-manager
-downloads using the committed build inputs. Six further jobs test
+downloads using the committed build inputs. Six further jobs, in CI VM, test
 `infrastructure/vm/deploy.sh`, the VM override, the frontend `release` image and
 the MinIO initializer image against real containers on the runner; they do not
 deploy anywhere. CodeQL code
