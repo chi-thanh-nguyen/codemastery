@@ -136,7 +136,11 @@ rows and publishes it with Spring's `ApplicationEventPublisher.publishEvent`.
 Adaptive's existing `QuizSubmittedEventListener` handles it with a plain
 `@EventListener` method: same thread, same transaction. No `@Async`, no
 `@TransactionalEventListener`, no `REQUIRES_NEW`, no asynchronous multicaster, queue,
-outbox or broker. Assessment imports no Adaptive type.
+outbox or broker. The publication path (`AttemptService` and `QuizSubmittedEvent`)
+imports no Adaptive type and calls no Adaptive service. This does not change
+Assessment's existing approved uses of Adaptive's `SkillGraphService` for question
+tagging and quiz scope validation (ADR005 §3.2, ADR007 §4), nor the Assessment-owned
+port of §8 that Adaptive implements.
 
 **Exactly one subscriber.** This record approves one subscriber of
 `QuizSubmittedEvent`: Adaptive's `QuizSubmittedEventListener`. Spring would run any
@@ -178,12 +182,14 @@ and `AdaptiveDecisionService` (existing files):
 5. Classify each assessed skill with the existing calculator and classifier under
    the policy; insert or update its mastery row. Unassessed skills are untouched.
 6. Effects only when membership is `active`/`completed` **and** the Course is
-   effectively adaptive: `adaptiveEnabled` plus ADR005 §7.2 readiness re-evaluated
-   now, from §3's published Lessons, Adaptive's graph and mappings, and Assessment
-   coverage read by the execution-only companion of ADR005 §3.3 in existing
-   `QuestionBankService`: `public CoverageSnapshot readCoverageForExecution(UUID courseId,
-   Set<UUID> skillIds)` (same semantics, no actor, held-root precondition, Adaptive
-   execution caller only).
+   effectively adaptive. The stored `adaptiveEnabled` is checked first; only when it
+   is true is ADR005 §7.2 readiness re-evaluated now, from §3's published Lessons,
+   Adaptive's graph and mappings, and Assessment coverage read by the
+   execution-only companion of ADR005 §3.3 in existing `QuestionBankService`:
+   `public CoverageSnapshot readCoverageForExecution(UUID courseId, Set<UUID> skillIds)`
+   (same semantics, no actor, §12's execution-scope precondition, Adaptive
+   execution caller only). A disabled Course therefore runs no readiness,
+   coverage, decision, progress or recommendation code.
 7. Decide with §6's engine; apply test-out Lessons through `applyMasterySkips`;
    insert recommendation rows (§§7, 9).
 
@@ -202,6 +208,37 @@ processing instant (§9), while evidence order keeps ADR007's logical `submitted
   scheduler pass. Repeated failure stays visible as overdue attempts plus safe logs
   with correlation IDs (no answers, keys or reasons). The failure classes, recovery
   path and risk disposition follow below.
+- **Answer durability under rollback.** A manual POST submit writes the supplied
+  masks, grading, terminal fields and every Adaptive effect in this one unit
+  (ADR007 §9 and §4 above). When the unit rolls back, the masks sent in that POST
+  roll back as well, and the Attempt keeps only its **last committed saved masks**:
+  those of the latest committed answer save, or the all-false masks captured at
+  start. If the learner does not submit successfully before `expiresAt`, ADR007
+  §10's finalizer grades those saved masks once the cause is removed. The stored
+  result can then be lower than the answers the learner sent. It is immutable
+  submitted evidence: mastery is classified from it (for example Weak instead of
+  Mastered), the test-out it would have earned does not happen, and remedial or
+  continue recommendations follow from it. No regrade or repair operation exists.
+- **Mitigation: save before submit** (client obligation on existing operations).
+  The quiz-taking client (`useQuizAttempt.ts` and `quizApi.ts`) performs every
+  Submit as two steps of one user action: first the approved answer save (ADR007
+  §9 `PUT` with the complete current mask set), then, only after that save returned
+  200, the POST submit with the same set. Answer saves run no grading, event or
+  Adaptive code, so they keep committing while an Adaptive failure blocks
+  submission. If the save fails, is rejected or its outcome is unknown, the client
+  does not send the POST: it keeps the local answers, reads the Attempt (ADR007 §11
+  GET) to show its current state (active, overdue or already submitted) and reports
+  the failure before the learner's next deliberate Submit. There is no automatic
+  retry. **Guarantee:** when the save
+  committed, a rolled-back submission leaves exactly the submitted masks, and a
+  later finalization yields the same per-question correctness and score that the
+  manual submission would have produced (grading is deterministic over immutable
+  keys); only `submitted_at` becomes `expiresAt`. **Limit:** nothing protects
+  answers changed after the last committed save, or a save that failed, timed
+  out, was never sent, arrived at or after `expiresAt` (409), or was lost with the
+  browser or connection. Client-side saving reduces this exposure; it cannot
+  remove it. Periodic saves during the attempt narrow the window further but are
+  not required by this record. No server contract changes.
 - **Duplicates.** A committed submission publishes exactly one event inside its
   own transaction; a repeated submit or finalize of a submitted Attempt publishes
   none (ADR007 §9/§10). Processing is idempotent anyway: states are recomputed from
@@ -231,8 +268,9 @@ processing instant (§9), while evidence order keeps ADR007's logical `submitted
   every retry. Nothing distinguishes them automatically and nothing assumes
   progress: an unchanged cause yields an unchanged rollback.
 - **Identification.** Each failed run logs one safe structured record with the
-  correlation ID, Attempt and Course IDs, manual or scheduler trigger and the
-  exception class, never answers, keys, reasons or names. A deterministic failure
+  correlation ID, Attempt and Course IDs, manual or scheduler trigger, the failing
+  orchestration step (1–7 of §4, or the Assessment write before publication) and
+  the exception class, never answers, keys, reasons or names. A deterministic failure
   shows up as the same Attempt failing on consecutive scheduler passes, or repeated
   manual 500s in one Course, while other Courses keep committing (ADR007 §10 pages
   past failed candidates). No new metric, alert, threshold or endpoint is approved.
@@ -242,10 +280,25 @@ processing instant (§9), while evidence order keeps ADR007's logical `submitted
   the ordinary paths re-execute: (a) a code or configuration defect is fixed by a
   normal reviewed change, CI and an authorized deployment; (b) Course data that an
   approved operation can correct (graph, mapping, question or settings commands
-  under ADR005's guard) is corrected by its owner through that operation. After
-  that, the next scheduler pass finalizes overdue Attempts and learners resubmit
-  active ones. Recomputation from latest evidence, test-out of incomplete Lessons
-  only and §7's de-duplication give exactly one set of effects. **No** manual
+  under ADR005's guard) is corrected by its owner through that operation; (c) a
+  failure in step 6 or 7 (readiness or coverage evaluation, the decision engine,
+  test-out writes, recommendation inserts or §9's recommendation clock check) stops
+  occurring once the owning Instructor disables adaptive mode through the approved
+  settings operation (ADR005 §13.1–13.2: GET for the ETag, then PUT with
+  `adaptiveEnabled=false` and the unchanged policy). Route (c) exists only while the
+  stored policy is valid, because the settings read and every update require one;
+  it can meet the settings entry's NOWAIT 409 while submissions hold the root and
+  is then repeated deliberately. Because step 6 checks the stored flag first, a
+  disabled Course commits submissions with mastery only. This uses an approved
+  configuration operation, not a bypass of the unit. Route (c) does **not** avoid
+  failures in steps 1–5 (a malformed stored policy, foreign or incomplete
+  evidence, classification, mastery writes, a missing execution scope); those need
+  route (a) or (b) or have no approved repair. While disabled, learners see no
+  current recommendation (§15) and earn no test-out; re-enabling revalidates
+  readiness only (ADR005 §13.2), and effects resume at the next submission without
+  catch-up. After the cause is removed, the next scheduler pass finalizes overdue
+  Attempts and learners resubmit active ones. Recomputation from latest evidence,
+  test-out of incomplete Lessons only and §7's de-duplication give exactly one set of effects. **No** manual
   database edit, replay job, skip flag or bypass of the unit is approved. A cause
   that no approved operation can correct (for example a malformed stored policy,
   which ADR005 §7.1 does not allow to be cleared) has **no approved repair path**
@@ -263,13 +316,19 @@ processing instant (§9), while evidence order keeps ADR007's logical `submitted
   costs one guarded transaction per pass until the cause is removed.
 - **Trade-off and risk disposition.** The *architectural trade-off*, one atomic
   unit chosen over silent divergence between results and mastery, is a technical
-  decision within this delegation. The *operational consequence*, that a
-  deterministic Adaptive failure stops quiz submission in the affected Course,
-  with no in-product degraded mode, until the cause is removed, is residual risk and
-  is **PENDING_LEADER_RISK_ACCEPTANCE** before integrated quiz/adaptive behavior is
-  exposed to users. The Leader's decision required: accept that risk, or authorize
-  a separately approved mitigation (for example a degraded mode or a repair
-  capability). No acceptance is recorded or implied here.
+  decision within this delegation. The *operational consequences* are residual
+  risk: (1) a deterministic Adaptive failure stops quiz submission in the affected
+  Course until the cause is removed; the only in-product relief is route (c), which
+  covers step 6–7 failures only and needs a valid stored policy; (2) an Attempt
+  that expires while submission is blocked is finalized from its last committed
+  saved masks, so answers not covered by a committed save are graded as saved and
+  the resulting immutable evidence drives mastery and recommendations; the
+  save-before-submit obligation reduces but cannot remove this. Both are
+  **PENDING_LEADER_RISK_ACCEPTANCE** before integrated quiz/adaptive behavior is
+  exposed to users. The Leader's decision required: accept these risks, or
+  authorize a separately approved mitigation (for example a submission degraded
+  mode, a repair or regrade capability, or mandatory periodic answer saving). No
+  acceptance is recorded or implied here.
 
 ## 6. CT24.decision
 
@@ -297,8 +356,9 @@ order with unique IDs; `masteryBySkill` holds **every** Course skill (absent row
 `IllegalArgumentException`. Output: test-out IDs in canonical order; recommendations
 are the `SKIP` drafts in that order followed by at most one `REMEDIAL` or `CONTINUE`
 draft. `NextLessonResolver` and `RecommendationReasonBuilder` hold the engine's pure
-helpers; `PracticeDifficultySelector` is §8. The engine is called only when §4 step 6
-holds. Doubles conforming to these records may support local tests; integrated
+helpers; `PracticeDifficultySelector` is §8. In execution the engine is called only
+when §4 step 6 holds; §15's learner reads also call it, read-only, to test whether
+the current row is still valid. Doubles conforming to these records may support local tests; integrated
 behavior needs the real engine.
 
 ## 7. CT07.routing
@@ -330,10 +390,12 @@ Finding two such rows with the same greatest instant is an integrity failure (50
 not a tie to break. A new `continue` or
 `remedial` draft is inserted only if no current recommendation exists or it differs
 in type, target or reason. `skip` rows are always inserted for newly tested-out Lessons.
+The current row is history's latest guidance, not a promise that it still applies:
+learners see it only through §15's validity rule.
 
 **Prerequisite warning** (US-06): for Lesson l, the warning skills are the
 prerequisites p of any s in M(l) with state(p) ≠ `Mastered` and p not in M(l),
-ordered by name then UUID. They are guidance only.
+in §9's name order. They are guidance only.
 
 **Invariants and missing inputs.** Canonical order is never rewritten; no access is
 ever blocked by mastery; Unknown never triggers remedial and counts as unmastered;
@@ -354,13 +416,25 @@ competence. No numeric threshold is added.
 
 ```java
 public interface PracticeDifficultyProvider {
-    DifficultyLevel targetDifficulty(UUID courseId, UUID learnerId, UUID skillId);
+    DifficultyLevel targetDifficulty(UUID courseId, UUID skillId);
 }
 ```
 
 Assessment owns the port and `DifficultyLevel`; Adaptive's `PracticeDifficultySelector`
-is the only implementation, reading the learner's stored state. A skill outside the
-Course → `IllegalArgumentException`. The port reads no Assessment data.
+is the only implementation. The port takes **no learner argument**: it answers only
+for the trusted current Learner, so no caller can read another learner's mastery
+through it. Before any read the implementation requires, in order: an actual
+read-write READ COMMITTED transaction (it runs inside a Learner attempt-start unit),
+otherwise `IllegalStateException`; the CT01 `requireCurrentIdentity()` with role
+Learner and CT03 `requireLearnerCourseAccess(courseId)`, propagating their
+401/403/404 outcomes; and that the skill belongs to the Course (own repository),
+otherwise `IllegalArgumentException`. It then reads only that learner's own row
+(absent → `UNKNOWN`). The port reads no Assessment data, and the scheduler path,
+which has no current identity, can never use it. **Caller allowlist:** there is no
+approved production caller until the Leader-reserved amendment below is decided; if
+it is approved, the only caller is `QuestionSelectionService` inside
+`AttemptService.start`'s Learner guard. Allowlist tests prove that no other code
+calls the port.
 
 **Selection rule** for a future practice consumer in existing `QuestionSelectionService`:
 input is the candidate Questions (ID, skill, difficulty, membership position) and the
@@ -379,8 +453,17 @@ already satisfies §5.3's “difficulty **or** next lesson” requirement.
 
 Each persisted row keeps type, target Lesson, reason and time (V005). Reasons are
 fixed English templates, so every row traces to exactly one §7 rule; skill names are
-inserted verbatim in double quotes, multiple names sorted by name then UUID and
-joined with “, ”. Names are snapshots: later renames do not change history.
+inserted verbatim in double quotes, multiple names in name order and joined with
+“, ”. Names are snapshots: later renames do not change history.
+
+**Name order** (reasons here and §7's warnings). Skills are compared by their stored
+name with Java `String.compareTo`: lexicographic order of UTF-16 code units,
+case-sensitive (`"Z"` before `"a"`), with no Unicode normalization (`"é"` as one code
+point and `"e"` plus a combining accent are different strings), no trimming, no
+locale and no database collation. Equal names are ordered by lowercase canonical
+UUID text, again with `String.compareTo`. The order is computed in the application,
+never by SQL `ORDER BY`, so it does not depend on PostgreSQL collation or the host
+locale.
 
 | Rule | Type | Reason template |
 |---|---|---|
@@ -424,7 +507,8 @@ deterministic **rule oracles** are specified, NOT_RUN, for `AdaptiveDecisionEngi
 | B6-R09 | Same type, target and reason as the current recommendation → no new row; any change → one row. With an advanced fixed clock the newest row is current regardless of UUID values; a run that would insert with an unadvanced clock fails with rollback; history order follows §9 exactly |
 | B6-R10 | Disabled, not ready, `left` or `none` → mastery rows only; null policy → nothing |
 | B6-R11 | Mapping UNKNOWN/WEAK→EASY, LEARNING→MEDIUM, MASTERED→HARD; fallback orders of §8 |
-| B6-R12 | Reason strings equal §9's templates byte for byte, names sorted, no IDs in text |
+| B6-R12 | Reason strings equal §9's templates byte for byte, no IDs in text. Name order: skills named `"beta"`, `"Alpha"`, `"Zeta"`, `"Ärger"` and two named `"alpha"` order as `"Alpha"`, `"Zeta"`, `"alpha"` (smaller UUID), `"alpha"` (larger UUID), `"beta"`, `"Ärger"`, identically under any JVM default locale; a precomposed and a decomposed `"é"` are distinct names |
+| B6-R13 | §15 validity, with the current row R taken from an earlier run: unchanged inputs → R visible; continue target later completed manually → null; all Lessons completed → null; Weak skill now Learning, or its prerequisite now Mastered, or the prerequisite edge or target mapping removed → null; skill renamed → null; target hidden or Course disabled → null; a remedial review target that is already completed and still valid → visible with `targetCompleted` true. Evaluation writes nothing |
 
 Evaluation oracles (P1/P2/P3 path divergence, routing correctness against the ≥80%
 target, mastery-update correctness) belong to CT36.F in Batch 8 and must use these
@@ -445,15 +529,43 @@ rules; the routing target is an evaluation target, never a routing threshold.
   recommendation row is written, so states stay Unknown. Because the offer condition
   still holds, the offer reappears on later visits until mastery data exists, as US-03
   states; the client may hide it for the current view only.
-- **CT25.binding.** Exposure: §15's guidance read returns `placementOffered = true`
-  when membership is active/completed, `adaptiveEnabled` is true, a policy is stored,
-  the Course has at least one skill and the learner has no mastery row for any Course
-  skill. The client offers the first diagnostic Quiz of the CT23 learner list order;
-  with none published, no offer is shown. Start uses CT04 unchanged except the gate
-  ADR007 §8 reserved for CT25: in `AttemptService.start`, a `diagnostic` Quiz is 409
-  if the learner has any attempt on another diagnostic Quiz of the Course or a
-  submitted attempt on this one; an active attempt on this one resumes (200). The
-  receiver is the same `QuizSubmittedEvent` path (§4; U35), with no extra REST (U19).
+- **CT25.binding.** Start uses CT04 unchanged except the gate ADR007 §8 reserved for
+  CT25: in `AttemptService.start`, a `diagnostic` Quiz is 409 if the learner has any
+  attempt on another diagnostic Quiz of the Course or a submitted attempt on this
+  one; an active attempt on this one resumes (200). The receiver is the same
+  `QuizSubmittedEvent` path (§4; U35), with no extra REST (U19).
+
+  **Exposure.** The server, not the client, names the Quiz to offer, so that an
+  offer never leads to a 409 that the snapshot already predicts. Assessment adds, in
+  existing `AttemptService.java`:
+
+  ```java
+  public UUID readMyPlacementQuizId(UUID courseId);
+  ```
+
+  It applies CT03 `requireLearnerCourseAccess(courseId)`, reads only the trusted
+  current Learner, joins the caller's REPEATABLE READ read-only transaction, samples
+  server time once and returns, applying exactly the start gate above to that
+  snapshot:
+
+  1. if the learner has any attempt on a diagnostic Quiz of the Course (the gate
+     keeps them all on one Quiz): that Quiz's ID only when it has no submitted
+     attempt, exactly one unsubmitted attempt with now < `expiresAt`, and the Quiz is
+     currently published (start then resumes it with 200); otherwise `null`
+     (overdue pending finalization, already submitted, or hidden);
+  2. otherwise the first currently published diagnostic Quiz in CT23's learner
+     list order (title `COLLATE "C"`, then UUID); `null` when there is none.
+
+  Its only caller is Adaptive's existing `PlacementDiagnosticService`, composing
+  §15's guidance. Guidance returns `placementQuizId` and `placementOffered`, which is
+  true exactly when membership is active/completed, the stored `adaptiveEnabled` is
+  true, a policy is stored, the Course has at least one skill, the learner has no
+  mastery row for any Course skill **and** `placementQuizId` is non-null; otherwise
+  `placementQuizId` is null. The client offers only that Quiz and starts it through
+  CT04; it applies no selection of its own. A state change between the read and the
+  start (expiry, hiding, another tab) still yields start's normal 409 or 404, and
+  the client then reloads guidance. The one-time diagnostic invariant and the
+  attempt lifecycle are unchanged.
 
 ## 12. CT33.results
 
@@ -484,10 +596,9 @@ attempt with missing or null correctness is an integrity failure.
 admission, so none is a general read of an arbitrary learner:
 
 - `readLatestSkillEvidence` is **execution-only and actorless**. Its only caller is
-  Adaptive's `MasteryUpdateService` in §4 step 4. Like §3, it first verifies an
-  active read-write READ COMMITTED transaction in which Course's guard holds this
-  Course's root (ADR007 §3.1), otherwise `IllegalStateException` (safe 500) before
-  any query. `learnerId` comes from the event's persisted Attempt.
+  Adaptive's `MasteryUpdateService` in §4 step 4. It first verifies the
+  execution-scope precondition below, otherwise `IllegalStateException` (safe 500)
+  before any query. `learnerId` comes from the event's persisted Attempt.
 - `readMyLatestSkillEvidence` applies CT03 `requireLearnerCourseAccess(courseId)`
   and reads only the trusted current Learner from CT01 `requireCurrentIdentity()`;
   no learner ID is accepted. Its caller is §13's learner map.
@@ -495,6 +606,30 @@ admission, so none is a general read of an arbitrary learner:
   Its callers are §§13–14's owner reads, which must first obtain
   `readOwnedLearnerState` (active/completed Enrollment, else 404) in the same
   transaction, exactly as for `listLearnerAttemptsForOwner`.
+
+**Execution-scope precondition** (`readLatestSkillEvidence` and §4's
+`QuestionBankService.readCoverageForExecution`, both in Assessment's
+`application/service` package). Assessment cannot inspect Course's lock, and Course
+exports no lock handle (ADR005 §5), so Assessment proves the held root through its
+own position in the call chain. `AttemptService.submit` and `finalizeExpired` pass
+their work to Course's guard as a callback (ADR007 §3.1), and Course invokes that
+callback only after it holds this Course's root with `FOR UPDATE` and has rechecked
+admission; the lock lasts until the transaction ends. As the callback's first
+action, `AttemptService` binds an Assessment-private marker naming that Course ID to
+the current thread and transaction (Spring
+`TransactionSynchronizationManager.bindResource` under a key held by a
+package-private nested type of `AttemptService`), and unbinds it in a `finally`
+block before the callback returns; a transaction-completion synchronization unbinds
+it as a backstop. Each guarded read requires, before any query: an actual
+read-write transaction at READ COMMITTED, and the marker bound for exactly the
+requested `courseId`. A bound marker therefore implies that the caller runs inside
+that callback on that thread, with the root held. It cannot leak to another thread
+(the binding is thread-local), to a later transaction (unbound before the callback
+returns) or to another Course (the ID must match). `start`, answer saves and every
+other path never bind it. Course adds no method, and Assessment reads no Course
+lock, marker or internal type. The marker grants nothing by itself: only code
+running inside the callback, that is the publication → listener path, can observe
+it, and the caller allowlist tests still apply.
 
 Both admitted reads join the caller's REPEATABLE READ read-only transaction. No
 controller, scheduler, other module or other Adaptive service may call any of them;
@@ -568,34 +703,62 @@ UUID or page, 401, 403, 404, 500). Bindings: existing `MasteryController`,
 | Path | Actor and result |
 |---|---|
 | `GET /api/courses/{courseId}/mastery-map` | Self Learner: §13 map |
-| `GET /api/courses/{courseId}/adaptive-guidance` | Self Learner: `adaptiveEnabled`, `placementOffered` (§11), the **visible current recommendation** below (or null), and per published Lesson its warning skills (§7; empty when `adaptiveEnabled` is false) |
-| `GET /api/me/recommendations` | Self Learner: one row per ACTIVE membership of a published Course, ordered like `/api/me/course-progress`, each with the **visible current recommendation** below (or null) |
+| `GET /api/courses/{courseId}/adaptive-guidance` | Self Learner: `adaptiveEnabled`, `placementOffered` and `placementQuizId` (§11), the **visible current recommendation** below (or null), and per published Lesson its warning skills (§7; empty when `adaptiveEnabled` is false) |
+| `GET /api/me/recommendations` | Self Learner: one row per ACTIVE membership of a published Course, ordered like `/api/me/course-progress`, each with `courseTitle`, the **visible current recommendation** below (or null) and its `targetLessonTitle` (null exactly when the recommendation is null) |
 | `GET /api/instructor/courses/{courseId}/learners` | Owner: §14 list |
 | `GET .../learners/{learnerId}` | Owner: one §14 row |
 | `GET .../learners/{learnerId}/mastery-map` | Owner: §13 map of that learner |
 | `GET .../learners/{learnerId}/recommendations` | Owner: paged history |
 | `GET .../learners/{learnerId}/attempts` | Owner: §12 attempt summaries |
 
-For `/api/me/recommendations`, Course adds to `LessonProgressService`
-`public PageResponse<LearnerCourseRef> listMyAdaptiveEnrollments(int page, int size)` with
-`record LearnerCourseRef(UUID courseId, UUID enrollmentId, boolean adaptiveEnabled,
-Set<UUID> publishedLessonIds, Set<UUID> completedLessonIds)`, using the same population,
-order and paging as `myCourseProgress`. This satisfies CT16.learner-home's request
-without client fan-out or cross-Course ranking. Recommendations are shown verbatim.
+For `/api/me/recommendations`, Course adds to `LessonProgressService`:
 
-**Visible current recommendation** (one rule for both learner reads). Adaptive takes
-§7's current row for the Enrollment and returns it only if, in the same snapshot,
-(1) the Course's stored `adaptiveEnabled` is true and (2) the row's target Lesson is
-in the current published Lesson set (`LearnerCourseRef.publishedLessonIds`, or §3's
-`lessons` for `/adaptive-guidance`). Otherwise it returns null. This is a visibility
-filter only: it does not fall back to an older row, delete history or synthesize a
-recommendation. `targetCompleted` is true when the target is in the completed set.
-Readiness is not re-evaluated on reads; a row written while the Course was enabled
-and ready stays visible after re-enabling until the next run replaces it, flagged
-by `targetCompleted` where applicable. This implements CT16-LEARNER-HOME-2026-11-08-r1
-§3 (no entry for a Course without adaptive mode or a current recommendation, shown
+```java
+public PageResponse<LearnerCourseRef> listMyAdaptiveEnrollments(int page, int size);
+public record LearnerCourseRef(UUID courseId, String courseTitle, UUID enrollmentId,
+        boolean adaptiveEnabled, List<LessonState> lessons, Map<UUID, String> lessonTitles) {}
+```
+
+It uses the same population, order and paging as `myCourseProgress`; `lessons` are
+§3's published Lessons in canonical order with their flags, and `lessonTitles` maps
+exactly those Lesson IDs to their stored titles (Course-owned data; no hidden Lesson
+appears). Adaptive bulk-loads the graph, mappings and the learner's mastery rows for
+the page's Courses; there is no per-Course request. The row carries the Course title
+and the visible target's title, so Learner Home renders CT16.learner-home §3's entry
+("type, target lesson, the backend reason verbatim, time … labelled with its course")
+without client fan-out or cross-Course ranking. `/adaptive-guidance` needs no title:
+its client is on the Course page, whose existing syllabus read lists every published
+Lesson, and a visible target is always published. Recommendations are shown verbatim.
+
+**Visible current recommendation** (one rule for both learner reads). History keeps
+every row; a learner is shown only guidance that still holds. Adaptive takes §7's
+current row R for the Enrollment and returns it only if, in the same snapshot:
+
+1. the Course's stored `adaptiveEnabled` is true;
+2. R's target Lesson is a currently published Lesson of the Course
+   (`LearnerCourseRef.lessons`, or §3's `lessons` for `/adaptive-guidance`); and
+3. **R is still valid**: evaluating §7 steps 1–4 with §6's engine, read-only, on the
+   snapshot's current inputs (published Lessons in canonical order with their
+   completion flags, the learner's stored mastery rows with absent as Unknown,
+   Adaptive's graph and mappings, and current skill names) yields a
+   `continue`/`remedial` draft whose type, target Lesson and reason equal R's byte
+   for byte.
+
+Otherwise it returns null. The evaluation applies no test-out, writes nothing and
+does not re-evaluate readiness. It reproduces the run's own draft whenever the
+inputs are unchanged since R was inserted, because a run applies its test-out
+before deciding. It therefore hides exactly the guidance that no longer holds: a
+finished Course (no draft), a `continue` target that the learner has since
+completed manually (manual completion does not call Adaptive, ADR006 §3), a
+`remedial` whose Weak skill or unmastered prerequisite, edge or mapping has changed,
+a renamed skill (until the next run inserts the renamed row), a disabled Course and
+a hidden target. It never falls back to an older row, deletes history or
+synthesizes or persists a recommendation. A learner without visible guidance still
+has CT22's canonical `nextLessonId`. `targetCompleted` can be true only for a
+`remedial` review target (§7.2). This implements CT16-LEARNER-HOME-2026-11-08-r1 §3
+(no entry for a Course without adaptive mode or a current recommendation, shown
 unaltered otherwise). Clients display the response as is and add no visibility
-filter of their own. Owner insight reads stay unfiltered (§14).
+filter of their own. Owner insight reads stay unfiltered audit history (§14).
 
 ## 16. CT08.verification-plan
 
@@ -608,15 +771,22 @@ behavior with conforming doubles in `MasteryUpdateServiceTest`,
 | Case | Required observable outcome |
 |---|---|
 | B6-V01 | Manual submit in a ready Course commits result, mastery, skip progress and recommendation rows together |
-| B6-V02 | Fault injected after mastery writes, inside Course participation and in recommendation insert: nothing commits; the Attempt is still active; HTTP 500 |
-| B6-V03 | Scheduler finalization follows the same path; a failure leaves the Attempt overdue and the next pass retries. A deterministic fault (test-scoped bean override) fails the same Attempt on two consecutive passes with nothing committed while another Course's candidate commits; after the override is removed (a simulated released fix) the next pass commits exactly one set of effects, and a manual resubmission of an active Attempt behaves the same |
+| B6-V02 | Fault injected after mastery writes, inside Course participation and in recommendation insert: nothing commits; the Attempt is still active; HTTP 500. The masks sent in the failed POST are not committed: the Attempt's masks equal the last committed save, and equal the POST's masks when the same set was saved first |
+| B6-V03 | Scheduler finalization follows the same path; a failure leaves the Attempt overdue and the next pass retries. A deterministic fault (test-scoped bean override) fails the same Attempt on two consecutive passes with nothing committed while another Course's candidate commits; after the override is removed (a simulated released fix) the next pass commits exactly one set of effects, and a manual resubmission of an active Attempt behaves the same. Answer durability: with a committed save of masks M before the blocked manual submit, finalization after expiry and the fix stores exactly the correctness and score that an unfailed submission of M yields, with `submitted_at` = `expires_at`; without that save, finalization grades the earlier committed masks and the resulting mastery follows them (residual risk observed, not prevented) |
 | B6-V04 | Duplicate submit and repeated finalize publish no second event and add no rows; the application context has exactly the approved `QuizSubmittedEvent` subscriber set (§4) |
 | B6-V05 | Overdue older Attempt finalized after a newer submission does not regress any state |
-| B6-V06 | Disabled or not-ready Course: mastery committed, no progress or recommendation; null policy: no Adaptive rows. After disabling, or hiding the target Lesson, `/adaptive-guidance` and `/api/me/recommendations` return null while the owner history still lists the row (§15) |
+| B6-V06 | Disabled or not-ready Course: mastery committed, no progress or recommendation; a disabled Course executes no readiness or coverage read. Null policy: no Adaptive rows. After disabling, hiding the target Lesson, completing the `continue` target manually or completing the Course, `/adaptive-guidance` and `/api/me/recommendations` return null while the owner history still lists the row (§15); with unchanged inputs both return the row, and `/api/me/recommendations` carries the Course and target titles from Course data |
 | B6-V07 | `left` learner finalized after leaving: mastery only |
 | B6-V08 | Concurrent same-Course submissions serialize on the root; first submission versus threshold edit follows ADR005 §13.2 |
-| B6-V09 | Calls to §3 methods, `readLatestSkillEvidence` or `readCoverageForExecution` without the held root, from another thread or in a read-only/REPEATABLE READ transaction fail before any query or effect. `readMyLatestSkillEvidence` returns only the current Learner and denies another Course, LEFT or absent membership and non-Learners; `readOwnedLatestSkillEvidence` denies non-owners and Administrators; allowlist tests find no other caller (§12) |
-| B6-V10 | Diagnostic gate of §11 and init of in-scope skills only |
+| B6-V09 | Calls to §3 methods, `readLatestSkillEvidence` or `readCoverageForExecution` without the held root, from another thread, for another Course ID than the bound marker, after the guard callback returned, or in a read-only/REPEATABLE READ transaction fail before any query or effect; a call from `start` or an answer save (no marker) fails the same way. `PracticeDifficultyProvider` outside a read-write transaction, for a non-Learner or a non-member, or with a foreign skill fails before reading mastery, and has no production caller. `readMyLatestSkillEvidence` returns only the current Learner and denies another Course, LEFT or absent membership and non-Learners; `readOwnedLatestSkillEvidence` denies non-owners and Administrators; allowlist tests find no other caller (§12) |
+| B6-V10 | Diagnostic gate of §11 and init of in-scope skills only. `placementQuizId`: no diagnostic attempt → first published diagnostic Quiz; active attempt on D2 → D2 even when D1 sorts first; overdue or submitted diagnostic attempt, or an active attempt whose Quiz is now hidden → null and no offer; starting the returned Quiz never yields 409 or 404 in the same state |
+| B6-V11 | Route (c): a deterministic fault injected in step 6 or 7 blocks submissions; the owner disables adaptive mode through the settings operation with the current ETag; the next submission commits result and mastery only, while a fault injected in steps 1–5 still fails after disabling |
+
+Client oracle B6-C01, in the existing `frontend/src/features/assessment/components/assessment.test.tsx`:
+Submit sends the answer save and then the POST with an identical mask set; no POST
+is sent when the save fails, is rejected (including 409) or is aborted; a failed,
+rejected or unknown save, and an unknown submit outcome, read the Attempt before
+Submit is enabled again; nothing is retried automatically.
 
 Fixtures use `AbstractIntegrationTest`'s disposable container with Flyway; each test
 owns its records, commits real transactions and cleans them FK-safely (ADR008 §5).
@@ -657,10 +827,12 @@ Course @TamiaoNguyen, Assessment @minhtan29042006, Frontend @heizseung, QA), req
 CI and protected integration — first of ADR010, then this record — are start
 prerequisites for consumers. Still required: AD10/AD11/AD13/AD14/AD16, AS07 (port and
 rule only), AS12, AS16, CO15, FE09/FE12/FE19/FE33 implementation and tests; the
-B6-V cases; finite transaction and statement deadlines (ADR005 §13.3); runtime
-grants; CT29 notifications; CT36.F evaluation data and results. LD-11's joint
+B6-V cases and client oracle B6-C01; the save-before-submit sequence in the
+quiz-taking client (§5); finite transaction and statement deadlines (ADR005 §13.3);
+runtime grants; CT29 notifications; CT36.F evaluation data and results. LD-11's joint
 Course, Assessment and Adaptive owner review of §§3–5 stays open until it actually
-takes place. §5's operational risk is PENDING_LEADER_RISK_ACCEPTANCE. No deployment,
+takes place. §5's operational risks (blocked submission and answers graded from
+the last committed save) are PENDING_LEADER_RISK_ACCEPTANCE. No deployment,
 evaluation result or risk acceptance is implied.
 
 ## 18. Preparation validation — 12 November 2026
@@ -691,3 +863,31 @@ The adaptive practice capture amendment stays pending with a recorded deferral
 recommendation. The new and extended cases are specified and NOT_RUN. This section
 is documentation correction only; it is not independent review, CI evidence or
 Leader approval.
+
+## 20. Final technical review remediation — 13 November 2026
+
+A second independent technical review of PR #236 at `2f3dbf2` found the findings
+below. Under the Leader's explicit instruction **“CodeMastery — Batch 5 & 6 Final
+Technical Findings Remediation”** they are corrected **before integration and within
+the same r1 revisions**: no revision was ever effective, so no effective approval is
+amended. The branch was first restacked onto the remediated Batch 5 head; that
+restack changed no Batch 6 line. Checkpoint membership, IDs, scopes and the selected
+transaction model are unchanged; no schema, migration, dependency or architecture
+change is introduced. Two findings were re-assessed as P2 because, uncorrected,
+they would show learners guidance that no longer holds (P3-4) and leave CT16's
+Learner Home unable to label its entries without fan-out (P3-9).
+
+| Finding | Severity (review → final) | Correction | Clauses |
+|---|---|---|---|
+| F-B6-01 | P2 → P2 | Answers sent in a rolled-back POST are lost and finalization grades the last committed save; consequences for result, mastery and recommendations stated; save-before-submit client obligation with its exact guarantee and limits; risk text extended | §5, §17, B6-V02, B6-V03, B6-C01 |
+| P3-1 | P3 → P3 | Assessment-private, thread- and transaction-bound execution-scope marker bound inside Course's guard callback; no Course lock or type is read | §4, §12, B6-V09 |
+| P3-2 | P3 → P3 | "Imports no Adaptive type" limited to the publication path; existing `SkillGraphService` uses and §8's port kept | §4; ADR001 §16 |
+| P3-4 | P3 → **P2** | Visible current recommendation requires that a read-only evaluation of §7 on current inputs reproduces the stored row; history stays complete | §7, §15, B6-R13, B6-V06 |
+| P3-7 | P3 → P3 | Server-chosen `placementQuizId` from Assessment's `readMyPlacementQuizId`, applying the start gate to the snapshot | §11, §15, B6-V10 |
+| P3-8 | P3 → P3 | Name order: Java `String.compareTo` (UTF-16 code units), no normalization, locale or collation, UUID tie-break | §7, §9, B6-R12 |
+| P3-9 | P3 → **P2** | `/api/me/recommendations` rows carry `courseTitle` and `targetLessonTitle` from Course's `LearnerCourseRef` | §15, B6-V06 |
+| P3-10 | P3 → P3 | Recovery route (c): disabling adaptive mode avoids step 6–7 failures only and needs a valid stored policy; disabled Courses skip readiness entirely; failing step logged | §4, §5, B6-V11 |
+| P3-11 | P3 → P3 | `PracticeDifficultyProvider` takes no learner argument; current Learner, CT03 admission, read-write transaction and skill scope required; no production caller until the §17 amendment | §8, B6-V09 |
+
+The new and extended cases are specified and NOT_RUN. This section is documentation
+correction only; it is not independent review, CI evidence or Leader approval.

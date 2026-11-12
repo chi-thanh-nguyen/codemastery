@@ -952,6 +952,8 @@ subscriber, and any other needs its own contract), and the mastery update, relat
 `LessonProgress` update, recommendation history and the quiz result succeed or fail
 together. Course participation is actorless only under its own guard already held for
 that Course; Assessment adds evidence and execution coverage reads; Adaptive reaches
-Course and Assessment only through the bounded methods named there. Assessment still
-imports no Adaptive type, and Admin/Interaction ownership is unchanged. Review,
+Course and Assessment only through the bounded methods named there. The publication
+path (`AttemptService` and the event) imports no Adaptive type; Assessment's existing
+approved `SkillGraphService` uses and the Assessment-owned difficulty port are
+unchanged, and Admin/Interaction ownership is unchanged. Review,
 integration, implementation and real transaction verification remain gates.

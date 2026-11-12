@@ -6290,7 +6290,7 @@
         "tags": [
           "Batch 6 contracts"
         ],
-        "description": "Self Learner. Placement offer condition, the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true and the target is a currently published Lesson; no older row is substituted, and per-Lesson prerequisite warnings (empty when adaptiveEnabled is false). Guidance only; never blocks access. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner. Placement offer with the server-chosen diagnostic Quiz to start or resume (ADR011 §11), the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted, and per-Lesson prerequisite warnings (empty when adaptiveEnabled is false). Guidance only; never blocks access. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -6349,7 +6349,7 @@
         "tags": [
           "Batch 6 contracts"
         ],
-        "description": "Self Learner. One row per ACTIVE membership of a published Course, same population, order and paging as /api/me/course-progress, with the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true and the target is a currently published Lesson; no older row is substituted. Same rule as /adaptive-guidance; clients add no filter. No cross-Course ranking. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner. One row per ACTIVE membership of a published Course, same population, order and paging as /api/me/course-progress, with the Course title, the visible current recommendation (ADR011 §15) and its target Lesson title: null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted and nothing is written. Same rule as /adaptive-guidance; clients add no filter. No cross-Course ranking. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -9684,7 +9684,7 @@
           "recommendedAt",
           "targetCompleted"
         ],
-        "description": "Current continue/remedial row (ADR011 §7: unique greatest recommendedAt per Enrollment); reason verbatim. Learner reads return it only when visible under ADR011 §15."
+        "description": "Current continue/remedial row (ADR011 §7: unique greatest recommendedAt per Enrollment); reason verbatim. Learner reads return it only while it is still valid under ADR011 §15 (adaptive enabled, target published, and re-evaluating the routing rules on current data yields the same type, target and reason). targetCompleted can be true only for a remedial review target."
       },
       "B6LessonGuidance": {
         "type": "object",
@@ -9723,6 +9723,14 @@
           "placementOffered": {
             "type": "boolean"
           },
+          "placementQuizId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The diagnostic Quiz the learner can start or resume now (ADR011 §11); non-null exactly when placementOffered is true. Clients offer only this Quiz."
+          },
           "currentRecommendation": {
             "oneOf": [
               {
@@ -9744,6 +9752,7 @@
           "courseId",
           "adaptiveEnabled",
           "placementOffered",
+          "placementQuizId",
           "currentRecommendation",
           "lessons"
         ],
@@ -9757,6 +9766,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "courseTitle": {
+            "type": "string",
+            "minLength": 1
+          },
           "recommendation": {
             "oneOf": [
               {
@@ -9766,13 +9779,23 @@
                 "type": "null"
               }
             ]
+          },
+          "targetLessonTitle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "description": "Stored title of the recommendation's target Lesson; null exactly when recommendation is null."
           }
         },
         "required": [
           "courseId",
-          "recommendation"
+          "courseTitle",
+          "recommendation",
+          "targetLessonTitle"
         ],
-        "description": "recommendation is the visible current recommendation of ADR011 §15, or null when the Course's adaptiveEnabled is false, no current row exists or its target is not a published Lesson."
+        "description": "recommendation is the visible current recommendation of ADR011 §15, or null when the Course's adaptiveEnabled is false, no current row exists, its target is not a published Lesson or the routing rules evaluated on current data no longer yield it. courseTitle and targetLessonTitle come from Course data, so Learner Home needs no per-Course request."
       },
       "B6MyRecommendationPage": {
         "type": "object",

@@ -310,6 +310,11 @@ approved and awaits the Leader. LD-11 ordering is honoured; owners' joint review
 remains a review gate. [ADR011 §19](011-batch-06-contract-approvals.md#19-independent-review-corrections--12-november-2026)
 records pre-integration review corrections inside these r1 revisions (learner
 recommendation visibility, failure recovery path, strictly later recommendation
-time, admitted evidence reads, one approved event subscriber); scopes and IDs are
-unchanged. The operational risk of submission-blocking Adaptive failures is
-`PENDING_LEADER_RISK_ACCEPTANCE`.
+time, admitted evidence reads, one approved event subscriber);
+[§20](011-batch-06-contract-approvals.md#20-final-technical-review-remediation--13-november-2026)
+records the final review remediation (answer durability and save before submit,
+execution-scope marker, still-valid learner recommendations with Course and Lesson
+titles, server-chosen placement Quiz, name order, disabling as a bounded recovery
+route, learner-free difficulty port); scopes and IDs are unchanged. The operational
+risks of submission-blocking Adaptive failures and of answers graded from the last
+committed save are `PENDING_LEADER_RISK_ACCEPTANCE`.

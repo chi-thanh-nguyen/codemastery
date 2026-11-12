@@ -609,9 +609,12 @@ the Course policy and, when the Course is enabled and ready, applies test-out an
 records recommendations. Result, mastery, `LessonProgress` and recommendation history
 commit or roll back together; an unconfigured Course gets no Adaptive effect, and a
 disabled or not-ready Course gets mastery updates only (ADR005 §7.2). A failing
-Adaptive step fails the submission; recovery removes the cause through approved
-routes and lets ordinary resubmission or the scheduler re-execute (ADR011 §5). That
-operational consequence awaits Leader risk acceptance.
+Adaptive step fails the submission, and the answers sent with it roll back; an
+Attempt that expires meanwhile is later graded from its last committed answer save,
+so the quiz client saves the answers before every submit. Recovery removes the cause
+through approved routes, including disabling adaptive mode for routing-stage
+failures, and lets ordinary resubmission or the scheduler re-execute (ADR011 §5).
+Those operational consequences await Leader risk acceptance.
 
 Routing (ADR011 §7): Lessons whose mapped skills are all Mastered are tested out
 (completed and marked mastery-skipped, never reversed); a Weak skill with an
@@ -621,10 +624,12 @@ Lesson in canonical order. Prerequisite gaps only produce warnings. Reasons use 
 English templates (§9). Practice difficulty maps Unknown/Weak to easy, Learning to
 medium and Mastered to hard (§8); applying it to quiz capture awaits a Leader-reserved
 amendment of CT04/CT08 evidence rules. The placement diagnostic is an ordinary quiz
-whose scope is its questions' skills; skipping is a navigation, not a server write.
-The Mastery Map, learner guidance, learner-home recommendations and Instructor
-insights are read contracts (§§12–15); learners see a current recommendation only
-while the Course is adaptive-enabled and its target Lesson is published. Mastery
+whose scope is its questions' skills; the server names the diagnostic Quiz to offer,
+and skipping is a navigation, not a server write. The Mastery Map, learner
+guidance, learner-home recommendations and Instructor insights are read contracts
+(§§12–15); learners see the current recommendation only while the Course is
+adaptive-enabled, its target Lesson is published and re-evaluating the routing rules
+on current data still yields it; history keeps every row. Mastery
 states reflect the latest submitted quiz evidence for each skill; screens must say
 so. Earlier deferral text above is historical to the extent resolved by these
 bounded revisions.
