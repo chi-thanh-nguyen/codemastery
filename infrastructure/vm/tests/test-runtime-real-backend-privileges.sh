@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# CI regression test for job "VM runtime privileges with the real backend" (deployment-script-runtime),
+# step "Exercise real Auth, catalogue and membership under the approved matrix" in .github/workflows/ci-vm.yml.
+# Body moved verbatim from that step's former inline `run:` script.
+# CI runs it from the repository root, where its relative paths resolve:
+#   bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+set -euo pipefail
+script=infrastructure/vm/deploy.sh
+work="$(mktemp -d)"
+suffix="${GITHUB_RUN_ID:-local}-$$"
+network="codemastery-runtime-test-${suffix}"
+container="${network}-postgres"
+cleanup() {
+  docker rm -f "${container}-backend" "$container" >/dev/null 2>&1 || true
+  docker network rm "$network" >/dev/null 2>&1 || true
+  rm -rf "$work"
+}
+trap cleanup EXIT
+chmod 700 "$work"
+mkdir -m 700 "$work/env" "$work/http"
+secret() { openssl rand -hex 24; }
+bootstrap_password="$(secret)"
+cat > "$work/env/.env" <<EOF
+POSTGRES_DB=codemastery
+POSTGRES_USER=cm_bootstrap
+POSTGRES_PASSWORD=$bootstrap_password
+DB_NAME=codemastery
+DB_USER=cm_runtime
+DB_PASSWORD=$(secret)
+SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
+SPRING_FLYWAY_USER=cm_migrator
+SPRING_FLYWAY_PASSWORD=$(secret)
+EOF
+chmod 600 "$work/env/.env"
+# Not --internal: the backend API is published to the runner's loopback only.
+docker network create "$network" >/dev/null
+docker run --detach --name "$container" --network "$network" --network-alias postgres \
+  --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=256m \
+  -e POSTGRES_USER=cm_bootstrap -e POSTGRES_PASSWORD="$bootstrap_password" \
+  -e POSTGRES_DB=codemastery postgres:17.11-bookworm >/dev/null
+for attempt in {1..60}; do
+  if docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null
+cat > "$work/exercise-runtime.sh" <<'BASH'
+set -Eeuo pipefail
+source "$1"
+ENV_FILE="$2"; work="$3"
+pgcompose() {
+  [[ "$1" == exec ]] || return 97; shift
+  [[ "$1" == -T ]] && shift
+  [[ "$1" == postgres ]] && shift
+  docker exec -i "$PGTEST_CONTAINER" "$@"
+}
+COMPOSE=(pgcompose)
+backend="${PGTEST_CONTAINER}-backend"
+port="${BACKEND_PORT:-18080}"
+api="http://127.0.0.1:${port}"
+cleanup_backend() { docker rm -f "$backend" >/dev/null 2>&1 || true; }
+[[ "${KEEP_BACKEND:-no}" == yes ]] || trap cleanup_backend EXIT
+check() { [[ "$2" == "$3" ]] || { echo "CHECK FAILED: $1 (expected $3, got $2)" >&2; docker logs "$backend" 2>&1 | tail -20 >&2; exit 1; }; printf '  ok: %-64s %s\n' "$1" "$2"; }
+call() {  # method path token body -> sets STATUS and BODY
+  local args=(-s -o "$work/body" -w '%{http_code}' -X "$1" "$api$2" -H 'Accept: application/json')
+  [[ -z "$3" ]] || args+=(-H "Authorization: Bearer $3")
+  [[ -z "${4:-}" ]] || args+=(-H 'Content-Type: application/json' --data-binary "$4")
+  STATUS="$(curl "${args[@]}")"; BODY="$(cat "$work/body")"
+}
+field() { python3 -c 'import json,sys; d=json.loads(sys.argv[1]); [d:=d[int(k)] if isinstance(d,list) else d[k] for k in sys.argv[2].split(".")]; print(d)' "$BODY" "$1"; }
+
+echo "== provision roles on an empty database, then start the real backend (Flyway runs as the migrator)"
+provision_db_roles >/dev/null
+umask 077
+{ printf 'DB_HOST=postgres\nDB_PORT=5432\nDB_NAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\n' "$(env_get DB_NAME)" "$(env_get DB_USER)" "$(env_get DB_PASSWORD)"
+  printf 'SPRING_FLYWAY_URL=%s\nSPRING_FLYWAY_USER=%s\nSPRING_FLYWAY_PASSWORD=%s\n' "$(env_get SPRING_FLYWAY_URL)" "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)"
+  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\n' "$(openssl rand -hex 32)"
+} > "$work/backend.env"
+docker run -d --name "$backend" --network "$PGTEST_NETWORK" -p "127.0.0.1:${port}:8080" --env-file "$work/backend.env" "$BACKEND_IMAGE" >/dev/null
+# Read the whole log before matching: `docker logs | grep -q` fails under pipefail
+# (docker logs gets SIGPIPE, status 141) once the log outgrows the pipe buffer.
+backend_started() { local logs; logs="$(docker logs "$backend" 2>&1)" && [[ "$logs" == *'Started CodeMasteryApplication'* ]]; }
+backend_failed() {
+  echo "backend did not start: $1" >&2
+  docker inspect -f 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' "$backend" >&2 || true
+  docker logs --tail 80 "$backend" >&2 2>&1 || true
+  exit 1
+}
+started=no
+for _ in $(seq 1 180); do
+  if backend_started; then started=yes; break; fi
+  [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || backend_failed "the container exited during startup"
+  sleep 1
+done
+# One last read after the final sleep, so a marker logged during it still counts.
+[[ "$started" == yes ]] || backend_started || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
+check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "6/6 $(env_get SPRING_FLYWAY_USER)"
+harden_after_migration
+verify_role_separation >/dev/null
+echo "  verify_role_separation: PASS (exact matrix on the real Flyway schema)"
+
+echo "== fixture Course data (inserted by the bootstrap administrator; no seed policy implied)"
+psql_admin >/dev/null <<'SQL'
+INSERT INTO public.users VALUES ('10000000-0000-0000-0000-0000000000a1','instructor@example.test','not-a-login-hash','Test Instructor','instructor','active');
+INSERT INTO public.courses VALUES
+ ('20000000-0000-0000-0000-0000000000c1','10000000-0000-0000-0000-0000000000a1','Algorithms','Published course',NULL,'published',false,NULL),
+ ('20000000-0000-0000-0000-0000000000c2','10000000-0000-0000-0000-0000000000a1','Hidden','Hidden course',NULL,'hidden',false,NULL);
+INSERT INTO public.chapters VALUES ('30000000-0000-0000-0000-0000000000d1','20000000-0000-0000-0000-0000000000c1','Basics',1);
+INSERT INTO public.lessons VALUES
+ ('40000000-0000-0000-0000-0000000000e1','30000000-0000-0000-0000-0000000000d1','Published lesson','Body',1,'published'),
+ ('40000000-0000-0000-0000-0000000000e2','30000000-0000-0000-0000-0000000000d1','Hidden lesson','Body',2,'hidden');
+INSERT INTO public.learning_materials VALUES ('50000000-0000-0000-0000-0000000000f1','40000000-0000-0000-0000-0000000000e1','Slides','file','published',NULL,'private/object-key','slides.pdf',NULL);
+SQL
+course=20000000-0000-0000-0000-0000000000c1; hidden=20000000-0000-0000-0000-0000000000c2
+password='Correct-Horse-Battery-2026'
+
+echo "== Auth (users: SELECT, INSERT)"
+for who in learner.a learner.b learner.c; do
+  call POST /api/auth/register "" "{\"email\":\"$who@example.test\",\"password\":\"$password\",\"displayName\":\"$who\"}"
+  check "register $who" "$STATUS" 201
+done
+call POST /api/auth/register "" "{\"email\":\"learner.a@example.test\",\"password\":\"$password\",\"displayName\":\"dup\"}"
+check "duplicate canonical email" "$STATUS" 409
+check "self-registration stores role learner/active" "$(psql_admin <<<"SELECT role || '/' || account_status FROM public.users WHERE email='learner.a@example.test';")" "learner/active"
+call POST /api/auth/login "" "{\"email\":\"learner.a@example.test\",\"password\":\"wrong-password-value\"}"
+check "login with a wrong password" "$STATUS" 401
+for who in a b c; do
+  call POST /api/auth/login "" "{\"email\":\"learner.$who@example.test\",\"password\":\"$password\"}"
+  check "login learner.$who" "$STATUS" 200
+  printf -v "token_$who" '%s' "$(field accessToken)"
+done
+
+echo "== catalogue and detail (courses/chapters/lessons SELECT; instructor names via users SELECT)"
+call GET /api/courses ""
+check "catalogue list" "$STATUS" 200
+check "catalogue shows only the published Course" "$(field totalElements)/$(field content.0.title)/$(field content.0.instructorDisplayName)" "1/Algorithms/Test Instructor"
+call GET "/api/courses?q=algo&prerequisites=none" ""
+check "catalogue search/filter" "$STATUS/$(field totalElements)" "200/1"
+call GET "/api/courses/$course" ""
+check "Course detail with published syllabus" "$STATUS" 200
+check "syllabus excludes the hidden lesson" "$(python3 -c 'import sys; b=sys.argv[1]; print(("Published lesson" in b, "Hidden lesson" in b, "object-key" in b))' "$BODY")" "(True, False, False)"
+call GET "/api/courses/$hidden" ""
+check "hidden Course detail is concealed" "$STATUS" 404
+
+echo "== CT22 membership (enrollments SELECT/INSERT/UPDATE(status); courses FOR UPDATE via UPDATE(id))"
+call GET "/api/courses/$course/membership" "$token_a"; check "membership read (access snapshot incl. material columns)" "$STATUS/$(field status)" "200/none"
+call PUT "/api/courses/$course/membership" "$token_a"; check "join (row lock + INSERT)" "$STATUS/$(field status)" "200/active"
+call PUT "/api/courses/$course/membership" "$token_a"; check "join again is unchanged" "$STATUS/$(field status)" "200/active"
+call DELETE "/api/courses/$course/membership" "$token_a"; check "leave (UPDATE status)" "$STATUS/$(field status)" "200/left"
+call PUT "/api/courses/$course/membership" "$token_a"; check "rejoin reuses the row" "$STATUS/$(field status)" "200/active"
+check "one canonical row per learner/Course" "$(psql_admin <<<"SELECT count(*) FROM public.enrollments e JOIN public.users u ON u.id=e.user_id WHERE u.email='learner.a@example.test';")" 1
+call GET "/api/me/courses" "$token_a"; check "My Courses" "$STATUS/$(field totalElements)/$(field content.0.status)" "200/1/active"
+call PUT "/api/courses/$hidden/membership" "$token_a"; check "hidden Course membership is concealed" "$STATUS" 404
+
+echo "== Course-root lock still serializes membership mutations under the runtime role"
+docker exec -i "$PGTEST_CONTAINER" psql -X -q -U "$(env_get POSTGRES_USER)" -d "$(env_get POSTGRES_DB)" >/dev/null 2>&1 <<SQL &
+BEGIN;
+SELECT id FROM public.courses WHERE id='$course' FOR UPDATE;
+SELECT pg_sleep(6);
+COMMIT;
+SQL
+holder=$!
+sleep 1
+start=$SECONDS
+call PUT "/api/courses/$course/membership" "$token_b" &
+put_pid=$!
+waiting=0
+for _ in $(seq 1 30); do
+  waiting="$(psql_admin <<<"SELECT count(*) FROM pg_stat_activity WHERE usename='$(env_get DB_USER)' AND wait_event_type='Lock';")"
+  [[ "$waiting" == 0 ]] || break
+  sleep 0.2
+done
+check "runtime session waits on the held Course row lock" "$waiting" 1
+wait "$put_pid"; wait "$holder"
+elapsed=$((SECONDS - start))
+call GET "/api/courses/$course/membership" "$token_b"
+check "blocked join completes after the lock is released" "$STATUS/$(field status)/$([[ $elapsed -ge 3 ]] && echo waited)" "200/active/waited"
+( call PUT "/api/courses/$course/membership" "$token_c"; echo "$STATUS" > "$work/c1" ) &
+( call DELETE "/api/courses/$course/membership" "$token_b"; echo "$STATUS" > "$work/b1" ) &
+wait
+check "concurrent mutations by two learners both succeed" "$(cat "$work/c1")/$(cat "$work/b1")" "200/200"
+check "membership rows after the concurrent operations" "$(psql_admin <<<"SELECT string_agg(u.email || '=' || e.status, ',' ORDER BY u.email) FROM public.enrollments e JOIN public.users u ON u.id=e.user_id;")" "learner.a@example.test=active,learner.b@example.test=left,learner.c@example.test=active"
+
+echo "== current account state is enforced (users SELECT on every protected request)"
+psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
+call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
+call POST /api/auth/login "" "{\"email\":\"learner.c@example.test\",\"password\":\"$password\"}"; check "locked account cannot log in" "$STATUS" 401
+
+echo "== no permission failure anywhere, and the matrix is unchanged"
+check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
+verify_runtime_privileges complete >/dev/null
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, catalogue/detail and CT22 membership under the approved matrix"
+BASH
+PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
+  BACKEND_IMAGE=codemastery-backend:privilege-test \
+  bash "$work/exercise-runtime.sh" "$script" "$work/env/.env" "$work/http"
