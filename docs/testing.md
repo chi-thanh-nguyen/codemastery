@@ -480,14 +480,16 @@ replace installation or validation. CodeQL code scanning runs separately through
 GitHub's default setup, with no workflow file in this repository.
 
 Eighteen VM steps run a script from `infrastructure/vm/tests/` instead of an
-inline block: the step runs `bash infrastructure/vm/tests/<script>` from the
+inline block: the step runs `exec bash infrastructure/vm/tests/<script>` from the
 repository root, and the script holds that step's former inline commands
-unchanged. The step-to-script mapping is in the
+unchanged. `exec` makes the script the step's own process, as the inline block
+was, so a signal sent to the step on cancellation reaches the script and its
+cleanup trap directly. The step-to-script mapping is in the
 [inventory record](repository-structure.md#bounded-vm-ci-test-script-inventory-addition--12-november-2026).
 The remaining short steps stay inline. The `deployment-script` job first runs
-`bash -n` on every script in that directory. To run one script locally, start it
-from the repository root the same way. The scripts assume the runner's
-environment: most use Docker, and four use `sudo`.
+`bash -n` on every script in that directory. To run one script locally, run
+`bash infrastructure/vm/tests/<script>` from the repository root. The scripts
+assume the runner's environment: most use Docker, and four use `sudo`.
 
 The `main-quality-gates` repository ruleset requires `CodeQL` and every job above
 to pass before merging into `main`. A later read of the GitHub API on 1 November
