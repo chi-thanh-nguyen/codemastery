@@ -6,7 +6,7 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { connect, createServer as createSocketServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -123,6 +123,7 @@ describe('the preview acknowledges its own identity over its private channel', (
         assert.equal(asked.acknowledged.pid, preview.child.pid);
         assert.equal(await exited(preview.child), 0, preview.output());
         assert.match(preview.output(), /closing \(asked over the private control channel\)/);
+        assert.equal(existsSync(preview.control), false, 'the run-scoped socket file is removed with the channel');
         assert.equal(processIdentity(preview.child.pid).exists !== true || processIdentity(preview.child.pid).birth !== birth, true,
             'the recorded birth identity is gone');
     });

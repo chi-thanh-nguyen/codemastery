@@ -53,6 +53,10 @@ let server;
 /** Closes the preview server and exits. The process stops itself; nobody signals it. */
 async function selfClose(reason) {
     process.stdout.write(`preview-server: closing (${reason})\n`);
+    // The run-scoped socket file is removed with the channel, so nothing of this run stays behind.
+    try {
+        unlinkSync(control);
+    } catch { /* already gone */ }
     try {
         await server?.close();
     } catch (error) {

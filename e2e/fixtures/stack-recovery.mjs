@@ -23,8 +23,8 @@
 // returns a failure to the caller and keeps that checkout blocked until recovery succeeds.
 import { spawnSync } from 'node:child_process';
 import { connect } from 'node:net';
-import { readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, readdirSync, rmSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { classifyProcess, hostIdentity, processIdentity, verifyDirectory } from './host-identity.mjs';
 import { NONTERMINAL, observe, readInventory, setIntent, writeInventory } from './run-inventory.mjs';
 
@@ -342,6 +342,14 @@ export async function reconcile(inventoryFile, options = {}) {
             recorded.state = 'exited';
             recorded.why = verdict.why;
             report(`${role} ${recorded.pid} is verifiably gone (${verdict.why})`);
+            // A preview that died without closing leaves its socket file. It is removed only when it is
+            // this run's own name inside the private registry and is a socket, never another path.
+            if (role === 'preview' && recorded.control && basename(recorded.control) === `${runId}.sock`
+                && (!registryRoot || dirname(recorded.control) === join(registryRoot, 'sockets'))) {
+                try {
+                    if (lstatSync(recorded.control).isSocket()) rmSync(recorded.control, { force: true });
+                } catch { /* already gone */ }
+            }
         } else {
             recorded.state = 'preserved';
             recorded.why = verdict.why;

@@ -3059,3 +3059,94 @@ This resolves the tested Q03/P6 discrepancy, subject to independent re-review.
 Flyway-engine validation/full-product F2/Q08 and real Q07 RPO/RTO remain NOT_RUN.
 MinIO/CMS/cloud/renewal/Keychain/scheduler results retain their previous limits and
 were not rerun. No deployment, risk acceptance or spending permission is supplied.
+
+## FE24 CT34 r2 lifecycle implementation — 13 November 2026
+
+### Authority and scope
+
+Project Leader and repository Owner @chi-thanh-nguyen authorized this bounded work
+on 2026-11-13 (Asia/Ho_Chi_Minh) in “CodeMastery — Phase 3: Contract-Compliant
+Playwright E2E CI Integration”. It implements `CT34-FIXTURES-2026-11-10-r2`
+([ADR008 §10](decisions/008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026))
+for the existing disposable stack, keeping `CT34-RUNNER-2026-11-09-r1` unchanged: the
+same Playwright 1.63.0 lock, five projects, timeouts, no retries, output paths,
+fixtures, readiness limits and authentication behaviour. No workflow, ruleset,
+required check, dependency, test journey or application behaviour changes here. This
+is implementation and recorded verification, not independent QA08 acceptance, review
+approval or Final coverage acceptance.
+
+### Contract mapping
+
+| ADR008 clause | Implementation |
+| --- | --- |
+| §10.2 exclusivity before runner entry | `fixtures/lifecycle.py run` takes the lock and writes the run record before it starts `playwright test`; `npm test` and `npm run test:chromium` go through it; `playwright.config.ts` refuses an unadmitted output-producing invocation at config load, before Playwright touches outputs |
+| §10.2 registry and lock | `~/.codemastery-e2e/` from `pwd.getpwuid(geteuid())` (not `HOME`), directories 0700, records and lock 0600, owner and symlink checks, `O_NOFOLLOW`; nonblocking `fcntl.flock` on a stable `locks/<dev>-<ino>.lock` that is never unlinked or replaced and is not inherited by children; a second-process probe verifies exclusion on the actual lock file; known network/shared filesystems are refused |
+| §10.2 output roots | The three roots are inspected component by component without following symlinks; overlap, hard-link sharing and identities already claimed by another checkout's nonterminal record are refused |
+| §10.2 admission | Conflict exits 2 without starting anything; a nonterminal or unreadable record exits 3 until recovery completes; a completed record is archived to `archive/<key>.last.json` without deleting outputs or resources |
+| §10.3 inventory | `fixtures/run-inventory.mjs` and the coordinator write one bounded (256 KiB, 128 intents), versioned record per checkout key with same-directory atomic replacement and file/directory `fsync`; intents are written before each resource is created and carry the observed ID afterwards; no credentials, tokens, environment or commands are stored |
+| §10.3 process identity | Linux `/proc/<pid>/stat` start ticks with boot ID and PID namespace; macOS kernel `kinfo_proc` start time (microseconds) with `kern.boottime`; supervisor, runner, builder and preview are recorded; Vite is started from its resolved entry point, not through `npx`, so the recorded PID is the real writer |
+| §10.3 preview recovery | `fixtures/preview-server.mjs` hosts the build through the pinned Vite preview API and listens on `sockets/<runId>.sock` (0600); it closes its own server only for its own run ID and birth identity; no recovered PID is signalled; an unavailable channel preserves the process |
+| §10.3 Docker | Endpoint, context and daemon ID are pinned at setup and re-verified before cleanup; only Unix-socket/pipe contexts are accepted; removal targets recorded IDs corroborated by the run labels; pending intents are reconciled by exact run label and name; anonymous volumes are recorded from the owned container's mounts before it is removed; named volumes and bind mounts are refused; every action is followed by re-inspection with bounded retry; unaccounted labelled resources (including pre-r2 PID-only ones) are reported, never removed; no prune is issued |
+| §10.3 completion | One engine (`fixtures/stack-recovery.mjs`) serves teardown, the coordinator's finalization and `npm run stack:down`; the temporary build is removed only after its parent, owner, device/inode and run marker are verified; the run becomes `complete` only after the coordinator has verified the runner's own exit; otherwise it stays nonterminal and the command exits nonzero |
+
+The image cache tag is now per checkout (`codemastery-e2e/<component>:co-<dev>-<ino>`)
+instead of the shared `:local` tag; containers still run the exact built image ID and
+teardown removes no image. This was needed because, with a containerd image store,
+moving a tag deletes the image it previously named (reproduced directly), so a tag
+shared across checkouts let one checkout's concurrent build delete another run's
+exact image before it started. Existing `:local` tags are left untouched.
+
+### Executed verification
+
+Host: macOS 27.2 (arm64), Python 3.9.6, Node 24.21.0, npm 11.19.0, Docker Desktop
+29.8.1 (containerd image store), Playwright 1.63.0 with Chromium 153.0.8010.12
+(r1243), Firefox 155.0 (r1543) and WebKit 26.6 (r2359). Every real run cleared
+`E2E_BASE_URL`, `E2E_API_URL`, `E2E_BACKEND_IMAGE` and `E2E_POSTGRES_IMAGE`. Only
+synthetic accounts in disposable local stacks were used; no Azure VM, production
+endpoint or real account was involved.
+
+`node --test fixtures/*.test.mjs` (from `e2e/`): **PASS 85/85**. These are stub
+scenarios (fake Docker, stub Vite, real coordinator, real processes and sockets); they
+are not Docker or browser integration evidence.
+
+Real Docker and Vite (and browsers where tests ran):
+
+| Scenario | Observed result |
+| --- | --- |
+| Unadmitted `npx playwright test` | Refused at config load, exit 1; sentinels in all three output roots unchanged |
+| Normal run, all five projects (`npm test`) | 70 results: `chromium-desktop` 14 passed; `webkit-desktop`, `chromium-mobile`, `webkit-mobile` 13 passed each; 4 skipped (the suite's own `API-only checks run once.`); `firefox-desktop` 13 **failed at browser launch** (see limits); 2 containers, 1 anonymous volume, 1 network and the build removed and verified; exit 1 because of the Firefox failures |
+| Setup failure (a real defect found here, then fixed) | Exit 1 with the setup error; containers, volume, network and build removed and verified; Docker volumes, networks and containers byte-identical to the baseline |
+| Deliberate assertion failure (temporary uncommitted spec, removed afterwards) | Exit 1; cleanup complete |
+| Same checkout while a real run is active | Second invocation exit 2 immediately; no runner started, record unchanged |
+| Graceful interruption (`SIGINT` to the coordinator during setup) | Signal forwarded, teardown ran, every resource verified removed, record `complete`, exit 130 |
+| Coordinator and runner `SIGKILL`ed mid-test (7 tests done) | Record stayed `active`; preview and containers left running; new run exit 3; `npm run stack:down` stopped the live preview through its control channel, removed containers, anonymous volume, network and build with verified absence; the next run was admitted and passed |
+| Pending creation intent whose ID was never persisted | The single run-labelled container was adopted, its anonymous volume recorded from its mounts before removal, both verified gone |
+| Pending intent with nothing created | Resolved `absent` |
+| Daemon ID drift | All Docker resources preserved, exit 1, record `incomplete` |
+| Pre-r2 container with only a dead-PID label | Preserved and reported, exit 1; completion only after the operator removed it |
+| Two isolated checkouts concurrently (temporary git worktree) | Before the cache-tag change: the second run failed closed (`No such image`) and cleaned up. After it: both admitted with distinct lock keys, run IDs, image IDs, ports, temporary builds and control sockets; both `8 passed`; both cleaned up independently |
+| After all runs | 135 pre-existing volumes, networks and containers identical to the baseline; no preview process and no socket file left |
+
+Defects found and fixed during this verification: Vite's `exports` map does not
+expose `bin/vite.js` (now resolved from the manifest's `bin` field); the runner doing
+its own teardown blocked removal of the build (it is now recorded as reconciling
+itself, and completion waits for the coordinator to verify its exit); the shared
+cache-tag race above; and control socket files left after a preview closed itself.
+
+### Limits and outstanding evidence
+
+- **Ubuntu is not yet qualified.** The Linux identity and filesystem paths are
+  implemented but were not executed here; the SH07 CI job is their first execution.
+- **`firefox-desktop` is blocked on this macOS host.** Playwright's pinned Firefox exits
+  with “Could not find profile folder” when launched directly, outside the lifecycle and
+  outside the agent sandbox, so this is a local browser problem, not a lifecycle
+  result. Those 13 cases are failed/blocked evidence, not passes.
+- Real PID reuse, foreign host/namespace records, unreadable processes, Docker removal
+  timeouts/refusals and network-filesystem refusal were exercised only through stubs
+  and crafted records. A crash exactly between `docker run` and ID persistence was
+  represented by a crafted pending intent against a real container.
+- Explicit external mode (`E2E_BASE_URL`) was not executed.
+- A hard kill cannot promise automatic recovery: a preview whose channel is gone is
+  preserved for operator reconciliation.
+- QA08 independent verification, CODEOWNER review and protected integration remain
+  separate gates. CT19/CT35/CT20.F Final coverage is not addressed.
