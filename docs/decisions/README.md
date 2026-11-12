@@ -273,7 +273,10 @@ later replacement time, staged error precedence, download/replacement race and t
 wording fixes); [§17](010-batch-05-contract-approvals.md#17-final-technical-review-remediation--13-november-2026)
 records the final review remediation (object deletions by transaction outcome,
 missing-object versus provider failures, opaque `submittedAt`, connection-free
-downloads, lazy multipart binding); scopes and IDs are unchanged.
+downloads, lazy multipart binding);
+[§18](010-batch-05-contract-approvals.md#18-comprehensive-independent-review-remediation--13-november-2026)
+records N-B5-01/02 (valid Java 25 stream closure and raw binary multipart/download
+representation, B5-O15/O16). Scopes and IDs are unchanged.
 
 LD-07 (reminder deadline query ownership) is not resolved by CT10.deadline and stays
 with CT11.reminders (Batch 7). Submission-download hostile-content residual risk is

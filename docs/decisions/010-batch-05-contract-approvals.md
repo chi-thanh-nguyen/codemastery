@@ -271,6 +271,9 @@ Course `LearningMaterialService` and Assessment `SubmissionService` depend only 
 the interface. No other module, controller or frontend reaches storage.
 
 ```java
+import java.io.IOException;
+import java.io.InputStream;
+
 public interface FileStorage {
     void store(String objectKey, InputStream content, long contentLength, String mediaType);
     StoredObject open(String objectKey);
@@ -278,10 +281,17 @@ public interface FileStorage {
 
     record StoredObject(long contentLength, String mediaType, InputStream content)
             implements AutoCloseable {
-        @Override public void close();
+        @Override
+        public void close() throws IOException {
+            content.close();
+        }
     }
 
-    class FileStorageException extends RuntimeException { }
+    class FileStorageException extends RuntimeException {
+        public FileStorageException() {
+            super("File storage operation failed.");
+        }
+    }
     final class ObjectNotFoundException extends FileStorageException { }
 }
 ```
@@ -298,6 +308,15 @@ public interface FileStorage {
   malformed response, or a reported length or media type that does not match the
   §5 table. A provider failure is never reported as a missing object. Errors while
   reading the returned stream surface as `IOException` from the stream.
+- `StoredObject.close()` delegates to the underlying `InputStream.close()` and
+  propagates its checked `IOException`; it does not wrap it in a storage-provider
+  rejection or delete any object. `store`, `open` and `delete` retain their unchecked
+  exception contract. Download callers own the returned resource and use
+  try-with-resources (or equivalent `finally` cleanup), including header preparation,
+  copy failure and client disconnect. A close failure before response commitment
+  maps to safe 500; after commitment it aborts the response. Never expose the
+  exception message. If copying and closing both fail, preserve the copy failure
+  as primary and the close failure as suppressed, as try-with-resources does.
 - `delete` is idempotent: a missing object is success.
 - Invalid arguments raise `IllegalArgumentException`; provider failures raise
   `FileStorageException` with a safe message. All of them map to a safe 500, with
@@ -433,7 +452,17 @@ treats a network failure during an upload as an unknown outcome (§13), never as
 rejection with a known status, and never retries automatically.
 
 **Wire rules.** Multipart requests contain exactly the named parts; a missing,
-duplicate or unknown part is 400. A successful download returns 200 with the full
+duplicate or unknown part is 400. The `file` part is raw binary, with
+`Content-Disposition: form-data; name="file"; filename="..."`; a missing filename
+is 400 under §5. `B5FileUpload` and `B5MaterialUpload` use an unconstrained file
+property schema, and each multipart Media Type Object uses
+`encoding.file.contentType: application/octet-stream`. No string schema,
+`contentEncoding`, base64 conversion or JSON serialization applies to the bytes.
+This follows [OpenAPI 3.1 §§4.8.14.3–5 and §4.8.15](https://spec.openapis.org/oas/v3.1.0.html#considerations-for-file-uploads).
+The Encoding Object describes raw serialization, not the server's type admission:
+the received part media type is still ignored in favour of §5's filename/signature.
+PDF/ZIP download Media Type Objects likewise describe raw bodies without a string
+schema. A successful download returns 200 with the full
 body (no range support), `Content-Type` from §5's table derived from the stored
 filename extension, `Content-Length`, `Content-Disposition: attachment;
 filename="<ASCII fallback>"; filename*=UTF-8''<percent-encoded>` (RFC 6266/8187;
@@ -482,6 +511,9 @@ behavior unchanged:
 
 - multipart: sends `FormData` with the bearer token, lets the browser set the
   boundary, expects the operation's JSON status, and never retries automatically;
+  append the selected `File` directly, or a `Blob` with the original filename
+  explicitly supplied; never append file text, a JSON string or base64. The browser
+  supplies each part's filename and may supply its own media type (§5 ignores it);
   a network failure and a 500 are reported to the caller as an **unknown
   outcome**, distinct from a rejection with a known status;
 - binary download: authenticated GET returning a `Blob` and the server filename
@@ -625,6 +657,8 @@ gap that needs a bounded structural decision.
 | B5-O12 | Widget: accessible states, confirmation before replacement, no retry, Blob download without a token in any URL; a network failure or 500 on upload reloads the resource before another upload is offered; the grade request body carries the received `submittedAt` string byte for byte, microsecond digits included. |
 | B5-O13 | Multipart binding: a body whose parts cannot be parsed (malformed boundary) or whose file part exceeds the limit returns the admission status (401/403/404) for an unauthorized or out-of-scope caller, and 400/413 only for an admitted one; a Learner on an Instructor upload path with a wrong request media type gets 415, not 403; a test multipart resolver that records part access observes no access before stage 3. A controller using `@RequestPart`, `MultipartFile` or a `hasRole` URL rule fails these cases. |
 | B5-O14 | Downloads hold no transaction and no pooled connection while the body is written: with the test pool limited to one connection and a download paused mid-body by the test client, another request that needs the database completes; phase 1 runs read-only at REPEATABLE READ. |
+| B5-O15 | Compile the complete §7 interface, including imports and nested types, with Java 25. A close-tracking InputStream is closed on successful copy, header-preparation failure, copy failure and client disconnect; close IOException propagates as checked, never as ObjectNotFoundException. If copy and close both fail, copy is primary and close is suppressed. Closure never deletes an object; failure before/after response commitment follows §7. Use applicable existing backend suites; real storage integration retains the placement gap above. |
+| B5-O16 | All three upload operations use a raw file property and an Encoding Object for application/octet-stream, with no textual encoding. Serialize a browser FormData File, and a Blob with an explicit original filename, containing PDF/ZIP leading bytes plus NUL and non-UTF-8 bytes: the parsed part has exactly the original bytes and filename. A string append, base64/JSON/text conversion, or Blob without the required filename fails the client oracle; a server part without a filename is 400. The title remains a text part. Raw download responses preserve the same bytes. Verify the transport in existing httpClient.test.ts and widget suites; this does not replace real Tomcat/MinIO qualification. |
 
 No previously effective approval is amended or superseded. ADR005's guard, ADR006
 CT21 shapes and exclusions, ADR007's Assessment guards and ADR008's placement map
@@ -693,3 +727,29 @@ architecture change is introduced.
 The new and changed oracles are specified and NOT_RUN. This section records
 documentation corrections only; it is not independent review, CI evidence or
 Leader approval.
+
+## 18. Comprehensive independent review remediation — 13 November 2026
+
+Under the Project Leader's explicit **“CodeMastery — Execute All Independent
+Review Findings Remediation”** instruction, Codex corrects N-B5-01 and N-B5-02
+from the independent review of `6172c01`. These are pre-integration corrections
+within the existing r1 revisions; checkpoint membership, effective upstream
+contracts, storage operations, accepted types and authorization are unchanged.
+
+| Finding | Correction | Verification obligation |
+|---|---|---|
+| N-B5-01 (P2) | Complete Java 25 declaration; close delegates to the stream with checked IOException and defined caller cleanup/failure semantics | §7, B5-O15 |
+| N-B5-02 (P2) | Raw multipart file schemas plus per-operation Encoding Objects, filename-preserving FormData, and raw download bodies | §11, B5-O16 |
+
+No feature implementation, dependency, migration, exposure or risk acceptance is
+introduced. Isolated declaration/serialization probes are distinguished from the
+future application oracles in delivery evidence; this is remediation
+self-assessment, not independent approval.
+
+Executed for this correction: Java 25 compilation of the complete normative
+interface and an isolated close-tracking/suppressed-exception probe; Chromium
+FormData File/Blob serialization with byte/filename readback and negative text/
+unnamed-Blob cases; duplicate-key rejection, all 679 OpenAPI reference occurrences
+resolved, and an exact semantic allowlist proving only the intended two file
+schemas, three multipart encodings and five raw response representations changed.
+All passed. Application/Tomcat/MinIO integration oracles remain NOT_RUN.
