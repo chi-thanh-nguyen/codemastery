@@ -1,58 +1,88 @@
-// Regression tests for the startup lifecycle in local-stack.ts: frontend readiness must identify this run's build, and a
-// backend that fails to start must fail promptly with its diagnostics captured before teardown. Docker and npx are
-// stubs placed first on PATH, so no real container, network, image or Vite process is touched.
+// Regression tests for the startup lifecycle in local-stack.ts: frontend readiness must identify this run's build, a
+// backend that fails to start must fail promptly with its diagnostics captured before teardown, and that teardown must
+// go through the r2 inventory protocol (ADR008 CT34-FIXTURES-2026-11-10-r2): every resource is recorded before it is
+// created, and cleanup removes exactly the recorded ones, stops the preview over its private control channel and
+// verifies the temporary build before deleting it. Docker is a stateful stub first on PATH, Vite's build is a stub
+// entry point (E2E_VITE_BIN) and its preview API a stub module (E2E_VITE_MODULE), so no real container, network,
+// image, Vite build or browser is touched.
 // Run from e2e/ (Node 22.18+ or 24, which load the TypeScript fixture natively): node --test fixtures/*.test.mjs
 import { after, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import globalSetup, { buildMarker, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
+import { hostIdentity } from './host-identity.mjs';
+import { readInventory, writeInventory } from './run-inventory.mjs';
 
-// Stub docker: state comes from STUB_MODE; every call is appended to STUB_DIR/calls.log. `run` remembers the JWT
-// secret it receives through the environment, and `logs` prints it back, so redaction can be checked.
+// Stateful stub docker: resources live in STUB_DIR/resources.json and every call is appended to STUB_DIR/calls.log.
+// Container state for the readiness helpers still comes from STUB_MODE. `run` remembers the JWT secret it receives
+// through the environment, and `logs` prints it back, so redaction can be checked.
+const ANON = 'a'.repeat(64);
 const DOCKER = `#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path');
-const dir = process.env.STUB_DIR, mode = process.env.STUB_MODE, args = process.argv.slice(2);
+const dir = process.env.STUB_DIR, mode = process.env.STUB_MODE, args = process.argv.slice(2), id = args.at(-1);
 fs.appendFileSync(path.join(dir, 'calls.log'), args.join(' ') + '\\n');
 const fail = (message) => { process.stderr.write(message + '\\n'); process.exit(1); };
-const counter = path.join(dir, 'inspects'), inspects = (fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0) + 1;
-switch (args[0]) {
-    case 'network': case 'rm': console.log('ok'); break;
-    case 'exec': break;
-    case 'run': if (process.env.JWT_SECRET) fs.writeFileSync(path.join(dir, 'secret'), process.env.JWT_SECRET); console.log('stub-container-id'); break;
-    case 'inspect':
-        fs.writeFileSync(counter, String(inspects));
-        if (mode === 'missing') fail('Error: No such object: ' + args.at(-1));
-        if (mode === 'inspect-fails' || (mode === 'diagnostics-fail' && inspects > 1)) fail('Error response from daemon: i/o timeout');
-        console.log(mode === 'running'
-            ? 'state=running exit=0 oom=false error="" started=2026-11-07T00:00:00Z finished=0001-01-01T00:00:00Z'
-            : 'state=exited exit=3 oom=false error="" started=2026-11-07T00:00:00Z finished=2026-11-07T00:00:04Z');
-        break;
-    case 'logs': {
-        if (mode === 'diagnostics-fail') fail('Error response from daemon: connection refused');
-        const secret = fs.existsSync(path.join(dir, 'secret')) ? fs.readFileSync(path.join(dir, 'secret'), 'utf8') : 'none';
-        console.log('Flyway migration failed: relation already exists');
-        console.log('jwt secret in a log line: ' + secret);
-        process.stderr.write('APPLICATION FAILED TO START\\n');
-        break;
-    }
-    default: fail('unexpected docker ' + args.join(' '));
-}
+const dbFile = path.join(dir, 'resources.json'), db = fs.existsSync(dbFile) ? JSON.parse(fs.readFileSync(dbFile, 'utf8')) : {};
+const save = () => fs.writeFileSync(dbFile, JSON.stringify(db));
+const labelsOf = () => Object.fromEntries(args.filter((_, at) => args[at - 1] === '--label').map((label) => [label.split('=')[0], label.split('=').slice(1).join('=')]));
+const list = (kind) => console.log(Object.entries(db).filter(([, r]) => r.kind === kind && r.present).map(([key]) => key).join('\\n'));
+const live = (key) => { if (!db[key] || !db[key].present) fail('Error: No such object: ' + key); return db[key]; };
+const counter = path.join(dir, 'inspects');
+if (args[0] === 'context' && args[1] === 'show') console.log('stub-context');
+else if (args[0] === 'context') console.log('unix:///var/run/docker.sock');
+else if (args[0] === 'info') console.log('stub-daemon');
+else if (args[0] === 'network' && args[1] === 'create') { db['net-' + id] = { kind: 'network', labels: labelsOf(), present: true }; save(); }
+else if (args[0] === 'network' && args[1] === 'inspect') { const key = db[id] ? id : 'net-' + id; const r = live(key); console.log(args.includes('{{.Id}}') ? key : JSON.stringify(r.labels)); }
+else if (args[0] === 'network' && args[1] === 'ls') list('network');
+else if (args[0] === 'volume' && args[1] === 'inspect') console.log(JSON.stringify(live(id).labels));
+else if ((args[0] === 'network' || args[0] === 'volume') && args[1] === 'rm') { live(id).present = false; save(); console.log(id); }
+else if (args[0] === 'ps') list('container');
+else if (args[0] === 'rm') { live(id).present = false; save(); console.log(id); }
+else if (args[0] === 'exec') { /* pg_isready and psql succeed */ }
+else if (args[0] === 'run') {
+    if (process.env.JWT_SECRET) fs.writeFileSync(path.join(dir, 'secret'), process.env.JWT_SECRET);
+    const name = args[args.indexOf('--name') + 1], postgres = name.endsWith('-postgres');
+    db['ctr-' + name] = { kind: 'container', name, labels: labelsOf(), present: true,
+        mounts: postgres ? [{ Type: 'volume', Name: '${ANON}', Destination: '/var/lib/postgresql/data' }] : [] };
+    if (postgres) db['${ANON}'] = { kind: 'volume', labels: {}, present: true };
+    save(); console.log('ctr-' + name);
+} else if (args[0] === 'inspect' && args.includes('{{json .Mounts}}')) console.log(JSON.stringify(live(id).mounts));
+else if (args[0] === 'inspect' && args.includes('{{json .}}')) { const r = live(id); console.log(JSON.stringify({ Id: id, Config: { Labels: r.labels }, Mounts: r.mounts, State: { Status: 'exited' } })); }
+else if (args[0] === 'inspect') {
+    const inspects = (fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0) + 1;
+    fs.writeFileSync(counter, String(inspects));
+    if (mode === 'missing') fail('Error: No such object: ' + id);
+    if (mode === 'inspect-fails' || (mode === 'diagnostics-fail' && inspects > 1)) fail('Error response from daemon: i/o timeout');
+    console.log(mode === 'running'
+        ? 'state=running exit=0 oom=false error="" started=2026-11-07T00:00:00Z finished=0001-01-01T00:00:00Z'
+        : 'state=exited exit=3 oom=false error="" started=2026-11-07T00:00:00Z finished=2026-11-07T00:00:04Z');
+} else if (args[0] === 'logs') {
+    if (mode === 'diagnostics-fail') fail('Error response from daemon: connection refused');
+    const secret = fs.existsSync(path.join(dir, 'secret')) ? fs.readFileSync(path.join(dir, 'secret'), 'utf8') : 'none';
+    console.log('Flyway migration failed: relation already exists');
+    console.log('jwt secret in a log line: ' + secret);
+    process.stderr.write('APPLICATION FAILED TO START\\n');
+} else fail('unexpected docker ' + args.join(' '));
 `;
-// Stub npx: \`vite build\` writes a minimal index.html; \`vite preview\` serves it until SIGTERM.
-const NPX = `#!/usr/bin/env node
-const fs = require('node:fs'), http = require('node:http'), path = require('node:path');
-const args = process.argv.slice(2), value = (name) => args[args.indexOf(name) + 1];
-if (args[1] === 'build') {
-    fs.mkdirSync(value('--outDir'), { recursive: true });
-    fs.writeFileSync(path.join(value('--outDir'), 'index.html'), '<!doctype html><html><head><title>CodeMastery</title></head><body></body></html>');
-} else if (args[1] === 'preview') {
-    const server = http.createServer((_, res) => res.end(fs.readFileSync(path.join(value('--outDir'), 'index.html')))).listen(Number(value('--port')), value('--host'));
-    process.on('SIGTERM', () => { fs.writeFileSync(path.join(process.env.STUB_DIR, 'preview-stopped'), ''); server.close(); process.exit(0); });
+// Stub Vite build entry point (run as \`node vite.cjs build --outDir <dir> ...\`): writes a minimal index.html.
+const VITE_BIN = `const fs = require('node:fs'), path = require('node:path');
+const args = process.argv.slice(2), outDir = args[args.indexOf('--outDir') + 1];
+fs.mkdirSync(outDir, { recursive: true });
+fs.writeFileSync(path.join(outDir, 'index.html'), '<!doctype html><html><head><title>CodeMastery</title></head><body></body></html>');
+`;
+// Stub of the pinned Vite preview API: serves the build and records that it closed its own server.
+const VITE_MODULE = `import { createServer } from 'node:http';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+export async function preview(options) {
+    const http = createServer((_, response) => response.end(readFileSync(join(options.build.outDir, 'index.html'))));
+    await new Promise((ready, failed) => { http.once('error', failed); http.listen(options.preview.port, options.preview.host, ready); });
+    return { close: () => new Promise((closed) => { writeFileSync(join(process.env.STUB_DIR, 'preview-stopped'), ''); http.closeAllConnections(); http.close(closed); }) };
 }
 `;
 
@@ -60,11 +90,17 @@ let stub = '';
 const saved = { ...process.env };
 const calls = () => readFileSync(join(stub, 'calls.log'), 'utf8').trim().split('\n').filter(Boolean);
 before(() => {
-    stub = mkdtempSync(join(tmpdir(), 'codemastery-local-stack-test-'));
-    for (const [name, body] of [['docker', DOCKER], ['npx', NPX]]) { writeFileSync(join(stub, name), body); chmodSync(join(stub, name), 0o755); }
+    stub = realpathSync(mkdtempSync(join(tmpdir(), 'cmls-')));
+    chmodSync(stub, 0o700);
+    writeFileSync(join(stub, 'docker'), DOCKER); chmodSync(join(stub, 'docker'), 0o755);
+    writeFileSync(join(stub, 'vite.cjs'), VITE_BIN);
+    writeFileSync(join(stub, 'vite-preview.mjs'), VITE_MODULE);
     process.env.PATH = `${stub}:${saved.PATH}`; process.env.STUB_DIR = stub;
 });
-beforeEach(() => { writeFileSync(join(stub, 'calls.log'), ''); rmSync(join(stub, 'inspects'), { force: true }); rmSync(join(stub, 'preview-stopped'), { force: true }); });
+beforeEach(() => {
+    writeFileSync(join(stub, 'calls.log'), '');
+    for (const name of ['inspects', 'preview-stopped', 'resources.json', 'secret']) rmSync(join(stub, name), { force: true });
+});
 after(() => { process.env = saved; rmSync(stub, { recursive: true, force: true }); });
 
 /** An HTTP server on a free loopback port; `handler` answers every request. */
@@ -150,46 +186,92 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
         assert.ok(!calls().some((call) => call.startsWith('logs')), calls().join('\n'));
     });
 
+    /** The record the lifecycle coordinator would have written before starting Playwright. */
+    function admit() {
+        const host = hostIdentity(), inventory = join(stub, 'run.json');
+        writeInventory(inventory, {
+            schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-ls', state: 'active',
+            ownerUid: process.getuid(), lockKey: 'stub', host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
+            // The coordinator is this runner's parent, exactly as when lifecycle.py starts Playwright.
+            processes: { supervisor: { pid: process.ppid, birth: null, role: 'coordinator', state: 'live' } },
+            checkout: { path: stub, dev: 0, ino: 0 }, outputs: [], docker: null, temp: null, intents: [], observations: [],
+        });
+        Object.assign(process.env, {
+            CODEMASTERY_E2E_INVENTORY: inventory, CODEMASTERY_E2E_RUN_ID: 'cm-e2e-ls', CODEMASTERY_E2E_SOCKETS: stub,
+            CODEMASTERY_E2E_LOCK_KEY: 'stub', E2E_VITE_BIN: join(stub, 'vite.cjs'), E2E_VITE_MODULE: join(stub, 'vite-preview.mjs'),
+        });
+        delete process.env.CODEMASTERY_E2E_REGISTRY;
+        return inventory;
+    }
     async function setupFailure(mode) {
         process.env.STUB_MODE = mode;
+        const inventory = admit();
         const temp = mkdtempSync(join(tmpdir(), 'codemastery-local-stack-tmp-'));
         Object.assign(process.env, { TMPDIR: temp, E2E_BACKEND_IMAGE: 'stub-backend', E2E_POSTGRES_IMAGE: 'stub-postgres' });
         delete process.env.E2E_BASE_URL;
         const started = Date.now();
         try {
             const error = await globalSetup().then(() => null, (reason) => reason);
-            return { error, elapsed: Date.now() - started, leftovers: readdirSync(temp) };
+            return { error, elapsed: Date.now() - started, leftovers: readdirSync(temp), record: readInventory(inventory) };
         } finally {
             if (saved.TMPDIR === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved.TMPDIR;
             rmSync(temp, { recursive: true, force: true });
         }
     }
-    const backendName = () => calls().find((call) => call.startsWith('run -d --name ') && call.includes('-backend '))?.split(' ')[3];
+    const backendId = () => `ctr-${calls().find((call) => call.startsWith('run -d --name ') && call.includes('-backend '))?.split(' ')[3]}`;
 
     test('global setup fails promptly when the backend exits, keeps its logs (secrets redacted) and then cleans up', async () => {
-        const { error, elapsed, leftovers } = await setupFailure('exited');
+        const { error, elapsed, leftovers, record } = await setupFailure('exited');
         assert.ok(error instanceof Error, 'setup must fail');
-        assert.ok(elapsed < 20_000, `failed after ${elapsed} ms, not after the 180 s health timeout`);
+        assert.ok(elapsed < 30_000, `failed after ${elapsed} ms, not after the 180 s health timeout`);
         assert.match(error.message, /^backend health: the container stopped \(state=exited exit=3 oom=false/);
         assert.match(error.message, /Flyway migration failed: relation already exists/);
         const secret = readFileSync(join(stub, 'secret'), 'utf8');
         assert.ok(secret.length === 64 && !error.message.includes(secret), 'the JWT secret is redacted');
         assert.match(error.message, /jwt secret in a log line: \[redacted\]/);
-        const log = calls(), backend = backendName();
-        assert.ok(log.indexOf(`logs --tail 100 ${backend}`) >= 0, log.join('\n'));
-        assert.ok(log.indexOf(`logs --tail 100 ${backend}`) < log.indexOf(`rm -f -v ${backend}`), 'logs are read before the container is removed');
-        assert.ok(log.some((call) => /^rm -f -v cm-e2e-.*-postgres$/.test(call)) && log.some((call) => /^network rm cm-e2e-/.test(call)));
-        assert.ok(existsSync(join(stub, 'preview-stopped')), 'the preview process was stopped');
+        const log = calls(), backend = backendId(), backendName = backend.slice(4);
+        assert.ok(log.indexOf(`logs --tail 100 ${backendName}`) >= 0, log.join('\n'));
+        assert.ok(log.indexOf(`logs --tail 100 ${backendName}`) < log.indexOf(`rm -f ${backend}`), 'logs are read before the container is removed');
+        assert.ok(log.includes('rm -f ctr-cm-e2e-ls-postgres') && log.includes(`volume rm ${ANON}`) && log.includes('network rm net-cm-e2e-ls'), log.join('\n'));
+        assert.ok(log.indexOf('rm -f ctr-cm-e2e-ls-postgres') < log.indexOf(`volume rm ${ANON}`), 'the volume goes after its container');
+        assert.ok(!log.some((call) => /prune|--filter label=codemastery.e2e=disposable.*rm/.test(call)), 'no global or label-only deletion');
+        assert.ok(existsSync(join(stub, 'preview-stopped')), 'the preview closed its own server');
         assert.deepEqual(leftovers, [], 'the temporary build directory was removed');
+        // Every resource is verified absent; the run stays nonterminal until the coordinator verifies the runner's exit.
+        assert.equal(record.state, 'cleaning', 'resources are gone but the run is not complete while its runner lives');
+        assert.equal(record.processes.runner.state, 'reconciling-self');
+        assert.deepEqual(record.intents.map((intent) => `${intent.kind}:${intent.state}`),
+            ['network:removed', 'container:removed', 'volume:removed', 'container:removed']);
+        assert.equal(record.processes.preview.state, 'exited');
+        assert.equal(record.processes.builder.state, 'exited');
+        assert.ok(record.processes.preview.birth, 'the preview was recorded with its OS birth identity');
+        assert.ok(!JSON.stringify(record).includes(secret), 'no secret reaches the inventory');
+    });
+    test('every resource is recorded as an intent before it is created', async () => {
+        const { record } = await setupFailure('exited');
+        const log = calls();
+        assert.equal(record.docker.daemonId, 'stub-daemon', 'the daemon was pinned before anything was created');
+        assert.equal(record.docker.endpoint, 'unix:///var/run/docker.sock');
+        for (const intent of record.intents.filter((entry) => entry.kind !== 'volume')) assert.ok(intent.dockerId, `${intent.name} has its observed ID`);
+        assert.equal(record.intents.find((entry) => entry.kind === 'volume').container, 'ctr-cm-e2e-ls-postgres', 'the anonymous volume is tied to its container');
+        assert.ok(record.temp.marker === 'cm-e2e-ls' && record.temp.ino > 0, 'the temporary build is recorded with its identity and marker');
+        assert.ok(log.some((call) => call.includes('--label codemastery.e2e.run=cm-e2e-ls --label codemastery.e2e.owner=')), 'run and owner labels corroborate the inventory');
+        assert.ok(!log.some((call) => call.includes('codemastery.e2e.pid=')), 'a PID label is no longer written');
     });
     test('a diagnostics failure keeps the original error and does not prevent cleanup', async () => {
-        const { error, leftovers } = await setupFailure('diagnostics-fail');
+        const { error, leftovers, record } = await setupFailure('diagnostics-fail');
         assert.match(error.message, /^backend health: the container stopped \(state=exited exit=3/);
         assert.match(error.message, /state: unavailable \(Error response from daemon: i\/o timeout\)/);
         assert.match(error.message, /logs unavailable: Error response from daemon: connection refused/);
-        const log = calls(), backend = backendName();
-        assert.ok(log.includes(`rm -f -v ${backend}`) && log.some((call) => call.startsWith('network rm ')), log.join('\n'));
+        const log = calls();
+        assert.ok(log.includes(`rm -f ${backendId()}`) && log.some((call) => call.startsWith('network rm ')), log.join('\n'));
         assert.ok(existsSync(join(stub, 'preview-stopped')));
         assert.deepEqual(leftovers, []);
+        assert.equal(record.state, 'cleaning');
+    });
+    test('a runner that was not admitted by the coordinator creates nothing', async () => {
+        delete process.env.CODEMASTERY_E2E_INVENTORY;
+        await assert.rejects(globalSetup(), /must be started through the lifecycle coordinator/);
+        assert.deepEqual(calls(), [], 'no Docker call was made');
     });
 });

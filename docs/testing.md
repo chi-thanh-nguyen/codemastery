@@ -52,7 +52,7 @@ verification is separate work.
 | Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency. Auth, Enrollment and sample-data suites dispatch through MockMvc with the configured Spring Security chain; the other suites do not (see [Integration-Test Lifecycle](#integration-test-lifecycle)) | A running server, real browser, network/CORS from a browser, deployment |
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
-| E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`fixtures/local-stack.test.mjs`, `fixtures/stack-down.test.mjs`); stub `docker` and `npx` first on `PATH`; Node 22.18+ or 24 (they load `local-stack.ts` natively) | No | Frontend readiness requires this run's build marker; backend start failures fail promptly with state and redacted log tail captured before teardown; `stack:down` keeps live-owner and unreadable-owner resources and survives concurrently removed ones | Real Docker, Vite, browsers or the E2E flows themselves |
+| E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`lifecycle.test.mjs`, `run-inventory.test.mjs`, `stack-recovery.test.mjs`, `preview-control.test.mjs`, `local-stack.test.mjs`, `stack-down.test.mjs`); Python 3 (standard library only) and Node 22.18+ or 24; the coordinator tests use disposable fake checkouts and the real per-account registry, the recovery tests an injected fake Docker CLI, the other tests a stub `docker` on `PATH`, a stub Vite build entry point and a stub Vite preview module | No | CT34 r2: exclusive ownership taken and persisted before Playwright starts; same-checkout and path-alias conflicts refused without touching outputs; isolated checkouts concurrent; nonterminal or corrupt records block reuse; unsafe output roots refused; birth-identity process classification (PID reuse never signalled); cooperative preview shutdown over the private channel with no PID fallback; daemon pinning; interrupted-intent reconciliation; anonymous-volume inventory; verified temporary-path removal; bounded idempotent retry; readiness marker and backend diagnostics | Real Docker, Vite, browsers or the E2E flows themselves ([real-Docker record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)) |
 | Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
 | VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
@@ -314,16 +314,45 @@ on any failed check or browser that cannot launch. Positional FE01 arguments
 ```bash
 npm test                         # all five projects
 npm run test:chromium            # chromium-desktop and chromium-mobile
-npm run stack:down               # remove leftovers of an interrupted run (skips stacks whose run is still alive)
-node --test fixtures/*.test.mjs  # stub-based lifecycle tests for local-stack.ts and stack-down.mjs (no Docker)
+npm test -- --grep "<title>"     # extra Playwright arguments go after --
+npm run stack:down               # reconcile and recover an interrupted run (same lock and inventory)
+npm run report                   # open the last HTML report (read-only; needs no ownership)
+npm run lifecycle:inspect        # print this checkout's current run record (read-only)
+node --test fixtures/*.test.mjs  # lifecycle regression tests (no real Docker, Vite or browser)
 ```
+
+**Run lifecycle (`CT34-FIXTURES-2026-11-10-r2`).** `npm test`, `npm run test:chromium`
+and `npm run stack:down` enter through `fixtures/lifecycle.py` (Python 3, standard
+library only), which takes exclusive ownership of the canonical `e2e/` directory and of
+the three output roots (`test-results/artifacts`, `test-results/results.json`,
+`test-results/html`) and persists the run record **before** the Playwright CLI starts.
+Ownership is a nonblocking `flock` on a stable lock file in the private registry
+`~/.codemastery-e2e/` (mode 0700, files 0600, `~` resolved from the effective UID, not
+`HOME`), keyed by the checkout directory's device/inode, so path aliases contend for the
+same lock and separate checkouts run concurrently. A second invocation of the same
+checkout exits 2 without starting anything; an unresolved previous run blocks a new one
+(exit 3) until `npm run stack:down` verifies its recovery; an unsafe registry, output
+root or filesystem is refused (exit 4). A direct `npx playwright test` is refused by
+`playwright.config.ts` before Playwright touches any output; `show-report`, `install`,
+`--version` and `--help` remain available. The run inventory records every process with
+its OS birth identity, the pinned Docker endpoint, context and daemon ID, each creation
+intent before the resource exists, the observed container, network and anonymous-volume
+IDs, and the temporary build's identity and run marker; it never records credentials.
+Normal teardown, the coordinator's finalization after the runner exits and
+`npm run stack:down` all use the same engine (`fixtures/stack-recovery.mjs`): it stops an
+orphaned preview only by asking it over its private Unix-domain control channel (no PID
+is ever signalled), removes only resources the inventory proves are this run's, verifies
+each absence, preserves and reports anything live, foreign, unreadable or unaccounted
+(including pre-r2 resources that carry only a PID label), and exits nonzero until the run
+is complete. A run is complete only after the coordinator has also verified the runner's
+own exit.
 
 `fixtures/local-stack.ts` (Playwright global setup) needs Docker. It builds
 `codemastery-e2e/backend:local` and `codemastery-e2e/postgres:local` from
 `backend/` and `infrastructure/postgres/` (kept for layer reuse), starts them on a
 private network with random database, JWT and storage values passed through the
 environment, builds the production frontend pointed at that backend and serves it
-with `vite preview`, waits for `/actuator/health`, registers an Instructor through
+through the pinned Vite preview API (`fixtures/preview-server.mjs`), waits for `/actuator/health`, registers an Instructor through
 the API and promotes that account in the disposable database only, and applies
 `fixtures/catalogue-fixture.sql` (21 published courses, one hidden course, hidden
 lessons and an empty chapter). Containers run the exact image IDs this run built, so
@@ -338,12 +367,10 @@ exits) instead of testing another server. If the backend container stops while
 setup waits for health, setup fails at once; on that or on the 180 s timeout the
 error carries the container state (status, exit code, OOM, error) and its last 100
 log lines, with the generated secrets redacted, captured before the teardown removes
-the container. Containers and the network carry the run ID and the owning process
-ID, so `stack:down` removes only resources whose owner is gone; it inspects and
-removes each resource on its own, counts one already removed by a concurrent
-teardown as gone, keeps (and reports, exiting 1) one whose owner cannot be read or
-that cannot be removed, and continues with the rest. The teardown stops the preview
-server, removes the containers, network and temporary directory. Each test registers its own synthetic Learner,
+the container. Containers and the network carry the run and owner labels, which
+only corroborate the IDs in the run inventory; the teardown stops the preview over its
+control channel and removes exactly the recorded containers, their anonymous volume,
+the network and the temporary directory, as described above. Each test registers its own synthetic Learner,
 so tests are independent. Projects: `chromium-desktop`, `firefox-desktop`,
 `webkit-desktop` (1280 × 900), `chromium-mobile` (Pixel 7) and `webkit-mobile`
 (iPhone 14). Results go to `e2e/test-results/` (ignored), including

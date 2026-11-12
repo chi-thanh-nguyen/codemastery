@@ -342,6 +342,41 @@ added after checkout in the `deployment-script` job; it runs `bash -n` on every
 script in the directory. No new job, test framework, directory, deployment, ruleset,
 required-check or protected-review change is approved.
 
+## Bounded FE24 E2E lifecycle inventory addition — 13 November 2026
+
+On 2026-11-13 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen explicitly authorized, in the instruction “CodeMastery — Phase 3:
+Contract-Compliant Playwright E2E CI Integration”, the minimum tracked
+launcher/coordinator, inventory/recovery helpers and regression tests under the
+existing `e2e/fixtures/` directory needed to implement
+`CT34-FIXTURES-2026-11-10-r2` ([ADR008 §10](decisions/008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026)).
+This record adds exactly nine files:
+
+| File | Responsibility | Why it is needed |
+| --- | --- | --- |
+| `e2e/fixtures/lifecycle.py` | Pre-entry coordinator: private registry, nonblocking `flock` keyed by the checkout's device/inode, output-root identity checks, run admission, the persisted run record, supervision of the runner and the recovery entry point; also the platform process-birth identity | §10.2 requires exclusivity before the Playwright CLI starts, with Python 3's standard-library `fcntl` |
+| `e2e/fixtures/run-inventory.mjs` | Versioned, bounded, non-secret run inventory with durable atomic replacement and creation intents | §10.3 persistent inventory, written by the Node side of the lifecycle |
+| `e2e/fixtures/host-identity.mjs` | Process-birth, host/boot/PID-namespace and recorded-directory identity checks | §10.3: a PID or a path alone is not ownership evidence |
+| `e2e/fixtures/stack-recovery.mjs` | The single cleanup and recovery engine used by normal teardown, the coordinator's finalization and `npm run stack:down` | §10.3: normal cleanup and recovery use the same protocol |
+| `e2e/fixtures/preview-server.mjs` | The run's Vite preview, hosted through the pinned Vite preview API, with a private run-scoped Unix-domain control channel | §10.3 cooperative self-termination of an orphaned preview |
+| `e2e/fixtures/lifecycle.test.mjs` | `node --test` tests of the coordinator: exclusivity, aliases, isolated checkouts, blocked reuse, unsafe outputs | §10.4 acceptance cases |
+| `e2e/fixtures/run-inventory.test.mjs` | `node --test` tests of the inventory protocol | §10.3 |
+| `e2e/fixtures/stack-recovery.test.mjs` | `node --test` failure-injection tests of the recovery engine with a fake Docker CLI | §10.3 and §10.4 |
+| `e2e/fixtures/preview-control.test.mjs` | `node --test` tests of the control channel with a real process and socket and a stub Vite module | §10.3 |
+
+The existing `e2e/package.json` scripts, `e2e/playwright.config.ts`,
+`fixtures/local-stack.ts`, `fixtures/stack-down.mjs`, `fixtures/local-stack.test.mjs`
+and `fixtures/stack-down.test.mjs` keep their paths with new contents. The private
+`~/.codemastery-e2e/` registry is generated local tooling state outside every
+checkout, not a tracked path. No dependency, directory, top-level path, workflow,
+ruleset, required check or CODEOWNERS rule is added or changed by this record; the
+existing `/e2e/` rule (@heizseung and @chi-thanh-nguyen) covers the new files.
+Playwright does not collect the tests (its `testDir` is `tests/`). The immutable
+canonical tree remains unchanged; this is an explicit addition, not a
+reinterpretation of its original inventory.
+[The testing record](testing.md#fe24-ct34-r2-lifecycle-implementation--13-november-2026)
+holds the design mapping and the verification actually performed.
+
 ```text
 codemastery/
 
@@ -1835,13 +1870,31 @@ codemastery/
 
 │       ├── catalogue-fixture.sql
 
+│       ├── host-identity.mjs
+
+│       ├── lifecycle.py
+
+│       ├── lifecycle.test.mjs
+
 │       ├── local-stack.test.mjs
 
 │       ├── local-stack.ts
 
+│       ├── preview-control.test.mjs
+
+│       ├── preview-server.mjs
+
+│       ├── run-inventory.mjs
+
+│       ├── run-inventory.test.mjs
+
 │       ├── stack-down.mjs
 
 │       ├── stack-down.test.mjs
+
+│       ├── stack-recovery.mjs
+
+│       ├── stack-recovery.test.mjs
 
 │       └── files/
 

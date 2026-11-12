@@ -1,93 +1,119 @@
-// Regression tests for stack-down.mjs. They run the real script against a stub `docker` placed first on PATH, so no
-// Docker resource is listed, inspected or removed. Run from e2e/: node --test fixtures/*.test.mjs
-import { test } from 'node:test';
+// Regression tests for the `stack:down` command line (fixtures/stack-down.mjs) under ADR008
+// CT34-FIXTURES-2026-11-10-r2. They run the real script against a stateful stub `docker` placed
+// first on PATH, so no Docker resource is listed, inspected or removed. The removal protocol itself
+// is covered by stack-recovery.test.mjs; these tests pin the command's contract: it refuses to run
+// without the coordinator's exclusivity, reports a complete recovery with exit 0, an incomplete one
+// with exit 1, and no longer removes resources on the strength of a dead-PID label.
+// Run from e2e/: node --test fixtures/*.test.mjs
+import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hostIdentity } from './host-identity.mjs';
+import { readInventory, writeInventory } from './run-inventory.mjs';
 
 const script = join(dirname(fileURLToPath(import.meta.url)), 'stack-down.mjs');
-// Stub docker: answers from a JSON scenario and appends every call to a log.
+// Stateful stub docker: resources live in STUB_STATE (JSON); every call is appended to STUB_CALLS.
 const STUB = `#!/usr/bin/env node
 const fs = require('node:fs');
-const args = process.argv.slice(2), scenario = JSON.parse(fs.readFileSync(process.env.STUB_SCENARIO, 'utf8'));
+const args = process.argv.slice(2), file = process.env.STUB_STATE, state = JSON.parse(fs.readFileSync(file, 'utf8'));
 fs.appendFileSync(process.env.STUB_CALLS, args.join(' ') + '\\n');
+const save = () => fs.writeFileSync(file, JSON.stringify(state));
 const fail = (message) => { process.stderr.write(message + '\\n'); process.exit(1); };
-const find = (kind, id) => scenario[kind].find((resource) => resource.id === id);
-const respond = (kind, id, step, ok) => {
-    const resource = find(kind, id), behavior = resource ? (resource[step] ?? 'ok') : 'missing';
-    if (behavior === 'missing') fail(kind === 'containers' ? 'Error: No such container: ' + id : 'Error response from daemon: network ' + id + ' not found');
-    if (behavior === 'error') fail('Error response from daemon: permission denied while trying to connect');
-    ok(resource);
-};
-const command = args[0] === 'network' ? 'network ' + args[1] : args[0];
-if (command === 'ps') console.log(scenario.containers.map((c) => c.id).join('\\n'));
-else if (command === 'network ls') console.log(scenario.networks.map((n) => n.id).join('\\n'));
-else if (command === 'inspect') respond('containers', args.at(-1), 'inspect', (c) => console.log(c.pid ?? '<no value>'));
-else if (command === 'network inspect') respond('networks', args.at(-1), 'inspect', (n) => console.log(n.pid ?? '<no value>'));
-else if (command === 'rm') respond('containers', args.at(-1), 'rm', (c) => console.log(c.id));
-else if (command === 'network rm') respond('networks', args.at(-1), 'rm', (n) => console.log(n.id));
-else fail('unexpected docker ' + args.join(' '));
+const id = args.at(-1), item = state.resources[id];
+if (args[0] === 'context' && args[1] === 'show') console.log('stub-context');
+else if (args[0] === 'context' && args[1] === 'inspect') console.log('unix:///var/run/docker.sock');
+else if (args[0] === 'info') console.log(state.daemonId);
+else if (args[0] === 'ps' || (args[1] === 'ls')) {
+    const kind = args[0] === 'ps' ? 'container' : args[0];
+    console.log(Object.entries(state.resources).filter(([, r]) => r.kind === kind && r.present).map(([k]) => k).join('\\n'));
+} else if (args[0] === 'inspect' || args[1] === 'inspect') {
+    if (!item || !item.present) fail('Error: No such object: ' + id);
+    console.log(args[0] === 'inspect' ? JSON.stringify({ Id: id, Config: { Labels: item.labels }, Mounts: [], State: { Status: 'exited' } }) : JSON.stringify(item.labels));
+} else if (args[0] === 'rm' || args[1] === 'rm') {
+    if (!item || !item.present) fail('Error: No such object: ' + id);
+    if (item.refuse) fail('Error response from daemon: permission denied');
+    item.present = false; save(); console.log(id);
+} else fail('unexpected docker ' + args.join(' '));
 `;
 
-const livePid = String(process.pid);
-const deadPid = String(spawnSync(process.execPath, ['-e', '']).pid);
+let dir = '';
+before(() => {
+    dir = mkdtempSync(join(tmpdir(), 'codemastery-stack-down-test-'));
+    writeFileSync(join(dir, 'docker'), STUB);
+    chmodSync(join(dir, 'docker'), 0o755);
+});
+after(() => rmSync(dir, { recursive: true, force: true }));
 
-function stackDown(scenario) {
-    const dir = mkdtempSync(join(tmpdir(), 'codemastery-stack-down-test-'));
-    try {
-        writeFileSync(join(dir, 'docker'), STUB); chmodSync(join(dir, 'docker'), 0o755);
-        writeFileSync(join(dir, 'scenario.json'), JSON.stringify(scenario)); writeFileSync(join(dir, 'calls.log'), '');
-        const result = spawnSync(process.execPath, [script], { encoding: 'utf8',
-            env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, STUB_SCENARIO: join(dir, 'scenario.json'), STUB_CALLS: join(dir, 'calls.log') } });
-        const calls = readFileSync(join(dir, 'calls.log'), 'utf8').trim().split('\n');
-        return { status: result.status, stdout: result.stdout, stderr: result.stderr,
-            removed: calls.filter((call) => /^(rm -f -v|network rm) /.test(call)).map((call) => call.split(' ').at(-1)) };
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+const host = hostIdentity();
+const labels = (run) => ({ 'codemastery.e2e': 'disposable', 'codemastery.e2e.run': run, 'codemastery.e2e.owner': String(process.getuid()) });
+function stackDown({ resources = {}, intents = [], daemonId = 'D1', recorded = true, inventory = true }) {
+    const stateFile = join(dir, 'state.json'), calls = join(dir, 'calls.log'), record = join(dir, 'run.json');
+    writeFileSync(stateFile, JSON.stringify({ daemonId, resources }));
+    writeFileSync(calls, '');
+    rmSync(record, { force: true });
+    if (recorded) {
+        writeInventory(record, {
+            schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-cli', state: 'incomplete',
+            ownerUid: process.getuid(), host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
+            processes: {}, temp: null, outputs: [], observations: [], intents,
+            docker: { context: 'stub-context', endpoint: 'unix:///var/run/docker.sock', daemonId: 'D1' },
+        });
+    }
+    const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, STUB_STATE: stateFile, STUB_CALLS: calls };
+    delete env.CODEMASTERY_E2E_REGISTRY;
+    if (inventory) env.CODEMASTERY_E2E_INVENTORY = record; else delete env.CODEMASTERY_E2E_INVENTORY;
+    const result = spawnSync(process.execPath, [script, '--reason', 'test'], { encoding: 'utf8', env, timeout: 60_000 });
+    return { ...result, calls: readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean), record: recorded ? readInventory(record) : null };
 }
 
-test('keeps live-owner resources, removes orphans and survives resources that vanish concurrently', () => {
-    const result = stackDown({
-        containers: [
-            { id: 'c-live', pid: livePid },
-            { id: 'c-dead', pid: deadPid },
-            { id: 'c-unlabelled' },
-            // Removed by another run's teardown between `docker ps` and `docker inspect`.
-            { id: 'c-vanished', inspect: 'missing' },
-            // Removed by another run between `docker inspect` and `docker rm`.
-            { id: 'c-gone-before-rm', pid: deadPid, rm: 'missing' },
-            { id: 'c-after', pid: deadPid },
-        ],
-        networks: [{ id: 'n-live', pid: livePid }, { id: 'n-dead', pid: deadPid }, { id: 'n-vanished', inspect: 'missing' }],
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.removed, ['c-dead', 'c-unlabelled', 'c-gone-before-rm', 'c-after', 'n-dead']);
-    assert.match(result.stdout, /Removed 4; kept 2 owned by a running E2E process; 3 already gone; 0 kept with an unreadable owner; 0 failed\./);
+test('refuses to run outside the lifecycle coordinator and touches no Docker resource', () => {
+    const result = stackDown({ inventory: false, resources: { C1: { kind: 'container', present: true, labels: labels('cm-e2e-cli') } } });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /must run through the lifecycle coordinator/);
+    assert.deepEqual(result.calls, []);
 });
 
-test('never removes a resource whose owner cannot be read, and reports a genuine removal failure without stopping', () => {
+test('removes the recorded run\'s resources and exits 0 only when every one is verified absent', () => {
     const result = stackDown({
-        containers: [
-            { id: 'c-unknown-owner', inspect: 'error' },
-            { id: 'c-rm-fails', pid: deadPid, rm: 'error' },
-            { id: 'c-next', pid: deadPid },
-            { id: 'c-live', pid: livePid },
-        ],
-        networks: [{ id: 'n-dead', pid: deadPid }],
+        resources: { C1: { kind: 'container', present: true, labels: labels('cm-e2e-cli') }, N1: { kind: 'network', present: true, labels: labels('cm-e2e-cli') } },
+        intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created' }, { id: 'i2', kind: 'network', name: 'n', dockerId: 'N1', state: 'created' }],
     });
-    assert.equal(result.status, 1, 'unresolved resources make the run fail');
-    // No removal is attempted for the unreadable one; the failing removal does not stop the others.
-    assert.deepEqual(result.removed, ['c-rm-fails', 'c-next', 'n-dead']);
-    assert.match(result.stderr, /kept container c-unknown-owner: its owner could not be read \(Error response from daemon: permission denied/);
-    assert.match(result.stderr, /could not remove container c-rm-fails: Error response from daemon: permission denied/);
-    assert.match(result.stdout, /Removed 2; kept 1 owned by a running E2E process; 0 already gone; 1 kept with an unreadable owner; 1 failed\./);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /cm-e2e-cli — 2 removed; recovery complete/);
+    assert.equal(result.record.state, 'complete');
 });
 
-test('does nothing when no labelled resource exists', () => {
-    const result = stackDown({ containers: [], networks: [] });
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.removed, []);
-    assert.match(result.stdout, /Removed 0; kept 0/);
+test('a refused removal is reported and exits 1 with the inventory retained for retry', () => {
+    const result = stackDown({
+        resources: { C1: { kind: 'container', present: true, refuse: true, labels: labels('cm-e2e-cli') } },
+        intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created' }],
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /RECOVERY INCOMPLETE \(inventory retained for retry\)/);
+    assert.equal(result.record.state, 'incomplete');
+});
+
+test('a legacy resource labelled only with a dead owner PID is no longer removed', () => {
+    const deadPid = String(spawnSync(process.execPath, ['-e', '']).pid);
+    const result = stackDown({
+        resources: { OLD: { kind: 'container', present: true, labels: { 'codemastery.e2e': 'disposable', 'codemastery.e2e.pid': deadPid } } },
+    });
+    assert.equal(result.status, 1, 'an unaccounted resource is reported as unresolved');
+    assert.ok(!result.calls.some((call) => call.startsWith('rm ')), result.calls.join('\n'));
+    assert.match(result.stdout, /preserved container OLD: carries no run label \(a pre-r2 leftover\)/);
+});
+
+test('a daemon that changed since the run started preserves everything', () => {
+    const result = stackDown({
+        daemonId: 'D2',
+        resources: { C1: { kind: 'container', present: true, labels: labels('cm-e2e-cli') } },
+        intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created' }],
+    });
+    assert.equal(result.status, 1);
+    assert.ok(!result.calls.some((call) => call.startsWith('rm ')));
+    assert.match(result.stdout, /the daemon ID is now D2, not the recorded D1/);
 });
