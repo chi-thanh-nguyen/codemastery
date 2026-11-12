@@ -5200,7 +5200,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Complete file body, attachment disposition; specification only, NOT IMPLEMENTED.",
+            "description": "Complete file body, attachment disposition; a download racing a committed replacement re-admits once and serves the current file (ADR010 §11); specification only, NOT IMPLEMENTED.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -5466,7 +5466,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Self Learner; multipart part file only (PDF or ZIP). Admitted only if server now is before deadlineAt (equality is late), sampled after the Assignment row lock, and the current submission is ungraded. 201 when created, 200 when replaced. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner; multipart part file only (PDF or ZIP). Admitted only if server now is before deadlineAt (equality is late), sampled after the Assignment row lock, and the current submission is ungraded. A replacement records a strictly later submittedAt; a non-advancing clock is 500 with rollback. Errors follow ADR010 §14 precedence. 201 when created, 200 when replaced. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -5596,7 +5596,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Complete file body, attachment disposition; specification only, NOT IMPLEMENTED.",
+            "description": "Complete file body, attachment disposition; a download racing a committed replacement re-admits once and serves the current file (ADR010 §11); specification only, NOT IMPLEMENTED.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -6082,7 +6082,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Complete file body, attachment disposition; specification only, NOT IMPLEMENTED.",
+            "description": "Complete file body, attachment disposition; a download racing a committed replacement re-admits once and serves the current file (ADR010 §11); specification only, NOT IMPLEMENTED.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -8969,7 +8969,7 @@
           "feedback",
           "submittedAt"
         ],
-        "description": "submittedAt must equal the current submission's submittedAt."
+        "description": "submittedAt must equal the current submission's submittedAt at microsecond precision; every replacement records a strictly later value, so a stale value is 409."
       }
     },
     "responses": {

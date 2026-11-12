@@ -693,9 +693,10 @@ superseded objects are deleted after commit and orphans are tolerated, never ser
 
 `deadline_at` is an exclusive instant evaluated against server time sampled under
 the Assignment row lock. The single current Submission row per learner and
-assignment is updated in place on replacement (new key, filename and
-`submitted_at`) while ungraded and before the deadline. Grade (0–100, at most two
-decimals), nonblank feedback and `graded_at` are written together; regrading
-replaces all three, and no grade history or ungrade exists. Manual grading never
-writes mastery or progress. No migration, column, index or retention policy is
-added; see ADR010 §§5 and 8–10 for the normative rules.
+assignment is updated in place on replacement (new key, filename and a strictly
+later `submitted_at`, which serves as the grade precondition token) while ungraded
+and before the deadline. Grade (0–100, at most two decimals), nonblank feedback
+and `graded_at` are written together; regrading replaces all three, and no grade
+history or ungrade exists. Manual grading never writes mastery or progress. No
+migration, column, index or retention policy is added; see ADR010 §§5 and 8–10
+for the normative rules.

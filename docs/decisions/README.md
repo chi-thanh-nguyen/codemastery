@@ -267,6 +267,11 @@ no storage, assignment or widget behavior is implemented by the approvals.
 | `CT10-REST-2026-11-12-r1` | CT10.rest: assignment authoring, submission and grading REST | [ADR010 §12](010-batch-05-contract-approvals.md#12-ct10rest) |
 | `CT37-WIDGET-2026-11-12-r1` | CT37.widget: shared upload/download widget | [ADR010 §13](010-batch-05-contract-approvals.md#13-ct37widget) |
 
+[ADR010 §16](010-batch-05-contract-approvals.md#16-independent-review-corrections--12-november-2026)
+records pre-integration review corrections inside these r1 revisions (strictly
+later replacement time, staged error precedence, download/replacement race and two
+wording fixes); scopes and IDs are unchanged.
+
 LD-07 (reminder deadline query ownership) is not resolved by CT10.deadline and stays
 with CT11.reminders (Batch 7). Submission-download hostile-content residual risk is
 `PENDING_LEADER_RISK_ACCEPTANCE` before public exposure.

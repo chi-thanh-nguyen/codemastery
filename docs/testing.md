@@ -3011,9 +3011,11 @@ were not rerun. No deployment, risk acceptance or spending permission is supplie
 
 [ADR010 §14](decisions/010-batch-05-contract-approvals.md#14-errors-acceptance-obligations-and-retained-gates)
 specifies oracles B5-O01–B5-O12 for authorization before storage, object keys,
-type/filename/size validation, store-then-commit compensation, the exclusive
-deadline, Assignment-row serialization, grading precision and preconditions,
-download headers, no mastery effect of grading and the shared widget. They use
+type/filename/size validation and staged error precedence, store-then-commit
+compensation, the exclusive deadline and strictly later replacement time,
+Assignment-row serialization, grading precision and preconditions, download
+headers and the download/replacement race, no mastery effect of grading and the
+shared widget. They use
 ADR008 §5's existing placements (`SubmissionServiceTest`,
 `AuthorizationIntegrationTest`, existing Course and frontend suites). Real MinIO
 success, rollback and recovery tests still need qualified isolated storage

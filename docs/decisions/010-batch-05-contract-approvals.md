@@ -24,8 +24,11 @@ Starting `origin/main`: **921801cef9919e5290f5d08f09699b227bc32c6b** (AS01
 domain/entity commit of 11 November 2026). [PR #231](https://github.com/chi-thanh-nguyen/codemastery/pull/231)
 merged ADR008 as `b6fa24b` on 10 November and [PR #233](https://github.com/chi-thanh-nguyen/codemastery/pull/233)
 merged ADR009 as `fe73f9a` on 11 November 2026; neither recorded an approving
-review. ADR001–ADR009 are integrated documents. Open PR #234 (CI workflow split)
-is unrelated and untouched.
+review. ADR001–ADR009 are integrated documents. PR #234 (CI workflow split), open
+when this record was prepared, merged on 11 November 2026 as `52bdb8d` with no
+approving review; this branch was then rebased onto it without content change.
+#234 touched no file of this record and no contract; §16 lists the later review
+corrections.
 
 Planning sources under `~/codemastery-backlog-publication/contract-checkpoint-batching/`:
 `run-20261108-135024/BATCH-05.md` and `APPROVAL-CHECKPOINT-REGISTER.md`, corrected by
@@ -107,10 +110,12 @@ Assessment. Auth @duyduyit and Course @TamiaoNguyen review.
 ### 3.2 CT18.b5-errors
 
 **`CT18-B5-ERRORS-2026-11-12-r1` — DELEGATED_APPROVED**, [CT18 #20](https://github.com/chi-thanh-nguyen/codemastery/issues/20).
-Uploads need two statuses outside CT18.minimum's family. For Batch 5 file
-operations only: **413** when a file part exceeds §6's limit (title
-`Content Too Large`) and **415** when a multipart operation receives another
-request media type or a JSON operation receives multipart. Both use the shared
+CT18.minimum already keeps framework 405/415 with proper HTTP semantics and a safe
+problem representation; it has no 413. For Batch 5 file operations only, this
+slice adds **413** when a file part exceeds §6's limit (title `Content Too Large`)
+and binds the existing framework **415** to one meaning: a multipart operation
+receives another request media type, or a JSON operation receives multipart. It
+does not narrow framework 415 elsewhere. Both use the shared
 RFC 9457 ProblemDetail envelope, safe English detail, no rejected values and
 `Cache-Control: no-store`. A non-ProblemDetail 413 from an ingress proxy remains
 a generic transport failure for clients. No other status or exception file.
@@ -140,9 +145,10 @@ container size limit still bounds unread bodies. Administrator inherits nothing.
 
 CT03's failure precedence applies: 401, 403 wrong role or published non-owner or
 missing membership, 404 hidden/missing/foreign scope (never revealing another
-Course or learner). A database row whose object is missing is an integrity
-failure (500), not 404. Caller-supplied owner, learner, key or filename is never
-trusted.
+Course or learner). A committed row whose object is missing is an integrity
+failure (500), not 404, except for the concurrent-replacement case that §11's
+download rule resolves first. Caller-supplied owner, learner, key or filename is
+never trusted. §14 fixes the complete error precedence.
 
 ## 5. CT09.lifecycle
 
@@ -177,7 +183,9 @@ backend never silently renames. Downloads present it (§11); it is never part of
 transaction, insert or update the row that references the new key. After commit,
 delete the superseded object; after rollback, delete the new object. Both deletes
 are best effort: failure is logged safely and leaves an orphan. A row never
-references an object that was not completely stored.
+references an object that was not completely stored. Deleting the superseded
+object immediately after commit can race with a download that read the old row;
+§11 defines that outcome. No delayed-deletion queue or retention window is added.
 
 **Deletion.** No REST operation deletes file materials (CT21 approves no hard
 delete) or submissions. Objects are deleted only after a replacement commit or as
@@ -272,10 +280,21 @@ replacement is admitted only if **now < deadline_at**; equality is late.
 production, fixed in tests), the same local seam ADR008 §6 left to CT10; no shared
 clock bean. It is sampled **after** the Assignment row lock is acquired (§10) and
 truncated to microseconds, and becomes `submitted_at`. Browser time, request
-receipt time and upload duration do not count. A cheap pre-check before storing
-rejects an already late request with 409 to avoid useless uploads; the locked check
-is authoritative. A sampled `now` earlier than an existing submission's
-`submitted_at` is clock regression: safe 500 and rollback.
+receipt time and upload duration do not count. After the file part has passed
+shape validation and before storing, an unlocked pre-check rejects an already
+late or graded submission with 409 so that no object is written; the locked check
+is authoritative (§14 gives the precedence).
+
+**Monotonic version token.** `submitted_at` is the submission's version: the
+`submittedAt` a grade request carries (§9) must name exactly one stored file. A
+replacement is therefore admitted only if the sampled, truncated `now` is
+**strictly later** than the existing row's `submitted_at`. `now` equal to or
+earlier than it is a non-advancing or regressing clock: safe 500 and rollback,
+with the new object deleted as compensation. The server never adjusts, increments
+or fabricates a time. Concurrent replacements serialize on §10's locks, so the
+second one compares against the first one's committed value. Tests with a fixed
+clock must advance it between replacements; a test that does not advance it must
+observe the 500.
 
 The owning Instructor may set any representable deadline, including a past one,
 and may change it at any time. A change affects only later admissions; accepted
@@ -300,8 +319,10 @@ Grading writes grade, feedback and time together, as V004 requires. The owning
 Instructor may **regrade**: a later save replaces all three, with a new time.
 There is no ungrade and no grade history. Grading is allowed whether or not the
 assignment is published or past its deadline. Each grade request carries the
-`submittedAt` the Instructor reviewed; a different current value is 409, so a
-grade never lands on a replacement file the Instructor did not see.
+`submittedAt` the Instructor reviewed; it is compared with the current value under
+§10's locks at microsecond precision, and any difference is 409. Because §8 makes
+every replacement strictly later, a grade never lands on a replacement file the
+Instructor did not see. No separate version column is added.
 
 A Learner sees grade, feedback and time only on their own graded submission.
 Manual grading never publishes `QuizSubmittedEvent`, never calls Adaptive and
@@ -312,7 +333,7 @@ belong to CT27 (Batch 7); no event payload or publication timing is approved her
 
 One current submission per learner and assignment (V004 unique constraint).
 Before the deadline and while ungraded, `PUT` replaces the file: new key, new
-`original_filename`, new `submitted_at`, same row ID; the superseded object is
+`original_filename`, a strictly later `submitted_at` (§8), same row ID; the superseded object is
 deleted after commit (§5). After the deadline: 409. After grading: 409, even
 before the deadline. No learner withdrawal or deletion exists.
 
@@ -352,6 +373,20 @@ the fallback replaces non-ASCII, `"` and `\` with `_`), `X-Content-Type-Options:
 nosniff` and `Cache-Control: no-store`. Storage is opened before the status is
 written; a failure after streaming starts aborts the connection. Cross-origin
 development needs `Content-Disposition` added to the CORS exposed headers.
+
+**Download versus concurrent replacement** (every Batch 5 download, here and in
+§12). The read snapshot can name a key that a replacement committed meanwhile and
+whose object §5 has already deleted. When `open` reports a missing object, the
+service ends that snapshot and performs **exactly one** fresh read-only attempt in
+a new snapshot that repeats the complete admission (§4) and reads the current row.
+If the row now names a different key, it opens and serves that key with the
+headers derived from the current row. If the key is unchanged, the row or access
+is gone, or the second `open` also fails, the normal outcome applies: 404/403 from
+admission, otherwise 500 integrity failure. A missing object that the second read
+explains as superseded is logged as a concurrent replacement, not as corruption.
+The retry happens only before any status is written; once streaming has started,
+the connection is aborted and the client may repeat the GET. The client never
+retries automatically (§13); a repeated GET is an ordinary authorized download.
 
 **Frontend transport (the multipart/download handling CT16-FINAL deferred).** The
 existing `frontend/src/shared/api/httpClient.ts` gains two additive capabilities
@@ -441,6 +476,32 @@ precondition); 500 storage, integrity, clock or transaction failure with rollbac
 Authentication and role precede resource work; Course concealment precedes
 descendants; shape validation precedes lifecycle decisions.
 
+**Deterministic precedence.** For every Batch 5 operation the first failing stage
+decides the response, and later stages do not run:
+
+1. **401** authentication (CT01).
+2. Request-level checks that involve no resource lookup and no body part:
+   **415** request media type and **400** malformed path UUID or page parameter.
+3. Admission (§4): CT03 stages 2–5 (**403** role, **404** Course concealment,
+   **403** membership or ownership, **404** descendants), then this record's
+   resource scope (file-type material, Assignment visible to the Learner, Assignment
+   and Submission in scope) → **404**. Nothing is read from the body before this stage.
+4. Body shape: JSON **400**; for multipart, **413** when a part exceeds the limit
+   while it is parsed (the other part checks cannot run), then **400** for parts,
+   title, filename, extension, zero bytes and signature.
+5. Unlocked lifecycle pre-check (submission `PUT` only, before storage): **409**
+   late or graded; no object is written.
+6. Storage write: **500** on failure; no row changes.
+7. Locked authoritative checks (ADR005's guard for file materials, §11; the
+   Assignment and Submission locks, §10): **403/404** when the re-checked
+   ownership, ancestry or Assignment publication no longer holds, **409** late,
+   graded or stale grade precondition, **500** clock,
+   integrity or transaction failure. The new object is deleted as compensation.
+
+So a late request with an invalid file is 400, a late request with a valid file
+is 409 without a storage write, and a request that becomes late while uploading
+is 409 at stage 7.
+
 The following oracles are **specified, NOT_RUN**. Placement follows ADR008 §5:
 `SubmissionServiceTest`, `AuthorizationIntegrationTest` and existing Course suites;
 the dedicated storage success/rollback integration placement remains the recorded
@@ -450,14 +511,14 @@ gap that needs a bounded structural decision.
 |---|---|
 | B5-O01 | Every operation in §4's table rejects wrong role, non-owner, missing membership, hidden Course/Lesson/material/assignment and foreign IDs before reading the part or calling storage. |
 | B5-O02 | Keys match §5 and are fresh per store; no key appears in any response, log or URL. |
-| B5-O03 | Type table: correct extension with wrong signature, wrong extension, zero bytes, path separators, control characters and 256-byte names are 400; client `Content-Type` is ignored. |
+| B5-O03 | Type table: correct extension with wrong signature, wrong extension, zero bytes, path separators, control characters and 256-byte names are 400; client `Content-Type` is ignored. Precedence follows §14 stage by stage: an unauthorized request with a bad file gets its admission status, a late request with an invalid file gets 400, a late request with a valid file gets 409 with no storage call. |
 | B5-O04 | Above the configured limit → 413 ProblemDetail; at or below the limit minus framing → accepted. |
 | B5-O05 | Store-then-commit: a failed transaction deletes the new object; a committed replacement deletes the old one; a failed delete leaves an orphan that is never served. |
-| B5-O06 | Deadline: now = deadline − 1 µs accepted, now = deadline rejected; the time is sampled after the lock; clock regression rolls back. |
+| B5-O06 | Deadline: now = deadline − 1 µs accepted, now = deadline rejected; the time is sampled after the lock. A replacement with now equal to or earlier than the stored `submitted_at` (fixed clock not advanced, or regression) is 500 with rollback and the new object deleted; an advanced clock gives a strictly later `submitted_at`. |
 | B5-O07 | Barriers: concurrent first submissions give one row; replacement versus grading and deadline edit versus submission serialize on the Assignment row. |
-| B5-O08 | Grade 0, 100, 99.99 accepted; 100.01, −0.01, 1.234 and strings rejected; blank feedback rejected; stale `submittedAt` → 409; regrade replaces all three fields. |
+| B5-O08 | Grade 0, 100, 99.99 accepted; 100.01, −0.01, 1.234 and strings rejected; blank feedback rejected; stale `submittedAt` → 409, including a grade that names the value before a replacement committed between the Instructor's read and the grade; regrade replaces all three fields. |
 | B5-O09 | A graded or late submission cannot be replaced; no endpoint deletes files. |
-| B5-O10 | Download headers match §11; disposition is always attachment; a missing object for an existing row is 500. |
+| B5-O10 | Download headers match §11; disposition is always attachment. A download whose snapshot names a key superseded and deleted by a committed replacement re-admits once and serves the current file; a missing object whose row still names it is 500; no second retry occurs. |
 | B5-O11 | Grading publishes no quiz event and changes no mastery or progress row. |
 | B5-O12 | Widget: accessible states, confirmation before replacement, no retry, Blob download without a token in any URL. |
 
@@ -488,3 +549,21 @@ OpenAPI parsing with duplicate-key rejection and reference resolution, relative
 link/anchor resolution and a checkpoint/edge check against the verified register.
 They are not runtime tests, external OpenAPI certification, storage qualification
 or independent review.
+
+## 16. Independent review corrections — 12 November 2026
+
+An independent technical review of PR #235 at `de3df67` raised four non-blocking
+findings. Under the Leader's explicit remediation instruction for PR #235/#236,
+they are corrected **before integration and within the same r1 revisions**: no
+revision was ever effective, so no effective approval is amended. Checkpoint
+membership, IDs, scopes and every other clause are unchanged.
+
+| Finding | Correction | Clauses |
+|---|---|---|
+| F-06 | A replacement must sample a strictly later `submitted_at`; equal or earlier is 500 with rollback, so `submittedAt` is an unambiguous grade-precondition token without a new column | §§8–10, B5-O06, B5-O08 |
+| F-09 | One staged error precedence; the unlocked 409 pre-check runs after shape validation and before storage | §8, §14, B5-O03 |
+| F-10 | A download racing a committed replacement re-admits once and serves the current file instead of reporting corruption | §4, §5, §11, B5-O10 |
+| F-11 | PR #234 merge recorded; §3.2 states that CT18.minimum already had framework 415 and only 413 is new | §1, §3.2 |
+
+The new oracle clauses are specified and NOT_RUN. This section records documentation
+corrections only; it is not independent review, CI evidence or Leader approval.
