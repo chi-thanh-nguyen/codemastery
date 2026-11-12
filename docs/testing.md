@@ -479,6 +479,18 @@ setup enables npm caching keyed by `frontend/package-lock.json`. Caches do not
 replace installation or validation. CodeQL code scanning runs separately through
 GitHub's default setup, with no workflow file in this repository.
 
+Eighteen VM steps run a script from `infrastructure/vm/tests/` instead of an
+inline block: the step runs `exec bash infrastructure/vm/tests/<script>` from the
+repository root, and the script holds that step's former inline commands
+unchanged. `exec` makes the script the step's own process, as the inline block
+was, so a signal sent to the step on cancellation reaches the script and its
+cleanup trap directly. The step-to-script mapping is in the
+[inventory record](repository-structure.md#bounded-vm-ci-test-script-inventory-addition--12-november-2026).
+The remaining short steps stay inline. The `deployment-script` job first runs
+`bash -n` on every script in that directory. To run one script locally, run
+`bash infrastructure/vm/tests/<script>` from the repository root. The scripts
+assume the runner's environment: most use Docker, and four use `sudo`.
+
 The `main-quality-gates` repository ruleset requires `CodeQL` and every job above
 to pass before merging into `main`. A later read of the GitHub API on 1 November
 2026 lists “VM MinIO initializer qualification” as required too; an earlier read
@@ -489,6 +501,20 @@ only the MinIO initializer job uses Compose, starting just the `minio` and
 `minio-init` services (and a placeholder backend under the VM override) in
 disposable projects. There is no E2E job or artifact upload. Workflow configuration does not prove a successful run; see
 [Latest recorded results](#latest-recorded-results).
+
+The Backend and Frontend jobs end with an informational evidence step that writes
+to the run's job summary unless the run was cancelled, including after a failed
+step. Both record the checked-out commit (the tested merge commit on pull
+requests), the pull request head SHA and the event and ref. Backend adds
+test, failure, error and skip counts from the Surefire and Failsafe XML reports
+plus the names of failed or erroring test cases, written as literal code spans
+so that a name cannot change the summary's formatting. It copies no test output
+or failure messages. Frontend adds the Node and npm versions and the outcome
+(`success`, `failure` or `skipped`) of its setup, install, test and build steps.
+`npm test` writes no machine-readable report, so its counts stay in the step
+log; the summary points there only when the test step ran and says so when it
+was skipped. These steps cannot fail the job: a summary error becomes a warning,
+and the earlier steps remain the gate.
 
 ## Remaining Gaps
 
