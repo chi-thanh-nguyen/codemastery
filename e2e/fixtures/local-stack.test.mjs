@@ -14,7 +14,7 @@ import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import globalSetup, { buildMarker, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
+import globalSetup, { buildMarker, cacheTag, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
 import { hostIdentity } from './host-identity.mjs';
 import { readInventory, writeInventory } from './run-inventory.mjs';
 
@@ -158,6 +158,15 @@ describe('frontend readiness identifies this run\'s build', () => {
             await assert.rejects(waitForPreview(child, server.url, token, () => '', { timeoutMs: 500, probeTimeoutMs: 200, intervalMs: 100 }), /Timed out/);
             assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
         } finally { server.close(); await stopped(child); }
+    });
+});
+
+describe('image cache tags never cross checkouts', () => {
+    test('each checkout key names its own layer-cache tag; a missing key is refused', () => {
+        assert.equal(cacheTag('backend', '16777230-4902041'), 'codemastery-e2e/backend:co-16777230-4902041');
+        assert.notEqual(cacheTag('postgres', '1-2'), cacheTag('postgres', '1-3'), 'two checkouts never share a tag that could move under a live run');
+        assert.throws(() => cacheTag('backend', ''), /No lifecycle lock key/);
+        assert.throws(() => cacheTag('backend', 'local'), /No lifecycle lock key/);
     });
 });
 

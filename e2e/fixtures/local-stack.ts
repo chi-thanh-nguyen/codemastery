@@ -177,6 +177,12 @@ async function api(base: string, path: string, body: unknown) {
     return response.json() as Promise<Record<string, unknown>>;
 }
 
+/** The per-checkout layer-cache tag of one image, e.g. `codemastery-e2e/backend:co-16777230-4902041`. */
+export function cacheTag(component: 'backend' | 'postgres', lockKey = process.env.CODEMASTERY_E2E_LOCK_KEY ?? '') {
+    if (!/^[0-9]+-[0-9]+$/.test(lockKey)) throw new Error('No lifecycle lock key: the per-checkout image cache tag cannot be named');
+    return `codemastery-e2e/${component}:co-${lockKey}`;
+}
+
 /** The pinned Vite CLI of `frontend/`, from its manifest's `bin` field (its exports map does not expose the file). */
 function resolveViteBin(frontend: string) {
     const manifest = createRequire(join(frontend, 'package.json')).resolve('vite/package.json');
@@ -269,12 +275,15 @@ export default async function globalSetup() {
             JWT_SECRET: randomBytes(32).toString('hex'),
             STORAGE_ACCESS_KEY: `e2e-${randomBytes(6).toString('hex')}`, STORAGE_SECRET_KEY: randomBytes(24).toString('hex'),
         };
-        // Containers run the exact image ID this run built (printed by --quiet), not the shared tag, so a
-        // concurrent run from another checkout that rebuilds the tag cannot swap the image underneath.
+        // Containers run the exact image ID this run built (printed by --quiet); the tag is only a layer
+        // cache. It is per checkout: runs of one checkout are serialized by the lifecycle lock, so the tag
+        // never moves under a live run, while a concurrent run from another checkout uses its own tag.
+        // (With a containerd image store, retagging a shared tag deletes the previously tagged image, so
+        // a tag shared across checkouts could remove another run's exact image before it is started.)
         const backendImage = process.env.E2E_BACKEND_IMAGE
-            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', 'codemastery-e2e/backend:local', join(repo, 'backend')]);
+            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', cacheTag('backend'), join(repo, 'backend')]);
         const postgresImage = process.env.E2E_POSTGRES_IMAGE
-            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', 'codemastery-e2e/postgres:local', join(repo, 'infrastructure', 'postgres')]);
+            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', cacheTag('postgres'), join(repo, 'infrastructure', 'postgres')]);
 
         const network = runId;
         const networkIntent = intend({ kind: 'network', name: network });
