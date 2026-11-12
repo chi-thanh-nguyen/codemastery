@@ -1941,7 +1941,9 @@ shared `httpClient.ts` gains additive multipart (`FormData`, browser-set boundar
 JSON result, no retry) and authenticated binary download (`Blob` plus the
 `Content-Disposition` filename) capabilities. Existing JSON callers, session
 generation, abort handling and 401-only session clearing stay unchanged; 413 maps
-to `Content Too Large`. Cross-origin development must expose `Content-Disposition`
+to `Content Too Large`; a network failure or 500 on upload is an unknown outcome
+that reloads the resource first. Grading echoes `submittedAt` as the exact string
+received, never through `Date`. Cross-origin development must expose `Content-Disposition`
 in CORS. The shared widget remains `shared/components/FileUploadField.tsx`: one
 file, PDF or PDF/ZIP requirement text, indeterminate progress, confirmation before
 replacement, Blob download through a revoked object URL, no token in any URL and

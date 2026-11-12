@@ -131,9 +131,9 @@ example after a learner leaves). Streaming costs backend bandwidth, bounded by �
 
 Every upload or download authenticates (CT01), checks role and resource rules,
 and completes all scoping **before** a file part is read or storage is called.
-Implementation uses lazy multipart resolution (`spring.servlet.multipart.resolve-lazily`
-or an equivalent mechanism) so that admission precedes reading the part; the
-container size limit still bounds unread bodies. Administrator inherits nothing.
+Implementation uses lazy multipart resolution (`spring.servlet.multipart.resolve-lazily=true`)
+and §11's multipart binding, so that admission precedes reading any part; the
+configured size limit bounds a part once it is read. Administrator inherits nothing.
 
 | Operation | Actor | Admission before reading the part or storage |
 |---|---|---|
@@ -180,17 +180,45 @@ these checks: nonblank, at most 255 UTF-8 bytes, no `/`, `\` or control characte
 backend never silently renames. Downloads present it (§11); it is never part of a key.
 
 **Write order and replacement.** Store the object first; then, in one database
-transaction, insert or update the row that references the new key. After commit,
-delete the superseded object; after rollback, delete the new object. Both deletes
-are best effort: failure is logged safely and leaves an orphan. A row never
-references an object that was not completely stored. Deleting the superseded
-object immediately after commit can race with a download that read the old row;
-§11 defines that outcome. No delayed-deletion queue or retention window is added.
+transaction, insert or update the row that references the new key. A row never
+references an object that was not completely stored. The storage call and every
+deletion run outside any database transaction. The file operation itself begins
+the **outermost** transaction for the row write (ADR005's guard joins it for file
+materials); called inside an existing transaction it fails with a safe 500 before
+storage, because only the outermost owner can observe how the transaction ended.
+
+The service classifies that ending into exactly one outcome and deletes only what
+the outcome proves unreferenced:
+
+| Outcome | Exact condition | Object deletions |
+|---|---|---|
+| **Confirmed commit** | The transaction manager reports completion as committed (Spring `TransactionSynchronization.STATUS_COMMITTED`) | Delete the superseded object (replacement only); keep the new one |
+| **Confirmed not committed** | The failure happened **before the commit phase began**: in admission re-checks, locks, validation, the clock check, a statement or the explicit flush that ends the transaction body. No COMMIT was sent, and PostgreSQL never commits a transaction without one | Delete the new object; keep the superseded one, which the unchanged row still references |
+| **Unknown outcome** | The commit phase began (Spring's `beforeCommit` callback ran) and committed completion was not observed: an exception during or after COMMIT, a lost acknowledgement, a connection failure, or a reported rollback after the commit request | Delete **neither** object |
+
+The transaction body flushes all writes explicitly before it returns, so constraint
+and statement failures fall into the second outcome rather than the third. A
+status that Spring derives after a commit-phase exception (including
+`STATUS_ROLLED_BACK` from a rollback attempted after a failed commit) is **not**
+proof of rollback, in line with ADR005 §13.3. A database that reports an error for
+COMMIT on a live connection has rolled back, but this contract does not require
+distinguishing that case: keeping both objects costs at most one orphan, while a
+wrong deletion would destroy a file that a committed row references. An unknown
+outcome returns a safe 500, logs one safe record (operation, row ID, correlation ID,
+never a key) and is resolved by the next ordinary read: the row then names
+whichever key actually committed, and the other object is an orphan that is never
+served. If `store` itself fails, the fresh key was never referenced, so one
+best-effort `delete` of that key runs before the 500.
+
+All deletions are best effort: a failed deletion is logged safely and leaves an
+orphan. Deleting the superseded object immediately after a confirmed commit can
+race with a download that read the old row; §11 defines that outcome. No
+delayed-deletion queue or retention window is added.
 
 **Deletion.** No REST operation deletes file materials (CT21 approves no hard
-delete) or submissions. Objects are deleted only after a replacement commit or as
-rollback compensation. Hidden or left content keeps its objects; no retention or
-expiry policy is introduced.
+delete) or submissions. Objects are deleted only under the outcome table above.
+Hidden or left content keeps its objects; no retention or expiry policy is
+introduced.
 
 **Orphans.** An object under an approved prefix referenced by no row is an
 orphan. Orphans are never served, because downloads require a row. The application
@@ -253,7 +281,8 @@ public interface FileStorage {
         @Override public void close();
     }
 
-    final class FileStorageException extends RuntimeException { }
+    class FileStorageException extends RuntimeException { }
+    final class ObjectNotFoundException extends FileStorageException { }
 }
 ```
 
@@ -261,12 +290,19 @@ public interface FileStorage {
   writes exactly `contentLength` bytes (a shorter or longer stream fails) and sets
   that media type as object metadata. It does not overwrite in a meaningful case,
   because keys are fresh random values.
-- `open` returns length, media type and a stream that the caller closes; a missing
-  object or provider failure raises `FileStorageException`.
+- `open` returns length, media type and a stream that the caller closes. It raises
+  `ObjectNotFoundException` **only** when the provider answers that the key does not
+  exist in the configured bucket: the S3 error code `NoSuchKey` (HTTP 404). Every
+  other failure raises plain `FileStorageException`: `NoSuchBucket`, `AccessDenied`
+  or any other error code, a 5xx, a timeout, a connection or TLS failure, a
+  malformed response, or a reported length or media type that does not match the
+  §5 table. A provider failure is never reported as a missing object. Errors while
+  reading the returned stream surface as `IOException` from the stream.
 - `delete` is idempotent: a missing object is success.
 - Invalid arguments raise `IllegalArgumentException`; provider failures raise
-  `FileStorageException` with a safe message. Both map to a safe 500, with no
-  automatic retry.
+  `FileStorageException` with a safe message. All of them map to a safe 500, with
+  no automatic retry, except the single download re-read that §11 allows for
+  `ObjectNotFoundException`.
 - No list, presign, public URL, bucket or policy management, multipart-upload,
   versioning or encryption API is exposed. Streams are not buffered whole in memory.
 - The adapter must use finite connection and request timeouts recorded in its
@@ -324,6 +360,15 @@ assignment is published or past its deadline. Each grade request carries the
 every replacement strictly later, a grade never lands on a replacement file the
 Instructor did not see. No separate version column is added.
 
+**Opaque token on the wire.** `submittedAt` is serialized as an RFC 3339 UTC instant
+carrying the stored microsecond value (Java `Instant` text, for example
+`2026-11-20T09:15:02.123456Z`). Clients treat it as an **opaque string**: the grade
+request echoes the exact string received in the Instructor's submission row,
+never a value parsed into JavaScript `Date`, a number or any type with millisecond
+precision and serialized again. Display formatting may parse a copy. The server
+parses the echoed value and compares the instant exactly; a value with nonzero
+digits below the microsecond is 400, any other different instant is 409.
+
 A Learner sees grade, feedback and time only on their own graded submission.
 Manual grading never publishes `QuizSubmittedEvent`, never calls Adaptive and
 never changes mastery or progress. `AssignmentGradedEvent` and its notification
@@ -333,8 +378,8 @@ belong to CT27 (Batch 7); no event payload or publication timing is approved her
 
 One current submission per learner and assignment (V004 unique constraint).
 Before the deadline and while ungraded, `PUT` replaces the file: new key, new
-`original_filename`, a strictly later `submitted_at` (§8), same row ID; the superseded object is
-deleted after commit (§5). After the deadline: 409. After grading: 409, even
+`original_filename`, a strictly later `submitted_at` (§8), same row ID; the
+superseded object is deleted after a confirmed commit (§5). After the deadline: 409. After grading: 409, even
 before the deadline. No learner withdrawal or deletion exists.
 
 Every submission, replacement, grading and assignment edit locks the Assignment
@@ -364,6 +409,29 @@ CT21's `FileMaterialMetadata` shape: no key, filename or URL. Bindings: existing
 `CourseStructureController`, `CourseStructureRequests`, `CourseStructureResponses`
 and `LearningMaterialService`; nested records only, no new file.
 
+**Multipart binding** (every Batch 5 multipart operation, here and in §12). The
+controller method declares no `@RequestPart`, `@RequestParam`, `MultipartFile`,
+`Part`, `@ModelAttribute` or Bean Validation binding for the parts, because Spring
+resolves such arguments, and therefore parses the body, before the method runs. It
+receives the lazily resolved request (`MultipartHttpServletRequest` with
+`resolve-lazily=true`) and passes the service an accessor that reads the parts only
+when called. The service calls it only after §14 stage 3. Before that stage no
+filter, interceptor, argument resolver or advice may call `getParameter*`,
+`getParts`, `getPart`, `getInputStream` or `getReader` on the request; the
+existing bearer filter reads only the `Authorization` header. The URL authorization
+rule for these paths in the existing `SecurityConfig` is `authenticated()`, not
+`hasRole(...)`: a role decided by the filter chain would answer 403 before the
+415/400 of stage 2, contrary to §14. The role is decided by CT03 at stage 3.
+
+**Early rejection of an unread body (transport limitation).** When admission
+rejects a request whose body has not been read, the server answers without
+consuming it and sends `Connection: close`. Tomcat drains a bounded amount of the
+unread body and otherwise closes the connection; a client still sending a large
+body can then see a connection reset before it reads the status. An ingress proxy
+that buffers the request body delivers the status reliably. The client therefore
+treats a network failure during an upload as an unknown outcome (§13), never as a
+rejection with a known status, and never retries automatically.
+
 **Wire rules.** Multipart requests contain exactly the named parts; a missing,
 duplicate or unknown part is 400. A successful download returns 200 with the full
 body (no range support), `Content-Type` from §5's table derived from the stored
@@ -374,18 +442,37 @@ nosniff` and `Cache-Control: no-store`. Storage is opened before the status is
 written; a failure after streaming starts aborts the connection. Cross-origin
 development needs `Content-Disposition` added to the CORS exposed headers.
 
-**Download versus concurrent replacement** (every Batch 5 download, here and in
-§12). The read snapshot can name a key that a replacement committed meanwhile and
-whose object §5 has already deleted. When `open` reports a missing object, the
-service ends that snapshot and performs **exactly one** fresh read-only attempt in
-a new snapshot that repeats the complete admission (§4) and reads the current row.
-If the row now names a different key, it opens and serves that key with the
-headers derived from the current row. If the key is unchanged, the row or access
-is gone, or the second `open` also fails, the normal outcome applies: 404/403 from
-admission, otherwise 500 integrity failure. A missing object that the second read
+**Download transaction and connection** (every Batch 5 download, here and in §12).
+A download runs in phases, and no database transaction or pooled JDBC connection
+is held while storage is called or the body is written:
+
+1. **Read.** One read-only REPEATABLE READ transaction performs the complete
+   admission (§4) and reads the row's key, filename and type, then ends. Its
+   connection returns to the pool.
+2. **Open.** `open(key)` runs outside any transaction.
+3. **Write.** The status and the headers derived from the row read in phase 1 are
+   written, then the stream is copied to the response and closed in a `finally`
+   block, again outside any transaction. The controller is not transactional, and
+   `spring.jpa.open-in-view` stays `false` as configured.
+
+Authorization is decided at phase 1, as for any read: a membership or publication
+change after phase 1 does not stop a body already being written, and the next GET
+is admitted afresh. The headers always describe the object being written, because
+both come from the same row read.
+
+**Download versus concurrent replacement.** Phase 1 can name a key that a
+replacement committed meanwhile and whose object §5 has already deleted. When
+phase 2 raises `ObjectNotFoundException`, the service repeats phase 1 **exactly
+once** in a new transaction, repeating the complete admission and reading the
+current row. If the row now names a different key, it opens that key and serves it
+with headers derived from the current row. If the key is unchanged, the row or
+access is gone, or the second `open` fails in any way, the normal outcome applies:
+404/403 from admission, otherwise 500. A missing object that the second read
 explains as superseded is logged as a concurrent replacement, not as corruption.
-The retry happens only before any status is written; once streaming has started,
-the connection is aborted and the client may repeat the GET. The client never
+Any other `FileStorageException` from `open` is a 500 at once, with no re-read: an
+infrastructure failure is never retried as if it were a replacement race. The
+re-read happens only before any status is written; once streaming has started, a
+failure aborts the connection and the client may repeat the GET. The client never
 retries automatically (§13); a repeated GET is an ordinary authorized download.
 
 **Frontend transport (the multipart/download handling CT16-FINAL deferred).** The
@@ -395,6 +482,8 @@ behavior unchanged:
 
 - multipart: sends `FormData` with the bearer token, lets the browser set the
   boundary, expects the operation's JSON status, and never retries automatically;
+  a network failure and a 500 are reported to the caller as an **unknown
+  outcome**, distinct from a rejection with a known status;
 - binary download: authenticated GET returning a `Blob` and the server filename
   parsed from `Content-Disposition` (`filename*` first); error bodies are parsed as
   ProblemDetail; 413 maps to the title `Content Too Large`.
@@ -451,8 +540,10 @@ or dependency.
   non-empty) only improve feedback; the backend decides. States: idle, uploading
   (indeterminate progress), accepted (file name and server time), rejected (safe
   message). The control is disabled while a request is pending; there is no
-  automatic retry; cancellation uses the request signal. After a network failure the
-  outcome is unknown: the UI reloads the resource before offering another upload.
+  automatic retry; cancellation uses the request signal. After a network failure or
+  a 500 the outcome is unknown (§5 can keep an upload whose commit outcome was
+  unknown): the UI reloads the resource and shows its current file before
+  offering another upload.
   Replacing an existing submission requires an explicit confirmation showing the
   current file name and time.
 - **Messages.** 400 field errors are shown verbatim; 409 maps to “The deadline has
@@ -463,6 +554,11 @@ or dependency.
 - **Download.** A button fetches the Blob through the shared transport, creates an
   object URL, triggers an anchor with the server filename, then revokes the URL.
   No inline preview, iframe or new tab; nothing is persisted.
+- **Grading precondition.** The grading view (`gradingApi.ts`) keeps each
+  submission row's `submittedAt` as the exact string from the response and sends
+  that string unchanged as the grade request's `submittedAt` (§9); its TypeScript
+  type is `string`, and it never passes through `Date`. After a 409 the view
+  reloads the submission row before another grade can be saved.
 - **Accessibility.** Keyboard operation, the existing `aria-describedby`
   requirement text and the existing `role="status"` region are kept; all text is English.
 
@@ -472,14 +568,16 @@ Errors follow CT18.minimum plus §3.2: 401 authentication; 403 role, published
 non-owner or missing membership; 404 hidden, missing or foreign scope; 400 malformed
 UUID/JSON/page, multipart parts, filename, type, signature, grade, precision or
 deadline; 413 size; 415 media type; 409 lifecycle (late, graded, stale grade
-precondition); 500 storage, integrity, clock or transaction failure with rollback.
+precondition); 500 storage, integrity, clock or transaction failure, with rollback
+or, after the commit phase began, an unknown outcome handled by §5.
 Authentication and role precede resource work; Course concealment precedes
 descendants; shape validation precedes lifecycle decisions.
 
 **Deterministic precedence.** For every Batch 5 operation the first failing stage
 decides the response, and later stages do not run:
 
-1. **401** authentication (CT01).
+1. **401** authentication (CT01). The filter chain decides only authentication for
+   these paths (§11, `authenticated()`).
 2. Request-level checks that involve no resource lookup and no body part:
    **415** request media type and **400** malformed path UUID or page parameter.
 3. Admission (§4): CT03 stages 2–5 (**403** role, **404** Course concealment,
@@ -491,12 +589,16 @@ decides the response, and later stages do not run:
    title, filename, extension, zero bytes and signature.
 5. Unlocked lifecycle pre-check (submission `PUT` only, before storage): **409**
    late or graded; no object is written.
-6. Storage write: **500** on failure; no row changes.
+6. Storage write: **500** on failure; no row changes; one best-effort delete of
+   the unreferenced fresh key (§5).
 7. Locked authoritative checks (ADR005's guard for file materials, §11; the
    Assignment and Submission locks, §10): **403/404** when the re-checked
    ownership, ancestry or Assignment publication no longer holds, **409** late,
-   graded or stale grade precondition, **500** clock,
-   integrity or transaction failure. The new object is deleted as compensation.
+   graded or stale grade precondition, **500** clock, integrity or transaction
+   failure. Every failure at this stage happens before the commit phase, so the new
+   object is deleted (§5, confirmed not committed).
+8. Commit: confirmed commit → success, superseded object deleted; unknown outcome
+   → **500**, both objects kept (§5).
 
 So a late request with an invalid file is 400, a late request with a valid file
 is 409 without a storage write, and a request that becomes late while uploading
@@ -511,16 +613,18 @@ gap that needs a bounded structural decision.
 |---|---|
 | B5-O01 | Every operation in §4's table rejects wrong role, non-owner, missing membership, hidden Course/Lesson/material/assignment and foreign IDs before reading the part or calling storage. |
 | B5-O02 | Keys match §5 and are fresh per store; no key appears in any response, log or URL. |
-| B5-O03 | Type table: correct extension with wrong signature, wrong extension, zero bytes, path separators, control characters and 256-byte names are 400; client `Content-Type` is ignored. Precedence follows §14 stage by stage: an unauthorized request with a bad file gets its admission status, a late request with an invalid file gets 400, a late request with a valid file gets 409 with no storage call. |
+| B5-O03 | Type table: correct extension with wrong signature, wrong extension, zero bytes, path separators, control characters and 256-byte names are 400; client `Content-Type` is ignored. Precedence follows §14 stage by stage: an unauthorized request with a bad or oversized file gets its admission status, a late request with an invalid file gets 400, a late request with a valid file gets 409 with no storage call. |
 | B5-O04 | Above the configured limit → 413 ProblemDetail; at or below the limit minus framing → accepted. |
-| B5-O05 | Store-then-commit: a failed transaction deletes the new object; a committed replacement deletes the old one; a failed delete leaves an orphan that is never served. |
+| B5-O05 | Store-then-commit, with faults from test-scoped bean overrides only: (a) a failure before the commit phase (re-check, lock, clock, statement, flush) leaves the row unchanged and deletes the new object; (b) a confirmed commit of a replacement deletes the superseded object; (c) a COMMIT that the database executes but whose acknowledgement is lost (a connection proxy that runs the commit and then throws) returns 500, deletes **neither** object, and the next read serves the new file; (d) a commit-phase exception after which the database did not commit returns 500, deletes neither object, keeps the old row and file, and leaves the new object as an orphan; (e) a failed `store` leaves no row change and attempts one delete of the fresh key; (f) a failed delete leaves an orphan that is never served; (g) a file operation called inside an existing transaction fails 500 before storage. |
 | B5-O06 | Deadline: now = deadline − 1 µs accepted, now = deadline rejected; the time is sampled after the lock. A replacement with now equal to or earlier than the stored `submitted_at` (fixed clock not advanced, or regression) is 500 with rollback and the new object deleted; an advanced clock gives a strictly later `submitted_at`. |
 | B5-O07 | Barriers: concurrent first submissions give one row; replacement versus grading and deadline edit versus submission serialize on the Assignment row. |
-| B5-O08 | Grade 0, 100, 99.99 accepted; 100.01, −0.01, 1.234 and strings rejected; blank feedback rejected; stale `submittedAt` → 409, including a grade that names the value before a replacement committed between the Instructor's read and the grade; regrade replaces all three fields. |
+| B5-O08 | Grade 0, 100, 99.99 accepted; 100.01, −0.01, 1.234 and strings rejected; blank feedback rejected; stale `submittedAt` → 409, including a grade that names the value before a replacement committed between the Instructor's read and the grade; regrade replaces all three fields. For a stored `submittedAt` with nonzero microseconds (`…T09:15:02.123456Z`), the exact echoed string is accepted, the millisecond-truncated `…T09:15:02.123Z` is 409 and a value with nonzero sub-microsecond digits is 400. |
 | B5-O09 | A graded or late submission cannot be replaced; no endpoint deletes files. |
-| B5-O10 | Download headers match §11; disposition is always attachment. A download whose snapshot names a key superseded and deleted by a committed replacement re-admits once and serves the current file; a missing object whose row still names it is 500; no second retry occurs. |
+| B5-O10 | Download headers match §11; disposition is always attachment. A download whose snapshot names a key superseded and deleted by a committed replacement re-admits once and serves the current file; a missing object whose row still names it is 500; no second retry occurs. A provider failure from `open` (5xx, timeout, `AccessDenied`, `NoSuchBucket`) is 500 with **no** re-read, and only `NoSuchKey` raises `ObjectNotFoundException` in the adapter. |
 | B5-O11 | Grading publishes no quiz event and changes no mastery or progress row. |
-| B5-O12 | Widget: accessible states, confirmation before replacement, no retry, Blob download without a token in any URL. |
+| B5-O12 | Widget: accessible states, confirmation before replacement, no retry, Blob download without a token in any URL; a network failure or 500 on upload reloads the resource before another upload is offered; the grade request body carries the received `submittedAt` string byte for byte, microsecond digits included. |
+| B5-O13 | Multipart binding: a body whose parts cannot be parsed (malformed boundary) or whose file part exceeds the limit returns the admission status (401/403/404) for an unauthorized or out-of-scope caller, and 400/413 only for an admitted one; a Learner on an Instructor upload path with a wrong request media type gets 415, not 403; a test multipart resolver that records part access observes no access before stage 3. A controller using `@RequestPart`, `MultipartFile` or a `hasRole` URL rule fails these cases. |
+| B5-O14 | Downloads hold no transaction and no pooled connection while the body is written: with the test pool limited to one connection and a download paused mid-body by the test client, another request that needs the database completes; phase 1 runs read-only at REPEATABLE READ. |
 
 No previously effective approval is amended or superseded. ADR005's guard, ADR006
 CT21 shapes and exclusions, ADR007's Assessment guards and ADR008's placement map
@@ -567,3 +671,25 @@ membership, IDs, scopes and every other clause are unchanged.
 
 The new oracle clauses are specified and NOT_RUN. This section records documentation
 corrections only; it is not independent review, CI evidence or Leader approval.
+
+## 17. Final technical review remediation — 13 November 2026
+
+A second independent technical review of PR #235 at `19ce6e0` found one approval-
+blocking defect and four lower findings in this record. Under the Leader's explicit
+instruction **“CodeMastery — Batch 5 & 6 Final Technical Findings Remediation”**
+they are corrected **before integration and within the same r1 revisions**, as in
+§16: no revision was ever effective, so no effective approval is amended. Checkpoint
+membership, IDs and scopes are unchanged; no schema, endpoint, dependency or
+architecture change is introduced.
+
+| Finding | Severity | Correction | Clauses |
+|---|---|---|---|
+| F-B5-01 | P2 | Three transaction outcomes (confirmed commit, confirmed not committed, unknown); objects are deleted only when the outcome proves them unreferenced; an unknown commit outcome keeps both objects, consistent with ADR005 §13.3; the file operation owns the outermost transaction | §5, §13, §14 stages 6–8, B5-O05, B5-O12 |
+| P3-3 | P3 | `ObjectNotFoundException` only for S3 `NoSuchKey`; every other provider failure is plain `FileStorageException`; the download re-read runs only for the former | §7, §11, B5-O10 |
+| P3-5 | P3 | `submittedAt` is an opaque RFC 3339 token echoed byte for byte; never round-tripped through JavaScript `Date` | §9, §13, B5-O08, B5-O12 |
+| P3-6 | P3 | Downloads run read → open → write with no transaction or pooled connection held during storage calls or body writing | §11, B5-O14 |
+| P3-12 | P3 | No eager part binding; lazy resolution with a deferred part accessor; `authenticated()` URL rule; early-rejection transport limitation | §4, §11, §14 stage 1, B5-O03, B5-O13 |
+
+The new and changed oracles are specified and NOT_RUN. This section records
+documentation corrections only; it is not independent review, CI evidence or
+Leader approval.

@@ -689,13 +689,15 @@ columns unchanged. `object_key` holds a backend-generated `materials/{uuid}` or
 `original_filename` stores the validated client name verbatim; media type, size and
 checksum stay unstored and are re-derived or validated at upload (PDF materials;
 PDF or ZIP submissions). Objects are stored before the referencing row commits;
-superseded objects are deleted after commit and orphans are tolerated, never served.
+a superseded object is deleted only after a confirmed commit and a new one only when
+the transaction provably did not commit; an unknown commit outcome keeps both.
+Orphans are tolerated, never served.
 
 `deadline_at` is an exclusive instant evaluated against server time sampled under
 the Assignment row lock. The single current Submission row per learner and
 assignment is updated in place on replacement (new key, filename and a strictly
 later `submitted_at`, which serves as the grade precondition token) while ungraded
-and before the deadline. Grade (0–100, at most two decimals), nonblank feedback
+and before the deadline; clients echo it as an opaque string. Grade (0–100, at most two decimals), nonblank feedback
 and `graded_at` are written together; regrading replaces all three, and no grade
 history or ungrade exists. Manual grading never writes mastery or progress. No
 migration, column, index or retention policy is added; see ADR010 §§5 and 8–10

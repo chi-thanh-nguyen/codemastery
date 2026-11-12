@@ -3010,12 +3010,14 @@ were not rerun. No deployment, risk acceptance or spending permission is supplie
 ## Batch 5 contract acceptance obligations — specified, NOT_RUN
 
 [ADR010 §14](decisions/010-batch-05-contract-approvals.md#14-errors-acceptance-obligations-and-retained-gates)
-specifies oracles B5-O01–B5-O12 for authorization before storage, object keys,
+specifies oracles B5-O01–B5-O14 for authorization before storage, object keys,
 type/filename/size validation and staged error precedence, store-then-commit
-compensation, the exclusive deadline and strictly later replacement time,
-Assignment-row serialization, grading precision and preconditions, download
-headers and the download/replacement race, no mastery effect of grading and the
-shared widget. They use
+deletions by transaction outcome (including a lost commit acknowledgement, which
+keeps both objects), the exclusive deadline and strictly later replacement time,
+Assignment-row serialization, grading precision and the opaque `submittedAt`
+precondition, download headers, the download/replacement race and missing-object
+versus provider failures, no mastery effect of grading, the shared widget, lazy
+multipart binding and downloads that hold no database connection. They use
 ADR008 §5's existing placements (`SubmissionServiceTest`,
 `AuthorizationIntegrationTest`, existing Course and frontend suites). Real MinIO
 success, rollback and recovery tests still need qualified isolated storage

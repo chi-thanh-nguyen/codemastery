@@ -4980,7 +4980,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; multipart part file only. New object key; superseded object deleted after commit, new object deleted after rollback. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; multipart part file only. New object key; the superseded object is deleted only after a confirmed commit and the new object only when the transaction provably did not commit; an unknown commit outcome is 500 and keeps both (ADR010 §5). ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -5163,7 +5163,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Admitted Learner (published Course, Lesson and material; ACTIVE/COMPLETED membership) or owning Instructor preview, through the CT03 material read predicate. Streams through the backend; no pre-signed URL. Missing object for an existing row is 500. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Admitted Learner (published Course, Lesson and material; ACTIVE/COMPLETED membership) or owning Instructor preview, through the CT03 material read predicate. Streams through the backend; no pre-signed URL; no database transaction or connection is held while the body is written. Missing object for an existing row is 500. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -8866,7 +8866,8 @@
           },
           "submittedAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "Microsecond instant; also the grade precondition token, to be echoed as this exact string (ADR010 §9)."
           },
           "graded": {
             "type": "boolean"
@@ -8969,7 +8970,7 @@
           "feedback",
           "submittedAt"
         ],
-        "description": "submittedAt must equal the current submission's submittedAt at microsecond precision; every replacement records a strictly later value, so a stale value is 409."
+        "description": "submittedAt is an opaque token: echo the exact RFC 3339 string received in the submission row (microsecond digits included, never round-tripped through a millisecond Date). It must equal the current submittedAt instant; a stale value is 409, nonzero sub-microsecond digits are 400. Every replacement records a strictly later value."
       }
     },
     "responses": {
@@ -9242,7 +9243,7 @@
         }
       },
       "B5Failure": {
-        "description": "Safe storage, integrity, clock or transaction failure. Database work rolls back and a new object is compensated; no automatic retry.",
+        "description": "Safe storage, integrity, clock or transaction failure; no automatic retry. A failure before the commit phase rolls back and deletes the new object; an unknown commit outcome keeps both objects and the client must reload the resource before another attempt (ADR010 §5).",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/AuthenticationNoStore"
