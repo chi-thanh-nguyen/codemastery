@@ -307,4 +307,9 @@ after it; no runtime behavior is implemented by the approvals.
 The recommended amendment of `CT04-START-2026-11-09-r1` and
 `CT08-EVIDENCE-2026-11-09-r1` for adaptive practice capture (ADR011 §17) is not
 approved and awaits the Leader. LD-11 ordering is honoured; owners' joint review
-remains a review gate.
+remains a review gate. [ADR011 §19](011-batch-06-contract-approvals.md#19-independent-review-corrections--12-november-2026)
+records pre-integration review corrections inside these r1 revisions (learner
+recommendation visibility, failure recovery path, strictly later recommendation
+time, admitted evidence reads, one approved event subscriber); scopes and IDs are
+unchanged. The operational risk of submission-blocking Adaptive failures is
+`PENDING_LEADER_RISK_ACCEPTANCE`.

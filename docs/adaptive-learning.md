@@ -608,7 +608,10 @@ transaction; Adaptive recomputes each assessed skill from its latest evidence un
 the Course policy and, when the Course is enabled and ready, applies test-out and
 records recommendations. Result, mastery, `LessonProgress` and recommendation history
 commit or roll back together; an unconfigured Course gets no Adaptive effect, and a
-disabled or not-ready Course gets mastery updates only (ADR005 §7.2).
+disabled or not-ready Course gets mastery updates only (ADR005 §7.2). A failing
+Adaptive step fails the submission; recovery removes the cause through approved
+routes and lets ordinary resubmission or the scheduler re-execute (ADR011 §5). That
+operational consequence awaits Leader risk acceptance.
 
 Routing (ADR011 §7): Lessons whose mapped skills are all Mastered are tested out
 (completed and marked mastery-skipped, never reversed); a Weak skill with an
@@ -620,6 +623,8 @@ medium and Mastered to hard (§8); applying it to quiz capture awaits a Leader-r
 amendment of CT04/CT08 evidence rules. The placement diagnostic is an ordinary quiz
 whose scope is its questions' skills; skipping is a navigation, not a server write.
 The Mastery Map, learner guidance, learner-home recommendations and Instructor
-insights are read contracts (§§12–15). Mastery states reflect the latest submitted
-quiz evidence for each skill; screens must say so. Earlier deferral text above is
-historical to the extent resolved by these bounded revisions.
+insights are read contracts (§§12–15); learners see a current recommendation only
+while the Course is adaptive-enabled and its target Lesson is published. Mastery
+states reflect the latest submitted quiz evidence for each skill; screens must say
+so. Earlier deferral text above is historical to the extent resolved by these
+bounded revisions.

@@ -3057,7 +3057,9 @@ result is claimed.
 specifies real-PostgreSQL cases B6-V01–B6-V10 for the atomic submission unit,
 rollback on injected faults, scheduler finalization, duplicates, evidence ordering,
 disabled/not-ready/unconfigured Courses, left learners, same-Course concurrency,
-held-root enforcement and the diagnostic gate. QA04 owns
+held-root and evidence-read admission enforcement, the single approved event
+subscriber, deterministic-failure recovery, learner recommendation visibility and
+the diagnostic gate. QA04 owns
 `MasteryProgressTransactionIntegrationTest`, QA03 `AdaptiveLearningFlowIntegrationTest`;
 unit doubles live in the existing Adaptive, Assessment and Course suites. Rule
 oracles B6-R01–B6-R12 (ADR011 §10) belong to the existing decision and mastery unit

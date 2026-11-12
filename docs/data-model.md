@@ -712,6 +712,8 @@ columns. `lesson_progress` gains mastery skips through Course's
 Enrollment status is recalculated as for manual completion. `learner_skill_masteries`
 is upserted only for skills assessed by a submitted quiz. `path_recommendations`
 receives one `skip` row per newly tested-out Lesson and a `continue` or `remedial`
-row only when it differs from the current one; history is never collapsed. All of
+row only when it differs from the current one; history is never collapsed. A run
+that inserts rows uses an instant strictly later than the Enrollment's latest
+`recommended_at`, so the current row is unique without a new column. All of
 these share the submission's transaction and lock order (ADR011 §4). No migration,
 column, index or ledger is added.

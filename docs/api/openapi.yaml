@@ -6290,7 +6290,7 @@
         "tags": [
           "Batch 6 contracts"
         ],
-        "description": "Self Learner. Placement offer condition, current continue/remedial recommendation (null when adaptation is off, none exists or the target is not a published Lesson) and per-Lesson prerequisite warnings. Guidance only; never blocks access. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner. Placement offer condition, the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true and the target is a currently published Lesson; no older row is substituted, and per-Lesson prerequisite warnings (empty when adaptiveEnabled is false). Guidance only; never blocks access. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -6349,7 +6349,7 @@
         "tags": [
           "Batch 6 contracts"
         ],
-        "description": "Self Learner. One row per ACTIVE membership of a published Course, same population, order and paging as /api/me/course-progress, with the unaltered current recommendation or null. No cross-Course ranking. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner. One row per ACTIVE membership of a published Course, same population, order and paging as /api/me/course-progress, with the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true and the target is a currently published Lesson; no older row is substituted. Same rule as /adaptive-guidance; clients add no filter. No cross-Course ranking. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -6418,7 +6418,7 @@
         "tags": [
           "Batch 6 contracts"
         ],
-        "description": "Owning Instructor; ACTIVE/COMPLETED learners ordered by learner UUID, with CT22 progress, mastery state counts and current recommendation marker. Display names via the ADR010 learner-name read. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; ACTIVE/COMPLETED learners ordered by learner UUID, with CT22 progress, mastery state counts and the unfiltered current recommendation marker (ADR011 §14). Display names via the ADR010 learner-name read. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -6632,7 +6632,7 @@
         "tags": [
           "Batch 6 contracts"
         ],
-        "description": "Full recommendation history (continue, skip, remedial) with target Lesson, reason and time, newest first. Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Full recommendation history (continue, skip, remedial) with target Lesson, reason and time, ordered by recommendedAt descending, then continue/remedial before skip, then target Lesson UUID ascending (ADR011 §9). Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -9684,7 +9684,7 @@
           "recommendedAt",
           "targetCompleted"
         ],
-        "description": "Latest continue/remedial row; reason verbatim."
+        "description": "Current continue/remedial row (ADR011 §7: unique greatest recommendedAt per Enrollment); reason verbatim. Learner reads return it only when visible under ADR011 §15."
       },
       "B6LessonGuidance": {
         "type": "object",
@@ -9771,7 +9771,8 @@
         "required": [
           "courseId",
           "recommendation"
-        ]
+        ],
+        "description": "recommendation is the visible current recommendation of ADR011 §15, or null when the Course's adaptiveEnabled is false, no current row exists or its target is not a published Lesson."
       },
       "B6MyRecommendationPage": {
         "type": "object",

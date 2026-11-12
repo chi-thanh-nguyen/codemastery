@@ -947,7 +947,8 @@ architecture change is introduced; review, integration and implementation remain
 
 [ADR011](011-batch-06-contract-approvals.md) resolves this record's §9 deferrals for
 the submitted-quiz flow: the event is handled synchronously in the same transaction
-(no asynchronous listener, retry or replay), and the mastery update, related
+(no asynchronous listener, retry or replay; Adaptive's listener is the only approved
+subscriber, and any other needs its own contract), and the mastery update, related
 `LessonProgress` update, recommendation history and the quiz result succeed or fail
 together. Course participation is actorless only under its own guard already held for
 that Course; Assessment adds evidence and execution coverage reads; Adaptive reaches
