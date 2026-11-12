@@ -544,9 +544,12 @@ retries and no `continue-on-error`. An `always()` step then runs `npm run stack:
 reconciles the run inventory after the test process has ended and fails the job on its own
 when recovery is incomplete. It never prunes Docker or removes a resource the inventory does
 not prove belongs to the run. A test, setup, browser-launch or cleanup failure fails the job.
-Step budgets (minutes): frontend install 10, E2E install 5, browsers 10, lifecycle tests 10,
-suite 30, recovery 8, summary 3. Their sum (76) leaves 14 minutes of the 90-minute job limit
-for checkout, Node setup and termination. A timed-out suite step still leaves recovery and
+Step budgets (minutes): frontend install 5, E2E install 3, browsers 10, lifecycle tests 5,
+suite 25, recovery 8, summary 2. Their sum (58) leaves 12 minutes of the 70-minute job limit
+for checkout, Node setup, post steps and termination. They are sized from the first measured
+run (browsers 66 s, lifecycle tests 33 s, suite 5.2 min including cold image builds, recovery
+1 s, job about 7 min) with headroom for cold dependency downloads, and the recovery budget
+covers bounded Docker retries against a slow daemon. A timed-out suite step still leaves recovery and
 summary their own budgets. An `always()` step is best effort and cannot run after a forced
 loss of the runner. The final step writes an informational job summary: tested commit and
 pull request head, runner OS, Node, npm, Python and Docker versions, the lockfile hash, the
@@ -3179,3 +3182,29 @@ cache-tag race above; and control socket files left after a preview closed itsel
   preserved for operator reconciliation.
 - QA08 independent verification, CODEOWNER review and protected integration remain
   separate gates. CT19/CT35/CT20.F Final coverage is not addressed.
+
+## SH07 E2E CI first executions — 13 November 2026
+
+The `CI E2E` workflow ([record](#ci)) ran for the first time on stacked draft PR
+[#241](https://github.com/chi-thanh-nguyen/codemastery/pull/241) (built on FE24 PR
+[#240](https://github.com/chi-thanh-nguyen/codemastery/pull/240); this is not final `main`
+integration evidence). Run
+[43296414482](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/43296414482):
+PR head `8f3be1d08484050d2d38b68bbca4a620b4dbe29c`, tested merge commit `eca7a86` (into
+`main` `956fa35fa197d57dde61e04501ac03af46f9d155`), `ubuntu-24.04`, Node 24, Playwright
+1.63.0 with its pinned browsers.
+
+| Step | Result |
+| --- | --- |
+| Install pinned browsers (`--with-deps`) | success, 66 s |
+| `node --test fixtures/*.test.mjs` | PASS 85/85, 33 s: the coordinator, inventory, recovery and control-channel tests on Linux |
+| `E2E_WORKERS=1 npm test` | success: 70 results, **66 passed, 4 skipped, 0 failed**, all five projects including `firefox-desktop`; the 4 skips are the suite's own `API-only checks run once.` on the four non-`chromium-desktop` projects; run admitted by the coordinator before Playwright started; both containers, the anonymous volume, the network and the build removed and verified; the runner's exit verified by Linux birth identity before the run became complete |
+| `npm run stack:down` (`always()`) | success: the completed run re-verified, nothing left |
+
+This first execution qualifies the Linux identity, filesystem and lock paths on the
+hosted Ubuntu runner, for the normal path. CI-level failure injection (a deliberately failing
+setup, assertion, browser or cleanup inside the workflow) was not run. Those propagation
+paths were exercised locally through the same `npm` entrypoints
+([FE24 record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)). The step budgets
+were then set from these durations. `E2E` is not a required check. No raw report was
+uploaded. Coverage is the existing suite only, so this is not Final main-flow acceptance.

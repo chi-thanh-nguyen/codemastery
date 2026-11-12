@@ -20,10 +20,12 @@ jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-24.04
-    # Outer budget; it must exceed the sum of the step budgets below plus
-    # checkout and runner overhead, so that recovery and the summary still run
-    # after a timed-out test step (ADR008 §10.5).
-    timeout-minutes: 90
+    # Outer budget (ADR008 §10.5). The step budgets below sum to 58 minutes and
+    # leave 12 for checkout, Node setup, post steps and termination grace, so
+    # recovery and the summary keep their own time after a timed-out suite.
+    # First measured run (ubuntu-24.04, cold image builds): browsers 66 s,
+    # lifecycle tests 33 s, suite 5.2 min, recovery 1 s, whole job about 7 min.
+    timeout-minutes: 70
     defaults:
       run:
         working-directory: e2e
@@ -41,11 +43,11 @@ jobs:
       - name: Install frontend dependencies
         id: install-frontend
         working-directory: frontend
-        timeout-minutes: 10
+        timeout-minutes: 5
         run: npm ci
       - name: Install E2E dependencies
         id: install-e2e
-        timeout-minutes: 5
+        timeout-minutes: 3
         run: npm ci
       - name: Install pinned Playwright browsers and OS dependencies
         id: browsers
@@ -53,11 +55,11 @@ jobs:
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Run E2E lifecycle regression tests
         id: lifecycle
-        timeout-minutes: 10
+        timeout-minutes: 5
         run: node --test fixtures/*.test.mjs
       - name: Run the E2E suite on all five projects
         id: e2e
-        timeout-minutes: 30
+        timeout-minutes: 25
         shell: bash
         run: |
           set -euo pipefail
@@ -70,12 +72,15 @@ jobs:
         # Runs after the test process has ended, whatever its outcome, and fails
         # the job on its own when recovery is incomplete. It never prunes Docker
         # and never removes a resource its run inventory does not prove it owns.
+        # Its budget covers bounded Docker retries against a slow daemon; the
+        # inventory is persisted after each resource, so a timeout keeps the
+        # partial results and still fails the job.
         if: ${{ always() }}
         timeout-minutes: 8
         run: npm run stack:down
       - name: Summarize E2E evidence
         if: ${{ always() }}
-        timeout-minutes: 3
+        timeout-minutes: 2
         shell: bash
         env:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
