@@ -452,13 +452,14 @@ The approved initial physical decisions above are no longer deferred. Later
 changes require new Flyway migrations after this baseline; an applied or possibly
 applied migration must never be edited.
 
-Still deferred: public APIs/DTOs, password-reset persistence/security workflow,
-additional profiles/storage metadata/submission history, numeric mastery if an
-approved algorithm needs it, adaptive configuration keys/thresholds/routing and
-evidence aggregation, module interfaces/events/transaction execution, and proven
-future indexes. These require their feature contracts before implementation.
-Seed/demo content remains separate under `sample-data/`; no versioned migration
-in this foundation supplies application records.
+Still deferred: additional profiles/storage metadata/submission history, numeric
+mastery if an approved algorithm needs it, adaptive configuration
+keys/thresholds/routing and evidence aggregation, module interfaces/events/
+transaction execution, and proven future indexes. Password recovery is now
+implemented locally under AU07 using the approved CT02 contract and additive V007
+schema; PostgreSQL execution, SMTP delivery and independent review remain
+unverified. Seed/demo content remains separate under `sample-data/`; no migration
+supplies application account records.
 
 ### CT01 account/identity contract supplement — approved, integration pending
 
@@ -654,7 +655,7 @@ Additive physical design for later NEW Flyway migration(s), not V001–V006 edit
 | Object | Approved design | Authority / remaining gate |
 |---|---|---|
 | enrollments.last_visited_at | nullable timestamptz, Java Instant, no default/backfill; legacy null means unknown; successful visit captures PostgreSQL clock_timestamp once under Course/Enrollment locks and writes pointer/time together | `CT22-RESUME-SCHEMA-2026-11-09-r1`, explicit additional Leader authorization; migration implementation and runtime grants still required |
-| password_reset_tokens | Auth-owned id uuid PK; user_id uuid unique FK users; token_digest bytea unique, exactly 32 bytes; issued_at/expires_at timestamptz NOT NULL, expires_at > issued_at; no defaults | `CT02-TOKEN-2026-11-09-r1`; exact constraint names and no-action/nondeferrable FK in [ADR006 §9.2](decisions/006-batch-02-contract-approvals.md#92-capability-storage-and-confirmation-transaction); separately authorized NEW migration required |
+| password_reset_tokens | Auth-owned id uuid PK; user_id uuid unique FK users; token_digest bytea unique, exactly 32 bytes; issued_at/expires_at timestamptz NOT NULL, expires_at > issued_at; no defaults | `CT02-TOKEN-2026-11-09-r1`; exact constraint names and no-action/nondeferrable FK in [ADR006 §9.2](decisions/006-batch-02-contract-approvals.md#92-capability-storage-and-confirmation-transaction); implemented by V007 under the Leader's 12 November 2026 scope amendment; migration execution remains unverified |
 
 One outstanding reset row per User; active eligible request replaces it, successful
 confirmation updates BCrypt hash and deletes matching capability atomically under
@@ -666,8 +667,12 @@ here, rather than authority inferred from the dormant configuration default.
 Learner-level resume selects only accessible recorded ACTIVE Course visits by time
 descending and Course UUID ascending on ties; legacy null times never become fake
 visits. No cross-course adaptive logic. CT01 membership/identity/JWT contracts and
-all existing physical constraints remain effective. NEW migrations, grants,
-implementation/security review and reset exposure risk acceptance stay separate.
+all existing physical constraints remain effective. AU07 adds V007 and the
+approved runtime DML grant. The Leader accepted that already-issued JWTs remain
+valid under unchanged CT01 checks until their original expiry (at most PT15M)
+after reset. This is not global logout or immediate account-compromise recovery.
+PostgreSQL execution, runtime grant qualification, SMTP delivery and protected
+review remain unverified; public exposure is not authorized by this implementation.
 
 
 ## Batch 3 assessment lifecycle contract — no physical change

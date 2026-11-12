@@ -37,6 +37,27 @@ spring:
     enabled: true
     locations: classpath:db/migration
     validate-on-migrate: true
+    placeholders:
+      # V007 grants only reset-token DML to the resolved application identity.
+      runtime-role: '"${spring.datasource.username}"'
+
+  mail:
+    host: ${SMTP_HOST}
+    port: 587
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+          starttls:
+            enable: true
+            required: true
+          ssl:
+            checkserveridentity: true
 
   servlet:
     multipart:
@@ -87,6 +108,8 @@ codemastery:
       expiration: ${JWT_EXPIRATION:PT15M}          # CT38.core: consumed JWT lifetime must equal PT15M
     password-reset:
       token-ttl: ${PASSWORD_RESET_TOKEN_TTL:PT30M}
+      frontend-origin: ${PASSWORD_RESET_FRONTEND_ORIGIN}
+      email-from: ${PASSWORD_RESET_EMAIL_FROM}
     cors:
       allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}   # comma-separated
 

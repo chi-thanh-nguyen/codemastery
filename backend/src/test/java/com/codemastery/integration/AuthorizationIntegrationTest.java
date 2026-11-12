@@ -7,6 +7,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailDelivery;
+import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailMessage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
@@ -19,6 +21,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -51,6 +54,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -90,6 +95,9 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private JwtTokenProvider tokens;
 
+    @MockitoBean
+    private ResetEmailDelivery resetEmailDelivery;
+
     private final Set<String> testEmails = ConcurrentHashMap.newKeySet();
 
     @BeforeEach
@@ -113,6 +121,8 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     @AfterEach
     void cleanCommittedUsersAndSecurityContext() {
         for (String email : testEmails) {
+            jdbc.update("DELETE FROM public.password_reset_tokens WHERE user_id IN "
+                    + "(SELECT id FROM public.users WHERE email = ?)", email);
             jdbc.update("DELETE FROM public.users WHERE email = ?", email);
         }
         testEmails.clear();
@@ -156,6 +166,60 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         assertTrue(storedHash.startsWith("$2b$14$"));
         assertNotEquals(password, storedHash);
         assertTrue(PASSWORDS.matches(password, storedHash));
+    }
+
+    @Test
+    void passwordResetStoresOnlyDigestConsumesTokenAndRequiresOrdinarySignIn() throws Exception {
+        String email = newEmail();
+        String oldPassword = syntheticPassword();
+        String newPassword = syntheticPassword();
+        testEmails.add(email);
+        register(Map.of("email", email, "password", oldPassword, "displayName", "QA01 Reset Learner"))
+                .andExpect(status().isCreated());
+
+        CountDownLatch delivered = new CountDownLatch(1);
+        AtomicReference<ResetEmailMessage> message = new AtomicReference<>();
+        doAnswer(invocation -> {
+            message.set(invocation.getArgument(0));
+            delivered.countDown();
+            return null;
+        }).when(resetEmailDelivery).send(any(ResetEmailMessage.class));
+
+        mvc.perform(post("/api/auth/password-reset-requests").contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("email", email))))
+                .andExpect(status().isAccepted())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.message")
+                        .value("If an account matches, a password reset link will be sent."));
+        assertTrue(delivered.await(10, TimeUnit.SECONDS), "Reset email should be delivered asynchronously");
+
+        String link = message.get().resetLink();
+        String capability = link.substring(link.indexOf("#token=") + "#token=".length());
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(java.util.Base64.getUrlDecoder().decode(capability));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.password_reset_tokens "
+                + "WHERE user_id = (SELECT id FROM public.users WHERE email = ?) AND token_digest = ?",
+                Integer.class, email, digest));
+
+        mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("token", capability, "password", newPassword))))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.message")
+                        .value("Password reset. Sign in with your new password."));
+
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.password_reset_tokens "
+                + "WHERE user_id = (SELECT id FROM public.users WHERE email = ?)", Integer.class, email));
+        String storedHash = jdbc.queryForObject(
+                "SELECT password_hash FROM public.users WHERE email = ?", String.class, email);
+        assertTrue(PASSWORDS.matches(newPassword, storedHash));
+        assertFalse(PASSWORDS.matches(oldPassword, storedHash));
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("email", email, "password", oldPassword))))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("email", email, "password", newPassword))))
+                .andExpect(status().isOk());
     }
 
     @ParameterizedTest

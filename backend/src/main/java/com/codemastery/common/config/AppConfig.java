@@ -9,6 +9,8 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -52,6 +54,24 @@ public class AppConfig {
 
     @Bean
     @Lazy
+    public PasswordResetSettings passwordResetSettings(Environment environment) {
+        String ttl = environment.getProperty("codemastery.security.password-reset.token-ttl");
+        Duration duration;
+        try {
+            duration = Duration.parse(ttl);
+        } catch (RuntimeException exception) {
+            throw invalid("PASSWORD_RESET_TOKEN_TTL");
+        }
+        return new PasswordResetSettings(duration,
+                environment.getProperty("codemastery.security.password-reset.frontend-origin"),
+                environment.getProperty("codemastery.security.password-reset.email-from"),
+                environment.getProperty("spring.mail.host"),
+                environment.getProperty("spring.mail.username"),
+                environment.getProperty("spring.mail.password"));
+    }
+
+    @Bean
+    @Lazy
     public CorsSettings corsSettings(Environment environment) {
         String value = environment.getProperty("codemastery.security.cors.allowed-origins");
         requireValue(value, "CORS_ALLOWED_ORIGINS");
@@ -86,6 +106,9 @@ public class AppConfig {
 
     private static void validateDatasource(String url, String username, String password) {
         requireValue(username, "spring.datasource.username / DB_USER");
+        if (!username.matches("[a-z_][a-z0-9_]*")) {
+            throw invalid("DB_USER (must be a lowercase PostgreSQL role identifier)");
+        }
         requireValue(password, "spring.datasource.password / DB_PASSWORD");
         requireValue(url, "spring.datasource.url / DB_HOST / DB_PORT / DB_NAME");
         try {
@@ -170,4 +193,47 @@ public class AppConfig {
     }
 
     public record SchedulingSettings(boolean enabled) { }
+
+    public record PasswordResetSettings(Duration tokenTtl, String frontendOrigin, String emailFrom,
+                                        String smtpHost, String smtpUsername, String smtpPassword) {
+        public PasswordResetSettings {
+            if (!Duration.ofMinutes(30).equals(tokenTtl)) {
+                throw invalid("PASSWORD_RESET_TOKEN_TTL (must be PT30M)");
+            }
+            requireValue(frontendOrigin, "PASSWORD_RESET_FRONTEND_ORIGIN");
+            try {
+                URI uri = URI.create(frontendOrigin);
+                if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
+                        || uri.getPort() == 0 || uri.getPort() > 65535 || uri.getPort() < -1
+                        || !uri.getRawPath().isEmpty() || uri.getRawQuery() != null || uri.getRawFragment() != null
+                        || frontendOrigin.contains("*") || !uri.toASCIIString().equals(frontendOrigin)) {
+                    throw invalid("PASSWORD_RESET_FRONTEND_ORIGIN");
+                }
+            } catch (RuntimeException exception) {
+                throw invalid("PASSWORD_RESET_FRONTEND_ORIGIN");
+            }
+            requireValue(emailFrom, "PASSWORD_RESET_EMAIL_FROM");
+            try {
+                InternetAddress sender = new InternetAddress(emailFrom, true);
+                sender.validate();
+                if (sender.getPersonal() != null || !emailFrom.equals(sender.getAddress())) {
+                    throw invalid("PASSWORD_RESET_EMAIL_FROM");
+                }
+            } catch (AddressException exception) {
+                throw invalid("PASSWORD_RESET_EMAIL_FROM");
+            }
+            requireValue(smtpHost, "SMTP_HOST");
+            if (smtpHost.chars().anyMatch(Character::isWhitespace)) {
+                throw invalid("SMTP_HOST");
+            }
+            requireValue(smtpUsername, "SMTP_USERNAME");
+            requireValue(smtpPassword, "SMTP_PASSWORD");
+        }
+
+        @Override
+        public String toString() {
+            return "PasswordResetSettings[tokenTtl=" + tokenTtl + ", frontendOrigin=<redacted>, "
+                    + "emailFrom=<redacted>, smtpHost=<redacted>, smtpUsername=<redacted>, smtpPassword=<redacted>]";
+        }
+    }
 }

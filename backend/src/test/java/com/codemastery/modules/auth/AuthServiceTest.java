@@ -1,12 +1,16 @@
 package com.codemastery.modules.auth;
 
 import com.codemastery.common.config.AppConfig;
+import com.codemastery.common.config.AppConfig.PasswordResetSettings;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.GlobalExceptionHandler;
 import com.codemastery.modules.auth.api.controller.AuthController;
 import com.codemastery.modules.auth.api.dto.AuthRequests;
 import com.codemastery.modules.auth.api.dto.UserResponse;
 import com.codemastery.modules.auth.application.service.AuthService;
+import com.codemastery.modules.auth.application.service.PasswordResetService;
+import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailDelivery;
+import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailMessage;
 import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
 import com.codemastery.modules.auth.application.service.UserAccountService.IdentityRole;
@@ -40,6 +44,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -62,11 +67,17 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.validation.beanvalidation.SpringValidatorAdapter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.sql.SQLException;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -138,6 +149,53 @@ class AuthServiceTest {
         return new DataIntegrityViolationException("Synthetic persistence failure",
                 new ConstraintViolationException("Synthetic constraint failure",
                         new SQLException("Synthetic SQL error", state), "synthetic SQL", name));
+    }
+
+    @Nested
+    class PasswordRecovery {
+
+        private final Instant now = Instant.parse("2026-11-12T12:00:00Z");
+        private final PasswordResetSettings settings = new PasswordResetSettings(Duration.ofMinutes(30),
+                "https://codemastery.test", "auth@codemastery.test", "smtp.example.test", "test-user", "test-secret");
+
+        private PasswordResetService service(ResetEmailDelivery delivery) {
+            return new PasswordResetService(users, transactionManager, settings, delivery, validator,
+                    Clock.fixed(now, ZoneOffset.UTC), Runnable::run, new SimpleMeterRegistry());
+        }
+
+        @Test
+        void activeRequestStoresOnlyDigestAndUsesConfiguredFragmentOrigin() throws Exception {
+            allowTransaction();
+            when(users.findByEmailForUpdate("learner@example.test"))
+                    .thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
+            when(users.findResetTokenByUserId(USER_ID)).thenReturn(Optional.empty());
+            ResetEmailDelivery delivery = mock(ResetEmailDelivery.class);
+
+            assertEquals("If an account matches, a password reset link will be sent.",
+                    service(delivery).requestReset("learner@example.test").message());
+
+            ArgumentCaptor<ResetEmailMessage> message = ArgumentCaptor.forClass(ResetEmailMessage.class);
+            verify(delivery).send(message.capture());
+            String link = message.getValue().resetLink();
+            assertTrue(link.startsWith("https://codemastery.test/reset-password#token="));
+            String capability = link.substring(link.indexOf("#token=") + "#token=".length());
+            byte[] raw = Base64.getUrlDecoder().decode(capability);
+            assertEquals(32, raw.length);
+            ArgumentCaptor<byte[]> digest = ArgumentCaptor.forClass(byte[].class);
+            verify(users).replaceResetToken(eq(USER_ID), digest.capture(), eq(now), eq(now.plus(Duration.ofMinutes(30))));
+            assertArrayEquals(MessageDigest.getInstance("SHA-256").digest(raw), digest.getValue());
+            assertFalse(message.getValue().toString().contains(capability));
+        }
+
+        @Test
+        void malformedCapabilityAndInvalidPasswordDoNotAccessPersistence() {
+            PasswordResetService service = service(mock(ResetEmailDelivery.class));
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(BusinessRuleException.class,
+                    () -> service.resetPassword("malformed", PASSWORD)).getStatus());
+            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(BusinessRuleException.class,
+                    () -> service.resetPassword("A".repeat(43), "short")).getStatus());
+            verifyNoInteractions(users, transactionManager);
+        }
     }
 
     @Nested
@@ -458,7 +516,8 @@ class AuthServiceTest {
         @BeforeEach
         void setUpMvc() {
             application = mock(AuthService.class);
-            mvc = MockMvcBuilders.standaloneSetup(new AuthController(application, mock(JwtTokenProvider.class)))
+            mvc = MockMvcBuilders.standaloneSetup(new AuthController(application, mock(JwtTokenProvider.class),
+                            mock(PasswordResetService.class)))
                     .setControllerAdvice(new GlobalExceptionHandler(), new AuthController.RegistrationCacheAdvice())
                     .setValidator(new SpringValidatorAdapter(validator)).build();
         }

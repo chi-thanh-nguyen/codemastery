@@ -49,7 +49,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(BusinessRuleException.class)
     public ResponseEntity<Object> handleBusinessRule(BusinessRuleException exception, WebRequest request) {
-        return response(exception.getStatus(), HttpHeaders.EMPTY, request, List.of());
+        String safeDetail = "Reset link is invalid or expired.".equals(exception.getMessage())
+                ? "Reset link is invalid or expired." : null;
+        return response(exception.getStatus(), HttpHeaders.EMPTY, request, List.of(), safeDetail);
     }
 
     @ExceptionHandler(Exception.class)
@@ -110,12 +112,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private ResponseEntity<Object> response(HttpStatusCode status, HttpHeaders originalHeaders,
             WebRequest request, List<ValidationError> errors) {
+        return response(status, originalHeaders, request, errors, null);
+    }
+
+    private ResponseEntity<Object> response(HttpStatusCode status, HttpHeaders originalHeaders,
+            WebRequest request, List<ValidationError> errors, String safeDetailOverride) {
         if (request instanceof ServletWebRequest servletRequest
                 && servletRequest.getResponse() != null && servletRequest.getResponse().isCommitted()) {
             return null;
         }
         HttpStatus standardStatus = HttpStatus.resolve(status.value());
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, safeDetail(status.value()));
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status,
+                safeDetailOverride == null ? safeDetail(status.value()) : safeDetailOverride);
         problem.setType(URI.create("about:blank"));
         problem.setTitle(standardStatus == null ? "HTTP Error" : standardStatus.getReasonPhrase());
         if (request instanceof ServletWebRequest servletRequest) {

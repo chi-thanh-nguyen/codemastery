@@ -1,11 +1,17 @@
 package com.codemastery.modules.auth.api.controller;
 
-import com.codemastery.modules.auth.api.dto.AuthRequests.RegisterRequest;
-import com.codemastery.modules.auth.api.dto.UserResponse;
-import com.codemastery.modules.auth.api.dto.AuthResponse;
+import com.codemastery.modules.auth.api.dto.AuthRequests;
 import com.codemastery.modules.auth.api.dto.AuthRequests.LoginRequest;
-import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import com.codemastery.modules.auth.api.dto.AuthRequests.PasswordResetConfirmRequest;
+import com.codemastery.modules.auth.api.dto.AuthRequests.RegisterRequest;
+import com.codemastery.modules.auth.api.dto.AuthRequests.PasswordResetRequest;
+import com.codemastery.modules.auth.api.dto.AuthResponse;
+import com.codemastery.modules.auth.api.dto.AuthResponse.PasswordResetAcknowledgement;
+import com.codemastery.modules.auth.api.dto.AuthResponse.PasswordResetCompleted;
+import com.codemastery.modules.auth.api.dto.UserResponse;
 import com.codemastery.modules.auth.application.service.AuthService;
+import com.codemastery.modules.auth.application.service.PasswordResetService;
+import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
 import jakarta.validation.Valid;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.CacheControl;
@@ -30,8 +36,12 @@ public class AuthController {
 
     private final JwtTokenProvider tokens;
 
-    public AuthController(AuthService auth, JwtTokenProvider tokens) {
-        this.auth = auth; this.tokens = tokens;
+    private final PasswordResetService passwordResets;
+
+    public AuthController(AuthService auth, JwtTokenProvider tokens, PasswordResetService passwordResets) {
+        this.auth = auth;
+        this.tokens = tokens;
+        this.passwordResets = passwordResets;
     }
 
     @PostMapping("/login")
@@ -45,6 +55,22 @@ public class AuthController {
     public ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
         UserResponse result = UserResponse.from(auth.register(request.email(), request.password(), request.displayName()));
         return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(result);
+    }
+
+    @PostMapping("/password-reset-requests")
+    public ResponseEntity<PasswordResetAcknowledgement> requestPasswordReset(@RequestBody String json) {
+        PasswordResetRequest request = AuthRequests.parsePasswordResetRequest(json);
+        return ResponseEntity.accepted().cacheControl(CacheControl.noStore())
+                .body(new PasswordResetAcknowledgement(
+                        passwordResets.requestReset(request.email()).message()));
+    }
+
+    @PostMapping("/password-resets")
+    public ResponseEntity<PasswordResetCompleted> confirmPasswordReset(@RequestBody String json) {
+        PasswordResetConfirmRequest request = AuthRequests.parsePasswordResetConfirmRequest(json);
+        passwordResets.resetPassword(request.token(), request.password());
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(new PasswordResetCompleted("Password reset. Sign in with your new password."));
     }
 
     /** Also covers shared MVC advice responses before writing register error bodies. */
@@ -61,7 +87,9 @@ public class AuthController {
                                       Class<? extends HttpMessageConverter<?>> converterType,
                                       ServerHttpRequest request, ServerHttpResponse response) {
             String path = request.getURI().getPath();
-            if ("/api/auth/register".equals(path) || "/api/auth/login".equals(path)) {
+            if ("/api/auth/register".equals(path) || "/api/auth/login".equals(path)
+                    || "/api/auth/password-reset-requests".equals(path)
+                    || "/api/auth/password-resets".equals(path)) {
                 response.getHeaders().setCacheControl("no-store");
             }
             return body;

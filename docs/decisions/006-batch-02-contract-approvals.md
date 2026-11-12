@@ -570,3 +570,52 @@ is inferred from technical approval.
 Security mechanism reference: [OWASP recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html).
 It supports side-channel possession, indistinguishable requests and expiring single
 use; the exact CodeMastery values/semantics above come from this delegated decision.
+
+## 10. AU07 implementation authorization and bounded scope amendment — 12 November 2026
+
+The Project Leader's explicit implementation instruction and approval to amend the
+AU07 scope and record reset-token residual risk were relayed by @duyduyit in this
+Codex session on 12 November 2026. The Leader authorized implementation of AU07,
+the V007 migration and minimum runtime grants, Auth persistence changes, SMTP
+adapter/dependency/configuration, and accepted that already-issued CT01 JWTs remain
+valid under the unchanged CT01 checks until their original expiry (at most PT15M)
+after a password reset. This records the authorization as relayed; it is not a
+claim of a GitHub review, protected merge, or independent review.
+
+Under the Leader's instruction to select the remaining bounded implementation
+details, the following implementation choices apply to this AU07 change:
+
+- Use Spring Boot's existing Mail abstraction via `spring-boot-starter-mail` and
+  `JavaMailSender`, with an Auth-owned `SmtpPasswordResetEmailAdapter` under
+  `modules/auth/infrastructure/email`. Send plain text only.
+- Use authenticated SMTP submission on port 587 with STARTTLS required and server
+  certificate/hostname verification enabled. Set connect, read and write timeouts
+  to 5000 ms. No TLS fallback is permitted.
+- Bind `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `PASSWORD_RESET_EMAIL_FROM`, and `PASSWORD_RESET_FRONTEND_ORIGIN` as required
+  runtime inputs. The origin must be a single HTTPS origin with no path, query,
+  fragment, userinfo, wildcard or request-derived component. The sender must be a
+  valid email address. Missing, placeholder or invalid values fail closed; no
+  provider, origin, sender or credential is committed. `PASSWORD_RESET_TOKEN_TTL`
+  remains required to equal PT30M.
+- Use the resolved application datasource username as the V007 runtime role.
+  Restrict that identifier to lowercase ASCII letters, digits and underscore,
+  beginning with a letter or underscore, before safely quoting it in the Flyway
+  grant. V007 grants only SELECT, INSERT, UPDATE and DELETE on
+  `public.password_reset_tokens`; it grants no schema ownership or unrelated
+  privileges. The approved §9.2 table definition is unchanged.
+- The service's single-worker FIFO queue remains capacity 128 and best effort;
+  per-user issuance remains limited by PT1M. Do not add a rate-limit dependency
+  or a new 429 contract. Deployment ingress abuse/load qualification remains an
+  exposure gate.
+- Keep verification in the already approved `AuthServiceTest.java` and
+  `AuthorizationIntegrationTest.java` locations; no new test file is required.
+
+This amendment supersedes only §9.1's exclusion of an SMTP adapter/dependency and
+§9.4's pending implementation, migration/grant and reset-specific JWT-risk gates
+within the AU07 implementation scope above. It does not authorize deployment,
+real credentials, live migration execution against a shared/production database,
+public exposure, protected-review bypass, or a change to CT01 JWT semantics. Actual
+SMTP provider delivery, runtime grants, PostgreSQL race/rollback behavior, frontend
+fragment handling and public exposure remain unverified until independently run
+and reviewed under their applicable gates.

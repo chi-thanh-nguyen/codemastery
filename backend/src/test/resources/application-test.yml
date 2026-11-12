@@ -1,3 +1,15 @@
 codemastery:
   scheduling:
     enabled: false
+
+  security:
+    password-reset:
+      frontend-origin: https://codemastery.test
+      email-from: auth@codemastery.test
+
+spring:
+  mail:
+    host: localhost
+    port: 587
+    username: test-smtp-user
+    password: test-smtp-password

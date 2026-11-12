@@ -493,7 +493,7 @@ codemastery/
 
 │       │   │               │       │       └── UserRepositoryImpl.java
 
-│       │   │               │       └── security/
+│       │   │               │       ├── security/
 
 │       │   │               │           ├── AuthenticatedUser.java
 
@@ -504,6 +504,8 @@ codemastery/
 │       │   │               │           ├── RestSecurityErrorHandler.java
 
 │       │   │               │           └── SecurityConfig.java
+│       │   │               │       ├── email/
+│       │   │               │       │   └── SmtpPasswordResetEmailAdapter.java
 
 │       │   │               ├── course/
 
@@ -1103,7 +1105,8 @@ codemastery/
 
 │       │               ├── V005__create_mastery_and_recommendation_schema.sql
 
-│       │               └── V006__create_interaction_and_audit_schema.sql
+│       │               ├── V006__create_interaction_and_audit_schema.sql
+│       │               └── V007__create_password_reset_tokens.sql
 
 │       └── test/
 
