@@ -502,6 +502,20 @@ only the MinIO initializer job uses Compose, starting just the `minio` and
 disposable projects. There is no E2E job or artifact upload. Workflow configuration does not prove a successful run; see
 [Latest recorded results](#latest-recorded-results).
 
+The Backend and Frontend jobs end with an informational evidence step that writes
+to the run's job summary unless the run was cancelled, including after a failed
+step. Both record the checked-out commit (the tested merge commit on pull
+requests), the pull request head SHA and the event and ref. Backend adds
+test, failure, error and skip counts from the Surefire and Failsafe XML reports
+plus the names of failed or erroring test cases, written as literal code spans
+so that a name cannot change the summary's formatting. It copies no test output
+or failure messages. Frontend adds the Node and npm versions and the outcome
+(`success`, `failure` or `skipped`) of its setup, install, test and build steps.
+`npm test` writes no machine-readable report, so its counts stay in the step
+log; the summary points there only when the test step ran and says so when it
+was skipped. These steps cannot fail the job: a summary error becomes a warning,
+and the earlier steps remain the gate.
+
 ## Remaining Gaps
 
 The following are not covered by any executable test in the repository. No

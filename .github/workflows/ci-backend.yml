@@ -30,3 +30,63 @@ jobs:
             backend/.mvn/wrapper/maven-wrapper.properties
       - name: Verify backend
         run: ./mvnw verify
+      - name: Summarize backend test evidence
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Informational only: the verify step above is the gate. Counts come from
+        # the Surefire/Failsafe XML reports; no test output or message is copied.
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY" || echo "::warning::Backend test evidence summary could not be written."
+          import glob, os, re, subprocess
+          import xml.etree.ElementTree as ET
+
+          def git(*args):
+              done = subprocess.run(["git", *args], capture_output=True, text=True)
+              return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else "unavailable"
+
+          def code(text):
+              # Literal code span. Non-printable characters are shown as escapes, and the
+              # fence is longer than any backtick run in the text, so no test name can
+              # end the span or be read as Markdown or HTML.
+              text = "".join(ch if ch.isprintable() else ch.encode("unicode_escape").decode() for ch in text)
+              fence = "`" * (max(map(len, re.findall("`+", text)), default=0) + 1)
+              pad = " " if text[:1] in ("`", " ") or text[-1:] in ("`", " ") else ""
+              return f"{fence}{pad}{text}{pad}{fence}"
+
+          def suite(pattern):
+              files = sorted(glob.glob(pattern))
+              totals = dict(tests=0, failures=0, errors=0, skipped=0)
+              failed = []
+              for path in files:
+                  root = ET.parse(path).getroot()
+                  for key in totals:
+                      totals[key] += int(float(root.get(key, "0")))
+                  for case in root.iter("testcase"):
+                      if case.find("failure") is not None or case.find("error") is not None:
+                          failed.append(f"{case.get('classname', '?')}.{case.get('name', '?')}")
+              return len(files), totals, failed
+
+          suites = [(label, *suite(pattern)) for label, pattern in (
+              ("Unit (Surefire)", "target/surefire-reports/TEST-*.xml"),
+              ("Integration (Failsafe)", "target/failsafe-reports/TEST-*.xml"))]
+          all_failed = [name for *_, failed in suites for name in failed]
+          event = os.environ.get("GITHUB_EVENT_NAME", "")
+          print("### Backend test evidence\n")
+          print("| Item | Value |\n| --- | --- |")
+          print(f"| Tested commit (checked-out `HEAD`) | `{git('rev-parse', 'HEAD')}` |")
+          print(f"| Pull request head | `{os.environ.get('PR_HEAD_SHA') or 'n/a (' + event + ')'}` |")
+          print(f"| Event, ref | `{event}`, `{os.environ.get('GITHUB_REF', '')}` |")
+          print("\n| Suite | Report files | Tests | Failures | Errors | Skipped |\n| --- | --- | --- | --- | --- | --- |")
+          for label, count, t, _ in suites:
+              print(f"| {label} | {count} | {t['tests']} | {t['failures']} | {t['errors']} | {t['skipped']} |")
+          if all_failed:
+              print("\nFailed or erroring test cases (names only):\n")
+              for name in all_failed[:50]:
+                  print(f"- {code(name)}")
+              if len(all_failed) > 50:
+                  print(f"- … and {len(all_failed) - 50} more")
+          print("\nZero report files means the build stopped before that suite ran."
+                " This summary is informational; the job result is the gate.")
+          PY
