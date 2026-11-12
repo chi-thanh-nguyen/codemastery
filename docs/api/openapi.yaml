@@ -4878,6 +4878,11 @@
             "multipart/form-data": {
               "schema": {
                 "$ref": "#/components/schemas/B5MaterialUpload"
+              },
+              "encoding": {
+                "file": {
+                  "contentType": "application/octet-stream"
+                }
               }
             }
           }
@@ -5061,6 +5066,11 @@
             "multipart/form-data": {
               "schema": {
                 "$ref": "#/components/schemas/B5FileUpload"
+              },
+              "encoding": {
+                "file": {
+                  "contentType": "application/octet-stream"
+                }
               }
             }
           }
@@ -5216,12 +5226,7 @@
               }
             },
             "content": {
-              "application/pdf": {
-                "schema": {
-                  "type": "string",
-                  "contentMediaType": "application/pdf"
-                }
-              }
+              "application/pdf": {}
             }
           },
           "400": {
@@ -5556,6 +5561,11 @@
             "multipart/form-data": {
               "schema": {
                 "$ref": "#/components/schemas/B5FileUpload"
+              },
+              "encoding": {
+                "file": {
+                  "contentType": "application/octet-stream"
+                }
               }
             }
           }
@@ -5612,18 +5622,8 @@
               }
             },
             "content": {
-              "application/pdf": {
-                "schema": {
-                  "type": "string",
-                  "contentMediaType": "application/pdf"
-                }
-              },
-              "application/zip": {
-                "schema": {
-                  "type": "string",
-                  "contentMediaType": "application/zip"
-                }
-              }
+              "application/pdf": {},
+              "application/zip": {}
             }
           },
           "400": {
@@ -6098,18 +6098,8 @@
               }
             },
             "content": {
-              "application/pdf": {
-                "schema": {
-                  "type": "string",
-                  "contentMediaType": "application/pdf"
-                }
-              },
-              "application/zip": {
-                "schema": {
-                  "type": "string",
-                  "contentMediaType": "application/zip"
-                }
-              }
+              "application/pdf": {},
+              "application/zip": {}
             }
           },
           "400": {
@@ -9052,8 +9042,7 @@
         "additionalProperties": false,
         "properties": {
           "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream"
+            "description": "Raw binary file bytes; multipart Content-Disposition must carry the original filename. No base64 or text conversion."
           }
         },
         "required": [
@@ -9070,8 +9059,7 @@
             "pattern": "\\S"
           },
           "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream"
+            "description": "Raw binary file bytes; multipart Content-Disposition must carry the original filename. No base64 or text conversion."
           }
         },
         "required": [

@@ -1938,7 +1938,8 @@ default or `.env.example` entry changes, and no storage setting reaches `VITE_*`
 
 Files travel only through the backend: no pre-signed or public storage URL. The
 shared `httpClient.ts` gains additive multipart (`FormData`, browser-set boundary,
-JSON result, no retry) and authenticated binary download (`Blob` plus the
+JSON result, no retry; append a File or a Blob with its explicit original filename,
+without text/JSON/base64 conversion) and authenticated binary download (`Blob` plus the
 `Content-Disposition` filename) capabilities. Existing JSON callers, session
 generation, abort handling and 401-only session clearing stay unchanged; 413 maps
 to `Content Too Large`; a network failure or 500 on upload is an unknown outcome
