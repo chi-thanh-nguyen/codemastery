@@ -304,7 +304,7 @@ after it; no runtime behavior is implemented by the approvals.
 | `CT33-RESULTS-2026-11-12-r1` | CT33.results: latest per-skill evidence and owner attempt list | [ADR011 §12](011-batch-06-contract-approvals.md#12-ct33results) |
 | `CT33-MAP-2026-11-12-r1` | CT33.map: learner and owner Mastery Map | [ADR011 §13](011-batch-06-contract-approvals.md#13-ct33map) |
 | `CT33-INSIGHTS-2026-11-12-r1` | CT33.insights: owner-only joined-learner insights | [ADR011 §14](011-batch-06-contract-approvals.md#14-ct33insights) |
-| `CT08-VERIFICATION-PLAN-2026-11-12-r1` | CT08.verification-plan: real PostgreSQL cases B6-V01–V10 | [ADR011 §16](011-batch-06-contract-approvals.md#16-ct08verification-plan) |
+| `CT08-VERIFICATION-PLAN-2026-11-12-r1` | CT08.verification-plan: real PostgreSQL cases B6-V01–V12 | [ADR011 §16](011-batch-06-contract-approvals.md#16-ct08verification-plan) |
 | `CT33-REST-2026-11-12-r1` | CT33.rest: eight read operations, including learner-home recommendations | [ADR011 §15](011-batch-06-contract-approvals.md#15-ct33rest) |
 
 The recommended amendment of `CT04-START-2026-11-09-r1` and
@@ -321,3 +321,7 @@ titles, server-chosen placement Quiz, name order, disabling as a bounded recover
 route, learner-free difficulty port); scopes and IDs are unchanged. The operational
 risks of submission-blocking Adaptive failures and of answers graded from the last
 committed save are `PENDING_LEADER_RISK_ACCEPTANCE`.
+[ADR011 §21](011-batch-06-contract-approvals.md#21-comprehensive-independent-review-remediation--13-november-2026)
+records N-B6-01/02: intervening-writer limits and V12/C01, valid completed remedial
+review, selected-reason rename effects and Home row omission (R13–R16/V06).
+Existing routing, upstream approvals and all checkpoint revision IDs are preserved.

@@ -229,16 +229,36 @@ processing instant (§9), while evidence order keeps ADR007's logical `submitted
   does not send the POST: it keeps the local answers, reads the Attempt (ADR007 §11
   GET) to show its current state (active, overdue or already submitted) and reports
   the failure before the learner's next deliberate Submit. There is no automatic
-  retry. **Guarantee:** when the save
-  committed, a rolled-back submission leaves exactly the submitted masks, and a
-  later finalization yields the same per-question correctness and score that the
-  manual submission would have produced (grading is deterministic over immutable
-  keys); only `submitted_at` becomes `expiresAt`. **Limit:** nothing protects
-  answers changed after the last committed save, or a save that failed, timed
+  retry. **Conditional guarantee:** a committed save of masks M protects M across
+  this POST's rollback only if no intervening accepted writer changes the saved
+  masks and no other terminal submission commits. The two HTTP requests are two
+  transactions; the Course root does not lock them as a pair. A later finalization
+  has the same per-question correctness and score as a successful submit of M only
+  while M remains the latest committed saved set until finalization and no other
+  submission has already made the Attempt terminal. Grading uses immutable keys;
+  finalization records `submitted_at = expiresAt`. This does not promise identical
+  mastery, test-out or recommendations: the latest-evidence tuple, other quiz
+  evidence, current progress and routing inputs can differ by processing time.
+
+  **Intervening writer:** A saves M (200), B saves N (200), A submits M and Adaptive
+  fails: A's POST rolls back to N, not M. If N is still the latest committed set
+  when the scheduler finalizes, it grades N. Its score/correctness may differ from
+  M, and the committed evidence selected by §4 step 4 drives mastery, test-out and
+  recommendations (possibly Weak/no skip/remedial instead of Mastered/skip).
+  A later accepted save can change the set again; an independently committed
+  terminal submission is retained. A rollback undoes only its own transaction.
+
+  **Limit:** nothing protects a particular tab's save from another accepted writer,
+  answers changed after the latest committed save, or a save that failed, timed
   out, was never sent, arrived at or after `expiresAt` (409), or was lost with the
-  browser or connection. Client-side saving reduces this exposure; it cannot
-  remove it. Periodic saves during the attempt narrow the window further but are
-  not required by this record. No server contract changes.
+  browser or connection. After failure/unknown outcome the client reads the Attempt
+  before another deliberate action; if it shows N, it presents that server state
+  without claiming M is durable or automatically resaving M over N. Local unsaved
+  answers may be retained for explicit reconciliation while the view/session is
+  current. Client-side saving reduces this exposure; it cannot remove it. Periodic
+  saves narrow one client's unsaved window but provide no cross-client isolation
+  and are not required here. ADR007's last-accepted-save and repeated-submit rules
+  remain unchanged; no revision token, optimistic lock or schema change is added.
 - **Duplicates.** A committed submission publishes exactly one event inside its
   own transaction; a repeated submit or finalize of a submitted Attempt publishes
   none (ADR007 §9/§10). Processing is idempotent anyway: states are recomputed from
@@ -321,9 +341,11 @@ processing instant (§9), while evidence order keeps ADR007's logical `submitted
   Course until the cause is removed; the only in-product relief is route (c), which
   covers step 6–7 failures only and needs a valid stored policy; (2) an Attempt
   that expires while submission is blocked is finalized from its last committed
-  saved masks, so answers not covered by a committed save are graded as saved and
-  the resulting immutable evidence drives mastery and recommendations; the
-  save-before-submit obligation reduces but cannot remove this. Both are
+  saved masks, which may be another tab's accepted set even after this tab received
+  a successful save; overwritten or never-committed answers are not protected.
+  The resulting immutable evidence drives mastery, test-out and recommendations;
+  the save-before-submit obligation reduces unsaved-answer exposure but gives no
+  cross-client isolation. Both are
   **PENDING_LEADER_RISK_ACCEPTANCE** before integrated quiz/adaptive behavior is
   exposed to users. The Leader's decision required: accept these risks, or
   authorize a separately approved mitigation (for example a submission degraded
@@ -381,6 +403,11 @@ pre(s) the direct prerequisites of s (edge s → p):
    `continue` to N.
 4. Otherwise no `continue`/`remedial` row (nothing remains and nothing is Weak with
    a mapped unmastered prerequisite).
+
+Completion alone does not suppress step 2: even if every published Lesson is
+completed, a Weak skill with a mapped unmastered prerequisite still selects a
+completed remedial review target. Only all-completed **and no remedial candidate**
+yields no draft. This preserves the distinction between progress and mastery.
 
 The current recommendation of an Enrollment is its `continue`/`remedial` row with
 the greatest `recommended_at`. §9 makes every processing run's instant strictly
@@ -508,7 +535,10 @@ deterministic **rule oracles** are specified, NOT_RUN, for `AdaptiveDecisionEngi
 | B6-R10 | Disabled, not ready, `left` or `none` → mastery rows only; null policy → nothing |
 | B6-R11 | Mapping UNKNOWN/WEAK→EASY, LEARNING→MEDIUM, MASTERED→HARD; fallback orders of §8 |
 | B6-R12 | Reason strings equal §9's templates byte for byte, no IDs in text. Name order: skills named `"beta"`, `"Alpha"`, `"Zeta"`, `"Ärger"` and two named `"alpha"` order as `"Alpha"`, `"Zeta"`, `"alpha"` (smaller UUID), `"alpha"` (larger UUID), `"beta"`, `"Ärger"`, identically under any JVM default locale; a precomposed and a decomposed `"é"` are distinct names |
-| B6-R13 | §15 validity, with the current row R taken from an earlier run: unchanged inputs → R visible; continue target later completed manually → null; all Lessons completed → null; Weak skill now Learning, or its prerequisite now Mastered, or the prerequisite edge or target mapping removed → null; skill renamed → null; target hidden or Course disabled → null; a remedial review target that is already completed and still valid → visible with `targetCompleted` true. Evaluation writes nothing |
+| B6-R13 | §15 validity: return R exactly when the enabled/published-target checks hold and the current engine draft equals R in type, target and reason. Unchanged inputs → visible. A completed continue target → null. For a sole remedial candidate, changing its Weak skill to Learning, mastering its prerequisite, or removing its only edge/target mapping makes that draft differ or disappear → null. Hidden target or disabled Course → null. No fallback to history and no writes; R14–R16 specify completion, rename and population cases |
+| B6-R14 | Two-Lesson fixture only: L1 maps S1, L2 maps S2, S2 requires S1; S1 Unknown, S2 Weak, L1 completed, L2 incomplete, stored R = remedial L1. Manually complete L2: all Lessons completed, but the same remedial L1 is still selected and visible with targetCompleted=true in course guidance. Change S2 to Learning: no remedial candidate and no incomplete Lesson → no draft, null. This is R08's no-Weak-candidate condition, not an all-completed suppression rule |
+| B6-R15 | Rename the selected Weak skill or prerequisite in a remedial reason → reason differs, R hidden until an execution run records the new draft. Rename an unrelated skill without changing the selected draft, or rename skills while a continue draft is unchanged → R remains visible. Equality of the selected type/target/reason, not any rename or input change by itself, decides visibility |
+| B6-R16 | Same visibility predicate for both learner reads, with their approved populations: an ACTIVE published-Course row with valid R includes R and its title in Home; with invalid/no R it includes recommendation=null and targetLessonTitle=null. COMPLETED membership omits that Course row from Home, while course guidance still admits the learner and may show R14's valid review. LEFT/absent membership or hidden Course grants no course guidance and no Home row. A hidden target in an otherwise admitted ACTIVE Course yields null, not a hidden title. Owner history retains every row |
 
 Evaluation oracles (P1/P2/P3 path divergence, routing correctness against the ≥80%
 target, mastery-update correctness) belong to CT36.F in Batch 8 and must use these
@@ -747,15 +777,26 @@ current row R for the Enrollment and returns it only if, in the same snapshot:
 Otherwise it returns null. The evaluation applies no test-out, writes nothing and
 does not re-evaluate readiness. It reproduces the run's own draft whenever the
 inputs are unchanged since R was inserted, because a run applies its test-out
-before deciding. It therefore hides exactly the guidance that no longer holds: a
-finished Course (no draft), a `continue` target that the learner has since
-completed manually (manual completion does not call Adaptive, ADR006 §3), a
-`remedial` whose Weak skill or unmastered prerequisite, edge or mapping has changed,
-a renamed skill (until the next run inserts the renamed row), a disabled Course and
-a hidden target. It never falls back to an older row, deletes history or
+before deciding. It hides a completed `continue` target, a disappeared or changed
+selected draft (including a rename that changes its reason), a disabled Course or
+a hidden target. An unrelated rename or other input change that leaves the draft
+identical does not hide it. All Lessons completed yields no draft only when no
+remedial candidate remains; a still-selected completed remedial review stays
+visible with `targetCompleted=true`. Manual completion changes progress, not
+mastery (ADR006 §3). It never falls back to an older row, deletes history or
 synthesizes or persists a recommendation. A learner without visible guidance still
 has CT22's canonical `nextLessonId`. `targetCompleted` can be true only for a
-`remedial` review target (§7.2). This implements CT16-LEARNER-HOME-2026-11-08-r1 §3
+`remedial` review target (§7.2).
+
+The predicate is identical across endpoints; admission/population is not widened.
+`/adaptive-guidance` admits ACTIVE/COMPLETED membership. `/api/me/recommendations`
+includes only ACTIVE published-Course memberships: COMPLETED/LEFT/absent memberships
+or hidden Courses produce no Course row, not a synthetic row with null guidance.
+An included ACTIVE row with no visible recommendation has both recommendation and
+targetLessonTitle null. Keep stored membership distinct from calculated completion:
+ADR006's retained rejoin behavior can yield ACTIVE membership with all Lessons
+completed; evaluate the same predicate there, without a client filter. This
+implements CT16-LEARNER-HOME-2026-11-08-r1 §3
 (no entry for a Course without adaptive mode or a current recommendation, shown
 unaltered otherwise). Clients display the response as is and add no visibility
 filter of their own. Owner insight reads stay unfiltered audit history (§14).
@@ -771,22 +812,28 @@ behavior with conforming doubles in `MasteryUpdateServiceTest`,
 | Case | Required observable outcome |
 |---|---|
 | B6-V01 | Manual submit in a ready Course commits result, mastery, skip progress and recommendation rows together |
-| B6-V02 | Fault injected after mastery writes, inside Course participation and in recommendation insert: nothing commits; the Attempt is still active; HTTP 500. The masks sent in the failed POST are not committed: the Attempt's masks equal the last committed save, and equal the POST's masks when the same set was saved first |
-| B6-V03 | Scheduler finalization follows the same path; a failure leaves the Attempt overdue and the next pass retries. A deterministic fault (test-scoped bean override) fails the same Attempt on two consecutive passes with nothing committed while another Course's candidate commits; after the override is removed (a simulated released fix) the next pass commits exactly one set of effects, and a manual resubmission of an active Attempt behaves the same. Answer durability: with a committed save of masks M before the blocked manual submit, finalization after expiry and the fix stores exactly the correctness and score that an unfailed submission of M yields, with `submitted_at` = `expires_at`; without that save, finalization grades the earlier committed masks and the resulting mastery follows them (residual risk observed, not prevented) |
+| B6-V02 | Fault injected after mastery writes, inside Course participation and in recommendation insert: the failing transaction commits nothing; with no other terminal writer the Attempt remains unsubmitted; HTTP 500. The failed POST's masks roll back to the latest committed saved set. They equal POST masks M only if M was saved first and no intervening accepted writer changes that set; V12 covers another tab. An independent committed read checks result/mastery/progress/recommendation rollback |
+| B6-V03 | Scheduler finalization follows the same path; a failure leaves the Attempt overdue and the next pass retries. A deterministic fault (test-scoped bean override) fails the same Attempt on two consecutive passes with nothing committed while another Course's candidate commits; after the override is removed (a simulated released fix) the next pass commits exactly one set of effects, and a manual resubmission of an active Attempt behaves the same. Answer durability: with M saved before the blocked manual submit, no other terminal writer and no accepted save changing M through finalization, expiry/fix stores M's deterministic correctness and score with `submitted_at` = `expires_at`. Without that condition, finalization grades the latest committed saved set (possibly another tab's N, V12). Mastery uses the latest-evidence tuple and routing uses current inputs; equal masks/score alone do not guarantee identical effects to an earlier manual submit. Residual exposure is observed, not prevented |
 | B6-V04 | Duplicate submit and repeated finalize publish no second event and add no rows; the application context has exactly the approved `QuizSubmittedEvent` subscriber set (§4) |
 | B6-V05 | Overdue older Attempt finalized after a newer submission does not regress any state |
-| B6-V06 | Disabled or not-ready Course: mastery committed, no progress or recommendation; a disabled Course executes no readiness or coverage read. Null policy: no Adaptive rows. After disabling, hiding the target Lesson, completing the `continue` target manually or completing the Course, `/adaptive-guidance` and `/api/me/recommendations` return null while the owner history still lists the row (§15); with unchanged inputs both return the row, and `/api/me/recommendations` carries the Course and target titles from Course data |
+| B6-V06 | Disabled or not-ready Course: mastery committed, no new progress or recommendation; disabled executes no readiness/coverage read. Null policy: no Adaptive rows. Where the Course row remains in the ACTIVE published population, disabling, hiding the target or completing a continue target makes guidance's currentRecommendation and Home's included recommendation/target title null. Apply R14: all Lessons complete with a still-valid remedial review remains visible in course guidance; no remedial candidate → null. On stored membership becoming COMPLETED, Home omits the Course row; ACTIVE rejoin with the same completed Lessons includes it and uses the identical validity predicate. R15's selected-name change hides R, unrelated rename leaves it visible. Reads write nothing, current titles come from Course, and owner history retains R in every case |
 | B6-V07 | `left` learner finalized after leaving: mastery only |
 | B6-V08 | Concurrent same-Course submissions serialize on the root; first submission versus threshold edit follows ADR005 §13.2 |
 | B6-V09 | Calls to §3 methods, `readLatestSkillEvidence` or `readCoverageForExecution` without the held root, from another thread, for another Course ID than the bound marker, after the guard callback returned, or in a read-only/REPEATABLE READ transaction fail before any query or effect; a call from `start` or an answer save (no marker) fails the same way. `PracticeDifficultyProvider` outside a read-write transaction, for a non-Learner or a non-member, or with a foreign skill fails before reading mastery, and has no production caller. `readMyLatestSkillEvidence` returns only the current Learner and denies another Course, LEFT or absent membership and non-Learners; `readOwnedLatestSkillEvidence` denies non-owners and Administrators; allowlist tests find no other caller (§12) |
 | B6-V10 | Diagnostic gate of §11 and init of in-scope skills only. `placementQuizId`: no diagnostic attempt → first published diagnostic Quiz; active attempt on D2 → D2 even when D1 sorts first; overdue or submitted diagnostic attempt, or an active attempt whose Quiz is now hidden → null and no offer; starting the returned Quiz never yields 409 or 404 in the same state |
 | B6-V11 | Route (c): a deterministic fault injected in step 6 or 7 blocks submissions; the owner disables adaptive mode through the settings operation with the current ETag; the next submission commits result and mastery only, while a fault injected in steps 1–5 still fails after disabling |
+| B6-V12 | Deterministic two-client schedule on one Attempt: A saves M and receives 200; a barrier allows B to save distinct N and receive 200 before A POSTs M. Inject an Adaptive fault: A gets 500; independent committed reads show N, unsubmitted state and no effects from A's POST. With no further writer, advance the test clock to expiry, remove the fault, finalize: correctness/score are grading(N), submittedAt=expiresAt, mastery is selected from committed evidence and skips/recommendations follow current routing. Choose M/N with different reviewed scores to detect accidental preservation of M; repeated finalize adds no effects. A second case saves N after A's rollback but before expiry, proving the conditional guarantee extends through finalization |
 
 Client oracle B6-C01, in the existing `frontend/src/features/assessment/components/assessment.test.tsx`:
-Submit sends the answer save and then the POST with an identical mask set; no POST
-is sent when the save fails, is rejected (including 409) or is aborted; a failed,
-rejected or unknown save, and an unknown submit outcome, read the Attempt before
-Submit is enabled again; nothing is retried automatically.
+Submit captures one mask set M for the user action and sends its save, then its
+POST only after 200, with that identical set. No POST follows a failed, rejected
+(including 409), unknown or aborted save. A failed/rejected/unknown save or submit
+reads the Attempt before another deliberate Submit is enabled; nothing is retried
+automatically. Simulate another tab's accepted N between A's successful save and
+failed POST: GET returns N (or another writer's terminal result), the client shows
+that server state, retains any still-current local M only for explicit reconciliation,
+and neither claims M was preserved nor automatically writes M over N. This client
+oracle checks transport/UI behavior; V12 proves the database/event consequences.
 
 Fixtures use `AbstractIntegrationTest`'s disposable container with Flyway; each test
 owns its records, commits real transactions and cleans them FK-safely (ADR008 §5).
@@ -891,3 +938,34 @@ Learner Home unable to label its entries without fan-out (P3-9).
 
 The new and extended cases are specified and NOT_RUN. This section is documentation
 correction only; it is not independent review, CI evidence or Leader approval.
+
+## 21. Comprehensive independent review remediation — 13 November 2026
+
+Under the Project Leader's explicit **“CodeMastery — Execute All Independent
+Review Findings Remediation”** instruction, Codex corrects N-B6-01 and N-B6-02
+from the independent review of `e91f273`. The branch receives the corrected
+Batch 5 through a normal merge preserving all existing Batch 6 commits. These
+are pre-integration corrections within the existing r1 revisions; checkpoint
+membership, effective upstream contracts and algorithms remain unchanged.
+
+| Finding | Correction | Verification obligations |
+|---|---|---|
+| N-B6-01 (P2) | Rollback retains the latest committed saved set; preservation of a particular tab's M is conditional on no intervening writer, through finalization for score equivalence; risks and client reconciliation retain ADR007's last-accepted-save semantics | §5, B6-V02/V03/V12, B6-C01 |
+| N-B6-02 (P2) | Keep valid completed remedial review, restrict rename invalidation to changed selected drafts, distinguish Home row omission from null guidance, and use the same predicate within each endpoint's approved population | §§7/15, B6-R08/R13–R16, B6-V06 |
+
+No Assessment revision token, schema, dependency, routing redesign, history
+filter for Instructors, exposure or operational-risk acceptance is introduced.
+Isolated model checks are not real PostgreSQL/client integration evidence; the
+application oracles remain specified, NOT_RUN. This is remediation self-assessment,
+not independent approval.
+
+Executed for this correction: an independent pure routing/visibility model for
+R08/R13–R16, including completed review versus no candidate, selected versus
+unrelated/continue renames, changed mastery/edge/mapping, hidden target, disabled
+mode and Home omission versus null; barrier-controlled isolated save/rollback
+models with B's N before A's POST and after A's rollback. All passed, retaining N
+for finalization and its distinct reviewed score. These models execute no
+application service or database. OpenAPI duplicate-key/reference checks and exact
+semantic comparison passed: all 751 reference occurrences resolve, all 87
+operations remain, and only five Batch 6 descriptions change beyond the inherited
+Batch 5 correction. Real PostgreSQL and quiz-client integration remain NOT_RUN.

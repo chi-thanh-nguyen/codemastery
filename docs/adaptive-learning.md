@@ -611,7 +611,12 @@ commit or roll back together; an unconfigured Course gets no Adaptive effect, an
 disabled or not-ready Course gets mastery updates only (ADR005 §7.2). A failing
 Adaptive step fails the submission, and the answers sent with it roll back; an
 Attempt that expires meanwhile is later graded from its last committed answer save,
-so the quiz client saves the answers before every submit. Recovery removes the cause
+so the quiz client saves the answers before every submit. This protects a tab's
+saved set only while no other accepted writer changes it: A-save-M, B-save-N,
+A-submit-M rollback retains N, and finalization grades N if unchanged. Equal saved
+masks guarantee equal grading only, not identical later mastery/routing inputs.
+The client reconciles the fresh Attempt without automatically overwriting another
+tab's set. Recovery removes the cause
 through approved routes, including disabling adaptive mode for routing-stage
 failures, and lets ordinary resubmission or the scheduler re-execute (ADR011 §5).
 Those operational consequences await Leader risk acceptance.
@@ -629,7 +634,13 @@ and skipping is a navigation, not a server write. The Mastery Map, learner
 guidance, learner-home recommendations and Instructor insights are read contracts
 (§§12–15); learners see the current recommendation only while the Course is
 adaptive-enabled, its target Lesson is published and re-evaluating the routing rules
-on current data still yields it; history keeps every row. Mastery
-states reflect the latest submitted quiz evidence for each skill; screens must say
+on current data still yields it; history keeps every row. All Lessons completed
+does not hide a still-selected remedial review; no remaining remedial candidate
+and no incomplete Lesson yields no draft. A rename matters only if the selected
+draft/reason changes. Home includes only ACTIVE published-Course memberships:
+COMPLETED membership omits the Course row even when course guidance still admits
+that learner and shows a valid review; an included row without guidance has null
+recommendation and target title. Both reads use the same visibility predicate.
+Mastery states reflect the latest submitted quiz evidence for each skill; screens must say
 so. Earlier deferral text above is historical to the extent resolved by these
 bounded revisions.

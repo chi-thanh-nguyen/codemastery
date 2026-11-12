@@ -6280,7 +6280,7 @@
         "tags": [
           "Batch 6 contracts"
         ],
-        "description": "Self Learner. Placement offer with the server-chosen diagnostic Quiz to start or resume (ADR011 §11), the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted, and per-Lesson prerequisite warnings (empty when adaptiveEnabled is false). Guidance only; never blocks access. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner. Placement offer with the server-chosen diagnostic Quiz to start or resume (ADR011 §11), the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted, and per-Lesson prerequisite warnings (empty when adaptiveEnabled is false). Guidance only; never blocks access. Completing every Lesson does not suppress a still-selected remedial review; only a changed/absent draft fails validity. A rename matters only if the selected draft/reason changes. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -6339,7 +6339,7 @@
         "tags": [
           "Batch 6 contracts"
         ],
-        "description": "Self Learner. One row per ACTIVE membership of a published Course, same population, order and paging as /api/me/course-progress, with the Course title, the visible current recommendation (ADR011 §15) and its target Lesson title: null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted and nothing is written. Same rule as /adaptive-guidance; clients add no filter. No cross-Course ranking. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner. One row per ACTIVE membership of a published Course, same population, order and paging as /api/me/course-progress, with the Course title, the visible current recommendation (ADR011 §15) and its target Lesson title: null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted and nothing is written. Same validity rule as /adaptive-guidance; clients add no filter. COMPLETED membership omits the Course row here, while course guidance can still show a valid completed remedial review. An included ACTIVE row without valid guidance has null recommendation and targetLessonTitle. No cross-Course ranking. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -9672,7 +9672,7 @@
           "recommendedAt",
           "targetCompleted"
         ],
-        "description": "Current continue/remedial row (ADR011 §7: unique greatest recommendedAt per Enrollment); reason verbatim. Learner reads return it only while it is still valid under ADR011 §15 (adaptive enabled, target published, and re-evaluating the routing rules on current data yields the same type, target and reason). targetCompleted can be true only for a remedial review target."
+        "description": "Current continue/remedial row (ADR011 §7: unique greatest recommendedAt per Enrollment); reason verbatim. Learner reads return it only while it is still valid under ADR011 §15 (adaptive enabled, target published, and re-evaluating the routing rules on current data yields the same type, target and reason). All Lessons completed can still yield a valid remedial review with targetCompleted=true; no draft requires no remaining remedial candidate as well. A rename invalidates it only if the selected draft/reason changes. targetCompleted can be true only for a remedial review target."
       },
       "B6LessonGuidance": {
         "type": "object",
@@ -9744,7 +9744,7 @@
           "currentRecommendation",
           "lessons"
         ],
-        "description": "lessons covers every published Lesson in canonical order."
+        "description": "lessons covers every published Lesson in canonical order. ACTIVE/COMPLETED learners remain admitted; completing all Lessons alone does not suppress a still-valid remedial review. The visibility predicate is identical to the Home read within its ACTIVE-only population."
       },
       "B6MyRecommendation": {
         "type": "object",
@@ -9783,7 +9783,7 @@
           "recommendation",
           "targetLessonTitle"
         ],
-        "description": "recommendation is the visible current recommendation of ADR011 §15, or null when the Course's adaptiveEnabled is false, no current row exists, its target is not a published Lesson or the routing rules evaluated on current data no longer yield it. courseTitle and targetLessonTitle come from Course data, so Learner Home needs no per-Course request."
+        "description": "recommendation is the visible current recommendation of ADR011 §15, or null when the Course's adaptiveEnabled is false, no current row exists, its target is not a published Lesson or the routing rules evaluated on current data no longer yield it. courseTitle and targetLessonTitle come from Course data, so Learner Home needs no per-Course request. Only ACTIVE memberships of published Courses have rows; COMPLETED/LEFT/absent memberships and hidden Courses are omitted. An included row without visible guidance has both recommendation and targetLessonTitle null."
       },
       "B6MyRecommendationPage": {
         "type": "object",
