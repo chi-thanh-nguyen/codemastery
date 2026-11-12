@@ -39,12 +39,21 @@ jobs:
         # the Surefire/Failsafe XML reports; no test output or message is copied.
         run: |
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY" || echo "::warning::Backend test evidence summary could not be written."
-          import glob, os, subprocess
+          import glob, os, re, subprocess
           import xml.etree.ElementTree as ET
 
           def git(*args):
               done = subprocess.run(["git", *args], capture_output=True, text=True)
               return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else "unavailable"
+
+          def code(text):
+              # Literal code span. Non-printable characters are shown as escapes, and the
+              # fence is longer than any backtick run in the text, so no test name can
+              # end the span or be read as Markdown or HTML.
+              text = "".join(ch if ch.isprintable() else ch.encode("unicode_escape").decode() for ch in text)
+              fence = "`" * (max(map(len, re.findall("`+", text)), default=0) + 1)
+              pad = " " if text[:1] in ("`", " ") or text[-1:] in ("`", " ") else ""
+              return f"{fence}{pad}{text}{pad}{fence}"
 
           def suite(pattern):
               files = sorted(glob.glob(pattern))
@@ -75,7 +84,7 @@ jobs:
           if all_failed:
               print("\nFailed or erroring test cases (names only):\n")
               for name in all_failed[:50]:
-                  print(f"- `{name}`")
+                  print(f"- {code(name)}")
               if len(all_failed) > 50:
                   print(f"- … and {len(all_failed) - 50} more")
           print("\nZero report files means the build stopped before that suite ran."

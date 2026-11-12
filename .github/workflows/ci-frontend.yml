@@ -20,24 +20,33 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up Node
+        id: setup
         uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install frontend dependencies
+        id: install
         run: npm ci
       - name: Run frontend regression tests
+        id: test
         run: npm test
       - name: Typecheck and build frontend
+        id: build
         run: npm run build
       - name: Summarize frontend test evidence
         if: ${{ !cancelled() }}
         shell: bash
         env:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          TEST_OUTCOME: ${{ steps.test.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
         # Informational only: the steps above are the gate. `npm test` writes no
-        # machine-readable report, so test counts are not summarized here.
+        # machine-readable report, so test counts are not summarized here; the
+        # step outcomes say whether the test step ran at all.
         run: |
           {
             echo '### Frontend test evidence'
@@ -49,5 +58,20 @@ jobs:
             echo "| Event, ref | \`$GITHUB_EVENT_NAME\`, \`$GITHUB_REF\` |"
             echo "| Node, npm | \`$(node --version 2>/dev/null || echo unavailable)\`, \`$(npm --version 2>/dev/null || echo unavailable)\` |"
             echo
-            echo 'Test counts are in the "Run frontend regression tests" step log. This summary is informational; the job result is the gate.'
+            echo '| Step | Outcome |'
+            echo '| --- | --- |'
+            echo "| Set up Node | \`${SETUP_OUTCOME:-unknown}\` |"
+            echo "| Install frontend dependencies | \`${INSTALL_OUTCOME:-unknown}\` |"
+            echo "| Run frontend regression tests | \`${TEST_OUTCOME:-unknown}\` |"
+            echo "| Typecheck and build frontend | \`${BUILD_OUTCOME:-unknown}\` |"
+            echo
+            case "${TEST_OUTCOME:-unknown}" in
+              success|failure) echo 'Test counts are in the "Run frontend regression tests" step log.' ;;
+              skipped) echo 'The "Run frontend regression tests" step was skipped, so this run has no frontend test counts.' ;;
+              *) echo 'The outcome of the "Run frontend regression tests" step is not known, so no frontend test counts are claimed.' ;;
+            esac
+            if [[ "${SETUP_OUTCOME:-unknown}" != success ]]; then
+              echo 'The "Set up Node" step did not succeed, so the Node and npm versions above are the ones found on `PATH`, not necessarily the configured version.'
+            fi
+            echo 'This summary is informational; the job result is the gate.'
           } >> "$GITHUB_STEP_SUMMARY" || echo "::warning::Frontend test evidence summary could not be written."
