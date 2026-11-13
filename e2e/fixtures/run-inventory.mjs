@@ -14,7 +14,7 @@
 // identity, immutable container, network and volume IDs with their creating-container association,
 // creation intents and per-resource observations. Credentials, tokens, environment dumps, request
 // bodies and executable cleanup commands are never stored.
-import { closeSync, fstatSync, fsyncSync, openSync, readFileSync, readSync, renameSync, writeSync } from 'node:fs';
+import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, readSync, realpathSync, renameSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export const SCHEMA = 'codemastery-e2e-inventory/1';
@@ -26,26 +26,66 @@ export const MAX_OBSERVATIONS = 96;
 export const NONTERMINAL = ['active', 'cleaning', 'incomplete'];
 /** Resource states an intent can resolve to (Section 10.3: pending/removed/absent/preserved/failed). */
 export const RESOURCE_STATES = ['pending', 'created', 'removed', 'absent', 'preserved', 'failed'];
+/** Resource kinds an inventory may describe; nothing else is ever handed to Docker. */
+export const RESOURCE_KINDS = ['container', 'network', 'volume'];
+const RUN_ID = /^cm-e2e-[a-z0-9-]{1,64}$/;
+/** Docker IDs and names that can only ever be an operand, never an option or a path. */
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 export class UntrustedInventory extends Error {}
 
 /** The record path handed down by the coordinator, or null when this process was not admitted. */
 export const inventoryPath = () => process.env.CODEMASTERY_E2E_INVENTORY || null;
 
-/** Reads and validates the record. Returns null when absent; throws when present but untrusted. */
+/**
+ * Structural validation before any field is used: the run ID, state, processes and intents must have
+ * the shapes this lifecycle writes, so a malformed record can never turn into an unexpected Docker
+ * operand, signal target or path. Optional fields may be absent; present ones must be well formed.
+ */
+function validate(record, path) {
+    const bad = (what) => { throw new UntrustedInventory(`inventory ${path} is malformed (${what}); its run stays preserved`); };
+    if (typeof record.runId !== 'string' || !RUN_ID.test(record.runId)) bad('run ID');
+    if (![...NONTERMINAL, 'complete'].includes(record.state)) bad('state');
+    const processes = record.processes ?? {};
+    if (typeof processes !== 'object' || processes === null || Array.isArray(processes)) bad('processes');
+    for (const [role, entry] of Object.entries(processes)) {
+        if (!entry || typeof entry !== 'object') bad(`process ${role}`);
+        if (entry.pid != null && !(Number.isInteger(entry.pid) && entry.pid > 0)) bad(`process ${role} PID`);
+        if (entry.control != null && typeof entry.control !== 'string') bad(`process ${role} control channel`);
+    }
+    const intents = record.intents ?? [];
+    if (!Array.isArray(intents)) bad('intents');
+    if (intents.length > MAX_INTENTS) throw new UntrustedInventory(`inventory ${path} exceeds the ${MAX_INTENTS} intent bound`);
+    for (const intent of intents) {
+        if (!intent || typeof intent !== 'object' || !RESOURCE_KINDS.includes(intent.kind)) bad('intent kind');
+        if (intent.state !== undefined && !RESOURCE_STATES.includes(intent.state)) bad('intent state');
+        for (const field of ['dockerId', 'name', 'container']) {
+            if (intent[field] != null && !(typeof intent[field] === 'string' && SAFE_NAME.test(intent[field]))) bad(`intent ${field}`);
+        }
+    }
+    if (record.temp != null && (typeof record.temp !== 'object' || typeof record.temp.path !== 'string')) bad('temporary build');
+    if (record.docker != null && (typeof record.docker !== 'object' || typeof record.docker.endpoint !== 'string'
+        || typeof record.docker.daemonId !== 'string')) bad('docker identity');
+}
+
+/**
+ * Reads and validates the record. Returns null when absent; throws when present but untrusted. The
+ * record must be a single-link 0600 file of this account, opened without following a symlink.
+ */
 export function readInventory(path) {
     let handle;
     try {
-        handle = openSync(path, 'r');
+        handle = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     } catch (error) {
         if (error.code === 'ENOENT') return null;
-        throw new UntrustedInventory(`inventory ${path} cannot be opened: ${error.message}`);
+        throw new UntrustedInventory(`inventory ${path} cannot be opened (${error.code ?? error.message}); a symlink is never followed`);
     }
     let raw;
     try {
         const info = fstatSync(handle);
         if (!info.isFile() || info.nlink !== 1) throw new UntrustedInventory(`inventory ${path} is not a single-link ordinary file`);
         if (info.uid !== process.getuid()) throw new UntrustedInventory(`inventory ${path} is owned by uid ${info.uid}`);
+        if ((info.mode & 0o777) !== 0o600) throw new UntrustedInventory(`inventory ${path} has mode ${(info.mode & 0o777).toString(8)}, not 600`);
         if (info.size > MAX_RECORD_BYTES) throw new UntrustedInventory(`inventory ${path} is ${info.size} bytes, over the ${MAX_RECORD_BYTES} byte bound`);
         raw = Buffer.alloc(info.size);
         readSync(handle, raw, 0, info.size, 0);
@@ -60,8 +100,43 @@ export function readInventory(path) {
     }
     if (!record || typeof record !== 'object' || record.schema !== SCHEMA) throw new UntrustedInventory(`inventory ${path} has an unknown schema`);
     if (record.ownerUid !== process.getuid()) throw new UntrustedInventory(`inventory ${path} belongs to uid ${record.ownerUid}`);
-    if ((record.intents?.length ?? 0) > MAX_INTENTS) throw new UntrustedInventory(`inventory ${path} exceeds the ${MAX_INTENTS} intent bound`);
+    validate(record, path);
     return record;
+}
+
+/**
+ * Why this process may *not* act as the admitted Playwright invocation, or null when it may. The
+ * coordinator hands its run down through the environment; this proves the hand-down is current and
+ * belongs to this process: the parent must be the recorded coordinator, the record must be that run's
+ * active record, and (for the runner) the configuration must belong to the admitted checkout. An
+ * exported or stale variable, another checkout's configuration or a finished run is refused.
+ */
+export function admissionProblem({ env = process.env, ppid = process.ppid, checkoutDir = null } = {}) {
+    const token = env.CODEMASTERY_E2E_OWNERSHIP, runId = env.CODEMASTERY_E2E_RUN_ID, key = env.CODEMASTERY_E2E_LOCK_KEY;
+    const file = env.CODEMASTERY_E2E_INVENTORY, supervisor = Number(env.CODEMASTERY_E2E_SUPERVISOR);
+    if (!token || !runId || !key || !file || !supervisor) return 'no lifecycle ownership was handed down to this process';
+    if (token !== `${key}:${runId}`) return 'the ownership token does not name the handed-down run';
+    if (supervisor !== ppid) return `this process was not started by the coordinator that owns the run (parent ${ppid}, coordinator ${supervisor})`;
+    let record;
+    try {
+        record = readInventory(file);
+    } catch (error) {
+        return error.message;
+    }
+    if (!record) return 'the handed-down run record does not exist';
+    if (record.runId !== runId || record.lockKey !== key) return 'the run record belongs to another run';
+    if (record.state !== 'active') return `the run is ${record.state}, not active`;
+    if (record.processes?.supervisor?.pid !== supervisor) return 'the run record names another coordinator';
+    if (checkoutDir) {
+        let info;
+        try {
+            info = lstatSync(realpathSync(checkoutDir));
+        } catch (error) {
+            return `the checkout cannot be inspected: ${error.message}`;
+        }
+        if (`${info.dev}-${info.ino}` !== key) return 'this configuration belongs to another checkout than the admitted one';
+    }
+    return null;
 }
 
 /** Atomic replacement with a durable file and directory flush. */

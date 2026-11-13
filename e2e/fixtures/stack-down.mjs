@@ -17,7 +17,9 @@ const flag = (name, fallback = null) => {
 };
 
 const inventory = process.env.CODEMASTERY_E2E_INVENTORY;
-if (!inventory) {
+// The coordinator that holds the lock starts this process directly and names itself; an exported or
+// stale variable in another shell does not make this process the coordinator's child.
+if (!inventory || Number(process.env.CODEMASTERY_E2E_SUPERVISOR) !== process.ppid) {
     process.stderr.write('stack-down: this command must run through the lifecycle coordinator, which holds the exclusive '
         + 'lock for this checkout. Use `npm run stack:down` from e2e/.\n');
     process.exit(2);

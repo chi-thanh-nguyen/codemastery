@@ -144,6 +144,30 @@ def process_identity(pid):
             "reliable": False, "detail": "no qualified birth identity on %s" % system}
 
 
+def _machine_identity(system):
+    """The OS machine identity, which, unlike a network-assigned hostname, survives a network
+    change: the macOS host UUID (`gethostuuid`) or the Linux machine-id. None when unavailable."""
+    try:
+        if system == "Darwin":
+            class Timespec(ctypes.Structure):
+                _fields_ = [("tv_sec", ctypes.c_long), ("tv_nsec", ctypes.c_long)]
+            raw = (ctypes.c_ubyte * 16)()
+            if _darwin_libc().gethostuuid(raw, ctypes.byref(Timespec(5, 0))) == 0:
+                return "darwin-host:%s" % bytes(raw).hex()
+        elif system == "Linux":
+            for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+                try:
+                    with open(path, "rb") as handle:
+                        value = handle.read().decode().strip()
+                except OSError:
+                    continue
+                if re.match(r"^[0-9a-f]{32}$", value):
+                    return "linux-machine:%s" % value
+    except (OSError, AttributeError, ValueError):
+        pass
+    return None
+
+
 def host_identity():
     """Host, boot and PID-namespace identity. Resources recorded under another one are foreign."""
     system = platform.system()
@@ -163,8 +187,8 @@ def host_identity():
                                                 struct.unpack_from("@i", buf, 8)[0])
     except OSError:
         boot = boot or None
-    return {"system": system, "hostname": platform.node(), "boot": boot,
-            "pidNamespace": namespace, "uid": os.geteuid()}
+    return {"system": system, "hostname": platform.node(), "machine": _machine_identity(system),
+            "boot": boot, "pidNamespace": namespace, "uid": os.geteuid()}
 
 
 # ------------------------------------------------------------------------------------ filesystem
@@ -200,7 +224,10 @@ def filesystem_type(path):
 
 def require_qualified_filesystem(path, what):
     kind = filesystem_type(path)
-    if kind is not None and kind.lower() in UNQUALIFIED_FS:
+    if kind is None:
+        raise Unqualified("the filesystem type of %s (%s) cannot be determined, so its locking/sharing "
+                          "semantics cannot be qualified" % (what, path))
+    if kind.lower() in UNQUALIFIED_FS:
         raise Unqualified("%s is on %s, whose locking/sharing semantics are not qualified: %s"
                           % (what, kind, path))
     return kind
@@ -339,11 +366,18 @@ def read_record(path, tolerate=False):
                       "run and must be reconciled by hand" % (path, error))
     try:
         info = os.fstat(handle)
+        problem = None
         if not statmodule.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
-            raise Blocked("inventory record %s is not a single-link file owned by this account" % path)
-        if info.st_size > MAX_RECORD_BYTES:
-            raise Blocked("inventory record %s is %d bytes, over the %d byte bound"
-                          % (path, info.st_size, MAX_RECORD_BYTES))
+            problem = "inventory record %s is not a single-link file owned by this account" % path
+        elif statmodule.S_IMODE(info.st_mode) != 0o600:
+            problem = "inventory record %s has mode %o, not 600" % (path, statmodule.S_IMODE(info.st_mode))
+        elif info.st_size > MAX_RECORD_BYTES:
+            problem = "inventory record %s is %d bytes, over the %d byte bound" % (path, info.st_size, MAX_RECORD_BYTES)
+        if problem:
+            # Another checkout's untrusted record is not ours to interpret, and must not block us.
+            if tolerate:
+                return None
+            raise Blocked(problem)
         raw = os.read(handle, MAX_RECORD_BYTES + 1)
     finally:
         os.close(handle)
@@ -370,6 +404,17 @@ def read_record(path, tolerate=False):
     return record
 
 
+def _durable_sync(fd):
+    """fsync, plus F_FULLFSYNC on macOS, where fsync alone does not flush the drive's write cache.
+    (Node's fs.fsyncSync already uses F_FULLFSYNC there through libuv.)"""
+    os.fsync(fd)
+    if platform.system() == "Darwin" and hasattr(fcntl, "F_FULLFSYNC"):
+        try:
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+        except OSError:
+            pass
+
+
 def write_record(path, record):
     """Atomic same-directory replacement with a durable file and directory flush, so a crash leaves
     either the previous or the new valid record and never a truncated one."""
@@ -382,13 +427,13 @@ def write_record(path, record):
     handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
         os.write(handle, payload)
-        os.fsync(handle)
+        _durable_sync(handle)
     finally:
         os.close(handle)
     os.replace(temporary, path)
     folder = os.open(directory, os.O_RDONLY)
     try:
-        os.fsync(folder)
+        _durable_sync(folder)
     finally:
         os.close(folder)
 
@@ -475,6 +520,30 @@ class Exclusivity(object):
 
 # ------------------------------------------------------------------------------------- admission
 
+def earlier_identity_records(registry, key, checkout, ino):
+    """Nonterminal records left by *this* checkout under an earlier device identity.
+
+    The lock key is the checkout directory's device/inode identity (Section 10.2), and some hosts
+    renumber the device of an unchanged filesystem (macOS assigns APFS device numbers at mount time,
+    so a reboot can change `st_dev` while the path and inode stay the same). A record whose checkout
+    has this exact canonical path *and* inode under another device number therefore describes this
+    same checkout: its ownership obligation still blocks reuse and is reconciled by `recover`. A
+    different checkout (another path or another inode) is never matched. Returns `(key, path, record)`.
+    """
+    found = []
+    for name in sorted(os.listdir(registry.runs)):
+        if not name.endswith(".json") or name[:-5] == key:
+            continue
+        path = os.path.join(registry.runs, name)
+        record = read_record(path, tolerate=True)
+        if not record or record.get("state") not in NONTERMINAL:
+            continue
+        recorded = record.get("checkout") or {}
+        if recorded.get("path") == checkout and recorded.get("ino") == ino and record.get("lockKey") == name[:-5]:
+            found.append((name[:-5], path, record))
+    return found
+
+
 def admit(registry, key, checkout, mode):
     """Decides whether this invocation may proceed, under the already-held lock.
 
@@ -508,7 +577,7 @@ def initial_record(registry, key, run_id, checkout, dev, ino, outputs, command):
     return {
         "schema": SCHEMA, "contract": CONTRACT, "runId": run_id, "state": "active",
         "ownerUid": os.geteuid(), "lockKey": key,
-        "host": {"hostname": host["hostname"], "boot": host["boot"],
+        "host": {"hostname": host["hostname"], "machine": host["machine"], "boot": host["boot"],
                  "pidNamespace": host["pidNamespace"], "system": host["system"]},
         "checkout": {"path": checkout, "dev": dev, "ino": ino},
         "outputs": [{"path": entry["path"], "relative": entry["relative"], "dev": entry["dev"],
@@ -600,6 +669,10 @@ def finalize(checkout, record_path, env, reason):
 
 def mode_run(registry, key, checkout, dev, ino, command):
     outputs = resolve_outputs(checkout, registry, key)
+    for earlier_key, _, earlier in earlier_identity_records(registry, key, checkout, ino):
+        raise Blocked("checkout %s has an unresolved run (%s, state %s) recorded under its earlier device "
+                      "identity %s. Run `npm run stack:down` to reconcile it; its resources are preserved "
+                      "until then." % (checkout, earlier.get("runId"), earlier.get("state"), earlier_key))
     admit(registry, key, checkout, "run")
     run_id = new_run_id(registry, key)
     record_path = registry.record_file(key)
@@ -622,13 +695,30 @@ def mode_run(registry, key, checkout, dev, ino, command):
     return EXIT_OK
 
 
-def mode_recover(registry, key, checkout):
+def mode_recover(registry, key, checkout, ino):
+    worst = EXIT_OK
+    # Obligations recorded under this checkout's earlier device identity are reconciled first, through
+    # their own record and while also holding their own (stable, never replaced) lock file.
+    for earlier_key, earlier_path, earlier in earlier_identity_records(registry, key, checkout, ino):
+        lock = Exclusivity(registry, earlier_key)
+        if not lock.acquire():
+            fail("the earlier-identity lock %s of this checkout is held; nothing was touched" % earlier_key)
+            return EXIT_CONFLICT
+        try:
+            note("reconciling run %s, recorded under this checkout's earlier device identity %s"
+                 % (earlier.get("runId"), earlier_key))
+            env = child_environment(registry, earlier_key, earlier.get("runId", "none"), earlier_path)
+            status = finalize(checkout, earlier_path, env, "recover-earlier-identity")
+        finally:
+            lock.release()
+        worst = worst or status
     record_path = registry.record_file(key)
     previous = admit(registry, key, checkout, "recover")
     env = child_environment(registry, key, (previous or {}).get("runId", "none"), record_path)
     if previous is None:
         note("no inventory record for checkout %s; checking for unaccounted labelled resources" % checkout)
-    return finalize(checkout, record_path, env, "recover")
+    status = finalize(checkout, record_path, env, "recover")
+    return worst or status
 
 
 # ------------------------------------------------------------------------------------------- CLI
@@ -657,8 +747,9 @@ def main(argv):
         sys.stdout.write("\n")
         return EXIT_OK
 
-    checkout_dir = os.environ.get("CODEMASTERY_E2E_CHECKOUT") or \
-        os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    # The checkout is the directory holding this coordinator's own fixtures/ directory, resolved
+    # through every symlink, so path aliases and the Playwright configuration agree on one identity.
+    checkout_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     if mode == "report":
         # Reading a written report produces no output of its own and therefore does not need
         # ownership; taking the lock here would make a crashed run's evidence unreadable.
@@ -677,7 +768,9 @@ def main(argv):
 
     if mode == "inspect":
         record = read_record(registry.record_file(key), tolerate=True)
-        json.dump({"lockKey": key, "checkout": checkout, "record": record}, sys.stdout, indent=2)
+        earlier = [{"lockKey": k, "record": r} for k, _, r in earlier_identity_records(registry, key, checkout, ino)]
+        json.dump({"lockKey": key, "checkout": checkout, "record": record, "earlierIdentityRecords": earlier},
+                  sys.stdout, indent=2)
         sys.stdout.write("\n")
         return EXIT_OK
     if mode not in ("run", "recover"):
@@ -701,7 +794,7 @@ def main(argv):
     try:
         if mode == "run":
             return mode_run(registry, key, checkout, dev, ino, command)
-        return mode_recover(registry, key, checkout)
+        return mode_recover(registry, key, checkout, ino)
     except Blocked as error:
         fail("%s" % error)
         return EXIT_BLOCKED

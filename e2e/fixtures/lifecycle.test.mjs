@@ -6,14 +6,16 @@
 // and an unresolved obligation blocks reuse until recovery verifies completion.
 //
 // Each test drives the real coordinator against a disposable fake checkout (its own directory, with
-// `fixtures` symlinked to this one and its own `test-results` roots), so the real lock keys and
+// its own copy of the coordinator in `fixtures/`, every other fixture symlinked to this directory,
+// and its own `test-results` roots; the coordinator derives its checkout from its own resolved
+// location, exactly as in the real checkout), so the real lock keys and
 // records are never involved. The runner command is a plain Node process, so no Playwright, Docker,
 // Vite or browser is touched. The registry is deliberately the real per-account one: the coordinator
 // resolves `~` from the effective UID and must ignore a HOME override, which is asserted below.
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +26,7 @@ const python = process.env.E2E_PYTHON || 'python3';
 const registry = join(realpathSync(homedir()), '.codemastery-e2e');
 const EXIT = { ok: 0, fail: 1, conflict: 2, blocked: 3, unqualified: 4 };
 const made = [];
+const extraKeys = [];
 
 /** A disposable fake checkout: its own output roots, and `fixtures` shared with this directory. */
 function fakeCheckout(name = 'co') {
@@ -32,7 +35,9 @@ function fakeCheckout(name = 'co') {
     mkdirSync(join(root, 'test-results', 'html'), { recursive: true });
     writeFileSync(join(root, 'test-results', 'results.json'), '{"sentinel":true}');
     writeFileSync(join(root, 'test-results', 'artifacts', 'sentinel.txt'), 'SENTINEL');
-    symlinkSync(here, join(root, 'fixtures'));
+    mkdirSync(join(root, 'fixtures'));
+    copyFileSync(launcher, join(root, 'fixtures', 'lifecycle.py'));
+    for (const name of readdirSync(here)) if (name !== 'lifecycle.py') symlinkSync(join(here, name), join(root, 'fixtures', name));
     const info = lstatSync(root);
     const entry = { root, key: `${info.dev}-${info.ino}` };
     made.push(entry);
@@ -45,16 +50,17 @@ const sentinels = (checkout) => [
     readFileSync(join(checkout.root, 'test-results', 'results.json'), 'utf8'),
 ];
 
-const env = (checkout, extra = {}) => ({ ...process.env, CODEMASTERY_E2E_CHECKOUT: checkout.root, ...extra });
-/** Runs the coordinator to completion. */
+const env = (extra = {}) => ({ ...process.env, ...extra });
+const launcherOf = (root) => join(root, 'fixtures', 'lifecycle.py');
+/** Runs the checkout's own coordinator to completion. */
 const coordinate = (checkout, args, extra = {}) =>
-    spawnSync(python, [launcher, ...args], { encoding: 'utf8', timeout: 120_000, env: env(checkout, extra), cwd: checkout.root });
+    spawnSync(python, [launcherOf(checkout.root), ...args], { encoding: 'utf8', timeout: 120_000, env: env(extra), cwd: checkout.root });
 /** Starts a coordinator whose runner blocks until `gate` exists, so exclusivity can be observed. */
 function startGated(checkout, gate) {
     const waiter = 'const fs=require("node:fs");const g=process.argv[1];const t=Date.now();'
         + '(function w(){if(fs.existsSync(g)||Date.now()-t>60000)process.exit(0);setTimeout(w,40);})();';
-    return spawn(python, [launcher, 'run', '--', process.execPath, '-e', waiter, gate],
-        { encoding: 'utf8', env: env(checkout), cwd: checkout.root, stdio: ['ignore', 'pipe', 'pipe'] });
+    return spawn(python, [launcherOf(checkout.root), 'run', '--', process.execPath, '-e', waiter, gate],
+        { encoding: 'utf8', env: env(), cwd: checkout.root, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 /** Waits until the coordinator has persisted an active record, i.e. ownership precedes runner entry. */
 async function awaitActive(key, timeoutMs = 30_000) {
@@ -80,6 +86,10 @@ after(() => {
         rmSync(join(registry, 'locks', `${entry.key}.lock`), { force: true });
         rmSync(join(registry, 'archive', `${entry.key}.last.json`), { force: true });
         rmSync(entry.root, { recursive: true, force: true });
+    }
+    for (const key of extraKeys) {
+        rmSync(recordFile(key), { force: true });
+        rmSync(join(registry, 'locks', `${key}.lock`), { force: true });
     }
 });
 
@@ -164,8 +174,9 @@ describe('exactly one invocation of a checkout is admitted', () => {
         const first = startGated(checkout, gate);
         try {
             await awaitActive(checkout.key);
-            const loser = spawnSync(python, [launcher, 'run', '--', '/bin/echo', 'aliased'],
-                { encoding: 'utf8', env: { ...process.env, CODEMASTERY_E2E_CHECKOUT: aliasRoot }, cwd: aliasRoot });
+            // The coordinator is entered through the alias; it resolves its own location to the same directory.
+            const loser = spawnSync(python, [launcherOf(aliasRoot), 'run', '--', '/bin/echo', 'aliased'],
+                { encoding: 'utf8', env: env(), cwd: aliasRoot });
             assert.equal(loser.status, EXIT.conflict, loser.stdout + loser.stderr);
             assert.match(loser.stderr, new RegExp(`lock key ${checkout.key.replace('-', '\\-')}`));
         } finally {
@@ -281,6 +292,15 @@ describe('an unresolved ownership obligation blocks reuse until recovery complet
         assert.equal(coordinate(checkout, ['run', '--', '/bin/echo', 'reused']).status, EXIT.ok);
     });
 
+    test('a record whose mode was widened blocks reuse instead of being trusted', () => {
+        const checkout = fakeCheckout('widened');
+        leaveRecord(checkout, { state: 'complete' });
+        spawnSync('chmod', ['644', recordFile(checkout.key)]);
+        const blocked = coordinate(checkout, ['run', '--', '/bin/echo', 'no']);
+        assert.equal(blocked.status, EXIT.blocked, blocked.stdout + blocked.stderr);
+        assert.match(blocked.stderr, /has mode 644, not 600/);
+    });
+
     test('`recover` with no record at all succeeds and reports that nothing is owned', () => {
         const checkout = fakeCheckout('norecord');
         const recover = coordinate(checkout, ['recover']);
@@ -343,5 +363,64 @@ describe('process birth identity, not a PID, decides what a recorded process is'
     test('the same PID reports the same birth identity twice, so the comparison is stable', () => {
         const read = () => JSON.parse(spawnSync(python, [launcher, 'proc-identity', String(process.pid)], { encoding: 'utf8' }).stdout).birth;
         assert.equal(read(), read());
+    });
+});
+
+describe('an obligation recorded under an earlier device identity of the same checkout', () => {
+    // macOS assigns APFS device numbers at mount time, so after a reboot an unchanged checkout can
+    // have a new st_dev and therefore a new lock key. The earlier record is reproduced exactly: same
+    // canonical path and inode, the previous device number, and its own lock key.
+    const earlier = (checkout, patch = {}) => {
+        const info = lstatSync(checkout.root);
+        const key = `${info.dev - 1}-${info.ino}`;
+        extraKeys.push(key);
+        const host = JSON.parse(spawnSync(python, [launcher, 'host-identity'], { encoding: 'utf8' }).stdout);
+        writeFileSync(recordFile(key), JSON.stringify({
+            schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-before-reboot',
+            state: 'incomplete', ownerUid: process.getuid(), lockKey: key,
+            host: { hostname: host.hostname, machine: host.machine, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
+            checkout: { path: checkout.root, dev: info.dev - 1, ino: info.ino }, outputs: [], processes: {}, docker: null,
+            temp: null, intents: [], observations: [], ...patch,
+        }), { mode: 0o600 });
+        return key;
+    };
+
+    test('blocks a new run, and `recover` reconciles that record under its own lock before reuse', () => {
+        const checkout = fakeCheckout('devchange');
+        const key = earlier(checkout);
+        const blocked = coordinate(checkout, ['run', '--', '/bin/echo', 'must not run']);
+        assert.equal(blocked.status, EXIT.blocked, blocked.stdout + blocked.stderr);
+        assert.match(blocked.stderr, new RegExp(`unresolved run \\(cm-e2e-before-reboot, state incomplete\\) recorded under its earlier device identity ${key}`));
+        assert.ok(!/must not run/.test(blocked.stdout));
+        const recover = coordinate(checkout, ['recover']);
+        assert.equal(recover.status, EXIT.ok, recover.stdout + recover.stderr);
+        assert.match(recover.stdout, new RegExp(`reconciling run cm-e2e-before-reboot, recorded under this checkout's earlier device identity ${key}`));
+        assert.equal(readRecord(key).state, 'complete', 'the earlier record is reconciled, not deleted');
+        assert.ok(existsSync(join(registry, 'locks', `${key}.lock`)), 'its lock file is used, never removed');
+        assert.equal(coordinate(checkout, ['run', '--', '/bin/echo', 'reused']).status, EXIT.ok);
+    });
+
+    test('an earlier record from a previous boot stays preserved and keeps blocking reuse', () => {
+        const checkout = fakeCheckout('reboot');
+        const key = earlier(checkout, {
+            host: { hostname: 'x', boot: 'darwin-boot:1', pidNamespace: null, system: 'Darwin' },
+            processes: { preview: { pid: 999_999, birth: 'darwin-starttime:1.000001', birthSource: 'darwin-kinfo-starttime', role: 'vite-preview', state: 'live' } },
+        });
+        const recover = coordinate(checkout, ['recover']);
+        assert.equal(recover.status, EXIT.fail, recover.stdout + recover.stderr);
+        assert.match(recover.stdout, /preserved preview 999999: recorded on another host, boot or PID namespace/);
+        assert.equal(readRecord(key).state, 'incomplete');
+        assert.equal(coordinate(checkout, ['run', '--', '/bin/echo', 'no']).status, EXIT.blocked);
+    });
+
+    test('a record of another checkout (other path or other inode) is never associated', () => {
+        const checkout = fakeCheckout('notmine');
+        const elsewhere = fakeCheckout('elsewhere');
+        earlier(checkout, { checkout: { path: elsewhere.root, dev: 1, ino: lstatSync(checkout.root).ino } });
+        const other = earlier(elsewhere);
+        writeFileSync(recordFile(other), JSON.stringify({ ...readRecord(other), checkout: { path: checkout.root, dev: 1, ino: lstatSync(checkout.root).ino + 1 } }), { mode: 0o600 });
+        const result = coordinate(checkout, ['run', '--', '/bin/echo', 'admitted']);
+        assert.equal(result.status, EXIT.ok, result.stdout + result.stderr);
+        assert.match(result.stdout, /admitted/);
     });
 });

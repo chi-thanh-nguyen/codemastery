@@ -5,12 +5,12 @@
 // Nothing here touches Docker, Vite, a browser or the real registry.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
     MAX_INTENTS, MAX_OBSERVATIONS, MAX_RECORD_BYTES, SCHEMA, UntrustedInventory,
-    addIntent, markerFile, observe, readInventory, readMarker, setIntent, updateInventory, writeInventory,
+    addIntent, admissionProblem, markerFile, observe, readInventory, readMarker, setIntent, updateInventory, writeInventory,
 } from './run-inventory.mjs';
 
 const scratch = (body) => {
@@ -59,12 +59,35 @@ describe('the run inventory is durable, bounded and non-secret', () => {
         assert.throws(() => writeInventory(file, huge), /refusing to write/);
     }));
 
-    test('rejects a record whose mode was widened or that gained a second link', () => scratch((dir, file) => {
+    test('rejects a record whose mode was widened, that gained a second link or that is reached through a symlink', () => scratch((dir, file) => {
         writeInventory(file, base());
         chmodSync(file, 0o644);
-        assert.ok(readInventory(file), 'a widened mode alone still parses; ownership is what gates it');
-        writeFileSync(join(dir, 'other.json'), JSON.stringify(base()), { mode: 0o600 });
-        assert.ok(readInventory(join(dir, 'other.json')));
+        assert.throws(() => readInventory(file), /has mode 644, not 600/);
+        chmodSync(file, 0o600);
+        assert.ok(readInventory(file));
+        linkSync(file, join(dir, 'second-link.json'));
+        assert.throws(() => readInventory(file), /not a single-link ordinary file/);
+        rmSync(join(dir, 'second-link.json'));
+        symlinkSync(file, join(dir, 'alias.json'));
+        assert.throws(() => readInventory(join(dir, 'alias.json')), /a symlink is never followed/);
+    }));
+
+    test('rejects malformed fields before any of them can reach Docker, a signal or a path', () => scratch((dir, file) => {
+        const write = (patch) => writeFileSync(file, JSON.stringify({ ...base(), ...patch }), { mode: 0o600 });
+        for (const [patch, what] of [
+            [{ runId: '../../etc' }, /run ID/],
+            [{ state: 'done' }, /state/],
+            [{ processes: { preview: { pid: -1 } } }, /process preview PID/],
+            [{ processes: { preview: { pid: 5, control: 7 } } }, /control channel/],
+            [{ intents: [{ id: 'i1', kind: 'image', dockerId: 'x' }] }, /intent kind/],
+            [{ intents: [{ id: 'i1', kind: 'container', dockerId: '--all' }] }, /intent dockerId/],
+            [{ intents: [{ id: 'i1', kind: 'volume', name: 'a/b' }] }, /intent name/],
+            [{ docker: { endpoint: 5 } }, /docker identity/],
+            [{ temp: { path: null } }, /temporary build/],
+        ]) {
+            write(patch);
+            assert.throws(() => readInventory(file), what, JSON.stringify(patch));
+        }
     }));
 
     test('bounds observations instead of growing without limit', () => scratch((dir, file) => {
@@ -109,5 +132,35 @@ describe('creation intents survive a crash between creation and identity persist
         assert.equal(readMarker(dir), null);
         writeFileSync(markerFile(dir), 'cm-e2e-abc\n', { mode: 0o600 });
         assert.equal(readMarker(dir), 'cm-e2e-abc');
+    }));
+});
+
+describe('only the coordinator\'s current hand-down admits a process', () => {
+    const handDown = (dir, file, patch = {}) => {
+        writeInventory(file, { ...base(), runId: 'cm-e2e-adm', lockKey: '1-2', processes: { supervisor: { pid: 4242 } }, ...patch });
+        return {
+            CODEMASTERY_E2E_OWNERSHIP: '1-2:cm-e2e-adm', CODEMASTERY_E2E_RUN_ID: 'cm-e2e-adm', CODEMASTERY_E2E_LOCK_KEY: '1-2',
+            CODEMASTERY_E2E_INVENTORY: file, CODEMASTERY_E2E_SUPERVISOR: '4242',
+        };
+    };
+    test('the coordinator\'s child with the active record is admitted', () => scratch((dir, file) => {
+        assert.equal(admissionProblem({ env: handDown(dir, file), ppid: 4242 }), null);
+    }));
+    test('exported variables in another process, a finished run or a mismatched token are refused', () => scratch((dir, file) => {
+        const env = handDown(dir, file);
+        assert.match(admissionProblem({ env, ppid: 1 }), /not started by the coordinator/);
+        assert.match(admissionProblem({ env: { ...env, CODEMASTERY_E2E_OWNERSHIP: '1-2:cm-e2e-other' }, ppid: 4242 }), /token does not name/);
+        assert.match(admissionProblem({ env: {}, ppid: 4242 }), /no lifecycle ownership/);
+        handDown(dir, file, { state: 'complete' });
+        assert.match(admissionProblem({ env, ppid: 4242 }), /the run is complete, not active/);
+    }));
+    test('a configuration of another checkout is refused even with a valid hand-down', () => scratch((dir, file) => {
+        const env = handDown(dir, file);
+        assert.match(admissionProblem({ env, ppid: 4242, checkoutDir: dir }), /belongs to another checkout/);
+        const info = lstatSync(dir);
+        const own = handDown(dir, file, { lockKey: `${info.dev}-${info.ino}` });
+        own.CODEMASTERY_E2E_LOCK_KEY = `${info.dev}-${info.ino}`;
+        own.CODEMASTERY_E2E_OWNERSHIP = `${info.dev}-${info.ino}:cm-e2e-adm`;
+        assert.equal(admissionProblem({ env: own, ppid: 4242, checkoutDir: dir }), null);
     }));
 });

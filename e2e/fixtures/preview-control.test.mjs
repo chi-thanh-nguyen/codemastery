@@ -160,7 +160,7 @@ describe('the preview acknowledges its own identity over its private channel', (
 describe('recovery stops an orphaned preview through that channel alone', () => {
     test('a live orphan is closed cooperatively and the run is then complete', async () => {
         const runId = 'cm-e2e-orphan-live';
-        const preview = await startPreview(runId, 'orphan.sock');
+        const preview = await startPreview(runId, `${runId}.sock`);
         const inventory = join(scratch, 'orphan.json');
         const identity = processIdentity(preview.child.pid);
         writeInventory(inventory, {
