@@ -94,7 +94,7 @@ Neither document establishes implementation, runtime acceptance or deployment au
 | [ADR003](003-postgresql-alpine-su-exec-image.md) | PostgreSQL image hardening (Alpine with su-exec) | `LEADER_APPROVED` (2 November 2026); residual risks `PENDING_LEADER_RISK_ACCEPTANCE` |
 | [ADR004](004-leader-approval-of-delegated-records.md) | Leader approval of the earlier delegated records; label rename | `LEADER_APPROVED` (8 November 2026), merged PR #227 |
 | [ADR005](005-batch-01-contract-approvals.md) | Nine Batch 1 approvals and bounded CT03/CT24/CT14/CT18 prerequisites | `DELEGATED_APPROVED` (8 November 2026); integrated via PR #228 (9 November 2026) |
-| [ADR006](006-batch-02-contract-approvals.md) | Eight verified Batch 2 checkpoints: progress, resume, embed, authoring and recovery | Eight `DELEGATED_APPROVED`; integrated via PR #229, 9 November 2026; implementation/exposure gates retained. §10 (PR #239): AU07 implementation decisions `LEADER_APPROVED` 13 November 2026; reset JWT risk acceptance and exposure gates retained |
+| [ADR006](006-batch-02-contract-approvals.md) | Eight verified Batch 2 checkpoints: progress, resume, embed, authoring and recovery | Eight `DELEGATED_APPROVED`; integrated via PR #229, 9 November 2026; implementation/exposure gates retained. §10 (PR #239): AU07 implementation decisions `LEADER_APPROVED` 13 November 2026; §10.5 review-finding decisions `DELEGATED_APPROVED` the same day; reset JWT risk acceptance and exposure gates retained |
 | [ADR007](007-batch-03-contract-approvals.md) | Ten verified Batch 3 checkpoints CP-019–028; two bounded prerequisite slices | `DELEGATED_APPROVED`; integrated via PR #230, 9 November 2026; implementation/verification gates retained |
 | [ADR008](008-batch-04-contract-approvals.md) | Six Batch 4 testing/clock decisions; CP-030 r2 | `DELEGATED_APPROVED`; integrated via #231 on 10 November. Its original CT17 pending dispositions are historical, subsequently resolved by ADR009 r2 |
 | [ADR009](009-ct17-final-runtime-recovery.md) | CP-033/034 r2 runtime/recovery decisions, bounded qualification and dated Azure evidence | Two `DELEGATED_APPROVED`; integrated via #233 on 11 November (no approving review recorded); execution/admission gates retained |
@@ -125,6 +125,8 @@ Neither document establishes implementation, runtime acceptance or deployment au
 | `CT17-P6-PRIVILEGES-2026-10-28-r1` | Runtime database privileges and operation gates | [deployment](../deployment.md#ct17-runtime-database-privileges-and-operation-gates--28-october-2026) | `LEADER_APPROVED` | PR #110 |
 | `CT17-P6-PRIVILEGES-2026-11-13-r2` | AU07 extension of the r1 matrix: `users` UPDATE (password_hash); `password_reset_tokens` SELECT, INSERT, DELETE | [deployment](../deployment.md#ct17-p6-privileges-2026-11-13-r2--au07-extension-leader_approved-13-november-2026) | `LEADER_APPROVED` (13 November 2026); r1 unchanged; independent review/protected integration pending | PR #239 |
 | `AU07-IMPL-2026-11-13-r1` | AU07 implementation authorization, V007 (repository and controlled tests only), Spring Mail adapter and `auth/infrastructure/email/` placement, feature-scoped fail-closed delivery | [ADR006 §10.2](006-batch-02-contract-approvals.md#102-leader-decisions--au07-impl-2026-11-13-r1-and-ct17-p6-privileges-2026-11-13-r2) | `LEADER_APPROVED` (13 November 2026); does not modify CT02 r1; reset JWT risk acceptance pending | PR #239 |
+| `CT38-PASSWORD-RESET-2026-11-13-r1` | CT38.feature.password-reset: the six optional AU07 recovery inputs and their validation | [ADR006 §10.5.1](006-batch-02-contract-approvals.md#1051-ct38-password-reset-2026-11-13-r1--ct38featurepassword-reset) | `DELEGATED_APPROVED` (13 November 2026, explicit Leader delegation); CT38.core unchanged; CT38.remaining otherwise `DEFERRED` | PR #239 |
+| `AU07-REVIEW-2026-11-13-r1` | Dispositions of the PR #239 independent-review findings: shared-file scope, §9.4 gate classification, mandatory SMTP authentication, confirmation lock duration, test isolation, OpenAPI status | [ADR006 §10.5.2](006-batch-02-contract-approvals.md#1052-au07-review-2026-11-13-r1--findings-dispositions) | `DELEGATED_APPROVED` (13 November 2026, explicit Leader delegation); no risk acceptance, migration execution, exposure or merge | PR #239 |
 | `FE07-2026-10-27-r1` | CT22.membership, catalogue extension | [ADR002 FE07](002-interim-delegated-contracts.md#fe07-full-implementation--delegated-approval-27-october-2026) | `LEADER_APPROVED` | PR #101 |
 | `CT15-SD-2026-10-30-r3` | SD01/SD02 sample data | [ADR002 SD01/SD02](002-interim-delegated-contracts.md#sd01sd02-sample-data-completion--delegated-approval-30-october-2026) | `LEADER_APPROVED` | PR #116 |
 | `CT16-ROUTES-2026-11-08-r1` | Final route map, navigation, start pages | [setup](../setup.md#ct16routes--ct16-routes-2026-11-08-r1--delegated_approved) | `DELEGATED_APPROVED` | PR #226 |
@@ -187,7 +189,10 @@ On 13 November 2026 the Leader approved `AU07-IMPL-2026-11-13-r1` and
 ([ADR006 §10.2](006-batch-02-contract-approvals.md#102-leader-decisions--au07-impl-2026-11-13-r1-and-ct17-p6-privileges-2026-11-13-r2)),
 without modifying the CT02 revisions. Reset-specific residual-risk acceptance
 remains `PENDING_LEADER_RISK_ACCEPTANCE`. Exposure, provisioning and merge remain
-unauthorized.
+unauthorized. Under the Leader's explicit delegation the same day,
+`CT38-PASSWORD-RESET-2026-11-13-r1` and `AU07-REVIEW-2026-11-13-r1`
+([ADR006 §10.5](006-batch-02-contract-approvals.md#105-delegated-decisions-on-the-independent-review-findings--au07-review-2026-11-13-r1-and-ct38-password-reset-2026-11-13-r1))
+record the recovery input names and the review-finding dispositions as `DELEGATED_APPROVED`.
 
 
 ### Batch 3 revisions — 9 November 2026

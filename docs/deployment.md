@@ -1473,14 +1473,21 @@ The following stay synchronized with this record:
 - `test-postgres-privilege-matrix-containment.sh`: grants and denials on the real
   V001–V007 schema;
 - `test-runtime-real-backend-privileges.sh`: a real reset confirmation under the
-  runtime role.
+  runtime role, and a restart with recovery activated by synthetic inputs, where the
+  request worker issues capabilities (User lock, token DELETE/INSERT) under the same
+  role.
 
 Remaining gates:
 
 - `@tihh647-ui` infrastructure review and independent CODEOWNER review;
 - protected integration;
 - the operational host verification in the acceptance above, under a separately
-  authorized deployment.
+  authorized deployment;
+- V007 execution on any shared or production database. Flyway applies pending
+  migrations automatically when the backend starts, so once V007 is on `main`, starting
+  any build of it against such a database executes V007. That execution stays
+  Leader-reserved (`AU07-IMPL-2026-11-13-r1` item 2) and must be authorized before any
+  deployment of that build.
 
 This approval executes no provisioning on any real database.
 
