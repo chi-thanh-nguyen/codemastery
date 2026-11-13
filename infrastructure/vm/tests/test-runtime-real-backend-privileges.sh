@@ -75,7 +75,6 @@ umask 077
   printf 'SPRING_FLYWAY_URL=%s\nSPRING_FLYWAY_USER=%s\nSPRING_FLYWAY_PASSWORD=%s\n' "$(env_get SPRING_FLYWAY_URL)" "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)"
   printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\n' "$(openssl rand -hex 32)"
 } > "$work/backend.env"
-docker run -d --name "$backend" --network "$PGTEST_NETWORK" -p "127.0.0.1:${port}:8080" --env-file "$work/backend.env" "$BACKEND_IMAGE" >/dev/null
 # Read the whole log before matching: `docker logs | grep -q` fails under pipefail
 # (docker logs gets SIGPIPE, status 141) once the log outgrows the pipe buffer.
 backend_started() { local logs; logs="$(docker logs "$backend" 2>&1)" && [[ "$logs" == *'Started CodeMasteryApplication'* ]]; }
@@ -85,14 +84,18 @@ backend_failed() {
   docker logs --tail 80 "$backend" >&2 2>&1 || true
   exit 1
 }
-started=no
-for _ in $(seq 1 180); do
-  if backend_started; then started=yes; break; fi
-  [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || backend_failed "the container exited during startup"
-  sleep 1
-done
-# One last read after the final sleep, so a marker logged during it still counts.
-[[ "$started" == yes ]] || backend_started || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
+start_backend() {  # env-file
+  docker run -d --name "$backend" --network "$PGTEST_NETWORK" -p "127.0.0.1:${port}:8080" --env-file "$1" "$BACKEND_IMAGE" >/dev/null
+  local started=no
+  for _ in $(seq 1 180); do
+    if backend_started; then started=yes; break; fi
+    [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || backend_failed "the container exited during startup"
+    sleep 1
+  done
+  # One last read after the final sleep, so a marker logged during it still counts.
+  [[ "$started" == yes ]] || backend_started || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
+}
+start_backend "$work/backend.env"
 check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "7/7 $(env_get SPRING_FLYWAY_USER)"
 harden_after_migration
 verify_role_separation >/dev/null
@@ -204,10 +207,45 @@ check "old password no longer signs in" "$STATUS" 401
 call POST /api/auth/login "" "{\"email\":\"learner.b@example.test\",\"password\":\"$new_password\"}"
 check "new password signs in (ordinary sign-in, no JWT from reset)" "$STATUS" 200
 
+check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
+
+echo "== AU07 request worker under the runtime role (recovery activated; synthetic SMTP host that cannot resolve)"
+# Restart the same image against the same migrated database with recovery settings. Every value
+# is synthetic: `.invalid` never resolves, so delivery fails after commit (counted, never logged),
+# and no provider, credential or deployment binding is involved.
+docker rm -f "$backend" >/dev/null
+{ cat "$work/backend.env"
+  printf 'SMTP_HOST=smtp.invalid\nSMTP_USERNAME=synthetic-test-user\nSMTP_PASSWORD=%s\n' "$(openssl rand -hex 16)"
+  printf 'PASSWORD_RESET_EMAIL_FROM=no-reply@example.test\nPASSWORD_RESET_FRONTEND_ORIGIN=https://codemastery.example.test\n'
+} > "$work/backend-recovery.env"
+start_backend "$work/backend-recovery.env"
+token_count() { psql_admin <<<"SELECT count(*) FROM public.password_reset_tokens t JOIN public.users u ON u.id=t.user_id WHERE u.email='$1';"; }
+await_token() {  # email -> waits until the single FIFO worker has committed that account's capability
+  for _ in $(seq 1 150); do [[ "$(token_count "$1")" == 1 ]] && return 0; sleep 0.2; done
+  return 1
+}
+call POST /api/auth/password-reset-requests "" '{"email":"learner.a@example.test"}'
+check "active recovery acknowledges with the same generic 202" "$STATUS" 202
+await_token learner.a@example.test || true
+check "worker issued one capability (User row lock + token DELETE/INSERT)" "$(token_count learner.a@example.test)" 1
+check "PT30M lifetime and only a 32-byte digest stored" "$(psql_admin <<<"SELECT (t.expires_at - t.issued_at)::text || '/' || octet_length(t.token_digest) FROM public.password_reset_tokens t JOIN public.users u ON u.id=t.user_id WHERE u.email='learner.a@example.test';")" "00:30:00/32"
+issued="$(psql_admin <<<"SELECT t.issued_at FROM public.password_reset_tokens t JOIN public.users u ON u.id=t.user_id WHERE u.email='learner.a@example.test';")"
+# Single FIFO worker: once learner.b's capability exists, the earlier repeat and locked requests were processed.
+for email in learner.a@example.test learner.c@example.test nobody@example.test learner.b@example.test; do
+  call POST /api/auth/password-reset-requests "" "{\"email\":\"$email\"}"
+  check "request acknowledged identically ($email)" "$STATUS/$BODY" '202/{"message":"If an account matches, a password reset link will be sent."}'
+done
+await_token learner.b@example.test || true
+check "later eligible account issued in FIFO order" "$(token_count learner.b@example.test)" 1
+check "PT1M repeat left the first capability unchanged" "$(psql_admin <<<"SELECT t.issued_at FROM public.password_reset_tokens t JOIN public.users u ON u.id=t.user_id WHERE u.email='learner.a@example.test';")" "$issued"
+check "locked account receives no capability" "$(token_count learner.c@example.test)" 0
+check "only the two eligible capabilities exist" "$(psql_admin <<<"SELECT count(*) FROM public.password_reset_tokens;")" 2
+check "backend log never contains a recipient address" "$(docker logs "$backend" 2>&1 | grep -ciE 'learner\.[abc]@example\.test|nobody@example\.test' || true)" 0
+
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, AU07 reset confirmation, catalogue/detail and CT22 membership under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, AU07 request worker and reset confirmation, catalogue/detail and CT22 membership under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \
