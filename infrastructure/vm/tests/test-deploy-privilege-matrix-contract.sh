@@ -10,7 +10,7 @@ bash -c '
   set -euo pipefail
   source "$1"
   runtime_matrix_values >/dev/null
-  [[ "$(runtime_matrix_values | wc -l | tr -d " ")" == 24 ]]
+  [[ "$(runtime_matrix_values | wc -l | tr -d " ")" == 25 ]]  # V001-V006 (24) + proposed CT17 r2 password_reset_tokens
   approved="$RUNTIME_PRIVILEGE_MATRIX"
   reject() {
     RUNTIME_PRIVILEGE_MATRIX="$2"
