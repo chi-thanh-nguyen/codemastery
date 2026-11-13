@@ -4,9 +4,13 @@ import com.codemastery.common.config.AppConfig.PasswordResetActivation;
 import com.codemastery.common.config.AppConfig.PasswordResetSettings;
 import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailDelivery;
 import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailMessage;
+import jakarta.mail.AuthenticationFailedException;
+import jakarta.mail.MessagingException;
+import jakarta.mail.Transport;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Properties;
+import org.eclipse.angus.mail.smtp.SMTPTransport;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -48,7 +52,7 @@ public class SmtpPasswordResetEmailAdapter implements ResetEmailDelivery {
     /** Builds the fixed-policy SMTP submission client from validated recovery settings. */
     public static JavaMailSenderImpl newMailSender(PasswordResetSettings settings) {
         Objects.requireNonNull(settings);
-        JavaMailSenderImpl sender = new JavaMailSenderImpl();
+        JavaMailSenderImpl sender = new AuthenticatedSubmissionSender();
         sender.setProtocol("smtp");
         sender.setHost(settings.smtpHost());
         sender.setPort(SUBMISSION_PORT);
@@ -81,5 +85,29 @@ public class SmtpPasswordResetEmailAdapter implements ResetEmailDelivery {
                 + reset.resetLink()
                 + "\n\nIf you did not request this, you can ignore this email.");
         mail.send(message);
+    }
+
+    /**
+     * Makes SMTP authentication mandatory. With {@code mail.smtp.auth=true}, Jakarta Mail still
+     * treats the connection as usable when the server's post-STARTTLS EHLO does not offer AUTH, and
+     * it would then submit the message unauthenticated. When AUTH is offered, Jakarta Mail
+     * authenticates during connect and fails on rejection, so a connected transport that offered
+     * AUTH has authenticated. Any other connection is closed before MAIL FROM.
+     */
+    static final class AuthenticatedSubmissionSender extends JavaMailSenderImpl {
+        @Override
+        protected Transport connectTransport() throws MessagingException {
+            Transport transport = super.connectTransport();
+            if (transport instanceof SMTPTransport smtp && getUsername() != null && getPassword() != null
+                    && (smtp.supportsExtension("AUTH") || smtp.supportsExtension("AUTH=LOGIN"))) {
+                return transport;
+            }
+            try {
+                transport.close();
+            } catch (MessagingException ignored) {
+                // The refusal below is the outcome; a failed QUIT adds nothing.
+            }
+            throw new AuthenticationFailedException("SMTP server did not offer authentication after STARTTLS");
+        }
     }
 }

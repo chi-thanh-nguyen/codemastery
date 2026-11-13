@@ -77,6 +77,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
+        <!-- AU07: the starter's Boot-managed Jakarta Mail implementation, declared at compile scope only so
+             the reset adapter can verify that SMTP AUTH actually took place (no new library or version). -->
+        <dependency>
+            <groupId>org.eclipse.angus</groupId>
+            <artifactId>angus-mail</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-api</artifactId>

@@ -14,7 +14,28 @@ import org.springframework.mock.env.MockEnvironment;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Properties;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.KeyStore;
+import java.util.Locale;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.TrustManagerFactory;
+import org.springframework.mail.MailException;
 import java.util.concurrent.RejectedExecutionException;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.GlobalExceptionHandler;
@@ -376,6 +397,7 @@ class AuthServiceTest {
 
             InOrder order = inOrder(users, transactionManager);
             order.verify(users).findResetTokenByDigest(argThat(value -> Arrays.equals(digest, value)));
+            order.verify(transactionManager).getTransaction(any());
             order.verify(users).findByIdForUpdate(USER_ID);
             order.verify(users).findResetTokenByDigest(argThat(value -> Arrays.equals(digest, value)));
             ArgumentCaptor<String> hash = ArgumentCaptor.forClass(String.class);
@@ -427,15 +449,48 @@ class AuthServiceTest {
         }
 
         @Test
-        void unknownCapabilityIsGenericWithoutLockingAnyAccount() {
-            allowTransaction();
+        void unknownCapabilityIsGenericWithoutTransactionLockOrPasswordHash() {
             when(users.findResetTokenByDigest(any())).thenReturn(Optional.empty());
+            PasswordResetService recovery = service(mock(ResetEmailDelivery.class));
 
-            assertInvalidLink(() -> service(mock(ResetEmailDelivery.class))
-                    .resetPassword(encode(randomCapability()), NEW_PASSWORD));
+            long started = System.nanoTime();
+            assertInvalidLink(() -> recovery.resetPassword(encode(randomCapability()), NEW_PASSWORD));
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - started);
 
+            verifyNoInteractions(transactionManager);
             verify(users, never()).findByIdForUpdate(any());
             verify(users, never()).updatePasswordHash(any(), any());
+            // A cost-14 BCrypt hash alone takes far longer; an unknown capability costs none.
+            assertTrue(elapsed.compareTo(Duration.ofMillis(250)) < 0, "unknown capability was hashed: " + elapsed);
+        }
+
+        @Test
+        void passwordHashIsComputedBeforeTheUserRowLockIsTaken() throws Exception {
+            allowTransaction();
+            byte[] raw = randomCapability();
+            byte[] digest = sha256(raw);
+            long[] marks = new long[2];
+            when(users.findResetTokenByDigest(any())).thenReturn(Optional.of(token(digest, now)));
+            when(users.findByIdForUpdate(USER_ID)).thenAnswer(call -> {
+                marks[0] = System.nanoTime();
+                return Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE));
+            });
+            doAnswer(call -> {
+                marks[1] = System.nanoTime();
+                return null;
+            }).when(users).updatePasswordHash(eq(USER_ID), any());
+            when(users.deleteResetToken(eq(USER_ID), any())).thenReturn(true);
+            PasswordResetService recovery = service(mock(ResetEmailDelivery.class));
+
+            long started = System.nanoTime();
+            recovery.resetPassword(encode(raw), NEW_PASSWORD);
+
+            Duration beforeLock = Duration.ofNanos(marks[0] - started);
+            Duration underLock = Duration.ofNanos(marks[1] - marks[0]);
+            // The hash (hundreds of milliseconds at cost 14) happens before the lock; under the
+            // lock only in-memory checks run here, so that interval is a small fraction of it.
+            assertTrue(underLock.multipliedBy(10).compareTo(beforeLock) < 0,
+                    "BCrypt ran under the User lock: before=" + beforeLock + ", under=" + underLock);
         }
 
         @Test
@@ -539,6 +594,322 @@ class AuthServiceTest {
                     PasswordResetActivation.inactive("Missing, placeholder or invalid consumed configuration: SMTP_HOST"));
             assertThrows(IllegalStateException.class, () -> inactive.send(new ResetEmailMessage(
                     "learner@example.test", "https://codemastery.test/reset-password#token=abc", now)));
+        }
+    }
+
+    /**
+     * Real SMTP exchanges between the production adapter and an isolated in-process submission
+     * server on loopback, using an ephemeral certificate generated for this test JVM. No network,
+     * provider or real credential is involved. Only the listener port and the trust anchor for
+     * that ephemeral certificate differ from the production client.
+     */
+    @Nested
+    class SmtpSubmissionPolicy {
+        private static final List<String> NOTHING_SUBMITTED = List.of("MAIL", "RCPT", "DATA");
+        private final ResetEmailMessage reset = new ResetEmailMessage("learner@example.test",
+                "https://codemastery.test/reset-password#token=abc", Instant.parse("2026-11-12T12:30:00Z"));
+
+        private JavaMailSenderImpl sender(String host, int port, boolean trustTestCertificate) throws Exception {
+            JavaMailSenderImpl sender = SmtpPasswordResetEmailAdapter.newMailSender(new PasswordResetSettings(
+                    Duration.ofMinutes(30), "https://codemastery.test", "auth@codemastery.test", host,
+                    SubmissionServer.USER, SubmissionServer.SECRET));
+            sender.setPort(port);
+            if (trustTestCertificate) {
+                Properties properties = new Properties();
+                properties.putAll(sender.getJavaMailProperties());
+                properties.put("mail.smtp.ssl.socketFactory", TestCertificate.clientTrust().getSocketFactory());
+                sender.setJavaMailProperties(properties);
+            }
+            return sender;
+        }
+
+        private void send(JavaMailSenderImpl sender) {
+            new SmtpPasswordResetEmailAdapter(sender, "auth@codemastery.test").send(reset);
+        }
+
+        private static void assertNothingSubmitted(SubmissionServer server) {
+            assertNull(server.message());
+            for (String verb : server.verbs()) {
+                assertFalse(NOTHING_SUBMITTED.contains(verb.replace("TLS ", "")), "no submission after refusal: " + verb);
+            }
+        }
+
+        @Test
+        void authenticatedStarttlsSubmissionDeliversOnlyAfterTlsAndAuthentication() throws Exception {
+            try (SubmissionServer server = SubmissionServer.start(true, true, SubmissionServer.SECRET)) {
+                send(sender("localhost", server.port(), true));
+                server.awaitSession();
+
+                assertTrue(server.authenticated());
+                assertEquals(List.of("EHLO", "STARTTLS", "TLS EHLO", "TLS AUTH", "TLS MAIL", "TLS RCPT",
+                        "TLS DATA", "TLS QUIT"), server.verbs());
+                assertTrue(server.message().contains("Subject: Reset your CodeMastery password"));
+                assertTrue(server.message().contains("https://codemastery.test/reset-password#token=abc"));
+            }
+        }
+
+        @Test
+        void starttlsServerThatDoesNotOfferAuthenticationReceivesNoMessage() throws Exception {
+            try (SubmissionServer server = SubmissionServer.start(true, false, SubmissionServer.SECRET)) {
+                MailException refused = assertThrows(MailException.class,
+                        () -> send(sender("localhost", server.port(), true)));
+                server.awaitSession();
+
+                assertFalse(server.authenticated());
+                assertNothingSubmitted(server);
+                assertFalse(String.valueOf(refused.getMessage()).contains(SubmissionServer.SECRET));
+            }
+        }
+
+        @Test
+        void rejectedCredentialsSubmitNothing() throws Exception {
+            try (SubmissionServer server = SubmissionServer.start(true, true, "a-different-test-secret")) {
+                assertThrows(MailException.class, () -> send(sender("localhost", server.port(), true)));
+                server.awaitSession();
+
+                assertFalse(server.authenticated());
+                assertNothingSubmitted(server);
+            }
+        }
+
+        @Test
+        void serverWithoutStarttlsNeverReceivesCredentials() throws Exception {
+            try (SubmissionServer server = SubmissionServer.start(false, true, SubmissionServer.SECRET)) {
+                assertThrows(MailException.class, () -> send(sender("localhost", server.port(), true)));
+                server.awaitSession();
+
+                assertFalse(server.verbs().contains("AUTH"), "credentials are never offered without TLS");
+                assertNothingSubmitted(server);
+            }
+        }
+
+        @Test
+        void untrustedCertificateIsRefusedBeforeCredentials() throws Exception {
+            try (SubmissionServer server = SubmissionServer.start(true, true, SubmissionServer.SECRET)) {
+                assertThrows(MailException.class, () -> send(sender("localhost", server.port(), false)));
+                server.awaitSession();
+
+                assertEquals(List.of("EHLO", "STARTTLS"), server.verbs());
+                assertNothingSubmitted(server);
+            }
+        }
+
+        @Test
+        void certificateThatDoesNotNameTheConfiguredHostIsRefusedBeforeCredentials() throws Exception {
+            try (SubmissionServer server = SubmissionServer.start(true, true, SubmissionServer.SECRET)) {
+                // The ephemeral certificate names only "localhost", not the loopback IP address.
+                assertThrows(MailException.class, () -> send(sender("127.0.0.1", server.port(), true)));
+                server.awaitSession();
+
+                assertEquals(List.of("EHLO", "STARTTLS"), server.verbs());
+                assertNothingSubmitted(server);
+            }
+        }
+    }
+
+    /** One ephemeral self-signed certificate per test JVM, generated with the JDK keytool. */
+    private static final class TestCertificate {
+        private static SSLContext server;
+        private static SSLContext client;
+
+        static synchronized SSLContext serverContext() throws Exception {
+            generate();
+            return server;
+        }
+
+        static synchronized SSLContext clientTrust() throws Exception {
+            generate();
+            return client;
+        }
+
+        private static void generate() throws Exception {
+            if (server != null) {
+                return;
+            }
+            byte[] random = new byte[16];
+            new SecureRandom().nextBytes(random);
+            char[] storeSecret = HexFormat.of().formatHex(random).toCharArray();
+            Path directory = Files.createTempDirectory("codemastery-smtp-test");
+            Path store = directory.resolve("server.p12");
+            try {
+                Process keytool = new ProcessBuilder(
+                        Path.of(System.getProperty("java.home"), "bin", "keytool").toString(),
+                        "-genkeypair", "-alias", "smtp", "-keyalg", "EC", "-groupname", "secp256r1",
+                        "-dname", "CN=localhost", "-ext", "SAN=dns:localhost", "-validity", "1",
+                        "-storetype", "PKCS12", "-keystore", store.toString(),
+                        "-storepass", new String(storeSecret))
+                        .redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+                assertTrue(keytool.waitFor(60, TimeUnit.SECONDS) && keytool.exitValue() == 0, "keytool failed");
+                KeyStore keys = KeyStore.getInstance("PKCS12");
+                try (var input = Files.newInputStream(store)) {
+                    keys.load(input, storeSecret);
+                }
+                KeyManagerFactory keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+                keyManagers.init(keys, storeSecret);
+                SSLContext serverContext = SSLContext.getInstance("TLS");
+                serverContext.init(keyManagers.getKeyManagers(), null, null);
+
+                KeyStore anchors = KeyStore.getInstance("PKCS12");
+                anchors.load(null, null);
+                anchors.setCertificateEntry("smtp", keys.getCertificate("smtp"));
+                TrustManagerFactory trustManagers =
+                        TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                trustManagers.init(anchors);
+                SSLContext clientContext = SSLContext.getInstance("TLS");
+                clientContext.init(null, trustManagers.getTrustManagers(), null);
+                server = serverContext;
+                client = clientContext;
+            } finally {
+                Files.deleteIfExists(store);
+                Files.deleteIfExists(directory);
+            }
+        }
+    }
+
+    /**
+     * Minimal single-session SMTP submission server: optional STARTTLS and AUTH PLAIN offers, and
+     * it accepts MAIL/RCPT/DATA without requiring authentication, so a client that skips
+     * authentication would be observed delivering.
+     */
+    private static final class SubmissionServer implements AutoCloseable {
+        static final String USER = "smtp-test-user";
+        static final String SECRET = "smtp-test-secret";
+
+        private final ServerSocket listener;
+        private final boolean offerStartTls;
+        private final boolean offerAuth;
+        private final String acceptedSecret;
+        private final List<String> verbs = new CopyOnWriteArrayList<>();
+        private final AtomicBoolean authenticated = new AtomicBoolean();
+        private final AtomicReference<String> message = new AtomicReference<>();
+        private final Thread session;
+
+        private SubmissionServer(boolean offerStartTls, boolean offerAuth, String acceptedSecret) throws Exception {
+            TestCertificate.serverContext();
+            this.offerStartTls = offerStartTls;
+            this.offerAuth = offerAuth;
+            this.acceptedSecret = acceptedSecret;
+            this.listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+            this.listener.setSoTimeout(10_000);
+            this.session = Thread.ofPlatform().daemon().name("isolated-smtp-test-server").start(this::serve);
+        }
+
+        static SubmissionServer start(boolean offerStartTls, boolean offerAuth, String acceptedSecret)
+                throws Exception {
+            return new SubmissionServer(offerStartTls, offerAuth, acceptedSecret);
+        }
+
+        int port() {
+            return listener.getLocalPort();
+        }
+
+        List<String> verbs() {
+            return List.copyOf(verbs);
+        }
+
+        boolean authenticated() {
+            return authenticated.get();
+        }
+
+        String message() {
+            return message.get();
+        }
+
+        void awaitSession() throws InterruptedException {
+            session.join(Duration.ofSeconds(15));
+            assertFalse(session.isAlive(), "SMTP test session did not finish");
+        }
+
+        @Override
+        public void close() throws Exception {
+            listener.close();
+            session.join(Duration.ofSeconds(15));
+        }
+
+        private void serve() {
+            try (Socket plain = listener.accept()) {
+                plain.setSoTimeout(10_000);
+                Socket socket = plain;
+                boolean tls = false;
+                BufferedReader in = reader(socket);
+                Writer out = writer(socket);
+                reply(out, "220 localhost ESMTP isolated test server");
+                String line;
+                while ((line = in.readLine()) != null) {
+                    String verb = line.split(" ", 2)[0].toUpperCase(Locale.ROOT);
+                    verbs.add(tls ? "TLS " + verb : verb);
+                    switch (verb) {
+                        case "EHLO" -> {
+                            List<String> lines = new ArrayList<>(List.of("localhost"));
+                            if (!tls && offerStartTls) {
+                                lines.add("STARTTLS");
+                            }
+                            if (offerAuth && (tls || !offerStartTls)) {
+                                lines.add("AUTH PLAIN");
+                            }
+                            for (int i = 0; i < lines.size(); i++) {
+                                reply(out, "250" + (i == lines.size() - 1 ? " " : "-") + lines.get(i));
+                            }
+                        }
+                        case "STARTTLS" -> {
+                            reply(out, "220 2.0.0 Ready to start TLS");
+                            SSLSocket secured = (SSLSocket) TestCertificate.serverContext().getSocketFactory()
+                                    .createSocket(plain, "localhost", plain.getPort(), true);
+                            secured.setUseClientMode(false);
+                            secured.startHandshake();
+                            socket = secured;
+                            in = reader(socket);
+                            out = writer(socket);
+                            tls = true;
+                        }
+                        case "AUTH" -> {
+                            String[] parts = line.split(" ");
+                            String response = parts.length > 2 ? parts[2] : null;
+                            if (response == null) {
+                                reply(out, "334 ");
+                                response = in.readLine();
+                            }
+                            String[] plainAuth = new String(Base64.getDecoder().decode(response),
+                                    StandardCharsets.UTF_8).split("\u0000", -1);
+                            boolean accepted = plainAuth.length == 3 && USER.equals(plainAuth[1])
+                                    && acceptedSecret.equals(plainAuth[2]);
+                            authenticated.set(accepted);
+                            reply(out, accepted ? "235 2.7.0 Authentication successful"
+                                    : "535 5.7.8 Authentication credentials invalid");
+                        }
+                        case "MAIL", "RCPT", "RSET", "NOOP" -> reply(out, "250 2.0.0 OK");
+                        case "DATA" -> {
+                            reply(out, "354 End data with <CR><LF>.<CR><LF>");
+                            StringBuilder data = new StringBuilder();
+                            for (String body = in.readLine(); body != null && !body.equals("."); body = in.readLine()) {
+                                data.append(body).append('\n');
+                            }
+                            message.set(data.toString());
+                            reply(out, "250 2.0.0 Accepted");
+                        }
+                        case "QUIT" -> {
+                            reply(out, "221 2.0.0 Bye");
+                            return;
+                        }
+                        default -> reply(out, "502 5.5.1 Unrecognized command");
+                    }
+                }
+            } catch (Exception ended) {
+                // The client ended the session, for example by refusing the certificate.
+            }
+        }
+
+        private static BufferedReader reader(Socket socket) throws Exception {
+            return new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+        }
+
+        private static Writer writer(Socket socket) throws Exception {
+            return new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.US_ASCII);
+        }
+
+        private static void reply(Writer out, String line) throws Exception {
+            out.write(line + "\r\n");
+            out.flush();
         }
     }
 
