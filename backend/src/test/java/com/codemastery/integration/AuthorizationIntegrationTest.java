@@ -718,6 +718,24 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void recoveryMediaTypesAndUnlistedApiPathsReachTheProductionHandlersInTheFullContext() throws Exception {
+        // Test-only controllers must not be component-scanned into the application context, or a
+        // catch-all fixture would answer these permitted paths and hide the production 415.
+        for (String path : List.of("/api/auth/password-reset-requests", "/api/auth/password-resets")) {
+            mvc.perform(post(path).contentType(MediaType.TEXT_PLAIN).content("{}"))
+                    .andExpect(status().isUnsupportedMediaType())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.detail").value("The request media type is not supported."));
+        }
+        String valid = tokens.createToken(insertUser("learner", "active"));
+        // An operation that is not explicitly listed stays deny-by-default, even for a valid bearer.
+        mvc.perform(get("/api/au07-unlisted-probe").header("Authorization", "Bearer " + valid))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    @Test
     void protectedOperationStillRequiresValidBearerForActiveAccount() throws Exception {
         String valid = tokens.createToken(insertUser("learner", "active"));
         String tampered = valid.substring(0, valid.length() - 2) + (valid.endsWith("AA") ? "BB" : "AA");
