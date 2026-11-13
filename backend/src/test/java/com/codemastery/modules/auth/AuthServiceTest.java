@@ -2,6 +2,20 @@ package com.codemastery.modules.auth;
 
 import com.codemastery.common.config.AppConfig;
 import com.codemastery.common.config.AppConfig.PasswordResetSettings;
+import com.codemastery.common.config.AppConfig.PasswordResetActivation;
+import com.codemastery.modules.auth.domain.repository.UserRepository.PasswordResetToken;
+import com.codemastery.modules.auth.infrastructure.email.SmtpPasswordResetEmailAdapter;
+import org.junit.jupiter.api.function.Executable;
+import org.mockito.InOrder;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
+import org.springframework.mock.env.MockEnvironment;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Properties;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.GlobalExceptionHandler;
 import com.codemastery.modules.auth.api.controller.AuthController;
@@ -154,47 +168,377 @@ class AuthServiceTest {
     @Nested
     class PasswordRecovery {
 
+        private static final String ACK = "If an account matches, a password reset link will be sent.";
+        private static final String INVALID_LINK = "Reset link is invalid or expired.";
+        private static final String NEW_PASSWORD = "unit-only-new-passphrase";
+
         private final Instant now = Instant.parse("2026-11-12T12:00:00Z");
         private final PasswordResetSettings settings = new PasswordResetSettings(Duration.ofMinutes(30),
                 "https://codemastery.test", "auth@codemastery.test", "smtp.example.test", "test-user", "test-secret");
+        private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
 
         private PasswordResetService service(ResetEmailDelivery delivery) {
-            return new PasswordResetService(users, transactionManager, settings, delivery, validator,
-                    Clock.fixed(now, ZoneOffset.UTC), Runnable::run, new SimpleMeterRegistry());
+            return service(delivery, Runnable::run, PasswordResetActivation.active(settings));
+        }
+
+        private PasswordResetService service(ResetEmailDelivery delivery, Executor executor,
+                                             PasswordResetActivation activation) {
+            return new PasswordResetService(users, transactionManager, activation, delivery, validator,
+                    Clock.fixed(now, ZoneOffset.UTC), executor, meters);
+        }
+
+        private double count(String counter) {
+            return meters.counter(counter).count();
+        }
+
+        private static byte[] randomCapability() {
+            byte[] raw = new byte[32];
+            new SecureRandom().nextBytes(raw);
+            return raw;
+        }
+
+        private static String encode(byte[] raw) {
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+        }
+
+        private static byte[] sha256(byte[] value) throws Exception {
+            return MessageDigest.getInstance("SHA-256").digest(value);
+        }
+
+        private PasswordResetToken token(byte[] digest, Instant issuedAt) {
+            return new PasswordResetToken(USER_ID, digest, issuedAt, issuedAt.plus(Duration.ofMinutes(30)));
+        }
+
+        private void assertInvalidLink(Executable confirmation) {
+            BusinessRuleException rejected = assertThrows(BusinessRuleException.class, confirmation);
+            assertEquals(HttpStatus.BAD_REQUEST, rejected.getStatus());
+            assertEquals(INVALID_LINK, rejected.getPublicDetail());
         }
 
         @Test
-        void activeRequestStoresOnlyDigestAndUsesConfiguredFragmentOrigin() throws Exception {
+        void activeRequestStoresOnlyDigestCommitsThenSendsConfiguredFragmentLink() throws Exception {
             allowTransaction();
             when(users.findByEmailForUpdate("learner@example.test"))
                     .thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
             when(users.findResetTokenByUserId(USER_ID)).thenReturn(Optional.empty());
             ResetEmailDelivery delivery = mock(ResetEmailDelivery.class);
 
-            assertEquals("If an account matches, a password reset link will be sent.",
-                    service(delivery).requestReset("learner@example.test").message());
+            assertEquals(ACK, service(delivery).requestReset("learner@example.test").message());
 
             ArgumentCaptor<ResetEmailMessage> message = ArgumentCaptor.forClass(ResetEmailMessage.class);
-            verify(delivery).send(message.capture());
+            InOrder order = inOrder(users, transactionManager, delivery);
+            order.verify(users).findByEmailForUpdate("learner@example.test");
+            order.verify(users).replaceResetToken(eq(USER_ID), any(), eq(now), eq(now.plus(Duration.ofMinutes(30))));
+            order.verify(transactionManager).commit(any());
+            order.verify(delivery).send(message.capture());
             String link = message.getValue().resetLink();
             assertTrue(link.startsWith("https://codemastery.test/reset-password#token="));
             String capability = link.substring(link.indexOf("#token=") + "#token=".length());
+            assertTrue(capability.matches("[A-Za-z0-9_-]{43}"), "canonical 43-character Base64url capability");
             byte[] raw = Base64.getUrlDecoder().decode(capability);
             assertEquals(32, raw.length);
             ArgumentCaptor<byte[]> digest = ArgumentCaptor.forClass(byte[].class);
-            verify(users).replaceResetToken(eq(USER_ID), digest.capture(), eq(now), eq(now.plus(Duration.ofMinutes(30))));
-            assertArrayEquals(MessageDigest.getInstance("SHA-256").digest(raw), digest.getValue());
+            verify(users).replaceResetToken(eq(USER_ID), digest.capture(), any(), any());
+            assertArrayEquals(sha256(raw), digest.getValue());
+            assertEquals("learner@example.test", message.getValue().recipient());
+            assertEquals(now.plus(Duration.ofMinutes(30)), message.getValue().expiresAt());
             assertFalse(message.getValue().toString().contains(capability));
+            assertFalse(message.getValue().toString().contains("learner@example.test"));
         }
 
         @Test
-        void malformedCapabilityAndInvalidPasswordDoNotAccessPersistence() {
-            PasswordResetService service = service(mock(ResetEmailDelivery.class));
+        void unknownLockedAndRecentlyIssuedRequestsAcknowledgeIdenticallyWithoutCapabilityOrEmail() {
+            allowTransaction();
+            when(users.findByEmailForUpdate("unknown@example.test")).thenReturn(Optional.empty());
+            when(users.findByEmailForUpdate("locked@example.test"))
+                    .thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.LOCKED)));
+            when(users.findByEmailForUpdate("learner@example.test"))
+                    .thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
+            when(users.findResetTokenByUserId(USER_ID)).thenReturn(Optional.of(
+                    token(new byte[32], now.minus(Duration.ofSeconds(59)))));
+            ResetEmailDelivery delivery = mock(ResetEmailDelivery.class);
+            PasswordResetService recovery = service(delivery);
+
+            for (String email : List.of("unknown@example.test", "locked@example.test", "learner@example.test")) {
+                assertEquals(ACK, recovery.requestReset(email).message());
+            }
+
+            verify(users, never()).replaceResetToken(any(), any(), any(), any());
+            verifyNoInteractions(delivery);
+            assertEquals(0, count("auth.password_reset.processing.failures"));
+        }
+
+        @Test
+        void reissueIsAllowedExactlyAtThePt1mBoundaryAndReplacesTheSoleCapability() {
+            allowTransaction();
+            when(users.findByEmailForUpdate("learner@example.test"))
+                    .thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
+            when(users.findResetTokenByUserId(USER_ID)).thenReturn(Optional.of(
+                    token(new byte[32], now.minus(Duration.ofMinutes(1)))));
+            ResetEmailDelivery delivery = mock(ResetEmailDelivery.class);
+
+            service(delivery).requestReset("learner@example.test");
+
+            verify(users).replaceResetToken(eq(USER_ID), any(), eq(now), eq(now.plus(Duration.ofMinutes(30))));
+            verify(delivery).send(any());
+        }
+
+        @Test
+        void httpPathOnlyEnqueuesTheCanonicalEmailAndNeverLooksUpTheAccount() {
+            List<Runnable> queued = new ArrayList<>();
+            ResetEmailDelivery delivery = mock(ResetEmailDelivery.class);
+
+            assertEquals(ACK, service(delivery, queued::add, PasswordResetActivation.active(settings))
+                    .requestReset("learner@example.test").message());
+
+            assertEquals(1, queued.size());
+            verifyNoInteractions(users, transactionManager, delivery);
+        }
+
+        @Test
+        void fullQueueReturnsTheSameAcknowledgementAndCountsOnlyAnAggregate() {
+            ResetEmailDelivery delivery = mock(ResetEmailDelivery.class);
+            Executor full = task -> {
+                throw new RejectedExecutionException("synthetic full queue");
+            };
+
+            assertEquals(ACK, service(delivery, full, PasswordResetActivation.active(settings))
+                    .requestReset("learner@example.test").message());
+
+            assertEquals(1, count("auth.password_reset.queue.rejected"));
+            verifyNoInteractions(users, transactionManager, delivery);
+        }
+
+        @Test
+        void inactiveRecoveryAcknowledgesButNeverQueuesLooksUpIssuesOrSends() {
+            ResetEmailDelivery delivery = mock(ResetEmailDelivery.class);
+            Executor executor = mock(Executor.class);
+            PasswordResetService recovery = service(delivery, executor,
+                    PasswordResetActivation.inactive("Missing, placeholder or invalid consumed configuration: SMTP_HOST"));
+
+            assertEquals(ACK, recovery.requestReset("learner@example.test").message());
+            assertThrows(BusinessRuleException.class, () -> recovery.requestReset("not-an-email"));
+
+            assertEquals(1, count("auth.password_reset.inactive"));
+            verifyNoInteractions(executor, users, transactionManager, delivery);
+        }
+
+        @Test
+        void deliveryFailureIsIsolatedAfterTheCapabilityCommits() {
+            allowTransaction();
+            when(users.findByEmailForUpdate("learner@example.test"))
+                    .thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
+            when(users.findResetTokenByUserId(USER_ID)).thenReturn(Optional.empty());
+            ResetEmailDelivery delivery = mock(ResetEmailDelivery.class);
+            doThrow(new IllegalStateException("synthetic provider detail")).when(delivery).send(any());
+
+            assertEquals(ACK, service(delivery).requestReset("learner@example.test").message());
+
+            InOrder order = inOrder(transactionManager, delivery);
+            order.verify(transactionManager).commit(any());
+            order.verify(delivery).send(any());
+            verify(transactionManager, never()).rollback(any());
+            verify(users, never()).updatePasswordHash(any(), any());
+            assertEquals(1, count("auth.password_reset.processing.failures"));
+        }
+
+        @Test
+        void invalidPasswordAndMalformedOrNoncanonicalCapabilitiesNeverTouchPersistence() {
+            PasswordResetService recovery = service(mock(ResetEmailDelivery.class));
+            String canonical = encode(randomCapability());
+            String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            // The final character carries two unused bits; setting one keeps the decoded bytes.
+            String noncanonical = canonical.substring(0, 42)
+                    + alphabet.charAt(alphabet.indexOf(canonical.charAt(42)) ^ 1);
+
             assertEquals(HttpStatus.BAD_REQUEST, assertThrows(BusinessRuleException.class,
-                    () -> service.resetPassword("malformed", PASSWORD)).getStatus());
-            assertEquals(HttpStatus.BAD_REQUEST, assertThrows(BusinessRuleException.class,
-                    () -> service.resetPassword("A".repeat(43), "short")).getStatus());
+                    () -> recovery.resetPassword(canonical, "short")).getStatus());
+            assertThrows(BusinessRuleException.class, () -> recovery.resetPassword(canonical, null));
+            for (String malformed : Arrays.asList(null, "", "malformed", canonical.substring(1), canonical + "A",
+                    canonical + "=", canonical.substring(0, 42) + "+", noncanonical)) {
+                assertInvalidLink(() -> recovery.resetPassword(malformed, NEW_PASSWORD));
+            }
             verifyNoInteractions(users, transactionManager);
+        }
+
+        @Test
+        void validCapabilityJustBeforeExpiryUpdatesHashAndConsumesItUnderTheUserLock() throws Exception {
+            allowTransaction();
+            byte[] raw = randomCapability();
+            byte[] digest = sha256(raw);
+            PasswordResetToken stored = token(digest, now.minus(Duration.ofMinutes(30)).plusNanos(1));
+            when(users.findResetTokenByDigest(any())).thenReturn(Optional.of(stored));
+            when(users.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
+            when(users.deleteResetToken(eq(USER_ID), any())).thenReturn(true);
+
+            assertEquals("Password reset. Sign in with your new password.",
+                    service(mock(ResetEmailDelivery.class)).resetPassword(encode(raw), NEW_PASSWORD).message());
+
+            InOrder order = inOrder(users, transactionManager);
+            order.verify(users).findResetTokenByDigest(argThat(value -> Arrays.equals(digest, value)));
+            order.verify(users).findByIdForUpdate(USER_ID);
+            order.verify(users).findResetTokenByDigest(argThat(value -> Arrays.equals(digest, value)));
+            ArgumentCaptor<String> hash = ArgumentCaptor.forClass(String.class);
+            order.verify(users).updatePasswordHash(eq(USER_ID), hash.capture());
+            order.verify(users).deleteResetToken(eq(USER_ID), argThat(value -> Arrays.equals(digest, value)));
+            order.verify(transactionManager).commit(any());
+            assertTrue(hash.getValue().startsWith("$2b$14$"));
+            assertTrue(BCRYPT.matches(NEW_PASSWORD, hash.getValue()));
+        }
+
+        @Test
+        void capabilityIssuedExactlyNowIsValid() throws Exception {
+            allowTransaction();
+            byte[] raw = randomCapability();
+            when(users.findResetTokenByDigest(any())).thenReturn(Optional.of(token(sha256(raw), now)));
+            when(users.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
+            when(users.deleteResetToken(eq(USER_ID), any())).thenReturn(true);
+
+            service(mock(ResetEmailDelivery.class)).resetPassword(encode(raw), NEW_PASSWORD);
+
+            verify(users).updatePasswordHash(eq(USER_ID), any());
+        }
+
+        static Stream<Arguments> rejectedStoredStates() {
+            return Stream.of(
+                    Arguments.of("expired exactly at expires_at", Duration.ofMinutes(-30), AccountStatus.ACTIVE, true),
+                    Arguments.of("issued in the future", Duration.ofNanos(1), AccountStatus.ACTIVE, true),
+                    Arguments.of("locked account", Duration.ofMinutes(-1), AccountStatus.LOCKED, true),
+                    Arguments.of("replaced or used before the lock", Duration.ofMinutes(-1), AccountStatus.ACTIVE, false));
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("rejectedStoredStates")
+        void rejectedStatesShareTheGenericErrorAndChangeNothing(String scenario, Duration issuedOffset,
+                                                                AccountStatus status, boolean stillPresentAfterLock)
+                throws Exception {
+            allowTransaction();
+            byte[] raw = randomCapability();
+            PasswordResetToken stored = token(sha256(raw), now.plus(issuedOffset));
+            when(users.findResetTokenByDigest(any())).thenReturn(Optional.of(stored),
+                    stillPresentAfterLock ? Optional.of(stored) : Optional.empty());
+            when(users.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(account(Role.LEARNER, status)));
+
+            assertInvalidLink(() -> service(mock(ResetEmailDelivery.class)).resetPassword(encode(raw), NEW_PASSWORD));
+
+            verify(users, never()).updatePasswordHash(any(), any());
+            verify(users, never()).deleteResetToken(any(), any());
+            verify(transactionManager).rollback(any());
+        }
+
+        @Test
+        void unknownCapabilityIsGenericWithoutLockingAnyAccount() {
+            allowTransaction();
+            when(users.findResetTokenByDigest(any())).thenReturn(Optional.empty());
+
+            assertInvalidLink(() -> service(mock(ResetEmailDelivery.class))
+                    .resetPassword(encode(randomCapability()), NEW_PASSWORD));
+
+            verify(users, never()).findByIdForUpdate(any());
+            verify(users, never()).updatePasswordHash(any(), any());
+        }
+
+        @Test
+        void failedConsumptionAfterHashUpdateRollsBackTheWholeTransaction() throws Exception {
+            allowTransaction();
+            byte[] raw = randomCapability();
+            PasswordResetToken stored = token(sha256(raw), now.minus(Duration.ofMinutes(1)));
+            when(users.findResetTokenByDigest(any())).thenReturn(Optional.of(stored));
+            when(users.findByIdForUpdate(USER_ID)).thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
+            when(users.deleteResetToken(eq(USER_ID), any())).thenReturn(false);
+
+            assertInvalidLink(() -> service(mock(ResetEmailDelivery.class)).resetPassword(encode(raw), NEW_PASSWORD));
+
+            verify(users).updatePasswordHash(eq(USER_ID), any());
+            verify(transactionManager).rollback(any());
+            verify(transactionManager, never()).commit(any());
+        }
+
+        private MockEnvironment recoveryEnvironment(String name, String value) {
+            Map<String, String> values = new java.util.LinkedHashMap<>(Map.of(
+                    "token-ttl", "PT30M",
+                    "frontend-origin", "https://codemastery.test",
+                    "email-from", "auth@codemastery.test",
+                    "smtp-host", "smtp.example.test",
+                    "smtp-username", "unit-user",
+                    "smtp-password", "unit-secret-value"));
+            if (name != null) {
+                values.put(name, value);
+            }
+            MockEnvironment environment = new MockEnvironment();
+            values.forEach((key, setting) -> environment.setProperty("codemastery.security.password-reset." + key, setting));
+            return environment;
+        }
+
+        @Test
+        void completeValidRecoveryConfigurationActivatesWithoutExposingSecrets() {
+            PasswordResetActivation active = new AppConfig().passwordResetActivation(recoveryEnvironment(null, null));
+            assertTrue(active.isActive());
+            assertEquals(Duration.ofMinutes(30), active.requireSettings().tokenTtl());
+            assertFalse(active.toString().contains("unit-secret-value"));
+        }
+
+        static Stream<Arguments> inactiveRecoveryConfigurations() {
+            return Stream.of(Arguments.of("smtp-host", ""), Arguments.of("smtp-host", "smtp example"),
+                    Arguments.of("smtp-username", ""), Arguments.of("smtp-password", "<SET_ME_SMTP_PASSWORD>"),
+                    Arguments.of("frontend-origin", ""), Arguments.of("frontend-origin", "http://codemastery.test"),
+                    Arguments.of("frontend-origin", "https://codemastery.test/reset"),
+                    Arguments.of("frontend-origin", "https://CodeMastery.test"),
+                    Arguments.of("frontend-origin", "https://user@codemastery.test"),
+                    Arguments.of("frontend-origin", "https://*.codemastery.test"),
+                    Arguments.of("email-from", "CodeMastery <auth@codemastery.test>"),
+                    Arguments.of("email-from", "not-an-address"),
+                    Arguments.of("token-ttl", "PT31M"), Arguments.of("token-ttl", "thirty minutes"));
+        }
+
+        @ParameterizedTest(name = "{0}={1}")
+        @MethodSource("inactiveRecoveryConfigurations")
+        void missingPlaceholderOrInvalidRecoveryInputsOnlyDeactivateRecovery(String name, String value) {
+            PasswordResetActivation inactive = new AppConfig().passwordResetActivation(recoveryEnvironment(name, value));
+
+            assertFalse(inactive.isActive());
+            assertTrue(inactive.inactiveReason().startsWith("Missing, placeholder or invalid consumed configuration: "));
+            assertFalse(inactive.inactiveReason().contains("unit-secret-value"));
+            if (!value.isEmpty()) {
+                assertFalse(inactive.inactiveReason().contains(value), "diagnostic names variables, never values");
+            }
+            assertThrows(IllegalStateException.class, inactive::requireSettings);
+        }
+
+        @Test
+        void smtpAdapterFixesAuthenticatedStarttlsSubmissionWithFiniteDeadlines() {
+            JavaMailSenderImpl sender = SmtpPasswordResetEmailAdapter.newMailSender(settings);
+            assertEquals("smtp.example.test", sender.getHost());
+            assertEquals(587, sender.getPort());
+            assertEquals("smtp", sender.getProtocol());
+            Properties properties = sender.getJavaMailProperties();
+            assertEquals("true", properties.getProperty("mail.smtp.auth"));
+            assertEquals("true", properties.getProperty("mail.smtp.starttls.enable"));
+            assertEquals("true", properties.getProperty("mail.smtp.starttls.required"));
+            assertEquals("true", properties.getProperty("mail.smtp.ssl.checkserveridentity"));
+            for (String timeout : List.of("connectiontimeout", "timeout", "writetimeout")) {
+                assertEquals("5000", properties.getProperty("mail.smtp." + timeout));
+            }
+            assertNull(properties.getProperty("mail.smtp.ssl.trust"), "no blanket certificate trust");
+        }
+
+        @Test
+        void smtpAdapterSendsOnlyThePlainTextLinkMessageAndRefusesWhenInactive() {
+            JavaMailSender mail = mock(JavaMailSender.class);
+            new SmtpPasswordResetEmailAdapter(mail, "auth@codemastery.test").send(new ResetEmailMessage(
+                    "learner@example.test", "https://codemastery.test/reset-password#token=abc", now));
+            ArgumentCaptor<SimpleMailMessage> sent = ArgumentCaptor.forClass(SimpleMailMessage.class);
+            verify(mail).send(sent.capture());
+            assertEquals("auth@codemastery.test", sent.getValue().getFrom());
+            assertArrayEquals(new String[] {"learner@example.test"}, sent.getValue().getTo());
+            assertEquals("Reset your CodeMastery password", sent.getValue().getSubject());
+            assertTrue(sent.getValue().getText().contains("https://codemastery.test/reset-password#token=abc"));
+            assertTrue(sent.getValue().getText().contains("30 minutes"));
+
+            SmtpPasswordResetEmailAdapter inactive = new SmtpPasswordResetEmailAdapter(
+                    PasswordResetActivation.inactive("Missing, placeholder or invalid consumed configuration: SMTP_HOST"));
+            assertThrows(IllegalStateException.class, () -> inactive.send(new ResetEmailMessage(
+                    "learner@example.test", "https://codemastery.test/reset-password#token=abc", now)));
         }
     }
 
@@ -511,13 +855,15 @@ class AuthServiceTest {
     class DtoAndMvcBinding {
 
         private AuthService application;
+        private PasswordResetService resets;
         private MockMvc mvc;
 
         @BeforeEach
         void setUpMvc() {
             application = mock(AuthService.class);
+            resets = mock(PasswordResetService.class);
             mvc = MockMvcBuilders.standaloneSetup(new AuthController(application, mock(JwtTokenProvider.class),
-                            mock(PasswordResetService.class)))
+                            resets))
                     .setControllerAdvice(new GlobalExceptionHandler(), new AuthController.RegistrationCacheAdvice())
                     .setValidator(new SpringValidatorAdapter(validator)).build();
         }
@@ -539,6 +885,110 @@ class AuthServiceTest {
                     .andExpect(jsonPath("$.role").value("Learner"))
                     .andExpect(jsonPath("$.accessToken").doesNotExist())
                     .andExpect(jsonPath("$.passwordHash").doesNotExist());
+        }
+
+        private static final String RESET_PASSWORD = "unit-only-new-passphrase";
+
+        @Test
+        void resetRequestReturnsOnlyTheGeneric202AcknowledgementWithNoStore() throws Exception {
+            when(resets.requestReset("learner@example.test")).thenReturn(
+                    new PasswordResetService.RequestAcknowledgement("If an account matches, a password reset link will be sent."));
+            mvc.perform(post("/api/auth/password-reset-requests").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\" LEARNER@EXAMPLE.TEST \"}"))
+                    .andExpect(status().isAccepted()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$", aMapWithSize(1)))
+                    .andExpect(jsonPath("$.message").value("If an account matches, a password reset link will be sent."));
+        }
+
+        @Test
+        void resetConfirmationReturnsOnlyTheCompletionMessageAndNoCredential() throws Exception {
+            String token = "A".repeat(43);
+            when(resets.resetPassword(token, RESET_PASSWORD)).thenReturn(
+                    new PasswordResetService.ResetCompletion("Password reset. Sign in with your new password."));
+            mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON)
+                            .content(JSON.writeValueAsString(Map.of("token", token, "password", RESET_PASSWORD))))
+                    .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$", aMapWithSize(1)))
+                    .andExpect(jsonPath("$.message").value("Password reset. Sign in with your new password."))
+                    .andExpect(jsonPath("$.accessToken").doesNotExist());
+        }
+
+        @Test
+        void genericResetLinkFailureUsesTheContractDetailWithoutFieldErrors() throws Exception {
+            when(resets.resetPassword(any(), any())).thenThrow(BusinessRuleException.withPublicDetail(
+                    "synthetic diagnostic with capability", "Reset link is invalid or expired."));
+            mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON)
+                            .content(JSON.writeValueAsString(Map.of("token", "A".repeat(43), "password", RESET_PASSWORD))))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.detail").value("Reset link is invalid or expired."))
+                    .andExpect(jsonPath("$.errors").doesNotExist())
+                    .andExpect(content().string(not(containsString("synthetic diagnostic"))));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"/api/auth/password-reset-requests", "/api/auth/password-resets"})
+        void resetOperationsAreJsonOnly(String path) throws Exception {
+            String body = path.endsWith("requests") ? "{\"email\":\"learner@example.test\"}"
+                    : JSON.writeValueAsString(Map.of("token", "A".repeat(43), "password", RESET_PASSWORD));
+            for (MediaType type : List.of(MediaType.TEXT_PLAIN, MediaType.APPLICATION_XML,
+                    MediaType.APPLICATION_FORM_URLENCODED, MediaType.APPLICATION_OCTET_STREAM)) {
+                mvc.perform(post(path).contentType(type).content(body))
+                        .andExpect(status().isUnsupportedMediaType())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                        .andExpect(jsonPath("$.detail").value("The request media type is not supported."));
+            }
+            mvc.perform(post(path).content(body)).andExpect(status().isUnsupportedMediaType());
+            verifyNoInteractions(resets);
+        }
+
+        @Test
+        void jsonWithAnExplicitUtf8CharsetIsAccepted() throws Exception {
+            when(resets.requestReset("learner@example.test")).thenReturn(
+                    new PasswordResetService.RequestAcknowledgement("If an account matches, a password reset link will be sent."));
+            mvc.perform(post("/api/auth/password-reset-requests").contentType("application/json;charset=UTF-8")
+                            .content("{\"email\":\"learner@example.test\"}"))
+                    .andExpect(status().isAccepted());
+        }
+
+        static Stream<Arguments> malformedResetBodies() {
+            String token = "A".repeat(43);
+            return Stream.of(
+                    Arguments.of("/api/auth/password-reset-requests", "not json"),
+                    Arguments.of("/api/auth/password-reset-requests", "null"),
+                    Arguments.of("/api/auth/password-reset-requests", "[]"),
+                    Arguments.of("/api/auth/password-reset-requests", "{}"),
+                    Arguments.of("/api/auth/password-reset-requests", "{\"email\":null}"),
+                    Arguments.of("/api/auth/password-reset-requests", "{\"email\":7}"),
+                    Arguments.of("/api/auth/password-reset-requests", "{\"email\":[\"a@example.test\"]}"),
+                    Arguments.of("/api/auth/password-reset-requests", "{\"email\":\"a@example.test\",\"role\":\"x\"}"),
+                    Arguments.of("/api/auth/password-reset-requests",
+                            "{\"email\":\"a@example.test\",\"email\":\"b@example.test\"}"),
+                    Arguments.of("/api/auth/password-reset-requests", "{\"email\":\"a@example.test\"} {}"),
+                    Arguments.of("/api/auth/password-resets", "{\"token\":\"" + token + "\"}"),
+                    Arguments.of("/api/auth/password-resets", "{\"token\":\"" + token + "\",\"password\":null}"),
+                    Arguments.of("/api/auth/password-resets", "{\"token\":123,\"password\":\"" + RESET_PASSWORD + "\"}"),
+                    Arguments.of("/api/auth/password-resets",
+                            "{\"token\":\"" + token + "\",\"password\":12345678901234567}"),
+                    Arguments.of("/api/auth/password-resets",
+                            "{\"token\":\"" + token + "\",\"token\":\"" + token + "\",\"password\":\"" + RESET_PASSWORD + "\"}"),
+                    Arguments.of("/api/auth/password-resets",
+                            "{\"token\":\"" + token + "\",\"password\":\"" + RESET_PASSWORD + "\",\"email\":\"a@example.test\"}"),
+                    Arguments.of("/api/auth/password-resets",
+                            "{\"token\":\"" + token + "\",\"password\":\"" + RESET_PASSWORD + "\"}[]"));
+        }
+
+        @ParameterizedTest
+        @MethodSource("malformedResetBodies")
+        void malformedDuplicateUnknownTypedInvalidOrTrailingResetBodiesAreSafe400s(String path, String json)
+                throws Exception {
+            mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(json))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.detail").value("The request is invalid."))
+                    .andExpect(content().string(not(containsString(RESET_PASSWORD))));
+            verifyNoInteractions(resets);
         }
 
         static Stream<String> invalidRequests() {
