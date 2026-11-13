@@ -77,13 +77,43 @@ criteria, independent review and any environment-specific evidence remain open.
 ### AU07 SMTP diagnostic and negative regression coverage
 
 `AuthServiceTest$SmtpSubmissionPolicy` uses synthetic credentials and an isolated
-loopback STARTTLS server. It captures raw JUL handlers, the JUL-to-SLF4J/Logback
-path used by Spring Boot, and direct Session debug output at DEBUG/TRACE, for both
-successful delivery and a server rejection after DATA. Assertions exclude the reset
-URL/capability, credentials, encoded AUTH, recipient, sender and message payload;
-control messages prove unrelated application logging still works. Logging levels
-are also raised after sender construction to check the source refusal remains in
-force. Captured logger levels, filters, handlers and output streams are restored.
+loopback STARTTLS server. Its 72 diagnostic exchanges cover LOGIN, PLAIN and a
+test-only NTLM override at DEBUG/TRACE for success, rejected authentication and
+rejection after DATA. Capture paths are raw JUL, an explicit JUL-to-SLF4J bridge,
+direct Session output, and actual Spring Boot initialization in fresh JVMs. Boot's
+logging API and JUL levels are raised after sender construction. Forked JVMs keep
+Boot's logging lifecycle out of other test contexts; captured streams, handlers,
+levels and filters are restored, and temporary process output is deleted.
+
+Production permits only `LOGIN PLAIN` over mandatory certificate/hostname-verified
+STARTTLS and explicitly disables SASL. NTLM, DIGEST-MD5, XOAUTH2 and unknown-only
+offers fail before AUTH or message submission. NTLM is deliberately enabled only
+inside the diagnostic test to exercise the second defense independently of the
+production allowlist. The server decodes the UTF-16LE username and verifies the
+NTLMv2 proof against its synthetic secret. Tests inspect actual exchanged bytes,
+including PLAIN's `username\0username\0password` authorization identity, LOGIN
+credentials, and NTLM messages/responses in Base64 and hexadecimal form. Positive
+leak controls prove encoded identity and response detection works; independent
+JUL, SLF4J and stream controls prove ordinary application logging remains available.
+No reset URL/capability, credential, recipient, sender or sensitive payload is
+observed in these supported logging configurations.
+
+The diagnostic-source inventory was checked against resolved Angus Mail 2.0.5:
+
+| Source | Relevant path and policy |
+| --- | --- |
+| `org.eclipse.angus.mail.smtp` | SMTP transport, LOGIN/PLAIN, DIGEST-MD5 and the SMTP SASL helper; source-level reject-all filter |
+| `org.eclipse.angus.mail.smtp.protocol` | SMTP commands, replies and message data; separate source-level reject-all filter |
+| `org.eclipse.angus.mail.auth` | NTLM Type 1/2/3 helper diagnostics; source-level reject-all filter even in the test-only NTLM override |
+| `org.eclipse.angus.mail.util.socket` | Socket/TLS diagnostics; source-level reject-all filter |
+| Jakarta Mail Session debug | Disabled on every sender Session access with a discarded debug stream |
+
+The four named JUL filters are JVM-wide and strongly retained. They do not filter
+application loggers. The fixed sender exposes no `spring.mail.*` binding, alternate
+provider or SASL configuration input. Provider exceptions can contain sensitive
+details in memory; the recovery worker catches them and records only its aggregate
+failure counter. These checks do not claim confidentiality under arbitrary
+in-process replacement of the fixed transport or its logging filters.
 
 Negative exchanges include incompatible-only AUTH, a reserved non-listening
 loopback endpoint (connection refusal or connection timeout, depending on the OS),

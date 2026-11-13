@@ -575,6 +575,8 @@ class AuthServiceTest {
             }
             assertFalse(sender.getSession().getDebug());
             assertEquals("true", properties.getProperty("mail.smtp.auth"));
+            assertEquals("LOGIN PLAIN", properties.getProperty("mail.smtp.auth.mechanisms"));
+            assertEquals("false", properties.getProperty("mail.smtp.sasl.enable"));
             assertEquals("true", properties.getProperty("mail.smtp.starttls.enable"));
             assertEquals("true", properties.getProperty("mail.smtp.starttls.required"));
             assertEquals("true", properties.getProperty("mail.smtp.ssl.checkserveridentity"));
@@ -605,10 +607,9 @@ class AuthServiceTest {
     }
 
     /**
-     * Real SMTP exchanges between the production adapter and an isolated in-process submission
-     * server on loopback, using an ephemeral certificate generated for this test JVM. No network,
-     * provider or real credential is involved. Only the listener port and the trust anchor for
-     * that ephemeral certificate differ from the production client.
+     * Real loopback SMTP exchanges using an ephemeral certificate and synthetic credentials.
+     * Only the listener port/trust anchor differ from production, except the explicitly marked
+     * NTLM diagnostic tests that override the production authentication allowlist.
      */
     @Nested
     class SmtpSubmissionPolicy {
@@ -642,40 +643,88 @@ class AuthServiceTest {
         }
 
         static Stream<Arguments> diagnosticExchanges() {
-            return Stream.of("JUL", "SLF4J", "SESSION").flatMap(path -> Stream.of("DEBUG", "TRACE")
-                    .flatMap(level -> Stream.of(true, false).map(success -> Arguments.of(path, level, success))));
+            return Stream.of("JUL", "SLF4J", "SESSION", "BOOT").flatMap(path -> Stream.of("DEBUG", "TRACE")
+                    .flatMap(level -> Stream.of("LOGIN", "PLAIN", "NTLM").flatMap(mechanism ->
+                            Stream.of("SUCCESS", "AUTH_REJECT", "DATA_REJECT")
+                                    .map(outcome -> Arguments.of(path, level, mechanism, outcome)))));
         }
 
-        @ParameterizedTest(name = "{0} {1}, delivery succeeds={2}")
+        @ParameterizedTest(name = "{0} {1} {2} {3}")
         @MethodSource("diagnosticExchanges")
-        void verboseDiagnosticsNeverDiscloseRecoveryInformation(String path, String level, boolean success)
+        void verboseDiagnosticsNeverDiscloseRecoveryInformation(String path, String level, String mechanism,
+                                                                String outcome)
+                throws Exception {
+            if (path.equals("BOOT")) {
+                // A fresh JVM runs actual Boot initialization without altering other tests' Logback context.
+                Path output = Files.createTempFile("codemastery-smtp-boot-", ".log");
+                Process child = null;
+                try {
+                    child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                            "-cp", System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
+                            SmtpLoggingProbe.class.getName(), level, mechanism, outcome)
+                            .redirectErrorStream(true).redirectOutput(output.toFile()).start();
+                    assertTrue(child.waitFor(45, TimeUnit.SECONDS), "isolated Boot SMTP probe timed out");
+                    assertEquals(0, child.exitValue(), "isolated Boot SMTP probe failed");
+                    assertTrue(Files.readString(output).contains("smtp-boot-probe-passed"));
+                } finally {
+                    if (child != null && child.isAlive()) {
+                        child.destroyForcibly();
+                        assertTrue(child.waitFor(10, TimeUnit.SECONDS), "Boot probe did not exit");
+                    }
+                    Files.deleteIfExists(output);
+                }
+                return;
+            }
+            assertDiagnosticExchange(path, level, mechanism, outcome);
+        }
+
+        private void assertDiagnosticExchange(String path, String level, String mechanism, String outcome)
                 throws Exception {
             TestCertificate.serverContext();
             try (MailLogCapture logs = new MailLogCapture(path, level);
-                 SubmissionServer server = new SubmissionServer(true, "PLAIN", SubmissionServer.SECRET,
-                         null, !success)) {
+                 SubmissionServer server = new SubmissionServer(true, mechanism,
+                         outcome.equals("AUTH_REJECT") ? "different-synthetic-secret" : SubmissionServer.SECRET,
+                         null, outcome.equals("DATA_REJECT"))) {
                 JavaMailSenderImpl client = sender("localhost", server.port(), true);
+                if (mechanism.equals("NTLM")) {
+                    // Test only: bypass the production allowlist to prove the independent logger defense.
+                    Properties properties = new Properties();
+                    properties.putAll(client.getJavaMailProperties());
+                    properties.setProperty("mail.smtp.auth.mechanisms", "NTLM");
+                    client.setJavaMailProperties(properties);
+                }
                 if (path.equals("SESSION")) {
                     client.getSession().setDebug(true); // Direct PrintStream path also stays silent.
                 }
                 // Even a later logging-level change must not reopen the source diagnostic path.
                 logs.enableVerboseLevels();
-                if (success) {
+                if (outcome.equals("SUCCESS")) {
                     send(client);
                 } else {
                     assertThrows(MailException.class, () -> send(client));
                 }
                 server.awaitSession();
-                assertTrue(server.authenticated());
-                assertTrue(server.verbs().contains("TLS DATA"), "exercise the sensitive payload path");
-                logs.assertNoRecoveryInformation();
+                assertTrue(server.verbs().contains("TLS AUTH"), "exercise the authentication path");
+                assertFalse(server.authenticationMaterial().isEmpty(), "credentials actually exchanged");
+                assertEquals(!outcome.equals("AUTH_REJECT"), server.authenticated());
+                if (outcome.equals("AUTH_REJECT")) {
+                    assertNothingSubmitted(server);
+                } else {
+                    assertTrue(server.verbs().contains("TLS DATA"), "exercise the sensitive payload path");
+                    assertTrue(server.message().contains(reset.resetLink()));
+                }
+                if (mechanism.equals("NTLM")) {
+                    assertTrue(server.verbs().contains("TLS NTLM-TYPE3"));
+                }
+                logs.assertNoRecoveryInformation(server.authenticationMaterial());
             }
         }
 
-        @Test
-        void incompatibleAuthenticationMechanismsNeverReceiveCredentialsOrMessage() throws Exception {
+        @ParameterizedTest
+        @ValueSource(strings = {"NTLM", "DIGEST-MD5", "XOAUTH2", "UNSUPPORTED-TEST-MECHANISM"})
+        void excludedAuthenticationMechanismsNeverReceiveCredentialsOrMessage(String mechanism) throws Exception {
             try (MailLogCapture logs = new MailLogCapture("JUL", "TRACE");
-                 SubmissionServer server = new SubmissionServer(true, "UNSUPPORTED-TEST-MECHANISM",
+                 SubmissionServer server = new SubmissionServer(true, mechanism,
                          SubmissionServer.SECRET, null, false)) {
                 assertThrows(MailException.class, () -> send(sender("localhost", server.port(), true)));
                 server.awaitSession();
@@ -683,6 +732,23 @@ class AuthServiceTest {
                 assertFalse(server.authenticated());
                 assertNothingSubmitted(server);
                 logs.assertNoRecoveryInformation();
+            }
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"JUL", "SLF4J", "SESSION"})
+        void captureDetectsEncodedAuthenticationMaterial(String path) throws Exception {
+            byte[] username = SubmissionServer.USER.getBytes(StandardCharsets.UTF_16LE);
+            byte[] response = new byte[] {11, 23, 37, 41, 53, 67, 79, 83, 97, 101, 113, 127, 3, 5, 7, 13};
+            try (MailLogCapture logs = new MailLogCapture(path, "TRACE")) {
+                var logger = java.util.logging.Logger.getLogger("com.codemastery.smtp-test-control");
+                logger.finest("type 3 message: " + HexFormat.ofDelimiter(" ").formatHex(username));
+                assertThrows(AssertionError.class, () -> logs.assertNoRecoveryInformation(List.of(username)));
+            }
+            try (MailLogCapture logs = new MailLogCapture(path, "TRACE")) {
+                org.slf4j.LoggerFactory.getLogger("com.codemastery.smtp-test-control")
+                        .debug("authentication response {}", Base64.getEncoder().encodeToString(response));
+                assertThrows(AssertionError.class, () -> logs.assertNoRecoveryInformation(List.of(response)));
             }
         }
 
@@ -810,10 +876,31 @@ class AuthServiceTest {
         }
     }
 
+    /** Entry point for the subprocesses that exercise actual Spring Boot logging initialization. */
+    public static final class SmtpLoggingProbe {
+        public static void main(String[] args) throws Exception {
+            var app = new org.springframework.boot.SpringApplication(SmtpLoggingApplication.class);
+            app.setWebApplicationType(org.springframework.boot.WebApplicationType.NONE);
+            app.setDefaultProperties(java.util.Map.of("spring.config.location",
+                    "optional:classpath:/isolated-smtp-logging.properties", "logging.level.root", args[0],
+                    "spring.main.banner-mode", "off"));
+            try (var context = app.run()) {
+                assertTrue(org.slf4j.bridge.SLF4JBridgeHandler.isInstalled(), "Boot installed the JUL bridge");
+                new AuthServiceTest().new SmtpSubmissionPolicy()
+                        .assertDiagnosticExchange("BOOT", args[0], args[1], args[2]);
+            }
+            System.out.println("smtp-boot-probe-passed");
+        }
+    }
+
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    static class SmtpLoggingApplication { }
+
     /** Captures raw JUL handlers or Boot's JUL-to-SLF4J/Logback path, restoring global test state. */
     private static final class MailLogCapture implements AutoCloseable {
         private static final List<String> SOURCES = List.of("org.eclipse.angus.mail.smtp",
-                "org.eclipse.angus.mail.smtp.protocol", "org.eclipse.angus.mail.util.socket");
+                "org.eclipse.angus.mail.smtp.protocol", "org.eclipse.angus.mail.util.socket",
+                "org.eclipse.angus.mail.auth");
         private final java.util.logging.Logger julRoot = java.util.logging.Logger.getLogger("");
         private final java.util.logging.Level oldJulLevel = julRoot.getLevel();
         private final java.util.logging.Handler[] oldHandlers = julRoot.getHandlers();
@@ -833,18 +920,24 @@ class AuthServiceTest {
         private final PrintStream oldOut = System.out;
         private final PrintStream oldErr = System.err;
         private final PrintStream capturedOutput = new PrintStream(directOutput, true, StandardCharsets.UTF_8);
+        private final boolean boot;
+        private final String level;
 
         MailLogCapture(String path, String level) {
+            this.boot = path.equals("BOOT");
+            this.level = level;
             System.setOut(capturedOutput);
             System.setErr(capturedOutput);
             root.setLevel(ch.qos.logback.classic.Level.toLevel(level));
             appender.start();
             root.addAppender(appender);
-            Arrays.stream(oldHandlers).forEach(julRoot::removeHandler);
+            if (!path.equals("BOOT")) {
+                Arrays.stream(oldHandlers).forEach(julRoot::removeHandler);
+            }
             if (path.equals("SLF4J")) {
                 // The same bridge used by Spring Boot's LogbackLoggingSystem.
                 org.slf4j.bridge.SLF4JBridgeHandler.install();
-            } else {
+            } else if (!path.equals("BOOT")) {
                 julRoot.addHandler(new java.util.logging.Handler() {
                     { setLevel(java.util.logging.Level.ALL); }
                     @Override public void publish(java.util.logging.LogRecord record) {
@@ -868,25 +961,50 @@ class AuthServiceTest {
         }
 
         void enableVerboseLevels() {
+            if (boot) {
+                var system = org.springframework.boot.logging.LoggingSystem.get(getClass().getClassLoader());
+                for (String source : SOURCES) {
+                    system.setLogLevel(source, org.springframework.boot.logging.LogLevel.valueOf(level));
+                }
+            }
             sources.forEach(source -> source.setLevel(julRoot.getLevel()));
         }
 
         void assertNoRecoveryInformation() {
+            assertNoRecoveryInformation(List.of());
+        }
+
+        void assertNoRecoveryInformation(List<byte[]> authenticationMaterial) {
             // Prove that the capture works and unrelated application diagnostics remain available.
             org.slf4j.LoggerFactory.getLogger("com.codemastery.smtp-test-control").debug("application-log-control");
             julRoot.log(java.util.logging.Level.FINE, "jul-log-control");
+            System.out.println("direct-stream-control");
             String output = directOutput.toString(StandardCharsets.UTF_8) + julMessages
                     + appender.list.stream().map(event -> event.getFormattedMessage()
                     + (event.getThrowableProxy() == null ? "" : ch.qos.logback.classic.spi.ThrowableProxyUtil
                             .asString(event.getThrowableProxy()))).toList();
             assertTrue(output.contains("application-log-control"));
             assertTrue(output.contains("jul-log-control"));
+            assertTrue(output.contains("direct-stream-control"));
             for (String secret : List.of(SubmissionServer.USER, SubmissionServer.SECRET,
+                    Base64.getEncoder().encodeToString((SubmissionServer.USER + "\0" + SubmissionServer.USER
+                            + "\0" + SubmissionServer.SECRET).getBytes(StandardCharsets.UTF_8)),
                     Base64.getEncoder().encodeToString(("\0" + SubmissionServer.USER + "\0" + SubmissionServer.SECRET)
                             .getBytes(StandardCharsets.UTF_8)),
+                    Base64.getEncoder().encodeToString(SubmissionServer.USER.getBytes(StandardCharsets.UTF_8)),
+                    Base64.getEncoder().encodeToString(SubmissionServer.SECRET.getBytes(StandardCharsets.UTF_8)),
                     "https://codemastery.test/reset-password#token=abc", "token=abc", "learner@example.test",
                     "auth@codemastery.test", "A password reset was requested", "Reset your CodeMastery password")) {
                 assertFalse(output.contains(secret), "sensitive SMTP diagnostics were emitted");
+            }
+            String compact = output.replaceAll("\\s", "").toLowerCase(Locale.ROOT);
+            assertFalse(compact.contains(HexFormat.of().formatHex(
+                    SubmissionServer.USER.getBytes(StandardCharsets.UTF_16LE))), "encoded SMTP identity was emitted");
+            for (byte[] material : authenticationMaterial) {
+                assertFalse(output.contains(Base64.getEncoder().encodeToString(material)),
+                        "encoded authentication material was emitted");
+                assertFalse(compact.contains(HexFormat.of().formatHex(material)),
+                        "hex authentication material was emitted");
             }
         }
 
@@ -971,7 +1089,7 @@ class AuthServiceTest {
     }
 
     /**
-     * Minimal single-session SMTP submission server: optional STARTTLS and AUTH PLAIN offers, and
+     * Minimal single-session SMTP submission server: optional STARTTLS and AUTH offers, and
      * it accepts MAIL/RCPT/DATA without requiring authentication, so a client that skips
      * authentication would be observed delivering.
      */
@@ -987,6 +1105,7 @@ class AuthServiceTest {
         private final boolean rejectData;
         private final java.util.concurrent.CountDownLatch stop = new java.util.concurrent.CountDownLatch(1);
         private final List<String> verbs = new CopyOnWriteArrayList<>();
+        private final List<byte[]> authenticationMaterial = new CopyOnWriteArrayList<>();
         private final AtomicBoolean authenticated = new AtomicBoolean();
         private final AtomicReference<String> message = new AtomicReference<>();
         private final Thread session;
@@ -1027,6 +1146,10 @@ class AuthServiceTest {
 
         String message() {
             return message.get();
+        }
+
+        List<byte[]> authenticationMaterial() {
+            return List.copyOf(authenticationMaterial);
         }
 
         void awaitSession() throws InterruptedException {
@@ -1088,17 +1211,69 @@ class AuthServiceTest {
                             }
                             String[] parts = line.split(" ");
                             String response = parts.length > 2 ? parts[2] : null;
-                            if (response == null) {
-                                reply(out, "334 ");
-                                response = in.readLine();
+                            boolean accepted;
+                            switch (parts[1]) {
+                                case "PLAIN" -> {
+                                    if (response == null) {
+                                        reply(out, "334 ");
+                                        response = in.readLine();
+                                    }
+                                    byte[] bytes = Base64.getDecoder().decode(response);
+                                    authenticationMaterial.add(bytes);
+                                    String[] fields = new String(bytes, StandardCharsets.UTF_8).split("\u0000", -1);
+                                    // Angus defaults authzid to the username, not an empty string.
+                                    accepted = fields.length == 3 && USER.equals(fields[0]) && USER.equals(fields[1])
+                                            && acceptedSecret.equals(fields[2]);
+                                }
+                                case "LOGIN" -> {
+                                    reply(out, "334 " + Base64.getEncoder().encodeToString(
+                                            "Username:".getBytes(StandardCharsets.US_ASCII)));
+                                    byte[] username = Base64.getDecoder().decode(in.readLine());
+                                    reply(out, "334 " + Base64.getEncoder().encodeToString(
+                                            "Password:".getBytes(StandardCharsets.US_ASCII)));
+                                    byte[] password = Base64.getDecoder().decode(in.readLine());
+                                    authenticationMaterial.add(username);
+                                    authenticationMaterial.add(password);
+                                    accepted = USER.equals(new String(username, StandardCharsets.UTF_8))
+                                            && acceptedSecret.equals(new String(password, StandardCharsets.UTF_8));
+                                }
+                                case "NTLM" -> {
+                                    byte[] type1 = Base64.getDecoder().decode(response);
+                                    authenticationMaterial.add(type1);
+                                    byte[] type2 = new byte[48];
+                                    System.arraycopy("NTLMSSP\0".getBytes(StandardCharsets.US_ASCII), 0, type2, 0, 8);
+                                    type2[8] = 2;
+                                    type2[20] = 1; type2[21] = 2; type2[22] = 8; // Unicode, NTLM, NTLMv2.
+                                    byte[] challenge = new byte[] {1, 2, 3, 4, 5, 6, 7, 8};
+                                    System.arraycopy(challenge, 0, type2, 24, challenge.length);
+                                    reply(out, "334 " + Base64.getEncoder().encodeToString(type2));
+                                    byte[] type3 = Base64.getDecoder().decode(in.readLine());
+                                    verbs.add("TLS NTLM-TYPE3");
+                                    authenticationMaterial.add(type3);
+                                    byte[] username = ntlmField(type3, 36);
+                                    byte[] lmResponse = ntlmField(type3, 12);
+                                    byte[] ntResponse = ntlmField(type3, 20);
+                                    authenticationMaterial.add(username);
+                                    authenticationMaterial.add(lmResponse);
+                                    authenticationMaterial.add(ntResponse);
+                                    // Decode the actual identity and independently verify the NTLMv2 proof.
+                                    byte[] hash = new org.eclipse.angus.mail.auth.MD4()
+                                            .digest(acceptedSecret.getBytes(StandardCharsets.UTF_16LE));
+                                    byte[] key = hmacMd5(hash, USER.toUpperCase(Locale.ROOT)
+                                            .getBytes(StandardCharsets.UTF_16LE));
+                                    var proofInput = new ByteArrayOutputStream();
+                                    proofInput.write(challenge);
+                                    proofInput.write(ntResponse, 16, ntResponse.length - 16);
+                                    accepted = type1[8] == 1 && type3[8] == 3
+                                            && USER.equals(new String(username, StandardCharsets.UTF_16LE))
+                                            && java.security.MessageDigest.isEqual(
+                                                    Arrays.copyOf(ntResponse, 16), hmacMd5(key, proofInput.toByteArray()));
+                                }
+                                default -> throw new IllegalStateException("Unexpected authentication mechanism");
                             }
-                            String[] plainAuth = new String(Base64.getDecoder().decode(response),
-                                    StandardCharsets.UTF_8).split("\u0000", -1);
-                            boolean accepted = plainAuth.length == 3 && USER.equals(plainAuth[1])
-                                    && acceptedSecret.equals(plainAuth[2]);
                             authenticated.set(accepted);
                             reply(out, accepted ? "235 2.7.0 Authentication successful"
-                                    : "535 5.7.8 Authentication credentials invalid");
+                                    : "535 5.7.8 synthetic refusal " + USER + " " + SECRET);
                         }
                         case "MAIL", "RCPT", "RSET", "NOOP" -> reply(out, "250 2.0.0 OK");
                         case "DATA" -> {
@@ -1125,6 +1300,22 @@ class AuthServiceTest {
 
         private static BufferedReader reader(Socket socket) throws Exception {
             return new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+        }
+
+        private static byte[] ntlmField(byte[] message, int field) {
+            var buffer = java.nio.ByteBuffer.wrap(message).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            int length = Short.toUnsignedInt(buffer.getShort(field));
+            int offset = buffer.getInt(field + 4);
+            if (length == 0 || offset < 0 || offset > message.length - length) {
+                throw new IllegalArgumentException("Invalid synthetic NTLM exchange");
+            }
+            return Arrays.copyOfRange(message, offset, offset + length);
+        }
+
+        private static byte[] hmacMd5(byte[] key, byte[] input) throws Exception {
+            var mac = javax.crypto.Mac.getInstance("HmacMD5");
+            mac.init(new javax.crypto.spec.SecretKeySpec(key, "HmacMD5"));
+            return mac.doFinal(input);
         }
 
         private static Writer writer(Socket socket) throws Exception {

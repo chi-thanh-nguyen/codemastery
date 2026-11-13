@@ -35,13 +35,14 @@ public class SmtpPasswordResetEmailAdapter implements ResetEmailDelivery {
     static final int NETWORK_TIMEOUT_MILLIS = 5000;
     static final String SUBJECT = "Reset your CodeMastery password";
 
-    // Angus 2.0.5's SMTP, wire and socket diagnostics originate in these JUL loggers,
+    // Angus 2.0.5's SMTP, wire, socket and NTLM helper diagnostics use these JUL loggers,
     // including when Boot forwards them to SLF4J. Keep strong references: JUL otherwise
     // permits a logger (and its security policy) to be garbage-collected.
     private static final List<java.util.logging.Logger> SMTP_DIAGNOSTICS = List.of(
             java.util.logging.Logger.getLogger("org.eclipse.angus.mail.smtp"),
             java.util.logging.Logger.getLogger("org.eclipse.angus.mail.smtp.protocol"),
-            java.util.logging.Logger.getLogger("org.eclipse.angus.mail.util.socket"));
+            java.util.logging.Logger.getLogger("org.eclipse.angus.mail.util.socket"),
+            java.util.logging.Logger.getLogger("org.eclipse.angus.mail.auth"));
     private static final PrintStream NO_DIAGNOSTIC_OUTPUT = new PrintStream(OutputStream.nullOutputStream());
 
     private final JavaMailSender mail;
@@ -67,7 +68,7 @@ public class SmtpPasswordResetEmailAdapter implements ResetEmailDelivery {
         Objects.requireNonNull(settings);
         // Block at the source, before handlers/bridges see a record. A filter is needed
         // as well as OFF: a later DEBUG/TRACE level change must not enable wire logging.
-        // Only this reset-only transport is silenced; application diagnostics are untouched.
+        // These named Angus sources are silenced JVM-wide; application loggers are untouched.
         SMTP_DIAGNOSTICS.forEach(logger -> {
             logger.setLevel(java.util.logging.Level.OFF);
             logger.setFilter(record -> false);
@@ -85,6 +86,10 @@ public class SmtpPasswordResetEmailAdapter implements ResetEmailDelivery {
         properties.setProperty("mail.debug.auth.username", "false");
         properties.setProperty("mail.debug.auth.password", "false");
         properties.setProperty("mail.smtp.auth", "true");
+        // Username/password submission over verified TLS needs neither legacy challenge-response
+        // mechanisms nor OAuth/SASL. A server offering only excluded mechanisms must fail closed.
+        properties.setProperty("mail.smtp.auth.mechanisms", "LOGIN PLAIN");
+        properties.setProperty("mail.smtp.sasl.enable", "false");
         properties.setProperty("mail.smtp.starttls.enable", "true");
         properties.setProperty("mail.smtp.starttls.required", "true");
         properties.setProperty("mail.smtp.ssl.checkserveridentity", "true");
