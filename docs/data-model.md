@@ -702,3 +702,18 @@ and `graded_at` are written together; regrading replaces all three, and no grade
 history or ungrade exists. Manual grading never writes mastery or progress. No
 migration, column, index or retention policy is added; see ADR010 §§5 and 8–10
 for the normative rules.
+
+## Batch 6 adaptive runtime — no physical change
+
+[ADR011](decisions/011-batch-06-contract-approvals.md) writes only existing V002/V005
+columns. `lesson_progress` gains mastery skips through Course's
+`applyMasterySkips`: a missing or incomplete row becomes `completed = true`,
+`mastery_skipped = true`; a completed row is never relabelled or reverted, and the
+Enrollment status is recalculated as for manual completion. `learner_skill_masteries`
+is upserted only for skills assessed by a submitted quiz. `path_recommendations`
+receives one `skip` row per newly tested-out Lesson and a `continue` or `remedial`
+row only when it differs from the current one; history is never collapsed. A run
+that inserts rows uses an instant strictly later than the Enrollment's latest
+`recommended_at`, so the current row is unique without a new column. All of
+these share the submission's transaction and lock order (ADR011 §4). No migration,
+column, index or ledger is added.
