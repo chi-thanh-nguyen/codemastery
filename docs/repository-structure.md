@@ -342,6 +342,21 @@ added after checkout in the `deployment-script` job; it runs `bash -n` on every
 script in the directory. No new job, test framework, directory, deployment, ruleset,
 required-check or protected-review change is approved.
 
+## Proposed AU07 file additions — pending Leader approval (13 November 2026)
+
+[PR #239](https://github.com/chi-thanh-nguyen/codemastery/pull/239) (AU07) adds two
+files that are **not yet part of the approved tree** and are therefore not shown in
+it:
+
+| File | Purpose | Basis and status |
+| --- | --- | --- |
+| `backend/src/main/java/com/codemastery/modules/auth/infrastructure/email/SmtpPasswordResetEmailAdapter.java` | Auth-owned implementation of the CT02 delivery port: plain-text SMTP submission with mandatory STARTTLS | ADR006 §9.1 requires an approved adapter placement. A new `infrastructure/email/` directory inside the owning Auth module is proposed; PENDING_LEADER_STRUCTURAL_APPROVAL |
+| `backend/src/main/resources/db/migration/V007__create_password_reset_tokens.sql` | The NEW migration for the approved §9.2 `password_reset_tokens` design, with no grant | In the approved migration directory. The relayed implementation authorization awaits Leader confirmation ([ADR006 §10](decisions/006-batch-02-contract-approvals.md#10-au07-implementation-record-and-gate-status--1213-november-2026)) |
+
+The existing `/backend/src/main/java/com/codemastery/modules/auth/` and
+`/backend/src/main/resources/db/migration/` CODEOWNERS rules cover these files. The
+tree below changes only when the Leader approves the additions.
+
 ```text
 codemastery/
 
@@ -493,7 +508,7 @@ codemastery/
 
 │       │   │               │       │       └── UserRepositoryImpl.java
 
-│       │   │               │       ├── security/
+│       │   │               │       └── security/
 
 │       │   │               │           ├── AuthenticatedUser.java
 
@@ -504,8 +519,6 @@ codemastery/
 │       │   │               │           ├── RestSecurityErrorHandler.java
 
 │       │   │               │           └── SecurityConfig.java
-│       │   │               │       ├── email/
-│       │   │               │       │   └── SmtpPasswordResetEmailAdapter.java
 
 │       │   │               ├── course/
 
@@ -1105,8 +1118,7 @@ codemastery/
 
 │       │               ├── V005__create_mastery_and_recommendation_schema.sql
 
-│       │               ├── V006__create_interaction_and_audit_schema.sql
-│       │               └── V007__create_password_reset_tokens.sql
+│       │               └── V006__create_interaction_and_audit_schema.sql
 
 │       └── test/
 

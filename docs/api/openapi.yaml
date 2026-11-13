@@ -3247,11 +3247,11 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Implemented locally under AU07. Public; no bearer consumed. Canonical CT01 email; same 202 for known/unknown/locked/full queue. Auth FIFO capacity128, one worker; no lookup/SMTP on response path. Best-effort processing, no delivery guarantee. Active-account PT1M issuance interval; send only after commit. PostgreSQL execution, real SMTP delivery, independent review and protected integration remain unverified. ADR006 is authoritative.",
+        "description": "Implemented under AU07 (PR #239). Public; no bearer consumed; JSON only (other media types 415). Canonical CT01 email; same 202 for known/unknown/locked/full queue and while recovery delivery is unconfigured (then no lookup, capability or email). Auth FIFO capacity128, one worker; no lookup/SMTP on response path. Best-effort processing, no delivery guarantee. Active-account PT1M issuance interval; send only after commit. Real SMTP provider delivery, independent review and protected integration remain outstanding. ADR006 §9 is authoritative; §10 records gate status.",
         "security": [],
         "responses": {
           "202": {
-            "description": "Implemented locally under AU07; PostgreSQL and SMTP integration remain unverified.",
+            "description": "Generic acknowledgement; proves no account match or delivery.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3268,11 +3268,14 @@
           "400": {
             "$ref": "#/components/responses/Batch2Invalid"
           },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
+          },
           "500": {
             "$ref": "#/components/responses/Batch2Failure"
           }
         },
-        "x-implementation-status": "IMPLEMENTED_UNVERIFIED",
+        "x-implementation-status": "IMPLEMENTED_PENDING_REVIEW",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -3292,11 +3295,11 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Implemented locally under AU07. Public; no bearer consumed. Opaque 32-byte/43-character Base64url capability, digest-only storage, exact PT30M validity. Generic400 invalid/replaced/used/expired/locked; password CT01 predicate. User-first lock and atomic password-update/token-delete; no auto-login/JWT. The Leader accepted that existing tokens retain CT01 validity until natural expiry (at most PT15M); no revocation is implemented. PostgreSQL execution, independent review and protected integration remain unverified. ADR006 is authoritative.",
+        "description": "Implemented under AU07 (PR #239). Public; no bearer consumed; JSON only (other media types 415). Opaque 32-byte/43-character Base64url capability, digest-only storage, exact PT30M validity. Generic400 invalid/replaced/used/expired/locked; password CT01 predicate. User-first lock and atomic password-update/token-delete; no auto-login/JWT. CT01 is unchanged: existing bearer tokens remain valid until their own expiry (at most PT15M); no revocation is implemented, and reset-specific residual-risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public exposure. Independent review and protected integration remain outstanding. ADR006 §9 is authoritative; §10 records gate status.",
         "security": [],
         "responses": {
           "200": {
-            "description": "Implemented locally under AU07; PostgreSQL integration remains unverified.",
+            "description": "Password changed and capability consumed after commit; no credential is returned.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3313,11 +3316,14 @@
           "400": {
             "$ref": "#/components/responses/Batch2Invalid"
           },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
+          },
           "500": {
             "$ref": "#/components/responses/Batch2Failure"
           }
         },
-        "x-implementation-status": "IMPLEMENTED_UNVERIFIED",
+        "x-implementation-status": "IMPLEMENTED_PENDING_REVIEW",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -7860,7 +7866,7 @@
             "type": "string",
             "format": "uri",
             "pattern": "^https://www\\.youtube-nocookie\\.com/embed/[A-Za-z0-9_-]+$",
-            "description": "Only the exact canonical URL; no query, fragment, port, credentials, escapes or additional segments. ADR006 \u00a76."
+            "description": "Only the exact canonical URL; no query, fragment, port, credentials, escapes or additional segments. ADR006 §6."
           }
         },
         "required": [
@@ -10215,6 +10221,21 @@
           }
         }
       },
+      "Batch2UnsupportedMedia": {
+        "description": "Request is not application/json; no effect and no account information.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
       "Batch2Unavailable": {
         "description": "Safe missing/hidden/foreign scoped resource under CT03 precedence.",
         "headers": {
@@ -10713,9 +10734,9 @@
       "Independent owner/CODEOWNER review, CI and protected merge",
       "Other Batch 2 implementation work, NEW migrations and runtime privilege qualification remain separately gated",
       "SMTP adapter/provider/trusted origin and abuse/load qualification",
-      "AU07 reset-token residual risk accepted by the Leader; public exposure still requires independent review and deployment qualification",
+      "Reset-specific residual-token risk acceptance (PENDING_LEADER_RISK_ACCEPTANCE) before public recovery exposure; relayed 12 November acceptance is unconfirmed (ADR006 §10)",
       "CT09/CT12/CT26/CT22.atomic/CT33 remain separately governed",
-      "CT22 schema/read remains separately gated; AU07 reset migration and DML grant are implemented locally but not integration-verified"
+      "CT22 schema/read remains separately gated; AU07 V007 grants nothing and its runtime DML is the proposed CT17-P6-PRIVILEGES-2026-11-13-r2, pending Leader approval"
     ]
   },
   "x-batch-03-contracts": {
