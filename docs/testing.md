@@ -3060,6 +3060,50 @@ Flyway-engine validation/full-product F2/Q08 and real Q07 RPO/RTO remain NOT_RUN
 MinIO/CMS/cloud/renewal/Keychain/scheduler results retain their previous limits and
 were not rerun. No deployment, risk acceptance or spending permission is supplied.
 
+## Batch 5 contract acceptance obligations — specified, NOT_RUN
+
+[ADR010 §14](decisions/010-batch-05-contract-approvals.md#14-errors-acceptance-obligations-and-retained-gates)
+specifies oracles B5-O01–B5-O16 for authorization before storage, object keys,
+type/filename/size validation and staged error precedence, store-then-commit
+deletions by transaction outcome (including a lost commit acknowledgement, which
+keeps both objects), the exclusive deadline and strictly later replacement time,
+Assignment-row serialization, grading precision and the opaque `submittedAt`
+precondition, download headers, the download/replacement race and missing-object
+versus provider failures, no mastery effect of grading, the shared widget, lazy
+multipart binding and downloads that hold no database connection, plus the Java 25
+declaration/checked-close lifecycle (B5-O15) and raw multipart/download bytes with
+filename-preserving browser FormData (B5-O16). Compile/stream and local serialization
+probes do not prove application storage or transport integration. They use
+ADR008 §5's existing placements (`SubmissionServiceTest`,
+`AuthorizationIntegrationTest`, existing Course and frontend suites). Real MinIO
+success, rollback and recovery tests still need qualified isolated storage
+configuration and the dedicated storage integration placement that ADR008 records
+as a gap; no MinIO testcontainer, new test file or dependency is approved, and no
+result is claimed.
+
+## Batch 6 verification plan — specified, NOT_RUN
+
+[ADR011 §16](decisions/011-batch-06-contract-approvals.md#16-ct08verification-plan)
+specifies real-PostgreSQL cases B6-V01–B6-V12 for the atomic submission unit,
+rollback on injected faults including uncommitted POST answers, scheduler
+finalization from the latest committed save (including another tab's set), the
+conditional save-before-submit guarantee and deterministic intervening-writer
+schedule (V12/C01), duplicates, evidence ordering,
+disabled/not-ready/unconfigured Courses, left learners, same-Course concurrency,
+held-root execution-scope and evidence-read admission enforcement, the difficulty
+port's preconditions, the single approved event subscriber, deterministic-failure
+recovery including disabling adaptive mode, learner recommendation validity and
+titles, completed remedial reviews versus no-candidate completion, selected-reason
+versus unrelated renames, omitted Home Course rows versus included null guidance,
+and the diagnostic gate and server-chosen placement Quiz, plus client
+oracle B6-C01 (save before submit) in the existing `assessment.test.tsx`. QA04 owns
+`MasteryProgressTransactionIntegrationTest`, QA03 `AdaptiveLearningFlowIntegrationTest`;
+unit doubles live in the existing Adaptive, Assessment and Course suites. Rule
+oracles B6-R01–B6-R16 (ADR011 §10) belong to the existing decision and mastery unit
+tests; CT36.F keeps the evaluation scenarios. Faults come only from test-scoped bean
+overrides, outcomes from independent committed reads and concurrency from barriers.
+No new test file, dependency or result is claimed.
+
 ## FE24 CT34 r2 lifecycle implementation — 13 November 2026
 
 ### Authority and scope

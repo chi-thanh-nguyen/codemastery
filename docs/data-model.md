@@ -680,3 +680,40 @@ Auto-submission records logical expiry as submitted_at and grades saved masks.
 See ADR007 §§4–13 for normative decisions, errors, concurrency and evidence schema.
 Its DTO status is derived, never a new persisted enum. Physical schema and prior
 approvals remain intact; no migration or application implementation is supplied.
+
+## Batch 5 file and assignment contract — no physical change
+
+[ADR010](decisions/010-batch-05-contract-approvals.md) uses the existing V002/V004
+columns unchanged. `object_key` holds a backend-generated `materials/{uuid}` or
+`submissions/{uuid}` key, never client text or a filename, and is never exposed.
+`original_filename` stores the validated client name verbatim; media type, size and
+checksum stay unstored and are re-derived or validated at upload (PDF materials;
+PDF or ZIP submissions). Objects are stored before the referencing row commits;
+a superseded object is deleted only after a confirmed commit and a new one only when
+the transaction provably did not commit; an unknown commit outcome keeps both.
+Orphans are tolerated, never served.
+
+`deadline_at` is an exclusive instant evaluated against server time sampled under
+the Assignment row lock. The single current Submission row per learner and
+assignment is updated in place on replacement (new key, filename and a strictly
+later `submitted_at`, which serves as the grade precondition token) while ungraded
+and before the deadline; clients echo it as an opaque string. Grade (0–100, at most two decimals), nonblank feedback
+and `graded_at` are written together; regrading replaces all three, and no grade
+history or ungrade exists. Manual grading never writes mastery or progress. No
+migration, column, index or retention policy is added; see ADR010 §§5 and 8–10
+for the normative rules.
+
+## Batch 6 adaptive runtime — no physical change
+
+[ADR011](decisions/011-batch-06-contract-approvals.md) writes only existing V002/V005
+columns. `lesson_progress` gains mastery skips through Course's
+`applyMasterySkips`: a missing or incomplete row becomes `completed = true`,
+`mastery_skipped = true`; a completed row is never relabelled or reverted, and the
+Enrollment status is recalculated as for manual completion. `learner_skill_masteries`
+is upserted only for skills assessed by a submitted quiz. `path_recommendations`
+receives one `skip` row per newly tested-out Lesson and a `continue` or `remedial`
+row only when it differs from the current one; history is never collapsed. A run
+that inserts rows uses an instant strictly later than the Enrollment's latest
+`recommended_at`, so the current row is unique without a new column. All of
+these share the submission's transaction and lock order (ADR011 §4). No migration,
+column, index or ledger is added.

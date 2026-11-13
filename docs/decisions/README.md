@@ -34,10 +34,14 @@ approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPR
 
 **8/8 technical checkpoints are DELEGATED_APPROVED.** ADR008 is integrated by
 [PR #231](https://github.com/chi-thanh-nguyen/codemastery/pull/231), main
-`b6fa24b396d08e323ea54882af0a008077301ab6`; ADR009 awaits existing
-[PR #233](https://github.com/chi-thanh-nguyen/codemastery/pull/233) independent review
-and protected integration. This is the current one-row-per-checkpoint inventory;
-the revision/history tables below retain their dated preparation states.
+`b6fa24b396d08e323ea54882af0a008077301ab6`; ADR009 is integrated by
+[PR #233](https://github.com/chi-thanh-nguyen/codemastery/pull/233), main
+`fe73f9af640317541b0deaca57ad30e0cd198c0d` (11 November 2026; no approving review
+recorded, so independent review remains outstanding). This is the current
+one-row-per-checkpoint inventory; the revision/history tables below retain their
+dated preparation states. *Current-state correction, 12 November 2026 (ADR010 task):
+the earlier wording “ADR009 awaits PR #233” and the CP-033/034 “pending #233” cells
+were stale after that merge.*
 
 | CP | Slice | Current revision | Authoritative record / integration |
 |---|---|---|---|
@@ -45,8 +49,8 @@ the revision/history tables below retain their dated preparation states.
 | CP-030 | CT34.fixtures | `CT34-FIXTURES-2026-11-10-r2` | [ADR008 section 10, merged #231](008-batch-04-contract-approvals.md#10-f1f2-fixture-amendment--10-november-2026) |
 | CP-031 | CT14.coverage | `CT14-COVERAGE-2026-11-09-r1` | [ADR008 section 5, merged #231](008-batch-04-contract-approvals.md#5-ct14coverage) |
 | CP-032 | CT39.binding | `CT39-BINDING-2026-11-09-r1` | [ADR008 section 6, merged #231](008-batch-04-contract-approvals.md#6-ct39binding-and-ct39consumers) |
-| CP-033 | CT17.F-runtime | `CT17-F-RUNTIME-2026-11-10-r2` | [ADR009 section 9, pending #233 integration](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) |
-| CP-034 | CT17.F-recovery | `CT17-F-RECOVERY-2026-11-10-r2` | [ADR009 section 9, pending #233 integration](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) |
+| CP-033 | CT17.F-runtime | `CT17-F-RUNTIME-2026-11-10-r2` | [ADR009 section 9, merged #233](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) |
+| CP-034 | CT17.F-recovery | `CT17-F-RECOVERY-2026-11-10-r2` | [ADR009 section 9, merged #233](009-ct17-final-runtime-recovery.md#9-continuation-attestation-delegated-selections-and-executed-qualification) |
 | CP-035 | CT34.ci | `CT34-CI-2026-11-09-r1` | [ADR008 section 7, merged #231; consumes CP-030 r2](008-batch-04-contract-approvals.md#7-ct34ci) |
 | CP-036 | CT39.consumers | `CT39-CONSUMERS-2026-11-09-r1` | [ADR008 section 6, merged #231](008-batch-04-contract-approvals.md#6-ct39binding-and-ct39consumers) |
 
@@ -93,7 +97,9 @@ Neither document establishes implementation, runtime acceptance or deployment au
 | [ADR006](006-batch-02-contract-approvals.md) | Eight verified Batch 2 checkpoints: progress, resume, embed, authoring and recovery | Eight `DELEGATED_APPROVED`; integrated via PR #229, 9 November 2026; implementation/exposure gates retained |
 | [ADR007](007-batch-03-contract-approvals.md) | Ten verified Batch 3 checkpoints CP-019–028; two bounded prerequisite slices | `DELEGATED_APPROVED`; integrated via PR #230, 9 November 2026; implementation/verification gates retained |
 | [ADR008](008-batch-04-contract-approvals.md) | Six Batch 4 testing/clock decisions; CP-030 r2 | `DELEGATED_APPROVED`; integrated via #231 on 10 November. Its original CT17 pending dispositions are historical, subsequently resolved by ADR009 r2 |
-| [ADR009](009-ct17-final-runtime-recovery.md) | CP-033/034 r2 runtime/recovery decisions, bounded qualification and dated Azure evidence | Two `DELEGATED_APPROVED`; pending #233 independent review/protected integration; execution/admission gates retained |
+| [ADR009](009-ct17-final-runtime-recovery.md) | CP-033/034 r2 runtime/recovery decisions, bounded qualification and dated Azure evidence | Two `DELEGATED_APPROVED`; integrated via #233 on 11 November (no approving review recorded); execution/admission gates retained |
+| [ADR010](010-batch-05-contract-approvals.md) | Ten Batch 5 checkpoints CP-037–046: protected files, assignments, file widget; CT01/CT18 bounded prerequisites | `DELEGATED_APPROVED` (12 November 2026); pending independent review, CI and protected integration; implementation/exposure gates retained |
+| [ADR011](011-batch-06-contract-approvals.md) | Seventeen Batch 6 checkpoints CP-047–063: atomic quiz-to-mastery execution, routing, reasons, difficulty, placement, Mastery Map and insights | `DELEGATED_APPROVED` (12 November 2026); stacked on ADR010 (learner names); pending independent review, CI and protected integration after ADR010; adaptive practice capture amendment `PENDING_LEADER_APPROVAL` |
 
 ## Contract decision records by revision
 
@@ -239,3 +245,83 @@ Batch 3 present-state confirmation: PR #230 merged as
 The dated preparation-time pending-integration text above remains historical;
 its unchanged approvals are integrated documents, not runtime or independent
 review evidence. CT08 remains evidence-only at whole-Issue level.
+
+### Batch 5 revisions — 12 November 2026
+
+[ADR010](010-batch-05-contract-approvals.md) is the authoritative record for these
+**DELEGATED_APPROVED** revisions (Claude Code under the Leader's explicit Batch 5/6
+delegation). They await independent review, required CI and protected integration;
+no storage, assignment or widget behavior is implemented by the approvals.
+
+| Revision | Exact slice | Record |
+|---|---|---|
+| `CT01-LEARNER-NAMES-2026-11-12-r1` | Prerequisite: Auth learner display-name read, Course-only caller | [ADR010 §3.1](010-batch-05-contract-approvals.md#31-ct01learner-names) |
+| `CT18-B5-ERRORS-2026-11-12-r1` | Prerequisite: 413/415 for Batch 5 file operations | [ADR010 §3.2](010-batch-05-contract-approvals.md#32-ct18b5-errors) |
+| `CT09-AUTHORIZATION-2026-11-12-r1` | CT09.authorization: backend streaming, admission before storage | [ADR010 §4](010-batch-05-contract-approvals.md#4-ct09authorization) |
+| `CT09-LIFECYCLE-2026-11-12-r1` | CT09.lifecycle: keys, types, filenames, replacement, orphans | [ADR010 §5](010-batch-05-contract-approvals.md#5-ct09lifecycle) |
+| `CT09-CONFIG-2026-11-12-r1` | CT09.config: existing names, validation, upload limit input | [ADR010 §6](010-batch-05-contract-approvals.md#6-ct09config) |
+| `CT10-DEADLINE-2026-11-12-r1` | CT10.deadline: exclusive server-time deadline | [ADR010 §8](010-batch-05-contract-approvals.md#8-ct10deadline) |
+| `CT10-GRADING-2026-11-12-r1` | CT10.grading: grade, feedback, regrade, no mastery effect | [ADR010 §9](010-batch-05-contract-approvals.md#9-ct10grading) |
+| `CT09-INTERFACE-2026-11-12-r1` | CT09.interface: `FileStorage` port and S3 adapter | [ADR010 §7](010-batch-05-contract-approvals.md#7-ct09interface) |
+| `CT10-REPLACEMENT-2026-11-12-r1` | CT10.replacement: before deadline, ungraded, Assignment-row lock | [ADR010 §10](010-batch-05-contract-approvals.md#10-ct10replacement) |
+| `CT09-REST-2026-11-12-r1` | CT09.rest: file-material REST and frontend multipart/download transport | [ADR010 §11](010-batch-05-contract-approvals.md#11-ct09rest) |
+| `CT10-REST-2026-11-12-r1` | CT10.rest: assignment authoring, submission and grading REST | [ADR010 §12](010-batch-05-contract-approvals.md#12-ct10rest) |
+| `CT37-WIDGET-2026-11-12-r1` | CT37.widget: shared upload/download widget | [ADR010 §13](010-batch-05-contract-approvals.md#13-ct37widget) |
+
+[ADR010 §16](010-batch-05-contract-approvals.md#16-independent-review-corrections--12-november-2026)
+records pre-integration review corrections inside these r1 revisions (strictly
+later replacement time, staged error precedence, download/replacement race and two
+wording fixes); [§17](010-batch-05-contract-approvals.md#17-final-technical-review-remediation--13-november-2026)
+records the final review remediation (object deletions by transaction outcome,
+missing-object versus provider failures, opaque `submittedAt`, connection-free
+downloads, lazy multipart binding);
+[§18](010-batch-05-contract-approvals.md#18-comprehensive-independent-review-remediation--13-november-2026)
+records N-B5-01/02 (valid Java 25 stream closure and raw binary multipart/download
+representation, B5-O15/O16). Scopes and IDs are unchanged.
+
+LD-07 (reminder deadline query ownership) is not resolved by CT10.deadline and stays
+with CT11.reminders (Batch 7). Submission-download hostile-content residual risk is
+`PENDING_LEADER_RISK_ACCEPTANCE` before public exposure.
+
+### Batch 6 revisions — 12 November 2026
+
+[ADR011](011-batch-06-contract-approvals.md) is the authoritative record for these
+**DELEGATED_APPROVED** revisions (Claude Code under the same explicit delegation).
+They depend on ADR010 only for CT33.insights learner names and must be integrated
+after it; no runtime behavior is implemented by the approvals.
+
+| Revision | Exact slice | Record |
+|---|---|---|
+| `CT22-ATOMIC-2026-11-12-r1` | CT22.atomic: Course execution state and monotonic mastery skips under the held root | [ADR011 §3](011-batch-06-contract-approvals.md#3-ct22atomic--course-participation-and-execution-reads) |
+| `CT08-EXECUTION-2026-11-12-r1` | CT08.execution: synchronous in-transaction event, one unit for result, mastery, progress and recommendations | [ADR011 §4](011-batch-06-contract-approvals.md#4-ct08execution) |
+| `CT08-FAILURE-2026-11-12-r1` | CT08.failure: rollback visibility, idempotence, no replay infrastructure | [ADR011 §5](011-batch-06-contract-approvals.md#5-ct08failure) |
+| `CT24-DECISION-2026-11-12-r1` | CT24.decision: pure decision callable and output | [ADR011 §6](011-batch-06-contract-approvals.md#6-ct24decision) |
+| `CT07-ROUTING-2026-11-12-r1` | CT07.routing: test-out, remedial, continue, warnings | [ADR011 §7](011-batch-06-contract-approvals.md#7-ct07routing) |
+| `CT07-DIFFICULTY-2026-11-12-r1` | CT07.difficulty: state mapping, U06 port, selection rule (capture amendment pending) | [ADR011 §8](011-batch-06-contract-approvals.md#8-ct07difficulty) |
+| `CT07-REASONS-2026-11-12-r1` | CT07.reasons: fixed templates and recommendation time | [ADR011 §9](011-batch-06-contract-approvals.md#9-ct07reasons) |
+| `CT07-BINDING-ORACLES-2026-11-12-r1` | CT07.binding-oracles: consumed shapes and rule oracles | [ADR011 §10](011-batch-06-contract-approvals.md#10-ct07binding-oracles) |
+| `CT25-SCOPE-2026-11-12-r1` / `CT25-SKIP-2026-11-12-r1` / `CT25-INIT-2026-11-12-r1` / `CT25-BINDING-2026-11-12-r1` | Placement diagnostic scope, skip, initialization and exposure/binding | [ADR011 §11](011-batch-06-contract-approvals.md#11-ct25--placement-diagnostic) |
+| `CT33-RESULTS-2026-11-12-r1` | CT33.results: latest per-skill evidence and owner attempt list | [ADR011 §12](011-batch-06-contract-approvals.md#12-ct33results) |
+| `CT33-MAP-2026-11-12-r1` | CT33.map: learner and owner Mastery Map | [ADR011 §13](011-batch-06-contract-approvals.md#13-ct33map) |
+| `CT33-INSIGHTS-2026-11-12-r1` | CT33.insights: owner-only joined-learner insights | [ADR011 §14](011-batch-06-contract-approvals.md#14-ct33insights) |
+| `CT08-VERIFICATION-PLAN-2026-11-12-r1` | CT08.verification-plan: real PostgreSQL cases B6-V01–V12 | [ADR011 §16](011-batch-06-contract-approvals.md#16-ct08verification-plan) |
+| `CT33-REST-2026-11-12-r1` | CT33.rest: eight read operations, including learner-home recommendations | [ADR011 §15](011-batch-06-contract-approvals.md#15-ct33rest) |
+
+The recommended amendment of `CT04-START-2026-11-09-r1` and
+`CT08-EVIDENCE-2026-11-09-r1` for adaptive practice capture (ADR011 §17) is not
+approved and awaits the Leader. LD-11 ordering is honoured; owners' joint review
+remains a review gate. [ADR011 §19](011-batch-06-contract-approvals.md#19-independent-review-corrections--12-november-2026)
+records pre-integration review corrections inside these r1 revisions (learner
+recommendation visibility, failure recovery path, strictly later recommendation
+time, admitted evidence reads, one approved event subscriber);
+[§20](011-batch-06-contract-approvals.md#20-final-technical-review-remediation--13-november-2026)
+records the final review remediation (answer durability and save before submit,
+execution-scope marker, still-valid learner recommendations with Course and Lesson
+titles, server-chosen placement Quiz, name order, disabling as a bounded recovery
+route, learner-free difficulty port); scopes and IDs are unchanged. The operational
+risks of submission-blocking Adaptive failures and of answers graded from the last
+committed save are `PENDING_LEADER_RISK_ACCEPTANCE`.
+[ADR011 §21](011-batch-06-contract-approvals.md#21-comprehensive-independent-review-remediation--13-november-2026)
+records N-B6-01/02: intervening-writer limits and V12/C01, valid completed remedial
+review, selected-reason rename effects and Home row omission (R13–R16/V06).
+Existing routing, upstream approvals and all checkpoint revision IDs are preserved.
