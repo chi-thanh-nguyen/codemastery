@@ -1236,7 +1236,7 @@ metadata and needs no table privilege. V001–V006 create 23 tables and no seque
 
 | Relation (owner) | Approved runtime privilege | Consumer and operation | Status / basis |
 | --- | --- | --- | --- |
-| `users` (auth) | SELECT, INSERT; UPDATE (password_hash) | Registration email check and insert; login; JWT current-account check; CT01.identity instructor names; AU07 User-first `FOR UPDATE` lock and reset password-hash update | GRANTED — CT01.core, CT01.identity (SELECT, INSERT); UPDATE (password_hash) PROPOSED — CT17-P6-PRIVILEGES-2026-11-13-r2, pending Leader approval |
+| `users` (auth) | SELECT, INSERT | Registration email check and insert; login; JWT current-account check; CT01.identity instructor names | GRANTED — CT01.core, CT01.identity |
 | `courses` (course) | SELECT; UPDATE (id) | Catalogue/search/detail `SELECT *`, access snapshots, My Courses join; UPDATE (id) only enables the membership `FOR UPDATE` row lock | GRANTED — CT03/CT21 catalogue, FE07 CT22.membership |
 | `chapters` (course) | SELECT | Published syllabus, canonical lesson order, access snapshots | GRANTED — CT03/CT21 |
 | `lessons` (course) | SELECT | Published syllabus (entity load), access snapshots | GRANTED — CT03/CT21 |
@@ -1259,7 +1259,6 @@ metadata and needs no table privilege. V001–V006 create 23 tables and no seque
 | `notifications` (interaction) | none | No consumer | DEFERRED — Interaction contracts |
 | `content_reports` (interaction) | none | No consumer | DEFERRED — Interaction contracts |
 | `audit_logs` (admin) | none | No consumer | DEFERRED — CT12; UPDATE/DELETE permanently prohibited |
-| `password_reset_tokens` (auth) | SELECT, INSERT, DELETE | AU07 capability lookup, issue/replace (delete then insert) and single-use consumption; no UPDATE and no row lock | PROPOSED — CT17-P6-PRIVILEGES-2026-11-13-r2 (CT02-TOKEN-2026-11-09-r1, V007), pending Leader approval |
 | `flyway_schema_history` (migrator) | none | Migrator only | PROHIBITED — P6 |
 
 The runtime role additionally keeps only CONNECT on the application database and
@@ -1424,41 +1423,66 @@ record, the implementation and its tests were produced through AI-assisted
 development under the delegation. No provisioning, deployment, exposure or merge was
 performed or authorized.
 
-### CT17-P6-PRIVILEGES-2026-11-13-r2 — proposed AU07 extension (PENDING LEADER APPROVAL)
+### CT17-P6-PRIVILEGES-2026-11-13-r2 — AU07 extension (LEADER_APPROVED, 13 November 2026)
 
-**Status: PROPOSED, not approved.** Prepared on 13 November 2026 for
-[PR #239](https://github.com/chi-thanh-nguyen/codemastery/pull/239) (AU07) under the
-extension procedure above, through AI-assisted development. The 28 October delegation
-covered PR #110 only, so this revision is not self-approving: it takes effect only with
-the Leader's explicit approval (step 4 of the extension procedure), and actual
-provisioning on a real database remains separately Leader-reserved. The r1 record above
-remains authentic history; only the two matrix rows marked PROPOSED change.
+**LEADER_APPROVED** on 13 November 2026 (Asia/Ho_Chi_Minh) by the explicit instruction
+of Project Leader and repository Owner @chi-thanh-nguyen, "CodeMastery — PR #239
+Leader Authorization, Contract Synchronization & PR Finalization". It is recorded with
+`AU07-IMPL-2026-11-13-r1` in
+[ADR006 §10.2](decisions/006-batch-02-contract-approvals.md#102-leader-decisions--au07-impl-2026-11-13-r1-and-ct17-p6-privileges-2026-11-13-r2).
+The revision was prepared for
+[PR #239](https://github.com/chi-thanh-nguyen/codemastery/pull/239) under the extension
+procedure above, through AI-assisted development.
 
-Consumer: the implemented AU07 recovery use case (`PasswordResetService`,
-`UserRepositoryImpl`) under `CT02-WORKFLOW/TOKEN-2026-11-09-r1` and V007, which
-creates `password_reset_tokens` without any grant. Least privilege exercised:
+The r1 record and table above are unchanged history. The effective matrix is r1 with
+the two rows below replacing or adding the named relations; no other privilege, role
+elevation or change is approved.
+
+| Relation (owner) | Approved runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `users` (auth) | SELECT, INSERT; UPDATE (password_hash) | r1 consumers, plus the AU07 User-first `FOR UPDATE` lock and the reset password-hash update | r1 SELECT, INSERT unchanged; UPDATE (password_hash) LEADER_APPROVED — r2 |
+| `password_reset_tokens` (auth) | SELECT, INSERT, DELETE | AU07 capability lookup, issue/replace (delete then insert) and single-use consumption; no UPDATE and no row lock | LEADER_APPROVED — r2 (CT02-TOKEN-2026-11-09-r1, V007) |
+
+Least privilege exercised by the consumer (`PasswordResetService`, `UserRepositoryImpl`):
 
 | Operation | SQL | Privilege |
 | --- | --- | --- |
-| Request worker and confirmation lock the User first | `SELECT … FROM users … FOR UPDATE` | SELECT plus UPDATE on at least one column (PostgreSQL row-lock rule above) — supplied by UPDATE (password_hash) |
+| Request worker and confirmation lock the User first | `SELECT … FROM users … FOR UPDATE` | SELECT plus UPDATE on at least one column (PostgreSQL row-lock rule above), supplied by UPDATE (password_hash) |
 | Confirmation changes the credential | `UPDATE users SET password_hash = ? WHERE id = ?` | UPDATE (password_hash) |
 | Issue/replace one outstanding capability | `DELETE … WHERE user_id = ?` then `INSERT` | SELECT, DELETE, INSERT on `password_reset_tokens` |
 | Resolve and re-read a capability after the User lock | `SELECT … WHERE token_digest = ?` | SELECT |
 | Single-use consumption | `DELETE … WHERE user_id = ? AND token_digest = ?` | DELETE |
 
-No token-row lock is taken: every capability write happens under the User row lock,
-so a re-read after acquiring it is serialized without UPDATE on `password_reset_tokens`.
-The runtime role still cannot change email, role, account status or display name, rewrite
-capability digests or expiry, or truncate either table; `verify_role_separation` probes
-the role, email/status and expiry denials. Security impact: a compromised runtime role
-could overwrite any password hash, which the reset transition inherently requires.
+No token-row lock is taken. Every capability write happens under the User row lock, so
+a re-read after acquiring that lock is serialized without UPDATE on
+`password_reset_tokens`. The runtime role still cannot do any of the following:
 
-Synchronized together: this record and table, `RUNTIME_PRIVILEGE_MATRIX` in
-`infrastructure/vm/deploy.sh`, `test-postgres-privilege-matrix-containment.sh`
-(grants and denials on the real V001–V007 schema) and
-`test-runtime-real-backend-privileges.sh` (real reset confirmation under the runtime
-role). Remaining gates: Leader approval of r2, `@tihh647-ui` infrastructure review,
-protected integration, and the operational host verification in the acceptance above.
+- change email, role, account status or display name;
+- rewrite capability digests or expiry;
+- truncate either table.
+
+`verify_role_separation` probes the role, email/status and expiry denials. Security
+impact: a compromised runtime role could overwrite any password hash, which the reset
+transition inherently requires.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh`;
+- `test-deploy-privilege-matrix-contract.sh`, which checks the r1 table plus these r2
+  rows against the script and pins the r1 history;
+- `test-postgres-privilege-matrix-containment.sh`: grants and denials on the real
+  V001–V007 schema;
+- `test-runtime-real-backend-privileges.sh`: a real reset confirmation under the
+  runtime role.
+
+Remaining gates:
+
+- `@tihh647-ui` infrastructure review and independent CODEOWNER review;
+- protected integration;
+- the operational host verification in the acceptance above, under a separately
+  authorized deployment.
+
+This approval executes no provisioning on any real database.
 
 ## DP01 HTTPS ingress integration — 31 October 2026
 

@@ -655,7 +655,7 @@ Additive physical design for later NEW Flyway migration(s), not V001–V006 edit
 | Object | Approved design | Authority / remaining gate |
 |---|---|---|
 | enrollments.last_visited_at | nullable timestamptz, Java Instant, no default/backfill; legacy null means unknown; successful visit captures PostgreSQL clock_timestamp once under Course/Enrollment locks and writes pointer/time together | `CT22-RESUME-SCHEMA-2026-11-09-r1`, explicit additional Leader authorization; migration implementation and runtime grants still required |
-| password_reset_tokens | Auth-owned id uuid PK; user_id uuid unique FK users; token_digest bytea unique, exactly 32 bytes; issued_at/expires_at timestamptz NOT NULL, expires_at > issued_at; no defaults | `CT02-TOKEN-2026-11-09-r1`; exact constraint names and no-action/nondeferrable FK in [ADR006 §9.2](decisions/006-batch-02-contract-approvals.md#92-capability-storage-and-confirmation-transaction); implemented by V007 exactly as approved, without grants; runtime DML is the proposed CT17-P6-PRIVILEGES-2026-11-13-r2 (pending Leader approval); the relayed 12 November implementation authorization awaits Leader confirmation ([ADR006 §10](decisions/006-batch-02-contract-approvals.md#10-au07-implementation-record-and-gate-status--1213-november-2026)) |
+| password_reset_tokens | Auth-owned id uuid PK; user_id uuid unique FK users; token_digest bytea unique, exactly 32 bytes; issued_at/expires_at timestamptz NOT NULL, expires_at > issued_at; no defaults | `CT02-TOKEN-2026-11-09-r1`; exact constraint names and no-action/nondeferrable FK in [ADR006 §9.2](decisions/006-batch-02-contract-approvals.md#92-capability-storage-and-confirmation-transaction); implemented by V007 exactly as approved, without grants; V007 and AU07 implementation `AU07-IMPL-2026-11-13-r1` and runtime DML `CT17-P6-PRIVILEGES-2026-11-13-r2` are LEADER_APPROVED (13 November 2026, [ADR006 §10.2](decisions/006-batch-02-contract-approvals.md#102-leader-decisions--au07-impl-2026-11-13-r1-and-ct17-p6-privileges-2026-11-13-r2)); execution against a shared or production database is not authorized |
 
 One outstanding reset row per User; active eligible request replaces it, successful
 confirmation updates BCrypt hash and deletes matching capability atomically under
@@ -669,7 +669,7 @@ descending and Course UUID ascending on ties; legacy null times never become fak
 visits. No cross-course adaptive logic. CT01 membership/identity/JWT contracts and
 all existing physical constraints remain effective. AU07 adds V007 (no grant); the
 runtime role's `users` UPDATE (password_hash) and `password_reset_tokens` SELECT,
-INSERT, DELETE are the proposed CT17 r2 matrix rows, pending Leader approval. Under
+INSERT, DELETE are the LEADER_APPROVED `CT17-P6-PRIVILEGES-2026-11-13-r2` rows. Under
 unchanged CT01, already-issued JWTs remain valid until their original expiry (at most
 PT15M) after reset; this is not global logout or account-compromise recovery, and
 reset-specific risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public

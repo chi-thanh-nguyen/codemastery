@@ -1332,8 +1332,8 @@ SQL
   printf '%s\n' "${sql//@APP@/${app}}" | sed "s/@MIG@/${mig}/g"
 }
 
-# CT17-P6-PRIVILEGES-2026-10-28-r1 (docs/deployment.md), with the AU07 rows of the
-# PROPOSED CT17-P6-PRIVILEGES-2026-11-13-r2 (pending Leader approval): the complete
+# CT17-P6-PRIVILEGES-2026-10-28-r1 (docs/deployment.md) as extended by the
+# LEADER_APPROVED CT17-P6-PRIVILEGES-2026-11-13-r2 AU07 rows: the complete
 # runtime privilege matrix for the reviewed V001-V007 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
 # cannot silently widen a table-level grant. Nothing is granted to future objects.

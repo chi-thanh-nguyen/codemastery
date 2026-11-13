@@ -1886,9 +1886,11 @@ loads no third-party resources and sends no Referer. POST confirmation uses exis
 password validation and returns JSON with no JWT; ordinary sign-in follows.
 
 [ADR006 §10](decisions/006-batch-02-contract-approvals.md#10-au07-implementation-record-and-gate-status--1213-november-2026)
-records the implementation choices and their status. The relayed 12 November
-implementation authorization awaits Leader confirmation. The runtime DML is the
-proposed CT17-P6-PRIVILEGES-2026-11-13-r2. Under unchanged CT01, existing JWTs remain
+records the implementation choices. On 13 November 2026 the Leader approved
+`AU07-IMPL-2026-11-13-r1`: AU07 implementation, V007 (repository and controlled test
+environments only), the Spring Mail adapter and its placement, and feature-scoped
+fail-closed delivery. The Leader also approved the runtime DML
+`CT17-P6-PRIVILEGES-2026-11-13-r2`. Under unchanged CT01, existing JWTs remain
 valid until their original expiry (at most PT15M) after reset, and reset-specific
 risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public exposure. This
 implementation does not authorize production credentials, live shared-database

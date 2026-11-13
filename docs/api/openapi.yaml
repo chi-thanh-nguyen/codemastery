@@ -10733,10 +10733,10 @@
     "retainedGates": [
       "Independent owner/CODEOWNER review, CI and protected merge",
       "Other Batch 2 implementation work, NEW migrations and runtime privilege qualification remain separately gated",
-      "SMTP adapter/provider/trusted origin and abuse/load qualification",
-      "Reset-specific residual-token risk acceptance (PENDING_LEADER_RISK_ACCEPTANCE) before public recovery exposure; relayed 12 November acceptance is unconfirmed (ADR006 §10)",
+      "SMTP provider, real credentials, trusted origin binding and abuse/load qualification (adapter and placement LEADER_APPROVED in ADR006 §10.2)",
+      "Reset-specific residual-token risk acceptance (PENDING_LEADER_RISK_ACCEPTANCE) before public recovery exposure (ADR006 §9.4, §10.4)",
       "CT09/CT12/CT26/CT22.atomic/CT33 remain separately governed",
-      "CT22 schema/read remains separately gated; AU07 V007 grants nothing and its runtime DML is the proposed CT17-P6-PRIVILEGES-2026-11-13-r2, pending Leader approval"
+      "CT22 schema/read remains separately gated; AU07 implementation and V007 (AU07-IMPL-2026-11-13-r1) and runtime DML (CT17-P6-PRIVILEGES-2026-11-13-r2) are LEADER_APPROVED; V007 grants nothing and shared/production migration execution is not authorized"
     ]
   },
   "x-batch-03-contracts": {
