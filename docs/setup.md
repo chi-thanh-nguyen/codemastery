@@ -1923,3 +1923,30 @@ builds. Current direct Playwright commands and PID-only `stack:down` do not yet
 implement r2; do not infer concurrent-output protection or full interrupted-run
 recovery from them. New lifecycle behavior requires separate implementation and
 qualification; no environment variable or runnable command is added here.
+
+## Batch 5 storage configuration, file transport and widget — 12 November 2026
+
+[ADR010](decisions/010-batch-05-contract-approvals.md) approves CT09.config,
+CT09.rest's frontend transport and CT37.widget; nothing is implemented here.
+Storage keeps the existing names `STORAGE_ENDPOINT`, `STORAGE_REGION`,
+`STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` and
+`STORAGE_PATH_STYLE_ACCESS`; the storage adapter validates them when it is created
+and never uses `MINIO_ROOT_*`. `MAX_UPLOAD_SIZE` is the single upload limit (1 byte
+to 2147483647 bytes); its `20MB` fallback is local configuration, and deployment
+needs an operator-recorded value plus a matching ingress body limit. No variable,
+default or `.env.example` entry changes, and no storage setting reaches `VITE_*`.
+
+Files travel only through the backend: no pre-signed or public storage URL. The
+shared `httpClient.ts` gains additive multipart (`FormData`, browser-set boundary,
+JSON result, no retry; append a File or a Blob with its explicit original filename,
+without text/JSON/base64 conversion) and authenticated binary download (`Blob` plus the
+`Content-Disposition` filename) capabilities. Existing JSON callers, session
+generation, abort handling and 401-only session clearing stay unchanged; 413 maps
+to `Content Too Large`; a network failure or 500 on upload is an unknown outcome
+that reloads the resource first. Grading echoes `submittedAt` as the exact string
+received, never through `Date`. Cross-origin development must expose `Content-Disposition`
+in CORS. The shared widget remains `shared/components/FileUploadField.tsx`: one
+file, PDF or PDF/ZIP requirement text, indeterminate progress, confirmation before
+replacement, Blob download through a revoked object URL, no token in any URL and
+nothing persisted. Implementation, CORS/multipart configuration, runtime grants and
+browser verification remain separate.

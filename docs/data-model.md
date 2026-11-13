@@ -680,3 +680,25 @@ Auto-submission records logical expiry as submitted_at and grades saved masks.
 See ADR007 §§4–13 for normative decisions, errors, concurrency and evidence schema.
 Its DTO status is derived, never a new persisted enum. Physical schema and prior
 approvals remain intact; no migration or application implementation is supplied.
+
+## Batch 5 file and assignment contract — no physical change
+
+[ADR010](decisions/010-batch-05-contract-approvals.md) uses the existing V002/V004
+columns unchanged. `object_key` holds a backend-generated `materials/{uuid}` or
+`submissions/{uuid}` key, never client text or a filename, and is never exposed.
+`original_filename` stores the validated client name verbatim; media type, size and
+checksum stay unstored and are re-derived or validated at upload (PDF materials;
+PDF or ZIP submissions). Objects are stored before the referencing row commits;
+a superseded object is deleted only after a confirmed commit and a new one only when
+the transaction provably did not commit; an unknown commit outcome keeps both.
+Orphans are tolerated, never served.
+
+`deadline_at` is an exclusive instant evaluated against server time sampled under
+the Assignment row lock. The single current Submission row per learner and
+assignment is updated in place on replacement (new key, filename and a strictly
+later `submitted_at`, which serves as the grade precondition token) while ungraded
+and before the deadline; clients echo it as an opaque string. Grade (0–100, at most two decimals), nonblank feedback
+and `graded_at` are written together; regrading replaces all three, and no grade
+history or ungrade exists. Manual grading never writes mastery or progress. No
+migration, column, index or retention policy is added; see ADR010 §§5 and 8–10
+for the normative rules.
