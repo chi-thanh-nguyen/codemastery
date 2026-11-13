@@ -1,6 +1,6 @@
 package com.codemastery.modules.auth.application.service;
 
-import com.codemastery.common.config.AppConfig.PasswordResetSettings;
+import com.codemastery.common.config.AppConfig.PasswordResetActivation;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.validation.StrongPassword;
 import com.codemastery.modules.auth.domain.model.AccountStatus;
@@ -39,7 +39,11 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/** Auth-owned request/reset use case. The queue acknowledges best-effort work only. */
+/**
+ * Auth-owned CT02 request/reset use case. The queue acknowledges best-effort work only.
+ * When recovery delivery is not configured (inactive), requests keep the identical 202
+ * acknowledgement but issue no capability and send nothing (ADR006 B2-O16).
+ */
 @Service
 @Validated
 public class PasswordResetService {
@@ -55,7 +59,7 @@ public class PasswordResetService {
 
     private final UserRepository users;
     private final TransactionTemplate transactions;
-    private final PasswordResetSettings settings;
+    private final PasswordResetActivation activation;
     private final ResetEmailDelivery delivery;
     private final Validator validator;
     private final Clock clock;
@@ -63,21 +67,22 @@ public class PasswordResetService {
     private final ThreadPoolExecutor ownedExecutor;
     private final Counter rejectedRequests;
     private final Counter processingFailures;
+    private final Counter inactiveRequests;
 
     @Autowired
     public PasswordResetService(UserRepository users,
                                PlatformTransactionManager transactionManager,
-                               PasswordResetSettings settings,
+                               PasswordResetActivation activation,
                                ResetEmailDelivery delivery,
                                Validator validator,
                                MeterRegistry meters) {
-        this(users, transactionManager, settings, delivery, validator, Clock.systemUTC(), newWorker(), meters);
+        this(users, transactionManager, activation, delivery, validator, Clock.systemUTC(), newWorker(), meters);
     }
 
     /** Explicit seams keep the time and queue deterministic in service tests. */
     public PasswordResetService(UserRepository users,
                                 PlatformTransactionManager transactionManager,
-                                PasswordResetSettings settings,
+                                PasswordResetActivation activation,
                                 ResetEmailDelivery delivery,
                                 Validator validator,
                                 Clock clock,
@@ -85,7 +90,7 @@ public class PasswordResetService {
                                 MeterRegistry meters) {
         this.users = users;
         this.transactions = new TransactionTemplate(transactionManager);
-        this.settings = settings;
+        this.activation = activation;
         this.delivery = delivery;
         this.validator = validator;
         this.clock = clock;
@@ -93,12 +98,18 @@ public class PasswordResetService {
         this.ownedExecutor = executor instanceof ThreadPoolExecutor pool ? pool : null;
         this.rejectedRequests = meters.counter("auth.password_reset.queue.rejected");
         this.processingFailures = meters.counter("auth.password_reset.processing.failures");
+        this.inactiveRequests = meters.counter("auth.password_reset.inactive");
     }
 
     /** Enqueues only the canonical email; account lookup, token work and mail stay off the HTTP path. */
     public RequestAcknowledgement requestReset(String canonicalEmail) {
         if (!validator.validate(new CanonicalEmail(canonicalEmail)).isEmpty()) {
             throw new BusinessRuleException("Invalid reset request.");
+        }
+        if (!activation.isActive()) {
+            // Same acknowledgement for every account; no lookup, capability or delivery.
+            inactiveRequests.increment();
+            return new RequestAcknowledgement(REQUEST_ACKNOWLEDGEMENT);
         }
         try {
             executor.execute(() -> processRequest(canonicalEmail));
@@ -115,15 +126,19 @@ public class PasswordResetService {
         }
         byte[] rawToken = decodeCanonicalToken(capability);
         byte[] digest = sha256(rawToken);
-        Instant now = clock.instant();
 
         transactions.executeWithoutResult(transaction -> {
             PasswordResetToken observed = users.findResetTokenByDigest(digest)
                     .orElseThrow(PasswordResetService::invalidResetLink);
             User account = users.findByIdForUpdate(observed.userId())
                     .orElseThrow(PasswordResetService::invalidResetLink);
-            PasswordResetToken locked = users.findResetTokenByDigestForUpdate(digest)
+            // Every capability write (issue/replace/consume) holds this User row lock, so a
+            // fresh read after acquiring it observes the latest committed capability state.
+            // No token row lock is needed (and none is granted to the runtime role).
+            PasswordResetToken locked = users.findResetTokenByDigest(digest)
                     .orElseThrow(PasswordResetService::invalidResetLink);
+            // Exact expiry is evaluated after the lock wait, not when the request arrived.
+            Instant now = clock.instant();
             if (!account.id().equals(locked.userId())
                     || !MessageDigest.isEqual(digest, locked.digest())
                     || account.accountStatus() != AccountStatus.ACTIVE
@@ -142,6 +157,7 @@ public class PasswordResetService {
 
     private void processRequest(String canonicalEmail) {
         try {
+            var settings = activation.requireSettings();
             ResetEmailMessage message = transactions.execute(status -> {
                 User account = users.findByEmailForUpdate(canonicalEmail).orElse(null);
                 if (account == null || account.accountStatus() != AccountStatus.ACTIVE) {
@@ -198,7 +214,7 @@ public class PasswordResetService {
     }
 
     private static BusinessRuleException invalidResetLink() {
-        return new BusinessRuleException(INVALID_RESET_LINK);
+        return BusinessRuleException.withPublicDetail("Invalid reset capability.", INVALID_RESET_LINK);
     }
 
     private static ThreadPoolExecutor newWorker() {

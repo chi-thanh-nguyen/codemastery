@@ -14,6 +14,7 @@ public interface UserRepository {
 
     User save(User user);
 
+    /** Locks the Auth User row; every reset-capability write happens under this lock. */
     Optional<User> findByEmailForUpdate(String email);
 
     Optional<User> findByIdForUpdate(UUID id);
@@ -21,8 +22,6 @@ public interface UserRepository {
     Optional<PasswordResetToken> findResetTokenByUserId(UUID userId);
 
     Optional<PasswordResetToken> findResetTokenByDigest(byte[] digest);
-
-    Optional<PasswordResetToken> findResetTokenByDigestForUpdate(byte[] digest);
 
     void replaceResetToken(UUID userId, byte[] digest, Instant issuedAt, Instant expiresAt);
 

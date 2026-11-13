@@ -95,7 +95,7 @@ public final class AuthRequests {
             throw new BusinessRuleException("Invalid reset request.");
         }
         try {
-            return new PasswordResetRequest(string(input, "email"));
+            return new PasswordResetRequest(required(string(input, "email")));
         } catch (IllegalArgumentException malformed) {
             throw new BusinessRuleException("Invalid reset request.");
         }
@@ -106,13 +106,20 @@ public final class AuthRequests {
         if (!Set.of("token", "password").containsAll(input.propertyNames())) {
             throw new BusinessRuleException("Invalid reset request.");
         }
-        String token = nullableString(input.get("token"));
         try {
-            String password = string(input, "password");
-            return new PasswordResetConfirmRequest(token, password);
+            // A missing/null token is a malformed capability (generic CT02 400 after the
+            // password predicate); a non-string token or password is closed-syntax 400.
+            return new PasswordResetConfirmRequest(string(input, "token"), required(string(input, "password")));
         } catch (IllegalArgumentException malformed) {
             throw new BusinessRuleException("Invalid reset request.");
         }
+    }
+
+    private static String required(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("Missing reset request field.");
+        }
+        return value;
     }
 
     private static JsonNode parseStrictObject(String json) {
@@ -144,10 +151,6 @@ public final class AuthRequests {
             throw new IllegalArgumentException("Invalid account request.");
         }
         return value.asString();
-    }
-
-    private static String nullableString(JsonNode value) {
-        return value != null && value.isString() ? value.asString() : null;
     }
 
     private static String canonicalEmail(String value) {

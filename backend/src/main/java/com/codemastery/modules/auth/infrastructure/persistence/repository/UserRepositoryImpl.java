@@ -72,12 +72,6 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
-    public Optional<PasswordResetToken> findResetTokenByDigestForUpdate(byte[] digest) {
-        return resetTokens("SELECT user_id, token_digest, issued_at, expires_at "
-                + "FROM public.password_reset_tokens WHERE token_digest = ? FOR UPDATE", digest);
-    }
-
-    @Override
     public void replaceResetToken(UUID userId, byte[] digest, Instant issuedAt, Instant expiresAt) {
         jdbc.update("DELETE FROM public.password_reset_tokens WHERE user_id = ?", userId);
         jdbc.update("INSERT INTO public.password_reset_tokens "

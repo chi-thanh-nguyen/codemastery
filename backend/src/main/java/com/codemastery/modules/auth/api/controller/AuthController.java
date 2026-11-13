@@ -57,7 +57,8 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(result);
     }
 
-    @PostMapping("/password-reset-requests")
+    /** CT02-REST: JSON-only public request; other media types are rejected with CT18 415. */
+    @PostMapping(path = "/password-reset-requests", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<PasswordResetAcknowledgement> requestPasswordReset(@RequestBody String json) {
         PasswordResetRequest request = AuthRequests.parsePasswordResetRequest(json);
         return ResponseEntity.accepted().cacheControl(CacheControl.noStore())
@@ -65,12 +66,12 @@ public class AuthController {
                         passwordResets.requestReset(request.email()).message()));
     }
 
-    @PostMapping("/password-resets")
+    /** CT02-REST: JSON-only public confirmation; never authenticates or issues a JWT. */
+    @PostMapping(path = "/password-resets", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<PasswordResetCompleted> confirmPasswordReset(@RequestBody String json) {
         PasswordResetConfirmRequest request = AuthRequests.parsePasswordResetConfirmRequest(json);
-        passwordResets.resetPassword(request.token(), request.password());
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                .body(new PasswordResetCompleted("Password reset. Sign in with your new password."));
+        String message = passwordResets.resetPassword(request.token(), request.password()).message();
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(new PasswordResetCompleted(message));
     }
 
     /** Also covers shared MVC advice responses before writing register error bodies. */
