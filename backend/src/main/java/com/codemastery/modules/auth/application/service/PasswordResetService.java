@@ -126,10 +126,14 @@ public class PasswordResetService {
         }
         byte[] rawToken = decodeCanonicalToken(capability);
         byte[] digest = sha256(rawToken);
+        // Resolve the digest privately before any work: an unknown, used or replaced capability
+        // costs no BCrypt hash. The cost-14 hash is then computed before the User row lock is
+        // taken, so the lock is held only for the re-read, checks and two writes.
+        PasswordResetToken observed = users.findResetTokenByDigest(digest)
+                .orElseThrow(PasswordResetService::invalidResetLink);
+        String passwordHash = PASSWORDS.encode(password);
 
         transactions.executeWithoutResult(transaction -> {
-            PasswordResetToken observed = users.findResetTokenByDigest(digest)
-                    .orElseThrow(PasswordResetService::invalidResetLink);
             User account = users.findByIdForUpdate(observed.userId())
                     .orElseThrow(PasswordResetService::invalidResetLink);
             // Every capability write (issue/replace/consume) holds this User row lock, so a
@@ -147,7 +151,7 @@ public class PasswordResetService {
                 throw invalidResetLink();
             }
 
-            users.updatePasswordHash(account.id(), PASSWORDS.encode(password));
+            users.updatePasswordHash(account.id(), passwordHash);
             if (!users.deleteResetToken(account.id(), digest)) {
                 throw invalidResetLink();
             }
