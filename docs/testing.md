@@ -52,7 +52,7 @@ verification is separate work.
 | Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency. Auth, Enrollment and sample-data suites dispatch through MockMvc with the configured Spring Security chain; the other suites do not (see [Integration-Test Lifecycle](#integration-test-lifecycle)) | A running server, real browser, network/CORS from a browser, deployment |
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
-| E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`lifecycle.test.mjs`, `run-inventory.test.mjs`, `stack-recovery.test.mjs`, `preview-control.test.mjs`, `local-stack.test.mjs`, `stack-down.test.mjs`); Python 3 (standard library only) and Node 22.18+ or 24; the coordinator tests use disposable fake checkouts and the real per-account registry, the recovery tests an injected fake Docker CLI, the other tests a stub `docker` on `PATH`, a stub Vite build entry point and a stub Vite preview module | No | CT34 r2: exclusive ownership taken and persisted before Playwright starts; same-checkout and path-alias conflicts refused without touching outputs; isolated checkouts concurrent; nonterminal or corrupt records block reuse; unsafe output roots refused; birth-identity process classification (PID reuse never signalled); cooperative preview shutdown over the private channel with no PID fallback; daemon pinning; interrupted-intent reconciliation; anonymous-volume inventory; verified temporary-path removal; bounded idempotent retry; readiness marker and backend diagnostics | Real Docker, Vite, browsers or the E2E flows themselves ([real-Docker record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)) |
+| E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`lifecycle.test.mjs`, `run-inventory.test.mjs`, `stack-recovery.test.mjs`, `preview-control.test.mjs`, `local-stack.test.mjs`, `stack-down.test.mjs`); Python 3 (standard library only) and Node 22.18+ or 24; the coordinator tests use disposable fake checkouts and the real per-account registry, the recovery tests an injected fake Docker CLI, the other tests a stub `docker` on `PATH`, a stub Vite build entry point and a stub Vite preview module | No | CT34 r2: exclusive ownership taken and persisted before Playwright starts; same-checkout and path-alias conflicts refused without touching outputs; isolated checkouts concurrent; nonterminal, corrupt, widened-mode or earlier-device-identity records block reuse; a stale or exported hand-down is refused; unsafe output roots refused; birth-identity process classification (PID reuse never signalled); cooperative preview shutdown over the private channel with no PID fallback; no build or Docker removal while a writer lives; endpoint-bound Docker calls and daemon-confirmed absence (a lost daemon socket is never absence; recorded states are re-verified); interrupted-intent reconciliation; volume associations and unaccounted volumes; verified temporary-path removal; bounded idempotent retry; readiness marker and backend diagnostics | Real Docker, Vite, browsers or the E2E flows themselves ([real-Docker record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)) |
 | Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
 | VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
@@ -317,7 +317,7 @@ npm run test:chromium            # chromium-desktop and chromium-mobile
 npm test -- --grep "<title>"     # extra Playwright arguments go after --
 npm run stack:down               # reconcile and recover an interrupted run (same lock and inventory)
 npm run report                   # open the last HTML report (read-only; needs no ownership)
-npm run lifecycle:inspect        # print this checkout's current run record (read-only)
+python3 fixtures/lifecycle.py inspect  # print this checkout's run record(s) (read-only)
 node --test fixtures/*.test.mjs  # lifecycle regression tests (no real Docker, Vite or browser)
 ```
 
@@ -332,20 +332,41 @@ Ownership is a nonblocking `flock` on a stable lock file in the private registry
 same lock and separate checkouts run concurrently. A second invocation of the same
 checkout exits 2 without starting anything; an unresolved previous run blocks a new one
 (exit 3) until `npm run stack:down` verifies its recovery; an unsafe registry, output
-root or filesystem is refused (exit 4). A direct `npx playwright test` is refused by
-`playwright.config.ts` before Playwright touches any output; `show-report`, `install`,
+root or filesystem (including one whose type cannot be determined) is refused (exit 4).
+A record left under an earlier device number of the same checkout (same path and inode;
+macOS can renumber an APFS volume at boot) also blocks a new run, and `npm run stack:down`
+reconciles it under its own lock first. A direct `npx playwright test` is refused by
+`playwright.config.ts` before Playwright touches any output, and so is one that merely
+carries exported lifecycle variables: the Playwright CLI must be the child of the
+coordinator named in this checkout's active run record. `show-report`, `install`,
 `--version` and `--help` remain available. The run inventory records every process with
-its OS birth identity, the pinned Docker endpoint, context and daemon ID, each creation
-intent before the resource exists, the observed container, network and anonymous-volume
-IDs, and the temporary build's identity and run marker; it never records credentials.
-Normal teardown, the coordinator's finalization after the runner exits and
+its OS birth identity (each writer is recorded before it is spawned), the pinned Docker
+endpoint, context and daemon ID, each creation intent before the resource exists
+(containers with a pending volume association), the observed container, network and
+anonymous-volume IDs, and the temporary build's identity and run marker; it never records
+credentials. Every Docker call of a run is bound to the pinned endpoint through
+`DOCKER_HOST`. Normal teardown, the coordinator's finalization after the runner exits and
 `npm run stack:down` all use the same engine (`fixtures/stack-recovery.mjs`): it stops an
 orphaned preview only by asking it over its private Unix-domain control channel (no PID
-is ever signalled), removes only resources the inventory proves are this run's, verifies
-each absence, preserves and reports anything live, foreign, unreadable or unaccounted
-(including pre-r2 resources that carry only a PID label), and exits nonzero until the run
-is complete. A run is complete only after the coordinator has also verified the runner's
-own exit.
+is ever signalled), touches neither the temporary build nor any Docker resource while a
+recorded writer is not verified as exited, counts a resource as absent only on Docker's
+own not-found answer from the recorded daemon (a lost daemon socket, a timeout or another
+daemon is inconclusive), re-inspects every recorded ID on every pass, removes only
+resources the inventory proves are this run's (a volume only when it was recorded from this
+run's container and Docker marks it anonymous), and exits nonzero until the run is
+complete. A container that vanished before its volume association was recorded leaves an
+unaccounted volume and an incomplete run. Resources of no current inventory (pre-r2
+PID-label leftovers, other accounts' runs) are reported, never removed, and do not block
+this run. A run is complete only after the coordinator has also verified the runner's own
+exit.
+
+An incomplete record that recovery cannot resolve (for example processes recorded in a
+previous boot, which need explicit reconciliation) stays in `~/.codemastery-e2e/runs/`.
+Inspect it with `python3 fixtures/lifecycle.py inspect`, reconcile the listed resources by
+hand, and only then move the record out of the registry. `E2E_PYTHON`, `E2E_VITE_BIN` and
+`E2E_VITE_MODULE` are test hooks used only by the fixture tests (an alternative Python, a
+stub Vite build entry point and a stub Vite preview module); they must not be set for a real
+run.
 
 `fixtures/local-stack.ts` (Playwright global setup) needs Docker. It builds
 `codemastery-e2e/backend:local` and `codemastery-e2e/postgres:local` from
@@ -3124,13 +3145,13 @@ approval or Final coverage acceptance.
 | ADR008 clause | Implementation |
 | --- | --- |
 | §10.2 exclusivity before runner entry | `fixtures/lifecycle.py run` takes the lock and writes the run record before it starts `playwright test`; `npm test` and `npm run test:chromium` go through it; `playwright.config.ts` refuses an unadmitted output-producing invocation at config load, before Playwright touches outputs |
-| §10.2 registry and lock | `~/.codemastery-e2e/` from `pwd.getpwuid(geteuid())` (not `HOME`), directories 0700, records and lock 0600, owner and symlink checks, `O_NOFOLLOW`; nonblocking `fcntl.flock` on a stable `locks/<dev>-<ino>.lock` that is never unlinked or replaced and is not inherited by children; a second-process probe verifies exclusion on the actual lock file; known network/shared filesystems are refused |
+| §10.2 registry and lock | `~/.codemastery-e2e/` from `pwd.getpwuid(geteuid())` (not `HOME`), directories 0700, records and lock 0600 (verified again on every read, by both the coordinator and the Node side), owner and symlink checks, `O_NOFOLLOW`; nonblocking `fcntl.flock` on a stable `locks/<dev>-<ino>.lock` that is never unlinked or replaced and is not inherited by children; a second-process probe verifies exclusion on the actual lock file; known network/shared filesystems, and filesystems whose type cannot be determined, are refused; the checkout is derived only from the coordinator's own resolved location |
 | §10.2 output roots | The three roots are inspected component by component without following symlinks; overlap, hard-link sharing and identities already claimed by another checkout's nonterminal record are refused |
-| §10.2 admission | Conflict exits 2 without starting anything; a nonterminal or unreadable record exits 3 until recovery completes; a completed record is archived to `archive/<key>.last.json` without deleting outputs or resources |
+| §10.2 admission | Conflict exits 2 without starting anything; a nonterminal or unreadable record exits 3 until recovery completes, including one recorded under an earlier device number of the same checkout path and inode; a completed record is archived to `archive/<key>.last.json` without deleting outputs or resources; the Playwright configuration and `stack-down.mjs` accept only a process whose parent is the recorded coordinator |
 | §10.3 inventory | `fixtures/run-inventory.mjs` and the coordinator write one bounded (256 KiB, 128 intents), versioned record per checkout key with same-directory atomic replacement and file/directory `fsync`; intents are written before each resource is created and carry the observed ID afterwards; no credentials, tokens, environment or commands are stored |
-| §10.3 process identity | Linux `/proc/<pid>/stat` start ticks with boot ID and PID namespace; macOS kernel `kinfo_proc` start time (microseconds) with `kern.boottime`; supervisor, runner, builder and preview are recorded; Vite is started from its resolved entry point, not through `npx`, so the recorded PID is the real writer |
+| §10.3 process identity | Linux `/proc/<pid>/stat` start ticks with boot ID and PID namespace; macOS kernel `kinfo_proc` start time (microseconds) with `kern.boottime`; the host is the OS machine identity (macOS host UUID, Linux machine-id), not the network-assigned hostname; supervisor, runner, builder and preview are recorded, the builder and preview before they are spawned; Vite is started from its resolved entry point, not through `npx`, so the recorded PID is the real writer |
 | §10.3 preview recovery | `fixtures/preview-server.mjs` hosts the build through the pinned Vite preview API and listens on `sockets/<runId>.sock` (0600); it closes its own server only for its own run ID and birth identity; no recovered PID is signalled; an unavailable channel preserves the process |
-| §10.3 Docker | Endpoint, context and daemon ID are pinned at setup and re-verified before cleanup; only Unix-socket/pipe contexts are accepted; removal targets recorded IDs corroborated by the run labels; pending intents are reconciled by exact run label and name; anonymous volumes are recorded from the owned container's mounts before it is removed; named volumes and bind mounts are refused; every action is followed by re-inspection with bounded retry; unaccounted labelled resources (including pre-r2 PID-only ones) are reported, never removed; no prune is issued |
+| §10.3 Docker | Endpoint, context and daemon ID are pinned at setup; every later Docker call is bound to that endpoint (`DOCKER_HOST`); the client context and daemon ID are re-verified before cleanup, behind every not-found verdict and before completion; only Unix-socket/pipe contexts are accepted; absence is only Docker's own not-found answer for the exact ID; removal targets recorded IDs corroborated by the run labels, and recorded `removed`/`absent` states are re-verified on every pass; pending intents are reconciled by exact run label and name; each container's volume association is a pending intent until its own mounts are recorded, and a vanished container leaves an unaccounted volume; a volume is removed only when it is exclusive to this run's container and Docker labels it anonymous; named volumes and bind mounts are refused; nothing Docker-side is touched while a writer is unresolved; resources of no current inventory (including pre-r2 PID-only ones) are reported, never removed, and do not block this run; no prune is issued |
 | §10.3 completion | One engine (`fixtures/stack-recovery.mjs`) serves teardown, the coordinator's finalization and `npm run stack:down`; the temporary build is removed only after its parent, owner, device/inode and run marker are verified; the run becomes `complete` only after the coordinator has verified the runner's own exit; otherwise it stays nonterminal and the command exits nonzero |
 
 The image cache tag is now per checkout (`codemastery-e2e/<component>:co-<dev>-<ino>`)
@@ -3141,6 +3162,10 @@ shared across checkouts let one checkout's concurrent build delete another run's
 exact image before it started. Existing `:local` tags are left untouched.
 
 ### Executed verification
+
+The results in this subsection were executed before the independent review, at the
+heads `626e9f5`/`47f6f85`; the remediation record below holds the verification of the
+current head.
 
 Host: macOS 27.2 (arm64), Python 3.9.6, Node 24.21.0, npm 11.19.0, Docker Desktop
 29.8.1 (containerd image store), Playwright 1.63.0 with Chromium 153.0.8010.12
@@ -3194,3 +3219,53 @@ cache-tag race above; and control socket files left after a preview closed itsel
   preserved for operator reconciliation.
 - QA08 independent verification, CODEOWNER review and protected integration remain
   separate gates. CT19/CT35/CT20.F Final coverage is not addressed.
+
+### Independent review remediation — 13 November 2026
+
+An independent review of head `47f6f85` reported three blocking findings, all reproduced
+before they were fixed:
+
+| Finding | Reproduction at `47f6f85` | Fix |
+| --- | --- | --- |
+| P1-1 false Docker absence | The absence pattern accepted any `no such`, so Docker's real `failed to connect … connect: no such file or directory` was read as absence; a later pass trusted the persisted `absent` states and recorded `complete` while the container and network still existed. Docker calls were not bound to the pinned endpoint | Every Docker call is bound to the recorded endpoint; only Docker's not-found answer for the exact ID counts, and only after the endpoint is confirmed to reach the recorded daemon; recorded states are re-verified on every pass; the daemon is re-identified before completion |
+| P1-2 volume association gap | A container recorded with its ID, then gone before its anonymous volume was recorded, produced `complete`; the setup swallowed a failed mount inspection as "no volume" | Container intents carry a pending volume association written before creation and resolved from the container's own mounts; a failed inspection is an error; a vanished container leaves an unaccounted volume and an incomplete run; a volume is removed only when Docker labels it anonymous |
+| P1-3 device renumbering | After a reboot this host's APFS volume moved from device 16777230 to 16777231 (same checkout inode), so a crafted incomplete record under the earlier key no longer blocked the checkout and `stack:down` reported success | A nonterminal record with the same canonical path and inode under another device number blocks admission (exit 3); `stack:down` reconciles it under its own lock first; a different path or inode is never associated |
+
+The review's P2-5 (Docker cleanup while a writer is alive) was reclassified as blocking:
+with only the coordinator killed, `stack:down` removed the containers of a runner that was
+still executing tests. The engine now preserves the temporary build and every Docker
+resource while any recorded writer is not verified as exited. Confirmed CT34 r2 deviations
+among the other P2 findings were also fixed: a verified (not merely present) hand-down in
+`playwright.config.ts` and `stack-down.mjs`, and removal of the checkout-override variable;
+pre-r2 and other-account resources no longer block every checkout's completion; record mode,
+symlink and structure validation on read, and temporary-path name ancestry; writer records
+before spawn; machine identity instead of hostname; refusal of an undeterminable filesystem
+type and `F_FULLFSYNC` for the coordinator's writes on macOS; a stale header comment; and the
+new `lifecycle:inspect` npm script was withdrawn (the coordinator's `inspect` mode remains).
+
+`node --test fixtures/*.test.mjs` (from `e2e/`): **PASS 111/111** (stub scenarios: fake
+Docker using Docker 29.8.1's real error texts, stub Vite, real coordinator, processes and
+sockets; not Docker integration evidence). Real Docker, Vite and Chromium on the same macOS host
+(Docker Desktop 29.8.1), from a temporary worktree and a second isolated worktree, with
+`E2E_BASE_URL`, `E2E_API_URL`, `E2E_BACKEND_IMAGE` and `E2E_POSTGRES_IMAGE` cleared except
+where stated:
+
+| Scenario | Observed result |
+| --- | --- |
+| Normal run (`npm run test:chromium`) | 27 passed, 1 skipped (the suite's API-only case); 2 containers, 1 anonymous volume, 1 network and the build removed and verified; record `complete`; exit 0; worker processes loaded the guarded configuration |
+| Same checkout while a run is active | Second `npm test` exit 2; nothing started |
+| Coordinator alone `SIGKILL`ed mid-test, runner still running | `stack:down` exit 1: runner preserved by birth identity, preview stopped over its channel, build and all Docker resources preserved; `npm test` exit 3; after the runner ended, its own teardown removed everything and the next `stack:down` completed (exit 0) |
+| Coordinator and runner `SIGKILL`ed mid-test | Record stayed `active`; `npm test` exit 3; `stack:down` with `DOCKER_CONTEXT=default` (whose socket does not exist on this host) got Docker's real `connect: no such file or directory` and preserved all four resources (exit 1); `stack:down` on the recorded context then removed them with verified absence (exit 0); no preview process or socket left |
+| `SIGINT` to the coordinator during setup | The runner abandoned setup; finalization adopted the backend container from its creation intent, recorded its volume association and removed everything; record `complete` |
+| `SIGINT` to the coordinator during tests | Forwarded; the runner's teardown removed everything; finalization verified the runner's exit; record `complete` |
+| Setup failure (`E2E_BACKEND_IMAGE` set to an existing image that exits at once) | Exit 1 with the backend failure and its diagnostics; every resource removed and verified; record `complete` |
+| Deliberate assertion failure (temporary spec, removed afterwards) | Exit 1, `1 failed`; cleanup complete |
+| Two isolated checkouts concurrently | Distinct lock keys, run IDs, containers, volumes and networks; both `27 passed`; both complete; neither blocked the other |
+| After all runs | Containers, volumes and networks identical to the baseline taken before the first run |
+
+Not executed: Ubuntu (the Linux identity, machine-id and filesystem paths run first in the
+stacked SH07 job), real PID reuse, a real daemon outage during cleanup (represented by the
+real error text in failure injection and by the drifted-context run), a real reboot with an
+incomplete run (represented by a crafted record with the observed device renumbering),
+`firefox-desktop` and WebKit (not part of these runs), and external mode. Processes recorded
+in a previous boot remain preserved for explicit operator reconciliation, as §10.3 requires.
