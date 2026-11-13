@@ -1332,15 +1332,16 @@ SQL
   printf '%s\n' "${sql//@APP@/${app}}" | sed "s/@MIG@/${mig}/g"
 }
 
-# CT17-P6-PRIVILEGES-2026-10-28-r1 (docs/deployment.md): the complete runtime
-# privilege matrix for the reviewed V001-V006 schema. Every relation in schema
+# CT17-P6-PRIVILEGES-2026-10-28-r1 (docs/deployment.md), with the AU07 rows of the
+# PROPOSED CT17-P6-PRIVILEGES-2026-11-13-r2 (pending Leader approval): the complete
+# runtime privilege matrix for the reviewed V001-V007 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
 # cannot silently widen a table-level grant. Nothing is granted to future objects.
 # Change a row only together with that record and an implemented, approved consumer.
 # Fields: relation, table privileges, column privileges (PRIV(col,...) joined by
 # '+'), reviewed columns ('*' = Flyway-managed, not pinned); '-' means none.
 RUNTIME_PRIVILEGE_MATRIX='
-users                    SELECT,INSERT  -                                        id,email,password_hash,display_name,role,account_status
+users                    SELECT,INSERT  UPDATE(password_hash)                    id,email,password_hash,display_name,role,account_status
 courses                  SELECT         UPDATE(id)                               id,instructor_id,title,description,prerequisite_description,publication_status,adaptive_enabled,adaptive_settings
 chapters                 SELECT         -                                        id,course_id,title,position
 lessons                  SELECT         -                                        id,chapter_id,title,content_markdown,position,publication_status
@@ -1363,6 +1364,7 @@ discussion_posts         -              -                                       
 notifications            -              -                                        id,user_id,message,is_read,created_at
 content_reports          -              -                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at
 audit_logs               -              -                                        id,actor_id,action,target_type,target_reference,occurred_at
+password_reset_tokens    SELECT,INSERT,DELETE -                                  id,user_id,token_digest,issued_at,expires_at
 flyway_schema_history    -              -                                        *
 '
 
@@ -1519,10 +1521,10 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
     || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
   if [[ -n "${violations}" ]]; then
     printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
-    fail "Runtime database privileges or objects differ from the approved matrix (CT17-P6-PRIVILEGES-2026-10-28-r1); reconcile explicitly. Ingress remains closed."
+    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07 rows); reconcile explicitly. Ingress remains closed."
   fi
   if [[ "${mode}" == "complete" ]]; then
-    DB_GRANTS_RESULT="exact CT17-P6-PRIVILEGES-2026-10-28-r1 matrix verified (every public relation reviewed)"
+    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07 rows) verified (every public relation reviewed)"
   fi
   log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
 }
@@ -1553,7 +1555,9 @@ ROLLBACK;
 SQL
   expect_denied  "runtime role reading Flyway history" 42501 "${app}" "${app_pw}" <<<'SELECT 1 FROM public.flyway_schema_history LIMIT 1;'
   # Behavioral probes complement the exact ACL comparison below; none touches a row.
-  expect_denied  "runtime role changing account roles or credentials" 42501 "${app}" "${app_pw}" <<<'UPDATE public.users SET role = role WHERE false;'
+  expect_denied  "runtime role changing account roles" 42501 "${app}" "${app_pw}" <<<'UPDATE public.users SET role = role WHERE false;'
+  expect_denied  "runtime role changing account email or status" 42501 "${app}" "${app_pw}" <<<'UPDATE public.users SET email = email, account_status = account_status WHERE false;'
+  expect_denied  "runtime role rewriting reset-capability expiry" 42501 "${app}" "${app_pw}" <<<'UPDATE public.password_reset_tokens SET expires_at = expires_at WHERE false;'
   expect_denied  "runtime role changing Course publication" 42501 "${app}" "${app_pw}" <<<'UPDATE public.courses SET publication_status = publication_status WHERE false;'
   expect_denied  "runtime role deleting memberships" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.enrollments WHERE false;'
   expect_denied  "runtime role reading question answer keys" 42501 "${app}" "${app_pw}" <<<'SELECT correct_options FROM public.questions WHERE false;'

@@ -1,3 +1,6 @@
+-- AU07 / CT02-TOKEN-2026-11-09-r1: Auth-owned reset capability digests (ADR006 9.2).
+-- Runtime privileges are provisioned by the CT17 matrix, never by migrations.
+
 CREATE TABLE public.password_reset_tokens (
     id uuid NOT NULL,
     user_id uuid NOT NULL,
@@ -13,7 +16,3 @@ CREATE TABLE public.password_reset_tokens (
     CONSTRAINT ck_password_reset_tokens_digest CHECK (octet_length(token_digest) = 32),
     CONSTRAINT ck_password_reset_tokens_expiry CHECK (expires_at > issued_at)
 );
-
-GRANT SELECT, INSERT, UPDATE, DELETE
-    ON TABLE public.password_reset_tokens
-    TO ${runtime-role};

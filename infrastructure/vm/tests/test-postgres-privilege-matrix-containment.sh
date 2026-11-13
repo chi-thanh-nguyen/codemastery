@@ -88,7 +88,8 @@ for f in "$MIGRATIONS"/V*.sql; do
   { printf 'BEGIN;\n'; cat "$f"; printf "INSERT INTO public.flyway_schema_history VALUES (%d,'%d','m','SQL','%s',0,current_user,now(),1,true);\nCOMMIT;\n" "$n" "$n" "${f##*/}"; } | as_mig >/dev/null
 done
 echo "  applied $n migrations"
-expect_failure "migrated tables before hardening (no runtime grants yet)" "column privilege SELECT on public.courses.title: expected true" verify_runtime_privileges complete
+# The violation report is sorted and capped at 25 lines; assert an early, stable entry.
+expect_failure "migrated tables before hardening (no runtime grants yet)" "column privilege INSERT on public.users.email: expected true" verify_runtime_privileges complete
 harden_after_migration
 verify_role_separation >/dev/null
 echo "  verify_role_separation: PASS (exact matrix)"
@@ -108,9 +109,17 @@ probe "courses/chapters/lessons: catalogue and syllabus"     ok "SELECT * FROM p
 probe "courses: membership row lock (FOR UPDATE)"            ok "SELECT id FROM public.courses WHERE publication_status='published' FOR UPDATE;"
 probe "learning_materials: access-snapshot columns"          ok "SELECT m.id, m.publication_status FROM public.learning_materials m WHERE m.lesson_id IS NOT NULL;"
 probe "enrollments: SELECT/INSERT/UPDATE status"             ok "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c1','active',NULL); UPDATE public.enrollments SET status='left' WHERE id='00000000-0000-0000-0000-0000000000b1'; SELECT * FROM public.enrollments;"
+probe "users: AU07 User-first row lock (FOR UPDATE)"        ok "SELECT id FROM public.users WHERE email='instructor@example.test' FOR UPDATE;"
+probe "users: AU07 reset password-hash update"               ok "UPDATE public.users SET password_hash='x' WHERE email='instructor@example.test';"
+probe "password_reset_tokens: issue, re-read and consume"    ok "INSERT INTO public.password_reset_tokens VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000a1',decode(repeat('ab',32),'hex'),now(),now()+interval '30 minutes'); SELECT user_id, token_digest, issued_at, expires_at FROM public.password_reset_tokens WHERE token_digest=decode(repeat('ab',32),'hex'); DELETE FROM public.password_reset_tokens WHERE user_id='00000000-0000-0000-0000-0000000000a1' AND token_digest=decode(repeat('ab',32),'hex');"
 echo "== everything else is denied"
 probe "users: change role"                                   42501 "UPDATE public.users SET role='admin';"
-probe "users: overwrite password hash"                       42501 "UPDATE public.users SET password_hash='x';"
+probe "users: change email"                                  42501 "UPDATE public.users SET email='x@example.test';"
+probe "users: change account status"                         42501 "UPDATE public.users SET account_status='active';"
+probe "users: change display name"                           42501 "UPDATE public.users SET display_name='x';"
+probe "password_reset_tokens: rewrite expiry or digest"      42501 "UPDATE public.password_reset_tokens SET expires_at=expires_at;"
+probe "password_reset_tokens: row lock (no UPDATE granted)"  42501 "SELECT id FROM public.password_reset_tokens FOR UPDATE;"
+probe "password_reset_tokens: TRUNCATE"                      42501 "TRUNCATE public.password_reset_tokens;"
 probe "users: delete"                                        42501 "DELETE FROM public.users;"
 probe "courses: change publication"                          42501 "UPDATE public.courses SET publication_status='hidden';"
 probe "courses: change instructor ownership"                 42501 "UPDATE public.courses SET instructor_id=instructor_id;"

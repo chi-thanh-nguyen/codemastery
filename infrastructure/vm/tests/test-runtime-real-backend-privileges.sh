@@ -93,7 +93,7 @@ for _ in $(seq 1 180); do
 done
 # One last read after the final sleep, so a marker logged during it still counts.
 [[ "$started" == yes ]] || backend_started || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
-check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "6/6 $(env_get SPRING_FLYWAY_USER)"
+check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "7/7 $(env_get SPRING_FLYWAY_USER)"
 harden_after_migration
 verify_role_separation >/dev/null
 echo "  verify_role_separation: PASS (exact matrix on the real Flyway schema)"
@@ -185,10 +185,29 @@ psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE 
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
 call POST /api/auth/login "" "{\"email\":\"learner.c@example.test\",\"password\":\"$password\"}"; check "locked account cannot log in" "$STATUS" 401
 
+echo "== AU07 recovery under the runtime role (users UPDATE(password_hash) + row lock; tokens SELECT/INSERT/DELETE)"
+call POST /api/auth/password-reset-requests "" '{"email":"learner.b@example.test"}'
+check "unconfigured recovery still acknowledges with the generic 202" "$STATUS" 202
+check "unconfigured recovery issues no capability" "$(psql_admin <<<"SELECT count(*) FROM public.password_reset_tokens;")" 0
+# The bootstrap administrator stands in for the (inactive) request worker; the capability
+# is generated here, and only its SHA-256 digest is stored, exactly as the worker does.
+read -r capability digest < <(python3 -c 'import base64,hashlib,os; b=os.urandom(32); print(base64.urlsafe_b64encode(b).rstrip(b"=").decode(), hashlib.sha256(b).hexdigest())')
+psql_admin >/dev/null <<<"INSERT INTO public.password_reset_tokens SELECT gen_random_uuid(), id, decode('$digest','hex'), now() - interval '1 minute', now() + interval '29 minutes' FROM public.users WHERE email='learner.b@example.test';"
+new_password='Reset-Horse-Battery-2026'
+call POST /api/auth/password-resets "" "{\"token\":\"$capability\",\"password\":\"$new_password\"}"
+check "reset confirmation commits under the runtime role" "$STATUS" 200
+check "capability consumed in the same transaction" "$(psql_admin <<<"SELECT count(*) FROM public.password_reset_tokens;")" 0
+call POST /api/auth/password-resets "" "{\"token\":\"$capability\",\"password\":\"$new_password\"}"
+check "reused capability is rejected" "$STATUS" 400
+call POST /api/auth/login "" "{\"email\":\"learner.b@example.test\",\"password\":\"$password\"}"
+check "old password no longer signs in" "$STATUS" 401
+call POST /api/auth/login "" "{\"email\":\"learner.b@example.test\",\"password\":\"$new_password\"}"
+check "new password signs in (ordinary sign-in, no JWT from reset)" "$STATUS" 200
+
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, catalogue/detail and CT22 membership under the approved matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, AU07 reset confirmation, catalogue/detail and CT22 membership under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \
