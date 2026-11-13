@@ -60,7 +60,7 @@ function stackDown({ resources = {}, intents = [], daemonId = 'D1', recorded = t
     if (recorded) {
         writeInventory(record, {
             schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-cli', state: 'incomplete',
-            ownerUid: process.getuid(), host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
+            ownerUid: process.getuid(), lockKey: 'k-cli', host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
             processes: {}, temp: null, outputs: [], observations: [], intents,
             docker: { context: 'stub-context', endpoint: 'unix:///var/run/docker.sock', daemonId: 'D1' },
         });
@@ -70,6 +70,8 @@ function stackDown({ resources = {}, intents = [], daemonId = 'D1', recorded = t
     if (inventory) env.CODEMASTERY_E2E_INVENTORY = record; else delete env.CODEMASTERY_E2E_INVENTORY;
     // This test process plays the coordinator that starts stack-down.mjs directly.
     if (supervisor) env.CODEMASTERY_E2E_SUPERVISOR = supervisor; else delete env.CODEMASTERY_E2E_SUPERVISOR;
+    // The rest of the hand-down the coordinator gives stack-down.mjs.
+    Object.assign(env, { CODEMASTERY_E2E_RUN_ID: 'cm-e2e-cli', CODEMASTERY_E2E_LOCK_KEY: 'k-cli' });
     const result = spawnSync(process.execPath, [script, '--reason', 'test'], { encoding: 'utf8', env, timeout: 60_000 });
     return { ...result, calls: readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean), record: recorded ? readInventory(record) : null };
 }

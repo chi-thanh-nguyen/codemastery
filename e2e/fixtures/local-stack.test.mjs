@@ -14,8 +14,8 @@ import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import globalSetup, { buildMarker, cacheTag, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
-import { hostIdentity } from './host-identity.mjs';
+import globalSetup, { buildMarker, cacheTag, confirmRecordedRunner, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
+import { hostIdentity, processIdentity } from './host-identity.mjs';
 import { readInventory, writeInventory } from './run-inventory.mjs';
 
 // Stateful stub docker: resources live in STUB_DIR/resources.json and every call is appended to STUB_DIR/calls.log.
@@ -200,18 +200,22 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
     });
 
     /** The record the lifecycle coordinator would have written before starting Playwright. */
-    function admit() {
+    function admit(runnerPatch = {}) {
         const host = hostIdentity(), inventory = join(stub, 'run.json');
         writeInventory(inventory, {
             schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-ls', state: 'active',
             ownerUid: process.getuid(), lockKey: 'stub', host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
-            // The coordinator is this runner's parent, exactly as when lifecycle.py starts Playwright.
-            processes: { supervisor: { pid: process.ppid, birth: null, role: 'coordinator', state: 'live' } },
+            // The coordinator is this runner's parent, exactly as when lifecycle.py starts Playwright, and it
+            // has already recorded this process as the runner (intent before the spawn, identity after it).
+            processes: {
+                supervisor: { pid: process.ppid, birth: null, role: 'coordinator', state: 'live' },
+                runner: { pid: process.pid, birth: processIdentity(process.pid).birth, birthSource: 'test', role: 'playwright-runner', state: 'live', ...runnerPatch },
+            },
             checkout: { path: stub, dev: 0, ino: 0 }, outputs: [], docker: null, temp: null, intents: [], observations: [],
         });
         Object.assign(process.env, {
             CODEMASTERY_E2E_INVENTORY: inventory, CODEMASTERY_E2E_RUN_ID: 'cm-e2e-ls', CODEMASTERY_E2E_SOCKETS: stub,
-            CODEMASTERY_E2E_LOCK_KEY: 'stub', E2E_VITE_BIN: join(stub, 'vite.cjs'), E2E_VITE_MODULE: join(stub, 'vite-preview.mjs'),
+            CODEMASTERY_E2E_LOCK_KEY: 'stub', CODEMASTERY_E2E_SUPERVISOR: String(process.ppid), E2E_VITE_BIN: join(stub, 'vite.cjs'), E2E_VITE_MODULE: join(stub, 'vite-preview.mjs'),
         });
         delete process.env.CODEMASTERY_E2E_REGISTRY;
         return inventory;
@@ -308,6 +312,38 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
         assert.equal(postgres.volumes, 'recorded', 'recovery read the association from the container itself');
         assert.equal(record.intents.find((intent) => intent.kind === 'volume')?.state, 'removed');
         assert.ok(calls().indexOf('rm -f ctr-cm-e2e-ls-postgres') < calls().indexOf(`volume rm ${ANON}`));
+    });
+    test('a process the coordinator did not record as the runner creates nothing', async () => {
+        admit({ pid: 999_999, birth: 'x-starttime:1' });
+        await assert.rejects(globalSetup(), /The run record names runner 999999, not this process/);
+        assert.deepEqual(calls(), [], 'no Docker call was made');
+        assert.equal(readInventory(join(stub, 'run.json')).intents.length, 0, 'nothing was recorded');
+    });
+    test('a runner whose coordinator is gone (it was reparented) creates and writes nothing', async () => {
+        const inventory = admit();
+        process.env.CODEMASTERY_E2E_SUPERVISOR = '1';
+        try {
+            await assert.rejects(globalSetup(), /no longer acts for its lifecycle coordinator .* is no longer this process' parent/);
+        } finally {
+            process.env.CODEMASTERY_E2E_SUPERVISOR = String(process.ppid);
+        }
+        assert.deepEqual(calls(), [], 'no Docker call was made');
+        const record = readInventory(inventory);
+        assert.equal(record.docker, null, 'the record was not changed');
+        assert.equal(record.temp, null);
+    });
+    test('global setup waits for the coordinator to record the runner\'s identity after the spawn', async () => {
+        const inventory = admit({ pid: null, birth: null, state: 'starting' });
+        // The coordinator persists the PID and birth identity right after the spawn.
+        setTimeout(() => {
+            const record = readInventory(inventory);
+            record.processes.runner = { ...record.processes.runner, pid: process.pid, birth: processIdentity(process.pid).birth, state: 'live' };
+            writeInventory(inventory, record);
+        }, 300);
+        const runner = await confirmRecordedRunner(inventory, { timeoutMs: 5000, intervalMs: 50 });
+        assert.equal(runner.pid, process.pid);
+        await assert.rejects(confirmRecordedRunner(admit({ pid: null, birth: null, state: 'starting' }), { timeoutMs: 300, intervalMs: 50 }),
+            /did not record this runner's identity in time/);
     });
     test('a runner that was not admitted by the coordinator creates nothing', async () => {
         delete process.env.CODEMASTERY_E2E_INVENTORY;

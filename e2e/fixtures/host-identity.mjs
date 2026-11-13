@@ -37,6 +37,18 @@ export function processIdentity(pid) {
     return reply;
 }
 
+/**
+ * `{reliable, members:[{pid, birth}]}`: the live (non-zombie) members of one process group, read from
+ * the OS without signalling anything. `reliable:false` means the group could not be inspected, which
+ * is never proof that it is empty.
+ */
+export function processGroup(pgid) {
+    if (!Number.isInteger(pgid) || pgid <= 1) return { pgid, reliable: false, members: [], detail: 'invalid process-group ID' };
+    const reply = ask(['proc-group', String(pgid)]);
+    if (reply.error) return { pgid, reliable: false, members: [], detail: reply.error };
+    return { pgid, reliable: reply.reliable === true, members: Array.isArray(reply.members) ? reply.members : [], detail: reply.detail };
+}
+
 export function hostIdentity() {
     const reply = ask(['host-identity']);
     if (reply.error) return { system: process.platform, hostname: null, machine: null, boot: null, pidNamespace: null, uid: process.getuid(), detail: reply.error };

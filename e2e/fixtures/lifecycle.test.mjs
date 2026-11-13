@@ -18,7 +18,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const launcher = join(here, 'lifecycle.py');
@@ -97,11 +97,20 @@ describe('ownership is taken and persisted before the runner is entered', () => 
     test('the admitted runner already sees an active record naming its own run and output roots', () => {
         const checkout = fakeCheckout('admit');
         const probe = 'const fs=require("node:fs");const r=JSON.parse(fs.readFileSync(process.env.CODEMASTERY_E2E_INVENTORY,"utf8"));'
-            + 'console.log(JSON.stringify({state:r.state,runId:r.runId,outputs:r.outputs.length,token:process.env.CODEMASTERY_E2E_OWNERSHIP,same:r.runId===process.env.CODEMASTERY_E2E_RUN_ID}));';
-        const result = coordinate(checkout, ['run', '--', process.execPath, '-e', probe]);
+            + 'console.log(JSON.stringify({state:r.state,runId:r.runId,outputs:r.outputs.length,token:process.env.CODEMASTERY_E2E_OWNERSHIP,same:r.runId===process.env.CODEMASTERY_E2E_RUN_ID,'
+            + 'runner:r.processes.runner||null,pid:process.pid,hooks:[process.env.E2E_VITE_BIN,process.env.E2E_VITE_MODULE].filter(Boolean).length}));';
+        const result = coordinate(checkout, ['run', '--', process.execPath, '-e', probe], { E2E_VITE_BIN: '/nowhere/vite.js', E2E_VITE_MODULE: '/nowhere/vite.mjs' });
         assert.equal(result.status, EXIT.ok, result.stderr);
         const seen = JSON.parse(result.stdout.split('\n').find((line) => line.startsWith('{')));
         assert.equal(seen.state, 'active', 'the record is already persisted when the runner starts');
+        assert.equal(seen.runner?.role, 'playwright-runner', 'the runner\'s creation intent was durable before it was spawned');
+        assert.equal(seen.hooks, 0, 'fixture-test hooks are never handed to a coordinated run');
+        const runner = readRecord(checkout.key).processes.runner;
+        assert.equal(runner.pid, seen.pid, 'the coordinator recorded the PID of the process it spawned');
+        assert.match(runner.birth, /^(linux|darwin)-starttime:/, 'with its OS birth identity');
+        assert.equal(runner.group, seen.pid, 'the runner leads its own process group');
+        assert.equal(runner.state, 'exited');
+        assert.equal(runner.groupState, 'empty');
         assert.equal(seen.outputs, 3, 'all three CP-029 output roots are owned');
         assert.equal(seen.same, true);
         assert.equal(seen.token, `${checkout.key}:${seen.runId}`);
@@ -337,9 +346,11 @@ describe('unsafe checkouts and output roots are refused before anything starts',
     test('an output root already claimed by another checkout\'s active run is refused', () => {
         const victim = fakeCheckout('claimed'), other = fakeCheckout('claimant');
         const artifacts = lstatSync(join(victim.root, 'test-results', 'artifacts'));
+        const otherInfo = lstatSync(other.root);
         writeFileSync(recordFile(other.key), JSON.stringify({
-            schema: 'codemastery-e2e-inventory/1', runId: 'cm-e2e-claimant', state: 'active',
-            ownerUid: process.getuid(), intents: [],
+            schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-claimant', state: 'active',
+            ownerUid: process.getuid(), lockKey: other.key, checkout: { path: other.root, dev: otherInfo.dev, ino: otherInfo.ino },
+            processes: {}, intents: [], docker: null, temp: null, observations: [],
             outputs: [{ path: join(other.root, 'test-results', 'artifacts'), dev: artifacts.dev, ino: artifacts.ino, kind: 'directory' }],
         }), { mode: 0o600 });
         const result = coordinate(victim, ['run', '--', '/bin/echo', 'no']);
@@ -372,6 +383,9 @@ describe('an obligation recorded under an earlier device identity of the same ch
     // canonical path and inode, the previous device number, and its own lock key.
     const earlier = (checkout, patch = {}) => {
         const info = lstatSync(checkout.root);
+        // What the coordinator always writes: its own entry and the runner it started, both long gone.
+        const gone = () => spawnSync(process.execPath, ['-e', '']).pid;
+        const runnerPid = gone();
         const key = `${info.dev - 1}-${info.ino}`;
         extraKeys.push(key);
         const host = JSON.parse(spawnSync(python, [launcher, 'host-identity'], { encoding: 'utf8' }).stdout);
@@ -379,7 +393,11 @@ describe('an obligation recorded under an earlier device identity of the same ch
             schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-before-reboot',
             state: 'incomplete', ownerUid: process.getuid(), lockKey: key,
             host: { hostname: host.hostname, machine: host.machine, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
-            checkout: { path: checkout.root, dev: info.dev - 1, ino: info.ino }, outputs: [], processes: {}, docker: null,
+            checkout: { path: checkout.root, dev: info.dev - 1, ino: info.ino }, outputs: [], docker: null,
+            processes: {
+                supervisor: { pid: gone(), birth: 'x-starttime:1', birthSource: 'test', role: 'coordinator', state: 'live' },
+                runner: { pid: runnerPid, birth: 'x-starttime:2', birthSource: 'test', role: 'playwright-runner', state: 'live', group: runnerPid },
+            },
             temp: null, intents: [], observations: [], ...patch,
         }), { mode: 0o600 });
         return key;
@@ -422,5 +440,176 @@ describe('an obligation recorded under an earlier device identity of the same ch
         const result = coordinate(checkout, ['run', '--', '/bin/echo', 'admitted']);
         assert.equal(result.status, EXIT.ok, result.stdout + result.stderr);
         assert.match(result.stdout, /admitted/);
+    });
+});
+
+describe('the runner is owned from before its spawn until its whole process group has exited', () => {
+    const inventoryModule = pathToFileURL(join(here, 'run-inventory.mjs')).href;
+    const waitFor = async (what, check, timeoutMs = 30_000) => {
+        const deadline = Date.now() + timeoutMs;
+        for (;;) {
+            const value = check();
+            if (value) return value;
+            if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+            await new Promise((next) => setTimeout(next, 50));
+        }
+    };
+    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
+    const gatedWait = 'await new Promise((go) => { const t = setInterval(() => { if (existsSync(GATE)) { clearInterval(t); go(); } }, 40); });';
+
+    test('coordinator SIGKILL before Playwright global setup: the live runner keeps the checkout blocked and can write nothing', async () => {
+        const checkout = fakeCheckout('sigkill');
+        const gate = join(checkout.root, 'gate'), started = join(checkout.root, 'started.json'), result = join(checkout.root, 'result.json');
+        // Stands in for the Playwright CLI between its start and global setup's first inventory write.
+        const runner = `import { existsSync, writeFileSync } from 'node:fs';
+            const { readInventory, updateInventory } = await import(${JSON.stringify(inventoryModule)});
+            const file = process.env.CODEMASTERY_E2E_INVENTORY, GATE = ${JSON.stringify(gate)};
+            writeFileSync(${JSON.stringify(started)}, JSON.stringify({ intent: readInventory(file).processes.runner ?? null }));
+            ${gatedWait}
+            let outcome = 'written';
+            try {
+                updateInventory(file, (record) => { record.observations.push('the orphan wrote'); });
+                writeFileSync('test-results/results.json', '{"overwritten":true}');
+            } catch (error) { outcome = error.constructor.name + ': ' + error.message; }
+            writeFileSync(${JSON.stringify(result)}, JSON.stringify({ outcome }));`;
+        const coordinator = spawn(python, [launcherOf(checkout.root), 'run', '--', process.execPath, '--input-type=module', '-e', runner],
+            { env: env(), cwd: checkout.root, stdio: 'ignore' });
+        try {
+            const recorded = await waitFor('the runner identity', () => existsSync(started) && readRecord(checkout.key)?.processes?.runner?.pid && readRecord(checkout.key));
+            const runId = recorded.runId, runnerPid = recorded.processes.runner.pid;
+            assert.ok(JSON.parse(readFileSync(started, 'utf8')).intent, 'the runner intent existed before the runner ran');
+            coordinator.kill('SIGKILL');
+            await settle(coordinator);
+            assert.ok(alive(runnerPid), 'the runner outlives its coordinator');
+
+            const recover = coordinate(checkout, ['recover']);
+            assert.equal(recover.status, EXIT.fail, recover.stdout + recover.stderr);
+            assert.match(recover.stdout, new RegExp(`preserved runner ${runnerPid}: the PID carries the recorded birth identity`));
+            assert.equal(readRecord(checkout.key).state, 'incomplete', 'never complete while the runner lives');
+            const blocked = coordinate(checkout, ['run', '--', '/bin/echo', 'must not run']);
+            assert.equal(blocked.status, EXIT.blocked, blocked.stdout + blocked.stderr);
+            assert.ok(!/must not run/.test(blocked.stdout));
+
+            open(gate);
+            const { outcome } = JSON.parse(await waitFor('the runner result', () => existsSync(result) && readFileSync(result, 'utf8')));
+            assert.match(outcome, /^OwnershipLost: refusing to change inventory .* is no longer this process' parent/);
+            assert.deepEqual(sentinels(checkout), ['SENTINEL', '{"sentinel":true}'], 'the orphan wrote no output');
+            await waitFor('the runner exit', () => !alive(runnerPid));
+
+            const after = coordinate(checkout, ['recover']);
+            assert.equal(after.status, EXIT.ok, after.stdout + after.stderr);
+            const final = readRecord(checkout.key);
+            assert.equal(final.runId, runId);
+            assert.equal(final.state, 'complete');
+            assert.ok(!final.observations.some((line) => line.includes('the orphan wrote')));
+            assert.equal(coordinate(checkout, ['run', '--', '/bin/echo', 'reused']).status, EXIT.ok);
+        } finally {
+            // Never leave a gated process behind when an assertion fails.
+            open(gate);
+            if (coordinator.exitCode === null && coordinator.signalCode === null) coordinator.kill('SIGKILL');
+        }
+    });
+
+    test('a crash between the runner intent and its recorded identity leaves an unresolved writer, never an exited one', () => {
+        const checkout = fakeCheckout('intent');
+        const host = JSON.parse(spawnSync(python, [launcher, 'host-identity'], { encoding: 'utf8' }).stdout);
+        const info = lstatSync(checkout.root);
+        writeFileSync(recordFile(checkout.key), JSON.stringify({
+            schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-crashed', state: 'active',
+            ownerUid: process.getuid(), lockKey: checkout.key, checkout: { path: checkout.root, dev: info.dev, ino: info.ino },
+            host: { hostname: host.hostname, machine: host.machine, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
+            outputs: [], docker: null, temp: null, intents: [], observations: [],
+            processes: {
+                supervisor: { pid: spawnSync(process.execPath, ['-e', '']).pid, birth: 'x-starttime:1', role: 'coordinator', state: 'live' },
+                runner: { pid: null, birth: null, birthSource: null, role: 'playwright-runner', state: 'starting' },
+            },
+        }), { mode: 0o600 });
+        const recover = coordinate(checkout, ['recover']);
+        assert.equal(recover.status, EXIT.fail, recover.stdout + recover.stderr);
+        assert.match(recover.stdout, /preserved runner \(no PID recorded\): no PID recorded/);
+        assert.equal(readRecord(checkout.key).state, 'incomplete');
+        assert.equal(coordinate(checkout, ['run', '--', '/bin/echo', 'no']).status, EXIT.blocked);
+    });
+
+    test('the coordinator finalizes only after the runner\'s process group (Playwright workers) has exited', () => {
+        const checkout = fakeCheckout('workers');
+        const late = join(checkout.root, 'test-results', 'artifacts', 'late.txt');
+        // The runner exits at once; a process it started keeps running and writes an output later,
+        // exactly like a Playwright worker finishing its teardown after the runner is gone.
+        const runner = `const { spawn } = require('node:child_process');
+            spawn(process.execPath, ['-e', 'setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(late)}, "late"), 1500)'], { stdio: 'ignore' }).unref();`;
+        const result = coordinate(checkout, ['run', '--', process.execPath, '-e', runner]);
+        assert.equal(result.status, EXIT.ok, result.stdout + result.stderr);
+        assert.ok(existsSync(late), 'the late writer finished before the coordinator finalized and released the checkout');
+        const record = readRecord(checkout.key);
+        assert.equal(record.state, 'complete');
+        assert.equal(record.processes.runner.groupState, 'empty');
+    });
+
+    test('after a coordinator SIGKILL, recovery waits for the runner\'s surviving group members as well', async () => {
+        const checkout = fakeCheckout('orphanworker');
+        const gate = join(checkout.root, 'gate'), workerGate = join(checkout.root, 'worker-gate'), workerPidFile = join(checkout.root, 'worker.pid');
+        const runner = `import { existsSync, writeFileSync } from 'node:fs';
+            import { spawn } from 'node:child_process';
+            const GATE = ${JSON.stringify(gate)};
+            const worker = spawn(process.execPath, ['-e', 'const fs=require("node:fs");const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(workerGate)})){clearInterval(t);}},40);'], { stdio: 'ignore' });
+            worker.unref();
+            writeFileSync(${JSON.stringify(workerPidFile)}, String(worker.pid));
+            ${gatedWait}`;
+        const coordinator = spawn(python, [launcherOf(checkout.root), 'run', '--', process.execPath, '--input-type=module', '-e', runner],
+            { env: env(), cwd: checkout.root, stdio: 'ignore' });
+        try {
+            const runnerPid = await waitFor('the runner identity', () => existsSync(workerPidFile) && readRecord(checkout.key)?.processes?.runner?.pid);
+            const workerPid = Number(readFileSync(workerPidFile, 'utf8'));
+            coordinator.kill('SIGKILL');
+            await settle(coordinator);
+            open(gate);
+            await waitFor('the runner exit', () => !alive(runnerPid));
+            assert.ok(alive(workerPid), 'the worker outlives the runner');
+
+            const recover = coordinate(checkout, ['recover']);
+            assert.equal(recover.status, EXIT.fail, recover.stdout + recover.stderr);
+            assert.match(recover.stdout, new RegExp(`runner ${runnerPid} is verifiably gone`));
+            assert.match(recover.stdout, new RegExp(`process group ${runnerPid} still has 1 live process`));
+            assert.equal(readRecord(checkout.key).state, 'incomplete');
+
+            open(workerGate);
+            await waitFor('the worker exit', () => !alive(workerPid));
+            const after = coordinate(checkout, ['recover']);
+            assert.equal(after.status, EXIT.ok, after.stdout + after.stderr);
+            assert.equal(readRecord(checkout.key).state, 'complete');
+        } finally {
+            open(gate);
+            open(workerGate);
+            if (coordinator.exitCode === null && coordinator.signalCode === null) coordinator.kill('SIGKILL');
+        }
+    });
+});
+
+describe('malformed records are refused cleanly, never half-interpreted', () => {
+    const malformed = (key) => {
+        extraKeys.push(key);
+        writeFileSync(recordFile(key), JSON.stringify({
+            schema: 'codemastery-e2e-inventory/1', ownerUid: process.getuid(), runId: 'cm-e2e-bad', state: 'active',
+            lockKey: key, checkout: 'not-an-object', outputs: ['not-an-entry'], processes: {}, intents: [],
+        }), { mode: 0o600 });
+    };
+    test('another checkout\'s malformed record neither crashes nor blocks this checkout', () => {
+        const checkout = fakeCheckout('foreignbad');
+        malformed('999999-1');
+        const result = coordinate(checkout, ['run', '--', '/bin/echo', 'admitted']);
+        assert.equal(result.status, EXIT.ok, result.stdout + result.stderr);
+        assert.ok(!/Traceback/.test(result.stderr), result.stderr);
+    });
+    test('this checkout\'s own malformed record blocks reuse with a clear error', () => {
+        const checkout = fakeCheckout('ownbad');
+        writeFileSync(recordFile(checkout.key), JSON.stringify({
+            schema: 'codemastery-e2e-inventory/1', ownerUid: process.getuid(), runId: 'cm-e2e-bad', state: 'active',
+            lockKey: checkout.key, checkout: 'not-an-object', outputs: [], processes: {}, intents: [],
+        }), { mode: 0o600 });
+        const blocked = coordinate(checkout, ['run', '--', '/bin/echo', 'no']);
+        assert.equal(blocked.status, EXIT.blocked, blocked.stdout + blocked.stderr);
+        assert.match(blocked.stderr, /is malformed \(checkout identity\)/);
+        assert.ok(!/Traceback/.test(blocked.stderr));
     });
 });

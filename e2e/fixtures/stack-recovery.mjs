@@ -20,9 +20,15 @@
 //     creation intents are reconciled against the pinned daemon, never by deleting everything
 //     carrying the generic disposable label, and never by a global prune;
 //   * each container's volume association is an intent written before the container is created and
-//     resolved from that container's own mounts; a container that vanished before its association
-//     was recorded leaves an unaccounted volume, never a completion. A volume is removed only when it
-//     was recorded from this run's container and Docker itself marks it anonymous;
+//     resolved from that container's own mounts; a container whose association is still unresolved is
+//     never removed (a failed inspection preserves it for the next pass); a container that vanished
+//     before its association was recorded leaves an unaccounted volume, never a completion. A volume
+//     is removed only when it was recorded from this run's container and Docker itself marks it
+//     anonymous;
+//   * the runner leads a process group of its own; after it exits, the build and the stack stay
+//     untouched while any process of that group (Playwright workers finishing) is still alive;
+//   * only a direct child of the coordinator that holds the lock, acting for that coordinator's run,
+//     may change the inventory: an orphan whose coordinator died stops before it writes anything;
 //   * the temporary build directory is removed only after its name, parent, owner, device/inode and
 //     run marker are verified without following a replacement symlink.
 //
@@ -35,8 +41,8 @@ import { spawnSync } from 'node:child_process';
 import { connect } from 'node:net';
 import { lstatSync, readdirSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { classifyProcess, hostIdentity, sameHost, verifyDirectory } from './host-identity.mjs';
-import { NONTERMINAL, observe, readInventory, setIntent, writeInventory } from './run-inventory.mjs';
+import { classifyProcess, hostIdentity, processGroup, sameHost, verifyDirectory } from './host-identity.mjs';
+import { NONTERMINAL, OwnershipLost, observe, ownershipProblem, readInventory, setIntent, writeInventory } from './run-inventory.mjs';
 
 export const STACK_LABEL = 'codemastery.e2e=disposable';
 export const runLabel = (runId) => `codemastery.e2e.run=${runId}`;
@@ -410,10 +416,23 @@ function scanUnaccounted(docker, knownIds, runId, liveElsewhere, report) {
  * be used if the cooperative channel fails. A recovered numeric PID is never used this way.
  */
 export async function reconcile(inventoryFile, options = {}) {
-    const base = options.docker ?? makeDocker();
     const lines = [];
     const report = (text) => { lines.push(text); if (options.log !== false) console.log(`stack-down: ${text}`); };
+    try {
+        return await reconcileOwned(inventoryFile, options, lines, report);
+    } catch (error) {
+        if (!(error instanceof OwnershipLost)) throw error;
+        report(error.message);
+        report('nothing further was changed: the lock holder (recovery or the next admitted run) owns this record now');
+        return { complete: false, record: null, report: lines, ownershipLost: true };
+    }
+}
+
+async function reconcileOwned(inventoryFile, options, lines, report) {
+    const base = options.docker ?? makeDocker();
     const host = options.host ?? hostIdentity();
+    const groupOf = options.processGroup ?? processGroup;
+    const relation = { env: options.env ?? process.env, ppid: options.ppid ?? process.ppid };
     const registryRoot = options.registryRoot ?? process.env.CODEMASTERY_E2E_REGISTRY ?? null;
     const ownKey = options.lockKey ?? process.env.CODEMASTERY_E2E_LOCK_KEY ?? null;
 
@@ -431,16 +450,26 @@ export async function reconcile(inventoryFile, options = {}) {
         return { complete: true, record: null, report: lines };
     }
 
+    /** Every write re-checks that this process still acts for the coordinator holding the lock. */
+    const persist = () => {
+        const problem = ownershipProblem(record, relation);
+        if (problem) throw new OwnershipLost(`refusing to change inventory ${inventoryFile}: ${problem}`);
+        writeInventory(inventoryFile, record);
+    };
     const runId = record.runId;
     record.state = 'cleaning';
     observe(record, `reconciliation started (${options.reason ?? 'unspecified'})`);
-    writeInventory(inventoryFile, record);
+    persist();
 
     // ---------------------------------------------------------------- 1. writers (processes first)
     const sameMachine = sameHost(record.host, host);
     let writersGone = true;
     let selfAlive = false;
-    for (const [role, recorded] of Object.entries(record.processes ?? {})) {
+    // The preview is the runner's own child and serves the runner's tests, so it is handled last and
+    // only asked to close once every other writer is verified gone: a coordinator's death alone never
+    // authorizes stopping what a surviving runner is still using.
+    const entries = Object.entries(record.processes ?? {}).sort(([a], [b]) => (a === 'preview') - (b === 'preview'));
+    for (const [role, recorded] of entries) {
         if (role === 'supervisor' && recorded.pid === process.ppid) {
             // The coordinator that is waiting for this call is not a writer to stop.
             observe(record, `supervisor ${recorded.pid} is this reconciliation's own coordinator`);
@@ -468,7 +497,9 @@ export async function reconcile(inventoryFile, options = {}) {
             continue;
         }
         let verdict = classifyProcess(recorded, { host });
-        if (verdict.state === 'exact-live' && role === 'preview') {
+        if (verdict.state === 'exact-live' && role === 'preview' && !writersGone) {
+            report(`preview ${recorded.pid} is left running: the runner or another writer that uses it has not been verified as exited`);
+        } else if (verdict.state === 'exact-live' && role === 'preview') {
             const socketPath = recorded.control;
             const expected = registryRoot ? join(registryRoot, 'sockets', `${runId}.sock`) : null;
             if (!socketPath) {
@@ -497,6 +528,7 @@ export async function reconcile(inventoryFile, options = {}) {
         if (verdict.state === 'exited' || verdict.state === 'pid-reused') {
             recorded.state = 'exited';
             recorded.why = verdict.why;
+            recorded.exitVerdict = verdict.state;
             report(`${role} ${recorded.pid} is verifiably gone (${verdict.why})`);
             // A preview that died without closing leaves its socket file. It is removed only when it is
             // this run's own name inside the private registry and is a socket, never another path.
@@ -513,7 +545,36 @@ export async function reconcile(inventoryFile, options = {}) {
             writersGone = false;
         }
     }
-    writeInventory(inventoryFile, record);
+    // The runner leads its own process group (the coordinator starts it in a new session), which
+    // holds every process it started: Playwright workers, the build and the preview. Once the runner
+    // is gone, a live member can still write outputs (a disconnected Playwright worker finishes its
+    // teardown before exiting), so nothing it may be using is removed until that group is empty.
+    const runner = record.processes?.runner;
+    if (runner && runner.state === 'exited' && Number.isInteger(runner.group) && runner.group === runner.pid && runner.groupState !== 'empty') {
+        if (!sameMachine) {
+            report(`the runner's process group ${runner.group} was recorded on another host, boot or PID namespace; it is preserved`);
+            writersGone = false;
+        } else if (runner.exitVerdict === 'pid-reused') {
+            // While any member of a group is alive the kernel never hands out its ID as a new PID, so a
+            // reused runner PID proves the runner's group has no member left.
+            runner.groupState = 'empty';
+            report(`the runner's process group ${runner.group} has no member left (its leader PID now belongs to another process)`);
+        } else {
+            const group = groupOf(runner.group);
+            if (!group.reliable) {
+                report(`the runner's process group ${runner.group} could not be inspected (${group.detail ?? 'unknown'}); the build and the stack are preserved`);
+                writersGone = false;
+            } else if (group.members.length) {
+                runner.groupState = 'live';
+                report(`the runner's process group ${runner.group} still has ${group.members.length} live process(es) (for example Playwright workers finishing); the build and the stack are preserved until they exit`);
+                writersGone = false;
+            } else {
+                runner.groupState = 'empty';
+                report(`the runner's process group ${runner.group} has no live member`);
+            }
+        }
+    }
+    persist();
 
     // ------------------------------------------------------------------- 2. the temporary build
     let buildResolved = true;
@@ -548,7 +609,7 @@ export async function reconcile(inventoryFile, options = {}) {
             }
         }
     }
-    writeInventory(inventoryFile, record);
+    persist();
 
     // --------------------------------------------------------------------------- 3. Docker state
     const dockerIntents = () => (record.intents ?? []).filter((intent) => ['container', 'network', 'volume'].includes(intent.kind));
@@ -589,20 +650,27 @@ export async function reconcile(inventoryFile, options = {}) {
                     report(`${intent.kind} intent ${intent.name}: ${outcome.why} (${outcome.id})`);
                 }
             }
-            writeInventory(inventoryFile, record);
+            persist();
 
             // b. Volume associations are settled from each container's own mounts and recorded
             //    durably before that container is removed.
             for (const intent of dockerIntents().filter((entry) => entry.kind === 'container')) {
                 if (!settleAssociation(docker, look, record, intent, report)) dockerResolved = false;
             }
-            writeInventory(inventoryFile, record);
+            persist();
 
             // c. Every recorded ID is inspected again, whatever an earlier pass recorded.
             const removeGroup = async (kind) => {
                 for (const intent of dockerIntents().filter((entry) => entry.kind === kind)) {
                     if (!intent.dockerId) {
                         if (intent.state !== 'absent') dockerResolved = false;
+                        continue;
+                    }
+                    if (kind === 'container' && !associationResolved(record, intent) && intent.volumes !== 'unaccounted') {
+                        // Removing it now would lose the only source of its anonymous volume's identity.
+                        setIntent(record, intent.id, { state: 'preserved', why: 'its volume association is not recorded yet; it is kept so a later pass can read its mounts first' });
+                        report(`preserved container ${intent.dockerId}: its volume association is unresolved, so it is not removed before its mounts are recorded`);
+                        dockerResolved = false;
                         continue;
                     }
                     const seen = kind === 'container' ? look.container(intent.dockerId) : look.simple(kind, intent.dockerId);
@@ -630,7 +698,7 @@ export async function reconcile(inventoryFile, options = {}) {
                     setIntent(record, intent.id, { state: outcome.state, why: outcome.note });
                     if (outcome.state === 'removed' || outcome.state === 'absent') report(`${kind} ${intent.dockerId}: ${outcome.state} (${outcome.note})`);
                     else dockerResolved = false;
-                    writeInventory(inventoryFile, record);
+                    persist();
                 }
             };
             // Containers hold the network and the anonymous volumes, so they go first; volumes next,
@@ -662,7 +730,7 @@ export async function reconcile(inventoryFile, options = {}) {
         ? 'verified absence of every owned process, build, container, volume and network'
         : `incomplete: ${pending.length} unresolved resource(s), ${associations.length} unresolved volume association(s), ${unaccounted} unaccounted, writers ${writersGone ? 'gone' : 'preserved'}`);
     record.finishedAt = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-    writeInventory(inventoryFile, record);
+    persist();
     report(complete && selfAlive
         ? `run ${runId}: every owned resource was verified absent; completion awaits verification of this process' exit`
         : complete

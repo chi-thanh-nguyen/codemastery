@@ -6,7 +6,8 @@
 // These are stub scenarios: they prove the protocol's decisions, not Docker integration itself.
 // The real-Docker lifecycle is a separate, recorded verification.
 import { afterEach, beforeEach, describe, test } from 'node:test';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { createServer as netCreateServer } from 'node:net';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -15,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { markerFile, readInventory, writeInventory } from './run-inventory.mjs';
 import { STACK_LABEL, dockerIdentity, makeDocker, reconcile, reportsNotFound, runLabel } from './stack-recovery.mjs';
-import { hostIdentity, processIdentity } from './host-identity.mjs';
+import { hostIdentity, processGroup, processIdentity } from './host-identity.mjs';
 
 const HOST = hostIdentity();
 const RUN = 'cm-e2e-stub';
@@ -72,6 +73,7 @@ function fakeDocker(state = {}, options = {}) {
                 : args[0] === 'volume' ? `Error response from daemon: get ${id}: no such volume` : `Error response from daemon: No such container: ${id}`);
             if (!target) return missing();
             if (target.inspectFails) return error('Error response from daemon: i/o timeout', true);
+            if (target.inspectFailsTimes > 0) { target.inspectFailsTimes -= 1; return error('Error response from daemon: i/o timeout', true); }
             if (!target.present) return missing();
             if (args[0] === 'inspect') {
                 return reply(args.includes('{{json .Mounts}}')
@@ -183,7 +185,8 @@ describe('only resources proven to belong to the recorded run are removed', () =
     });
 
     test('a resource whose ownership cannot be read is preserved and reported', async () => {
-        seed({ intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created' }] });
+        // A container whose mounts were already recorded at setup, exactly as setup leaves it.
+        seed({ intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created', volumes: 'recorded' }] });
         const outcome = await run(fakeDocker({ C1: { kind: 'container', name: 'c', present: true, inspectFails: true, labels: labels() } }));
         assert.equal(outcome.complete, false);
         assert.equal(stateOf(outcome.record, 'c'), 'preserved');
@@ -292,7 +295,8 @@ describe('interrupted creation intents are reconciled, never assumed', () => {
 
 describe('anonymous volumes are inventoried from the owned container before it is removed', () => {
     test('an uninventoried anonymous volume is recorded and removed after its container', async () => {
-        seed({ intents: [{ id: 'i1', kind: 'container', name: `${RUN}-postgres`, dockerId: 'C1', state: 'created' }] });
+        // What setup leaves when it dies after `docker run` returned the ID but before the mounts were read.
+        seed({ intents: [{ id: 'i1', kind: 'container', name: `${RUN}-postgres`, image: 'sha256:pg', role: 'postgres', dockerId: 'C1', state: 'created', volumes: 'pending' }] });
         const docker = fakeDocker({
             C1: { kind: 'container', name: `${RUN}-postgres`, present: true, labels: labels(), mounts: [{ Type: 'volume', Name: ANON, Destination: '/var/lib/postgresql/data' }] },
             [ANON]: { kind: 'volume', name: ANON, present: true, labels: ANON_LABELS },
@@ -353,6 +357,43 @@ describe('anonymous volumes are inventoried from the owned container before it i
         assert.equal(outcome.complete, false);
         assert.equal(outcome.record.intents[0].volumes, 'pending');
         assert.match(outcome.report.join('\n'), /volume association of container C1 is unresolved/);
+    });
+
+    test('a container whose mount inspection fails once is kept, and the retry records its volume before removing both', async () => {
+        // Exactly what setup leaves when `docker run` succeeded and reading the mounts failed.
+        seed({ intents: [
+            { id: 'i1', kind: 'network', name: RUN, dockerId: 'N1', state: 'created' },
+            { id: 'i2', kind: 'container', name: `${RUN}-postgres`, image: 'sha256:pg', role: 'postgres', dockerId: 'C1', state: 'created', volumes: 'pending' },
+        ] });
+        const state = {
+            N1: { kind: 'network', name: RUN, present: true, labels: labels() },
+            C1: { kind: 'container', name: `${RUN}-postgres`, present: true, inspectFailsTimes: 1, labels: labels(), mounts: [{ Type: 'volume', Name: ANON, Destination: '/var/lib/postgresql/data' }] },
+            [ANON]: { kind: 'volume', name: ANON, present: true, labels: ANON_LABELS },
+        };
+        const docker = fakeDocker(state);
+        const first = await run(docker);
+        assert.equal(first.complete, false, 'a transient error is never a completion');
+        assert.ok(!docker.calls.includes('rm -f C1'), `the container is not removed while its association is unresolved:\n${docker.calls.join('\n')}`);
+        assert.equal(state.C1.present, true);
+        assert.equal(first.record.intents[1].volumes, 'pending', 'the association stays pending, not unaccounted');
+        assert.equal(first.record.intents[1].state, 'preserved');
+        assert.equal(first.record.intents.filter((intent) => intent.kind === 'volume').length, 0);
+        assert.equal(readInventory(inventory).state, 'incomplete');
+        assert.match(first.report.join('\n'), /preserved container C1: its volume association is unresolved/);
+
+        const firstPass = docker.calls.length;
+        const second = await run(docker);
+        assert.equal(second.complete, true, second.report.join('\n'));
+        const volume = second.record.intents.find((intent) => intent.kind === 'volume');
+        assert.equal(volume?.dockerId, ANON, 'the retry recorded the anonymous volume from the container\'s own mounts');
+        assert.equal(volume.container, 'C1');
+        assert.equal(volume.state, 'removed');
+        assert.equal(state[ANON].present, false, 'no anonymous volume is orphaned');
+        assert.ok(docker.calls.indexOf(`inspect --type container --format {{json .}} C1`, firstPass) < docker.calls.indexOf('rm -f C1'),
+            'the retry reads the mounts before it removes the container');
+        assert.ok(docker.calls.indexOf('rm -f C1') < docker.calls.indexOf(`volume rm ${ANON}`));
+        assert.ok(!docker.calls.some((call) => /^volume (ls|prune)/.test(call)), 'nothing is searched or pruned');
+        assert.equal(readInventory(inventory).state, 'complete');
     });
 
     test('a volume Docker does not mark anonymous is preserved even when recorded as exclusive', async () => {
@@ -424,6 +465,94 @@ describe('processes are resolved by birth identity and never signalled by PID', 
         const outcome = await run(fakeDocker({}));
         assert.equal(outcome.complete, false);
         assert.match(outcome.report.join('\n'), /recorded on another host, boot or PID namespace/);
+    });
+});
+
+describe('the runner\'s process group must be empty before the build or the stack is touched', () => {
+    const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid;
+    /** A runner that exited, as the coordinator records it: it led its own process group. */
+    const exitedRunner = (patch = {}) => { const pid = deadPid(); return { pid, birth: 'x-starttime:1', birthSource: 'test', role: 'playwright-runner', state: 'live', group: pid, ...patch }; };
+    const stack = () => ({
+        intents: [
+            { id: 'i1', kind: 'network', name: RUN, dockerId: 'N1', state: 'created' },
+            { id: 'i2', kind: 'container', name: `${RUN}-postgres`, dockerId: 'C1', state: 'created', volumes: 'recorded' },
+        ],
+    });
+    const stackState = () => ({
+        N1: { kind: 'network', name: RUN, present: true, labels: labels() },
+        C1: { kind: 'container', name: `${RUN}-postgres`, present: true, labels: labels() },
+    });
+
+    test('a live member of the exited runner\'s group (a Playwright worker finishing) keeps the whole stack', async () => {
+        const runner = exitedRunner();
+        seed({ ...stack(), processes: { runner } });
+        const docker = fakeDocker(stackState());
+        const asked = [];
+        const outcome = await run(docker, { processGroup: (pgid) => { asked.push(pgid); return { reliable: true, members: [{ pid: 4242, birth: 'x-starttime:2' }] }; } });
+        assert.deepEqual(asked, [runner.pid], 'the recorded group is inspected, nothing is signalled');
+        assert.equal(outcome.complete, false);
+        assert.match(outcome.report.join('\n'), new RegExp(`process group ${runner.pid} still has 1 live process`));
+        assert.ok(!docker.calls.some((call) => /^(rm |network rm|volume rm)/.test(call)), docker.calls.join('\n'));
+        assert.equal(outcome.record.processes.runner.groupState, 'live');
+
+        const later = await run(docker, { processGroup: () => ({ reliable: true, members: [] }) });
+        assert.equal(later.complete, true, later.report.join('\n'));
+        assert.equal(later.record.processes.runner.groupState, 'empty');
+    });
+
+    test('a group that cannot be inspected is never taken as empty', async () => {
+        seed({ ...stack(), processes: { runner: exitedRunner() } });
+        const docker = fakeDocker(stackState());
+        const outcome = await run(docker, { processGroup: () => ({ reliable: false, members: [], detail: 'no qualified enumeration' }) });
+        assert.equal(outcome.complete, false);
+        assert.match(outcome.report.join('\n'), /could not be inspected \(no qualified enumeration\)/);
+        assert.ok(!docker.calls.some((call) => /^(rm |network rm|volume rm)/.test(call)));
+    });
+
+    test('a reused runner PID proves the group is gone without enumerating it', async () => {
+        const live = processIdentity(process.pid);
+        seed({ ...stack(), processes: { runner: { pid: process.pid, birth: `${live.birth}-earlier`, role: 'playwright-runner', state: 'live', group: process.pid } } });
+        const outcome = await run(fakeDocker(stackState()), { processGroup: () => { throw new Error('must not be asked'); } });
+        assert.equal(outcome.complete, true, outcome.report.join('\n'));
+        assert.match(outcome.report.join('\n'), /has no member left \(its leader PID now belongs to another process\)/);
+    });
+
+    test('the real group enumeration sees a live member and its exit', async () => {
+        const member = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore' });
+        sleepers.push(member);
+        for (let at = 0; at < 50 && !processIdentity(member.pid).exists; at++) await new Promise((next) => setTimeout(next, 20));
+        const seen = processGroup(member.pid);
+        assert.equal(seen.reliable, true, seen.detail);
+        assert.deepEqual(seen.members.map((entry) => entry.pid), [member.pid]);
+        assert.equal(seen.members[0].birth, processIdentity(member.pid).birth, 'members carry their OS birth identity');
+        member.kill('SIGKILL');
+        await once(member, 'exit');
+        assert.deepEqual(processGroup(member.pid).members, [], 'an exited (or reaped) member is gone');
+    });
+});
+
+describe('only a process acting for the coordinator that holds the lock changes anything', () => {
+    test('a reconciliation whose coordinator is gone inspects, removes and writes nothing', async () => {
+        seed({ lockKey: 'k1', intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created', volumes: 'recorded' }] });
+        const before = readFileSync(inventory, 'utf8');
+        const docker = fakeDocker({ C1: { kind: 'container', name: 'c', present: true, labels: labels() } });
+        const env = { CODEMASTERY_E2E_RUN_ID: RUN, CODEMASTERY_E2E_LOCK_KEY: 'k1', CODEMASTERY_E2E_SUPERVISOR: '4242' };
+        const outcome = await run(docker, { env, ppid: 1 });
+        assert.equal(outcome.complete, false);
+        assert.equal(outcome.ownershipLost, true);
+        assert.match(outcome.report.join('\n'), /coordinator 4242 that holds this checkout's lock is no longer this process' parent/);
+        assert.deepEqual(docker.calls, [], 'no Docker call at all');
+        assert.equal(readFileSync(inventory, 'utf8'), before, 'the record is byte-identical');
+    });
+
+    test('a reconciliation handed another run\'s record writes nothing', async () => {
+        seed({ lockKey: 'k1', runId: 'cm-e2e-later-run' });
+        const before = readFileSync(inventory, 'utf8');
+        const env = { CODEMASTERY_E2E_RUN_ID: RUN, CODEMASTERY_E2E_LOCK_KEY: 'k1', CODEMASTERY_E2E_SUPERVISOR: String(process.ppid) };
+        const outcome = await run(fakeDocker({}), { env, ppid: process.ppid });
+        assert.equal(outcome.ownershipLost, true);
+        assert.match(outcome.report.join('\n'), /belongs to run cm-e2e-later-run, not to the handed-down run cm-e2e-stub/);
+        assert.equal(readFileSync(inventory, 'utf8'), before);
     });
 });
 
@@ -684,6 +813,30 @@ describe('writers are stopped first: a live writer keeps the whole stack', () =>
             assert.equal(outcome.complete, false);
             assert.match(outcome.report.join('\n'), /recorded control path is not this run's private channel/);
             assert.equal(contacted, false);
+        } finally {
+            server.close();
+        }
+    });
+});
+
+describe('a surviving runner keeps the preview it is testing against', () => {
+    test('the preview of a live runner is never asked to close, even over its own private channel', async () => {
+        const runner = await liveWriter(), preview = await liveWriter();
+        const channel = join(scratch, `${RUN}.sock`);
+        let contacted = false;
+        const server = createSocketServerForTest(channel, () => { contacted = true; });
+        try {
+            seed({ processes: {
+                // Object order puts the preview first, as a record written by setup can.
+                preview: { pid: preview.pid, birth: preview.identity.birth, birthSource: 'test', role: 'vite-preview', state: 'live', control: channel },
+                runner: { pid: runner.pid, birth: runner.identity.birth, birthSource: 'test', role: 'playwright-runner', state: 'live', group: runner.pid },
+            } });
+            const outcome = await run(fakeDocker({}), { controlTimeoutMs: 500, exitTimeoutMs: 500 });
+            assert.equal(outcome.complete, false);
+            assert.equal(contacted, false, 'the live run\'s preview was not contacted');
+            assert.match(outcome.report.join('\n'), new RegExp(`preview ${preview.pid} is left running: the runner or another writer that uses it has not been verified as exited`));
+            assert.equal(outcome.record.processes.preview.state, 'preserved');
+            assert.equal(preview.child.exitCode, null);
         } finally {
             server.close();
         }

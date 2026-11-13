@@ -33,9 +33,35 @@ const RUN_ID = /^cm-e2e-[a-z0-9-]{1,64}$/;
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 export class UntrustedInventory extends Error {}
+/** This process no longer acts for the coordinator that holds the checkout's lock (or for this run). */
+export class OwnershipLost extends Error {}
 
 /** The record path handed down by the coordinator, or null when this process was not admitted. */
 export const inventoryPath = () => process.env.CODEMASTERY_E2E_INVENTORY || null;
+
+/**
+ * Why this process may *not* change `record`, or null when it may. Every inventory mutation made
+ * inside a coordinated run (the runner's global setup and teardown, and `stack-down.mjs`) must come
+ * from a direct child of the coordinator that currently holds this checkout's lock, and must name
+ * that coordinator's run. A process whose coordinator died is reparented, so its parent no longer
+ * matches: it must stop writing, because the lock is released and recovery (or the next admitted
+ * run) may own the record now. The parent check cannot be fooled by PID reuse: an orphan is always
+ * reparented to a reaper, never back to a new process with the old PID.
+ *
+ * Outside a coordinated run (none of the hand-down variables present) there is no relationship to
+ * check; the unit tests drive the engine that way. A partial hand-down is refused.
+ */
+export function ownershipProblem(record, { env = process.env, ppid = process.ppid } = {}) {
+    const runId = env.CODEMASTERY_E2E_RUN_ID, key = env.CODEMASTERY_E2E_LOCK_KEY, supervisor = env.CODEMASTERY_E2E_SUPERVISOR;
+    if (!runId && !key && !supervisor) return null;
+    if (!runId || !key || !supervisor) return 'the lifecycle hand-down is incomplete (run ID, lock key and coordinator are all required)';
+    if (Number(supervisor) !== ppid) {
+        return `the coordinator ${supervisor} that holds this checkout's lock is no longer this process' parent (parent ${ppid}); its run may already be recovered or replaced`;
+    }
+    if (!record || record.runId !== runId) return `the record belongs to run ${record?.runId ?? '(none)'}, not to the handed-down run ${runId}`;
+    if (record.lockKey !== key) return `the record belongs to lock key ${record.lockKey}, not ${key}`;
+    return null;
+}
 
 /**
  * Structural validation before any field is used: the run ID, state, processes and intents must have
@@ -111,7 +137,7 @@ export function readInventory(path) {
  * active record, and (for the runner) the configuration must belong to the admitted checkout. An
  * exported or stale variable, another checkout's configuration or a finished run is refused.
  */
-export function admissionProblem({ env = process.env, ppid = process.ppid, checkoutDir = null } = {}) {
+export function admissionProblem({ env = process.env, ppid = process.ppid, pid = process.pid, checkoutDir = null } = {}) {
     const token = env.CODEMASTERY_E2E_OWNERSHIP, runId = env.CODEMASTERY_E2E_RUN_ID, key = env.CODEMASTERY_E2E_LOCK_KEY;
     const file = env.CODEMASTERY_E2E_INVENTORY, supervisor = Number(env.CODEMASTERY_E2E_SUPERVISOR);
     if (!token || !runId || !key || !file || !supervisor) return 'no lifecycle ownership was handed down to this process';
@@ -127,6 +153,10 @@ export function admissionProblem({ env = process.env, ppid = process.ppid, check
     if (record.runId !== runId || record.lockKey !== key) return 'the run record belongs to another run';
     if (record.state !== 'active') return `the run is ${record.state}, not active`;
     if (record.processes?.supervisor?.pid !== supervisor) return 'the run record names another coordinator';
+    // The coordinator records the runner it started (intent before the spawn, PID and birth right
+    // after). Once a PID is recorded, only that process is the admitted runner.
+    const runner = record.processes?.runner;
+    if (runner && runner.pid != null && runner.pid !== pid) return `the run record names runner ${runner.pid}, not this process`;
     if (checkoutDir) {
         let info;
         try {
@@ -168,9 +198,13 @@ export function writeInventory(path, record) {
  * return value is only taken as a replacement when it is a whole record of this schema, so helpers
  * that return the intent or the record they touched cannot accidentally become the record.
  */
-export function updateInventory(path, mutate) {
+export function updateInventory(path, mutate, options = {}) {
     const record = readInventory(path);
     if (!record) throw new UntrustedInventory(`inventory ${path} disappeared; this run's ownership cannot be recorded`);
+    // Checked on every mutation: an orphan whose coordinator died must never write into a record that
+    // recovery or a later admitted run now owns.
+    const problem = ownershipProblem(record, options);
+    if (problem) throw new OwnershipLost(`refusing to change inventory ${path}: ${problem}`);
     const replacement = mutate(record);
     const next = replacement && typeof replacement === 'object' && replacement.schema === SCHEMA ? replacement : record;
     return writeInventory(path, next);

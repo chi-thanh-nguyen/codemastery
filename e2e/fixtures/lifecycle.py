@@ -19,6 +19,7 @@ Modes:
   recover               acquire the same lock and reconcile the persisted inventory (`stack:down`)
   report -- <command...> read-only pass-through for invocations that produce no output
   proc-identity <pid>   print one process' OS birth identity as JSON (helper for the Node side)
+  proc-group <pgid>     print the live (non-zombie) members of one process group as JSON
   host-identity         print host/boot/PID-namespace identity as JSON
   inspect               print the current inventory record for this checkout
 
@@ -48,6 +49,14 @@ REGISTRY_NAME = ".codemastery-e2e"
 MAX_RECORD_BYTES = 256 * 1024
 MAX_INTENTS = 128
 NONTERMINAL = ("active", "cleaning", "incomplete")
+RUN_ID = re.compile(r"^cm-e2e-[a-z0-9-]{1,64}$")
+# How long the coordinator waits, after the runner exits, for the rest of the runner's process group
+# (Playwright workers finishing their own teardown; Playwright 1.63 force-exits a disconnected worker
+# after 30 s) before finalizing anyway. It bounds waiting only: finalization itself still refuses to
+# touch the build or the stack while any member of that group is alive.
+GROUP_SETTLE_SECONDS = 45
+# Test hooks of the fixture tests. They are never handed to a coordinated run.
+TEST_HOOKS = ("E2E_VITE_BIN", "E2E_VITE_MODULE")
 # Output roots of CP-029, relative to the canonical checkout directory. Order is irrelevant; all
 # three are owned together by the single admitted invocation.
 OUTPUT_ROOTS = ("test-results/artifacts", "test-results/results.json", "test-results/html")
@@ -142,6 +151,78 @@ def process_identity(pid):
                 "reliable": False, "detail": "%s" % error}
     return {"pid": pid, "exists": None, "birth": None, "source": "unsupported-platform",
             "reliable": False, "detail": "no qualified birth identity on %s" % system}
+
+
+def _darwin_kinfo_size(libc):
+    """sizeof(struct kinfo_proc), as the running kernel fills it in for this one process (a sizing
+    query without a buffer returns an estimate with slack, not the entry size)."""
+    mib = (ctypes.c_int * 4)(1, 14, 1, os.getpid())
+    buf = ctypes.create_string_buffer(4096)
+    size = ctypes.c_size_t(len(buf))
+    if libc.sysctl(mib, 4, buf, ctypes.byref(size), None, ctypes.c_size_t(0)) != 0 or size.value < 48:
+        raise OSError(ctypes.get_errno(), "cannot size kinfo_proc")
+    return size.value
+
+
+def group_members(pgid):
+    """`{reliable, members:[{pid, birth}]}`: the live members of process group `pgid`.
+
+    Zombies are left out (an exited process cannot write). Nothing is signalled: Linux reads
+    `/proc/<pid>/stat` (pgrp and start ticks), macOS asks the kernel for the group's `kinfo_proc`
+    entries (`KERN_PROC_PGRP`). While any member is alive the kernel never hands the group's ID out
+    as a new PID. Callers therefore treat any live member as possibly theirs (fail closed); only a
+    leader PID that now carries another birth identity proves the original group is gone.
+    """
+    system = platform.system()
+    members = []
+    try:
+        if system == "Linux":
+            for name in os.listdir("/proc"):
+                if not name.isdigit():
+                    continue
+                try:
+                    with open("/proc/%s/stat" % name, "rb") as handle:
+                        raw = handle.read().decode("utf-8", "replace")
+                except OSError:
+                    continue  # exited meanwhile, or another account's hidden process
+                tail = raw[raw.rindex(")") + 1:].split()
+                if tail[0] == "Z" or int(tail[2]) != pgid:
+                    continue
+                members.append({"pid": int(name), "birth": "linux-starttime:%s" % tail[19]})
+        elif system == "Darwin":
+            libc = _darwin_libc()
+            stride = _darwin_kinfo_size(libc)
+            mib = (ctypes.c_int * 4)(1, 14, 2, pgid)  # CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid
+            raw, used = None, 0
+            for _ in range(8):
+                size = ctypes.c_size_t(0)
+                if libc.sysctl(mib, 4, None, ctypes.byref(size), None, ctypes.c_size_t(0)) != 0:
+                    raise OSError(ctypes.get_errno(), "sysctl KERN_PROC_PGRP (size) failed")
+                capacity = size.value + 16 * stride
+                buf = ctypes.create_string_buffer(capacity)
+                size = ctypes.c_size_t(capacity)
+                if libc.sysctl(mib, 4, buf, ctypes.byref(size), None, ctypes.c_size_t(0)) == 0:
+                    raw, used = buf, size.value
+                    break
+                if ctypes.get_errno() != errno.ENOMEM:
+                    raise OSError(ctypes.get_errno(), "sysctl KERN_PROC_PGRP failed")
+            if raw is None or used % stride:
+                raise OSError(errno.EIO, "unusable KERN_PROC_PGRP reply")
+            data = raw.raw[:used]
+            for offset in range(0, used, stride):
+                # struct extern_proc: p_starttime at 0, p_stat (char) at 36, p_pid at 40; SZOMB == 5.
+                if data[offset + 36] == 5:
+                    continue
+                pid = struct.unpack_from("@i", data, offset + 40)[0]
+                sec = struct.unpack_from("@q", data, offset)[0]
+                usec = struct.unpack_from("@i", data, offset + 8)[0]
+                members.append({"pid": pid, "birth": "darwin-starttime:%d.%06d" % (sec, usec)})
+        else:
+            return {"pgid": pgid, "reliable": False, "members": [],
+                    "detail": "no qualified process-group enumeration on %s" % system}
+    except (OSError, ValueError, IndexError) as error:
+        return {"pgid": pgid, "reliable": False, "members": [], "detail": "%s" % error}
+    return {"pgid": pgid, "reliable": True, "members": members}
 
 
 def _machine_identity(system):
@@ -401,7 +482,52 @@ def read_record(path, tolerate=False):
         if tolerate:
             return None
         raise Blocked("inventory record %s exceeds the intent bound" % path)
+    problem = structure_problem(record)
+    if problem:
+        # Another checkout's malformed record is not ours to interpret: it is skipped, never
+        # dereferenced. Our own blocks reuse until an operator has looked at it.
+        if tolerate:
+            return None
+        raise Blocked("inventory record %s is malformed (%s). A previous run may be incomplete; its "
+                      "resources are preserved. Inspect it and remove it only after confirming there "
+                      "are no leftovers." % (path, problem))
     return record
+
+
+def structure_problem(record):
+    """Why `record` does not have the shape this lifecycle writes, or None. Checked before any field
+    is used, so a malformed record can never crash the coordinator or be half-interpreted."""
+    def integer(value):
+        return isinstance(value, int) and not isinstance(value, bool)
+    if not isinstance(record.get("runId"), str) or not RUN_ID.match(record["runId"]):
+        return "run ID"
+    if record.get("state") not in NONTERMINAL + ("complete",):
+        return "state"
+    if not isinstance(record.get("lockKey"), str):
+        return "lock key"
+    checkout = record.get("checkout")
+    if not isinstance(checkout, dict) or not isinstance(checkout.get("path"), str) \
+            or not integer(checkout.get("ino")) or not integer(checkout.get("dev")):
+        return "checkout identity"
+    outputs = record.get("outputs")
+    if not isinstance(outputs, list):
+        return "outputs"
+    for entry in outputs:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            return "output entry"
+        for field in ("dev", "ino"):
+            if entry.get(field) is not None and not integer(entry.get(field)):
+                return "output identity"
+    processes = record.get("processes")
+    if not isinstance(processes, dict):
+        return "processes"
+    for entry in processes.values():
+        if not isinstance(entry, dict) or (entry.get("pid") is not None and not integer(entry.get("pid"))):
+            return "process entry"
+    intents = record.get("intents")
+    if not isinstance(intents, list) or not all(isinstance(entry, dict) for entry in intents):
+        return "intents"
+    return None
 
 
 def _durable_sync(fd):
@@ -582,9 +708,14 @@ def initial_record(registry, key, run_id, checkout, dev, ino, outputs, command):
         "checkout": {"path": checkout, "dev": dev, "ino": ino},
         "outputs": [{"path": entry["path"], "relative": entry["relative"], "dev": entry["dev"],
                      "ino": entry["ino"], "kind": entry["kind"]} for entry in outputs],
+        # The runner's creation intent is part of the very record that admits the run, so it is
+        # durable before the runner is spawned. A crash before its PID is recorded leaves a writer
+        # with no PID, which recovery preserves (never assumes exited) until an operator reconciles.
         "processes": {"supervisor": {"pid": os.getpid(), "birth": supervisor.get("birth"),
                                     "birthSource": supervisor.get("source"),
-                                    "role": "coordinator", "state": "live"}},
+                                    "role": "coordinator", "state": "live"},
+                      "runner": {"pid": None, "birth": None, "birthSource": None,
+                                 "role": "playwright-runner", "state": "starting"}},
         "docker": None, "temp": None, "intents": [],
         "registry": {"root": registry.root, "sockets": registry.sockets},
         "command": [os.path.basename(command[0])] + command[1:],
@@ -609,22 +740,36 @@ def child_environment(registry, key, run_id, record_path):
         "CODEMASTERY_E2E_SOCKETS": registry.sockets,
         "CODEMASTERY_E2E_CONTRACT": CONTRACT,
         "CODEMASTERY_E2E_SUPERVISOR": str(os.getpid()),
+        # The Node side asks this same interpreter for process identity.
+        "E2E_PYTHON": sys.executable,
     })
     env.pop("CODEMASTERY_E2E_FINALIZED", None)
+    for hook in TEST_HOOKS:
+        env.pop(hook, None)
     return env
 
 
-def run_child(command, env, cwd):
+def run_child(command, env, cwd, on_spawn=None):
     """Runs the admitted command to completion, forwarding interruption so its own teardown runs.
 
     The coordinator keeps the lock for the whole call, including the child's teardown, so no second
-    invocation can touch the outputs while this one is still finishing.
+    invocation can touch the outputs while this one is still finishing. The runner starts a session
+    of its own, so it leads a process group that holds every process it starts (Playwright workers,
+    the build and the preview); the coordinator later waits for that group to empty. Interruption is
+    forwarded to the runner itself, through the coordinator's own unreaped handle only.
+
+    `on_spawn(child)` records the runner's identity right after the spawn, while the unreaped handle
+    guarantees its PID cannot be reused. If that fails, the runner is stopped through the same handle.
+    Returns `(status, forwarded signals)`; a runner that could not be started raises OSError.
     """
-    child = subprocess.Popen(command, env=env, cwd=cwd, close_fds=True)
+    holder = {"child": None}
     forwarded = {"count": 0}
 
     def forward(signum, _frame):
         forwarded["count"] += 1
+        child = holder["child"]
+        if child is None:
+            return
         note("received signal %d; forwarding it to the runner so its teardown runs" % signum)
         try:
             child.send_signal(signum)
@@ -638,6 +783,15 @@ def run_child(command, env, cwd):
         except (OSError, ValueError):
             pass
     try:
+        child = subprocess.Popen(command, env=env, cwd=cwd, close_fds=True, start_new_session=True)
+        holder["child"] = child
+        if on_spawn is not None:
+            try:
+                on_spawn(child)
+            except Exception as error:  # noqa: BLE001 - any failure leaves the runner unrecorded
+                fail("the runner's identity could not be recorded (%s); stopping it through the "
+                     "coordinator's own process handle" % error)
+                child.terminate()
         while True:
             try:
                 return child.wait(), forwarded["count"]
@@ -649,6 +803,58 @@ def run_child(command, env, cwd):
                 signal.signal(signum, handler)
             except (OSError, ValueError):
                 pass
+
+
+def mark_runner(record_path, fields):
+    """Merges `fields` into the recorded runner entry (the coordinator is the only writer while it
+    supervises the runner's start; the runner waits for this record before it writes anything)."""
+    record = read_record(record_path)
+    if record is None:
+        raise Blocked("inventory record %s disappeared" % record_path)
+    record["processes"].setdefault("runner", {"role": "playwright-runner"}).update(fields)
+    write_record(record_path, record)
+
+
+def record_runner(record_path, child):
+    """Persists the spawned runner's PID, OS birth identity and process group. The handle is not yet
+    reaped, so the PID still names this child even if it has already exited. With
+    `start_new_session` a successful spawn guarantees that the child leads its own process group."""
+    identity = process_identity(child.pid)
+    reliable = identity.get("reliable") and identity.get("exists")
+    mark_runner(record_path, {"pid": child.pid, "birth": identity.get("birth") if reliable else None,
+                              "birthSource": identity.get("source"), "state": "live", "group": child.pid})
+
+
+def settle_runner_group(record_path, timeout=GROUP_SETTLE_SECONDS):
+    """After the runner exits, waits (bounded, without signalling anything) until its process group
+    holds no process other than recorded writers that finalization stops itself (the preview), so
+    Playwright workers still closing are not raced. Finalization re-checks the group either way."""
+    try:
+        record = read_record(record_path)
+    except Blocked:
+        return False
+    runner = (record or {}).get("processes", {}).get("runner") or {}
+    pgid = runner.get("group")
+    if not isinstance(pgid, int):
+        return False
+    deadline = time.time() + timeout
+    while True:
+        try:
+            record = read_record(record_path) or record
+        except Blocked:
+            pass
+        known = set((entry.get("pid"), entry.get("birth")) for role, entry in record["processes"].items()
+                    if role != "runner" and entry.get("pid"))
+        group = group_members(pgid)
+        if group["reliable"]:
+            stray = [m for m in group["members"] if (m["pid"], m["birth"]) not in known]
+            if not stray:
+                return True
+        if time.time() > deadline:
+            note("the runner's process group %d still has live members after %d s; finalization "
+                 "preserves the build and the stack until they exit" % (pgid, timeout))
+            return False
+        time.sleep(0.25)
 
 
 def finalize(checkout, record_path, env, reason):
@@ -681,7 +887,16 @@ def mode_run(registry, key, checkout, dev, ino, command):
     write_record(record_path, initial_record(registry, key, run_id, checkout, dev, ino, outputs, command))
     env = child_environment(registry, key, run_id, record_path)
     note("run %s admitted for checkout %s (lock key %s)" % (run_id, checkout, key))
-    status, interrupted = run_child(command, env, checkout)
+    try:
+        status, interrupted = run_child(command, env, checkout,
+                                        on_spawn=lambda child: record_runner(record_path, child))
+    except OSError as error:
+        # Popen reports a failed exec only after the child is gone, so no runner process exists.
+        fail("the runner could not be started: %s" % error)
+        mark_runner(record_path, {"state": "exited", "why": "the runner could not be started: %s" % error})
+        finalize(checkout, record_path, env, "runner-not-started")
+        return EXIT_FAIL
+    settle_runner_group(record_path)
     cleanup = finalize(checkout, record_path, env, "interrupted" if interrupted else
                        ("runner-exit-%d" % status))
     if status != 0 and cleanup != 0:
@@ -731,7 +946,7 @@ def split_command(argv):
 
 def main(argv):
     if not argv:
-        fail("a mode is required (run, recover, report, proc-identity, host-identity, inspect)")
+        fail("a mode is required (run, recover, report, proc-identity, proc-group, host-identity, inspect)")
         return EXIT_FAIL
     mode, rest = argv[0], argv[1:]
 
@@ -740,6 +955,13 @@ def main(argv):
             fail("proc-identity needs a PID")
             return EXIT_FAIL
         json.dump(process_identity(int(rest[0])), sys.stdout)
+        sys.stdout.write("\n")
+        return EXIT_OK
+    if mode == "proc-group":
+        if not rest or not rest[0].isdigit() or int(rest[0]) <= 1:
+            fail("proc-group needs a process-group ID above 1")
+            return EXIT_FAIL
+        json.dump(group_members(int(rest[0])), sys.stdout)
         sys.stdout.write("\n")
         return EXIT_OK
     if mode == "host-identity":

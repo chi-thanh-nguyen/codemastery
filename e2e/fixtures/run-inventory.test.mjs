@@ -9,8 +9,8 @@ import { chmodSync, linkSync, lstatSync, mkdtempSync, readFileSync, readdirSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-    MAX_INTENTS, MAX_OBSERVATIONS, MAX_RECORD_BYTES, SCHEMA, UntrustedInventory,
-    addIntent, admissionProblem, markerFile, observe, readInventory, readMarker, setIntent, updateInventory, writeInventory,
+    MAX_INTENTS, MAX_OBSERVATIONS, MAX_RECORD_BYTES, OwnershipLost, SCHEMA, UntrustedInventory,
+    addIntent, admissionProblem, ownershipProblem, markerFile, observe, readInventory, readMarker, setIntent, updateInventory, writeInventory,
 } from './run-inventory.mjs';
 
 const scratch = (body) => {
@@ -154,6 +154,14 @@ describe('only the coordinator\'s current hand-down admits a process', () => {
         handDown(dir, file, { state: 'complete' });
         assert.match(admissionProblem({ env, ppid: 4242 }), /the run is complete, not active/);
     }));
+    test('once the coordinator has recorded the runner, only that process is admitted', () => scratch((dir, file) => {
+        const env = handDown(dir, file, { processes: { supervisor: { pid: 4242 }, runner: { pid: 5150, state: 'live' } } });
+        assert.equal(admissionProblem({ env, ppid: 4242, pid: 5150 }), null);
+        assert.match(admissionProblem({ env, ppid: 4242, pid: 5151 }), /names runner 5150, not this process/);
+        handDown(dir, file, { processes: { supervisor: { pid: 4242 }, runner: { pid: null, state: 'starting' } } });
+        assert.equal(admissionProblem({ env, ppid: 4242, pid: 5151 }), null, 'while only the intent exists, the coordinator\'s child is admitted');
+    }));
+
     test('a configuration of another checkout is refused even with a valid hand-down', () => scratch((dir, file) => {
         const env = handDown(dir, file);
         assert.match(admissionProblem({ env, ppid: 4242, checkoutDir: dir }), /belongs to another checkout/);
@@ -163,4 +171,31 @@ describe('only the coordinator\'s current hand-down admits a process', () => {
         own.CODEMASTERY_E2E_OWNERSHIP = `${info.dev}-${info.ino}:cm-e2e-adm`;
         assert.equal(admissionProblem({ env: own, ppid: 4242, checkoutDir: dir }), null);
     }));
+});
+
+describe('inventory mutations come only from a process acting for the lock holder\'s run', () => {
+    const handDown = { CODEMASTERY_E2E_RUN_ID: 'cm-e2e-test', CODEMASTERY_E2E_LOCK_KEY: 'k1', CODEMASTERY_E2E_SUPERVISOR: '4242' };
+    test('the coordinator\'s child changes its own run\'s record', () => scratch((dir, file) => {
+        writeInventory(file, { ...base(), lockKey: 'k1' });
+        updateInventory(file, (record) => observe(record, 'allowed'), { env: handDown, ppid: 4242 });
+        assert.match(readInventory(file).observations.at(-1), /allowed/);
+    }));
+    test('an orphan whose coordinator died changes nothing', () => scratch((dir, file) => {
+        writeInventory(file, { ...base(), lockKey: 'k1' });
+        const before = readFileSync(file, 'utf8');
+        assert.throws(() => updateInventory(file, (record) => observe(record, 'orphan'), { env: handDown, ppid: 1 }),
+            (error) => error instanceof OwnershipLost && /coordinator 4242 .* is no longer this process' parent \(parent 1\)/.test(error.message));
+        assert.equal(readFileSync(file, 'utf8'), before, 'the record is byte-identical');
+    }));
+    test('a later run\'s record at the same path is never changed by an earlier run\'s process', () => scratch((dir, file) => {
+        writeInventory(file, { ...base(), runId: 'cm-e2e-later', lockKey: 'k1' });
+        const before = readFileSync(file, 'utf8');
+        assert.throws(() => updateInventory(file, (record) => observe(record, 'stale'), { env: handDown, ppid: 4242 }),
+            /belongs to run cm-e2e-later, not to the handed-down run cm-e2e-test/);
+        assert.equal(readFileSync(file, 'utf8'), before);
+    }));
+    test('a partial hand-down is refused; no hand-down at all is the uncoordinated unit-test path', () => {
+        assert.match(ownershipProblem(base(), { env: { CODEMASTERY_E2E_RUN_ID: 'cm-e2e-test' }, ppid: 1 }), /hand-down is incomplete/);
+        assert.equal(ownershipProblem(base(), { env: {}, ppid: 1 }), null);
+    });
 });

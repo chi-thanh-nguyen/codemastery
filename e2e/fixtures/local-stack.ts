@@ -30,7 +30,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { processIdentity } from './host-identity.mjs';
-import { addIntent, inventoryPath, markerFile, observe, setIntent, updateInventory } from './run-inventory.mjs';
+import { addIntent, inventoryPath, markerFile, observe, ownershipProblem, readInventory, setIntent, updateInventory } from './run-inventory.mjs';
 import { STACK_LABEL, dockerIdentity, ownerLabel, reconcile, recordVolumeAssociation, runLabel } from './stack-recovery.mjs';
 
 const run = promisify(execFile);
@@ -243,6 +243,32 @@ async function runRecorded(inventoryFile: string, role: string, command: string,
     return tail;
 }
 
+/**
+ * Confirms that the coordinator has recorded *this* process as the run's runner (it writes the
+ * runner's creation intent before the spawn and its PID and birth identity right after it) before
+ * global setup changes anything. The runner never records itself: a process that is not the recorded
+ * runner, or whose coordinator is gone, creates nothing and writes nothing.
+ */
+export async function confirmRecordedRunner(inventoryFile: string, { timeoutMs = 15_000, intervalMs = 100 } = {}) {
+    const mine = processIdentity(process.pid);
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const record = readInventory(inventoryFile);
+        if (!record) throw new Error(`The run inventory ${inventoryFile} does not exist; nothing was created`);
+        const problem = ownershipProblem(record);
+        if (problem) throw new Error(`This runner no longer acts for its lifecycle coordinator (${problem}); nothing was created`);
+        const runner = record.processes?.runner;
+        if (!runner) throw new Error('The run record has no runner intent, so this runner was not started by the coordinator; nothing was created');
+        if (runner.pid === process.pid) {
+            if (runner.birth && mine.birth && runner.birth !== mine.birth) throw new Error('The recorded runner has another birth identity than this process; nothing was created');
+            return runner;
+        }
+        if (runner.pid != null) throw new Error(`The run record names runner ${runner.pid}, not this process (${process.pid}); nothing was created`);
+        if (Date.now() > deadline) throw new Error('The coordinator did not record this runner\'s identity in time; nothing was created');
+        await new Promise((next) => setTimeout(next, intervalMs));
+    }
+}
+
 export default async function globalSetup() {
     // Ownership was taken by fixtures/lifecycle.py before this runner was started; a run that is
     // not admitted has no inventory to write its resources into and must not create any.
@@ -252,10 +278,7 @@ export default async function globalSetup() {
             + 'of this checkout and its outputs before Playwright runs. Use `npm test` or `npm run test:chromium` from e2e/.');
     }
     const runId = process.env.CODEMASTERY_E2E_RUN_ID as string;
-    const runnerIdentity = processIdentity(process.pid);
-    updateInventory(inventoryFile, (record) => {
-        record.processes.runner = { pid: process.pid, birth: runnerIdentity.birth, birthSource: runnerIdentity.source, role: 'playwright-runner', state: 'live' };
-    });
+    await confirmRecordedRunner(inventoryFile);
     /** Reconciles this run through the shared r2 engine; incomplete recovery is never silent. */
     const teardown = async (reason: string, previewHandle?: ChildProcess) => {
         // The runner's own exit is not claimed here: the coordinator verifies it by birth identity
@@ -400,7 +423,13 @@ export default async function globalSetup() {
         updateInventory(inventoryFile, (record) => observe(record, 'disposable stack ready; fixtures applied'));
         return () => teardown('playwright teardown', preview);
     } catch (error) {
-        updateInventory(inventoryFile, (record) => observe(record, `setup failed: ${String((error as Error).message).slice(0, 200)}`));
+        try {
+            updateInventory(inventoryFile, (record) => observe(record, `setup failed: ${String((error as Error).message).slice(0, 200)}`));
+        } catch (recordError) {
+            // Best effort: the original setup error is what the caller must see (for example when this
+            // runner no longer acts for its coordinator and may not write the record at all).
+            console.error(`E2E setup failed and the failure could not be recorded: ${String(recordError)}`);
+        }
         await teardown('setup failure', preview).catch((cleanupError: unknown) => {
             console.error(`E2E setup failed and cleanup did not complete: ${String(cleanupError)}`);
         });
