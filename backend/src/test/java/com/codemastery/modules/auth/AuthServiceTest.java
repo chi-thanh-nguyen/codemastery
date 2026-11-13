@@ -20,6 +20,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
@@ -567,6 +569,11 @@ class AuthServiceTest {
             assertEquals(587, sender.getPort());
             assertEquals("smtp", sender.getProtocol());
             Properties properties = sender.getJavaMailProperties();
+            for (String debug : List.of("mail.debug", "mail.debug.auth", "mail.debug.auth.username",
+                    "mail.debug.auth.password")) {
+                assertEquals("false", properties.getProperty(debug));
+            }
+            assertFalse(sender.getSession().getDebug());
             assertEquals("true", properties.getProperty("mail.smtp.auth"));
             assertEquals("true", properties.getProperty("mail.smtp.starttls.enable"));
             assertEquals("true", properties.getProperty("mail.smtp.starttls.required"));
@@ -632,6 +639,102 @@ class AuthServiceTest {
             for (String verb : server.verbs()) {
                 assertFalse(NOTHING_SUBMITTED.contains(verb.replace("TLS ", "")), "no submission after refusal: " + verb);
             }
+        }
+
+        static Stream<Arguments> diagnosticExchanges() {
+            return Stream.of("JUL", "SLF4J", "SESSION").flatMap(path -> Stream.of("DEBUG", "TRACE")
+                    .flatMap(level -> Stream.of(true, false).map(success -> Arguments.of(path, level, success))));
+        }
+
+        @ParameterizedTest(name = "{0} {1}, delivery succeeds={2}")
+        @MethodSource("diagnosticExchanges")
+        void verboseDiagnosticsNeverDiscloseRecoveryInformation(String path, String level, boolean success)
+                throws Exception {
+            TestCertificate.serverContext();
+            try (MailLogCapture logs = new MailLogCapture(path, level);
+                 SubmissionServer server = new SubmissionServer(true, "PLAIN", SubmissionServer.SECRET,
+                         null, !success)) {
+                JavaMailSenderImpl client = sender("localhost", server.port(), true);
+                if (path.equals("SESSION")) {
+                    client.getSession().setDebug(true); // Direct PrintStream path also stays silent.
+                }
+                // Even a later logging-level change must not reopen the source diagnostic path.
+                logs.enableVerboseLevels();
+                if (success) {
+                    send(client);
+                } else {
+                    assertThrows(MailException.class, () -> send(client));
+                }
+                server.awaitSession();
+                assertTrue(server.authenticated());
+                assertTrue(server.verbs().contains("TLS DATA"), "exercise the sensitive payload path");
+                logs.assertNoRecoveryInformation();
+            }
+        }
+
+        @Test
+        void incompatibleAuthenticationMechanismsNeverReceiveCredentialsOrMessage() throws Exception {
+            try (MailLogCapture logs = new MailLogCapture("JUL", "TRACE");
+                 SubmissionServer server = new SubmissionServer(true, "UNSUPPORTED-TEST-MECHANISM",
+                         SubmissionServer.SECRET, null, false)) {
+                assertThrows(MailException.class, () -> send(sender("localhost", server.port(), true)));
+                server.awaitSession();
+                assertEquals(List.of("EHLO", "STARTTLS", "TLS EHLO"), server.verbs());
+                assertFalse(server.authenticated());
+                assertNothingSubmitted(server);
+                logs.assertNoRecoveryInformation();
+            }
+        }
+
+        @Test
+        void nonListeningLoopbackEndpointFailsWithoutDisclosingCredentials() throws Exception {
+            // Keep the port reserved without listening: no race with another process taking it.
+            // The OS may refuse immediately or let the configured connection deadline expire.
+            try (var reserved = java.nio.channels.SocketChannel.open();
+                 MailLogCapture logs = new MailLogCapture("SLF4J", "TRACE")) {
+                reserved.bind(new java.net.InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+                int port = ((java.net.InetSocketAddress) reserved.getLocalAddress()).getPort();
+                long started = System.nanoTime();
+                MailException failure = assertThrows(MailException.class,
+                        () -> send(sender("localhost", port, true)));
+                assertTrue(hasCause(failure, java.net.ConnectException.class)
+                        || hasCause(failure, java.net.SocketTimeoutException.class));
+                assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(15)) < 0);
+                logs.assertNoRecoveryInformation();
+            }
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"GREETING", "AUTH"})
+        void stalledExchangeEnforcesTheProductionReadTimeout(String stallAt) throws Exception {
+            try (MailLogCapture logs = new MailLogCapture("SLF4J", "TRACE");
+                 SubmissionServer server = new SubmissionServer(true, "PLAIN", SubmissionServer.SECRET,
+                         stallAt, false)) {
+                JavaMailSenderImpl client = sender("localhost", server.port(), true);
+                long started = System.nanoTime();
+                MailException failure = assertThrows(MailException.class, () -> send(client));
+                Duration elapsed = Duration.ofNanos(System.nanoTime() - started);
+                assertTrue(hasCause(failure, java.net.SocketTimeoutException.class));
+                assertTrue(elapsed.compareTo(Duration.ofSeconds(4)) >= 0, "production 5000 ms deadline");
+                assertTrue(elapsed.compareTo(Duration.ofSeconds(15)) < 0, "exchange did not time out");
+                assertFalse(server.authenticated());
+                assertNothingSubmitted(server);
+                assertEquals(stallAt.equals("AUTH"), server.verbs().contains("TLS AUTH"));
+                logs.assertNoRecoveryInformation();
+            }
+        }
+
+        private boolean hasCause(Throwable failure, Class<? extends Throwable> type) {
+            if (type.isInstance(failure)) {
+                return true;
+            }
+            if (failure.getCause() != null && hasCause(failure.getCause(), type)) {
+                return true;
+            }
+            if (failure instanceof org.springframework.mail.MailSendException send) {
+                return Arrays.stream(send.getMessageExceptions()).anyMatch(cause -> hasCause(cause, type));
+            }
+            return false;
         }
 
         @Test
@@ -707,6 +810,107 @@ class AuthServiceTest {
         }
     }
 
+    /** Captures raw JUL handlers or Boot's JUL-to-SLF4J/Logback path, restoring global test state. */
+    private static final class MailLogCapture implements AutoCloseable {
+        private static final List<String> SOURCES = List.of("org.eclipse.angus.mail.smtp",
+                "org.eclipse.angus.mail.smtp.protocol", "org.eclipse.angus.mail.util.socket");
+        private final java.util.logging.Logger julRoot = java.util.logging.Logger.getLogger("");
+        private final java.util.logging.Level oldJulLevel = julRoot.getLevel();
+        private final java.util.logging.Handler[] oldHandlers = julRoot.getHandlers();
+        private final List<java.util.logging.Logger> sources = SOURCES.stream()
+                .map(java.util.logging.Logger::getLogger).toList();
+        private final List<java.util.logging.Level> oldLevels = sources.stream().map(java.util.logging.Logger::getLevel)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        private final List<java.util.logging.Filter> oldFilters = sources.stream().map(java.util.logging.Logger::getFilter)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        private final ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        private final ch.qos.logback.classic.Level oldLevel = root.getLevel();
+        private final ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        private final List<String> julMessages = new CopyOnWriteArrayList<>();
+        private final ByteArrayOutputStream directOutput = new ByteArrayOutputStream();
+        private final PrintStream oldOut = System.out;
+        private final PrintStream oldErr = System.err;
+        private final PrintStream capturedOutput = new PrintStream(directOutput, true, StandardCharsets.UTF_8);
+
+        MailLogCapture(String path, String level) {
+            System.setOut(capturedOutput);
+            System.setErr(capturedOutput);
+            root.setLevel(ch.qos.logback.classic.Level.toLevel(level));
+            appender.start();
+            root.addAppender(appender);
+            Arrays.stream(oldHandlers).forEach(julRoot::removeHandler);
+            if (path.equals("SLF4J")) {
+                // The same bridge used by Spring Boot's LogbackLoggingSystem.
+                org.slf4j.bridge.SLF4JBridgeHandler.install();
+            } else {
+                julRoot.addHandler(new java.util.logging.Handler() {
+                    { setLevel(java.util.logging.Level.ALL); }
+                    @Override public void publish(java.util.logging.LogRecord record) {
+                        julMessages.add(record.getMessage());
+                        if (record.getParameters() != null) {
+                            julMessages.add(Arrays.toString(record.getParameters()));
+                        }
+                        if (record.getThrown() != null) {
+                            var trace = new java.io.StringWriter();
+                            record.getThrown().printStackTrace(new java.io.PrintWriter(trace));
+                            julMessages.add(trace.toString());
+                        }
+                    }
+                    @Override public void flush() { }
+                    @Override public void close() { }
+                });
+            }
+            julRoot.setLevel(level.equals("TRACE") ? java.util.logging.Level.FINEST : java.util.logging.Level.FINE);
+            sources.forEach(source -> source.setFilter(null));
+            enableVerboseLevels();
+        }
+
+        void enableVerboseLevels() {
+            sources.forEach(source -> source.setLevel(julRoot.getLevel()));
+        }
+
+        void assertNoRecoveryInformation() {
+            // Prove that the capture works and unrelated application diagnostics remain available.
+            org.slf4j.LoggerFactory.getLogger("com.codemastery.smtp-test-control").debug("application-log-control");
+            julRoot.log(java.util.logging.Level.FINE, "jul-log-control");
+            String output = directOutput.toString(StandardCharsets.UTF_8) + julMessages
+                    + appender.list.stream().map(event -> event.getFormattedMessage()
+                    + (event.getThrowableProxy() == null ? "" : ch.qos.logback.classic.spi.ThrowableProxyUtil
+                            .asString(event.getThrowableProxy()))).toList();
+            assertTrue(output.contains("application-log-control"));
+            assertTrue(output.contains("jul-log-control"));
+            for (String secret : List.of(SubmissionServer.USER, SubmissionServer.SECRET,
+                    Base64.getEncoder().encodeToString(("\0" + SubmissionServer.USER + "\0" + SubmissionServer.SECRET)
+                            .getBytes(StandardCharsets.UTF_8)),
+                    "https://codemastery.test/reset-password#token=abc", "token=abc", "learner@example.test",
+                    "auth@codemastery.test", "A password reset was requested", "Reset your CodeMastery password")) {
+                assertFalse(output.contains(secret), "sensitive SMTP diagnostics were emitted");
+            }
+        }
+
+        @Override
+        public void close() {
+            System.setOut(oldOut);
+            System.setErr(oldErr);
+            root.detachAppender(appender);
+            appender.stop();
+            root.setLevel(oldLevel);
+            for (java.util.logging.Handler handler : julRoot.getHandlers()) {
+                julRoot.removeHandler(handler);
+                handler.close();
+            }
+            Arrays.stream(oldHandlers).forEach(julRoot::addHandler);
+            julRoot.setLevel(oldJulLevel);
+            for (int i = 0; i < sources.size(); i++) {
+                sources.get(i).setLevel(oldLevels.get(i));
+                sources.get(i).setFilter(oldFilters.get(i));
+            }
+            capturedOutput.close();
+        }
+    }
+
     /** One ephemeral self-signed certificate per test JVM, generated with the JDK keytool. */
     private static final class TestCertificate {
         private static SSLContext server;
@@ -777,18 +981,28 @@ class AuthServiceTest {
 
         private final ServerSocket listener;
         private final boolean offerStartTls;
-        private final boolean offerAuth;
+        private final String authMechanisms;
         private final String acceptedSecret;
+        private final String stallAt;
+        private final boolean rejectData;
+        private final java.util.concurrent.CountDownLatch stop = new java.util.concurrent.CountDownLatch(1);
         private final List<String> verbs = new CopyOnWriteArrayList<>();
         private final AtomicBoolean authenticated = new AtomicBoolean();
         private final AtomicReference<String> message = new AtomicReference<>();
         private final Thread session;
 
         private SubmissionServer(boolean offerStartTls, boolean offerAuth, String acceptedSecret) throws Exception {
+            this(offerStartTls, offerAuth ? "PLAIN" : null, acceptedSecret, null, false);
+        }
+
+        private SubmissionServer(boolean offerStartTls, String authMechanisms, String acceptedSecret,
+                                 String stallAt, boolean rejectData) throws Exception {
             TestCertificate.serverContext();
             this.offerStartTls = offerStartTls;
-            this.offerAuth = offerAuth;
+            this.authMechanisms = authMechanisms;
             this.acceptedSecret = acceptedSecret;
+            this.stallAt = stallAt;
+            this.rejectData = rejectData;
             this.listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
             this.listener.setSoTimeout(10_000);
             this.session = Thread.ofPlatform().daemon().name("isolated-smtp-test-server").start(this::serve);
@@ -822,6 +1036,7 @@ class AuthServiceTest {
 
         @Override
         public void close() throws Exception {
+            stop.countDown();
             listener.close();
             session.join(Duration.ofSeconds(15));
         }
@@ -833,6 +1048,10 @@ class AuthServiceTest {
                 boolean tls = false;
                 BufferedReader in = reader(socket);
                 Writer out = writer(socket);
+                if ("GREETING".equals(stallAt)) {
+                    stop.await(20, TimeUnit.SECONDS);
+                    return;
+                }
                 reply(out, "220 localhost ESMTP isolated test server");
                 String line;
                 while ((line = in.readLine()) != null) {
@@ -844,8 +1063,8 @@ class AuthServiceTest {
                             if (!tls && offerStartTls) {
                                 lines.add("STARTTLS");
                             }
-                            if (offerAuth && (tls || !offerStartTls)) {
-                                lines.add("AUTH PLAIN");
+                            if (authMechanisms != null && (tls || !offerStartTls)) {
+                                lines.add("AUTH " + authMechanisms);
                             }
                             for (int i = 0; i < lines.size(); i++) {
                                 reply(out, "250" + (i == lines.size() - 1 ? " " : "-") + lines.get(i));
@@ -863,6 +1082,10 @@ class AuthServiceTest {
                             tls = true;
                         }
                         case "AUTH" -> {
+                            if ("AUTH".equals(stallAt)) {
+                                stop.await(20, TimeUnit.SECONDS);
+                                return;
+                            }
                             String[] parts = line.split(" ");
                             String response = parts.length > 2 ? parts[2] : null;
                             if (response == null) {
@@ -885,7 +1108,8 @@ class AuthServiceTest {
                                 data.append(body).append('\n');
                             }
                             message.set(data.toString());
-                            reply(out, "250 2.0.0 Accepted");
+                            reply(out, rejectData ? "550 5.0.0 synthetic refusal " + USER + " " + SECRET
+                                    : "250 2.0.0 Accepted");
                         }
                         case "QUIT" -> {
                             reply(out, "221 2.0.0 Bye");

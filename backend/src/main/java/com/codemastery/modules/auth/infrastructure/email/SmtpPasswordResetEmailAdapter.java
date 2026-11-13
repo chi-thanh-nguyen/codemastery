@@ -6,8 +6,12 @@ import com.codemastery.modules.auth.application.service.PasswordResetService.Res
 import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailMessage;
 import jakarta.mail.AuthenticationFailedException;
 import jakarta.mail.MessagingException;
+import jakarta.mail.Session;
 import jakarta.mail.Transport;
+import java.io.OutputStream;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import org.eclipse.angus.mail.smtp.SMTPTransport;
@@ -31,6 +35,15 @@ public class SmtpPasswordResetEmailAdapter implements ResetEmailDelivery {
     static final int NETWORK_TIMEOUT_MILLIS = 5000;
     static final String SUBJECT = "Reset your CodeMastery password";
 
+    // Angus 2.0.5's SMTP, wire and socket diagnostics originate in these JUL loggers,
+    // including when Boot forwards them to SLF4J. Keep strong references: JUL otherwise
+    // permits a logger (and its security policy) to be garbage-collected.
+    private static final List<java.util.logging.Logger> SMTP_DIAGNOSTICS = List.of(
+            java.util.logging.Logger.getLogger("org.eclipse.angus.mail.smtp"),
+            java.util.logging.Logger.getLogger("org.eclipse.angus.mail.smtp.protocol"),
+            java.util.logging.Logger.getLogger("org.eclipse.angus.mail.util.socket"));
+    private static final PrintStream NO_DIAGNOSTIC_OUTPUT = new PrintStream(OutputStream.nullOutputStream());
+
     private final JavaMailSender mail;
     private final String sender;
 
@@ -52,6 +65,13 @@ public class SmtpPasswordResetEmailAdapter implements ResetEmailDelivery {
     /** Builds the fixed-policy SMTP submission client from validated recovery settings. */
     public static JavaMailSenderImpl newMailSender(PasswordResetSettings settings) {
         Objects.requireNonNull(settings);
+        // Block at the source, before handlers/bridges see a record. A filter is needed
+        // as well as OFF: a later DEBUG/TRACE level change must not enable wire logging.
+        // Only this reset-only transport is silenced; application diagnostics are untouched.
+        SMTP_DIAGNOSTICS.forEach(logger -> {
+            logger.setLevel(java.util.logging.Level.OFF);
+            logger.setFilter(record -> false);
+        });
         JavaMailSenderImpl sender = new AuthenticatedSubmissionSender();
         sender.setProtocol("smtp");
         sender.setHost(settings.smtpHost());
@@ -60,6 +80,10 @@ public class SmtpPasswordResetEmailAdapter implements ResetEmailDelivery {
         sender.setPassword(settings.smtpPassword());
         sender.setDefaultEncoding(StandardCharsets.UTF_8.name());
         Properties properties = new Properties();
+        properties.setProperty("mail.debug", "false");
+        properties.setProperty("mail.debug.auth", "false");
+        properties.setProperty("mail.debug.auth.username", "false");
+        properties.setProperty("mail.debug.auth.password", "false");
         properties.setProperty("mail.smtp.auth", "true");
         properties.setProperty("mail.smtp.starttls.enable", "true");
         properties.setProperty("mail.smtp.starttls.required", "true");
@@ -95,6 +119,16 @@ public class SmtpPasswordResetEmailAdapter implements ResetEmailDelivery {
      * AUTH has authenticated. Any other connection is closed before MAIL FROM.
      */
     static final class AuthenticatedSubmissionSender extends JavaMailSenderImpl {
+        @Override
+        public synchronized Session getSession() {
+            Session session = super.getSession();
+            // Session debug bypasses JUL/SLF4J. Apply to every session, including one
+            // recreated when test-only trust properties are installed.
+            session.setDebugOut(NO_DIAGNOSTIC_OUTPUT);
+            session.setDebug(false);
+            return session;
+        }
+
         @Override
         protected Transport connectTransport() throws MessagingException {
             Transport transport = super.connectTransport();

@@ -74,6 +74,26 @@ verification is separate work.
 Merged test code does not complete QA01 or QA02: each Issue's own acceptance
 criteria, independent review and any environment-specific evidence remain open.
 
+### AU07 SMTP diagnostic and negative regression coverage
+
+`AuthServiceTest$SmtpSubmissionPolicy` uses synthetic credentials and an isolated
+loopback STARTTLS server. It captures raw JUL handlers, the JUL-to-SLF4J/Logback
+path used by Spring Boot, and direct Session debug output at DEBUG/TRACE, for both
+successful delivery and a server rejection after DATA. Assertions exclude the reset
+URL/capability, credentials, encoded AUTH, recipient, sender and message payload;
+control messages prove unrelated application logging still works. Logging levels
+are also raised after sender construction to check the source refusal remains in
+force. Captured logger levels, filters, handlers and output streams are restored.
+
+Negative exchanges include incompatible-only AUTH, a reserved non-listening
+loopback endpoint (connection refusal or connection timeout, depending on the OS),
+and stalls at the greeting and post-STARTTLS AUTH response. The stall tests retain
+the production 5000 ms read deadline and assert a timeout with no message
+submission. Connection/read/write timeout settings remain asserted at 5000 ms;
+a write-buffer stall is not forced for the small reset message. Existing STARTTLS,
+trust, hostname and rejected-credential tests remain. No real provider or deployed
+qualification is implied.
+
 ### Latest recorded results
 
 | Date (ICT) | Revision | Where | Command | Result |
