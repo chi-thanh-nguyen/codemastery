@@ -674,5 +674,9 @@ G′01–G′24 and P2-R, and keeps the ≥80% figure as an evaluation target on
 mastery-update correctness uses cases M01–M11; learning gain is simulated and
 labelled as a procedure demonstration. No real-student pilot is selected (ADR013
 §16.2). The demonstration Course uses `weak 1/2`, `mastered 4/5`,
-`minimumQuestionsPerSkill 6` (ADR013 §16.1). Difficulty-shaped practice is not part of
-Final (ADR013 §16.3). No result is claimed.
+`minimumQuestionsPerSkill 6` (ADR013 §16.1). Whether and how practice difficulty is
+consumed in Final is a pending Leader decision (ADR013 §18.4, which withdraws §16.3):
+the approved architecture (§§4.7, 6) selects practice difficulty by mastery, and
+every consumption route either amends Leader-reserved contracts or needs a new
+learner-facing contract and an evidence-bias decision. Until then practice Quizzes
+are fixed, as CT04-START captures them. No result is claimed.

@@ -3186,3 +3186,14 @@ L-N1 and L-N2 on `chromium-desktop` and `chromium-mobile`, A-1 on `chromium-desk
 the CT36.F-measures report, deployment smoke checks, sample-data loading and the CI
 jobs on one exact commit; other cases and projects are attempted and reported but do
 not block release. No case has been executed for this record.
+
+*Independent review remediation, 15 November 2026* ([ADR013 §18](decisions/013-batch-08-contract-approvals.md#18-independent-review-remediation--15-november-2026-third-instruction)):
+the fixture-relative rule now also covers L-A5, whose far-page check keeps the exact
+`content`, `page` and `size` but asserts `totalElements ≥ 21` and
+`totalPages = ceil(totalElements / 20)` from the same response. Journey Courses must
+not contain `foundations` and must have no prerequisite text, so L-A1's search and
+filter results stay exact. L-N3 runs against a per-run MinIO added to the
+disposable stack by ADR013 §7.3: Compose-pinned images, a private network, generated
+credentials, a bucket provisioned by the unchanged Compose initializer, and
+removal with the run. L-N3 checks an upload/download byte round trip. Nothing is
+implemented or run.

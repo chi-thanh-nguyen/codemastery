@@ -412,7 +412,7 @@ no seed, test or runtime behavior is implemented by the approvals.
 | `CT15-F-ADAPTIVE-2026-11-15-r2` | Completes r1: demonstration policy `weak 1/2`, `mastered 4/5`, `minimumQuestionsPerSkill 6` | [ADR013 §16.1](013-batch-08-contract-approvals.md#161-ct15-f-adaptive-2026-11-15-r2--demonstration-policy-resolves-141) |
 | `CT15-F-ASSESSMENT-2026-11-15-r1` | 120 questions, placement/practice/test quizzes, two assignments | [ADR013 §4.3](013-batch-08-contract-approvals.md#43-ct15f-assessment-sd04) |
 | `CT36-F-SCENARIOS-2026-11-15-r1` / `CT36-F-MEASURES-2026-11-15-r1` | P1–P3, G01–G24, M01–M10; four measures and reporting | [ADR013 §§5–6](013-batch-08-contract-approvals.md#5-ct36f-scenarios) |
-| `CT19-CASES-2026-11-15-r1` / `CT19-FIXTURES-2026-11-15-r1` | Adopted L-A1–L-A5 and new L-N1–L-N4; per-test REST data | [ADR013 §7](013-batch-08-contract-approvals.md#7-ct19--learner-e2e-suite-f20) |
+| `CT19-CASES-2026-11-15-r2` / `CT19-FIXTURES-2026-11-15-r2` | Adopted L-A1–L-A5 and new L-N1–L-N4; per-test REST data; per-run storage fixture | [ADR013 §7](013-batch-08-contract-approvals.md#7-ct19--learner-e2e-suite-f20) |
 | `CT35-CASES-2026-11-15-r1` / `CT35-FIXTURES-2026-11-15-r1` | A-1–A-3 on a per-run loops sub-graph | [ADR013 §8](013-batch-08-contract-approvals.md#8-ct35--adaptive-e2e-suite-f21) |
 | `CT20-F-2026-11-15-r1` | Final coverage allocation; both suites release-required for named cases only | [ADR013 §11](013-batch-08-contract-approvals.md#11-ct20f--final-coverage-allocation-u33u34) |
 
@@ -428,3 +428,11 @@ CT08-EVIDENCE unchanged); twelve re-audit findings F8-01–F8-12 are corrected. 
 roadmap checkpoints now have a technical approval record: 63 integrated on `main`, 37 in
 open PRs #244/#245. LD-09 and acceptance of the review-free integration of #228–#236
 remain Leader decisions.
+
+*Independent review remediation, 15 November 2026* ([ADR013 §18](013-batch-08-contract-approvals.md#18-independent-review-remediation--15-november-2026-third-instruction)):
+R06 extends the fixture-relative catalogue rule to L-A5 and isolates journey Courses
+from L-A1's search and filter cases; E01 adds a per-run MinIO storage fixture for L-N3
+(both in the CT19 r2 revisions above); E02 withdraws the continuation's statement that
+the practice-capture amendment is not adopted for Final. Practice-difficulty
+consumption is again `PENDING_LEADER_DECISION`: the approved architecture selects it,
+and every route needs a Leader-reserved choice and an evidence-bias decision.

@@ -47,8 +47,8 @@ authored this record; no AI runtime is added.
 | CP-093 | CT15.F-assessment / #28 | `CT15-F-ASSESSMENT-2026-11-15-r1` | DELEGATED_APPROVED | §4.3 |
 | CP-094 | CT36.F-measures / #26 | `CT36-F-MEASURES-2026-11-15-r1` | DELEGATED_APPROVED | §6 |
 | CP-095 | CT15.F-adaptive / #28 | `CT15-F-ADAPTIVE-2026-11-15-r1`, completed by `CT15-F-ADAPTIVE-2026-11-15-r2` | r1 DELEGATED_PARTIALLY_APPROVED (policy values pending); **r2 DELEGATED_APPROVED** under the second instruction (§16.1) | §§4.2, 16.1 |
-| CP-096 | CT19.cases / [#140](https://github.com/chi-thanh-nguyen/codemastery/issues/140) | `CT19-CASES-2026-11-15-r1` | DELEGATED_APPROVED | §7.1 |
-| CP-097 | CT19.fixtures / #140 | `CT19-FIXTURES-2026-11-15-r1` | DELEGATED_APPROVED | §7.2 |
+| CP-096 | CT19.cases / [#140](https://github.com/chi-thanh-nguyen/codemastery/issues/140) | `CT19-CASES-2026-11-15-r2` (r1 → r2, §18) | DELEGATED_APPROVED | §§7.1, 18 |
+| CP-097 | CT19.fixtures / #140 | `CT19-FIXTURES-2026-11-15-r2` (r1 → r2, §18) | DELEGATED_APPROVED | §§7.2–7.3, 18 |
 | CP-098 | CT35.cases / [#151](https://github.com/chi-thanh-nguyen/codemastery/issues/151) | `CT35-CASES-2026-11-15-r1` | DELEGATED_APPROVED | §8.1 |
 | CP-099 | CT35.fixtures / #151 | `CT35-FIXTURES-2026-11-15-r1` | DELEGATED_APPROVED | §8.2 |
 | CP-100 | CT20.F / [#17](https://github.com/chi-thanh-nguyen/codemastery/issues/17) | `CT20-F-2026-11-15-r1` | DELEGATED_APPROVED | §11 |
@@ -287,12 +287,12 @@ New cases to implement in the same file (FE25):
 
 Password recovery is excluded (CT02 is verified by its own suites; no mailbox in
 E2E). Each **new** case states its story in its title; the adopted tests keep their
-titles, and only the L-A1/L-A4 count assertions change as §7.2 states. L-N3/L-N4 become start-ready only
+titles, and only the L-A1, L-A4 and L-A5 count assertions change as §7.2 states (L-A5 added by r2, §18 R06). L-N3 also downloads the submitted file through the Instructor's REST operation and compares its bytes with the generated PDF, so it proves a real storage round trip (§7.3). L-N3/L-N4 become start-ready only
 after ADR012 is integrated.
 
 ### 7.2 CT19.fixtures
 
-Reuse CT34.fixtures r2 unchanged: one disposable stack per run, the catalogue fixture
+Reuse CT34.fixtures r2 unchanged except for the additive storage component of §7.3 (r2): one disposable stack per run, the catalogue fixture
 for L-A1, per-test synthetic accounts through the existing `auth-fixture.ts` helpers,
 and the run's synthetic Instructor (`E2E_USERNAME`/`E2E_PASSWORD`). Course content
 for L-N1–L-N4 is created per test through the approved Instructor REST operations
@@ -304,12 +304,58 @@ appear in the one shared public catalogue of the run, so the adopted L-A1 and L-
 assertions become fixture-relative: page 1 shows exactly the first twenty fixture
 Courses, the hidden fixture Course never appears, the total is at least the fixture's
 21 and page 2 starts with the remaining fixture Course. No shared fixture row is
-mutated (ADR008 §4). *(Corrected, F8-02: the earlier claim that parallel workers share
+mutated (ADR008 §4).
+
+**Catalogue-dependent assertions (r2, §18 R06).** Every adopted assertion that
+depends on the shared public catalogue is fixture-relative, so a correct application
+passes in any execution order and with any number of concurrently published journey
+Courses:
+
+| Test | Exact assertions kept | Assertions that become fixture-relative |
+|---|---|---|
+| L-A1 catalogue | page 1 lists exactly 20 items, all fixture Courses, in fixture title order; the hidden fixture Course never appears; `foundations` search returns exactly the primary fixture Course (`1 course`); `Prerequisites described` lists exactly the primary fixture Course; page 2's first item is the 100-character fixture title | the total in “N courses” and “Showing 1–20 of N” satisfies N ≥ 21; page 2 shows “Showing 21–… of N” with the same N and at least one item |
+| L-A4 membership | own memberships of the test's fresh account | page-1 fixture assumptions as L-A1 |
+| L-A5 REST smoke | far page `page=107374183&size=20`: `content` is `[]`, `page` is `107374183`, `size` is `20`; hidden fixture 404; validation statuses | `totalElements ≥ 21` and `totalPages = ceil(totalElements / 20)` from the **same** response (one snapshot); never a fixed 21/2 |
+
+These hold only if journey Courses cannot match the fixture's search and filter
+cases, so every Course created by CT19 or CT35 **must** have a title starting with
+`~E2E Journey `, a description and title that do not contain `foundations` in any
+letter case, and **no** prerequisite description (null). Adaptive-flow and later
+suites follow the same rule. No assertion may depend on the exact number or order of
+journey Courses. *(Corrected, F8-02: the earlier claim that parallel workers share
 no mutable data was false.)* The PDF is generated in the test (bytes starting with `%PDF-`);
 deadlines are explicit case values relative to the test clock. No shared demo seed,
 direct SQL (other than CT34's existing catalogue load and role promotion), new
 fixture file or cleanup step is used; the disposable database is discarded with the
 stack.
+
+### 7.3 CT19 storage fixture (r2, §18 E01)
+
+ADR008 §4 states that storage-backed cases need CT09's real isolated configuration and
+that CT34's dummy storage values prove no MinIO integration; the current
+`local-stack.ts` passes only generated `STORAGE_ACCESS_KEY`/`STORAGE_SECRET_KEY` and
+starts no object store, so L-N3 had no storage. This bounded supplement to
+CT34.fixtures r2 (ADR008 §§4, 10) adds one per-run object store; it changes none of
+CT34's runner, readiness, labelling, inventory, recovery or ownership rules and is
+implemented in the existing `e2e/fixtures/local-stack.ts` (FE25 with the FE24 owner's
+review; no new file, script, dependency or top-level structure):
+
+| Aspect | Rule |
+|---|---|
+| Images | Exactly the digests pinned in `infrastructure/docker-compose.yml` for `minio` and `minio-init` (the same approved local-development builds; no tag-only reference, no other image). Test use is not a release admission |
+| Identity and isolation | Containers `<runId>-minio` and `<runId>-minio-init` on the run's private network with the run labels, so normal teardown, `stack:down`, the r2 inventory and recovery own and remove them exactly like the run's PostgreSQL. No host port is published; only the backend reaches `http://minio:9000` over that network, so concurrent runs cannot collide |
+| Credentials | Per run: a generated MinIO root user and password and the existing generated application `STORAGE_ACCESS_KEY`/`STORAGE_SECRET_KEY`, which must differ from the root user (the initializer rejects equality). Passed only through the environment or stdin, never argv or files; added to the redaction list of backend log capture |
+| Bucket and region | Explicit E2E case values `STORAGE_BUCKET=codemastery-e2e`, `STORAGE_REGION=us-east-1`, `STORAGE_PATH_STYLE_ACCESS=true`; not production values |
+| Provisioning | The `minio-init` container runs the Compose `minio-init` command unchanged, obtained from `infrastructure/docker-compose.yml` at run time (for example through `docker compose config` with the generated inputs), never a divergent copy: identity-separation and input checks, bucket creation and the bucket-scoped Get/Put/Delete/List/Location policy for the application identity (CT09.config). The backend never uses root credentials |
+| Readiness | The initializer's own `mc ready` wait (its existing 120 s limit) establishes MinIO readiness; setup waits for the initializer to exit 0, bounded by CT34's existing 180 s backend limit, and a non-zero exit or timeout aborts setup with redacted evidence (ADR008 §4). The backend starts only after that, and its readiness rule is unchanged |
+| Backend inputs | The existing CT09.config names: `STORAGE_ENDPOINT=http://minio:9000`, the bucket, region, path-style and application keys above, and an explicit `MAX_UPLOAD_SIZE=1MB` case value (the in-test PDF is far smaller); no `VITE_*` input |
+| Cleanup | `docker rm -f -v` of both containers removes MinIO's anonymous data volume with the run, on success, failure or interruption, through the existing teardown and recovery paths; leftovers are reported, never reused |
+| Case use | Only L-N3 uploads and downloads (learner `PUT` multipart PDF, Instructor `GET` file, byte comparison); other cases ignore storage. External mode (`E2E_BASE_URL`) skips L-N3 unless that environment is an authorized disposable one with its own storage record |
+
+Verification (QA08, specified, NOT_RUN): two concurrent runs each reach their own
+object store and bucket; a stopped MinIO or failed initializer aborts setup before
+tests; teardown and interrupted-run recovery leave no MinIO container or volume of
+either run; a backend log tail contains no generated storage secret.
 
 ## 8. CT35 — adaptive E2E suite (F21)
 
@@ -400,7 +446,8 @@ count: Batches 1–6 records as listed in the decision index; Batch 7 adds five
 
 **Residual obligations, classified** at first preparation (none was then eligible for
 new delegated approval; §16 resolves the first, second, third and fifth rows, narrows the
-fourth to a ceiling, and keeps the rest):
+fourth to a ceiling, and keeps the rest; §18.4 withdraws §16's resolution of the third row,
+which is again PENDING_LEADER_DECISION):
 
 | Item | Classification | Next action |
 |---|---|---|
@@ -428,7 +475,7 @@ implementation-start confirmation (ADR012 §1) applies within each Issue's scope
 **Still required:** authoring SD01 (admin extension)/SD03/SD04 and their disposable
 load evidence; loading the demonstration Course with the §16.1 values; FE25/FE26 implementation and FE24/SH07 (#240/#241) review;
 QA05/QA08 execution; deployment admission, demonstration seeding authorization and
-credential handover on the target; every item of §12. No result, deployment,
+credential handover on the target; the Leader's practice-difficulty decision (§18.4); FE25's implementation of the §7.3 storage fixture together with FE24 (#240); every item of §12. No result, deployment,
 credential handling or risk acceptance is implied.
 
 ## 14. Leader decisions requested
@@ -521,6 +568,11 @@ decision.
 
 ### 16.3 Adaptive practice capture (ADR011 §17) — technical disposition
 
+*Withdrawn on 15 November 2026 by §18.4 (E02): the DEFERRED disposition below decided a
+choice that ADR011 §17 reserves to the Leader and left the approved architecture's
+practice-difficulty step (§§4.7, 6) unconsumed. The matter is again
+**PENDING_LEADER_DECISION**; the text is kept as history.*
+
 Re-assessed: next-lesson adaptation (test-out, remedial, continue) already satisfies
 §5.3; the amendment would change two effective approvals (CT04-START, CT08-EVIDENCE);
 and because CT06.production weighs every captured question equally under the
@@ -578,7 +630,7 @@ No risk is accepted and no exposure or deployment is approved by this record.
 
 - CT14 Interaction/Admin and storage integration placement: **resolved** by
   `CT14-INTEGRATION-PLACEMENT-2026-11-15-r1` (ADR012 §19.3).
-- CT17-P6 runtime grants: `CT17-P6-PLAN-2026-11-15-r1` ceiling (ADR012 §19.2); matrix
+- CT17-P6 runtime grants: `CT17-P6-PLAN-2026-11-15-r1` ceiling, revised to r2 by ADR012 §21 (ADR012 §19.2); matrix
   revisions per implemented consumer; real provisioning Leader-reserved.
 - LD-02: **resolved** as option (a) (ADR012 §19.4).
 - §12's labels `ALREADY_EFFECTIVELY_APPROVED`, `ELIGIBLE_FOR_NEW_DELEGATED_APPROVAL`,
@@ -594,6 +646,7 @@ No risk is accepted and no exposure or deployment is approved by this record.
 After §16.1, all 100 roadmap checkpoints carry a technical approval record: CP-001–063
 are integrated on `main` (ADR004–ADR011), CP-064–090 are in open PR #244 and CP-091–100
 in open PR #245. This is technical approval only: 37 of the 100 are not integrated,
+the practice-difficulty consumption decision is open again (§18.4, outside the 100),
 none of ADR005–ADR013 has an approving GitHub review, and no checkpoint implies
 implementation, test evidence, deployment or risk acceptance.
 
@@ -623,3 +676,143 @@ derivations (independently re-implemented), dataset/schema compatibility, readin
 partition arithmetic, E2E REST operation availability, minimal `%PDF-` acceptance, the
 adopted test count, CT20.F against requirements §§5–6, the SD01 hashing procedure and
 §12's batch counts.
+
+## 18. Independent review remediation — 15 November 2026 (third instruction)
+
+### 18.1 Authority and method
+
+The Project Leader's explicit instruction of 15 November 2026, **“CodeMastery —
+Independent Review Findings Verification & Direct Remediation on Existing PR
+#244/#245”**, provided a separate read-only review of this PR at
+`2806b926dec5cf49104191211bb397eb90534025` (R06, E01, E02 here; R01–R05 in
+[ADR012 §21](012-batch-07-contract-approvals.md#21-independent-review-remediation--15-november-2026-third-instruction))
+and authorized verification, bounded technical decisions and corrections in this PR.
+It excludes overriding Leader-reserved decisions, weakening the approved architecture,
+accepting residual risk and bypassing review. Findings were re-derived from the
+sources (the merged `learner-flow.spec.ts`, `auth-fixture.ts`, `catalogue-fixture.sql`
+and `local-stack.ts`; ADR002 CT21's catalogue search; ADR008 §§4, 10; ADR010 §6;
+the Compose MinIO services; requirements §5.3; architecture §§4.7, 6, 10; ADR005 §6;
+ADR007 §§5, 8; ADR011 §§8, 17). This is delegated technical approval, not personal
+Leader approval or a GitHub, CODEOWNER or human review.
+
+### 18.2 R06 — L-A5 global catalogue totals
+
+**Valid.** L-A5 asserts the far page equals
+`{content: [], page: 107374183, size: 20, totalElements: 21, totalPages: 2}`
+(`fixture.publishedCount`). Any journey Course published by a parallel CT19 or CT35
+test makes `totalElements` at least 22, so a correct application fails depending on
+order. Root cause: F8-02 corrected L-A1/L-A4 but not L-A5. A further same-class
+dependency was found: L-A1's `foundations` search and `Prerequisites described`
+filter assert exactly one result, which a journey Course whose title or description
+contains `foundations`, or which has prerequisite text, would break. Correction:
+§7.2's assertion table (exact page, size, empty content, hidden 404, fixture order and
+search/filter results kept; totals fixture-relative and internally consistent) and the
+journey-Course isolation rule (title prefix, no `foundations`, null prerequisite
+text). Revisions `CT19-CASES-2026-11-15-r2` and `CT19-FIXTURES-2026-11-15-r2`. The
+adopted test file is not edited here; FE25 changes exactly these assertions.
+
+### 18.3 E01 — storage-backed E2E fixture
+
+**Gap confirmed.** No approved contract defined a MinIO lifecycle for Playwright:
+ADR008 §4 requires CT09's real isolated configuration for storage-backed cases and
+says CT34's dummy values prove nothing; `local-stack.ts` starts no object store;
+ADR012 §19.3's `FileStorageIntegrationTest` is a JUnit container that gives the
+browser stack nothing. Correction: §7.3, a bounded supplement to CT34.fixtures r2 that
+fixes image identity (the Compose-pinned digests), per-run container identity and
+network isolation, credentials, bucket, provisioning through the unchanged Compose
+initializer, readiness bounds reused from existing limits, backend inputs, cleanup,
+concurrent-run isolation and L-N3's upload/download round trip, plus QA08 checks.
+Ownership: FE25 implements it in the existing `local-stack.ts` with the FE24 owner's
+review, after or together with open PR #240's lifecycle implementation. **Resolved
+as a contract amendment (part of `CT19-FIXTURES-2026-11-15-r2`); nothing is
+implemented or run.**
+
+### 18.4 E02 — practice difficulty and the approved architecture
+
+**Finding substantiated.** Requirements §5.3 asks to adjust “difficulty **or** the next
+lesson”, and next-lesson adaptation satisfies it. The approved architecture, however,
+selects more: §4.7 lists choosing practice-quiz difficulty from current mastery as
+adaptive scope, §6's integration flow routes `Learning` to the canonical next lesson
+“with practice quiz at selected difficulty”, and §10 does not place it out of scope.
+The requirement's OR clause does not remove an architecture selection (root
+`CLAUDE.md`: when the architecture has selected one option, follow it). §16.3 therefore
+did more than defer an amendment: it set a Final scope that omits an architecture-listed
+function, and it chose among ADR011 §17's options, which that record reserves to the
+Leader (“authorize, revise or decline that amendment”). That exceeded this record's
+delegation. **§16.3's disposition is withdrawn.**
+
+**Is a compatible consumption possible within effective contracts?** No:
+
+1. Shaping a practice attempt at start (ADR011 §17 option A) changes
+   `CT04-START-2026-11-09-r1` (capture every membership Question) and
+   `CT08-EVIDENCE-2026-11-09-r1` (verify complete membership) inside the atomic
+   submission unit — the Leader-reserved amendment.
+2. Guidance-level selection among fixed per-difficulty practice Quizzes (ADR011 §17's
+   alternative) keeps capture and evidence unchanged, but needs a learner-facing
+   target-difficulty value and a per-Quiz difficulty profile, which no effective
+   contract defines (the port has no approved caller, ADR011 §8; Learner Quiz contracts
+   carry no difficulty), new demonstration content, and the same choice among ADR011
+   §17's options.
+3. Every variant makes difficulty-shaped attempts eligible evidence under ADR005 §6's
+   equal-weight latest-attempt policy: a Weak learner who answers two EASY questions
+   correctly becomes Mastered and may be tested out of a Lesson. Avoiding that would
+   change CT06/CT08 evidence semantics. Accepting or mitigating this bias is a Leader
+   decision either way.
+
+**Best technical solution (recommendation, not approved):** option 2, because it
+leaves the submission unit, CT04-START, CT08-EVIDENCE and mastery semantics untouched
+and keeps selection advisory and explainable:
+- **Assessment:** an additive Learner read giving, for each published `practice` Quiz
+  of an admitted Course, its question difficulties per skill (derived from existing
+  `questions.difficulty`; no schema field).
+- **Adaptive:** the CT33 Learner guidance gains, per skill of the next Lesson, the
+  CT07.difficulty target from the learner's own mastery, computed by Adaptive's
+  existing `PracticeDifficultySelector` mapping without calling the Assessment port.
+- **Frontend:** the UI marks the practice Quiz whose profile matches the target, with
+  the reason (for example “Recommended practice: Easy, because "Loop Control" is
+  Weak”), falling back by CT07.difficulty's order.
+- **Content and tests:** SD04 adds per-difficulty practice Quizzes. B6/CT35 oracles
+  cover the target per state and the fallback.
+- **Bias:** a recorded Leader decision on difficulty-shaped evidence.
+
+**Minimum Leader decision (`PENDING_LEADER_DECISION`):** choose one of —
+(a) authorize option 2 as above, including the evidence-bias disposition;
+(b) authorize ADR011 §17's amendment of CT04-START/CT08-EVIDENCE (option 1), with
+the same bias disposition; or (c) approve, as the architecture owner, a recorded
+Final scope deviation from architecture §§4.7/6 so that practice difficulty is
+specified (CT07.difficulty) but not consumed in Final.
+
+Until then: CT04-START, CT08-EVIDENCE and CT07.difficulty are unchanged; AS07 keeps
+only the port and the pure rule; `QuestionSelectionService` has no production caller;
+nothing is approved or deferred on the Leader's behalf. This decision is outside the
+100 roadmap checkpoints, so their count and dispositions are unchanged.
+
+### 18.5 Downstream effects of ADR012's corrections
+
+ADR012 §21's r2 revisions were checked against this record. L-N3 still expects the
+graded notification, because its learner is joined and its Assignment and Course are
+published, which `CT27-SUBSCRIPTION-2026-11-15-r2` requires. L-N4 is unchanged. §3's
+rule that further Administrators come only through CT12.user is unchanged by
+`CT12-USER-2026-11-15-r2`. §16.6 now points to `CT17-P6-PLAN-2026-11-15-r2`.
+
+### 18.6 Post-fix check
+
+- **R06 replay:** with one or more journey Courses published concurrently, every
+  L-A1/L-A4/L-A5 assertion in §7.2 still holds for a correct application. Page 1 is
+  the first 20 fixture titles, because `~` (0x7E) sorts after every fixture title
+  under `COLLATE "C"`. Totals are bounded below, and `totalPages` is derived from
+  the same response. Search and filter results are unchanged by the isolation rule.
+  An application that leaks the hidden Course or pages incorrectly still fails.
+- **E01 replay:** L-N3 has a reachable, isolated, provisioned bucket; concurrent runs
+  have separate networks, credentials and containers; teardown and recovery remove the
+  storage with the run.
+- **E02 replay:** no clause now states that Final omits practice difficulty, or that
+  the matter was decided. ADR011 §17's Leader-reserved status is restored, and the
+  architecture conflict is stated.
+- **No new contradiction.** Specifically:
+  - §7.3 reuses existing images, limits and the CT09 input names.
+  - §7.2's isolation rule constrains only test data.
+  - §16.7's count of 100 technically approved checkpoints is unchanged.
+
+Checkpoints CP-091–CP-100 keep their dispositions; CP-096/CP-097 move to r2. Nothing
+is a test result.
