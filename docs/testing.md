@@ -3145,3 +3145,23 @@ ADR008 §5's existing placements (`NotificationEventListenerTest`,
 real-PostgreSQL Interaction/Admin integration suites remain the structural gap
 ADR008 records; no new test file, dependency or result is claimed. Reminder tests
 supply explicitly named CT38 case values and a fixed injected clock.
+
+## Batch 8 E2E selection, evaluation and Final coverage — specified, NOT_RUN
+
+[ADR013](decisions/013-batch-08-contract-approvals.md) selects the Final E2E cases
+and evaluation procedures. **CT19:** the fourteen merged `learner-flow.spec.ts` tests
+are adopted as cases L-A1–L-A5 (historical results are not accepted), and FE25 adds
+L-N1 (lesson completion, progress, resume), L-N2 (timed quiz and results), L-N3
+(assignment submission, grading and notification) and L-N4 (lesson Q&A reply
+notification and report); L-N3/L-N4 depend on ADR012. **CT35:** FE26 implements A-1
+(two contrasting placement profiles with different guidance and Mastery Maps), A-2
+(prerequisite warning without a hard block) and A-3 (skipped placement) in
+`adaptive-flow.spec.ts`. Both suites keep CT34 r2's disposable stack and build their
+data per test through approved REST operations; no new fixture file or shared seed
+is used. **CT36:** profile scripts P1–P3, gap scenarios G01–G24 and mastery cases
+M01–M10 are policy-independent where stated and live in the existing scenario JSON
+files and evaluation/integration tests. **CT20.F:** release requires L-A3, L-A4,
+L-N1 and L-N2 on `chromium-desktop` and `chromium-mobile`, A-1 on `chromium-desktop`,
+the CT36.F-measures report, deployment smoke checks, sample-data loading and the CI
+jobs on one exact commit; other cases and projects are attempted and reported but do
+not block release. No case has been executed for this record.

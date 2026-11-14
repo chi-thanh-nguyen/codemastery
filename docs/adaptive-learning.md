@@ -657,3 +657,18 @@ Only inserted `remedial` rows (with their CT07.reasons text) and test-out `skip`
 rows notify; `continue` rows do not. Reporting (ADR012 §13) reads mastery
 distributions and quiz outcomes as descriptive metrics only and owns no adaptive
 decision. Adaptive rules, thresholds and recommendation history are unchanged.
+
+## Batch 8 evaluation scenarios and measures — 15 November 2026
+
+[ADR013 §§5–6](decisions/013-batch-08-contract-approvals.md#5-ct36f-scenarios)
+makes §12's evaluation concrete on the `final-v1` Course (twenty skills, twenty-four
+prerequisite edges, one Lesson per skill). Profiles answer the placement quiz with
+all-correct or all-incorrect answers per skill, so the expected results hold for any
+valid policy: **P1** tests out L01–L10 and continues to L11; **P2** (Loops gap) tests
+out L01–L07 and receives a remedial recommendation for L08 (“While Loops”, because
+“Loop Control” is Weak); **P3** receives a remedial recommendation for L01. Path
+divergence is skipped plus remediated Lessons (expected 10, 8 and 1 against the
+baseline's 0); routing correctness uses one gap scenario per edge (G01–G24) and keeps
+the ≥80% figure as an evaluation target only; mastery-update correctness uses cases
+M01–M10; learning gain is simulated and labelled as a procedure demonstration. No
+real-student pilot is selected. No result is claimed.
