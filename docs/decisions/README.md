@@ -377,6 +377,16 @@ LD-02 (notification scope) is not decided by these approvals; LD-07 is decided a
 option (a). Runtime database grants for the Batch 7 tables need a separate Leader
 approval of a CT17-P6 extension.
 
+*Continuation, 15 November 2026* (the Leader's second instruction,
+[ADR012 §§19–20](012-batch-07-contract-approvals.md#19-continuation-decisions--15-november-2026-second-instruction)):
+`CT17-P6-PLAN-2026-11-15-r1` (least-privilege ceiling; per-consumer matrix revisions
+still follow the extension procedure, so the sentence above is refined: each revision
+needs its implemented consumer, script and CI change, and real-host provisioning stays
+Leader-reserved) and `CT14-INTEGRATION-PLACEMENT-2026-11-15-r1` (two integration
+suites) are **DELEGATED_APPROVED**; LD-02 is resolved as option (a) by conformity with
+the approved architecture; fifteen re-audit findings F7-01–F7-15 are corrected inside
+the existing revisions.
+
 ### Batch 8 revisions — 15 November 2026
 
 [ADR013](013-batch-08-contract-approvals.md) is the authoritative record (Claude Code
