@@ -724,3 +724,24 @@ that inserts rows uses an instant strictly later than the Enrollment's latest
 `recommended_at`, so the current row is unique without a new column. All of
 these share the submission's transaction and lock order (ADR011 §4). No migration,
 column, index or ledger is added.
+
+## Batch 7 interaction, administration and reporting — no physical change
+
+[ADR012](decisions/012-batch-07-contract-approvals.md) uses the V006 tables
+unchanged. `notifications.id` is a name-based UUID derived from the notification's
+purpose and source identifiers and inserted with `ON CONFLICT (id) DO NOTHING`, so
+the primary key de-duplicates event deliveries and deadline reminders (one per
+learner, Assignment and deadline value) without a new column or ledger. Rows stay
+message-only (CT11-READ-FIELDS r1); `is_read` only moves from false to true and no
+row is deleted. `discussion_posts` holds questions (`parent_post_id` null) and
+one-level replies; `is_hidden` is set only by moderation and conceals the post and,
+for a question, its replies; posts are never edited or deleted. `content_reports`
+moves `open → resolved` (content hidden; every open report on the same target) or
+`open → dismissed` and never reopens; `resolved_at` is the decision instant.
+`audit_logs.action` takes the closed CT31 catalogue codes (`user_role_set_*`,
+`user_locked`, `user_unlocked`, `course_hidden`, `report_post_hidden`,
+`report_lesson_hidden`, `report_dismissed`) with `target_type` `user`, `course` or
+`content_report` and a lowercase UUID `target_reference`; rows are written in the
+audited action's transaction and never updated or deleted. Reporting metrics are
+computed at read time by the owning modules; nothing is stored. No migration,
+column, index or retention policy is added.

@@ -3994,3 +3994,15 @@ admission or qualification plan alone cannot pass them. See ADR009 for alternati
 current public price-meter estimates, complete-set/restore protocol and Q01–Q09.
 Runtime/source/workflow/Compose/permissions are unchanged. No production operation,
 new spending, access/exposure change, residual-risk acceptance or merge is authorized.
+
+## CT17-P6 least-privilege ceiling for Batch 2–7 consumers — 15 November 2026
+
+[ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)
+records `CT17-P6-PLAN-2026-11-15-r2` (DELEGATED_APPROVED; r2 adds
+`enrollments.last_visited_at` for CT22.resume and `quiz_questions.position` for CT23
+to r1): a per-relation **ceiling**
+for the runtime-role grants that later consumers may request. It is not a matrix
+revision. The effective matrix stays r1 plus r2, and the extension procedure above
+still applies unchanged: each implemented consumer adds its own dated revision,
+`RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
+granted, and provisioning on any real database remains Leader-reserved.

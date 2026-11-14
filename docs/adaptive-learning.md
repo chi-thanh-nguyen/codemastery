@@ -644,3 +644,16 @@ recommendation and target title. Both reads use the same visibility predicate.
 Mastery states reflect the latest submitted quiz evidence for each skill; screens must say
 so. Earlier deferral text above is historical to the extent resolved by these
 bounded revisions.
+
+## Batch 7 recommendation notifications — 15 November 2026
+
+[ADR012 §9.4](decisions/012-batch-07-contract-approvals.md#94-ct29--recommendation-created)
+completes the Adaptive → Interaction interaction of §9. `AdaptiveDecisionService`
+publishes one `RecommendationCreatedEvent` per processing run that inserted
+recommendation rows, inside the submission unit; Interaction consumes it only after
+that unit commits, in its own transaction, so a notification failure never rolls
+back mastery, progress or recommendations and a rolled-back unit never notifies.
+Only inserted `remedial` rows (with their CT07.reasons text) and test-out `skip`
+rows notify; `continue` rows do not. Reporting (ADR012 §13) reads mastery
+distributions and quiz outcomes as descriptive metrics only and owns no adaptive
+decision. Adaptive rules, thresholds and recommendation history are unchanged.

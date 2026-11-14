@@ -3126,3 +3126,40 @@ oracles B6-R01–B6-R16 (ADR011 §10) belong to the existing decision and master
 tests; CT36.F keeps the evaluation scenarios. Faults come only from test-scoped bean
 overrides, outcomes from independent committed reads and concurrency from barriers.
 No new test file, dependency or result is claimed.
+
+## Batch 7 acceptance obligations — specified, NOT_RUN
+
+[ADR012 §15](decisions/012-batch-07-contract-approvals.md#15-acceptance-oracles--specified-not_run)
+specifies oracles B7-O01–B7-O12: derived notification IDs and idempotent reminders;
+after-commit subscriptions that never notify for a rolled-back unit and never fail
+their producer, with exactly the two approved `QuizSubmittedEvent` subscribers
+(this also fixes the expected set of ADR011's B6-V04); the exclusive reminder window;
+owner-scoped notification reads; CT03 Q&A admission, hidden-post concealment and
+one-level replies; reply notifications; same-transaction audit rows and no-op
+non-auditing; self and last-Administrator protections under concurrency; Course-root
+locking for Administrator hiding; moderation resolution of every open report on a
+target; hand-computed reporting metrics; and OpenAPI/plain-text rendering. They use
+ADR008 §5's existing placements (`NotificationEventListenerTest`,
+`DeadlineReminderSchedulerTest`, `UserManagementServiceTest`,
+`AuthorizationIntegrationTest` and the owning modules' existing suites). *Update, 15
+November 2026:* ADR012 §19.3 (`CT14-INTEGRATION-PLACEMENT-2026-11-15-r1`) closes the
+structural gaps with exactly two new suites extending `AbstractIntegrationTest`:
+`InteractionAdminIntegrationTest` for the real-PostgreSQL Batch 7 cases (including
+B7-O13 pool exhaustion) and `FileStorageIntegrationTest` for ADR010's real MinIO cases,
+using the pinned Compose MinIO image in a `GenericContainer`. Neither file exists yet,
+no dependency is added and no result is claimed. Reminder tests supply explicitly
+named CT38 case values and a fixed injected clock.
+
+*Independent review remediation, 15 November 2026* ([ADR012 §21](decisions/012-batch-07-contract-approvals.md#21-independent-review-remediation--15-november-2026-third-instruction)):
+B7-O02 now expects Adaptive's plain in-transaction `QuizSubmittedEvent` listener and
+Interaction's after-commit listener as the only subscribers, and five oracles are
+added to `InteractionAdminIntegrationTest`'s scope or the consumer's CT17-P6 test:
+B7-O14 (an Adaptive fault rolls back the submission unit and suppresses notifications;
+an Interaction fault does not affect the committed unit), B7-O15 (Assignment
+admission under concurrency through the `FOR SHARE` `lockNotificationState`: hide,
+deadline edit, rebinding and submission races for reminders and graded
+notifications), B7-O16 (the foreign-key lock cycle between a reply notification and an
+Administrator mutation finishes without deadlock under `FOR NO KEY UPDATE`), B7-O17
+(Administrator Course names through `userSummaries`, never the published-scope
+`instructorDisplayNames`) and B7-O18 (runtime-role ceiling for the CT22.resume
+pointer and time and for `quiz_questions.position`). All remain specified, NOT_RUN.
