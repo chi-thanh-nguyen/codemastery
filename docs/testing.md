@@ -3149,3 +3149,17 @@ B7-O13 pool exhaustion) and `FileStorageIntegrationTest` for ADR010's real MinIO
 using the pinned Compose MinIO image in a `GenericContainer`. Neither file exists yet,
 no dependency is added and no result is claimed. Reminder tests supply explicitly
 named CT38 case values and a fixed injected clock.
+
+*Independent review remediation, 15 November 2026* ([ADR012 §21](decisions/012-batch-07-contract-approvals.md#21-independent-review-remediation--15-november-2026-third-instruction)):
+B7-O02 now expects Adaptive's plain in-transaction `QuizSubmittedEvent` listener and
+Interaction's after-commit listener as the only subscribers, and five oracles are
+added to `InteractionAdminIntegrationTest`'s scope or the consumer's CT17-P6 test:
+B7-O14 (an Adaptive fault rolls back the submission unit and suppresses notifications;
+an Interaction fault does not affect the committed unit), B7-O15 (Assignment
+admission under concurrency through the `FOR SHARE` `lockNotificationState`: hide,
+deadline edit, rebinding and submission races for reminders and graded
+notifications), B7-O16 (the foreign-key lock cycle between a reply notification and an
+Administrator mutation finishes without deadlock under `FOR NO KEY UPDATE`), B7-O17
+(Administrator Course names through `userSummaries`, never the published-scope
+`instructorDisplayNames`) and B7-O18 (runtime-role ceiling for the CT22.resume
+pointer and time and for `quiz_questions.position`). All remain specified, NOT_RUN.

@@ -356,19 +356,19 @@ protected integration; no runtime behavior is implemented by the approvals.
 | Revision | Exact slice | Record |
 |---|---|---|
 | `CT40-NOTIFICATION-CONTEXT-2026-11-15-r1` | Prerequisite: actorless Course/Lesson titles and publication state | [ADR012 §3.1](012-batch-07-contract-approvals.md#31-ct40notification-context) |
-| `CT22-ACTIVE-LEARNERS-2026-11-15-r1` | Prerequisite: joined learner IDs for reminders | [ADR012 §3.2](012-batch-07-contract-approvals.md#32-ct22active-learners) |
-| `CT10-REMINDER-READ-2026-11-15-r1` | Prerequisite: Assessment reminder candidates (LD-07 option a) | [ADR012 §3.3](012-batch-07-contract-approvals.md#33-ct10reminder-read--ld-07-option-a) |
-| `CT01-USER-SUMMARIES-2026-11-15-r1` | Prerequisite: display name and role for Q&A authors and audit actors | [ADR012 §3.4](012-batch-07-contract-approvals.md#34-ct01user-summaries) |
+| `CT22-ACTIVE-LEARNERS-2026-11-15-r2` | Prerequisite: joined learner IDs for reminders and graded-notification eligibility | [ADR012 §3.2](012-batch-07-contract-approvals.md#32-ct22active-learners) |
+| `CT10-REMINDER-READ-2026-11-15-r2` | Prerequisite: Assessment reminder discovery and `FOR SHARE` notification admission read (LD-07 option a) | [ADR012 §3.3](012-batch-07-contract-approvals.md#33-ct10reminder-read--ld-07-option-a) |
+| `CT01-USER-SUMMARIES-2026-11-15-r2` | Prerequisite: display name and role for Q&A authors, audit actors and Administrator Course pages | [ADR012 §3.4](012-batch-07-contract-approvals.md#34-ct01user-summaries) |
 | `CT38-DEADLINE-REMINDERS-2026-11-15-r1` | Prerequisite: four reminder scheduler inputs, no defaults | [ADR012 §3.5](012-batch-07-contract-approvals.md#35-ct38featuredeadline-reminders) |
-| `CT11-CREATE-2026-11-15-r1` / `CT11-READ-2026-11-15-r1` | Internal creation with derived IDs; list, unread count, mark-read operations | [ADR012 §4](012-batch-07-contract-approvals.md#4-ct11-notification-core) |
-| `CT11-REMINDERS-2026-11-15-r1` | Deadline reminders: window, recipients, de-duplication | [ADR012 §5](012-batch-07-contract-approvals.md#5-ct11reminders) |
+| `CT11-CREATE-2026-11-15-r2` / `CT11-READ-2026-11-15-r1` | Internal creation with derived IDs; list, unread count, mark-read operations | [ADR012 §4](012-batch-07-contract-approvals.md#4-ct11-notification-core) |
+| `CT11-REMINDERS-2026-11-15-r2` | Deadline reminders: window, locked admission, recipients, de-duplication | [ADR012 §5](012-batch-07-contract-approvals.md#5-ct11reminders) |
 | `CT30-ACCESS/POSTS/REPORTS/NOTIFY/REST-2026-11-15-r1` | Lesson Q&A, report intake, reply notification, REST | [ADR012 §6](012-batch-07-contract-approvals.md#6-ct30-lesson-qa-and-reports) |
 | `CT31-ACTIONS/CONSISTENCY/READ-2026-11-15-r1` | Audit catalogue, same-transaction audit, filtered read | [ADR012 §7](012-batch-07-contract-approvals.md#7-ct31-audit) |
 | `CT26-EVENT/SUBSCRIPTION-2026-11-15-r1` | Lesson-published event and notifications | [ADR012 §9.1](012-batch-07-contract-approvals.md#91-ct26--published-content) |
-| `CT27-EVENT/SUBSCRIPTION-2026-11-15-r1` | Graded-assignment event and notification | [ADR012 §9.2](012-batch-07-contract-approvals.md#92-ct27--graded-assignment) |
+| `CT27-EVENT-2026-11-15-r1` / `CT27-SUBSCRIPTION-2026-11-15-r2` | Graded-assignment event and notification | [ADR012 §9.2](012-batch-07-contract-approvals.md#92-ct27--graded-assignment) |
 | `CT28-SUBSCRIPTION-2026-11-15-r1` | Quiz-result notification from `QuizSubmittedEvent`, after commit (LD-12(f)) | [ADR012 §9.3](012-batch-07-contract-approvals.md#93-ct28--quiz-result-ld-12f-reuse-quizsubmittedevent) |
 | `CT29-EVENT/SUBSCRIPTION-2026-11-15-r1` | Recommendation-created event; remedial and test-out notifications only | [ADR012 §9.4](012-batch-07-contract-approvals.md#94-ct29--recommendation-created) |
-| `CT12-USER/COURSE/REST-2026-11-15-r1` | Administrator user search, role and lock changes; Course list and hide | [ADR012 §10](012-batch-07-contract-approvals.md#10-ct12-administrator-mutations) |
+| `CT12-USER-2026-11-15-r2` / `CT12-COURSE-2026-11-15-r2` / `CT12-REST-2026-11-15-r1` | Administrator user search, role and lock changes; Course list and hide | [ADR012 §10](012-batch-07-contract-approvals.md#10-ct12-administrator-mutations) |
 | `CT32-QUEUE/HIDE/REST-2026-11-15-r1` | Moderation queue, hide/dismiss decisions | [ADR012 §11](012-batch-07-contract-approvals.md#11-ct32-moderation) |
 | `CT13-METRICS/READS/REST-2026-11-15-r1` | Per-Course metrics on both learning-outcome bases (LD-12(e)) | [ADR012 §13](012-batch-07-contract-approvals.md#13-ct13-reporting) |
 
@@ -378,10 +378,20 @@ approval of a CT17-P6 extension.
 
 *Continuation, 15 November 2026* (the Leader's second instruction,
 [ADR012 §§19–20](012-batch-07-contract-approvals.md#19-continuation-decisions--15-november-2026-second-instruction)):
-`CT17-P6-PLAN-2026-11-15-r1` (least-privilege ceiling; per-consumer matrix revisions
+`CT17-P6-PLAN-2026-11-15-r1` (since revised to r2, see below; least-privilege ceiling; per-consumer matrix revisions
 still follow the extension procedure, so the sentence above is refined: each revision
 needs its implemented consumer, script and CI change, and real-host provisioning stays
 Leader-reserved) and `CT14-INTEGRATION-PLACEMENT-2026-11-15-r1` (two integration
 suites) are **DELEGATED_APPROVED**; LD-02 is resolved as option (a) by conformity with
 the approved architecture; fifteen re-audit findings F7-01–F7-15 are corrected inside
 the existing revisions.
+
+*Independent review remediation, 15 November 2026* (the Leader's third instruction,
+[ADR012 §21](012-batch-07-contract-approvals.md#21-independent-review-remediation--15-november-2026-third-instruction)):
+findings R01–R05 were verified and corrected. The revisions marked r2 above supersede
+their r1 drafts, none of which was integrated: locked Assignment admission for
+reminders and graded notifications (R02), `FOR NO KEY UPDATE` for Administrator user
+mutations (R03), Administrator Course names through `userSummaries` (R04) and
+`CT17-P6-PLAN-2026-11-15-r2` (R05). R01 restates §8's scope so that Adaptive's
+in-transaction `QuizSubmittedEvent` listener keeps ADR011's rollback semantics;
+`CT28-SUBSCRIPTION-2026-11-15-r1` is unchanged.
