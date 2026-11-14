@@ -268,7 +268,11 @@ namespace UUID) of the UTF-8 string
   `Instant.toString()` of the microsecond-truncated value and UUIDs in lowercase.
   Rows are inserted with `INSERT … ON CONFLICT (id) DO NOTHING`, so a repeated
   request creates nothing; the return value is the number of new rows. Duplicate IDs
-  inside one call are collapsed first. No schema change: the V006 primary key is the
+  inside one call are collapsed first, and the rows are then inserted in ascending
+  `id` order (r2), so two transactions creating overlapping ID sets (for example two
+  application instances reminding the same Assignment) wait on the first common key
+  instead of deadlocking on unique-index checks; the later one then inserts nothing
+  for those keys. No schema change: the V006 primary key is the
   de-duplication key. Predictable IDs disclose nothing because every read and
   mark-read is owner-scoped (§4.2).
 - **Row values.** `user_id` = recipient, `message` = the caller's fixed English
@@ -938,7 +942,7 @@ privilege test under the extension procedure.
 
 | Oracle | Required result |
 |---|---|
-| B7-O01 | Derived IDs: the same request twice creates one row; `create` returns 0 the second time; two reminder runs over the same window create one reminder per learner, Assignment and deadline. |
+| B7-O01 | Derived IDs: the same request twice creates one row; `create` returns 0 the second time; two reminder runs over the same window create one reminder per learner, Assignment and deadline; two concurrent `create` calls with the same IDs supplied in opposite orders both finish without `40P01` and leave each row once (§21 post-fix check). |
 | B7-O02 | A rolled-back publication, grade, submission or recommendation unit creates no notification; a forced **Interaction** listener failure leaves the producer committed and returns its normal response. The only plain `@EventListener` for any of the four events is Adaptive's `QuizSubmittedEventListener`; `ContentPublishedEvent`, `AssignmentGradedEvent` and `RecommendationCreatedEvent` have exactly one subscriber (Interaction, after commit) and `QuizSubmittedEvent` exactly the two approved subscribers (B6-V04). (Corrected, §21 R01.) |
 | B7-O03 | Reminder window: deadline = now is not reminded, now + lead is; submitted, left and non-member learners get none; a changed deadline inside the window gives a second reminder; a hidden Course, or a hidden bound Lesson, gives none (also for graded notifications); a deadline passing during the run is not reminded; a graded notification is not created for a learner who left or for an Assignment hidden after grading. |
 | B7-O04 | Notification reads and mark-read are owner-scoped: a foreign ID is 404 like a missing one; `read-all` changes only own rows; ordering and paging as §4.2. |
@@ -1200,8 +1204,15 @@ Each original counterexample was replayed against the corrected text:
   committed (B locked, reply and notification present). With `lock_timeout` probes,
   a held `FOR NO KEY UPDATE` blocked `FOR NO KEY UPDATE` and `FOR SHARE` and admitted
   `FOR KEY SHARE`; a held `FOR SHARE` (R02's admission lock) blocked `FOR UPDATE` and
-  admitted `FOR KEY SHARE` and `FOR SHARE`. The script stayed outside the repository
-  and the container was removed.
+  admitted `FOR KEY SHARE` and `FOR SHARE`. Two transactions inserting the same two
+  notification IDs with `ON CONFLICT (id) DO NOTHING` deadlocked in opposite order and
+  both committed (two rows) in ascending order. The scripts stayed outside the
+  repository and the containers were removed.
+- **Same-class finding during the check (lock order):** with R02's shared admission
+  lock, two application instances can process the same reminder candidate at once.
+  If CT11.create inserted overlapping IDs in different orders, their unique-index
+  waits could deadlock (one candidate would fail and be retried next run). CT11.create
+  r2 therefore inserts in ascending `id` order (§4.1); B7-O01 covers it.
 - **R04:** the hidden-Course row is named without calling the published-scope method;
   `userSummaries` remains bounded to rows being returned.
 - **R05:** CT22.resume's atomic write fits the ceiling; no ceiling row now forbids a
