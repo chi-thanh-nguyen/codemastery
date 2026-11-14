@@ -2,8 +2,8 @@
 
 ## 1. Authority, stacking and provenance
 
-**DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** (one checkpoint
-**DELEGATED_PARTIALLY_APPROVED**), 15 November 2026 (Asia/Ho_Chi_Minh), under the
+**DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** (one checkpoint first
+**DELEGATED_PARTIALLY_APPROVED**, completed by r2 in §16.1), 15 November 2026 (Asia/Ho_Chi_Minh), under the
 same explicit Project Leader instruction as [ADR012](012-batch-07-contract-approvals.md):
 **“CodeMastery — Final Contract Approval Campaign: Batch 7, Batch 8 & Remaining
 Technical Contracts”**. Claude Code technically approves the eligible Batch 8
@@ -46,7 +46,7 @@ authored this record; no AI runtime is added.
 | CP-092 | CT36.F-scenarios / [#26](https://github.com/chi-thanh-nguyen/codemastery/issues/26) | `CT36-F-SCENARIOS-2026-11-15-r1` | DELEGATED_APPROVED | §5 |
 | CP-093 | CT15.F-assessment / #28 | `CT15-F-ASSESSMENT-2026-11-15-r1` | DELEGATED_APPROVED | §4.3 |
 | CP-094 | CT36.F-measures / #26 | `CT36-F-MEASURES-2026-11-15-r1` | DELEGATED_APPROVED | §6 |
-| CP-095 | CT15.F-adaptive / #28 | `CT15-F-ADAPTIVE-2026-11-15-r1` | DELEGATED_PARTIALLY_APPROVED (demonstration policy values PENDING_LEADER_APPROVAL, §14.1) | §4.2 |
+| CP-095 | CT15.F-adaptive / #28 | `CT15-F-ADAPTIVE-2026-11-15-r1`, completed by `CT15-F-ADAPTIVE-2026-11-15-r2` | r1 DELEGATED_PARTIALLY_APPROVED (policy values pending); **r2 DELEGATED_APPROVED** under the second instruction (§16.1) | §§4.2, 16.1 |
 | CP-096 | CT19.cases / [#140](https://github.com/chi-thanh-nguyen/codemastery/issues/140) | `CT19-CASES-2026-11-15-r1` | DELEGATED_APPROVED | §7.1 |
 | CP-097 | CT19.fixtures / #140 | `CT19-FIXTURES-2026-11-15-r1` | DELEGATED_APPROVED | §7.2 |
 | CP-098 | CT35.cases / [#151](https://github.com/chi-thanh-nguyen/codemastery/issues/151) | `CT35-CASES-2026-11-15-r1` | DELEGATED_APPROVED | §8.1 |
@@ -71,13 +71,14 @@ CT15-SD r3 effective (ADR004).
 Requirement §8.4 asks for trial accounts for each role; §10.7 for credentials in a
 secure location. Selected:
 
-- **Dataset accounts.** Dataset `final-v1` (§4.1) adds synthetic accounts with
-  UUIDv5 IDs: `user/admin` → `admin@example.test`, “Administrator Demo”, `admin`;
-  `user/instructor` → `instructor@example.test`, “Instructor Demo”, `instructor`;
-  `user/learner` → `learner@example.test`, “Learner Demo”, `learner`; and the three
-  profile learners of §4.2. All `active`, all in existing `01-users.sql` (SD01
+- **Dataset accounts.** `final-v1` **reuses** the existing `interim-v1` rows
+  `user/instructor` (`1eacfb14-…`, `instructor@example.test`) and `user/learner`
+  (`6ae6a0b2-…`, `learner@example.test`) unchanged, because V001's unique email and the
+  SD01 conflict rule forbid a second row with the same email. It adds only new UUIDv5
+  accounts: `user/admin` → `admin@example.test`, “Administrator Demo”, `admin`, and the
+  three profile learners of §4.2. All `active`, all in existing `01-users.sql` (SD01
   extension), loaded with the same insert-only, no-overwrite, attested-target rules
-  as `interim-v1`.
+  as `interim-v1`. *(Corrected 15 November 2026, F8-01.)*
 - **Passwords.** Never committed. A distinct password per account is chosen at load
   time; its BCrypt `$2b$` cost-14 hash is produced by the documented Step 3 procedure
   (15 characters to 72 UTF-8 bytes) and passed through environment variables, never
@@ -87,9 +88,10 @@ secure location. Selected:
   does not), generates fresh high-entropy passwords on a trusted machine and hands
   them to the lecturer only through a Leader-controlled secure location. Credentials
   never enter the repository, Issues, PRs, CI logs, reports or screenshots.
-- **No Administrator feature.** Administrator accounts exist only through seeding;
-  there is no admin registration or promotion endpoint. CT34's direct role promotion
-  stays limited to the disposable E2E database.
+- **Administrator provisioning.** The first Administrator exists only through
+  seeding; there is no admin self-registration. Further Administrators are created only
+  by an active Administrator through ADR012 CT12.user (audited). CT34's direct role
+  promotion stays limited to the disposable E2E database. *(Corrected, F8-04.)*
 
 Excluded: actual credential values, their custody and rotation/lock after grading
 (operator and Leader actions), production seeding authorization and any new loader
@@ -110,8 +112,8 @@ are load-time inputs are named below; nothing else varies.
 
 ### 4.2 CT15.F-adaptive (SD03) — partially approved
 
-**Course.** `course/python` “Python Fundamentals”, published, owned by
-`user/instructor`, in existing `02-course-python-fundamentals.sql` alongside the
+**Course.** `course/python` “Python Fundamentals”, published, owned by the reused
+`interim-v1` `user/instructor`, in existing `02-course-python-fundamentals.sql` alongside the
 unchanged `interim-v1` rows. Six Chapters and twenty Lessons in canonical order
 L01–L20, all published, each with one published text material; L01 also gets the
 PDF file material, provisioned through the CT09 upload operation after loading (no
@@ -158,7 +160,8 @@ load-time inputs validated against ADR005 §6.2 (`weak`, `mastered`,
 `minimumQuestionsPerSkill`). The seed carries **no** numeric value. The concrete
 demonstration values are `PENDING_LEADER_APPROVAL` (§14.1); until approved, SD03 may
 be authored and tested with explicitly named test values, but the demonstration
-course must not be loaded with invented values.
+course must not be loaded with invented values. *(Resolved by r2, §16.1: `weak 1/2`,
+`mastered 4/5`, `minimumQuestionsPerSkill 6`, still supplied as load-time inputs.)*
 
 ### 4.3 CT15.F-assessment (SD04)
 
@@ -190,7 +193,9 @@ no test-out and no remedial step (path length 20).
 **Policy independence.** Scripts use only all-correct (rate 1) and all-incorrect
 (rate 0) answers for a skill. Because every valid policy has `0 < weak < mastered ≤ 1`
 (ADR005 §6.2), rate 1 is always `Mastered` and rate 0 always `Weak`, so the expected
-states and routes below hold for any approved policy. Unassessed skills stay Unknown.
+states and routes below hold for any valid thresholds, provided
+`minimumQuestionsPerSkill ≤ 6` so that the Course is ready (ADR005 §7.2 item 4).
+Unassessed skills stay Unknown. *(Qualifier added, F8-05.)*
 
 | Profile | Script (placement quiz, CT25) | Expected after processing (ADR011 §7) |
 |---|---|---|
@@ -210,7 +215,15 @@ Mastered except s and p, which are Weak. Expected: `remedial` to L(p) (p comes f
 in Lesson order but has no unmastered prerequisite; s's only candidate is p, whose
 Lesson is incomplete because it was not tested out). The reason names s and p.
 
-**Mastery-update cases M01–M10** (ADR005 §13.4 handoff): M01 all-correct → Mastered;
+**Discriminating variants G′01–G′24 and P2-R** *(added, F8-07)*. In G01–G24 and in
+P2/P3 the remedial target is also the first incomplete Lesson of Λ′, so a plain
+`continue` would name the same Lesson and these cases alone cannot tell remedial
+routing from linear progression. Each G′ case repeats its G case after L(p) was
+completed manually: expected `remedial` to the completed review Lesson L(p), while
+`continue` would name L(s) (re-derived for all 24). P2-R repeats P2 after L08 was
+completed manually: expected `remedial` L08 (review) while `continue` would name L09.
+
+**Mastery-update cases M01–M11** (ADR005 §13.4 handoff): M01 all-correct → Mastered;
 M02 all-incorrect → Weak; M03 one-question attempt correct → Mastered; M04
 one-question attempt incorrect → Weak; M05 alternation Mastered → Weak → Mastered
 follows the latest attempt; M06 an older 6/6 result replaced by a newer 0/1 → Weak;
@@ -218,11 +231,13 @@ M07 a skill not assessed by an attempt keeps its state; M08 the placement quiz
 initializes only S01–S10; M09 (policy-dependent) the smallest k with
 `weak ≤ k/6 < mastered` on a six-question attempt gives Learning, reported N/A when
 no such k exists; M10 adding questions to the bank without a new attempt changes no
-state.
+state; M11 (ADR005 §13.4 equal-time ordering) two attempts with equal `submitted_at`
+under a fixed clock are ordered by (`started_at`, `quiz_id`, `attempt_number`) and the
+later tuple decides the state. *(M11 added, F8-06.)*
 
 **Oracle rule.** Expected outcomes are derived by hand and by an independent
-re-implementation of ADR011 §7 from this dataset, reviewed by the Adaptive owner
-**before** the system is run, and stored in the existing scenario files
+re-implementation of ADR011 §7 from this dataset, reviewed by the Adaptive owner, who must not be the oracle's author (CT36.I-results
+rule; another reviewer otherwise), **before** the system is run, and stored in the existing scenario files
 `backend/src/test/resources/adaptive-scenarios/p1-strong-foundation.json`,
 `p2-loops-gap.json` and `p3-complete-beginner.json` (with G and M cases in the
 existing evaluation test). Outputs never redefine an expectation. The ≥80% routing
@@ -235,10 +250,10 @@ All measures run against an exact commit on a disposable PostgreSQL instance wit
 
 | Measure | Procedure | Reporting |
 |---|---|---|
-| Path divergence | Per profile after its script: skipped = number of `skip` rows; remediated = number of distinct `remedial` rows; divergence = skipped + remediated, against the baseline's 0. Expected P1 10 (10 + 0), P2 8 (7 + 1), P3 1 (0 + 1). | Table per profile with rows and reasons |
-| Routing correctness | G01–G24 at rule level (`AdaptiveDecisionEngine.decide` with the scenario's states) **and** at integrated level for P2, P3 and G10/G14/G24 (edges S10 → S08, S12 → S11, S20 → S19) by real quiz submissions. Correct = current recommendation is `remedial` to the expected Lesson. | Percentage per level with numerator/denominator; target ≥ 80% (architecture), reported, not assumed |
-| Mastery-update correctness | M01–M10 by real submissions through the quiz-to-mastery unit (ADR011 B6-V cases may be reused). | Passed / applicable cases; N/A cases listed |
-| Learning gain | Simulated only: P2 completes L08 and L10, then retakes `quiz/practice/S10` with a scripted all-correct answer set; gain = post score − pre score for S10, compared with the baseline P2 who receives no remedial step. Labelled as a demonstration of the measurement procedure, **not** evidence of learning. | Pre, post and difference with the explicit limitation |
+| Path divergence | Per profile after its script, against the baseline (architecture §6: Lessons skipped or inserted): skipped = number of `skip` rows; inserted = number of `remedial` recommendations whose target differs from the first incomplete Lesson of Λ′ (the step a linear continuation would take); divergence = skipped + inserted. Expected P1 10 (10 + 0), P2 7 (7 + 0), P3 0 (0 + 0); P2-R adds one inserted review. *(Redefined, F8-07.)* | Table per profile with rows and reasons; recommendation rows reported separately |
+| Routing correctness | G01–G24 and G′01–G′24 at rule level (`AdaptiveDecisionEngine.decide` with the scenario's states) **and** at integrated level for P2, P3, P2-R, G10/G14/G24 and G′10/G′14/G′24 (edges S10 → S08, S12 → S11, S20 → S19) by real quiz submissions. Correct = current recommendation is `remedial` to the expected Lesson; the G′ and P2-R results are reported separately because only they discriminate remedial routing from linear progression. | Percentage per level with numerator/denominator; target ≥ 80% (architecture), reported, not assumed |
+| Mastery-update correctness | M01–M11 by real submissions through the quiz-to-mastery unit (ADR011 B6-V cases may be reused). | Passed / applicable cases; N/A cases listed |
+| Learning gain | Simulated only: after the placement, P2 takes `quiz/practice/S10` with a scripted all-incorrect set (pre-score), completes L08 and L10, then takes the same quiz again with a scripted all-correct set (post-score); gain = post − pre. Because both answer sets are scripted, the result only demonstrates that the measurement pipeline works; no baseline comparison is made (it would be circular) and it is **not** evidence of learning. *(Redefined, F8-08.)* | Pre, post and difference with the explicit limitation |
 
 Every report records the commit SHA, dataset key, policy values, command, date,
 pass/fail/N/A per case and any deviation; failures are reported, not hidden or
@@ -271,7 +286,8 @@ New cases to implement in the same file (FE25):
 | L-N4 | Learner asks a question on a Lesson; the Instructor replies through REST; the learner sees the reply and a notification; the learner reports a post and gets a receipt | US-09; CT30, CT11 (**ADR012**) |
 
 Password recovery is excluded (CT02 is verified by its own suites; no mailbox in
-E2E). Each case states its story in its title. L-N3/L-N4 become start-ready only
+E2E). Each **new** case states its story in its title; the adopted tests keep their
+titles, and only the L-A1/L-A4 count assertions change as §7.2 states. L-N3/L-N4 become start-ready only
 after ADR012 is integrated.
 
 ### 7.2 CT19.fixtures
@@ -280,8 +296,16 @@ Reuse CT34.fixtures r2 unchanged: one disposable stack per run, the catalogue fi
 for L-A1, per-test synthetic accounts through the existing `auth-fixture.ts` helpers,
 and the run's synthetic Instructor (`E2E_USERNAME`/`E2E_PASSWORD`). Course content
 for L-N1–L-N4 is created per test through the approved Instructor REST operations
-(CT21, CT23, CT10) with titles made unique by the test ID, so parallel workers never
-share mutable data. The PDF is generated in the test (bytes starting with `%PDF-`);
+(CT05 skills, CT21, CT23, CT10, and CT30/CT11 reads for L-N4) as **isolated records**:
+each journey Course title starts with `~E2E Journey ` plus the test ID, so in the
+catalogue's title order (`COLLATE "C"`) every journey Course sorts after every
+catalogue-fixture title. Journey Courses must be published for enrolment and therefore
+appear in the one shared public catalogue of the run, so the adopted L-A1 and L-A4
+assertions become fixture-relative: page 1 shows exactly the first twenty fixture
+Courses, the hidden fixture Course never appears, the total is at least the fixture's
+21 and page 2 starts with the remaining fixture Course. No shared fixture row is
+mutated (ADR008 §4). *(Corrected, F8-02: the earlier claim that parallel workers share
+no mutable data was false.)* The PDF is generated in the test (bytes starting with `%PDF-`);
 deadlines are explicit case values relative to the test clock. No shared demo seed,
 direct SQL (other than CT34's existing catalogue load and role promotion), new
 fixture file or cleanup step is used; the disposable database is discarded with the
@@ -310,14 +334,17 @@ criterion. Quiz-driven mastery runs through the real submission unit (CP-057).
 Per run and per test, inside CT34's disposable stack: the run's Instructor builds the
 Course, skills, edges, mappings, questions, placement quiz and adaptive settings
 through approved REST operations, then enables adaptive mode; learners register
-through the API. The policy is an explicitly named test value; any valid policy gives
-the same results. SD03 is not loaded in E2E, and no profile data are shared between
+through the API. Each of K1–K5 has exactly two bank questions (the placement uses those
+of K1–K4), so readiness holds for a test policy with `minimumQuestionsPerSkill ≤ 2`; the
+thresholds are an explicitly named test value and any valid thresholds give the same
+results. Course titles follow §7.2's `~E2E Journey ` rule. *(Corrected, F8-03.)* SD03 is not loaded in E2E, and no profile data are shared between
 tests or runs.
 
 ## 9. Responsibilities unlocked
 
-SD01 (admin account extension), SD03 (except the demonstration policy values), SD04,
-QA05 (evaluation execution and report), FE25 (L-N1/L-N2 now; L-N3/L-N4 after ADR012),
+After ADR012 and this record are integrated and reviewed: SD01 (admin account
+extension), SD03, SD04, QA05 (evaluation execution and report), FE25 (L-N3/L-N4 also
+consume ADR012),
 FE26, QA08 (execution and evidence), DO03 (Final report allocation). Each still needs
 its implementation, execution and the reviews in §13.
 
@@ -339,7 +366,7 @@ dependency or result is claimed; all cases are specified, NOT_RUN.
 | **Adaptive E2E (U34)** | CT35 A-1 passes on `chromium-desktop` | **Yes** (advanced component in the main flow) |
 | Other selected E2E cases and projects | Remaining CT19/CT35 cases on all five CT34 projects | Attempted and reported with failures, skips and launch blocks; not release-blocking |
 | Adaptive evaluation | CT36.F-measures report (QA05) | Yes: the report must exist; the ≥80% target is reported, not a gate on release |
-| Deployment | CT17.F-runtime/recovery r2 qualification, smoke checks of the deployed URL and one sign-in per trial role | Yes |
+| Deployment | CT17.F-runtime/recovery r2 qualification, smoke checks of the deployed URL and one sign-in per trial role; the Leader's decision on ADR011 §5 operational risks before integrated quiz/adaptive exposure, and on the other exposure risks of §16.5 | Yes |
 | Sample data | Disposable load and login of SD01–SD04 (QA13) | Yes |
 | CI | CT14 F2 jobs and CT34.ci SH07 on the release commit | Yes |
 
@@ -352,6 +379,8 @@ unchanged.
 
 **All 100 roadmap checkpoints are accounted for.** No checkpoint was renamed,
 rebucketed or double-counted; prerequisite slices are counted separately.
+*This section is the state at first preparation; §16.6 gives the state after the
+second instruction (CP-095 completed by r2; several residual rows resolved).*
 
 | Scope | Checkpoints | Approved | Partial / pending | Record |
 |---|---:|---:|---:|---|
@@ -369,7 +398,9 @@ Separately counted prerequisite or companion slices approved outside the roadmap
 count: Batches 1–6 records as listed in the decision index; Batch 7 adds five
 (ADR012 §3); Batch 8 adds none.
 
-**Residual obligations, classified** (none is eligible for new delegated approval):
+**Residual obligations, classified** at first preparation (none was then eligible for
+new delegated approval; §16 resolves the first, second, third and fifth rows, narrows the
+fourth to a ceiling, and keeps the rest):
 
 | Item | Classification | Next action |
 |---|---|---|
@@ -395,13 +426,15 @@ CODEOWNER — required CI and protected integration **after** ADR012. Then the
 implementation-start confirmation (ADR012 §1) applies within each Issue's scope.
 
 **Still required:** authoring SD01 (admin extension)/SD03/SD04 and their disposable
-load evidence; Leader approval of the demonstration policy values before loading
-the demonstration Course; FE25/FE26 implementation and FE24/SH07 (#240/#241) review;
+load evidence; loading the demonstration Course with the §16.1 values; FE25/FE26 implementation and FE24/SH07 (#240/#241) review;
 QA05/QA08 execution; deployment admission, demonstration seeding authorization and
 credential handover on the target; every item of §12. No result, deployment,
 credential handling or risk acceptance is implied.
 
 ## 14. Leader decisions requested
+
+*§§14.1–14.3 are resolved by §16 (second instruction); the text below is retained as
+the original request.*
 
 ### 14.1 Demonstration policy values for `course/python`
 
@@ -436,3 +469,157 @@ Validated before commit: Markdown links and anchors in changed files;
 `git diff --check`; secret and artifact scan; arithmetic of §5–§6 expectations
 re-derived from the §4.2 graph. No OpenAPI change. No backend, frontend, E2E or seed
 command was run because this is documentation only.
+
+## 16. Continuation: residual resolution — 15 November 2026 (second instruction)
+
+**Authority.** The Project Leader's later explicit instruction of 15 November 2026,
+**“CodeMastery — Final Contract Resolution & Comprehensive Independent Re-Audit of PR
+#244 and #245”**, delegates bounded technical decisions that §14 had left for Leader
+selection and authorizes corrections in this PR. It does not delegate merge,
+deployment, credential or live-privilege changes, human review, residual-risk
+acceptance or silent amendment of effective Leader-reserved approvals. Decisions
+below are **DELEGATED_APPROVED** under it unless stated otherwise; none is personal
+Leader approval. Shared decisions consumed here (CT17-P6 plan, CT14 placement, LD-02,
+delivery semantics) are recorded in [ADR012 §19](012-batch-07-contract-approvals.md#19-continuation-decisions--15-november-2026-second-instruction).
+
+### 16.1 CT15-F-ADAPTIVE-2026-11-15-r2 — demonstration policy (resolves §14.1)
+
+`course/python` uses `weak = 1/2`, `mastered = 4/5`, `minimumQuestionsPerSkill = 6`.
+These are **demonstration-course data** (Instructor-owned Course configuration under
+ADR005 §6.2, which expressly left demo values to CT15.F-adaptive), not a system default
+or production threshold; any other Course still sets its own policy. Verified:
+
+- **Schema validity (ADR005 §6.2):** integers in range, `0 < 1/2 < 4/5 ≤ 1`; canonical
+  pairs are already reduced.
+- **Readiness (ADR005 §7.2 item 4, §3.3):** `n` counts distinct bank Questions tagged to
+  each Course skill; SD04 supplies exactly six per skill, so every one of the twenty
+  skills reaches coverage 6 and the Course is ready. `n` governs bank readiness only, so
+  the two-question placement quiz is compatible (ADR005 §6.2: not a sample size). Trade-off
+  recorded: deleting any unused question of a skill makes readiness false and suspends
+  routing effects (fail-closed, ADR005 §7.2), which is acceptable for a fixed demo
+  dataset and makes incomplete loading visible.
+- **Classification:** on a six-question practice quiz 0–2 correct is Weak, 3–4
+  Learning, 5–6 Mastered; on the two placement questions of a skill 0, 1 and 2 correct
+  give Weak, Learning and Mastered. M09's smallest Learning k is 3.
+- **Scenarios:** §5's scripts use rates 0 and 1 only, so their outcomes are unchanged.
+
+The values are chosen from that partition, not from the separate ≥80% routing target.
+r2 replaces only r1's pending policy clause; every other r1 clause is unchanged. CP-095
+is now **DELEGATED_APPROVED**. The seed still takes the three values as load-time inputs
+(§4.2), now with these approved values.
+
+### 16.2 Learning-gain evaluation — no real-student pilot (resolves §14.2)
+
+Requirement §5.3 requires modelling skills and prerequisites, adapting difficulty **or**
+the next lesson, a Mastery Map and a flow change across at least two profiles; §5 asks
+for supporting data or test scenarios, evaluation criteria and a live demonstration.
+None requires real learners. Decision: **no real-student pilot for Final**; learning
+gain is reported only as the simulated procedure of §6 with its stated limitation, and
+the Final report must not present it as evidence of learning. No personal student data
+is collected. A later pilot would need consent, anonymization and a Leader data
+decision.
+
+### 16.3 Adaptive practice capture (ADR011 §17) — technical disposition
+
+Re-assessed: next-lesson adaptation (test-out, remedial, continue) already satisfies
+§5.3; the amendment would change two effective approvals (CT04-START, CT08-EVIDENCE);
+and because CT06.production weighs every captured question equally under the
+latest-attempt policy, difficulty-shaped evidence would bias classification (a Weak
+learner who answers two easy questions correctly becomes Mastered). The compatible
+alternative of fixed per-difficulty practice quizzes has the same bias. Disposition:
+**the amendment is not adopted for Final (DEFERRED)**; CT04-START and CT08-EVIDENCE stay
+unchanged; AS07 keeps only the port and the pure selection rule (ADR011 §8);
+`QuestionSelectionService` stays without a production caller; Course is unaffected.
+Declining changes no effective contract. The Leader keeps the reserved authority to
+adopt the amendment later, which would also need a decision on that bias. The Final
+report states that practice quizzes are not difficulty-shaped and that the
+architecture's “practice quiz at selected difficulty” step is specified (CT07.difficulty)
+but not consumed in Final.
+
+### 16.4 LD-09, LD-11 and review routes
+
+- **LD-09 (technical part):** the live `main-quality-gates` ruleset requires one approving
+  review, CODEOWNER review, approval after the last push, resolved threads and the
+  required checks, with **no bypass actor**; `/docs/decisions/` has only the Leader as
+  CODEOWNER and these PRs are pushed from the Leader's account, so no reviewer can
+  satisfy the CODEOWNER rule. Evidence required before any merge of #244/#245: approving
+  reviews from the affected module owners given after the last push, green required
+  checks and resolved threads. How the CODEOWNER rule is then met (a CODEOWNERS change,
+  a ruleset bypass entry or another route) is a repository-rule decision that this
+  delegation excludes: **PENDING_LEADER_APPROVAL**.
+- **Integration of ADR005–ADR011 without approving reviews:** #228, #229, #230, #231,
+  #233, #235 and #236 were merged by the Leader with no approving review while
+  `main-quality-gates` requires one. Their content is integrated and their delegated
+  approvals stand, but no record states that the Leader accepts that integration route
+  (ADR004 covered only the earlier records). Recording that acceptance is the Leader's
+  own act: **PENDING_LEADER_APPROVAL**, together with LD-09.
+- **LD-11:** a human joint review by the Course, Assessment and Adaptive owners of
+  ADR011 §§3–5 cannot be performed by this record. Its checklist: lock order (ADR011 §4),
+  actorless allowlists (§3), rollback visibility and recovery route (§5), B6-V01–V12
+  and the two-member `QuizSubmittedEvent` subscriber set (ADR012 §9.3). Status: open
+  review gate.
+
+### 16.5 Security and operational risk register
+
+| Item | Control | Status |
+|---|---|---|
+| ADR010 hostile submission content | PDF/ZIP signature validation, attachment disposition, `nosniff`, owner-only download (ADR010 §§5, 11) | MITIGATION_SPECIFIED_NOT_IMPLEMENTED; no content scanning, so delivering hostile files to graders stays PENDING_PERSONAL_RISK_ACCEPTANCE before exposure |
+| ADR011 §5 blocked submission on deterministic Adaptive failure; answers graded from last committed save | Disable-adaptive recovery route, save-before-submit client rule | MITIGATION_SPECIFIED_NOT_IMPLEMENTED; residual PENDING_PERSONAL_RISK_ACCEPTANCE |
+| ADR012 notification loss after commit | Best-effort at-most-once, derived IDs (ADR012 §§8, 19.5) | Design property, disclosed; no acceptance needed because nothing claims delivery guarantees |
+| AU07 reset does not revoke issued tokens (≤ PT15M) | Per-request account check; short lifetime | PENDING_PERSONAL_RISK_ACCEPTANCE. A verifiable mitigation (a password-hash fingerprint claim checked per request) would amend the Leader-approved CT01-2026-10-21-r1 token contract and is therefore not selected here |
+| ADR003 glibc/musl collation of pre-existing data | None for existing data | PENDING_PERSONAL_RISK_ACCEPTANCE (not applicable to a fresh database) |
+| DP01 F1, F4, F5, F6, F10, F11, image admissions, tmpfs/memory budgets | Qualified controls recorded in the deployment record | PENDING_VERIFICATION / PENDING_PERSONAL_RISK_ACCEPTANCE (licensing, signing trust, CVE acceptance and admission are Leader decisions) |
+| CT17 runtime/recovery admission | ADR009 r2 qualification protocol | PENDING_VERIFICATION (actual VM execution and acceptance) |
+| CT17-P6 runtime grants | ADR012 §19.2 ceiling | MITIGATION_SPECIFIED_NOT_IMPLEMENTED (per-consumer matrix revisions) |
+
+No risk is accepted and no exposure or deployment is approved by this record.
+
+### 16.6 Other residual rows of §12
+
+- CT14 Interaction/Admin and storage integration placement: **resolved** by
+  `CT14-INTEGRATION-PLACEMENT-2026-11-15-r1` (ADR012 §19.3).
+- CT17-P6 runtime grants: `CT17-P6-PLAN-2026-11-15-r1` ceiling (ADR012 §19.2); matrix
+  revisions per implemented consumer; real provisioning Leader-reserved.
+- LD-02: **resolved** as option (a) (ADR012 §19.4).
+- §12's labels `ALREADY_EFFECTIVELY_APPROVED`, `ELIGIBLE_FOR_NEW_DELEGATED_APPROVAL`,
+  `IMPLEMENTATION_OR_VERIFICATION_GATE_ONLY` and similar are analysis labels describing
+  evidence, not approval statuses (decision index, “Analysis labels”).
+- Stale history noted, not rewritten: ADR008 §§1–2/8 still call CP-033/034 pending
+  (resolved by ADR009 r2); ADR009's header says “awaits PR #233” (merged); ADR010 §2
+  counts eleven relationships where the register has fourteen (the three extra are
+  VERIFY-C1 edges resolved by LD-01). None changes an approval.
+
+### 16.7 Updated reconciliation
+
+After §16.1, all 100 roadmap checkpoints carry a technical approval record: CP-001–063
+are integrated on `main` (ADR004–ADR011), CP-064–090 are in open PR #244 and CP-091–100
+in open PR #245. This is technical approval only: 37 of the 100 are not integrated,
+none of ADR005–ADR013 has an approving GitHub review, and no checkpoint implies
+implementation, test evidence, deployment or risk acceptance.
+
+## 17. Adversarial re-audit corrections — 15 November 2026
+
+Under §16, separately instructed review passes (reconciled against the sources; not a
+GitHub or human review) produced these findings, corrected in place; revision IDs are
+unchanged except CP-095's completion by r2 (§16.1).
+
+| ID | Severity | Finding | Correction |
+|---|---|---|---|
+| F8-01 | HIGH | New `final-v1` IDs for `instructor@`/`learner@example.test` collide with the `interim-v1` rows (unique email, SD01 conflict rule), so SD01 and QA13 could never load | Reuse the interim rows; new IDs only for admin and P1–P3 (§§3, 4.2; sample-data README) |
+| F8-02 | HIGH | Per-test published journey Courses enter the shared catalogue and break L-A1's exact counts and possibly L-A4's page-1 assumption; “never share mutable data” was false | `~E2E Journey ` title rule and fixture-relative L-A1/L-A4 assertions; isolated records (§§7.1–7.2, 8.2) |
+| F8-03 | MEDIUM | The E2E Course gave K5 no questions, so adaptive enabling fails readiness; “any valid policy” was false | Two bank questions per K1–K5, `n ≤ 2` (§8.2) |
+| F8-04 | MEDIUM | “No admin promotion endpoint” contradicted ADR012 CT12.user | First Administrator by seed, others by CT12.user (§3) |
+| F8-05 | MEDIUM | “Any approved policy” ignored readiness | Qualifier `n ≤ 6` (§5) |
+| F8-06 | MEDIUM | ADR005 §13.4's equal-time ordering case was missing | M11 (§5) |
+| F8-07 | MEDIUM | Remedial expectations coincided with linear continuation; path divergence counted non-insertions | G′ variants, P2-R; divergence redefined to architecture §6 (P1 10, P2 7, P3 0) (§§5–6) |
+| F8-08 | LOW | Learning gain retook an untaken quiz and compared against a circular scripted baseline | Pre/post on the same quiz, no baseline (§6) |
+| F8-09 | LOW | Fixture operations omitted CT05 and CT30; §9 implied work could start “now” | Operations listed; start only after integration and review (§§7.2, 9) |
+| F8-10 | LOW | Oracle review omitted the reviewer ≠ author rule; adopted tests were said to state stories in titles | Rule added; claim limited to new cases (§§5, 7.1) |
+| F8-11 | LOW | CT20.F deployment row did not name the ADR011 §5 risk decision | Named (§11) |
+| F8-12 | LOW | §12 used analysis labels without saying so; stale history in ADR008–ADR010 | §16.6 |
+
+Verified as correct and unchanged: graph counts and acyclicity, G numbering, all P/G/A
+derivations (independently re-implemented), dataset/schema compatibility, readiness and
+partition arithmetic, E2E REST operation availability, minimal `%PDF-` acceptance, the
+adopted test count, CT20.F against requirements §§5–6, the SD01 hashing procedure and
+§12's batch counts.

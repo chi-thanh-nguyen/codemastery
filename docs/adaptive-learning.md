@@ -667,8 +667,12 @@ all-correct or all-incorrect answers per skill, so the expected results hold for
 valid policy: **P1** tests out L01–L10 and continues to L11; **P2** (Loops gap) tests
 out L01–L07 and receives a remedial recommendation for L08 (“While Loops”, because
 “Loop Control” is Weak); **P3** receives a remedial recommendation for L01. Path
-divergence is skipped plus remediated Lessons (expected 10, 8 and 1 against the
-baseline's 0); routing correctness uses one gap scenario per edge (G01–G24) and keeps
-the ≥80% figure as an evaluation target only; mastery-update correctness uses cases
-M01–M10; learning gain is simulated and labelled as a procedure demonstration. No
-real-student pilot is selected. No result is claimed.
+divergence counts skipped Lessons plus inserted remedial steps that differ from a
+linear continuation (expected 10, 7 and 0 against the baseline's 0); routing
+correctness uses one gap scenario per edge (G01–G24) plus discriminating variants
+G′01–G′24 and P2-R, and keeps the ≥80% figure as an evaluation target only;
+mastery-update correctness uses cases M01–M11; learning gain is simulated and
+labelled as a procedure demonstration. No real-student pilot is selected (ADR013
+§16.2). The demonstration Course uses `weak 1/2`, `mastered 4/5`,
+`minimumQuestionsPerSkill 6` (ADR013 §16.1). Difficulty-shaped practice is not part of
+Final (ADR013 §16.3). No result is claimed.

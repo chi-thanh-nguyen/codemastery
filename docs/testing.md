@@ -3161,9 +3161,12 @@ notification and report); L-N3/L-N4 depend on ADR012. **CT35:** FE26 implements 
 (two contrasting placement profiles with different guidance and Mastery Maps), A-2
 (prerequisite warning without a hard block) and A-3 (skipped placement) in
 `adaptive-flow.spec.ts`. Both suites keep CT34 r2's disposable stack and build their
-data per test through approved REST operations; no new fixture file or shared seed
-is used. **CT36:** profile scripts P1–P3, gap scenarios G01–G24 and mastery cases
-M01–M10 are policy-independent where stated and live in the existing scenario JSON
+data per test through approved REST operations as isolated records whose Course titles
+start with `~E2E Journey `; because those published Courses join the shared catalogue,
+L-A1/L-A4 assert fixture-relative results (first twenty fixture Courses on page 1,
+total at least 21). No new fixture file or shared seed is used. *(ADR013 §17 F8-02.)* **CT36:** profile scripts P1–P3, gap scenarios G01–G24 and mastery cases
+M01–M11 and the discriminating
+variants G′01–G′24 and P2-R are policy-independent where stated and live in the existing scenario JSON
 files and evaluation/integration tests. **CT20.F:** release requires L-A3, L-A4,
 L-N1 and L-N2 on `chromium-desktop` and `chromium-mobile`, A-1 on `chromium-desktop`,
 the CT36.F-measures report, deployment smoke checks, sample-data loading and the CI

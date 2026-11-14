@@ -28,7 +28,9 @@ stable IDs `CT01`–`CT40`) in GitHub and in Project #3, not here.
 
 Analysis labels that appear inside reconciliation tables describe evidence, not
 approval: `APPROVED_AND_CONSISTENT`, `APPROVED_BUT_INCOMPLETE`, `PREVIOUSLY_APPROVED`,
-`EFFECTIVE_APPROVAL`, `IMPLEMENTED_NOT_APPROVED` and similar.
+`EFFECTIVE_APPROVAL`, `IMPLEMENTED_NOT_APPROVED`, `ALREADY_EFFECTIVELY_APPROVED`,
+`ELIGIBLE_FOR_NEW_DELEGATED_APPROVAL`, `IMPLEMENTATION_OR_VERIFICATION_GATE_ONLY`,
+`MITIGATION_SPECIFIED_NOT_IMPLEMENTED`, `PENDING_VERIFICATION` and similar.
 
 ## Current Batch 4 checkpoint inventory — 10 November 2026
 
@@ -101,7 +103,7 @@ Neither document establishes implementation, runtime acceptance or deployment au
 | [ADR010](010-batch-05-contract-approvals.md) | Ten Batch 5 checkpoints CP-037–046: protected files, assignments, file widget; CT01/CT18 bounded prerequisites | `DELEGATED_APPROVED` (12 November 2026); integrated via PR #235 (`c9d1427`, 13 November 2026) with no approving review recorded, so independent/module-owner review remains outstanding; implementation/exposure gates retained |
 | [ADR011](011-batch-06-contract-approvals.md) | Seventeen Batch 6 checkpoints CP-047–063: atomic quiz-to-mastery execution, routing, reasons, difficulty, placement, Mastery Map and insights | `DELEGATED_APPROVED` (12 November 2026); integrated after ADR010 via PR #236 (`c80fda9`, 13 November 2026) with no approving review recorded, so independent/module-owner review and LD-11's joint review remain outstanding; adaptive practice capture amendment `PENDING_LEADER_APPROVAL` |
 | [ADR012](012-batch-07-contract-approvals.md) | Twenty-seven Batch 7 checkpoints CP-064–090: notifications, reminders, event subscriptions, lesson Q&A and reports, audit, Administrator user/Course mutations, moderation and reporting; five bounded prerequisite slices | `DELEGATED_APPROVED` (15 November 2026); PR open, pending independent review, CI and protected integration; implementation, runtime grants and QA gates retained |
-| [ADR013](013-batch-08-contract-approvals.md) | Ten Batch 8 checkpoints CP-091–100: trial accounts, Final datasets, evaluation scenarios and measures, learner and adaptive E2E cases, Final coverage allocation; complete reconciliation of all 100 checkpoints and residual obligations | Nine `DELEGATED_APPROVED`, CT15.F-adaptive `DELEGATED_PARTIALLY_APPROVED` (demonstration policy values `PENDING_LEADER_APPROVAL`), 15 November 2026; stacked on ADR012; PR open, pending independent review, CI and protected integration after ADR012 |
+| [ADR013](013-batch-08-contract-approvals.md) | Ten Batch 8 checkpoints CP-091–100: trial accounts, Final datasets, evaluation scenarios and measures, learner and adaptive E2E cases, Final coverage allocation; complete reconciliation of all 100 checkpoints and residual obligations | Ten `DELEGATED_APPROVED` (CT15.F-adaptive r1 partial, completed by r2 under the Leader's second instruction), 15 November 2026; stacked on ADR012; PR open, pending independent review, CI and protected integration after ADR012 |
 
 ## Contract decision records by revision
 
@@ -397,6 +399,7 @@ no seed, test or runtime behavior is implemented by the approvals.
 |---|---|---|
 | `CT15-F-ADMIN-ACCOUNT-2026-11-15-r1` | Per-role trial accounts, load-time hashes, secure handover | [ADR013 §3](013-batch-08-contract-approvals.md#3-ct15f-admin-account--trial-accounts-per-role) |
 | `CT15-F-ADAPTIVE-2026-11-15-r1` | `final-v1` Course, twenty skills and edges, profiles; policy values pending the Leader | [ADR013 §4.2](013-batch-08-contract-approvals.md#42-ct15f-adaptive-sd03--partially-approved) |
+| `CT15-F-ADAPTIVE-2026-11-15-r2` | Completes r1: demonstration policy `weak 1/2`, `mastered 4/5`, `minimumQuestionsPerSkill 6` | [ADR013 §16.1](013-batch-08-contract-approvals.md#161-ct15-f-adaptive-2026-11-15-r2--demonstration-policy-resolves-141) |
 | `CT15-F-ASSESSMENT-2026-11-15-r1` | 120 questions, placement/practice/test quizzes, two assignments | [ADR013 §4.3](013-batch-08-contract-approvals.md#43-ct15f-assessment-sd04) |
 | `CT36-F-SCENARIOS-2026-11-15-r1` / `CT36-F-MEASURES-2026-11-15-r1` | P1–P3, G01–G24, M01–M10; four measures and reporting | [ADR013 §§5–6](013-batch-08-contract-approvals.md#5-ct36f-scenarios) |
 | `CT19-CASES-2026-11-15-r1` / `CT19-FIXTURES-2026-11-15-r1` | Adopted L-A1–L-A5 and new L-N1–L-N4; per-test REST data | [ADR013 §7](013-batch-08-contract-approvals.md#7-ct19--learner-e2e-suite-f20) |
@@ -404,5 +407,14 @@ no seed, test or runtime behavior is implemented by the approvals.
 | `CT20-F-2026-11-15-r1` | Final coverage allocation; both suites release-required for named cases only | [ADR013 §11](013-batch-08-contract-approvals.md#11-ct20f--final-coverage-allocation-u33u34) |
 
 [ADR013 §12](013-batch-08-contract-approvals.md#12-complete-contract-reconciliation--15-november-2026)
-accounts for all 100 roadmap checkpoints (99 approved, one partial) and classifies
+accounts for all 100 roadmap checkpoints (99 approved and one partial at first preparation; 100 after §16.1) and classifies
 every residual obligation; §14 lists the Leader decisions requested.
+
+*Continuation, 15 November 2026* ([ADR013 §§16–17](013-batch-08-contract-approvals.md#16-continuation-residual-resolution--15-november-2026-second-instruction)):
+`CT15-F-ADAPTIVE-2026-11-15-r2` completes CP-095 (**DELEGATED_APPROVED**: demonstration
+policy `weak 1/2`, `mastered 4/5`, `minimumQuestionsPerSkill 6`); no real-student pilot;
+the adaptive practice-capture amendment is not adopted for Final (CT04-START and
+CT08-EVIDENCE unchanged); twelve re-audit findings F8-01–F8-12 are corrected. All 100
+roadmap checkpoints now have a technical approval record: 63 integrated on `main`, 37 in
+open PRs #244/#245. LD-09 and acceptance of the review-free integration of #228–#236
+remain Leader decisions.

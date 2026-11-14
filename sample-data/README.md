@@ -387,10 +387,11 @@ approves the Final dataset contract (`CT15-F-ADMIN-ACCOUNT-2026-11-15-r1`,
 - **IDs.** UUIDv5 in the URL namespace for
   `https://codemastery.test/final-v1/<logical-key>`, insert-only and no-overwrite as
   above.
-- **Accounts (`01-users.sql`).** `admin@example.test` (Administrator),
-  `instructor@example.test`, `learner@example.test` and the profile learners
-  `p1@`, `p2@` and `p3@example.test`. Every password is chosen at load time and only
-  its hash is passed in through the environment; nothing is committed.
+- **Accounts (`01-users.sql`).** The existing `interim-v1` Instructor and Learner rows
+  are reused unchanged (a second row with the same email would conflict). New:
+  `admin@example.test` (Administrator) and the profile learners `p1@`, `p2@` and
+  `p3@example.test`. Every password is chosen at load time and only its hash is
+  passed in through the environment; nothing is committed.
 - **Course (`02`–`03`).** “Python Fundamentals”: six Chapters, twenty published
   Lessons L01–L20 with text materials, twenty skills S01–S20 mapped one to one, and
   the twenty-four prerequisite edges listed in ADR013 §4.2. The PDF material on L01
@@ -401,9 +402,10 @@ approves the Final dataset contract (`CT15-F-ADMIN-ACCOUNT-2026-11-15-r1`,
 - **Profiles (`05`).** Accounts and active enrolments only. Mastery, progress and
   recommendations are produced by taking the quizzes in the application, never
   seeded.
-- **Adaptive policy.** Three load-time inputs validated by ADR005 §6.2. The
-  demonstration values await Leader approval (ADR013 §14.1); do not load the
-  demonstration Course with invented values.
+- **Adaptive policy.** Three load-time inputs validated by ADR005 §6.2. The approved
+  demonstration values are `weak 1/2`, `mastered 4/5` and
+  `minimumQuestionsPerSkill 6` (ADR013 §16.1); they are demonstration-course data,
+  not a system default.
 - **Deployed trial accounts.** Seeding a deployment target needs the Leader's
   authorization; credentials are handed to the lecturer only through a
   Leader-controlled secure location.
