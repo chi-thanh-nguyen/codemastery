@@ -674,9 +674,13 @@ G′01–G′24 and P2-R, and keeps the ≥80% figure as an evaluation target on
 mastery-update correctness uses cases M01–M11; learning gain is simulated and
 labelled as a procedure demonstration. No real-student pilot is selected (ADR013
 §16.2). The demonstration Course uses `weak 1/2`, `mastered 4/5`,
-`minimumQuestionsPerSkill 6` (ADR013 §16.1). Whether and how practice difficulty is
-consumed in Final is a pending Leader decision (ADR013 §18.4, which withdraws §16.3):
-the approved architecture (§§4.7, 6) selects practice difficulty by mastery, and
-every consumption route either amends Leader-reserved contracts or needs a new
-learner-facing contract and an evidence-bias decision. Until then practice Quizzes
-are fixed, as CT04-START captures them. No result is claimed.
+`minimumQuestionsPerSkill 6` (ADR013 §16.1). **Practice difficulty (Leader decision
+E02, ADR013 §19):** for a Lesson, Adaptive takes the CT07.difficulty target of the
+Lesson's weakest mapped skill (Unknown and Weak give Easy, Learning gives Medium,
+Mastered gives Hard) and recommends a published practice Quiz whose questions all
+have that difficulty, falling back in CT07.difficulty's order, with a fixed reason.
+The guidance for the next step and the Lesson page show it; it never blocks access
+and is not persisted. Quiz capture, evidence and mastery mathematics are unchanged.
+Accepted limitation (Leader, academic Final only): because the latest attempt decides
+with equal question weight, a few correct Easy answers can make a skill Mastered;
+this is disclosed and is not evidence of learning. No result is claimed.

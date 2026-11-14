@@ -44,14 +44,14 @@ authored this record; no AI runtime is added.
 |---|---|---|---|---|
 | CP-091 | CT15.F-admin-account / [#28](https://github.com/chi-thanh-nguyen/codemastery/issues/28) | `CT15-F-ADMIN-ACCOUNT-2026-11-15-r1` | DELEGATED_APPROVED | §3 |
 | CP-092 | CT36.F-scenarios / [#26](https://github.com/chi-thanh-nguyen/codemastery/issues/26) | `CT36-F-SCENARIOS-2026-11-15-r1` | DELEGATED_APPROVED | §5 |
-| CP-093 | CT15.F-assessment / #28 | `CT15-F-ASSESSMENT-2026-11-15-r1` | DELEGATED_APPROVED | §4.3 |
+| CP-093 | CT15.F-assessment / #28 | `CT15-F-ASSESSMENT-2026-11-15-r2` (r1 → r2, §19) | DELEGATED_APPROVED | §§4.3, 19.6 |
 | CP-094 | CT36.F-measures / #26 | `CT36-F-MEASURES-2026-11-15-r1` | DELEGATED_APPROVED | §6 |
 | CP-095 | CT15.F-adaptive / #28 | `CT15-F-ADAPTIVE-2026-11-15-r1`, completed by `CT15-F-ADAPTIVE-2026-11-15-r2` | r1 DELEGATED_PARTIALLY_APPROVED (policy values pending); **r2 DELEGATED_APPROVED** under the second instruction (§16.1) | §§4.2, 16.1 |
 | CP-096 | CT19.cases / [#140](https://github.com/chi-thanh-nguyen/codemastery/issues/140) | `CT19-CASES-2026-11-15-r2` (r1 → r2, §18) | DELEGATED_APPROVED | §§7.1, 18 |
 | CP-097 | CT19.fixtures / #140 | `CT19-FIXTURES-2026-11-15-r2` (r1 → r2, §18) | DELEGATED_APPROVED | §§7.2–7.3, 18 |
-| CP-098 | CT35.cases / [#151](https://github.com/chi-thanh-nguyen/codemastery/issues/151) | `CT35-CASES-2026-11-15-r1` | DELEGATED_APPROVED | §8.1 |
-| CP-099 | CT35.fixtures / #151 | `CT35-FIXTURES-2026-11-15-r1` | DELEGATED_APPROVED | §8.2 |
-| CP-100 | CT20.F / [#17](https://github.com/chi-thanh-nguyen/codemastery/issues/17) | `CT20-F-2026-11-15-r1` | DELEGATED_APPROVED | §11 |
+| CP-098 | CT35.cases / [#151](https://github.com/chi-thanh-nguyen/codemastery/issues/151) | `CT35-CASES-2026-11-15-r2` (r1 → r2, §19) | DELEGATED_APPROVED | §§8.1, 19.7 |
+| CP-099 | CT35.fixtures / #151 | `CT35-FIXTURES-2026-11-15-r2` (r1 → r2, §19) | DELEGATED_APPROVED | §§8.2, 19.7 |
+| CP-100 | CT20.F / [#17](https://github.com/chi-thanh-nguyen/codemastery/issues/17) | `CT20-F-2026-11-15-r2` (r1 → r2, §19) | DELEGATED_APPROVED | §§11, 19.7 |
 
 The revised plan has **25 relationships** into Batch 8 (15 HARD, 10 CONDITIONAL).
 HARD sources outside the batch are effective on `main`: CP-006 CT06.production,
@@ -181,6 +181,8 @@ Existing `04-questions-quizzes-assignments.sql`, CT23 validity rules unchanged:
   `assignment/files` bound to L20, PDF or ZIP submissions (CT09). Their deadlines are
   two load-time inputs that must be in the future at load; no submission or grade row
   is seeded.
+
+*r2 (§19.6) adds sixty per-difficulty practice Quizzes; the bank and the rules above are unchanged.*
 
 Readiness: with six questions per skill, the Course is adaptive-ready for any
 approved `minimumQuestionsPerSkill` ≤ 6.
@@ -371,6 +373,7 @@ quiz has two questions for each of K1–K4.
 | A-1 contrasting profiles | Learner A answers the placement quiz all correct; Learner B answers K1 correctly and K2–K4 incorrectly | A: E1–E4 tested out and labelled Mastered, guidance `continue` E5. B: E1 tested out, guidance `remedial` E2 with reason `Review this lesson first: your skill "Loop Control" is Weak and its prerequisite "While Loops" is not yet Mastered.` Mastery Maps differ (US-03, US-04, US-06, US-07). |
 | A-2 no hard block | Learner B opens E5 | A prerequisite warning names "For Loops" and the Lesson opens (US-06). |
 | A-3 skipped placement | Learner C skips the placement offer | No mastery row is written and the default path starts at E1 (US-03, CT25.skip). |
+| A-4 practice difficulty (r2, §19.7) | Learners A and B open E2; Learner B opens E5; Learner D answers one K1 placement question correctly and one incorrectly, then opens E1 | A: Hard practice for "While Loops" (Mastered); B: Easy practice for "While Loops" (Weak) and Easy for "Lists" on E5 (not yet assessed); D: K1 Learning, target Medium, no Medium Quiz, so Easy with `fallback = true`. Each with §19.4's reason, no access blocked (architecture §§4.7, 6). |
 
 At least two contrasting profiles (A and B) are selected, satisfying the CT35
 criterion. Quiz-driven mastery runs through the real submission unit (CP-057).
@@ -385,6 +388,14 @@ of K1–K4), so readiness holds for a test policy with `minimumQuestionsPerSkill
 thresholds are an explicitly named test value and any valid thresholds give the same
 results. Course titles follow §7.2's `~E2E Journey ` rule. *(Corrected, F8-03.)* SD03 is not loaded in E2E, and no profile data are shared between
 tests or runs.
+
+*r2 (§19.7):* of each skill's two bank questions, one is `easy` and one is `hard`, and
+the Course also has two published `practice` Quizzes per skill, `E2E practice Kn easy`
+(the easy question) and `E2E practice Kn hard` (the hard question), so there is no
+Medium Quiz and A-4 exercises the fallback. The test policy is fixed to the explicit
+test values `weak 1/2`, `mastered 4/5`, `minimumQuestionsPerSkill 2`; A-1–A-3 stay
+policy-independent, and A-4's Learner D depends on `weak ≤ 1/2 < mastered`, which these
+values satisfy.
 
 ## 9. Responsibilities unlocked
 
@@ -409,7 +420,7 @@ dependency or result is claimed; all cases are specified, NOT_RUN.
 | Core functions (requirements §4) | Backend unit and real-PostgreSQL integration suites at ADR008 §5 placements; CT14 F1 authorization regression; OpenAPI conformance of implemented operations | Yes, for implemented operations |
 | Security (requirements §6) | `AuthorizationIntegrationTest`, password hashing and token tests, secret scans, DP01/ADR003 admission evidence | Yes, plus the Leader decisions in §14 |
 | **E2E, main flow (U33)** | CT19 L-A3, L-A4, L-N1 and L-N2 pass on `chromium-desktop` **and** `chromium-mobile` | **Yes** |
-| **Adaptive E2E (U34)** | CT35 A-1 passes on `chromium-desktop` | **Yes** (advanced component in the main flow) |
+| **Adaptive E2E (U34)** | CT35 A-1 and A-4 (r2, §19.7) pass on `chromium-desktop` | **Yes** (advanced component in the main flow) |
 | Other selected E2E cases and projects | Remaining CT19/CT35 cases on all five CT34 projects | Attempted and reported with failures, skips and launch blocks; not release-blocking |
 | Adaptive evaluation | CT36.F-measures report (QA05) | Yes: the report must exist; the ≥80% target is reported, not a gate on release |
 | Deployment | CT17.F-runtime/recovery r2 qualification, smoke checks of the deployed URL and one sign-in per trial role; the Leader's decision on ADR011 §5 operational risks before integrated quiz/adaptive exposure, and on the other exposure risks of §16.5 | Yes |
@@ -475,7 +486,7 @@ implementation-start confirmation (ADR012 §1) applies within each Issue's scope
 **Still required:** authoring SD01 (admin extension)/SD03/SD04 and their disposable
 load evidence; loading the demonstration Course with the §16.1 values; FE25/FE26 implementation and FE24/SH07 (#240/#241) review;
 QA05/QA08 execution; deployment admission, demonstration seeding authorization and
-credential handover on the target; the Leader's practice-difficulty decision (§18.4); FE25's implementation of the §7.3 storage fixture together with FE24 (#240); every item of §12. No result, deployment,
+credential handover on the target; implementation and tests of §19's practice recommendation (AD11, AS07, FE09/LessonPage, SD04, FE26); FE25's implementation of the §7.3 storage fixture together with FE24 (#240); every item of §12. No result, deployment,
 credential handling or risk acceptance is implied.
 
 ## 14. Leader decisions requested
@@ -646,7 +657,7 @@ No risk is accepted and no exposure or deployment is approved by this record.
 After §16.1, all 100 roadmap checkpoints carry a technical approval record: CP-001–063
 are integrated on `main` (ADR004–ADR011), CP-064–090 are in open PR #244 and CP-091–100
 in open PR #245. This is technical approval only: 37 of the 100 are not integrated,
-the practice-difficulty consumption decision is open again (§18.4, outside the 100),
+the practice-difficulty consumption decision reopened by §18.4 was decided by the Leader and specified in §19 (outside the 100),
 none of ADR005–ADR013 has an approving GitHub review, and no checkpoint implies
 implementation, test evidence, deployment or risk acceptance.
 
@@ -728,6 +739,9 @@ as a contract amendment (part of `CT19-FIXTURES-2026-11-15-r2`); nothing is
 implemented or run.**
 
 ### 18.4 E02 — practice difficulty and the approved architecture
+
+*Resolved on 15 November 2026 by the Leader's explicit decision for option (a) and the
+contracts of §19; the analysis below is kept as the basis of that decision.*
 
 **Finding substantiated.** Requirements §5.3 asks to adjust “difficulty **or** the next
 lesson”, and next-lesson adaptation satisfies it. The approved architecture, however,
@@ -816,3 +830,263 @@ rule that further Administrators come only through CT12.user is unchanged by
 
 Checkpoints CP-091–CP-100 keep their dispositions; CP-096/CP-097 move to r2. Nothing
 is a test result.
+
+## 19. Leader decision E02 and practice-difficulty consumption — 15 November 2026
+
+### 19.1 Authority and provenance
+
+In **“CodeMastery — Final Leader Authorization for Remaining Technical Decisions”**
+(15 November 2026, Asia/Ho_Chi_Minh), Project Leader @chi-thanh-nguyen explicitly:
+
+- **decided E02 as option (a)** of §18.4: mastery-based recommendation among fixed,
+  per-difficulty practice Quizzes. CT04-START, CT08-EVIDENCE and the atomic
+  submission unit are preserved, CT07.difficulty's mapping and fallback are reused,
+  and only bounded Assessment, Adaptive, Frontend and sample-data contracts are added
+  so that the Final design satisfies architecture §§4.7 and 6.
+  **LEADER_APPROVED (decision).**
+- **accepted a pedagogical limitation for the academic Final.** The existing
+  latest-attempt, equally weighted mastery model can classify a learner as Mastered
+  after a small number of correct Easy answers. Mastery mathematics must not change,
+  and the limitation must not be presented as empirically validated learning.
+  **LEADER_ACCEPTED**, limited to that pedagogical limitation.
+- **authorized Claude Code** to verify option (a) and to finalize the directly
+  related technical contracts. Those contracts are **DELEGATED_APPROVED** under that
+  authorization; they are not personal Leader approval.
+
+The authorization covers E02 and its directly related decisions only. It accepts no
+security, deployment, operational or release risk and replaces no human or CODEOWNER
+review.
+
+**Consequences for ADR011 §17.** Its option (b), the amendment of CT04-START and
+CT08-EVIDENCE, is **not adopted, by this Leader decision**. Option (c), a scope
+deviation, is not needed. ADR011 itself is not edited.
+
+### 19.2 Independent compatibility and completeness check
+
+| Check | Result |
+|---|---|
+| Quiz capture and evidence | Unchanged. The learner starts whichever Quiz they choose through CT04.start, which captures its full membership; CT08.evidence verifies full membership; the submission unit, `QuizSubmittedEvent` path and ADR011 lock order are untouched |
+| Mastery mathematics | Unchanged (ADR005 §6, CT06.production): per-difficulty Quizzes are ordinary practice evidence |
+| CT07.difficulty reuse | The state → difficulty mapping of `PracticeDifficultySelector` and its fallback orders (EASY→MEDIUM→HARD, MEDIUM→EASY→HARD, HARD→MEDIUM→EASY) are reused verbatim at Quiz level |
+| Port allowlist | `PracticeDifficultyProvider` keeps **no production caller** (ADR011 §8): the recommendation runs in Adaptive and uses the selector's pure mapping, never the port. AS07.port stays published; question-level selection in `QuestionSelectionService` (AS07.select) has no consumer in Final |
+| Module boundaries | Adaptive → Course (existing CT33 `readLearnerState`) and Adaptive → Assessment (one new allowlisted read, §19.3) are already-approved directions. No new module, file, table, column, migration, dependency or route |
+| Architecture §4.7 | “Choose practice-quiz difficulty from current mastery”: §19.4 chooses the practice Quiz's difficulty from the learner's current state |
+| Architecture §6 | “Learning → continue canonical next lesson, with practice quiz at selected difficulty”: the guidance for the continue (or remedial) target shows the selected practice Quiz (§19.5). Canonical order is unchanged and no access is blocked or reordered |
+| Explainability and traceability | Every recommendation carries a fixed English reason naming the governing skill and its state. It is a deterministic function of persisted mastery rows, the published Quiz bank and the graph, recomputed on read. It is not persisted: V005 types are the three path decisions, and the practice attempt itself is persisted as an Attempt |
+| Determinism | Total orders throughout: CT07.reasons name order, then Quiz title with Java `String.compareTo`, then lowercase UUID; no randomness, clock or attempt-history input |
+| Requirements §5.3 | Both halves are now covered: next lesson (ADR011 §7) and difficulty (this section) |
+
+No incompatibility was found. Directly related ambiguities are resolved in
+§§19.3–19.7: candidate Quizzes, multi-skill Lessons, ties, non-adaptive Courses,
+failure behavior, UI placement and E2E evidence.
+
+### 19.3 CT23-PRACTICE-PROFILES-2026-11-15-r1 — Assessment read
+
+**DELEGATED_APPROVED**, [CT23 #44](https://github.com/chi-thanh-nguyen/codemastery/issues/44).
+Add to existing `modules/assessment/application/service/QuizService.java`:
+
+```java
+public List<PracticeQuizProfile> readPracticeQuizProfiles(UUID courseId, Set<UUID> skillIds);
+public record PracticeQuizProfile(UUID quizId, String title, Set<DifficultyLevel> difficulties) {}
+```
+
+- **Rows.** Every **published** Quiz of kind `practice` in the Course with at least one
+  membership Question whose every membership Question's skill is in `skillIds`.
+- **Profile.** `difficulties` is the set of its Questions' V004 difficulty values.
+  `DifficultyLevel` is the existing Assessment type that ADR011 §8 already exposes
+  to Adaptive.
+- **Shape and transaction.** Empty `skillIds` returns an empty list, and the result is
+  immutable. It is one set-based query and joins the caller's REPEATABLE READ
+  read-only transaction.
+- **Excluded data.** No prompt, option, answer key, question ID, attempt or score.
+- **Callers, exactly:** Adaptive `RecommendationService` (§19.4), after
+  `readLearnerState` has admitted the current Learner in the same transaction.
+  Allowlist tests prove that no other caller exists.
+- **Scope.** CT23 composition, publication and Learner Quiz reads are unchanged.
+
+### 19.4 CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1 — rule and REST
+
+**DELEGATED_APPROVED**, [CT07 #48](https://github.com/chi-thanh-nguyen/codemastery/issues/48).
+
+**Bindings.** Existing `RecommendationController`, `RecommendationResponse` and
+`RecommendationService`, plus a pure, side-effect-free mapping and fallback method on
+the existing `PracticeDifficultySelector`. The port method, its admission checks and its
+empty production-caller allowlist are unchanged.
+
+**Operation.** `GET /api/courses/{courseId}/lessons/{lessonId}/practice-recommendation`
+(OpenAPI `b8ReadPracticeRecommendation`, `B8PracticeRecommendation`). It is a
+read-only REPEATABLE READ snapshot with `Cache-Control: no-store` and CT18.minimum
+errors:
+
+| Order | Check | Failure |
+|---|---|---|
+| 1 | Authenticated | 401 |
+| 2 | UUIDs well formed | 400 |
+| 3 | Role Learner | 403 |
+| 4 | CT33 `LessonProgressService.readLearnerState(courseId)`: CT03 Learner Course access, ACTIVE/COMPLETED, exactly as `/adaptive-guidance` | CT03's outcomes |
+| 5 | `lessonId` is one of that state's currently published Lessons | 404 (`B8Unavailable`) |
+| 6 | Provider or integrity failure | 500 |
+
+**Rule.** For Lesson L with mapped skills M(L) (Adaptive's mappings) and state(s)
+the learner's stored state (absent → Unknown):
+
+1. **Null result.** `recommendation = null` if the Course's stored `adaptiveEnabled`
+   (`LearnerCourseState.adaptiveEnabled`, the same snapshot) is false or M(L) is empty. Readiness is not re-evaluated, as for §15 guidance in
+   ADR011.
+2. **Target per skill.** target(s) is CT07.difficulty's mapping: Unknown and Weak →
+   EASY, Learning → MEDIUM, Mastered → HARD.
+3. **Governing skill g.** The skill of M(L) with the easiest target (EASY < MEDIUM <
+   HARD); ties are broken by CT07.reasons name order. The weakest skill decides
+   because practice should not be harder than the learner's weakest skill in that
+   Lesson.
+4. **Candidates.** The profiles from `readPracticeQuizProfiles(courseId, M(L))` whose
+   `difficulties` has exactly one element, which is the Quiz's level. Mixed-difficulty
+   practice Quizzes are never recommended but stay available.
+5. **Level.** Walk CT07.difficulty's fallback order for target(g) and choose the first
+   level that has a candidate. If none exists, `recommendation = null`.
+6. **Quiz.** At that level, order candidates by title (Java `String.compareTo`), then
+   lowercase quiz UUID; the first is recommended. `fallback = (level ≠ target(g))`.
+
+**Fixed English reason templates.** `{Level}` and `{Target}` are `Easy`, `Medium` or
+`Hard`; `{state}` is `not yet assessed`, `Weak`, `Learning` or `Mastered`; the skill
+name is inserted verbatim:
+- `Recommended practice: {Level}, because your skill "{skill}" is {state}.`
+- with fallback:
+  `Recommended practice: {Level}, because your skill "{skill}" is {state} and no {Target} practice quiz is available for this lesson.`
+
+**Guarantees.** The response is a function of the snapshot only. It writes nothing,
+publishes no event, never blocks or reorders access, never hides another Quiz and
+never starts an attempt. Learners other than the caller and Instructor views are out
+of scope.
+
+### 19.5 Frontend binding (part of CT07-PRACTICE-RECOMMENDATION r1)
+
+All UI changes stay in `features/learning`, so there is no cross-feature import
+(repository-structure CT16.final-state F1). The existing files involved are
+`learningApi.ts`, `learningTypes.ts`, `useCourseLearning.ts`,
+`CourseLearningPage.tsx` and `LessonPage.tsx`.
+
+- **Course workspace (FE09 guidance).** For the Lesson that guidance points to,
+  the client calls the operation and shows a “Recommended practice” entry. That
+  Lesson is the visible current recommendation's target when one exists, otherwise
+  CT22's `nextLessonId`. This is §6's “continue … with practice quiz at selected
+  difficulty”.
+- **Lesson page.** The same entry is shown for the open Lesson.
+- **Entry content.** The Quiz title and level, the reason verbatim and a link to
+  the existing CT16 quiz route. It also carries ADR011 §9's required statement:
+  “Mastery states reflect the latest submitted quiz evidence for each skill.”
+- **Null result.** Nothing is shown.
+- **Client rules.** The client never selects a Quiz itself and never shows
+  thresholds. Text is plain and in English, and the layout is responsive.
+
+### 19.6 CT15-F-ASSESSMENT-2026-11-15-r2 — SD04 per-difficulty practice Quizzes
+
+r1 is unchanged. In addition, `04-questions-quizzes-assignments.sql` adds, for every
+skill Sk, three published `practice` Quizzes:
+
+- `quiz/practice/Sk/easy`, `quiz/practice/Sk/medium` and `quiz/practice/Sk/hard`;
+- each contains exactly the two existing questions of Sk at that difficulty;
+- sixty Quizzes in total, reusing the bank (no new question).
+
+Titles follow `{skill name} practice (Easy|Medium|Hard)`; time limits are SD04
+content values. The twenty mixed `quiz/practice/Sk` Quizzes stay, unchanged, for
+general practice and for §6's learning-gain procedure.
+
+Readiness, P1–P3, G, G′, P2-R and M expectations are unchanged: their scripts use
+only the placement and `quiz/practice/S10`.
+
+Expected demonstration outputs, policy-independent unless noted (rule-level oracles
+in §19.8):
+
+| Learner | Lesson | Governing skill and state | Recommended practice |
+|---|---|---|---|
+| P1 | L05 | Mastered | Hard: `Input and Type Conversion practice (Hard)` |
+| P1 | L11 | not yet assessed | Easy |
+| P2 | L08 | Weak | Easy: `While Loops practice (Easy)` |
+| P3 | L01 | Weak | Easy |
+
+A Learning case, with the demonstration policy `weak 1/2`, `mastered 4/5`, is a
+learner with 3 or 4 of 6 correct on `quiz/practice/Sk`; it gives Medium.
+
+### 19.7 E2E: CT35-CASES/FIXTURES-2026-11-15-r2 and CT20-F-2026-11-15-r2
+
+- **CT35-CASES r2** adds A-4 (§8.1). **CT35-FIXTURES r2** adds the question
+  difficulties, the per-difficulty E2E practice Quizzes and the named test policy
+  (§8.2).
+- **CT20-F r2** makes A-4 release-required on `chromium-desktop` together with A-1
+  (§11). It is the only end-to-end evidence of the architecture's practice-difficulty
+  step; nothing else in CT20.F changes.
+- FE26 implements A-4 in the existing `adaptive-flow.spec.ts`; journey-Course rules
+  (§7.2) apply.
+
+### 19.8 Verification oracles — specified, NOT_RUN
+
+Placement: the existing `PracticeDifficultySelectorTest` (rule), the Adaptive and
+Assessment service unit tests, `AuthorizationIntegrationTest` (admission),
+`AdaptiveLearningFlowIntegrationTest` (real PostgreSQL), and frontend tests beside
+`learningApi.test.ts`.
+
+| Oracle | Required result |
+|---|---|
+| B8-P01 | Mapping: Unknown/Weak → EASY, Learning → MEDIUM, Mastered → HARD; reasons use `not yet assessed` for Unknown |
+| B8-P02 | Governing skill: in a multi-skill Lesson the easiest target wins; ties follow CT07.reasons name order, including case-sensitive names and equal names by UUID |
+| B8-P03 | Candidates: hidden, `test`, `diagnostic`, mixed-difficulty, empty and foreign-skill Quizzes are excluded; a Quiz covering a subset of M(L) is included |
+| B8-P04 | Fallback for each target, with `fallback` and the second template exactly when the level differs; no candidate at any level → null |
+| B8-P05 | Ties at one level: title by `String.compareTo`, then UUID |
+| B8-P06 | Null when `adaptiveEnabled` is false or M(L) is empty; no readiness evaluation |
+| B8-P07 | Admission: 401; malformed UUID 400; Instructor and Administrator 403; LEFT/absent/hidden-Course outcomes as `/adaptive-guidance`; hidden, missing or foreign Lesson 404 |
+| B8-P08 | Read-only and isolation: no row written; the port has no production caller (allowlist); starting and submitting a recommended Quiz captures its full membership and produces the same evidence and mastery as any practice Quiz (CT04-START/CT08-EVIDENCE unchanged) |
+| B8-P09 | `readPracticeQuizProfiles` allowlist and data minimality (no answer data); one query per call |
+| B8-P10 | Dataset: SD04 r2 has sixty uniform practice Quizzes; §19.6's table holds for P1–P3 after their scripts; the Learning case holds with the demonstration policy |
+| B8-P11 | Frontend: the entry appears for the guidance target and the open Lesson, shows the reason verbatim and the mastery statement, renders nothing for null, and links to the existing quiz route; every Quiz remains listed |
+| A-4 | E2E per §8.1 |
+
+### 19.9 Accepted pedagogical limitation and its disclosure
+
+- **The accepted limitation.** Because evidence is the latest attempt with equal
+  question weight (ADR005 §6), a Weak learner who answers both questions of an Easy
+  practice Quiz correctly becomes Mastered, and may then be tested out of a Lesson
+  by ADR011 §7.
+- **Leader acceptance.** The Leader accepted this for the academic Final (§19.1).
+- **Disclosure duties.**
+  - Learner screens keep ADR011 §9's statement.
+  - The Final report (DO03) and the CT36 evaluation report state the limitation
+    plainly.
+  - Neither may claim that difficulty-targeted practice improves or validly measures
+    learning. §6's learning gain stays a simulated procedure demonstration.
+- **No compensating change.** No threshold, weighting or evidence rule is changed to
+  offset the limitation.
+
+### 19.10 Handoffs
+
+The responsible members confirm scope in their Issues; Issue file lists are planning
+records and do not limit these contracts.
+
+| Contract | Responsible Issues |
+|---|---|
+| Rule, selector method and REST (§19.4) | AD11 (#168) |
+| Profile read (§19.3) | AS07 (#158), Assessment owner. AS07.select's question-level wiring is not used in Final |
+| Frontend (§19.5) | FE09 (#194) and the Lesson page's owner |
+| Dataset (§19.6) | SD04 |
+| A-4 E2E case | FE26 |
+| Evaluation and evidence | QA05/QA08 |
+| Limitation disclosure | DO03 |
+
+**Start prerequisites** are those of §13: review, CI and protected integration of
+ADR012 and then this record.
+
+### 19.11 Post-change consistency review
+
+- **Re-checked.** OpenAPI adds one path and three components and changes no existing
+  value. ADR011 §8's allowlist, §15's guidance and §17's options are consistent with
+  §19.1.
+- **CT15/CT36.** Counts and dispositions are unchanged except CP-093's r2: ADR005
+  readiness holds, and no scenario script uses the new Quizzes.
+- **CT35.** A-1–A-3 stay policy-independent, and A-4's policy is explicit.
+- **CT20.F.** Exactly one release-blocking case is added.
+- **Recommendation history.** Path recommendations still preserve type, target,
+  reason and time (V005). The practice recommendation adds no persisted state.
+
+No new contradiction was found. Checkpoint count: 100 roadmap checkpoints, all with
+a technical approval record; CP-093/098/099/100 move to r2. The E02 decision lies
+outside the 100. No implementation or test result is claimed.

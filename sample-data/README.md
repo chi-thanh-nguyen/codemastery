@@ -380,7 +380,7 @@ domain and cannot reach a real mailbox.
 
 [ADR013 §§3–4](../docs/decisions/013-batch-08-contract-approvals.md#3-ct15f-admin-account--trial-accounts-per-role)
 approves the Final dataset contract (`CT15-F-ADMIN-ACCOUNT-2026-11-15-r1`,
-`CT15-F-ASSESSMENT-2026-11-15-r1` and, except its demonstration policy values,
+`CT15-F-ASSESSMENT-2026-11-15-r2` and, except its demonstration policy values,
 `CT15-F-ADAPTIVE-2026-11-15-r1`). **None of it is in the seed files yet**; the
 `interim-v1` instructions above are unchanged and remain the only loadable dataset.
 
@@ -397,8 +397,10 @@ approves the Final dataset contract (`CT15-F-ADMIN-ACCOUNT-2026-11-15-r1`,
   the twenty-four prerequisite edges listed in ADR013 §4.2. The PDF material on L01
   is uploaded through the application after loading.
 - **Assessment (`04`).** 120 questions (six per skill: two easy, two medium, two
-  hard), a placement quiz over S01–S10, one practice quiz per skill, one final test
-  and two file assignments whose deadlines are load-time inputs.
+  hard), a placement quiz over S01–S10, one mixed practice quiz per skill, three
+  per-difficulty practice quizzes per skill (Easy, Medium, Hard; two questions each,
+  sixty in total, ADR013 §19.6), one final test and two file assignments whose
+  deadlines are load-time inputs.
 - **Profiles (`05`).** Accounts and active enrolments only. Mastery, progress and
   recommendations are produced by taking the quizzes in the application, never
   seeded.

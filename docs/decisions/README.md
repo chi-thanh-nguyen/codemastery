@@ -410,11 +410,13 @@ no seed, test or runtime behavior is implemented by the approvals.
 | `CT15-F-ADMIN-ACCOUNT-2026-11-15-r1` | Per-role trial accounts, load-time hashes, secure handover | [ADR013 §3](013-batch-08-contract-approvals.md#3-ct15f-admin-account--trial-accounts-per-role) |
 | `CT15-F-ADAPTIVE-2026-11-15-r1` | `final-v1` Course, twenty skills and edges, profiles; policy values pending the Leader | [ADR013 §4.2](013-batch-08-contract-approvals.md#42-ct15f-adaptive-sd03--partially-approved) |
 | `CT15-F-ADAPTIVE-2026-11-15-r2` | Completes r1: demonstration policy `weak 1/2`, `mastered 4/5`, `minimumQuestionsPerSkill 6` | [ADR013 §16.1](013-batch-08-contract-approvals.md#161-ct15-f-adaptive-2026-11-15-r2--demonstration-policy-resolves-141) |
-| `CT15-F-ASSESSMENT-2026-11-15-r1` | 120 questions, placement/practice/test quizzes, two assignments | [ADR013 §4.3](013-batch-08-contract-approvals.md#43-ct15f-assessment-sd04) |
+| `CT15-F-ASSESSMENT-2026-11-15-r2` | 120 questions, placement/practice/test quizzes, sixty per-difficulty practice quizzes (r2), two assignments | [ADR013 §4.3](013-batch-08-contract-approvals.md#43-ct15f-assessment-sd04) |
 | `CT36-F-SCENARIOS-2026-11-15-r1` / `CT36-F-MEASURES-2026-11-15-r1` | P1–P3, G01–G24, M01–M10; four measures and reporting | [ADR013 §§5–6](013-batch-08-contract-approvals.md#5-ct36f-scenarios) |
 | `CT19-CASES-2026-11-15-r2` / `CT19-FIXTURES-2026-11-15-r2` | Adopted L-A1–L-A5 and new L-N1–L-N4; per-test REST data; per-run storage fixture | [ADR013 §7](013-batch-08-contract-approvals.md#7-ct19--learner-e2e-suite-f20) |
-| `CT35-CASES-2026-11-15-r1` / `CT35-FIXTURES-2026-11-15-r1` | A-1–A-3 on a per-run loops sub-graph | [ADR013 §8](013-batch-08-contract-approvals.md#8-ct35--adaptive-e2e-suite-f21) |
-| `CT20-F-2026-11-15-r1` | Final coverage allocation; both suites release-required for named cases only | [ADR013 §11](013-batch-08-contract-approvals.md#11-ct20f--final-coverage-allocation-u33u34) |
+| `CT35-CASES-2026-11-15-r2` / `CT35-FIXTURES-2026-11-15-r2` | A-1–A-4 on a per-run loops sub-graph (A-4 practice difficulty, r2) | [ADR013 §8](013-batch-08-contract-approvals.md#8-ct35--adaptive-e2e-suite-f21) |
+| `CT20-F-2026-11-15-r2` | Final coverage allocation; both suites release-required for named cases only (A-4 added, r2) |
+| `CT23-PRACTICE-PROFILES-2026-11-15-r1` | Prerequisite: Assessment per-Quiz difficulty profiles of published practice Quizzes, Adaptive caller only | [ADR013 §19.3](013-batch-08-contract-approvals.md#193-ct23-practice-profiles-2026-11-15-r1--assessment-read) |
+| `CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1` | Mastery-based recommendation among per-difficulty practice Quizzes: rule, REST, frontend binding (E02 option a) | [ADR013 §19.4](013-batch-08-contract-approvals.md#194-ct07-practice-recommendation-2026-11-15-r1--rule-and-rest) | [ADR013 §11](013-batch-08-contract-approvals.md#11-ct20f--final-coverage-allocation-u33u34) |
 
 [ADR013 §12](013-batch-08-contract-approvals.md#12-complete-contract-reconciliation--15-november-2026)
 accounts for all 100 roadmap checkpoints (99 approved and one partial at first preparation; 100 after §16.1) and classifies
@@ -436,3 +438,12 @@ from L-A1's search and filter cases; E01 adds a per-run MinIO storage fixture fo
 the practice-capture amendment is not adopted for Final. Practice-difficulty
 consumption is again `PENDING_LEADER_DECISION`: the approved architecture selects it,
 and every route needs a Leader-reserved choice and an evidence-bias decision.
+
+*Leader decision E02, 15 November 2026* ([ADR013 §19](013-batch-08-contract-approvals.md#19-leader-decision-e02-and-practice-difficulty-consumption--15-november-2026)): the Leader explicitly
+chose option (a) (`LEADER_APPROVED`) and accepted, for the academic Final only, the
+pedagogical limitation that the latest-attempt, equally weighted mastery model can
+classify a learner as Mastered after a few correct Easy answers (`LEADER_ACCEPTED`).
+The delegated contracts `CT23-PRACTICE-PROFILES-2026-11-15-r1` and
+`CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1` and the r2 revisions of CT15-F-ASSESSMENT,
+CT35-CASES/FIXTURES and CT20-F implement it. CT04-START, CT08-EVIDENCE, the submission
+unit and mastery mathematics are unchanged. ADR011 §17's amendment is not adopted.

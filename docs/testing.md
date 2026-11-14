@@ -3197,3 +3197,14 @@ disposable stack by ADR013 §7.3: Compose-pinned images, a private network, gene
 credentials, a bucket provisioned by the unchanged Compose initializer, and
 removal with the run. L-N3 checks an upload/download byte round trip. Nothing is
 implemented or run.
+
+*Leader decision E02, 15 November 2026* ([ADR013 §19](decisions/013-batch-08-contract-approvals.md#19-leader-decision-e02-and-practice-difficulty-consumption--15-november-2026)): the
+mastery-based practice recommendation adds oracles B8-P01–B8-P11. They cover the
+mapping, the governing skill and its ties, the candidate Quizzes, fallback, null
+results, admission, read-only isolation from quiz capture and evidence, the
+Assessment read's allowlist, the SD04 outputs and the frontend entry. They are placed
+in the existing `PracticeDifficultySelectorTest`, the service unit tests,
+`AuthorizationIntegrationTest`, `AdaptiveLearningFlowIntegrationTest` and the
+learning frontend tests. CT35 adds A-4 (Hard versus Easy practice for contrasting
+learners, plus a Medium-to-Easy fallback), which CT20.F r2 makes release-required on
+`chromium-desktop` with A-1. All are specified, NOT_RUN.
