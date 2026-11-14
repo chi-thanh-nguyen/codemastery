@@ -13091,7 +13091,7 @@
         }
       },
       "B8Unavailable": {
-        "description": "Safe unavailable resource: missing or hidden Course, a Learner without an ACTIVE/COMPLETED Enrollment as CT03 conceals it, or a Lesson that is missing, hidden or not in that Course; no identifiers.",
+        "description": "Safe unavailable resource: missing or hidden Course (CT03 stage 3), or, for a Learner with an ACTIVE/COMPLETED Enrollment, a Lesson that is missing, hidden or not in that Course; no identifiers. A LEFT or absent Enrollment on a published Course is 403 (CT03 stage 4), not 404.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/AuthenticationNoStore"
