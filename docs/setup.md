@@ -212,7 +212,8 @@ The approved Option A contract uses these names:
 | Backend datasource | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_POOL_SIZE` | Referenced by backend datasource configuration. |
 | MinIO administration | `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | Consumed by MinIO and its administrative initializer, not the backend. |
 | Backend object storage | `STORAGE_ENDPOINT`, `STORAGE_REGION`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_PATH_STYLE_ACCESS` | Referenced by backend storage configuration. |
-| Backend security/CORS | `JWT_SECRET`, `JWT_EXPIRATION`, `PASSWORD_RESET_TOKEN_TTL`, `CORS_ALLOWED_ORIGINS` | Referenced by backend security configuration. |
+| Backend security/CORS | `JWT_SECRET`, `JWT_EXPIRATION`, `CORS_ALLOWED_ORIGINS` | Required/validated by backend security configuration. |
+| Password recovery (optional) | `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `PASSWORD_RESET_EMAIL_FROM`, `PASSWORD_RESET_FRONTEND_ORIGIN`, `PASSWORD_RESET_TOKEN_TTL` | Read by the backend for AU07 delivery. If any value is missing, a placeholder or invalid, recovery stays inactive and the rest of the backend starts normally. SMTP uses port 587 with required STARTTLS; TTL defaults to and must equal `PT30M`. SMTP authentication is mandatory: a server that does not offer AUTH after STARTTLS receives no message. AUTH mechanisms are fixed to `LOGIN PLAIN` over verified TLS; SASL is disabled. NTLM, DIGEST-MD5, XOAUTH2 and unknown-only offers fail closed. Angus SMTP/wire/socket and authentication-helper JUL diagnostics are source-filtered JVM-wide; Session debug is disabled with a discarded output stream. Synthetic DEBUG/TRACE coverage includes actual Spring Boot startup, encoded authentication material and a test-only NTLM override; see the SMTP coverage in `docs/testing.md`. Recovery failures retain only aggregate metrics. Local Compose and the VM release do not pass these values. No real credentials are supplied. Names and validation: `CT38-PASSWORD-RESET-2026-11-13-r1` ([ADR006 §10.5.1](decisions/006-batch-02-contract-approvals.md#1051-ct38-password-reset-2026-11-13-r1--ct38featurepassword-reset)). |
 | Backend runtime/operations | `SERVER_PORT`, `MAX_UPLOAD_SIZE`, `LOG_LEVEL_ROOT`, `LOG_LEVEL_APP`, `SCHEDULING_ENABLED`, `ATTEMPT_AUTO_SUBMIT_DELAY`, `DEADLINE_REMINDER_DELAY`, `DEADLINE_REMINDER_LEAD_TIME` | Referenced by backend runtime configuration. |
 | Spring profile selection | `SPRING_PROFILES_ACTIVE` | Supported through Spring profile selection, rather than a `${...}` placeholder in `application.yml`. |
 | Frontend | `VITE_API_BASE_URL` | Public build-time API address read by the shared HTTP client; Compose passes a build ARG defaulting to http://localhost:8080. Required for any API request. |
@@ -435,7 +436,7 @@ backend, run the Compose `ps -a` and `logs backend` subcommands with the same
 which returns `200`. Future application retry/resilience remains necessary;
 startup ordering does not replace it.
 
-Flyway remains enabled and normally applies V001–V006 on first backend startup,
+Flyway remains enabled and normally applies V001–V007 on first backend startup,
 then validates their checksums on later starts. These are implemented schema
 migrations, not empty placeholders. Never edit an applied migration or run repair
 to hide a mismatch; subsequent changes require NEW Flyway migrations. Hibernate
@@ -1840,7 +1841,9 @@ defines current tests and their existing allocation.
 
 [ADR006](decisions/006-batch-02-contract-approvals.md) records all eight delegated
 approvals and the Leader's two explicit additional scope authorizations.
-All 25 added operations in [OpenAPI](api/openapi.yaml) are **not implemented**.
+Most added operations in [OpenAPI](api/openapi.yaml) remain unimplemented. The two
+CT02 password-reset operations are implemented under AU07 (PR #239); real SMTP
+delivery and independent review remain outstanding.
 Existing CT16 shared transport, session/abort/generation isolation, safe errors,
 route guards and no automatic mutation retries remain effective.
 
@@ -1861,15 +1864,20 @@ Referer using strict-origin-when-cross-origin, without credentials or protected
 query parameters. Player minimum viewport and external-link fallback apply.
 No concrete video asset, licence or actual playback is approved by provider policy.
 
-CT02 is technically approved after the explicit reset-only email exception.
-The request is best effort and returns the same 202 even for unknown/locked/full
+AU07 implements the CT02 reset endpoints and V007. PostgreSQL behavior is covered by
+the Testcontainers suite and the CT17 VM tests; real SMTP delivery is not verified.
+The reset request is best effort and returns the same 202 even for unknown/locked/full
 queue; it proves no delivery. Auth's bounded single-worker queue holds up to 128
 pending canonical emails. Outstanding-token reissue interval is PT1M; token lifetime
-is explicitly PT30M. The dormant PASSWORD_RESET_TOKEN_TTL setting must equal this
-approved value when the feature is implemented; current configuration is not changed.
-The local service clock is testable, with no global CT39 binding. AppConfig may
-bind the feature-owned executor/validated settings in a later implementation task;
-do not assume a default executor, SMTP timeout, provider, sender or trusted origin.
+is explicitly PT30M, and `PASSWORD_RESET_TOKEN_TTL` (default PT30M) must equal it.
+The local service clock is testable, with no global CT39 binding. AppConfig decides
+recovery activation: only a PT30M TTL, a trusted lowercase HTTPS origin, a bare sender
+address and the three SMTP inputs together make recovery active. Otherwise the backend
+logs one warning naming the variable, and reset requests are acknowledged without
+lookup, token or email. Backend health excludes SMTP. SMTP host, credentials, sender
+and origin remain deployment-provided values; local Compose and the VM release
+deliberately pass none, so recovery is inactive there until a separately authorized
+deployment binding exists.
 
 The reset link uses a configured approved HTTPS origin and /reset-password#token=…,
 never request Host/Forwarded. FE06 captures/erases the fragment before requests;
@@ -1877,14 +1885,17 @@ no token in persistent storage, query, returnTo, DOM, analytics or logs. Reset p
 loads no third-party resources and sends no Referer. POST confirmation uses existing
 password validation and returns JSON with no JWT; ordinary sign-in follows.
 
-Required before exposure: NEW token/resume migrations, runtime read/write grants,
-SMTP adapter/dependency and file-placement qualification, certificate-verified TLS
-with finite network deadlines, configured sender/trusted origin/secrets, abuse/load
-qualification and independent security review. No concrete provider, host, credential,
-environment binding or runtime grant is introduced by this PR. Changing a password
-does not revoke existing JWTs under unchanged CT01: reset-specific residual-token
-risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public recovery
-exposure and is not inherited from the earlier logout acceptance.
+[ADR006 §10](decisions/006-batch-02-contract-approvals.md#10-au07-implementation-record-and-gate-status--1213-november-2026)
+records the implementation choices. On 13 November 2026 the Leader approved
+`AU07-IMPL-2026-11-13-r1`: AU07 implementation, V007 (repository and controlled test
+environments only), the Spring Mail adapter and its placement, and feature-scoped
+fail-closed delivery. The Leader also approved the runtime DML
+`CT17-P6-PRIVILEGES-2026-11-13-r2`. Under unchanged CT01, existing JWTs remain
+valid until their original expiry (at most PT15M) after reset, and reset-specific
+risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public exposure. This
+implementation does not authorize production credentials, live shared-database
+migration, public exposure or bypass of independent review. Provider delivery,
+load/abuse qualification and security review remain outstanding.
 
 
 ## Batch 3 expiry configuration specification — not implemented

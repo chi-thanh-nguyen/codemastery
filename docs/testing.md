@@ -61,7 +61,7 @@ verification is separate work.
 
 | Suite | Added by | What it exercises |
 | --- | --- | --- |
-| `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). Uses an ephemeral JWT secret. |
+| `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). AU07 additions (PR #239): digest-only issuance and single-use confirmation; identical 202s for unknown/locked/repeated requests, with only eligible accounts issued; delivery after commit without a held User lock; two concurrent confirmations yield exactly one success; rollback when consumption fails; re-check after the User-lock wait; generic 400 for expired, future, locked and reused capabilities; unchanged CT01 bearer validity; a nested context with unconfigured delivery, where health, registration and login work and nothing is issued; and the production 415 for both recovery operations plus the deny-by-default 403 in the full application context (test-only controllers are `@TestComponent`s and are not component-scanned). `AuthServiceTest` adds real SMTP exchanges with an isolated loopback STARTTLS server: delivery only after STARTTLS and successful AUTH, and no message for a server that does not offer AUTH, rejected credentials, missing STARTTLS, or an untrusted or wrongly named certificate. Uses an ephemeral JWT secret. |
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
 | `EnrollmentIntegrationTest` | FE07, PR #101 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods |
@@ -73,6 +73,56 @@ verification is separate work.
 
 Merged test code does not complete QA01 or QA02: each Issue's own acceptance
 criteria, independent review and any environment-specific evidence remain open.
+
+### AU07 SMTP diagnostic and negative regression coverage
+
+`AuthServiceTest$SmtpSubmissionPolicy` uses synthetic credentials and an isolated
+loopback STARTTLS server. Its 72 diagnostic exchanges cover LOGIN, PLAIN and a
+test-only NTLM override at DEBUG/TRACE for success, rejected authentication and
+rejection after DATA. Capture paths are raw JUL, an explicit JUL-to-SLF4J bridge,
+direct Session output, and actual Spring Boot initialization in fresh JVMs. Boot's
+logging API and JUL levels are raised after sender construction. Forked JVMs keep
+Boot's logging lifecycle out of other test contexts; captured streams, handlers,
+levels and filters are restored, and temporary process output is deleted.
+
+Production permits only `LOGIN PLAIN` over mandatory certificate/hostname-verified
+STARTTLS and explicitly disables SASL. NTLM, DIGEST-MD5, XOAUTH2 and unknown-only
+offers fail before AUTH or message submission. NTLM is deliberately enabled only
+inside the diagnostic test to exercise the second defense independently of the
+production allowlist. The server decodes the UTF-16LE username and verifies the
+NTLMv2 proof against its synthetic secret. Tests inspect actual exchanged bytes,
+including PLAIN's `username\0username\0password` authorization identity, LOGIN
+credentials, and NTLM messages/responses in Base64 and hexadecimal form. Positive
+leak controls prove encoded identity and response detection works; independent
+JUL, SLF4J and stream controls prove ordinary application logging remains available.
+No reset URL/capability, credential, recipient, sender or sensitive payload is
+observed in these supported logging configurations.
+
+The diagnostic-source inventory was checked against resolved Angus Mail 2.0.5:
+
+| Source | Relevant path and policy |
+| --- | --- |
+| `org.eclipse.angus.mail.smtp` | SMTP transport, LOGIN/PLAIN, DIGEST-MD5 and the SMTP SASL helper; source-level reject-all filter |
+| `org.eclipse.angus.mail.smtp.protocol` | SMTP commands, replies and message data; separate source-level reject-all filter |
+| `org.eclipse.angus.mail.auth` | NTLM Type 1/2/3 helper diagnostics; source-level reject-all filter even in the test-only NTLM override |
+| `org.eclipse.angus.mail.util.socket` | Socket/TLS diagnostics; source-level reject-all filter |
+| Jakarta Mail Session debug | Disabled on every sender Session access with a discarded debug stream |
+
+The four named JUL filters are JVM-wide and strongly retained. They do not filter
+application loggers. The fixed sender exposes no `spring.mail.*` binding, alternate
+provider or SASL configuration input. Provider exceptions can contain sensitive
+details in memory; the recovery worker catches them and records only its aggregate
+failure counter. These checks do not claim confidentiality under arbitrary
+in-process replacement of the fixed transport or its logging filters.
+
+Negative exchanges include incompatible-only AUTH, a reserved non-listening
+loopback endpoint (connection refusal or connection timeout, depending on the OS),
+and stalls at the greeting and post-STARTTLS AUTH response. The stall tests retain
+the production 5000 ms read deadline and assert a timeout with no message
+submission. Connection/read/write timeout settings remain asserted at 5000 ms;
+a write-buffer stall is not forced for the small reset message. Existing STARTTLS,
+trust, hostname and rejected-credential tests remain. No real provider or deployed
+qualification is implied.
 
 ### Latest recorded results
 

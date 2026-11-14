@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101; see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, and the two AU07 password-recovery operations in PR #239; see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -3247,11 +3247,11 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Public no bearer consumed. Canonical CT01 email; same 202 for known/unknown/locked/full queue. Auth FIFO capacity128, one worker; no lookup/SMTP on response path. Best-effort processing, no delivery guarantee. Active-account PT1M issuance interval; send only after commit. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Implemented under AU07 (PR #239). Public; no bearer consumed; JSON only (other media types 415). Canonical CT01 email; same 202 for known/unknown/locked/full queue and while recovery delivery is unconfigured (then no lookup, capability or email). Auth FIFO capacity128, one worker; no lookup/SMTP on response path. Best-effort processing, no delivery guarantee. Active-account PT1M issuance interval; send only after commit. Real SMTP provider qualification, deployment binding and public exposure remain gated. ADR006 §9 is authoritative; §10 records gate status.",
         "security": [],
         "responses": {
           "202": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Generic acknowledgement; proves no account match or delivery.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3268,11 +3268,13 @@
           "400": {
             "$ref": "#/components/responses/Batch2Invalid"
           },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
+          },
           "500": {
             "$ref": "#/components/responses/Batch2Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -3292,11 +3294,11 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Public no bearer consumed. Opaque 32-byte/43-character Base64url capability, digest-only storage, exact PT30M validity. Generic400 invalid/replaced/used/expired/locked; password CT01 predicate. User-first lock and atomic password-update/token-delete; no auto-login/JWT. Existing tokens retain CT01 validity; reset-specific risk acceptance before exposure is pending. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Implemented under AU07 (PR #239). Public; no bearer consumed; JSON only (other media types 415). Opaque 32-byte/43-character Base64url capability, digest-only storage, exact PT30M validity. Generic400 invalid/replaced/used/expired/locked; password CT01 predicate. User-first lock and atomic password-update/token-delete; no auto-login/JWT. CT01 is unchanged: existing bearer tokens remain valid until their own expiry (at most PT15M); no revocation is implemented, and reset-specific residual-risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public exposure. ADR006 §9 is authoritative; §10 records gate status.",
         "security": [],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Password changed and capability consumed after commit; no credential is returned.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3313,11 +3315,13 @@
           "400": {
             "$ref": "#/components/responses/Batch2Invalid"
           },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
+          },
           "500": {
             "$ref": "#/components/responses/Batch2Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -10215,6 +10219,21 @@
           }
         }
       },
+      "Batch2UnsupportedMedia": {
+        "description": "Request is not application/json; no effect and no account information.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
       "Batch2Unavailable": {
         "description": "Safe missing/hidden/foreign scoped resource under CT03 precedence.",
         "headers": {
@@ -10697,7 +10716,7 @@
   "x-batch-02-contracts": {
     "decisionReference": "../decisions/006-batch-02-contract-approvals.md",
     "status": "DELEGATED_APPROVED",
-    "implementation": "NOT_IMPLEMENTED",
+    "implementation": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_239",
     "checkpoints": [
       "CT22.progress",
       "CT22.resume",
@@ -10711,11 +10730,11 @@
     "authority": "Codex delegated technical approval under explicit Project Leader Batch 2 instruction, 9 November 2026; Leader separately authorized reset-only email exception and bounded visit-time schema/read.",
     "retainedGates": [
       "Independent owner/CODEOWNER review, CI and protected merge",
-      "Separate implementation authorization, NEW migrations and runtime privilege qualification",
-      "SMTP adapter/provider/trusted origin and abuse/load qualification",
-      "Reset-specific residual-token risk acceptance before public recovery exposure",
+      "Other Batch 2 implementation work, NEW migrations and runtime privilege qualification remain separately gated",
+      "SMTP provider, real credentials, trusted origin binding and abuse/load qualification (adapter and placement LEADER_APPROVED in ADR006 §10.2)",
+      "Reset-specific residual-token risk acceptance (PENDING_LEADER_RISK_ACCEPTANCE) before public recovery exposure (ADR006 §9.4, §10.4)",
       "CT09/CT12/CT26/CT22.atomic/CT33 remain separately governed",
-      "CT22 schema/read explicitly authorized; no migration or privilege change performed"
+      "CT22 schema/read remains separately gated; AU07 implementation and V007 (AU07-IMPL-2026-11-13-r1) and runtime DML (CT17-P6-PRIVILEGES-2026-11-13-r2) are LEADER_APPROVED; V007 grants nothing and shared/production migration execution is not authorized"
     ]
   },
   "x-batch-03-contracts": {

@@ -1,7 +1,9 @@
 package com.codemastery.modules.auth.api.dto;
 
+import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.validation.StrongPassword;
 import com.fasterxml.jackson.annotation.JsonCreator;
+import tools.jackson.core.StreamReadFeature;
 import jakarta.validation.Constraint;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
@@ -10,6 +12,7 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -19,6 +22,10 @@ import java.util.Locale;
 import java.util.Set;
 
 public final class AuthRequests {
+
+    private static final JsonMapper STRICT_RESET_JSON = JsonMapper.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .build();
 
     private AuthRequests() {}
 
@@ -61,6 +68,71 @@ public final class AuthRequests {
         @Override
         public String toString() {
             return "LoginRequest[redacted]";
+        }
+    }
+
+    public record PasswordResetRequest(@NotNull @Email @Pattern(regexp = "[!-~]+") String email) {
+        public PasswordResetRequest {
+            email = canonicalEmail(email);
+        }
+
+        @Override
+        public String toString() {
+            return "PasswordResetRequest[email=<redacted>]";
+        }
+    }
+
+    public record PasswordResetConfirmRequest(String token, @NotNull @StrongPassword String password) {
+        @Override
+        public String toString() {
+            return "PasswordResetConfirmRequest[token=<redacted>, password=<redacted>]";
+        }
+    }
+
+    public static PasswordResetRequest parsePasswordResetRequest(String json) {
+        JsonNode input = parseStrictObject(json);
+        if (!Set.of("email").containsAll(input.propertyNames())) {
+            throw new BusinessRuleException("Invalid reset request.");
+        }
+        try {
+            return new PasswordResetRequest(required(string(input, "email")));
+        } catch (IllegalArgumentException malformed) {
+            throw new BusinessRuleException("Invalid reset request.");
+        }
+    }
+
+    public static PasswordResetConfirmRequest parsePasswordResetConfirmRequest(String json) {
+        JsonNode input = parseStrictObject(json);
+        if (!Set.of("token", "password").containsAll(input.propertyNames())) {
+            throw new BusinessRuleException("Invalid reset request.");
+        }
+        try {
+            // A missing/null token is a malformed capability (generic CT02 400 after the
+            // password predicate); a non-string token or password is closed-syntax 400.
+            return new PasswordResetConfirmRequest(string(input, "token"), required(string(input, "password")));
+        } catch (IllegalArgumentException malformed) {
+            throw new BusinessRuleException("Invalid reset request.");
+        }
+    }
+
+    private static String required(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("Missing reset request field.");
+        }
+        return value;
+    }
+
+    private static JsonNode parseStrictObject(String json) {
+        try {
+            JsonNode input = STRICT_RESET_JSON.readTree(json);
+            if (input == null || !input.isObject()) {
+                throw new BusinessRuleException("Invalid reset request.");
+            }
+            return input;
+        } catch (BusinessRuleException exception) {
+            throw exception;
+        } catch (Exception malformed) {
+            throw new BusinessRuleException("Invalid reset request.");
         }
     }
 

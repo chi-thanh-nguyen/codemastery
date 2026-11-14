@@ -61,6 +61,10 @@ management:
       probes:
         enabled: true
       show-details: never
+  health:
+    mail:
+      # Optional recovery delivery must never make the backend unhealthy or probe SMTP.
+      enabled: false
 
 springdoc:
   api-docs:
@@ -86,7 +90,15 @@ codemastery:
       issuer: codemastery
       expiration: ${JWT_EXPIRATION:PT15M}          # CT38.core: consumed JWT lifetime must equal PT15M
     password-reset:
-      token-ttl: ${PASSWORD_RESET_TOKEN_TTL:PT30M}
+      # AU07 recovery delivery is optional: when any value below is missing, a placeholder
+      # or invalid, recovery stays inactive (no token, no email) and the rest of the
+      # backend starts normally. SMTP uses port 587 with mandatory STARTTLS (fixed in code).
+      token-ttl: ${PASSWORD_RESET_TOKEN_TTL:PT30M}   # CT02-TOKEN-2026-11-09-r1: must equal PT30M
+      frontend-origin: ${PASSWORD_RESET_FRONTEND_ORIGIN:}
+      email-from: ${PASSWORD_RESET_EMAIL_FROM:}
+      smtp-host: ${SMTP_HOST:}
+      smtp-username: ${SMTP_USERNAME:}
+      smtp-password: ${SMTP_PASSWORD:}
     cors:
       allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}   # comma-separated
 
