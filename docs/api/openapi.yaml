@@ -6793,6 +6793,1323 @@
         "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
       }
+    },
+    "/api/me/notifications": {
+      "get": {
+        "operationId": "b7ListMyNotifications",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Any authenticated active account; own notifications only, newest first (createdAt desc, then id desc); unreadOnly filters unread rows. Message-only rows (CT11-READ-FIELDS r1) rendered as plain text. Read-only REPEATABLE READ. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "unreadOnly",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7NotificationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/me/notifications/unread-count": {
+      "get": {
+        "operationId": "b7CountMyUnreadNotifications",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Any authenticated active account; count of own unread notifications. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7UnreadCount"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/me/notifications/{notificationId}/read": {
+      "put": {
+        "operationId": "b7MarkMyNotificationRead",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Marks one own notification read; idempotent; no body is needed and any body is ignored. A missing or foreign notification is the same 404. There is no mark-unread or delete. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notificationId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7Notification"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/me/notifications/read-all": {
+      "put": {
+        "operationId": "b7MarkAllMyNotificationsRead",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Marks every own unread notification read in one statement and returns how many changed; no body is needed. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7MarkedCount"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/lessons/{lessonId}/discussion": {
+      "get": {
+        "operationId": "b7ListLessonDiscussion",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "CT03 requireLessonReadAccess on the Lesson (active/completed Learner member of the published Course and published Lesson, or owning Instructor including hidden preview); Administrator 403; other denials are the concealed 404. Questions newest first with all visible replies oldest first; hidden posts and replies of hidden questions never appear. CT30-ACCESS/POSTS/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lessonId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7DiscussionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      },
+      "post": {
+        "operationId": "b7CreateLessonDiscussionPost",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Same admission as the list. Creates a question (no parentPostId) or a one-level reply to a visible question of this Lesson; a reply to a reply is 400 and a hidden, missing or foreign parent is 404. Content is stored verbatim. A reply notifies the question author in the same transaction (CT30-NOTIFY-2026-11-15-r1). No edit or delete operation exists. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lessonId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7DiscussionPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7DiscussionPostWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/{lessonId}/reports": {
+      "post": {
+        "operationId": "b7ReportLesson",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Same admission as the discussion list. Reports the Lesson itself; status open; duplicates are allowed and resolved together by moderation. CT30-REPORTS-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lessonId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7ContentReportReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7ContentReportWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/{lessonId}/discussion/{postId}/reports": {
+      "post": {
+        "operationId": "b7ReportDiscussionPost",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Same admission as the discussion list; the post must be a visible post of this Lesson, else 404. Status open; duplicates are allowed. CT30-REPORTS-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lessonId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "postId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7ContentReportReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7ContentReportWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/audit-logs": {
+      "get": {
+        "operationId": "b7ListAuditLogs",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Optional AND filters; occurredFrom inclusive and occurredTo exclusive (RFC 3339, at most microsecond precision, from before to). Ordered occurredAt desc, then id desc. CT31-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "actorId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user_role_set_learner",
+                "user_role_set_instructor",
+                "user_role_set_admin",
+                "user_locked",
+                "user_unlocked",
+                "course_hidden",
+                "report_post_hidden",
+                "report_lesson_hidden",
+                "report_dismissed"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "targetType",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "course",
+                "content_report"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "targetReference",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "occurredFrom",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "occurredTo",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AuditLogPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "b7SearchUsers",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Optional trimmed query matches a case-insensitive substring of email or display name; optional exact role and accountStatus filters; ordered by email (C collation), then id. No credential data. CT12-USER/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "learner",
+                "instructor",
+                "admin"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "accountStatus",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "locked"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminUserPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/users/{userId}/role": {
+      "put": {
+        "operationId": "b7ChangeUserRole",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Same role is changed=false and not audited. Own role, or removing the last active Administrator, is 409; an actor who is no longer an active Administrator under lock is 403. Audited as user_role_set_* in the same transaction. Takes effect on the user's next request. CT12-USER/REST-2026-11-15-r1, CT31-ACTIONS/CONSISTENCY-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminUserChange"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B7Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7AdminRoleWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{userId}/account-status": {
+      "put": {
+        "operationId": "b7ChangeUserAccountStatus",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Lock or unlock. Same status is changed=false and not audited. Own status, or locking the last active Administrator, is 409. Audited as user_locked or user_unlocked in the same transaction; a locked account never authenticates. CT12-USER/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminUserChange"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B7Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7AdminAccountStatusWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/courses": {
+      "get": {
+        "operationId": "b7ListCoursesForAdministration",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Hidden and published Courses; optional case-insensitive title substring and publicationStatus filter; ordered by title (C collation), then id. CT12-COURSE/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "publicationStatus",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hidden",
+                "published"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminCoursePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/courses/{courseId}/publication": {
+      "put": {
+        "operationId": "b7HideCourseAsAdministrator",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Only hidden is accepted (published is 400). Same effects as the Instructor hidden publication change, under the Course root lock taken first; already hidden is changed=false and not audited; otherwise audited as course_hidden in the same transaction. The owner may republish. CT12-COURSE/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminCourseChange"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7AdminCoursePublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/content-reports": {
+      "get": {
+        "operationId": "b7ListContentReports",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Reports with one status (default open), ordered createdAt ascending, then id; post content is shown verbatim as plain text, including hidden posts. CT32-QUEUE/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "resolved",
+                "dismissed"
+              ],
+              "default": "open"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7ModerationReportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/content-reports/{reportId}/decision": {
+      "put": {
+        "operationId": "b7DecideContentReport",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). On an open report only (else 409). hide: hides the post or the Lesson and resolves every open report on that target, one audit row each; dismiss: dismisses only this report. Statuses never reopen; nothing is deleted. CT32-HIDE/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reportId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7ModerationDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B7Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7ModerationDecisionWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/metrics/courses": {
+      "get": {
+        "operationId": "b7ListCourseMetrics",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Per-Course enrollment counts, completion and quiz-outcome figures for hidden and published Courses, ordered by title (C collation), then id; computed at read time by the owning modules in one read-only snapshot. CT13-METRICS/READS/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7CourseMetricsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/metrics/courses/{courseId}": {
+      "get": {
+        "operationId": "b7ReadCourseMetrics",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). The Course's figures plus the mastery-state distribution of joined learners per skill (Unknown includes learners without a mastery row). CT13-METRICS/READS/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7CourseMetricsDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
     }
   },
   "components": {
@@ -10128,6 +11445,1164 @@
           "totalElements",
           "totalPages"
         ]
+      },
+      "B7Notification": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "message",
+          "read",
+          "createdAt"
+        ]
+      },
+      "B7NotificationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7Notification"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7UnreadCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "unreadCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "unreadCount"
+        ]
+      },
+      "B7MarkedCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "markedCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "markedCount"
+        ]
+      },
+      "B7DiscussionReply": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parentPostId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "learner",
+              "instructor",
+              "admin",
+              null
+            ]
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "parentPostId",
+          "authorId",
+          "authorDisplayName",
+          "authorRole",
+          "mine",
+          "content",
+          "createdAt"
+        ]
+      },
+      "B7DiscussionThread": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "learner",
+              "instructor",
+              "admin",
+              null
+            ]
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "replies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7DiscussionReply"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "authorId",
+          "authorDisplayName",
+          "authorRole",
+          "mine",
+          "content",
+          "createdAt",
+          "replies"
+        ]
+      },
+      "B7DiscussionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7DiscussionThread"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7DiscussionPostWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Stored verbatim; plain text."
+          },
+          "parentPostId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Null or absent for a question; a visible question of the same Lesson for a reply."
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "B7DiscussionPost": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parentPostId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "learner",
+              "instructor",
+              "admin",
+              null
+            ]
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "lessonId",
+          "parentPostId",
+          "authorId",
+          "authorDisplayName",
+          "authorRole",
+          "mine",
+          "content",
+          "createdAt"
+        ]
+      },
+      "B7ContentReportWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Stored verbatim; plain text."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "B7ContentReportReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "const": "open"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "createdAt"
+        ]
+      },
+      "B7AuditLogEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "user_role_set_learner",
+              "user_role_set_instructor",
+              "user_role_set_admin",
+              "user_locked",
+              "user_unlocked",
+              "course_hidden",
+              "report_post_hidden",
+              "report_lesson_hidden",
+              "report_dismissed"
+            ]
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "user",
+              "course",
+              "content_report"
+            ]
+          },
+          "targetReference": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "actorDisplayName",
+          "action",
+          "targetType",
+          "targetReference",
+          "occurredAt"
+        ]
+      },
+      "B7AuditLogPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7AuditLogEntry"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7AdminUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "minLength": 1
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "learner",
+              "instructor",
+              "admin"
+            ]
+          },
+          "accountStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "locked"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "email",
+          "displayName",
+          "role",
+          "accountStatus"
+        ]
+      },
+      "B7AdminUserPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7AdminUser"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7AdminRoleWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "learner",
+              "instructor",
+              "admin"
+            ]
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "B7AdminAccountStatusWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accountStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "locked"
+            ]
+          }
+        },
+        "required": [
+          "accountStatus"
+        ]
+      },
+      "B7AdminUserChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/B7AdminUser"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "user",
+          "changed"
+        ]
+      },
+      "B7AdminCourse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "instructorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "instructorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "courseId",
+          "title",
+          "publicationStatus",
+          "instructorId",
+          "instructorDisplayName"
+        ]
+      },
+      "B7AdminCoursePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7AdminCourse"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7AdminCoursePublicationWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "publicationStatus": {
+            "type": "string",
+            "const": "hidden",
+            "description": "Only hidden is accepted; published is 400."
+          }
+        },
+        "required": [
+          "publicationStatus"
+        ]
+      },
+      "B7AdminCourseChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "course": {
+            "$ref": "#/components/schemas/B7AdminCourse"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "course",
+          "changed"
+        ]
+      },
+      "B7ModerationReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reporterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reporterDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "discussion_post",
+              "lesson"
+            ]
+          },
+          "postId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "postContent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postAuthorId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "postAuthorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postHidden": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lessonPublicationStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "hidden",
+              "published",
+              null
+            ]
+          },
+          "courseId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "courseTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "reportId",
+          "status",
+          "reason",
+          "createdAt",
+          "resolvedAt",
+          "reporterId",
+          "reporterDisplayName",
+          "targetType",
+          "postId",
+          "postContent",
+          "postAuthorId",
+          "postAuthorDisplayName",
+          "postHidden",
+          "lessonId",
+          "lessonTitle",
+          "lessonPublicationStatus",
+          "courseId",
+          "courseTitle"
+        ]
+      },
+      "B7ModerationReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7ModerationReport"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7ModerationDecisionWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "hide",
+              "dismiss"
+            ]
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "B7ModerationDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "hide",
+              "dismiss"
+            ]
+          },
+          "resolvedReportIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "resolvedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "decision",
+          "resolvedReportIds",
+          "status",
+          "resolvedAt"
+        ]
+      },
+      "B7CourseMetrics": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "activeEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completedEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "leftEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "joinedLearners": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completedLearners": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completionRatePercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "scoredQuizAttempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "averageQuizScore": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Exact mean rounded half-up to two fraction digits; null when no attempt qualifies."
+          }
+        },
+        "required": [
+          "courseId",
+          "title",
+          "publicationStatus",
+          "activeEnrollments",
+          "completedEnrollments",
+          "leftEnrollments",
+          "joinedLearners",
+          "completedLearners",
+          "completionRatePercent",
+          "scoredQuizAttempts",
+          "averageQuizScore"
+        ]
+      },
+      "B7CourseMetricsPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7CourseMetrics"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7SkillMasteryCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skillName": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "unknown": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "learning": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mastered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "weak": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "skillId",
+          "skillName",
+          "unknown",
+          "learning",
+          "mastered",
+          "weak"
+        ]
+      },
+      "B7CourseMetricsDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "activeEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completedEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "leftEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "joinedLearners": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completedLearners": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completionRatePercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "scoredQuizAttempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "averageQuizScore": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Exact mean rounded half-up to two fraction digits; null when no attempt qualifies."
+          },
+          "masteryDistribution": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7SkillMasteryCount"
+            }
+          }
+        },
+        "required": [
+          "courseId",
+          "title",
+          "publicationStatus",
+          "activeEnrollments",
+          "completedEnrollments",
+          "leftEnrollments",
+          "joinedLearners",
+          "completedLearners",
+          "completionRatePercent",
+          "scoredQuizAttempts",
+          "averageQuizScore",
+          "masteryDistribution"
+        ]
       }
     },
     "responses": {
@@ -10461,6 +12936,81 @@
       },
       "B6Failure": {
         "description": "Safe provider, integrity or snapshot failure; no partial representation.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7Invalid": {
+        "description": "Malformed identifier, query value, page or JSON body, or a field rule failure (for example a blank text, a reply to a reply or an unsupported filter value); no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7Unavailable": {
+        "description": "Safe unavailable resource: missing, hidden or foreign Lesson, post, notification, user, Course or report, including CT03 concealment; no identifiers.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7Conflict": {
+        "description": "Valid request in a forbidden state: report already decided, self role or status change, or the last active Administrator would be removed; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7UnsupportedMedia": {
+        "description": "JSON operation received another request media type; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7Failure": {
+        "description": "Safe provider, integrity, clock or transaction failure; the whole unit rolled back, including any audit row; no automatic retry.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/AuthenticationNoStore"

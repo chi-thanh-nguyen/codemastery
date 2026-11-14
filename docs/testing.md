@@ -3126,3 +3126,22 @@ oracles B6-R01–B6-R16 (ADR011 §10) belong to the existing decision and master
 tests; CT36.F keeps the evaluation scenarios. Faults come only from test-scoped bean
 overrides, outcomes from independent committed reads and concurrency from barriers.
 No new test file, dependency or result is claimed.
+
+## Batch 7 acceptance obligations — specified, NOT_RUN
+
+[ADR012 §15](decisions/012-batch-07-contract-approvals.md#15-acceptance-oracles--specified-not_run)
+specifies oracles B7-O01–B7-O12: derived notification IDs and idempotent reminders;
+after-commit subscriptions that never notify for a rolled-back unit and never fail
+their producer, with exactly the two approved `QuizSubmittedEvent` subscribers
+(this also fixes the expected set of ADR011's B6-V04); the exclusive reminder window;
+owner-scoped notification reads; CT03 Q&A admission, hidden-post concealment and
+one-level replies; reply notifications; same-transaction audit rows and no-op
+non-auditing; self and last-Administrator protections under concurrency; Course-root
+locking for Administrator hiding; moderation resolution of every open report on a
+target; hand-computed reporting metrics; and OpenAPI/plain-text rendering. They use
+ADR008 §5's existing placements (`NotificationEventListenerTest`,
+`DeadlineReminderSchedulerTest`, `UserManagementServiceTest`,
+`AuthorizationIntegrationTest` and the owning modules' existing suites). Dedicated
+real-PostgreSQL Interaction/Admin integration suites remain the structural gap
+ADR008 records; no new test file, dependency or result is claimed. Reminder tests
+supply explicitly named CT38 case values and a fixed injected clock.

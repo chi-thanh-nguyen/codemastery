@@ -98,8 +98,9 @@ Neither document establishes implementation, runtime acceptance or deployment au
 | [ADR007](007-batch-03-contract-approvals.md) | Ten verified Batch 3 checkpoints CP-019–028; two bounded prerequisite slices | `DELEGATED_APPROVED`; integrated via PR #230, 9 November 2026; implementation/verification gates retained |
 | [ADR008](008-batch-04-contract-approvals.md) | Six Batch 4 testing/clock decisions; CP-030 r2 | `DELEGATED_APPROVED`; integrated via #231 on 10 November. Its original CT17 pending dispositions are historical, subsequently resolved by ADR009 r2 |
 | [ADR009](009-ct17-final-runtime-recovery.md) | CP-033/034 r2 runtime/recovery decisions, bounded qualification and dated Azure evidence | Two `DELEGATED_APPROVED`; integrated via #233 on 11 November (no approving review recorded); execution/admission gates retained |
-| [ADR010](010-batch-05-contract-approvals.md) | Ten Batch 5 checkpoints CP-037–046: protected files, assignments, file widget; CT01/CT18 bounded prerequisites | `DELEGATED_APPROVED` (12 November 2026); pending independent review, CI and protected integration; implementation/exposure gates retained |
-| [ADR011](011-batch-06-contract-approvals.md) | Seventeen Batch 6 checkpoints CP-047–063: atomic quiz-to-mastery execution, routing, reasons, difficulty, placement, Mastery Map and insights | `DELEGATED_APPROVED` (12 November 2026); stacked on ADR010 (learner names); pending independent review, CI and protected integration after ADR010; adaptive practice capture amendment `PENDING_LEADER_APPROVAL` |
+| [ADR010](010-batch-05-contract-approvals.md) | Ten Batch 5 checkpoints CP-037–046: protected files, assignments, file widget; CT01/CT18 bounded prerequisites | `DELEGATED_APPROVED` (12 November 2026); integrated via PR #235 (`c9d1427`, 13 November 2026) with no approving review recorded, so independent/module-owner review remains outstanding; implementation/exposure gates retained |
+| [ADR011](011-batch-06-contract-approvals.md) | Seventeen Batch 6 checkpoints CP-047–063: atomic quiz-to-mastery execution, routing, reasons, difficulty, placement, Mastery Map and insights | `DELEGATED_APPROVED` (12 November 2026); integrated after ADR010 via PR #236 (`c80fda9`, 13 November 2026) with no approving review recorded, so independent/module-owner review and LD-11's joint review remain outstanding; adaptive practice capture amendment `PENDING_LEADER_APPROVAL` |
+| [ADR012](012-batch-07-contract-approvals.md) | Twenty-seven Batch 7 checkpoints CP-064–090: notifications, reminders, event subscriptions, lesson Q&A and reports, audit, Administrator user/Course mutations, moderation and reporting; five bounded prerequisite slices | `DELEGATED_APPROVED` (15 November 2026); PR open, pending independent review, CI and protected integration; implementation, runtime grants and QA gates retained |
 
 ## Contract decision records by revision
 
@@ -265,6 +266,9 @@ review evidence. CT08 remains evidence-only at whole-Issue level.
 **DELEGATED_APPROVED** revisions (Claude Code under the Leader's explicit Batch 5/6
 delegation). They await independent review, required CI and protected integration;
 no storage, assignment or widget behavior is implemented by the approvals.
+*Current-state correction, 15 November 2026:* PR #235 merged these revisions into
+`main` as `c9d1427` on 13 November 2026 with no approving review recorded; protected
+integration is done, while independent/module-owner review remains outstanding.
 
 | Revision | Exact slice | Record |
 |---|---|---|
@@ -302,6 +306,9 @@ with CT11.reminders (Batch 7). Submission-download hostile-content residual risk
 **DELEGATED_APPROVED** revisions (Claude Code under the same explicit delegation).
 They depend on ADR010 only for CT33.insights learner names and must be integrated
 after it; no runtime behavior is implemented by the approvals.
+*Current-state correction, 15 November 2026:* PR #236 merged these revisions after
+ADR010 as `c80fda9` on 13 November 2026 with no approving review recorded; the
+module-owner reviews and LD-11's joint review remain outstanding.
 
 | Revision | Exact slice | Record |
 |---|---|---|
@@ -338,3 +345,33 @@ committed save are `PENDING_LEADER_RISK_ACCEPTANCE`.
 records N-B6-01/02: intervening-writer limits and V12/C01, valid completed remedial
 review, selected-reason rename effects and Home row omission (R13–R16/V06).
 Existing routing, upstream approvals and all checkpoint revision IDs are preserved.
+
+### Batch 7 revisions — 15 November 2026
+
+[ADR012](012-batch-07-contract-approvals.md) is the authoritative record for these
+**DELEGATED_APPROVED** revisions (Claude Code under the Leader's explicit Batch 7/8
+delegation of 15 November 2026). They await independent review, required CI and
+protected integration; no runtime behavior is implemented by the approvals.
+
+| Revision | Exact slice | Record |
+|---|---|---|
+| `CT40-NOTIFICATION-CONTEXT-2026-11-15-r1` | Prerequisite: actorless Course/Lesson titles and publication state | [ADR012 §3.1](012-batch-07-contract-approvals.md#31-ct40notification-context) |
+| `CT22-ACTIVE-LEARNERS-2026-11-15-r1` | Prerequisite: joined learner IDs for reminders | [ADR012 §3.2](012-batch-07-contract-approvals.md#32-ct22active-learners) |
+| `CT10-REMINDER-READ-2026-11-15-r1` | Prerequisite: Assessment reminder candidates (LD-07 option a) | [ADR012 §3.3](012-batch-07-contract-approvals.md#33-ct10reminder-read--ld-07-option-a) |
+| `CT01-USER-SUMMARIES-2026-11-15-r1` | Prerequisite: display name and role for Q&A authors and audit actors | [ADR012 §3.4](012-batch-07-contract-approvals.md#34-ct01user-summaries) |
+| `CT38-DEADLINE-REMINDERS-2026-11-15-r1` | Prerequisite: four reminder scheduler inputs, no defaults | [ADR012 §3.5](012-batch-07-contract-approvals.md#35-ct38featuredeadline-reminders) |
+| `CT11-CREATE-2026-11-15-r1` / `CT11-READ-2026-11-15-r1` | Internal creation with derived IDs; list, unread count, mark-read operations | [ADR012 §4](012-batch-07-contract-approvals.md#4-ct11-notification-core) |
+| `CT11-REMINDERS-2026-11-15-r1` | Deadline reminders: window, recipients, de-duplication | [ADR012 §5](012-batch-07-contract-approvals.md#5-ct11reminders) |
+| `CT30-ACCESS/POSTS/REPORTS/NOTIFY/REST-2026-11-15-r1` | Lesson Q&A, report intake, reply notification, REST | [ADR012 §6](012-batch-07-contract-approvals.md#6-ct30-lesson-qa-and-reports) |
+| `CT31-ACTIONS/CONSISTENCY/READ-2026-11-15-r1` | Audit catalogue, same-transaction audit, filtered read | [ADR012 §7](012-batch-07-contract-approvals.md#7-ct31-audit) |
+| `CT26-EVENT/SUBSCRIPTION-2026-11-15-r1` | Lesson-published event and notifications | [ADR012 §9.1](012-batch-07-contract-approvals.md#91-ct26--published-content) |
+| `CT27-EVENT/SUBSCRIPTION-2026-11-15-r1` | Graded-assignment event and notification | [ADR012 §9.2](012-batch-07-contract-approvals.md#92-ct27--graded-assignment) |
+| `CT28-SUBSCRIPTION-2026-11-15-r1` | Quiz-result notification from `QuizSubmittedEvent`, after commit (LD-12(f)) | [ADR012 §9.3](012-batch-07-contract-approvals.md#93-ct28--quiz-result-ld-12f-reuse-quizsubmittedevent) |
+| `CT29-EVENT/SUBSCRIPTION-2026-11-15-r1` | Recommendation-created event; remedial and test-out notifications only | [ADR012 §9.4](012-batch-07-contract-approvals.md#94-ct29--recommendation-created) |
+| `CT12-USER/COURSE/REST-2026-11-15-r1` | Administrator user search, role and lock changes; Course list and hide | [ADR012 §10](012-batch-07-contract-approvals.md#10-ct12-administrator-mutations) |
+| `CT32-QUEUE/HIDE/REST-2026-11-15-r1` | Moderation queue, hide/dismiss decisions | [ADR012 §11](012-batch-07-contract-approvals.md#11-ct32-moderation) |
+| `CT13-METRICS/READS/REST-2026-11-15-r1` | Per-Course metrics on both learning-outcome bases (LD-12(e)) | [ADR012 §13](012-batch-07-contract-approvals.md#13-ct13-reporting) |
+
+LD-02 (notification scope) is not decided by these approvals; LD-07 is decided as
+option (a). Runtime database grants for the Batch 7 tables need a separate Leader
+approval of a CT17-P6 extension.

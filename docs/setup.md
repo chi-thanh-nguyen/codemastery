@@ -1961,3 +1961,22 @@ file, PDF or PDF/ZIP requirement text, indeterminate progress, confirmation befo
 replacement, Blob download through a revoked object URL, no token in any URL and
 nothing persisted. Implementation, CORS/multipart configuration, runtime grants and
 browser verification remain separate.
+
+## Batch 7 reminder configuration and notification client — 15 November 2026
+
+[ADR012 §3.5](decisions/012-batch-07-contract-approvals.md#35-ct38featuredeadline-reminders)
+approves four backend-only inputs for the Interaction deadline-reminder scheduler,
+following the CT38 quiz-expiry pattern: `APP_DEADLINE_REMINDER_ENABLED`,
+`APP_DEADLINE_REMINDER_DELAY_MS`, `APP_DEADLINE_REMINDER_LEAD_MINUTES` and
+`APP_DEADLINE_REMINDER_BATCH_SIZE` (properties under `app.deadline-reminder.*`).
+They have no defaults and no approved production values; missing or invalid values
+will fail startup once implemented, and a deployed reminder capability needs
+operator-recorded values. They are **not implemented**; `.env.example` and
+`application.yml` are unchanged by this record. They are never `VITE_*` inputs.
+
+The notification client (FE28) uses the ADR012 §4.2 operations. No polling interval,
+push channel, WebSocket or server-sent events are approved: the unread count is
+reloaded on route change and the list when the bell or notifications page opens.
+Notification messages and Q&A posts are rendered as plain text, never as Markdown
+or HTML. Administrator screens (FE20–FE23) consume only the `/api/admin/**`
+operations in OpenAPI; frontend route guards remain no security boundary.
