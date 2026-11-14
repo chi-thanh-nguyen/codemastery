@@ -66,7 +66,7 @@ Approve §3's prerequisite slices first, then the table order.
 
 | CP | Checkpoint / Issue | Revision | Section | Satisfied prerequisites |
 |---|---|---|---|---|
-| CP-064 | CT11.create / [#137](https://github.com/chi-thanh-nguyen/codemastery/issues/137) | `CT11-CREATE-2026-11-15-r1` | §4.1 | CT11-READ-FIELDS r1 |
+| CP-064 | CT11.create / [#137](https://github.com/chi-thanh-nguyen/codemastery/issues/137) | `CT11-CREATE-2026-11-15-r2` | §4.1 | CT11-READ-FIELDS r1 |
 | CP-065 | CT11.read / #137 | `CT11-READ-2026-11-15-r1` | §4.2 | CT11-READ-FIELDS r1 (field set retained) |
 | CP-066 | CT30.access / [#146](https://github.com/chi-thanh-nguyen/codemastery/issues/146) | `CT30-ACCESS-2026-11-15-r1` | §6.1 | CT03-2026-10-21-r1 U04 |
 | CP-067 | CT31.actions / [#147](https://github.com/chi-thanh-nguyen/codemastery/issues/147) | `CT31-ACTIONS-2026-11-15-r1` | §7.1 | V006 `audit_logs` |
@@ -75,12 +75,12 @@ Approve §3's prerequisite slices first, then the table order.
 | CP-070 | CT30.posts / #146 | `CT30-POSTS-2026-11-15-r1` | §6.2 | CP-066 |
 | CP-071 | CT30.reports / #146 | `CT30-REPORTS-2026-11-15-r1` | §6.3 | CP-066 |
 | CP-072 | CT31.read / #147 | `CT31-READ-2026-11-15-r1` | §7.3 | CP-067; §3.4 |
-| CP-073 | CT12.user / [#138](https://github.com/chi-thanh-nguyen/codemastery/issues/138) | `CT12-USER-2026-11-15-r1` | §10.1 | CP-067, CP-068; CT01 r1 |
+| CP-073 | CT12.user / [#138](https://github.com/chi-thanh-nguyen/codemastery/issues/138) | `CT12-USER-2026-11-15-r2` | §10.1 | CP-067, CP-068; CT01 r1 |
 | CP-074 | CT13.metrics / [#139](https://github.com/chi-thanh-nguyen/codemastery/issues/139) | `CT13-METRICS-2026-11-15-r1` | §13.1 | CP-011 CT22.progress r1 |
 | CP-075 | CT26.event / [#142](https://github.com/chi-thanh-nguyen/codemastery/issues/142) | `CT26-EVENT-2026-11-15-r1` | §9.1 | CP-015 CT21.authoring r1 |
-| CP-076 | CT27.subscription / #143 | `CT27-SUBSCRIPTION-2026-11-15-r1` | §9.2 | CP-069, CP-064 |
+| CP-076 | CT27.subscription / #143 | `CT27-SUBSCRIPTION-2026-11-15-r2` | §9.2 | CP-069, CP-064; §§3.2, 3.3 |
 | CP-077 | CT30.notify / #146 | `CT30-NOTIFY-2026-11-15-r1` | §6.4 | CP-070, CP-064 |
-| CP-078 | CT12.course / #138 | `CT12-COURSE-2026-11-15-r1` | §10.2 | CP-067, CP-068; CP-015 (applies: reuses publication semantics) |
+| CP-078 | CT12.course / #138 | `CT12-COURSE-2026-11-15-r2` | §10.2 | CP-067, CP-068; CP-015 (applies: reuses publication semantics); §3.4 |
 | CP-079 | CT32.queue / [#148](https://github.com/chi-thanh-nguyen/codemastery/issues/148) | `CT32-QUEUE-2026-11-15-r1` | §11.1 | CP-071 |
 | CP-080 | CT26.subscription / #142 | `CT26-SUBSCRIPTION-2026-11-15-r1` | §9.1 | CP-075, CP-064 |
 | CP-081 | CT29.event / [#145](https://github.com/chi-thanh-nguyen/codemastery/issues/145) | `CT29-EVENT-2026-11-15-r1` | §9.4 | CP-054 CT07.reasons r1 (ADR011, on `main`) |
@@ -89,7 +89,7 @@ Approve §3's prerequisite slices first, then the table order.
 | CP-084 | CT32.hide / #148 | `CT32-HIDE-2026-11-15-r1` | §11.2 | CP-079, CP-067 |
 | CP-085 | CT29.subscription / #145 | `CT29-SUBSCRIPTION-2026-11-15-r1` | §9.4 | CP-081, CP-064 |
 | CP-086 | CT32.rest / #148 | `CT32-REST-2026-11-15-r1` | §11.3 | CP-084 |
-| CP-087 | CT11.reminders / #137 | `CT11-REMINDERS-2026-11-15-r1` | §5 | CP-064, CP-040 CT10.deadline r1; §§3.2, 3.3, 3.5 |
+| CP-087 | CT11.reminders / #137 | `CT11-REMINDERS-2026-11-15-r2` | §5 | CP-064, CP-040 CT10.deadline r1; §§3.2, 3.3, 3.5 |
 | CP-088 | CT28.subscription / [#144](https://github.com/chi-thanh-nguyen/codemastery/issues/144) | `CT28-SUBSCRIPTION-2026-11-15-r1` | §9.3 | CP-064; CP-027 CT08.evidence r1 (applies, option A) |
 | CP-089 | CT13.reads / #139 | `CT13-READS-2026-11-15-r1` | §13.2 | CP-074; CP-026 and CP-006 (both apply) |
 | CP-090 | CT13.rest / #139 | `CT13-REST-2026-11-15-r1` | §13.3 | CP-089 |
@@ -139,7 +139,7 @@ Each caller has either admitted its actor first or is an approved system path.
 
 ### 3.2 CT22.active-learners
 
-**`CT22-ACTIVE-LEARNERS-2026-11-15-r1` — DELEGATED_APPROVED**, [CT22 #43](https://github.com/chi-thanh-nguyen/codemastery/issues/43).
+**`CT22-ACTIVE-LEARNERS-2026-11-15-r2` — DELEGATED_APPROVED** (r1 → r2, §21), [CT22 #43](https://github.com/chi-thanh-nguyen/codemastery/issues/43).
 Add to existing `modules/course/application/service/EnrollmentService.java`:
 
 ```java
@@ -147,12 +147,14 @@ public Set<UUID> joinedLearnerIds(UUID courseId);
 ```
 
 Immutable set of learners whose Enrollment status is `active` or `completed`
-(the CT03 learning-access population); empty for a missing Course. Actorless. Only
-caller: Interaction `DeadlineReminderScheduler` (§5).
+(the CT03 learning-access population); empty for a missing Course. Actorless,
+unlocked: a statement snapshot inside the caller's transaction. Callers, exactly:
+Interaction `DeadlineReminderScheduler` (§5) and `NotificationEventListener` for the
+CT27 subscription only (§9.2, recipient eligibility).
 
 ### 3.3 CT10.reminder-read — LD-07 option (a)
 
-**`CT10-REMINDER-READ-2026-11-15-r1` — DELEGATED_APPROVED**, [CT10 #136](https://github.com/chi-thanh-nguyen/codemastery/issues/136).
+**`CT10-REMINDER-READ-2026-11-15-r2` — DELEGATED_APPROVED** (r1 → r2, §21), [CT10 #136](https://github.com/chi-thanh-nguyen/codemastery/issues/136).
 Assessment owns deadlines (ADR001 producer ownership; ADR010 §8 left this choice to
 CT11.reminders). Add to existing
 `modules/assessment/application/service/AssignmentService.java`:
@@ -160,24 +162,43 @@ CT11.reminders). Add to existing
 ```java
 public List<ReminderCandidate> findReminderCandidates(Instant now, Instant windowEnd,
         ReminderCursor after, int limit);
+public Optional<ReminderCandidate> lockNotificationState(UUID assignmentId);
 public record ReminderCandidate(UUID assignmentId, UUID courseId, UUID lessonId,
         String assignmentTitle, Instant deadlineAt, Set<UUID> submittedLearnerIds) {}
 public record ReminderCursor(Instant deadlineAt, UUID assignmentId) {}
 ```
 
-Returns **published** Assignments with `now < deadline_at <= windowEnd` (CT10.deadline's
-exclusive end: an Assignment whose deadline equals `now` is already late), ordered by
-(`deadline_at`, `id`) ascending, strictly after the nullable keyset cursor, at most
-`limit` rows (1..2147483647). `submittedLearnerIds` holds every learner with a
-Submission row of any state. `lessonId` is the Assignment's nullable bound Lesson.
-Course and Lesson publication are not filtered here (§5 checks them).
-Actorless. Only caller: `DeadlineReminderScheduler`. No REST exposure.
+**Discovery.** `findReminderCandidates` returns **published** Assignments with
+`now < deadline_at <= windowEnd` (CT10.deadline's exclusive end: an Assignment whose
+deadline equals `now` is already late), ordered by (`deadline_at`, `id`) ascending,
+strictly after the nullable keyset cursor, at most `limit` rows (1..2147483647).
+`submittedLearnerIds` holds every learner with a Submission row of any state.
+`lessonId` is the Assignment's nullable bound Lesson. Course and Lesson publication are
+not filtered here (§5 checks them). Its rows are an unlocked snapshot used **only** to
+choose which Assignment IDs to process and to advance the cursor; no notification
+recipient, title, Lesson or deadline may be taken from them.
+
+**Admission read.** `lockNotificationState` requires an active read-write transaction
+(`IllegalStateException` otherwise) and locks the Assignment row `FOR SHARE`, the
+shared mode of ADR010 §10's lock: every submission, replacement, grading and
+Assignment edit takes that row `FOR UPDATE` first, so they and this read serialize.
+After the lock it re-reads, with new statements, the Assignment's current Course,
+bound Lesson, title, deadline and the learners with a Submission row; it returns empty
+when the Assignment does not exist or is not `published`. Until the caller's
+transaction ends, no submission, replacement, grade, deadline, title, Lesson or
+publication change of that Assignment can commit, and every such change committed
+before the lock is visible. It takes no Submission, Course or Lesson lock, and each
+caller must make it the first row lock of its transaction (§4.1); because ADR010's
+writers also lock the Assignment first, this adds no lock cycle. Callers, exactly: `DeadlineReminderScheduler` (§5) and
+`NotificationEventListener` for CT27 (§9.2). Both methods are actorless and have no
+REST exposure.
 
 ### 3.4 CT01.user-summaries
 
-**`CT01-USER-SUMMARIES-2026-11-15-r1` — DELEGATED_APPROVED**, [CT01 #18](https://github.com/chi-thanh-nguyen/codemastery/issues/18).
+**`CT01-USER-SUMMARIES-2026-11-15-r2` — DELEGATED_APPROVED** (r1 → r2, §21), [CT01 #18](https://github.com/chi-thanh-nguyen/codemastery/issues/18).
 Q&A authors may be Learners or Instructors and audit actors are Administrators;
-`learnerDisplayNames` (ADR010 §3.1) is Course-only. Add to existing
+`learnerDisplayNames` (ADR010 §3.1) is Course-only, and CT01.identity's
+`instructorDisplayNames` is limited to published-course results (ADR001 §11). Add to existing
 `modules/auth/application/service/UserAccountService.java`, leaving both CT01.identity
 methods and `learnerDisplayNames` unchanged:
 
@@ -189,10 +210,16 @@ public record UserSummary(UUID userId, String displayName, String role) {}
 Stored display name and current role literal for existing IDs; unknown IDs omitted;
 at most 100 IDs per call (callers split larger sets, for example a discussion page
 with many replies or a moderation page with reporters and authors, into chunks of at
-most 100); no email, account status or credential data. Callers:
-Interaction `DiscussionService` (authors of posts it returns) and Admin
+most 100); no email, account status or credential data. Callers, exactly:
+Interaction `DiscussionService` (authors of posts it returns), Admin
 `AuditLogService` and `ContentModerationService` (actors and reporters of rows they
-return). Auth never calls Interaction or Admin.
+return), and Admin `AdminCourseService` (only the `instructorId` values of the
+Administrator Course page or hide result it is returning, §10.2, after its active-`admin` check; a
+page has at most 100 rows, so at most 100 IDs). Each caller passes only IDs from rows
+it is returning; no caller may pass a search term, a role filter or arbitrary IDs, so
+this is not a user directory. A missing account is omitted (the caller shows null);
+a later role change does not hide a name (the current role is returned). Auth never
+calls Interaction or Admin.
 
 ### 3.5 CT38.feature.deadline-reminders
 
@@ -255,11 +282,22 @@ namespace UUID) of the UTF-8 string
   (CT11-READ-FIELDS r1); no type, link or migration is added.
 - **Recipients.** A missing recipient violates the foreign key and fails the call. A
   locked recipient still receives the row and sees it after unlocking.
-- **Visibility precondition.** Every creator first reads §3.1's context in the same
-  transaction and creates nothing (counted, logged at debug level) unless the Course
-  is `published` and, when the message names a Lesson, that Lesson is `published`.
-  A notification therefore never names content that is concealed **at creation
-  time**; rows created earlier stay when content is hidden later (§11.2).
+- **Visibility precondition and admission point** (r2). Every creator reads §3.1's
+  context in the same transaction as its insert and creates nothing (counted, logged
+  at debug level) unless the Course is `published` and, when the message names a
+  Lesson, that Lesson is `published`; Assignment-based creators additionally admit
+  only on `lockNotificationState` (§3.3), which must be the first row lock of their
+  transaction. The guarantee is exactly this: **Assessment-owned Assignment state**
+  (publication, bound Lesson, title, deadline, submissions) is the state at the
+  locked admission read and cannot change before the insert commits; **Course and
+  Lesson publication and membership** are statement snapshots read in that
+  transaction and are not locked, so a hide or leave that commits between the read
+  and the insert's commit can still be followed by a notification naming that
+  content. No creator takes the Course root: that would make quiz submission,
+  authoring and progress wait on notification jobs (ADR005 §13.3). This is the
+  contract's defined visibility guarantee, not an accepted risk; it adds no exposure
+  class beyond the existing rule that rows created earlier stay when content is
+  hidden later (§11.2), and the frontend never links a notification to content.
 
 ### 4.2 CT11.read
 
@@ -293,26 +331,45 @@ creation is idempotent (§4.1). Each run:
 2. Pages through `findReminderCandidates(now, windowEnd, cursor, batch-size)` (§3.3)
    with the keyset cursor until a page is shorter than the batch size. Batch size
    bounds each query, not the run.
-3. For each candidate, in its **own** read-write transaction: skips it unless
-   `deadlineAt` is still later than a fresh `clock.instant()`; reads §3.1's context
-   with the candidate's `lessonId` when present (skip unless the Course is published
-   and, for a Lesson-bound Assignment, that Lesson is published, because CT03 U03
-   conceals such an Assignment otherwise); reads §3.2's joined learners, takes
-   recipients = joined learners minus `submittedLearnerIds`, and calls CT11.create
-   with ID `derivedId("deadline-reminder", assignmentId, learnerId, deadlineAt)` and
-   message `Reminder: the assignment "{assignmentTitle}" in "{courseTitle}" is due soon. Open the assignment to see its deadline.`
+3. For each candidate's `assignmentId`, in its **own** read-write READ COMMITTED
+   transaction (r2), in this order:
+   1. **Admission:** `lockNotificationState(assignmentId)` (§3.3) as the first row
+      lock; skip on empty (no longer published). Every later step uses
+      only this locked state, never the discovery row.
+   2. Sample `checkedAt = clock.instant()` (truncated to microseconds) **after** the
+      lock returns; skip unless `checkedAt < deadlineAt <= windowEnd` (a deadline
+      edited out of the window, or passed meanwhile, is skipped; a later run handles
+      a deadline moved later).
+   3. Read §3.1's context with the **locked** `lessonId` when present; skip unless the
+      Course is published and, for a Lesson-bound Assignment, that Lesson is published
+      (CT03 U03 conceals it otherwise).
+   4. Recipients = §3.2's joined learners minus the **locked**
+      `submittedLearnerIds`; call CT11.create with ID
+      `derivedId("deadline-reminder", assignmentId, learnerId, deadlineAt)` (locked
+      deadline) and message
+      `Reminder: the assignment "{assignmentTitle}" in "{courseTitle}" is due soon. Open the assignment to see its deadline.`
+      (locked title); commit, which releases the lock.
 4. A failing candidate is logged (IDs only) and the run continues; the next run
    retries it and the derived ID prevents duplicates.
 
 **Semantics.** One reminder per learner, Assignment and deadline value. Changing the
 deadline produces a new reminder if the new deadline enters the window; a deadline
-that already passed is never reminded (no catch-up after downtime). Learners who
-submitted, left or are not members get none. The message carries no time, so no
-time-zone conversion is needed; the Assignment page shows the deadline. A deadline
-edited during a run is not re-read until the next run; the per-candidate re-check only
-stops reminders for deadlines that passed during the run. Lessons,
-Quizzes and attempt time limits are not reminded. Assessment exposes facts only;
-Interaction owns the reminder policy.
+that already passed is never reminded (no catch-up after downtime). The message
+carries no time, so no time-zone conversion is needed; the Assignment page shows the
+deadline. Lessons, Quizzes and attempt time limits are not reminded. Assessment
+exposes facts only; Interaction owns the reminder policy.
+
+**Concurrency (r2).** The linearization point for Assignment state is the locked
+admission read: a hide, Lesson rebinding, title or deadline edit, or a submission
+that commits before it is honoured; one that arrives later waits until the reminder
+transaction commits, and the reminder then correctly reflects the earlier state (a
+learner who submits right after it was still unsubmitted at that point). The
+remaining, stated races are those of §4.1: Course and Lesson hiding and membership
+changes are unlocked snapshots, so a learner who leaves, or content hidden, after the
+§3.1/§3.2 reads but before commit can still receive that one reminder. Submissions,
+grading and edits of the same Assignment wait for the per-candidate transaction (one
+context read, one membership read and one insert statement); no other writer is
+delayed. The reminder never holds the lock across candidates or pages.
 
 ## 6. CT30 lesson Q&A and reports
 
@@ -434,6 +491,29 @@ REPEATABLE READ; no export. Bindings: existing `AdminReportingController`,
 
 ## 8. Event execution rules (shared by §9)
 
+**Scope (corrected, §21 R01).** These rules govern Interaction's **notification**
+subscriptions only. They do not govern Adaptive's existing `QuizSubmittedEventListener`,
+which ADR011 §§4–5 approves as a plain `@EventListener` inside the submission unit and
+which this record leaves unchanged. The two `QuizSubmittedEvent` subscribers therefore
+behave differently by design:
+
+| Subscriber | Phase and transaction | Failure effect |
+|---|---|---|
+| Adaptive `QuizSubmittedEventListener` (ADR011) | Plain `@EventListener`: same thread, **inside** the producer's transaction, invoked synchronously by `publishEvent` | Mandatory: any exception in ADR011 §4 steps 1–7 propagates out of `publishEvent` and rolls back the whole unit (quiz result, mastery, progress, recommendations), ADR011 §5 |
+| Interaction `NotificationEventListener` (this record) | `@TransactionalEventListener(AFTER_COMMIT)` + `REQUIRES_NEW`: runs only after that unit **committed**, in its own transaction | Best effort: its failure never rolls back or fails the committed unit |
+
+Spring's default multicaster (no executor is configured or approved) invokes
+listeners synchronously. For a plain listener, an exception propagates to the
+`publishEvent` caller. For a transactional listener, `publishEvent` only registers a
+transaction synchronization and returns; the method runs from the completion
+callback after commit (and not at all after rollback, nor without a transaction,
+because `fallbackExecution = false`), and an exception there is logged by Spring,
+not rethrown to the producer. (Inspected in the locally resolved spring-tx 7.0.9 jar: the
+listener synchronization implements only `beforeCommit` and `afterCompletion`, runs the
+AFTER_COMMIT phase from `afterCompletion` on `STATUS_COMMITTED`, and
+`TransactionSynchronizationUtils.invokeAfterCompletion` logs, not rethrows, its
+exceptions.)
+
 **Approved mechanism: after-commit subscription.** Every Batch 7 notification
 subscription is a method of Interaction's existing `NotificationEventListener`
 annotated `@TransactionalEventListener(phase = AFTER_COMMIT)` (default
@@ -448,9 +528,15 @@ annotated `@TransactionalEventListener(phase = AFTER_COMMIT)` (default
   crash between the producer commit and the listener can lose a notification. The
   derived IDs make an accidental second delivery harmless.
 - Producers publish only inside an active transaction, with
-  `ApplicationEventPublisher.publishEvent`, after their rows are flushed. Publishing
-  must not throw or change the producer's outcome. **No plain `@EventListener`** may
-  subscribe to these events: it would join the producer transaction.
+  `ApplicationEventPublisher.publishEvent`, after their rows are flushed. Registering
+  the Interaction subscription adds no failure path to publishing and cannot change
+  the producer's outcome. For `ContentPublishedEvent`, `AssignmentGradedEvent` and
+  `RecommendationCreatedEvent`, Interaction's after-commit method is the **only**
+  subscriber, so publishing them cannot throw because of a subscriber. For
+  `QuizSubmittedEvent`, `publishEvent` still runs Adaptive's in-transaction listener
+  and propagates its exceptions exactly as ADR011 §5 requires; this record neither
+  catches nor weakens that. **No additional plain `@EventListener`** may subscribe to
+  any of the four events: it would join the producer transaction and could fail it.
 - The listener needs a second pooled connection while the producer's is still held.
   If every pooled connection is held by a producer waiting in its listener, each
   listener waits for the pool's acquisition timeout, the producer's response is
@@ -501,13 +587,24 @@ grade, feedback and `graded_at` are written and flushed, for every successful sa
 (`regrade = true` when a grade already existed). No grade, feedback or file data is
 carried. It is not `QuizSubmittedEvent` and never reaches Adaptive (ADR010 §9).
 
-**CT27.subscription.** Recipient: the submission's learner, only when
-`assignmentPublished` is true, the Course is published and, when `lessonId` (the
-nullable bound Lesson) is present, that Lesson is published (§3.1). ID
-`derivedId("assignment-graded", submissionId, gradedAt)`. Messages:
+**CT27.subscription (r2).** The event's `assignmentPublished`, `lessonId` and
+`assignmentTitle` are producer-time facts (kept for logs and tests); the subscription
+never uses them for admission or message text, because the Assignment can be hidden,
+renamed or rebound between the grade commit and the listener. In the listener's own
+`REQUIRES_NEW` transaction, in this order: (1) `lockNotificationState(assignmentId)`
+(§3.3) as the first row lock; skip on empty (not published); (2) skip unless the event's
+`learnerId` is in the locked `submittedLearnerIds` (the Submission still exists, as it
+always does: no deletion is approved); (3) read §3.1's context with the **locked**
+`lessonId`; skip unless the Course is published and, when bound, that Lesson is
+published; (4) skip unless `learnerId` is in §3.2's `joinedLearnerIds` (a learner who
+left has no current access to the Assignment or grade, ADR010 §12); (5) create one
+notification for `learnerId` with ID `derivedId("assignment-graded", submissionId, gradedAt)`
+and, using the **locked** title, the message
 `Your submission for "{assignmentTitle}" in "{courseTitle}" has been graded.` or,
 for a regrade, `The grade for your submission to "{assignmentTitle}" in "{courseTitle}" was updated.`
-A notification failure never rolls back grading.
+A later regrade waits for this transaction and then publishes its own event with its
+own `gradedAt`. §4.1's stated Course/Lesson/membership race applies. A notification
+failure never rolls back grading.
 
 ### 9.3 CT28 — quiz result (LD-12(f): reuse `QuizSubmittedEvent`)
 
@@ -520,7 +617,10 @@ unit rolls back and makes no submission depend on it. The approved subscriber se
 `QuizSubmittedEvent` is therefore exactly {Adaptive `QuizSubmittedEventListener`
 (plain, in-transaction, ADR011), Interaction `NotificationEventListener` (after
 commit)}; B6-V04 asserts this two-member set. ADR011's single in-transaction
-subscriber rule is unchanged.
+subscriber rule is unchanged: Adaptive stays the only in-transaction subscriber, its
+failures still propagate through `publishEvent` and roll back the submission unit
+(ADR011 §5), and §8's after-commit rules apply to the Interaction member only
+(clarified, §21 R01; B7-O14).
 
 Recipient: `learnerId`, for every qualifying event (manual and automatic
 submissions alike), when the Course is published. ID
@@ -592,11 +692,25 @@ public record UserChange(AdminUserView user, boolean changed) {}
   the existing API role vocabulary of `PublicUser` (ADR001 §11.3): `Learner`,
   `Instructor`, `Administrator`, mapped one to one; storage literals stay internal and
   in audit codes. **Status change.** `active` or `locked`. Same value → `changed = false`, nothing audited.
-- **Protections.** An Administrator cannot change their own role or status (409).
-  Under concurrency, each mutation locks every `admin` user row `FOR UPDATE` in
-  `id` order, then the target row, re-checks that the actor is still an active
-  Administrator (else 403) and rejects any result leaving no active Administrator
-  (409). Two Administrators demoting each other therefore serialize safely.
+- **Protections (r2).** An Administrator cannot change their own role or status
+  (409). Under concurrency, each mutation, before any other row lock or write, locks
+  every `admin` user row in `id` order and then the target row with
+  **`FOR NO KEY UPDATE`** (one native statement each, as the existing
+  `UserRepositoryImpl` locks; never `FOR UPDATE`), then, with new statements issued
+  after all locks are held, re-checks that the actor is still an active Administrator
+  (else 403) and rejects any result leaving no active Administrator (409); then it
+  updates only `role` or `account_status` and inserts the audit row. `FOR NO KEY
+  UPDATE` conflicts with itself, `FOR UPDATE` and `FOR SHARE`, so two mutations still
+  serialize on the lowest-`id` common admin row and two Administrators demoting each
+  other cannot both succeed. It does **not** conflict with the `FOR KEY SHARE` locks
+  that PostgreSQL's foreign-key checks take when another transaction inserts a row
+  referencing a user (posts, notifications, reports, audit rows, enrollments,
+  attempts), so those inserts never wait for an Administrator mutation and cannot
+  close a lock cycle with it. The updated columns carry no unique index usable by a
+  foreign key (V001 has only `pk_users` and `uq_users_email`), so PostgreSQL's own
+  row lock for that `UPDATE` is also `FOR NO KEY UPDATE`; the mode never escalates.
+  The row-locking clause needs UPDATE on at least one column, which the
+  `users` UPDATE (role, account_status) ceiling supplies (§19.2).
 - **Effects.** No cascade: Courses keep their `instructor_id`, Enrollments,
   submissions, posts and history stay. CT01 re-validates account state and role on
   every request (ADR001 §11.3), so a lock or role change takes effect on the user's
@@ -616,7 +730,7 @@ public PageResponse<AdminCourseView> listCoursesForAdministration(String query,
 public CourseChange hideCourseAsAdministrator(UUID courseId);
 public LessonChange hideLessonAsAdministrator(UUID lessonId);
 public record AdminCourseView(UUID courseId, String title, String publicationStatus,
-        UUID instructorId, String instructorDisplayName) {}
+        UUID instructorId) {}
 public record CourseChange(AdminCourseView course, boolean changed) {}
 public record LessonChange(UUID courseId, UUID lessonId, String publicationStatus,
         boolean changed) {}
@@ -624,8 +738,18 @@ public record LessonChange(UUID courseId, UUID lessonId, String publicationStatu
 
 - Each method requires an active `admin` through CT01.identity. The list includes
   hidden and published Courses; `query` matches a case-insensitive title substring;
-  order title `COLLATE "C"`, then `id`; names come from the existing CT01.identity
-  `instructorDisplayNames`.
+  order title `COLLATE "C"`, then `id`.
+- **Instructor names (r2).** Course returns only `instructorId` and never calls
+  CT01.identity's `instructorDisplayNames` for this list: that method's effective
+  scope (ADR001 §11) is IDs from published-course results, and this page includes
+  hidden Courses. Admin `AdminCourseService`, after its own active-`admin` check,
+  collects the distinct `instructorId` values of the page (at most 100) and calls
+  §3.4's `userSummaries` once; `instructorDisplayName` in the REST row is the
+  returned `displayName`, or null when the account is missing. A former Instructor
+  whose role later changed keeps their name (rows are owned Courses, not a role
+  directory). The hide response's single row (`CourseChange.course`) is named the
+  same way, with one ID. The REST shape `B7AdminCourse` is unchanged; Course's published
+  catalogue and its use of `instructorDisplayNames` are unchanged.
 - **Hiding** has exactly the effects of CT21.authoring's `hidden` publication change
   (no cascade; CT22 reconciliation for a Lesson). It is **not** run through the
   Instructor-only `withCourseConfigurationWrite` callback, whose audience is not
@@ -808,13 +932,15 @@ module, service, dependency, file, migration or architecture change is introduce
 Placement follows ADR008 §5: existing `NotificationEventListenerTest`,
 `DeadlineReminderSchedulerTest`, `UserManagementServiceTest`,
 `AuthorizationIntegrationTest` and the owning modules' existing suites, plus the
-real-PostgreSQL suite `InteractionAdminIntegrationTest` approved in §19.3.
+real-PostgreSQL suite `InteractionAdminIntegrationTest` approved in §19.3 (which also
+carries B7-O14–O17). B7-O18 belongs to the implementing consumer's CT17-P6 runtime-role
+privilege test under the extension procedure.
 
 | Oracle | Required result |
 |---|---|
 | B7-O01 | Derived IDs: the same request twice creates one row; `create` returns 0 the second time; two reminder runs over the same window create one reminder per learner, Assignment and deadline. |
-| B7-O02 | A rolled-back publication, grade, submission or recommendation unit creates no notification; a forced listener failure leaves the producer committed and returns its normal response. No plain `@EventListener` exists for the four events; `QuizSubmittedEvent` has exactly the two approved subscribers. |
-| B7-O03 | Reminder window: deadline = now is not reminded, now + lead is; submitted, left and non-member learners get none; a changed deadline inside the window gives a second reminder; a hidden Course, or a hidden bound Lesson, gives none (also for graded notifications); a deadline passing during the run is not reminded. |
+| B7-O02 | A rolled-back publication, grade, submission or recommendation unit creates no notification; a forced **Interaction** listener failure leaves the producer committed and returns its normal response. The only plain `@EventListener` for any of the four events is Adaptive's `QuizSubmittedEventListener`; `ContentPublishedEvent`, `AssignmentGradedEvent` and `RecommendationCreatedEvent` have exactly one subscriber (Interaction, after commit) and `QuizSubmittedEvent` exactly the two approved subscribers (B6-V04). (Corrected, §21 R01.) |
+| B7-O03 | Reminder window: deadline = now is not reminded, now + lead is; submitted, left and non-member learners get none; a changed deadline inside the window gives a second reminder; a hidden Course, or a hidden bound Lesson, gives none (also for graded notifications); a deadline passing during the run is not reminded; a graded notification is not created for a learner who left or for an Assignment hidden after grading. |
 | B7-O04 | Notification reads and mark-read are owner-scoped: a foreign ID is 404 like a missing one; `read-all` changes only own rows; ordering and paging as §4.2. |
 | B7-O05 | Q&A admission follows CT03 for Learner active/completed/left/absent, owning and non-owning Instructor and Administrator (403); hidden posts and replies of hidden questions never appear; a reply to a reply is 400; a mismatched Lesson is 404. |
 | B7-O06 | A reply notifies the question author once, never the replier, and commits with the reply. |
@@ -825,10 +951,15 @@ real-PostgreSQL suite `InteractionAdminIntegrationTest` approved in §19.3.
 | B7-O11 | Metrics match hand-computed fixtures: zero joined learners give null rates; latest-attempt selection follows ADR005's tuple; diagnostics are excluded; Unknown counts joined learners without rows; left learners are excluded. |
 | B7-O12 | OpenAPI shapes, 401/403/404 precedence and no-store headers for every Batch 7 operation; REST role values use the API vocabulary; frontend renders every message and post as plain text. |
 | B7-O13 | With the test pool limited so that every connection is held by a producer, the producer still commits and responds (after the acquisition timeout) and the lost notification is logged; with a pool larger than the producer threads, notifications are created. |
+| B7-O14 | Two listener paths of `QuizSubmittedEvent` (§21 R01), real PostgreSQL: (a) with a test-scoped fault in Adaptive's in-transaction processing, the submission returns the safe 500, no Attempt result, mastery, progress or recommendation row commits, the Attempt stays active, and Interaction's after-commit method is never invoked (no quiz-result or recommendation notification); (b) with a test-scoped fault in Interaction's method only, the submission returns 200 and the quiz result, mastery, progress and recommendations are committed (independent committed read), with the failure logged and no notification; (c) without faults, the notification exists only after the submission's commit is visible. |
+| B7-O15 | Assignment admission under concurrency (§21 R02), barriers on two connections: (a) discovery returns an Assignment, the Instructor hides it and commits, then the per-candidate transaction creates no reminder; (b) the per-candidate transaction holds `lockNotificationState`, a concurrent hide, deadline edit, Lesson rebinding or submission blocks until it commits, and the reminder reflects the pre-change state; (c) a deadline edited out of the window before admission gives no reminder, one moved inside gives a reminder keyed by the new deadline; (d) a learner whose submission commits before admission gets no reminder; (e) an Assignment hidden, renamed or rebound to a hidden Lesson between the grade commit and the CT27 listener gives no notification (hidden) or the locked current title (renamed); (f) no deadlock occurs between reminders, submissions, grading and edits (ADR010 §10 lock order). |
+| B7-O16 | Foreign-key lock cycle (§21 R03), real PostgreSQL with barriers: Learner A, the author of a question, has since been promoted to Administrator; transaction R inserts Learner B's reply (FK `KEY SHARE` on B) and pauses; transaction M, an Administrator locking B, takes every admin row (including A) and B with `FOR NO KEY UPDATE` and updates B's `account_status`; R then inserts the notification for A (FK `KEY SHARE` on A). Both commit within the test timeout, no `40P01` occurs, B is locked and the reply and notification exist. The same schedule with `FOR UPDATE` is the recorded counterexample and must not be the implementation. B7-O08's mutual demotions still leave an active Administrator. |
+| B7-O17 | Administrator Course names (§21 R04): a hidden Course's row shows its Instructor's name from `userSummaries`; a missing account gives null; a demoted former Instructor keeps the name; `instructorDisplayNames` is never called from the Administrator list or hide path and only with published-course IDs (allowlist test); `userSummaries` receives at most the page's distinct `instructorId` values; a non-Administrator gets 403 before any lookup. |
+| B7-O18 | Runtime-role ceiling (§19.2 r2), once the CT22.resume migration exists: under the runtime role a visit updates `resume_lesson_id` and `last_visited_at` together; a fault after the update rolls both back; an update of `enrollments.user_id` or `enrollments.course_id` fails with `42501`; a CT23 composition replacement that updates `quiz_questions.position` succeeds and an update of `quiz_id` or `question_id` fails with `42501`. |
 
 ## 16. Compatibility and alternatives
 
-No effective approval is amended or superseded. CT11-READ-FIELDS r1 is completed
+No effective approval is amended or superseded (re-checked for the §21 corrections: ADR001's `instructorDisplayNames` scope is now respected rather than widened, ADR010 §10's writer lock order is joined by a compatible shared reader, ADR006 CT22.resume is enabled by the ceiling, and ADR011 §§4–5 are restated, not changed). CT11-READ-FIELDS r1 is completed
 without change; CT03 U04 is consumed as approved; CT21 publication semantics, CT22
 reconciliation and ADR005's lock order are reused; ADR010 grading and
 ADR011's unit, single in-transaction subscriber and recommendation rules are unchanged
@@ -854,7 +985,7 @@ Issue's scope.
 
 **Still required:** IN06/IN07/IN08/IN10/IN11/IN12/IN15/IN20/IN21, CO06 (admin slice),
 CO12, CO16, AS09 (event), AS12 (unchanged), AS17, AD14 (event), AD16 (reporting),
-FE13/FE20–FE23/FE28 implementation and tests; QA06 execution of §15; runtime database
+FE13/FE20–FE23/FE28 implementation and tests; QA06 execution of §15 (including B7-O14–O18, §21); runtime database
 grants within the §19.2 ceiling, added per consumer as dated CT17-P6 matrix
 revisions: the four deferred Interaction/Admin tables, `users` UPDATE (role,
 account_status) for CT12.user (r2 currently denies both), `courses`/`lessons`
@@ -886,7 +1017,10 @@ earlier effective Leader-reserved approvals. Every decision below is
 Leader approval. Corrections of findings from the adversarial re-audit are listed in
 §20; earlier sections were edited in place only where §20 says so.
 
-### 19.2 CT17-P6-PLAN-2026-11-15-r1 — least-privilege ceiling for Batch 2–7 consumers
+### 19.2 CT17-P6-PLAN-2026-11-15-r2 — least-privilege ceiling for Batch 2–7 consumers
+
+*Revision r2 (§21 R05) adds `enrollments.last_visited_at` and `quiz_questions.position`
+to the ceiling and states the scope of unlisted relations; r1 was otherwise identical.*
 
 The effective CT17-P6 extension procedure (deployment record, “Deferred privileges and
 extension procedure”, r1 and the Leader-approved r2) requires a dated **matrix**
@@ -901,21 +1035,21 @@ is granted by this record.
 
 | Relation | Ceiling for runtime role | Contract basis | Never granted |
 |---|---|---|---|
-| `users` | existing r2 + UPDATE (role, account_status) | CT12.user; row locks use these columns | email, display_name, id updates; DELETE |
+| `users` | existing r2 + UPDATE (role, account_status) | CT12.user; its `FOR NO KEY UPDATE` row locks use these columns (§10.1) | email, display_name, id updates; DELETE |
 | `courses` | existing + INSERT; UPDATE (title, description, prerequisite_description, publication_status, adaptive_enabled, adaptive_settings) | CT21.authoring, CT06 settings, CT12.course | instructor_id update; DELETE |
 | `chapters` | SELECT, INSERT, UPDATE (title, position) | CT21.authoring, reorder | course_id update; DELETE |
 | `lessons` | SELECT, INSERT, UPDATE (title, content_markdown, position, publication_status) | CT21.authoring, CT12/CT32 hide | chapter_id update; DELETE |
 | `learning_materials` | SELECT; INSERT; UPDATE (title, publication_status, text_content, external_video_url, object_key, original_filename) | CT21.authoring, CT09 | lesson_id, material_type update; DELETE |
-| `enrollments` | existing + UPDATE (resume_lesson_id) | CT22.resume | DELETE |
+| `enrollments` | existing + UPDATE (resume_lesson_id, last_visited_at) | CT22.resume: pointer and time are written atomically (ADR006 `CT22-RESUME-SCHEMA-2026-11-09-r1`); `last_visited_at` is listed once its approved migration exists (r2) | id, user_id, course_id updates; DELETE |
 | `lesson_progress` | SELECT, INSERT, UPDATE (completed, mastery_skipped) | CT22.progress, CT22.atomic | DELETE |
 | `skills` | SELECT, INSERT, UPDATE (name, description), DELETE | CT05 (deleteSkill) | course_id update |
 | `skill_prerequisites`, `lesson_skills` | SELECT, INSERT, DELETE | CT05 add/remove, map/unmap | UPDATE |
 | `quizzes` | SELECT, INSERT, UPDATE (title, kind, time_limit_seconds, publication_status), DELETE | CT23 replace/delete unused hidden | course_id update |
 | `questions` | SELECT, INSERT, UPDATE (skill_id, prompt, kind, difficulty, options, correct_options), DELETE | CT23 replace/delete unused | — |
-| `quiz_questions` | SELECT, INSERT, DELETE | CT23 composition replacement | UPDATE |
+| `quiz_questions` | SELECT, INSERT, UPDATE (position), DELETE | CT23 composition replacement under the deferrable position uniqueness (r2: an in-place reorder may update positions) | quiz_id, question_id updates |
 | `attempts` | SELECT, INSERT, UPDATE (submitted_at, score_percentage) | CT04 | user/quiz/number/start/expiry updates; DELETE |
 | `attempt_answers` | SELECT, INSERT, UPDATE (selected_options, is_correct) | CT04 save/grade | DELETE |
-| `assignments` | SELECT, INSERT, UPDATE (lesson_id, title, instructions, deadline_at, publication_status) | CT10.rest | course_id update; DELETE |
+| `assignments` | SELECT, INSERT, UPDATE (lesson_id, title, instructions, deadline_at, publication_status) | CT10.rest; ADR010 §10 `FOR UPDATE` and §3.3's `FOR SHARE` admission lock (row locks need UPDATE on one column) | course_id update; DELETE |
 | `submissions` | SELECT, INSERT, UPDATE (object_key, original_filename, submitted_at, grade_percentage, feedback, graded_at) | CT10 replacement/grading | assignment/user updates; DELETE |
 | `learner_skill_masteries` | SELECT, INSERT, UPDATE (state) | CT08.execution | DELETE |
 | `path_recommendations` | SELECT, INSERT | CT07 (history is append-only) | UPDATE, DELETE |
@@ -927,7 +1061,12 @@ is granted by this record.
 Column-level UPDATE means implementations must issue targeted updates (or an
 equivalent dynamic update) and prove them with the existing real-backend privilege
 test under the runtime role; a JPA full-row update that touches a forbidden column is
-an implementation defect, not a reason to widen the ceiling. TRUNCATE, REFERENCES,
+an implementation defect, not a reason to widen the ceiling. Relations not listed
+(`password_reset_tokens`, `flyway_schema_history`) keep their effective r1/r2 rows;
+this ceiling neither widens nor narrows them. A ceiling that omits a column an
+effective contract must write is a defect of this record, corrected by a dated
+revision of the ceiling, never by a consumer exceeding it. Verification: B7-O18.
+TRUNCATE, REFERENCES,
 TRIGGER, MAINTAIN, DDL and grant options remain permanently prohibited. Gates: each
 consumer's dated matrix revision, script and CI change; infrastructure review
 (@tihh647-ui) and Leader CODEOWNER review; and Leader-authorized provisioning on any
@@ -1005,3 +1144,71 @@ V006; owner-scoped reads; CT30 precedence against ADR001 §12.4; the last-Admini
 protection under concurrency; Lesson-target moderation order; CT31 atomicity; CT13
 handling of empty populations, left learners and missing mastery rows; the reminder
 window; and all Batch 7 OpenAPI operations against their sections.
+
+## 21. Independent review remediation — 15 November 2026 (third instruction)
+
+### 21.1 Authority and method
+
+The Project Leader's explicit instruction of 15 November 2026, **“CodeMastery —
+Independent Review Findings Verification & Direct Remediation on Existing PR
+#244/#245”**, provided a separate read-only technical review of this PR at
+`3ef9bc09ff4c2c3bc2a97a0124c113852ffbf460` (findings R01–R05 here, R06 and E01–E02 in
+ADR013) and authorized verification, bounded technical decisions, contract amendments
+and oracle corrections on this PR. It excludes overriding Leader-reserved decisions,
+weakening the approved architecture, accepting residual risk and bypassing review.
+Each finding was treated as a falsifiable claim and re-derived from the sources
+(V001/V006, ADR001 §11, ADR006 CT22.resume, ADR010 §10, ADR011 §§4–5, the CT17-P6
+matrix, PostgreSQL row-lock conflict rules and Spring's event dispatch). This is
+delegated technical approval, not personal Leader approval, a GitHub or CODEOWNER
+review, or a test result.
+
+### 21.2 Dispositions
+
+| ID | Verified? | Root cause | Correction (sections) | Revision |
+|---|---|---|---|---|
+| R01 | **Valid.** §8 said publishing “must not throw” and banned plain listeners for all four events, and B7-O02 required “no plain `@EventListener`”, while §9.3 and ADR011 keep Adaptive's plain in-transaction listener whose failures must propagate and roll back the unit | §8 was written for notification subscribers but worded for every subscriber of the events | §8 scoped to Interaction with a two-path table; publishing rule restated per event; §9.3 cross-reference; B7-O02 corrected; B7-O14 added | Clarification: `CT28-SUBSCRIPTION-2026-11-15-r1` kept (semantics already as §9.3 stated) |
+| R02 | **Valid.** Reminders used the unlocked discovery row's publication, Lesson, title, deadline and submitters; the CT27 listener used the event's producer-time snapshot. Counterexamples reproduced: hide after discovery, hide/rename/rebind after grading, submission after discovery, deadline edit before insert | No Assessment-owned admission read inside the creating transaction; “at creation time” overstated the guarantee | `lockNotificationState` (`FOR SHARE`, ADR010 §10 compatible) as the first row lock of each creating transaction; reminder steps and CT27 subscription use only the locked state; CT27 adds membership eligibility; §4.1 states the exact admission point and the remaining unlocked Course/Lesson/membership snapshots; B7-O03 extended, B7-O15 added | `CT10-REMINDER-READ`, `CT22-ACTIVE-LEARNERS`, `CT11-CREATE`, `CT11-REMINDERS`, `CT27-SUBSCRIPTION` → r2 |
+| R03 | **Valid.** V006 posts and notifications reference `users`; PostgreSQL's FK checks take `FOR KEY SHARE`, which conflicts with `FOR UPDATE`. Reachable cycle: a question author later promoted to Administrator receives a reply notification while an Administrator mutation targets the replier (also reachable through multi-recipient notification inserts) | `FOR UPDATE` is stronger than needed: role and status are not key columns | `FOR NO KEY UPDATE` for every CT12.user row lock (§10.1); invariants re-derived (mutual conflict kept, re-check after locks); B7-O16 added, B7-O08 kept | `CT12-USER` → r2 |
+| R04 | **Valid.** ADR001 §11 limits `instructorDisplayNames` to IDs from published-course results; the Administrator list includes hidden Courses and also omits names of Instructors whose role changed | Reuse of a scoped catalogue lookup | Course returns IDs only; Admin names the page through `userSummaries` (allowlisted caller, ≤ 100 page IDs, null for missing accounts); REST shape and ADR001 unchanged; B7-O17 added | `CT12-COURSE`, `CT01-USER-SUMMARIES` → r2 |
+| R05 | **Valid.** CT22.resume writes `resume_lesson_id` and `last_visited_at` atomically, but the ceiling allowed only the pointer. Same-class check of every ceiling row against V001–V007 and its contracts found one more: CT23's in-place composition replacement may update `quiz_questions.position` under its deferrable uniqueness | Ceiling derived from current columns; the approved future column and an implementation-permitted update were missed | Both columns added; unlisted relations stated; B7-O18 added; nothing granted | `CT17-P6-PLAN` → r2 |
+
+### 21.3 Post-fix adversarial check
+
+Each original counterexample was replayed against the corrected text:
+
+- **R01:** a fault in Adaptive now propagates (allowed and required); a fault in
+  Interaction cannot reach the producer; B7-O02 no longer forbids ADR011's listener.
+  No new contradiction: `RecommendationCreatedEvent` is published inside the Adaptive
+  listener while the unit is active, so its after-commit subscription registers on the
+  same unit and never runs after a rollback.
+- **R02:** an Assignment hidden after discovery is re-read under the lock and skipped;
+  a hide arriving after admission waits, so the reminder reflects the earlier,
+  published state. The new lock adds no cycle: it is the creating transaction's first
+  row lock; ADR010 writers lock the Assignment first; and after R03 no Administrator
+  lock blocks the subsequent foreign-key checks. The remaining Course/Lesson/membership
+  race is stated, not hidden, and is no wider than §11.2's retained rows.
+- **R03:** the cycle needs a lock that conflicts with `FOR KEY SHARE`; `FOR NO KEY
+  UPDATE` does not, and the role/status `UPDATE` itself also takes only that mode.
+  Two mutations still conflict, so the last-Administrator protection is unchanged.
+  Existing AU07 password-reset `FOR UPDATE` locks one row and waits on nothing that a
+  CT12 mutation holds, so it serializes without a cycle.
+- **Executed SQL-level evidence (PostgreSQL semantics only, not the application).**
+  On a disposable container of the project's PostgreSQL image (17.11) with V001–V007
+  applied and synthetic rows, the B7-O16 schedule was run with two sessions: with
+  `FOR UPDATE` the reply transaction was aborted with `deadlock detected` (reply and
+  notification lost) while the mutation committed; with `FOR NO KEY UPDATE` both
+  committed (B locked, reply and notification present). With `lock_timeout` probes,
+  a held `FOR NO KEY UPDATE` blocked `FOR NO KEY UPDATE` and `FOR SHARE` and admitted
+  `FOR KEY SHARE`; a held `FOR SHARE` (R02's admission lock) blocked `FOR UPDATE` and
+  admitted `FOR KEY SHARE` and `FOR SHARE`. The script stayed outside the repository
+  and the container was removed.
+- **R04:** the hidden-Course row is named without calling the published-scope method;
+  `userSummaries` remains bounded to rows being returned.
+- **R05:** CT22.resume's atomic write fits the ceiling; no ceiling row now forbids a
+  write that an effective contract requires.
+
+Checkpoint count and dispositions are unchanged: twenty-seven checkpoints,
+**DELEGATED_APPROVED**, with the revisions in §2. The r1 identifiers above remain
+traceable as superseded open-PR drafts; none was integrated. Retained gates (§17)
+are unchanged. Apart from the SQL-level demonstration above, no test was run: no
+application code exists for these contracts, and B7-O14–O18 are specified, NOT_RUN.

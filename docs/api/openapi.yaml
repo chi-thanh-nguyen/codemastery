@@ -7436,7 +7436,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Optional trimmed query matches a case-insensitive substring of email or display name; optional exact role and accountStatus filters; ordered by email (C collation), then id. No credential data. CT12-USER/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Optional trimmed query matches a case-insensitive substring of email or display name; optional exact role and accountStatus filters; ordered by email (C collation), then id. No credential data. CT12-USER-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -7532,7 +7532,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Same role is changed=false and not audited. Own role, or removing the last active Administrator, is 409; an actor who is no longer an active Administrator under lock is 403. Audited as user_role_set_* in the same transaction. Takes effect on the user's next request. CT12-USER/REST-2026-11-15-r1, CT31-ACTIONS/CONSISTENCY-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Same role is changed=false and not audited. Own role, or removing the last active Administrator, is 409; an actor who is no longer an active Administrator under lock is 403. Audited as user_role_set_* in the same transaction. Takes effect on the user's next request. CT12-USER-2026-11-15-r2, CT12-REST-2026-11-15-r1, CT31-ACTIONS/CONSISTENCY-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -7607,7 +7607,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Lock or unlock. Same status is changed=false and not audited. Own status, or locking the last active Administrator, is 409. Audited as user_locked or user_unlocked in the same transaction; a locked account never authenticates. CT12-USER/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Lock or unlock. Same status is changed=false and not audited. Own status, or locking the last active Administrator, is 409. Audited as user_locked or user_unlocked in the same transaction; a locked account never authenticates. CT12-USER-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -7682,7 +7682,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Hidden and published Courses; optional case-insensitive title substring and publicationStatus filter; ordered by title (C collation), then id. CT12-COURSE/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Hidden and published Courses; optional case-insensitive title substring and publicationStatus filter; ordered by title (C collation), then id. instructorDisplayName comes from Auth user summaries for the page's instructor IDs (null for a missing account), never from the published-catalogue name lookup. CT12-COURSE-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -7766,7 +7766,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Only hidden is accepted (published is 400). Same effects as the Instructor hidden publication change, under the Course root lock taken first; already hidden is changed=false and not audited; otherwise audited as course_hidden in the same transaction. The owner may republish. CT12-COURSE/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Only hidden is accepted (published is 400). Same effects as the Instructor hidden publication change, under the Course root lock taken first; already hidden is changed=false and not audited; otherwise audited as course_hidden in the same transaction. The owner may republish. CT12-COURSE-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
