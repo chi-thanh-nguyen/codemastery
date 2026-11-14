@@ -7456,9 +7456,9 @@
             "schema": {
               "type": "string",
               "enum": [
-                "learner",
-                "instructor",
-                "admin"
+                "Learner",
+                "Instructor",
+                "Administrator"
               ]
             }
           },
@@ -11564,9 +11564,9 @@
               "null"
             ],
             "enum": [
-              "learner",
-              "instructor",
-              "admin",
+              "Learner",
+              "Instructor",
+              "Administrator",
               null
             ]
           },
@@ -11618,9 +11618,9 @@
               "null"
             ],
             "enum": [
-              "learner",
-              "instructor",
-              "admin",
+              "Learner",
+              "Instructor",
+              "Administrator",
               null
             ]
           },
@@ -11748,9 +11748,9 @@
               "null"
             ],
             "enum": [
-              "learner",
-              "instructor",
-              "admin",
+              "Learner",
+              "Instructor",
+              "Administrator",
               null
             ]
           },
@@ -11932,9 +11932,9 @@
           "role": {
             "type": "string",
             "enum": [
-              "learner",
-              "instructor",
-              "admin"
+              "Learner",
+              "Instructor",
+              "Administrator"
             ]
           },
           "accountStatus": {
@@ -11996,9 +11996,9 @@
           "role": {
             "type": "string",
             "enum": [
-              "learner",
-              "instructor",
-              "admin"
+              "Learner",
+              "Instructor",
+              "Administrator"
             ]
           }
         },
@@ -12418,10 +12418,6 @@
             "minimum": 0,
             "maximum": 100
           },
-          "scoredQuizAttempts": {
-            "type": "integer",
-            "minimum": 0
-          },
           "averageQuizScore": {
             "type": [
               "number",
@@ -12430,6 +12426,10 @@
             "minimum": 0,
             "maximum": 100,
             "description": "Exact mean rounded half-up to two fraction digits; null when no attempt qualifies."
+          },
+          "scoredLearnerQuizPairs": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
@@ -12442,7 +12442,7 @@
           "joinedLearners",
           "completedLearners",
           "completionRatePercent",
-          "scoredQuizAttempts",
+          "scoredLearnerQuizPairs",
           "averageQuizScore"
         ]
       },
@@ -12569,10 +12569,6 @@
             "minimum": 0,
             "maximum": 100
           },
-          "scoredQuizAttempts": {
-            "type": "integer",
-            "minimum": 0
-          },
           "averageQuizScore": {
             "type": [
               "number",
@@ -12587,6 +12583,10 @@
             "items": {
               "$ref": "#/components/schemas/B7SkillMasteryCount"
             }
+          },
+          "scoredLearnerQuizPairs": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
@@ -12599,7 +12599,7 @@
           "joinedLearners",
           "completedLearners",
           "completionRatePercent",
-          "scoredQuizAttempts",
+          "scoredLearnerQuizPairs",
           "averageQuizScore",
           "masteryDistribution"
         ]
@@ -13167,7 +13167,8 @@
       "approvalDisposition": "DELEGATED_APPROVED",
       "effectiveOnMain": false,
       "scope": "U07 structural/no-extra-read prerequisite technically resolved; bounded Course structure/guard/settings boundaries added. Original seven assertions, U03/U04 and access/error policy unchanged. New PR integration pending.",
-      "focusedCorrectionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026"
+      "focusedCorrectionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026",
+      "currentStateCorrection": "Current-state correction, 15 November 2026 (ADR012 §20 F7-15): PR #228 merged ADR005 into main as 81806fc on 9 November 2026 with no approving review recorded; the effectiveOnMain/integrationStatus values in this object are the historical preparation state. Independent review remains outstanding."
     }
   },
   "x-fe07-delegated-approval": {
@@ -13261,7 +13262,8 @@
       "effectiveOnMain": false,
       "scope": "Same-snapshot guarded PUT preconditions, generic safe 412 wording, explicit shared-client no-content mode for five unchanged 204 operations, existing verification allocations. Preserves N1 validator-free PUT success, original revisions and all other scopes. Approved, not implemented.",
       "scopePrecedence": "ADR005 section 16 replaces only the listed conditional input/comparison/error clauses and adds bounded CT16 no-content handling; sections 13 and 15 continue to govern all unaffected scopes. Earlier currentRevisions fields identify their historical amendment, not blanket precedence."
-    }
+    },
+    "currentStateCorrection": "Current-state correction, 15 November 2026 (ADR012 §20 F7-15): PR #228 merged ADR005 into main as 81806fc on 9 November 2026 with no approving review recorded; the effectiveOnMain/integrationStatus values in this object are the historical preparation state. Independent review remains outstanding."
   },
   "x-batch-02-contracts": {
     "decisionReference": "../decisions/006-batch-02-contract-approvals.md",
@@ -13313,6 +13315,7 @@
       "CT08.execution/failure/verification-plan and CT22.atomic remain pending",
       "CT25 diagnostic and CT28 notification binding remain pending",
       "Configuration values and scheduler/deadline/privilege qualification"
-    ]
+    ],
+    "currentStateCorrection": "Current-state correction, 15 November 2026 (ADR012 §20 F7-15): PR #230 merged ADR007 as 3eeacc8 on 9 November 2026. The retained gate naming CT08.execution/failure/verification-plan and CT22.atomic as pending is historical: ADR011 approved them (PR #236, c80fda9). CT25 is approved in ADR011 and CT28 in ADR012 (PR #244, open). No approving review is recorded for these merges."
   }
 }

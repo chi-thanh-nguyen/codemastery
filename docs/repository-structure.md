@@ -2062,3 +2062,21 @@ loader-script or helper path is added.
 
 The approved `sample-data/` inventory is unchanged: `README.md`,
 `materials/sample-slides.pdf` and `seed/01`–`05` keep their existing paths.
+
+### Batch 7 delegated integration-test placement — 15 November 2026
+
+`CT14-INTEGRATION-PLACEMENT-2026-11-15-r1` is **DELEGATED_APPROVED** under the Project
+Leader's explicit instruction of 15 November 2026, “CodeMastery — Final Contract
+Resolution & Comprehensive Independent Re-Audit of PR #244 and #245”, which delegated
+the bounded test-structure decision for the gaps ADR008 §5 recorded
+([ADR012 §19.3](decisions/012-batch-07-contract-approvals.md#193-ct14-integration-placement-2026-11-15-r1--interactionadmin-and-storage-suites)).
+Exactly these two test files may be added; they are not yet created:
+
+- backend/src/test/java/com/codemastery/integration/InteractionAdminIntegrationTest.java
+- backend/src/test/java/com/codemastery/integration/FileStorageIntegrationTest.java
+
+Both extend the existing `AbstractIntegrationTest`. The storage suite uses a
+Testcontainers `GenericContainer` from the already declared test dependency with the
+MinIO image digest pinned in `infrastructure/docker-compose.yml`; no new dependency,
+directory or production file is approved. The canonical tree above is unchanged; this
+is an explicit addition.

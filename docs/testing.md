@@ -3141,7 +3141,11 @@ locking for Administrator hiding; moderation resolution of every open report on 
 target; hand-computed reporting metrics; and OpenAPI/plain-text rendering. They use
 ADR008 §5's existing placements (`NotificationEventListenerTest`,
 `DeadlineReminderSchedulerTest`, `UserManagementServiceTest`,
-`AuthorizationIntegrationTest` and the owning modules' existing suites). Dedicated
-real-PostgreSQL Interaction/Admin integration suites remain the structural gap
-ADR008 records; no new test file, dependency or result is claimed. Reminder tests
-supply explicitly named CT38 case values and a fixed injected clock.
+`AuthorizationIntegrationTest` and the owning modules' existing suites). *Update, 15
+November 2026:* ADR012 §19.3 (`CT14-INTEGRATION-PLACEMENT-2026-11-15-r1`) closes the
+structural gaps with exactly two new suites extending `AbstractIntegrationTest`:
+`InteractionAdminIntegrationTest` for the real-PostgreSQL Batch 7 cases (including
+B7-O13 pool exhaustion) and `FileStorageIntegrationTest` for ADR010's real MinIO cases,
+using the pinned Compose MinIO image in a `GenericContainer`. Neither file exists yet,
+no dependency is added and no result is claimed. Reminder tests supply explicitly
+named CT38 case values and a fixed injected clock.
