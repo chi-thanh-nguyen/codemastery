@@ -1204,8 +1204,10 @@ Each original counterexample was replayed against the corrected text:
   committed (B locked, reply and notification present). With `lock_timeout` probes,
   a held `FOR NO KEY UPDATE` blocked `FOR NO KEY UPDATE` and `FOR SHARE` and admitted
   `FOR KEY SHARE`; a held `FOR SHARE` (R02's admission lock) blocked `FOR UPDATE` and
-  admitted `FOR KEY SHARE` and `FOR SHARE`. The script stayed outside the repository
-  and the container was removed.
+  admitted `FOR KEY SHARE` and `FOR SHARE`. Two transactions inserting the same two
+  notification IDs with `ON CONFLICT (id) DO NOTHING` deadlocked in opposite order and
+  both committed (two rows) in ascending order. The scripts stayed outside the
+  repository and the containers were removed.
 - **Same-class finding during the check (lock order):** with R02's shared admission
   lock, two application instances can process the same reminder candidate at once.
   If CT11.create inserted overlapping IDs in different orders, their unique-index
