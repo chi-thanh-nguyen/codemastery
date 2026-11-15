@@ -3163,3 +3163,48 @@ Administrator mutation finishes without deadlock under `FOR NO KEY UPDATE`), B7-
 (Administrator Course names through `userSummaries`, never the published-scope
 `instructorDisplayNames`) and B7-O18 (runtime-role ceiling for the CT22.resume
 pointer and time and for `quiz_questions.position`). All remain specified, NOT_RUN.
+
+## Batch 8 E2E selection, evaluation and Final coverage — specified, NOT_RUN
+
+[ADR013](decisions/013-batch-08-contract-approvals.md) selects the Final E2E cases
+and evaluation procedures. **CT19:** the fourteen merged `learner-flow.spec.ts` tests
+are adopted as cases L-A1–L-A5 (historical results are not accepted), and FE25 adds
+L-N1 (lesson completion, progress, resume), L-N2 (timed quiz and results), L-N3
+(assignment submission, grading and notification) and L-N4 (lesson Q&A reply
+notification and report); L-N3/L-N4 depend on ADR012. **CT35:** FE26 implements A-1
+(two contrasting placement profiles with different guidance and Mastery Maps), A-2
+(prerequisite warning without a hard block) and A-3 (skipped placement) in
+`adaptive-flow.spec.ts`. Both suites keep CT34 r2's disposable stack and build their
+data per test through approved REST operations as isolated records whose Course titles
+start with `~E2E Journey `; because those published Courses join the shared catalogue,
+L-A1/L-A4 assert fixture-relative results (first twenty fixture Courses on page 1,
+total at least 21). No new fixture file or shared seed is used. *(ADR013 §17 F8-02.)* **CT36:** profile scripts P1–P3, gap scenarios G01–G24 and mastery cases
+M01–M11 and the discriminating
+variants G′01–G′24 and P2-R are policy-independent where stated and live in the existing scenario JSON
+files and evaluation/integration tests. **CT20.F:** release requires L-A3, L-A4,
+L-N1 and L-N2 on `chromium-desktop` and `chromium-mobile`, A-1 on `chromium-desktop`,
+the CT36.F-measures report, deployment smoke checks, sample-data loading and the CI
+jobs on one exact commit; other cases and projects are attempted and reported but do
+not block release. No case has been executed for this record.
+
+*Independent review remediation, 15 November 2026* ([ADR013 §18](decisions/013-batch-08-contract-approvals.md#18-independent-review-remediation--15-november-2026-third-instruction)):
+the fixture-relative rule now also covers L-A5, whose far-page check keeps the exact
+`content`, `page` and `size` but asserts `totalElements ≥ 21` and
+`totalPages = ceil(totalElements / 20)` from the same response. Journey Courses must
+not contain `foundations` and must have no prerequisite text, so L-A1's search and
+filter results stay exact. L-N3 runs against a per-run MinIO added to the
+disposable stack by ADR013 §7.3: Compose-pinned images, a private network, generated
+credentials, a bucket provisioned by the unchanged Compose initializer, and
+removal with the run. L-N3 checks an upload/download byte round trip. Nothing is
+implemented or run.
+
+*Leader decision E02, 15 November 2026* ([ADR013 §19](decisions/013-batch-08-contract-approvals.md#19-leader-decision-e02-and-practice-difficulty-consumption--15-november-2026)): the
+mastery-based practice recommendation adds oracles B8-P01–B8-P11. They cover the
+mapping, the governing skill and its ties, the candidate Quizzes, fallback, null
+results, admission, read-only isolation from quiz capture and evidence, the
+Assessment read's allowlist, the SD04 outputs and the frontend entry. They are placed
+in the existing `PracticeDifficultySelectorTest`, the service unit tests,
+`AuthorizationIntegrationTest`, `AdaptiveLearningFlowIntegrationTest` and the
+learning frontend tests. CT35 adds A-4 (Hard versus Easy practice for contrasting
+learners, plus a Medium-to-Easy fallback), which CT20.F r2 makes release-required on
+`chromium-desktop` with A-1. All are specified, NOT_RUN.

@@ -6337,6 +6337,74 @@
         "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
       }
     },
+    "/api/courses/{courseId}/lessons/{lessonId}/practice-recommendation": {
+      "get": {
+        "operationId": "b8ReadPracticeRecommendation",
+        "tags": [
+          "Batch 8 contracts"
+        ],
+        "description": "Self Learner. Mastery-based practice recommendation for one published Lesson (ADR013 §19, CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1; Leader decision E02 option a). Admission as /adaptive-guidance (CT03 learner Course access, ACTIVE/COMPLETED membership); the Lesson must be a currently published Lesson of that Course, else 404. recommendation is null unless the Course's stored adaptiveEnabled is true, the Lesson has mapped skills and at least one published practice Quiz of uniform difficulty covers only those skills. The governing skill is the Lesson skill with the easiest CT07.difficulty target (unknown/weak easy, learning medium, mastered hard; ties by skill name order); the Quiz is chosen at that level, else by the CT07.difficulty fallback order, then by title and id. Advisory only: never blocks or reorders access, writes nothing, and does not change quiz capture, evidence or mastery. ADR013 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B8PracticeRecommendation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B8Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/013-batch-08-contract-approvals.md"
+      }
+    },
     "/api/me/recommendations": {
       "get": {
         "operationId": "b6ListMyRecommendations",
@@ -11067,6 +11135,109 @@
         ],
         "description": "lessons covers every published Lesson in canonical order. ACTIVE/COMPLETED learners remain admitted; completing all Lessons alone does not suppress a still-valid remedial review. The visibility predicate is identical to the Home read within its ACTIVE-only population."
       },
+      "B8PracticeRecommendation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "recommendation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B8RecommendedPractice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "courseId",
+          "lessonId",
+          "adaptiveEnabled",
+          "recommendation"
+        ],
+        "description": "Computed on read from the learner's stored mastery states and the published Quiz bank; not persisted and not a path recommendation. Clients show it as returned, add no selection of their own, and keep every Quiz available."
+      },
+      "B8RecommendedPractice": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizTitle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ],
+            "description": "Uniform difficulty of every Question of the recommended Quiz."
+          },
+          "targetDifficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ],
+            "description": "CT07.difficulty target of the governing skill's state."
+          },
+          "fallback": {
+            "type": "boolean",
+            "description": "True exactly when difficulty differs from targetDifficulty."
+          },
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skillName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skillState": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "learning",
+              "mastered",
+              "weak"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Fixed English template (ADR013 §19.4), shown verbatim."
+          }
+        },
+        "required": [
+          "quizId",
+          "quizTitle",
+          "difficulty",
+          "targetDifficulty",
+          "fallback",
+          "skillId",
+          "skillName",
+          "skillState",
+          "reason"
+        ]
+      },
       "B6MyRecommendation": {
         "type": "object",
         "additionalProperties": false,
@@ -12906,6 +13077,21 @@
       },
       "B6Invalid": {
         "description": "Malformed identifier or page; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B8Unavailable": {
+        "description": "Safe unavailable resource: missing or hidden Course (CT03 stage 3), or, for a Learner with an ACTIVE/COMPLETED Enrollment, a Lesson that is missing, hidden or not in that Course; no identifiers. A LEFT or absent Enrollment on a published Course is 403 (CT03 stage 4), not 404.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/AuthenticationNoStore"
