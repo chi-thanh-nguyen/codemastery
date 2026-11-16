@@ -398,6 +398,27 @@ reinterpretation of its original inventory.
 [The testing record](testing.md#fe24-ct34-r2-lifecycle-implementation--13-november-2026)
 holds the design mapping and the verification actually performed.
 
+## Bounded SH07 E2E CI workflow addition — 13 November 2026
+
+Under the same instruction of 2026-11-13, the Project Leader explicitly authorized one
+bounded workflow addition for SH07, `.github/workflows/ci-e2e.yml` (workflow `CI E2E`,
+job `E2E`), implementing `CT34-CI-2026-11-09-r1`
+([ADR008 §7](decisions/008-batch-04-contract-approvals.md#7-ct34ci)). This record adds
+exactly two files:
+
+| File | Responsibility |
+| --- | --- |
+| `.github/workflows/ci-e2e.yml` | The E2E job: locked installs, pinned browsers, lifecycle tests, the five-project suite against the run's own disposable stack, an `always()` recovery step and an informational summary |
+| `e2e/fixtures/ci-evidence.mjs` | Writes that summary from an allowlist of facts (pinned versions, per-project counts, titles and skip reasons of non-passing tests, run ID, inventory state, image IDs, resource outcomes) and copies no error output, trace, report or log |
+
+The existing `/.github/workflows/` (@chi-thanh-nguyen) and `/e2e/` (@heizseung and
+@chi-thanh-nguyen) CODEOWNERS rules cover them and are unchanged. The eight existing
+jobs, their names and the `main-quality-gates` ruleset are unchanged; `E2E` is not a
+required check. No new action, action version, dependency, secret, permission or
+artifact upload is introduced: the workflow reuses `actions/checkout@v7` and
+`actions/setup-node@v7`. The immutable canonical tree remains unchanged; this is an
+explicit addition, not a reinterpretation of its original inventory.
+
 ```text
 codemastery/
 
@@ -406,6 +427,8 @@ codemastery/
     ├── workflows/
 
     │   ├── ci-backend.yml
+
+    │   ├── ci-e2e.yml
 
     │   ├── ci-frontend.yml
 
@@ -1896,6 +1919,8 @@ codemastery/
 │       ├── auth-fixture.ts
 
 │       ├── catalogue-fixture.sql
+
+│       ├── ci-evidence.mjs
 
 │       ├── host-identity.mjs
 

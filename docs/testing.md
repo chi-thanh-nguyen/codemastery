@@ -53,7 +53,7 @@ verification is separate work.
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
 | E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`lifecycle.test.mjs`, `run-inventory.test.mjs`, `stack-recovery.test.mjs`, `preview-control.test.mjs`, `local-stack.test.mjs`, `stack-down.test.mjs`); Python 3 (standard library only) and Node 22.18+ or 24; the coordinator tests use disposable fake checkouts and the real per-account registry, the recovery tests an injected fake Docker CLI, the other tests a stub `docker` on `PATH`, a stub Vite build entry point and a stub Vite preview module | No | CT34 r2: exclusive ownership taken and persisted before Playwright starts; same-checkout and path-alias conflicts refused without touching outputs; isolated checkouts concurrent; nonterminal, corrupt, widened-mode or earlier-device-identity records block reuse; a stale or exported hand-down is refused; unsafe output roots refused; birth-identity process classification (PID reuse never signalled); cooperative preview shutdown over the private channel with no PID fallback; no build or Docker removal while a writer lives; endpoint-bound Docker calls and daemon-confirmed absence (a lost daemon socket is never absence; recorded states are re-verified); interrupted-intent reconciliation; volume associations and unaccounted volumes; verified temporary-path removal; bounded idempotent retry; readiness marker and backend diagnostics | Real Docker, Vite, browsers or the E2E flows themselves ([real-Docker record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)) |
-| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
+| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` and by the non-required `E2E` job of `CI E2E` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
 | VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
 
@@ -307,7 +307,7 @@ Vite configuration without emitting files. The `build` script already runs
 Build output goes to `frontend/dist/`. Development-only Vitest `5.0.5` and jsdom
 `27.4.0` execute the bounded frontend suite through `npm test` (`vitest run`).
 No lint script is implemented. The required Frontend CI job runs `npm ci`, `npm test`, then `npm run build`.
-The optional browser harness and the E2E suite are separate and are not run by CI.
+The optional browser harness is not run by CI; the E2E suite runs in the separate, non-required `CI E2E` workflow ([CI](#ci)).
 Build success alone does not establish behavioral coverage or deployment readiness.
 
 ### Browser harness and E2E suite
@@ -627,8 +627,51 @@ CI runner: they deploy nothing and do not reach the real VM. No job starts the
 full local Compose stack. The VM jobs start their containers with `docker run`;
 only the MinIO initializer job uses Compose, starting just the `minio` and
 `minio-init` services (and a placeholder backend under the VM override) in
-disposable projects. There is no E2E job or artifact upload. Workflow configuration does not prove a successful run; see
+disposable projects. A fourth workflow, `CI E2E` (described below), runs the E2E suite and is
+not a required check. No workflow uploads artifacts. Workflow configuration does not prove a successful run; see
 [Latest recorded results](#latest-recorded-results).
+
+`CI E2E` ([ci-e2e.yml](../.github/workflows/ci-e2e.yml)) has one job, `E2E` (`e2e`), on
+`ubuntu-24.04` with Node 24, Docker and `contents: read`, triggered like the other
+workflows. It implements the SH07 contract `CT34-CI-2026-11-09-r1`
+([ADR008 §7](decisions/008-batch-04-contract-approvals.md#7-ct34ci)). From `frontend/` it runs
+`npm ci`; from `e2e/` it runs `npm ci`, then
+`npx playwright install --with-deps chromium firefox webkit` (the browser builds pinned by
+the lockfile), then `node --test fixtures/*.test.mjs`, then `E2E_WORKERS=1 npm test` with
+`E2E_BASE_URL`, `E2E_API_URL`, `E2E_BACKEND_IMAGE`, `E2E_POSTGRES_IMAGE`,
+`E2E_USERNAME` and `E2E_PASSWORD` unset. The suite therefore runs all five projects
+against the run's own disposable stack, through the r2 lifecycle coordinator, with no
+retries and no `continue-on-error`. An `always()` step then runs `npm run stack:down`. That step
+reconciles the run inventory after the test process has ended and fails the job on its own
+when recovery is incomplete. It never prunes Docker or removes a resource the inventory does
+not prove belongs to the run. A test, setup, browser-launch or cleanup failure fails the job.
+On a step timeout or cancellation the Actions runner signals only the step's root process
+(SIGINT, then SIGTERM after 7.5 s, then a kill of that process alone after 2.5 s more). The
+suite step therefore `exec`s `npm test` with npm's script shell set to bash
+(`npm_config_script_shell=bash`): npm forwards the signal to its script shell, bash runs the
+single script command in place (Ubuntu's `/bin/sh`, dash, does not), and so the lifecycle
+coordinator receives it, forwards it to its runner and finalizes the run. Without this the
+coordinator received nothing and kept running the suite after the step had ended. The
+coordinator can still outlive the step while it finishes its teardown, so the recovery step
+retries `npm run stack:down` only while it exits 2 (another invocation owns the checkout;
+nothing was touched), at most 48 times 5 seconds; any other result, including incomplete
+recovery, is final.
+Step budgets (minutes): frontend install 5, E2E install 3, browsers 10, lifecycle tests 5,
+suite 25, recovery 8, summary 2. Their sum (58) leaves 12 minutes of the 70-minute job limit
+for checkout, Node setup, post steps and termination. They are sized from the first measured
+run (browsers 66 s, lifecycle tests 33 s, suite 5.2 min including cold image builds, recovery
+1 s, job about 7 min) with headroom for cold dependency downloads, and the recovery budget
+covers bounded Docker retries against a slow daemon. A timed-out suite step still leaves recovery and
+summary their own budgets. An `always()` step is best effort and cannot run after a forced
+loss of the runner. The final step writes an informational job summary: tested commit and
+pull request head, runner OS, Node, npm, Python and Docker versions, the lockfile hash, the
+pinned Playwright and browser revisions, the run ID, the final inventory state, the image IDs
+and per-resource outcomes, per-project pass/fail/flaky/skip counts, and the titles and skip
+reasons of non-passing tests. It copies no error messages, traces, screenshots, request data,
+storage state or logs, because those can contain the run's synthetic credentials and session
+material. Raw reports are not uploaded. Making `E2E` a required check is a separate Project
+Leader decision. A green run is infrastructure evidence, not CT19/CT35/CT20.F Final coverage
+acceptance.
 
 The Backend and Frontend jobs end with an informational evidence step that writes
 to the run's job summary unless the run was cancelled, including after a failed
@@ -3532,3 +3575,75 @@ Not executed: Ubuntu 24.04 (its first execution remains the stacked SH07 job onc
 this branch), a Linux host with `hidepid` mounted (there an inaccessible `/proc` entry makes
 every group check unreliable, so recovery stays incomplete), real PID reuse, a real reboot,
 `firefox-desktop` and WebKit, and external mode.
+
+## SH07 E2E CI first executions — 13 November 2026
+
+The `CI E2E` workflow ([record](#ci)) ran for the first time on stacked draft PR
+[#241](https://github.com/chi-thanh-nguyen/codemastery/pull/241) (built on FE24 PR
+[#240](https://github.com/chi-thanh-nguyen/codemastery/pull/240); this is not final `main`
+integration evidence). Run
+[43296414482](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/43296414482):
+PR head `8f3be1d08484050d2d38b68bbca4a620b4dbe29c`, tested merge commit `eca7a86` (into
+`main` `956fa35fa197d57dde61e04501ac03af46f9d155`), `ubuntu-24.04`, Node 24, Playwright
+1.63.0 with its pinned browsers.
+
+| Step | Result |
+| --- | --- |
+| Install pinned browsers (`--with-deps`) | success, 66 s |
+| `node --test fixtures/*.test.mjs` | PASS 85/85, 33 s: the coordinator, inventory, recovery and control-channel tests on Linux |
+| `E2E_WORKERS=1 npm test` | success: 70 results, **66 passed, 4 skipped, 0 failed**, all five projects including `firefox-desktop`; the 4 skips are the suite's own `API-only checks run once.` on the four non-`chromium-desktop` projects; run admitted by the coordinator before Playwright started; both containers, the anonymous volume, the network and the build removed and verified; the runner's exit verified by Linux birth identity before the run became complete |
+| `npm run stack:down` (`always()`) | success: the completed run re-verified, nothing left |
+
+This first execution qualifies the Linux identity, filesystem and lock paths on the
+hosted Ubuntu runner, for the normal path. CI-level failure injection (a deliberately failing
+setup, assertion, browser or cleanup inside the workflow) was not run. Those propagation
+paths were exercised locally through the same `npm` entrypoints
+([FE24 record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)). The step budgets
+were then set from these durations. `E2E` is not a required check. No raw report was
+uploaded. Coverage is the existing suite only, so this is not Final main-flow acceptance.
+
+These first executions tested the pre-remediation FE24 lifecycle that the stacked branch then
+carried (85 lifecycle tests). They are historical and are superseded by the record below.
+
+## SH07 synchronization with the merged FE24 lifecycle — 17 November 2026
+
+FE24 PR [#240](https://github.com/chi-thanh-nguyen/codemastery/pull/240) merged as `main`
+`46a4540794bb1d31e2d24483cae48b19db1ad539`. `main` was merged into the SH07 branch rather than
+rebased. Every FE24 lifecycle file (`e2e/fixtures/*` other than `ci-evidence.mjs`,
+`e2e/package.json` and `e2e/playwright.config.ts`) takes `main`'s version unchanged. The SH07
+diff against `main` is the workflow, `ci-evidence.mjs` and this documentation only.
+
+Auditing the workflow against the final lifecycle found one SH07 defect: the signal path on a
+step timeout or cancellation (see [CI](#ci)). The Actions runner signals only a step's root
+process on Unix. Under the original step that process was bash, which absorbed SIGINT and died
+on SIGTERM, so the coordinator never received a signal and kept running the suite after the step
+had ended. The fix is the `exec`, bash-script-shell suite step and the exit-2 wait in the
+recovery step. The lifecycle files did not change.
+
+| Check | Result |
+| --- | --- |
+| `node --test fixtures/*.test.mjs` (macOS, Python 3.9.6, Node 24.21) | PASS 152/152, 25 s |
+| Local `E2E_WORKERS=1 npm test`, then `npm run stack:down` (macOS, Docker 29.8.1) | 53 passed, 4 skipped (API-only), 13 failed: every `firefox-desktop` case, `browserType.launch: Failed to launch the browser process`. This is the known local Firefox launch failure on this host, not a lifecycle or suite result. Run complete; recovery exit 0; no Docker leftovers |
+| Runner cancellation replayed against the original step (SIGINT to the step root, SIGTERM after 7.5 s, then a kill of the root alone) | The coordinator received no signal and was still running after the step ended. Recovery exited 2. The orphaned coordinator ran the rest of the suite to completion about 53 s later |
+| The same replay against the fixed step | The coordinator logged `received signal 2; forwarding it to the runner`, Playwright stopped (1 interrupted, 23 did not run), and the run was finalized within 4 s. The recovery step then exited 0, `complete`, with no leftovers |
+| The recovery step while a live run owned the checkout | Waited 23 times on exit 2, then recovered once the run ended. Exit 0, `complete` |
+| The recovery step with stubbed `stack:down` exits 0, 1, 3 and 2 | Step exits 0, 1 and 3 after one call; on a permanent exit 2 it stops after 48 calls with an error and exit 2 |
+| Shell behavior on `ubuntu:24.04` | `bash -c` runs a single command in place; `sh` (dash 0.5.12) does not |
+| npm signal forwarding | Exercised on macOS (npm 11.19.0, real coordinator) and in a Debian container (npm 10.9.9, dash), where only the bash script shell delivered the signal |
+
+CI run [43951662691](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/43951662691)
+tested PR head `beb25e830c911dca774ef1a5f27f345361ddee7a` as merge commit `a35b757` into `main`
+`46a4540`. It ran on `ubuntu-24.04` (image 20261111.370.1) with Node 24.22.2 and Playwright
+1.63.0 with its pinned browsers.
+
+| Step | Result |
+| --- | --- |
+| Install pinned browsers (`--with-deps`) | success, 46 s |
+| `node --test fixtures/*.test.mjs` | PASS 152/152, 38 s: the final fencing, CAS, process-group and recovery tests on Linux |
+| `E2E_WORKERS=1 npm test` (bash script shell, `exec`) | success, 5.0 min: 70 results, **66 passed, 4 skipped, 0 failed**, 14 per project on all five projects. The 4 skips are the API-only REST smoke on the four non-`chromium-desktop` projects. The run was admitted before Playwright started, finalized by the coordinator with 4 resources removed, and became `complete` after the runner's exit was verified |
+| `npm run stack:down` (`always()`) | success: the completed run was re-verified and nothing was left |
+
+Not exercised in CI: deliberate setup, assertion, browser or cleanup failure, and a real
+timeout or cancellation inside the hosted workflow. The cancellation path was replayed locally
+only, as listed above. `E2E` is not a required check. Coverage is the existing suite only, so
+this is not Final main-flow acceptance.
