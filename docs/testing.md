@@ -417,11 +417,25 @@ holding every process it starts (Playwright workers, the build and the preview).
 runner exits, the coordinator waits (at most 45 s, without signalling anything) for that
 group to empty before it finalizes, and finalization and `npm run stack:down` touch neither
 the build nor the stack while a live member remains: a disconnected Playwright 1.63 worker
-can keep writing `test-results/artifacts` for up to 30 s while it finishes. A run is complete
-only after the coordinator has also verified the runner's own exit. Only a direct child of
-the coordinator that currently holds the lock, acting for that coordinator's run, may change
-the inventory: a runner orphaned by a killed coordinator stops before it writes anything,
-so it can neither change the record recovery now owns nor one written by a later run.
+can keep writing `test-results/artifacts` for up to 30 s while it finishes. The group is
+checked before the preview is asked to close (the verified preview, matched by PID and birth
+identity, is the only member allowed to remain at that point) and again, in full, afterwards.
+A runner record without a usable group identity, an enumeration that is incomplete (on Linux
+any `/proc` read error other than the process having gone, such as `EACCES`, `EPERM` or
+`EIO`), or a record from another boot never counts as an empty group. A run is complete
+only after the coordinator has also verified the runner's own exit.
+
+Every change of a run record is serialized by a second stable lock file next to the record
+(`runs/.<key>.json.lock`) and is a fenced compare-and-swap: inside that short, bounded
+critical section the current record is re-read and the writer's handed-down run ID, lock
+key, `fence` (ownership generation) and last-read `revision` must still match it; the write
+then increments `revision`. The coordinator makes its own changes this way, and Node
+writers (global setup, teardown and `stack:down`) commit through the coordinator's
+`commit-record` helper. Each recovery takes the record over by incrementing `fence`, so a
+writer of an earlier generation is refused at its next write however long it was paused,
+and a later run has a new run ID. Finalizers are recorded writers like the runner (intent
+before the spawn, PID and birth identity after it), so recovery stays incomplete, and the
+checkout stays blocked, while an earlier finalizer may still be alive.
 
 An incomplete record that recovery cannot resolve (for example processes recorded in a
 previous boot, which need explicit reconciliation) stays in `~/.codemastery-e2e/runs/`.
@@ -3300,7 +3314,7 @@ approval or Final coverage acceptance.
 | §10.3 process identity | Linux `/proc/<pid>/stat` start ticks with boot ID and PID namespace; macOS kernel `kinfo_proc` start time (microseconds) with `kern.boottime`; the host is the OS machine identity (macOS host UUID, Linux machine-id), not the network-assigned hostname; supervisor, runner, builder and preview are recorded; the coordinator writes the runner's intent before the spawn and its PID, birth identity and process group right after it, and global setup refuses to act unless it is that recorded runner; the builder and preview are recorded before they are spawned; the runner's process group must be empty (Playwright workers included) before the build or the stack is touched; Vite is started from its resolved entry point, not through `npx`, so the recorded PID is the real writer |
 | §10.3 preview recovery | `fixtures/preview-server.mjs` hosts the build through the pinned Vite preview API and listens on `sockets/<runId>.sock` (0600); it closes its own server only for its own run ID and birth identity; no recovered PID is signalled; an unavailable channel preserves the process |
 | §10.3 Docker | Endpoint, context and daemon ID are pinned at setup; every later Docker call is bound to that endpoint (`DOCKER_HOST`); the client context and daemon ID are re-verified before cleanup, behind every not-found verdict and before completion; only Unix-socket/pipe contexts are accepted; absence is only Docker's own not-found answer for the exact ID; removal targets recorded IDs corroborated by the run labels, and recorded `removed`/`absent` states are re-verified on every pass; pending intents are reconciled by exact run label and name; each container's volume association is a pending intent until its own mounts are recorded, a container with an unresolved association is never removed, and a vanished container leaves an unaccounted volume; a volume is removed only when it is exclusive to this run's container and Docker labels it anonymous; named volumes and bind mounts are refused; nothing Docker-side is touched while a writer is unresolved; resources of no current inventory (including pre-r2 PID-only ones) are reported, never removed, and do not block this run; no prune is issued |
-| §10.3 completion | One engine (`fixtures/stack-recovery.mjs`) serves teardown, the coordinator's finalization and `npm run stack:down`; every inventory write comes from a direct child of the lock-holding coordinator acting for its run; the temporary build is removed only after its parent, owner, device/inode and run marker are verified; the run becomes `complete` only after the coordinator has verified the runner's own exit; otherwise it stays nonterminal and the command exits nonzero |
+| §10.3 completion | One engine (`fixtures/stack-recovery.mjs`) serves teardown, the coordinator's finalization and `npm run stack:down`; every inventory change is a fenced compare-and-swap under the record lock (run ID, lock key, `fence` and `revision` must match), and each recovery takes the record over with a new fence; finalizers are recorded writers; the temporary build is removed only after its parent, owner, device/inode and run marker are verified; the run becomes `complete` only after the coordinator has verified the runner's own exit; otherwise it stays nonterminal and the command exits nonzero |
 
 The image cache tag is now per checkout (`codemastery-e2e/<component>:co-<dev>-<ino>`)
 instead of the shared `:local` tag; containers still run the exact built image ID and
@@ -3426,7 +3440,7 @@ fixed code:
 
 | Finding | Reproduction at `dcbf877` | Fix |
 | --- | --- | --- |
-| N1 runner ownership | Real coordinator, stub runner that passes the config-load admission check and writes the inventory 6 s later (as global setup does): after `SIGKILL` of the coordinator, `stack:down` exited 0 with the record `complete` while the runner was alive; a new run was admitted (exit 0); the orphan then wrote into that later run's record and overwrote `test-results/results.json` | The coordinator writes the runner's creation intent into the admitting record before the spawn and its PID, birth identity and process group right after it (a crash in between leaves a PID-less writer that recovery preserves); global setup acts only when it is that recorded runner; every inventory change, including teardown and `stack:down`, must come from a direct child of the lock-holding coordinator acting for its run. Rerun: `stack:down` exit 1 with the runner preserved, new run exit 3, the orphan's write refused (`OwnershipLost`), outputs unchanged, recovery exit 0 after the runner exited |
+| N1 runner ownership | Real coordinator, stub runner that passes the config-load admission check and writes the inventory 6 s later (as global setup does): after `SIGKILL` of the coordinator, `stack:down` exited 0 with the record `complete` while the runner was alive; a new run was admitted (exit 0); the orphan then wrote into that later run's record and overwrote `test-results/results.json` | The coordinator writes the runner's creation intent into the admitting record before the spawn and its PID, birth identity and process group right after it (a crash in between leaves a PID-less writer that recovery preserves); global setup acts only when it is that recorded runner; inventory changes from a process whose coordinator is gone are refused (the round 3 review showed this parent check alone was insufficient; it is now backed by the fenced compare-and-swap described above). Rerun: `stack:down` exit 1 with the runner preserved, new run exit 3, the orphan's write refused (`OwnershipLost`), outputs unchanged, recovery exit 0 after the runner exited |
 | N2 container removed before its volume association | Recovery engine with a Docker double whose first mount inspection fails: the container was removed while its association was pending; the next pass marked the volume unaccounted and the anonymous volume was orphaned | A container whose association is unresolved is preserved (state `preserved`, association still `pending`); the next pass reads its mounts, records the volume, then removes the container and the volume. Rerun: pass 1 incomplete with the container kept, pass 2 complete with no orphaned volume |
 
 The remaining review items were also addressed. Playwright workers (P2): in the pinned
@@ -3435,15 +3449,17 @@ after 30 s, so it could still write `test-results/artifacts` after finalization.
 leads its own process group (a new session), the coordinator waits for that group to empty
 before finalizing, and finalization and `stack:down` preserve the build and the stack while a
 live member remains. Membership is read from the OS (`/proc` on Linux, `KERN_PROC_PGRP` on
-macOS), zombies excluded, and nothing is signalled. The orphaned runner's own teardown no longer
-writes without the lock (N10). The coordinator validates record structure and refuses a malformed
+macOS), zombies excluded, and nothing is signalled. (The round 3 review showed that this round's
+parent check did not fully stop an orphaned writer (N10) and that an incomplete enumeration or a
+missing group identity could still count as an empty group; both are corrected in round 3.) The coordinator validates record structure and refuses a malformed
 record with a clear error, while another checkout's malformed record is skipped (N4). The
 documentation of writer recording and of the per-checkout image tags is corrected (N5). Fixture
 records in the tests now match what production writes (N6). `E2E_VITE_BIN` and
 `E2E_VITE_MODULE` are never handed to a coordinated run, and `E2E_PYTHON` is set to the
 coordinator's own interpreter (N7). The real-Docker rerun also exposed that recovery asked a
 surviving runner's preview to close while that runner was still testing: 17 of its tests failed.
-The preview is now contacted only after every other writer is verified gone. The
+The preview was then contacted only after every other recorded writer was verified gone, which the round 3
+review showed to be insufficient (unrecorded workers); round 3 checks the runner's group first. The
 filesystem check remains a deny-list combined with the live lock-exclusion probe (N8, unchanged).
 
 `node --test fixtures/*.test.mjs` (from `e2e/`): **PASS 133/133** on macOS 27.2 (Python 3.9.6,
@@ -3465,3 +3481,54 @@ on Ubuntu is the stacked SH07 job after it is rebased onto this branch), a non-r
 account, real PID reuse, a real reboot, `firefox-desktop` and WebKit (not part of these runs),
 and external mode. A Playwright worker that outlives the runner by longer than the 45 s wait
 leaves the run incomplete until it exits and `stack:down` is run again.
+
+### Independent review round 3 remediation — 17 November 2026
+
+A third independent review of head `1b1e473` reported three blocking findings. Each was
+reproduced on `1b1e473` before it was fixed (stub Docker and real processes), and each
+reproduction was rerun on the fixed code:
+
+| Finding | Reproduction at `1b1e473` | Fix |
+| --- | --- | --- |
+| P1-1 stale finalizer | Finalizer A blocked inside a Docker removal, coordinator A `SIGKILL`ed, `stack:down` exit 0 (`complete`), run B admitted; when A resumed it replaced B's active record with its own `complete` state. The engine had captured its parent PID once, and its check and write were not atomic | Every record change is a fenced compare-and-swap under a per-record lock (run ID, lock key, `fence`, `revision`); each recovery increments `fence`; finalizers are recorded writers. Rerun: recovery exit 1 with finalizer A preserved, run B refused (exit 3), the resumed finalizer wrote nothing, recovery then completed |
+| P1-2 preview before the group | Runner exited, preview and a worker of its group alive: recovery asked the preview to close | The runner's group is checked before the preview is contacted; only the preview, matched by PID and birth identity, may remain; the group is checked again in full afterwards. Rerun: the preview is not contacted |
+| P1-3 group verification fail-open | A runner record without a group identity let recovery report `complete=true`; on Linux an `EACCES` while reading `/proc` gave `reliable: true` | A missing or unusable group identity, no runner entry, another boot, or any `/proc` error other than the process having gone keeps the run incomplete; the PID-reuse shortcut was removed (the group is always enumerated). Rerun: incomplete, `reliable: false` |
+| P2 malformed record | `intents: 5` raised `TypeError` in the coordinator | Types are validated before use; a malformed own record blocks reuse with a clear error (exit 3), another checkout's is skipped |
+
+Fencing design and crash behaviour. Passing the checkout lock to child processes was rejected
+(ADR008 §10.2 forbids inheriting its descriptor), and Node has no built-in `flock`, so the
+coordinator's own `commit-record` helper performs Node's writes. The record lock is a stable
+file that is never unlinked; its critical sections are short, bounded (20 s) and never wait
+for another lock or process, so there is no lock-ordering cycle (checkout lock, then record
+lock, never the reverse). A writer that dies inside the section releases it with its
+descriptor, and the atomic replacement leaves the old or the new record. A writer that is
+paused while holding it makes other writers fail closed after the bound. A crash between a
+writer's intent and its recorded PID leaves a PID-less writer that recovery preserves until
+an operator reconciles it.
+
+Records written before this protocol (without `fence` and `revision`) are malformed for the
+coordinator and block their checkout until an operator has inspected them and moved them out
+of `~/.codemastery-e2e/runs/`. On the verification host the worktree's own completed record
+from the earlier rounds was moved to `archive/` this way.
+
+`node --test fixtures/*.test.mjs` (from `e2e/`): **PASS 152/152** on macOS 27.2 (Python 3.9.6,
+Node 24.21.0), and **PASS 152/152** in a Debian 13 arm64 container (Python 3.12.16, Node
+22.23.3), run once as root and once as a non-root user (uid 1000). Of the new regression tests,
+17 fail on `1b1e473`; the other 2 are positive controls (only a process verified gone is skipped
+on Linux; a runner that never started needs no group). These are stub, real-process and
+multi-process race tests, not Docker integration evidence. Real Docker Desktop 29.8.1, Vite and
+Chromium on the macOS host, from a separate worktree:
+
+| Scenario | Observed result |
+| --- | --- |
+| Normal run (`npm run test:chromium`) | 27 passed, 1 skipped; record `complete` at fence 1 (37 fenced commits); runner group empty; the finalizer recorded and reaped; exit 0 |
+| Coordinator `SIGKILL`ed mid-test | Recovery exit 1 with the runner preserved and its preview left running (fence 2); new run exit 3; the surviving runner finished (27 passed) and its teardown was refused; the next recovery closed the preview, verified the group empty and removed everything (fence 3, exit 0) |
+| Finalizer `SIGSTOP`ped, coordinator `SIGKILL`ed, recovery, finalizer `SIGCONT`ed | Recovery exit 1 with the paused finalizer preserved (fence 2); new run exit 3; the resumed finalizer was refused and left the record byte-identical; the next recovery found it gone and completed (exit 0) |
+| `SIGINT` to the coordinator mid-test | Record `complete`, runner group empty, everything removed |
+| Runner `SIGKILL`ed mid-test | Workers left; preview closed; group verified empty; everything removed; exit nonzero |
+| After all runs | Containers, volumes and networks identical to the baseline; no preview, worker, finalizer or socket left |
+
+Not executed: Ubuntu 24.04 (its first execution remains the stacked SH07 job once rebased onto
+this branch), a Linux host with `hidepid` mounted (there an inaccessible `/proc` entry makes
+every group check unreliable, so recovery stays incomplete), real PID reuse, a real reboot,
+`firefox-desktop` and WebKit, and external mode.
