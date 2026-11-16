@@ -22,7 +22,7 @@ or production database, spending, credential or secret changes, and Leader
 acceptance of residual risk.
 
 The revisions below are approved and acted upon **in the implementation branch**
-`feature/auth-hybrid-refresh-sessions`. They become effective on protected `main`
+`feature/auth-hybrid-refresh-sessions`, [PR #246](https://github.com/chi-thanh-nguyen/codemastery/pull/246). They become effective on protected `main`
 only through compliant integration of that PR; until then the earlier contracts
 remain the effective `main` contracts. Technical approval is not implementation
 completion, independent review, integration verification or deployment readiness;
