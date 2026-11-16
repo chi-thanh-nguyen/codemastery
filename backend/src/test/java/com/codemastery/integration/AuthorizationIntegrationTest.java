@@ -61,6 +61,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -129,6 +130,10 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         for (String email : testEmails) {
             jdbc.update("DELETE FROM public.password_reset_tokens WHERE user_id IN "
                     + "(SELECT id FROM public.users WHERE email = ?)", email);
+            jdbc.update("DELETE FROM public.refresh_tokens WHERE session_id IN (SELECT s.id FROM "
+                    + "public.refresh_sessions s JOIN public.users u ON u.id = s.user_id WHERE u.email = ?)", email);
+            jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id IN "
+                    + "(SELECT id FROM public.users WHERE email = ?)", email);
             jdbc.update("DELETE FROM public.users WHERE email = ?", email);
         }
         testEmails.clear();
@@ -184,7 +189,10 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isCreated());
 
         UUID userId = jdbc.queryForObject("SELECT id FROM public.users WHERE email = ?", UUID.class, email);
-        String bearerIssuedBeforeReset = tokens.createToken(userId);
+        UUID sessionBeforeReset = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) "
+                + "VALUES (?,?,now(),now() + interval '1 hour')", sessionBeforeReset, userId);
+        String bearerIssuedBeforeReset = tokens.createToken(userId, sessionBeforeReset);
         CountDownLatch delivered = new CountDownLatch(1);
         AtomicReference<ResetEmailMessage> message = new AtomicReference<>();
         doAnswer(invocation -> {
@@ -229,10 +237,20 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(JSON.writeValueAsString(Map.of("email", email, "password", newPassword))))
                 .andExpect(status().isOk());
-        // CT01 is unchanged (ADR006 9.4): an earlier bearer stays valid until its own PT15M
-        // expiry. This records the residual behavior; it is not a revocation guarantee.
+        // ADR014 §6 supersedes the ADR006 9.4 residual: the reset revoked every refresh
+        // session in its transaction, so a session-bound bearer issued before it is rejected.
         mvc.perform(get("/api/me/courses").header("Authorization", "Bearer " + bearerIssuedBeforeReset))
-                .andExpect(status().isOk());
+                .andExpect(status().isUnauthorized());
+        assertEquals(Boolean.TRUE, jdbc.queryForObject("SELECT revoked_at IS NOT NULL FROM public.refresh_sessions "
+                + "WHERE id = ?", Boolean.class, sessionBeforeReset));
+    }
+
+    /** ADR014: a session-bound bearer for an existing account (one unrevoked refresh session). */
+    private String sessionToken(UUID userId) {
+        UUID session = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) "
+                + "VALUES (?,?,now(),now() + interval '1 hour')", session, userId);
+        return tokens.createToken(userId, session);
     }
 
     private static final String RESET_ACK = "{\"message\":\"If an account matches, a password reset link will be sent.\"}";
@@ -704,7 +722,7 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         mvc.perform(get(path))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string("WWW-Authenticate", "Bearer"));
-        mvc.perform(get(path).header("Authorization", "Bearer " + tokens.createToken(insertUser("learner", "active"))))
+        mvc.perform(get(path).header("Authorization", "Bearer " + sessionToken(insertUser("learner", "active"))))
                 .andExpect(status().isForbidden());
     }
 
@@ -728,7 +746,7 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                     .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                     .andExpect(jsonPath("$.detail").value("The request media type is not supported."));
         }
-        String valid = tokens.createToken(insertUser("learner", "active"));
+        String valid = sessionToken(insertUser("learner", "active"));
         // An operation that is not explicitly listed stays deny-by-default, even for a valid bearer.
         mvc.perform(get("/api/au07-unlisted-probe").header("Authorization", "Bearer " + valid))
                 .andExpect(status().isForbidden())
@@ -737,10 +755,10 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void protectedOperationStillRequiresValidBearerForActiveAccount() throws Exception {
-        String valid = tokens.createToken(insertUser("learner", "active"));
+        String valid = sessionToken(insertUser("learner", "active"));
         String tampered = valid.substring(0, valid.length() - 2) + (valid.endsWith("AA") ? "BB" : "AA");
         List<String> rejected = List.of("not-a-jwt", tampered,
-                tokens.createToken(UUID.randomUUID()), tokens.createToken(insertUser("learner", "locked")));
+                tokens.createToken(UUID.randomUUID(), UUID.randomUUID()), sessionToken(insertUser("learner", "locked")));
 
         mvc.perform(get("/api/me/courses"))
                 .andExpect(status().isUnauthorized())
@@ -758,7 +776,7 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     @ValueSource(strings = {"instructor", "admin"})
     void learnerOnlyOperationRejectsOtherRolesWith403(String role) throws Exception {
         mvc.perform(get("/api/me/courses")
-                        .header("Authorization", "Bearer " + tokens.createToken(insertUser(role, "active"))))
+                        .header("Authorization", "Bearer " + sessionToken(insertUser(role, "active"))))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
     }
@@ -793,6 +811,322 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             UUID userId = jdbc.queryForObject("SELECT id FROM public.users WHERE email = ?", UUID.class, email);
             assertEquals(0, resetTokenCount(userId));
             org.mockito.Mockito.verifyNoInteractions(resetEmailDelivery);
+        }
+    }
+
+    /**
+     * ADR014 refresh sessions over the real security chain and PostgreSQL: cookie issuance,
+     * rotation, replay and grace, concurrency, logout, revocation and CSRF/Origin rules.
+     * The test CORS origin is the HTTP loopback default, so the cookie is {@code cm_refresh}.
+     */
+    @Nested
+    class RefreshSessions {
+
+        private static final String ORIGIN = "http://localhost:5173";
+        private static final String COOKIE = "cm_refresh";
+
+        private record Signed(String accessToken, String refreshToken, UUID userId) { }
+
+        private Signed signIn(String email, String password) throws Exception {
+            MvcResult result = mvc.perform(post("/api/auth/login").header("Origin", ORIGIN)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(JSON.writeValueAsString(Map.of("email", email, "password", password))))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andReturn();
+            JsonNode body = JSON.readTree(result.getResponse().getContentAsString());
+            return new Signed(body.get("accessToken").asString(), cookieValue(result),
+                    UUID.fromString(body.get("user").get("id").asString()));
+        }
+
+        private Signed newSession() throws Exception {
+            String email = newEmail(), password = syntheticPassword();
+            insertActiveAccountWithPassword(email, password);
+            return signIn(email, password);
+        }
+
+        private org.springframework.test.web.servlet.ResultActions refresh(String token) throws Exception {
+            var request = post("/api/auth/refresh").header("Origin", ORIGIN);
+            if (token != null) {
+                request.cookie(new jakarta.servlet.http.Cookie(COOKIE, token));
+            }
+            return mvc.perform(request);
+        }
+
+        private String cookieValue(MvcResult result) {
+            String header = result.getResponse().getHeader("Set-Cookie");
+            assertTrue(header != null && header.startsWith(COOKIE + "="), "refresh cookie issued");
+            return header.substring(COOKIE.length() + 1, header.indexOf(';'));
+        }
+
+        private int protectedStatus(String accessToken) throws Exception {
+            return mvc.perform(get("/api/me/courses").header("Authorization", "Bearer " + accessToken))
+                    .andReturn().getResponse().getStatus();
+        }
+
+        private UUID sessionOf(String refreshToken) throws Exception {
+            return jdbc.queryForObject("SELECT session_id FROM public.refresh_tokens WHERE token_digest = ?",
+                    UUID.class, sha256(java.util.Base64.getUrlDecoder().decode(refreshToken)));
+        }
+
+        private boolean revoked(UUID session) {
+            return Boolean.TRUE.equals(jdbc.queryForObject(
+                    "SELECT revoked_at IS NOT NULL FROM public.refresh_sessions WHERE id = ?", Boolean.class, session));
+        }
+
+        @Test
+        void loginIssuesAnHttpOnlyCookieStoresOnlyItsDigestAndBindsTheAccessToken() throws Exception {
+            String email = newEmail(), password = syntheticPassword();
+            insertActiveAccountWithPassword(email, password);
+            MvcResult result = mvc.perform(post("/api/auth/login").header("Origin", ORIGIN)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(JSON.writeValueAsString(Map.of("email", email, "password", password))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.tokenType").value("Bearer"))
+                    .andExpect(jsonPath("$.expiresIn").value(900))
+                    .andReturn();
+            String setCookie = result.getResponse().getHeader("Set-Cookie");
+            assertTrue(setCookie.matches("cm_refresh=[A-Za-z0-9_-]{43}; Path=/; Max-Age=86400; Expires=.+; HttpOnly; SameSite=Strict"),
+                    setCookie);
+            assertFalse(setCookie.contains("Domain"));
+            JsonNode body = JSON.readTree(result.getResponse().getContentAsString());
+            assertEquals(Set.of("accessToken", "tokenType", "expiresIn", "user"), Set.copyOf(body.propertyNames()));
+            assertFalse(result.getResponse().getContentAsString().contains(cookieValue(result)));
+
+            UUID userId = UUID.fromString(body.get("user").get("id").asString());
+            UUID session = sessionOf(cookieValue(result));
+            assertEquals(userId, jdbc.queryForObject("SELECT user_id FROM public.refresh_sessions WHERE id = ?",
+                    UUID.class, session));
+            assertEquals(Boolean.TRUE, jdbc.queryForObject("SELECT expires_at = created_at + interval '7 days' "
+                    + "FROM public.refresh_sessions WHERE id = ?", Boolean.class, session));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.refresh_tokens WHERE token_digest = ?",
+                    Integer.class, (Object) cookieValue(result).getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
+            assertEquals(session, tokens.parse(body.get("accessToken").asString()).sessionId());
+            assertEquals(200, protectedStatus(body.get("accessToken").asString()));
+        }
+
+        @Test
+        void refreshRotatesTheTokenKeepsTheSessionAndReturnsTheLoginRepresentation() throws Exception {
+            Signed first = newSession();
+            MvcResult rotated = refresh(first.refreshToken())
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.user.id").value(first.userId().toString()))
+                    .andReturn();
+            String next = cookieValue(rotated);
+            assertNotEquals(first.refreshToken(), next);
+            UUID session = sessionOf(first.refreshToken());
+            assertEquals(session, sessionOf(next));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.refresh_tokens WHERE session_id = ? "
+                    + "AND consumed_at IS NULL", Integer.class, session));
+            String access = JSON.readTree(rotated.getResponse().getContentAsString()).get("accessToken").asString();
+            assertEquals(200, protectedStatus(access));
+            assertEquals(200, protectedStatus(first.accessToken()));
+            refresh(next).andExpect(status().isOk());
+        }
+
+        @Test
+        void reuseInsideTheGraceWindowIsRejectedWithoutRevokingTheFamily() throws Exception {
+            Signed first = newSession();
+            String next = cookieValue(refresh(first.refreshToken()).andExpect(status().isOk()).andReturn());
+            MvcResult reused = refresh(first.refreshToken()).andExpect(status().isUnauthorized())
+                    .andExpect(header().string("WWW-Authenticate", "Bearer"))
+                    .andExpect(header().doesNotExist("Set-Cookie")).andReturn();
+            assertFalse(reused.getResponse().getContentAsString().contains(first.refreshToken()));
+            assertFalse(revoked(sessionOf(next)));
+            refresh(next).andExpect(status().isOk());
+        }
+
+        @Test
+        void replayAfterTheGraceWindowRevokesTheFamilyAndItsAccessTokens() throws Exception {
+            Signed first = newSession();
+            MvcResult rotated = refresh(first.refreshToken()).andExpect(status().isOk()).andReturn();
+            String next = cookieValue(rotated);
+            String nextAccess = JSON.readTree(rotated.getResponse().getContentAsString()).get("accessToken").asString();
+            jdbc.update("UPDATE public.refresh_tokens SET consumed_at = consumed_at - interval '31 seconds', "
+                    + "issued_at = issued_at - interval '31 seconds' WHERE token_digest = ?",
+                    (Object) sha256(java.util.Base64.getUrlDecoder().decode(first.refreshToken())));
+            refresh(first.refreshToken()).andExpect(status().isUnauthorized()).andExpect(header().doesNotExist("Set-Cookie"));
+            assertTrue(revoked(sessionOf(next)));
+            refresh(next).andExpect(status().isUnauthorized());
+            assertEquals(401, protectedStatus(first.accessToken()));
+            assertEquals(401, protectedStatus(nextAccess));
+        }
+
+        @Test
+        void concurrentRefreshesOfOneTokenProduceExactlyOneRotationAndNoRevocation() throws Exception {
+            Signed first = newSession();
+            int callers = 6;
+            ExecutorService pool = Executors.newFixedThreadPool(callers);
+            try {
+                CountDownLatch ready = new CountDownLatch(callers), start = new CountDownLatch(1);
+                List<Future<MvcResult>> results = new ArrayList<>();
+                for (int i = 0; i < callers; i++) {
+                    results.add(pool.submit(() -> {
+                        ready.countDown();
+                        start.await(10, TimeUnit.SECONDS);
+                        return refresh(first.refreshToken()).andReturn();
+                    }));
+                }
+                assertTrue(ready.await(10, TimeUnit.SECONDS));
+                start.countDown();
+                List<MvcResult> done = new ArrayList<>();
+                for (Future<MvcResult> result : results) {
+                    done.add(result.get(30, TimeUnit.SECONDS));
+                }
+                assertEquals(1, done.stream().filter(r -> r.getResponse().getStatus() == 200).count());
+                assertEquals(callers - 1, done.stream().filter(r -> r.getResponse().getStatus() == 401).count());
+                UUID session = sessionOf(first.refreshToken());
+                assertFalse(revoked(session));
+                assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM public.refresh_tokens WHERE session_id = ?",
+                        Integer.class, session));
+                String winner = done.stream().filter(r -> r.getResponse().getStatus() == 200)
+                        .map(this::cookieValue).findFirst().orElseThrow();
+                refresh(winner).andExpect(status().isOk());
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
+        void logoutRevokesTheSessionAndItsAccessTokensAndAlwaysDeletesTheCookie() throws Exception {
+            Signed first = newSession();
+            String cleared = mvc.perform(post("/api/auth/logout").header("Origin", ORIGIN)
+                            .cookie(new jakarta.servlet.http.Cookie(COOKIE, first.refreshToken())))
+                    .andExpect(status().isNoContent())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andReturn().getResponse().getHeader("Set-Cookie");
+            assertTrue(cleared.startsWith("cm_refresh=; Path=/; Max-Age=0;") && cleared.contains("HttpOnly")
+                    && cleared.contains("SameSite=Strict"), cleared);
+            assertTrue(revoked(sessionOf(first.refreshToken())));
+            assertEquals(401, protectedStatus(first.accessToken()));
+            refresh(first.refreshToken()).andExpect(status().isUnauthorized());
+            for (String value : new String[]{null, "malformed", first.refreshToken()}) {
+                var request = post("/api/auth/logout").header("Origin", ORIGIN);
+                if (value != null) {
+                    request.cookie(new jakarta.servlet.http.Cookie(COOKIE, value));
+                }
+                mvc.perform(request).andExpect(status().isNoContent()).andExpect(header().exists("Set-Cookie"));
+            }
+        }
+
+        @Test
+        void missingMalformedUnknownExpiredAndAmbiguousCookiesFailClosedWithoutSettingACookie() throws Exception {
+            Signed first = newSession();
+            for (String token : new String[]{null, "", "short", first.refreshToken() + "A",
+                    first.refreshToken().substring(0, 42) + "!", java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(new byte[32])}) {
+                refresh(token).andExpect(status().isUnauthorized()).andExpect(header().doesNotExist("Set-Cookie"));
+            }
+            mvc.perform(post("/api/auth/refresh").header("Origin", ORIGIN)
+                            .cookie(new jakarta.servlet.http.Cookie(COOKIE, first.refreshToken()),
+                                    new jakarta.servlet.http.Cookie(COOKIE, first.refreshToken())))
+                    .andExpect(status().isUnauthorized());
+            jdbc.update("UPDATE public.refresh_tokens SET issued_at = issued_at - interval '25 hours', "
+                    + "expires_at = expires_at - interval '24 hours' WHERE session_id = ?", sessionOf(first.refreshToken()));
+            refresh(first.refreshToken()).andExpect(status().isUnauthorized());
+            assertFalse(revoked(sessionOf(first.refreshToken())));
+
+            Signed second = newSession();
+            jdbc.update("UPDATE public.refresh_sessions SET created_at = created_at - interval '8 days', "
+                    + "expires_at = expires_at - interval '7 days' WHERE id = ?", sessionOf(second.refreshToken()));
+            refresh(second.refreshToken()).andExpect(status().isUnauthorized());
+            assertEquals(401, protectedStatus(second.accessToken()));
+        }
+
+        @Test
+        void lockedAccountsCannotRefreshAndTheirSessionIsRevoked() throws Exception {
+            Signed first = newSession();
+            jdbc.update("UPDATE public.users SET account_status = 'locked' WHERE id = ?", first.userId());
+            refresh(first.refreshToken()).andExpect(status().isUnauthorized());
+            assertTrue(revoked(sessionOf(first.refreshToken())));
+            jdbc.update("UPDATE public.users SET account_status = 'active' WHERE id = ?", first.userId());
+            refresh(first.refreshToken()).andExpect(status().isUnauthorized());
+            assertEquals(401, protectedStatus(first.accessToken()));
+        }
+
+        @Test
+        void refreshReturnsTheCurrentRoleAfterARoleChange() throws Exception {
+            Signed first = newSession();
+            jdbc.update("UPDATE public.users SET role = 'instructor' WHERE id = ?", first.userId());
+            refresh(first.refreshToken()).andExpect(status().isOk()).andExpect(jsonPath("$.user.role").value("Instructor"));
+            assertEquals(403, protectedStatus(first.accessToken()));
+        }
+
+        @Test
+        void loginReplacementRevokesThePresentedSessionAndOldSessionsBeyondTheCapAreRevoked() throws Exception {
+            String email = newEmail(), password = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, password);
+            Signed first = signIn(email, password);
+            List<UUID> older = new ArrayList<>();
+            for (int i = 0; i < 10; i++) {
+                UUID session = UUID.randomUUID();
+                older.add(session);
+                jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) VALUES "
+                        + "(?,?,now() - make_interval(hours => ?),now() + interval '1 day')", session, userId, 20 - i);
+            }
+            MvcResult replaced = mvc.perform(post("/api/auth/login").header("Origin", ORIGIN)
+                            .cookie(new jakarta.servlet.http.Cookie(COOKIE, first.refreshToken()))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(JSON.writeValueAsString(Map.of("email", email, "password", password))))
+                    .andExpect(status().isOk()).andReturn();
+            assertTrue(revoked(sessionOf(first.refreshToken())));
+            assertTrue(revoked(older.getFirst()), "oldest session beyond the cap of 10 is revoked");
+            assertEquals(10, jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE user_id = ? "
+                    + "AND revoked_at IS NULL", Integer.class, userId));
+            refresh(cookieValue(replaced)).andExpect(status().isOk());
+        }
+
+        @Test
+        void cookieOperationsRejectUntrustedOriginsAndCrossSiteFetchMetadata() throws Exception {
+            Signed first = newSession();
+            jakarta.servlet.http.Cookie cookie = new jakarta.servlet.http.Cookie(COOKIE, first.refreshToken());
+            for (String path : List.of("/api/auth/refresh", "/api/auth/logout")) {
+                mvc.perform(post(path).cookie(cookie)).andExpect(status().isForbidden())
+                        .andExpect(jsonPath("$.detail").value("Access is denied."));
+                mvc.perform(post(path).cookie(cookie).header("Origin", "https://attacker.example.test"))
+                        .andExpect(status().isForbidden());
+                mvc.perform(post(path).cookie(cookie).header("Origin", "null")).andExpect(status().isForbidden());
+                mvc.perform(post(path).cookie(cookie).header("Origin", ORIGIN).header("Sec-Fetch-Site", "cross-site"))
+                        .andExpect(status().isForbidden());
+                mvc.perform(post(path).cookie(cookie).header("Origin", ORIGIN).header("Sec-Fetch-Mode", "navigate"))
+                        .andExpect(status().isForbidden());
+            }
+            assertFalse(revoked(sessionOf(first.refreshToken())));
+            refresh(first.refreshToken()).andExpect(status().isOk());
+            mvc.perform(post("/api/auth/refresh").header("Origin", ORIGIN).header("Sec-Fetch-Site", "same-site")
+                    .header("Sec-Fetch-Mode", "cors").cookie(cookie)).andExpect(status().isUnauthorized());
+
+            String email = newEmail(), password = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, password);
+            mvc.perform(post("/api/auth/login").header("Origin", "https://attacker.example.test")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(JSON.writeValueAsString(Map.of("email", email, "password", password))))
+                    .andExpect(status().isForbidden());
+            mvc.perform(post("/api/auth/login").header("Sec-Fetch-Site", "cross-site")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(JSON.writeValueAsString(Map.of("email", email, "password", password))))
+                    .andExpect(status().isForbidden());
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE user_id = ?",
+                    Integer.class, userId));
+        }
+
+        @Test
+        void onlyCookieOperationsAdmitCredentialedCorsForTheConfiguredOrigin() throws Exception {
+            mvc.perform(options("/api/auth/refresh").header("Origin", ORIGIN)
+                            .header("Access-Control-Request-Method", "POST"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Access-Control-Allow-Origin", ORIGIN))
+                    .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+            mvc.perform(options("/api/auth/refresh").header("Origin", ORIGIN)
+                            .header("Access-Control-Request-Method", "POST")
+                            .header("Access-Control-Request-Headers", "Authorization"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(options("/api/me/courses").header("Origin", ORIGIN)
+                            .header("Access-Control-Request-Method", "GET")
+                            .header("Access-Control-Request-Headers", "Authorization"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().doesNotExist("Access-Control-Allow-Credentials"));
         }
     }
 

@@ -83,9 +83,13 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         jdbc.update("DELETE FROM public.lessons WHERE id IN (?,?)", LESSON, HIDDEN_LESSON);
         jdbc.update("DELETE FROM public.chapters WHERE id IN (?,?)", CHAPTER, EMPTY_CHAPTER);
         jdbc.update("DELETE FROM public.courses WHERE id IN (?,?,?)", COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.refresh_tokens WHERE session_id IN (SELECT id FROM public.refresh_sessions WHERE user_id IN (?,?,?,?))", OWNER, LEARNER, OTHER, ADMIN);
+        jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id IN (?,?,?,?)", OWNER, LEARNER, OTHER, ADMIN);
         jdbc.update("DELETE FROM public.users WHERE id IN (?,?,?,?)", OWNER, LEARNER, OTHER, ADMIN);
     }
-    private MockHttpServletRequestBuilder as(MockHttpServletRequestBuilder request, UUID actor) { return request.header("Authorization", "Bearer " + tokens.createToken(actor)); }
+    private MockHttpServletRequestBuilder as(MockHttpServletRequestBuilder request, UUID actor) { return request.header("Authorization", "Bearer " + tokens.createToken(actor, refreshSession(actor))); }
+    /** ADR014: access JWTs are bound to an unrevoked refresh session of the same account. */
+    private UUID refreshSession(UUID actor) { UUID session = UUID.randomUUID(); jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) SELECT ?, id, now(), now() + interval '1 hour' FROM public.users WHERE id = ?", session, actor); return session; }
     private String membership(UUID course) { return "/api/courses/" + course + "/membership"; }
     private void row(String status) { jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status,resume_lesson_id) VALUES (?,?,?,?,?)", ENROLLMENT, LEARNER, COURSE, status, LESSON); }
 

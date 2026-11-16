@@ -155,6 +155,9 @@ public class PasswordResetService {
             if (!users.deleteResetToken(account.id(), digest)) {
                 throw invalidResetLink();
             }
+            // AUTH-SESSION-2026-11-16-r1 (ADR014 §6): a credential change ends every refresh
+            // session, and with it every session-bound access JWT, in the same transaction.
+            users.revokeRefreshSessionsOfUser(account.id(), now);
         });
         return new ResetCompletion(COMPLETION_MESSAGE);
     }

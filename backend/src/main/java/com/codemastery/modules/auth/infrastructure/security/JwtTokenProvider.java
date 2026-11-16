@@ -32,6 +32,8 @@ import java.util.UUID;
 public class JwtTokenProvider {
 
     static final String HS256_ID = Jwts.SIG.HS256.getId();
+    /** Refresh-session binding claim (ADR014 §3); required on every accepted access JWT. */
+    static final String SESSION_CLAIM = "sid";
     // Local parser resource guards, not new token claims or runtime configuration.
     // The approved producer emits a small, uncompressed, shallow JSON object.
     private static final int MAX_TOKEN_LENGTH = 16_384;
@@ -59,12 +61,18 @@ public class JwtTokenProvider {
         this.clock = clock;
     }
 
-    public String createToken(UUID userId) {
+    /**
+     * Issues the CT01 access JWT bound to one refresh session through the {@code sid}
+     * claim (AUTH-SESSION-2026-11-16-r1, ADR014 §3). The claim is an opaque UUID; the
+     * filter accepts the token only while that session is unrevoked and unexpired.
+     */
+    public String createToken(UUID userId, UUID sessionId) {
         Instant issuedAt = clock.instant().truncatedTo(ChronoUnit.SECONDS);
         Instant expiresAt = issuedAt.plus(settings.expiration());
         return Jwts.builder()
                 .header().type("JWT").and()
                 .subject(userId.toString())
+                .claim(SESSION_CLAIM, sessionId.toString())
                 .issuer(settings.issuer())
                 .audience().add(settings.audience()).and()
                 .issuedAt(Date.from(issuedAt))
@@ -73,7 +81,13 @@ public class JwtTokenProvider {
                 .compact();
     }
 
+    /** Validated subject of a session-bound access JWT. */
     public UUID parseSubject(String compactJwt) {
+        return parse(compactJwt).userId();
+    }
+
+    /** Validates the complete CT01 profile, including the canonical {@code sid} session claim. */
+    public AccessClaims parse(String compactJwt) {
         if (compactJwt == null || compactJwt.length() > MAX_TOKEN_LENGTH || compactJwt.isBlank()) {
             throw failedAuthentication();
         }
@@ -118,7 +132,15 @@ public class JwtTokenProvider {
             if (!subject.toString().equalsIgnoreCase(claims.getSubject())) {
                 throw failedAuthentication();
             }
-            return subject;
+            String sid = claims.get(SESSION_CLAIM, String.class);
+            if (sid == null) {
+                throw failedAuthentication();
+            }
+            UUID session = UUID.fromString(sid);
+            if (!session.toString().equals(sid)) {
+                throw failedAuthentication();
+            }
+            return new AccessClaims(subject, session);
         } catch (BadCredentialsException exception) {
             throw exception;
         } catch (JwtException | IllegalArgumentException exception) {
@@ -129,6 +151,7 @@ public class JwtTokenProvider {
     private static Map<String, ?> validateClaims(Map<String, Object> values, Instant now) {
         Object audience = values.get("aud");
         if (!(values.get("sub") instanceof String) || !(values.get("iss") instanceof String)
+                || !(values.get(SESSION_CLAIM) instanceof String)
                 || !(audience instanceof String || audience instanceof Collection<?> members
                 && members.stream().allMatch(String.class::isInstance))) {
             throw failedAuthentication();
@@ -170,6 +193,9 @@ public class JwtTokenProvider {
     private SecretKey signingKey() {
         return Keys.hmacShaKeyFor(settings.decodedSecret());
     }
+
+    /** Subject and refresh session of an accepted access JWT. */
+    public record AccessClaims(UUID userId, UUID sessionId) { }
 
     private static BadCredentialsException failedAuthentication() {
         return new BadCredentialsException("Authentication failed.");

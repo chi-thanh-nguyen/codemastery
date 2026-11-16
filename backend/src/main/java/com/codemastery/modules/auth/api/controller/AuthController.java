@@ -11,10 +11,15 @@ import com.codemastery.modules.auth.api.dto.AuthResponse.PasswordResetCompleted;
 import com.codemastery.modules.auth.api.dto.UserResponse;
 import com.codemastery.modules.auth.application.service.AuthService;
 import com.codemastery.modules.auth.application.service.PasswordResetService;
+import com.codemastery.modules.auth.application.service.RefreshSessionService;
+import com.codemastery.modules.auth.application.service.RefreshSessionService.IssuedSession;
 import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import com.codemastery.modules.auth.infrastructure.security.RefreshCookieSecurity;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -38,17 +43,51 @@ public class AuthController {
 
     private final PasswordResetService passwordResets;
 
-    public AuthController(AuthService auth, JwtTokenProvider tokens, PasswordResetService passwordResets) {
+    private final RefreshSessionService sessions;
+
+    private final RefreshCookieSecurity cookies;
+
+    public AuthController(AuthService auth, JwtTokenProvider tokens, PasswordResetService passwordResets,
+                          RefreshSessionService sessions, RefreshCookieSecurity cookies) {
         this.auth = auth;
         this.tokens = tokens;
         this.passwordResets = passwordResets;
+        this.sessions = sessions;
+        this.cookies = cookies;
     }
 
+    /**
+     * CT01 login. The JSON representation is unchanged; ADR014 adds a new refresh session,
+     * its HttpOnly cookie and the session-bound access JWT. A refresh cookie the browser
+     * still holds has its old session revoked (login replacement).
+     */
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
         var user = auth.authenticate(request.email(), request.password());
+        return issued(sessions.start(user, cookies.read(http)));
+    }
+
+    /** ADR014 rotation: the cookie is the only credential; failures are the generic 401 and set no cookie. */
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthResponse> refresh(HttpServletRequest http) {
+        return issued(sessions.rotate(cookies.read(http).orElse(null)));
+    }
+
+    /** ADR014 logout: revokes the presented session (and its access JWTs); always deletes the cookie. */
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(HttpServletRequest http) {
+        sessions.end(cookies.read(http));
+        return ResponseEntity.noContent().cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.SET_COOKIE, cookies.clear().toString()).build();
+    }
+
+    private ResponseEntity<AuthResponse> issued(IssuedSession session) {
+        var user = session.account();
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                .body(new AuthResponse(tokens.createToken(user.id()), "Bearer", 900, UserResponse.from(user)));
+                .header(HttpHeaders.SET_COOKIE,
+                        cookies.issue(session.refreshToken(), session.refreshExpiresAt(), session.issuedAt()).toString())
+                .body(new AuthResponse(tokens.createToken(user.id(), session.sessionId()), "Bearer", 900,
+                        UserResponse.from(user)));
     }
 
     @PostMapping("/register")
@@ -89,6 +128,7 @@ public class AuthController {
                                       ServerHttpRequest request, ServerHttpResponse response) {
             String path = request.getURI().getPath();
             if ("/api/auth/register".equals(path) || "/api/auth/login".equals(path)
+                    || "/api/auth/refresh".equals(path) || "/api/auth/logout".equals(path)
                     || "/api/auth/password-reset-requests".equals(path)
                     || "/api/auth/password-resets".equals(path)) {
                 response.getHeaders().setCacheControl("no-store");

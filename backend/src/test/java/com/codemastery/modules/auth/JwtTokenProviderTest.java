@@ -8,6 +8,7 @@ import com.codemastery.modules.auth.domain.repository.UserRepository;
 import com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser;
 import com.codemastery.modules.auth.infrastructure.security.JwtAuthenticationFilter;
 import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import com.codemastery.modules.auth.infrastructure.security.RefreshCookieSecurity;
 import com.codemastery.modules.auth.infrastructure.security.RestSecurityErrorHandler;
 import com.codemastery.modules.auth.infrastructure.security.SecurityConfig;
 import io.jsonwebtoken.Jwts;
@@ -81,12 +82,14 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class JwtTokenProviderTest {
     private static final UUID USER_ID = UUID.fromString("11111111-1111-4111-8111-111111111111");
+    private static final UUID SESSION_ID = UUID.fromString("2aaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
     private static final Instant NOW = Instant.parse("2026-10-25T00:00:00Z");
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private byte[] secret;
@@ -123,6 +126,7 @@ class JwtTokenProviderTest {
         values.put("iss", "codemastery");
         values.put("aud", List.of("codemastery-api"));
         values.put("sub", USER_ID.toString());
+        values.put("sid", SESSION_ID.toString());
         values.put("iat", NOW.getEpochSecond());
         values.put("exp", NOW.getEpochSecond() + 900);
         return values;
@@ -159,7 +163,7 @@ class JwtTokenProviderTest {
     class JwtContract {
         @Test
         void mintedTokenHasTheIndependentApprovedProfileAndRoundTrips() {
-            String token = provider.createToken(USER_ID);
+            String token = provider.createToken(USER_ID, SESSION_ID);
             var verified = Jwts.parser().verifyWith(Keys.hmacShaKeyFor(secret))
                     .clock(() -> Date.from(NOW)).clockSkewSeconds(0).build().parseSignedClaims(token);
             assertEquals("HS256", verified.getHeader().getAlgorithm());
@@ -211,7 +215,7 @@ class JwtTokenProviderTest {
         }
 
         @ParameterizedTest
-        @ValueSource(strings = {"iss", "aud", "sub", "iat", "exp"})
+        @ValueSource(strings = {"iss", "aud", "sub", "sid", "iat", "exp"})
         void rejectsEveryMissingRequiredClaim(String field) throws Exception {
             Map<String, Object> values = claims();
             values.remove(field);
@@ -225,6 +229,10 @@ class JwtTokenProviderTest {
                     Arguments.of("aud", List.of("codemastery-api", 7)),
                     Arguments.of("sub", "not-a-uuid"), Arguments.of("sub", "1-1-1-1-1"),
                     Arguments.of("sub", 7), Arguments.of("sub", List.of(USER_ID.toString())),
+                    // ADR014 §3: the session binding is a canonical lower-case UUID string.
+                    Arguments.of("sid", "not-a-uuid"), Arguments.of("sid", "1-1-1-1-1"), Arguments.of("sid", 7),
+                    Arguments.of("sid", SESSION_ID.toString().toUpperCase(Locale.ROOT)),
+                    Arguments.of("sid", List.of(SESSION_ID.toString())), Arguments.of("sid", null),
                     Arguments.of("iat", Long.toString(NOW.getEpochSecond())), Arguments.of("iat", NOW.toString()),
                     Arguments.of("iat", true), Arguments.of("iat", List.of(NOW.getEpochSecond())), Arguments.of("iat", null),
                     Arguments.of("exp", Long.toString(NOW.getEpochSecond() + 900)),
@@ -433,7 +441,7 @@ class JwtTokenProviderTest {
                         assertNull(context.getStartupFailure());
                         assertNotNull(context.getBean(JsonMapper.class));
                         JwtTokenProvider production = context.getBean(JwtTokenProvider.class);
-                        assertEquals(USER_ID, production.parseSubject(production.createToken(USER_ID)));
+                        assertEquals(USER_ID, production.parseSubject(production.createToken(USER_ID, SESSION_ID)));
                         var response = new MockHttpServletResponse();
                         context.getBean(RestSecurityErrorHandler.class).commence(
                                 new MockHttpServletRequest("GET", "/api/test"), response,
@@ -474,7 +482,7 @@ class JwtTokenProviderTest {
         }
 
         private String token() {
-            return tokens.createToken(USER_ID);
+            return tokens.createToken(USER_ID, SESSION_ID);
         }
 
         private User account(Role role, AccountStatus status) {
@@ -491,7 +499,7 @@ class JwtTokenProviderTest {
         @MethodSource("publicOperations")
         void publicOperationsIgnoreBearerCandidatesAndIdentityStorage(HttpMethod method, String path) throws Exception {
             String valid = token();
-            when(users.findById(any())).thenThrow(new DataAccessResourceFailureException("Synthetic storage outage"));
+            when(users.findSessionUser(any(), any(), any())).thenThrow(new DataAccessResourceFailureException("Synthetic storage outage"));
             for (String header : new String[]{null, "Bearer not-a-jwt", "Bearer " + valid}) {
                 var request = request(method, path);
                 if (header != null) {
@@ -500,7 +508,7 @@ class JwtTokenProviderTest {
                 mvc.perform(request).andExpect(status().isOk());
             }
             assertEquals(3, endpoints.effects.get());
-            verify(tokens, never()).parseSubject(anyString());
+            verify(tokens, never()).parse(anyString());
             verifyNoInteractions(users);
         }
 
@@ -515,20 +523,20 @@ class JwtTokenProviderTest {
         @ParameterizedTest
         @MethodSource("unselectedOperations")
         void publicMatchersDoNotExemptOtherMethodsOrDescendants(HttpMethod method, String path) throws Exception {
-            when(users.findById(USER_ID)).thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
+            when(users.findSessionUser(eq(USER_ID), eq(SESSION_ID), any())).thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
             String token = token();
             var response = mvc.perform(request(method, path).header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden()).andReturn().getResponse();
             assertProblem(response, 403, "Access is denied.", path);
-            verify(tokens).parseSubject(token);
-            verify(users).findById(USER_ID);
+            verify(tokens).parse(token);
+            verify(users).findSessionUser(eq(USER_ID), eq(SESSION_ID), any());
             assertEquals(0, endpoints.effects.get());
         }
 
         @ParameterizedTest
         @EnumSource(Role.class)
         void noRoleReceivesImplicitAccessToUnselectedCapabilities(Role role) throws Exception {
-            when(users.findById(USER_ID)).thenReturn(Optional.of(account(role, AccountStatus.ACTIVE)));
+            when(users.findSessionUser(eq(USER_ID), eq(SESSION_ID), any())).thenReturn(Optional.of(account(role, AccountStatus.ACTIVE)));
             var response = mvc.perform(get("/api/review-only-unselected").header("Authorization", "Bearer " + token()))
                     .andExpect(status().isForbidden()).andReturn().getResponse();
             assertProblem(response, 403, "Access is denied.", "/api/review-only-unselected");
@@ -563,7 +571,7 @@ class JwtTokenProviderTest {
         @ParameterizedTest
         @ValueSource(strings = {"missing", "locked"})
         void missingAndLockedAccountsCannotAuthenticate(String state) throws Exception {
-            when(users.findById(USER_ID)).thenReturn("missing".equals(state) ? Optional.empty()
+            when(users.findSessionUser(eq(USER_ID), eq(SESSION_ID), any())).thenReturn("missing".equals(state) ? Optional.empty()
                     : Optional.of(account(Role.LEARNER, AccountStatus.LOCKED)));
             var response = mvc.perform(get("/api/review-only-unselected").header("Authorization", "Bearer " + token()))
                     .andExpect(status().isUnauthorized()).andReturn().getResponse();
@@ -573,14 +581,14 @@ class JwtTokenProviderTest {
 
         @Test
         void accountStateIsReadAgainOnTheNextRequest() throws Exception {
-            when(users.findById(USER_ID)).thenReturn(Optional.of(account(Role.INSTRUCTOR, AccountStatus.ACTIVE)))
+            when(users.findSessionUser(eq(USER_ID), eq(SESSION_ID), any())).thenReturn(Optional.of(account(Role.INSTRUCTOR, AccountStatus.ACTIVE)))
                     .thenReturn(Optional.of(account(Role.INSTRUCTOR, AccountStatus.LOCKED)));
             String token = token();
             mvc.perform(get("/api/review-only-unselected").header("Authorization", "Bearer " + token))
                     .andExpect(status().isForbidden());
             mvc.perform(get("/api/review-only-unselected").header("Authorization", "Bearer " + token))
                     .andExpect(status().isUnauthorized());
-            verify(users, times(2)).findById(USER_ID);
+            verify(users, times(2)).findSessionUser(eq(USER_ID), eq(SESSION_ID), any());
             assertEquals(0, endpoints.effects.get());
         }
 
@@ -592,7 +600,7 @@ class JwtTokenProviderTest {
         @ParameterizedTest
         @MethodSource("accountReadFailures")
         void accountReadFailuresProduceSafe500AndStopTheActualChain(RuntimeException failure) throws Exception {
-            when(users.findById(USER_ID)).thenThrow(failure);
+            when(users.findSessionUser(eq(USER_ID), eq(SESSION_ID), any())).thenThrow(failure);
             var response = mvc.perform(get("/api/review-only-unselected").queryParam("private", "confidential")
                             .header("Authorization", "Bearer " + token()))
                     .andExpect(status().isInternalServerError()).andReturn().getResponse();
@@ -605,7 +613,7 @@ class JwtTokenProviderTest {
         @ParameterizedTest
         @EnumSource(Role.class)
         void filterUsesTheCurrentRoleAndKeepsThePrincipalInsideAuth(Role role) throws Exception {
-            when(users.findById(USER_ID)).thenReturn(Optional.of(account(role, AccountStatus.ACTIVE)));
+            when(users.findSessionUser(eq(USER_ID), eq(SESSION_ID), any())).thenReturn(Optional.of(account(role, AccountStatus.ACTIVE)));
             var request = new MockHttpServletRequest("GET", "/api/review-only-unselected");
             request.addHeader("Authorization", "Bearer " + token());
             AtomicReference<Authentication> observed = new AtomicReference<>();
@@ -622,6 +630,28 @@ class JwtTokenProviderTest {
             assertTrue(principal.isAccountNonLocked());
             assertTrue(principal.isCredentialsNonExpired());
             assertTrue(principal.isEnabled());
+        }
+
+        @Test
+        void revokedExpiredOrForeignSessionsRejectAnOtherwiseValidAccessToken() throws Exception {
+            when(users.findSessionUser(eq(USER_ID), eq(SESSION_ID), any())).thenReturn(Optional.empty());
+            var response = mvc.perform(get("/api/review-only-unselected").header("Authorization", "Bearer " + token()))
+                    .andExpect(status().isUnauthorized()).andReturn().getResponse();
+            assertProblem(response, 401, "Authentication failed.", "/api/review-only-unselected");
+            verify(users).findSessionUser(eq(USER_ID), eq(SESSION_ID), any());
+            verify(users, never()).findById(any());
+            assertEquals(0, endpoints.effects.get());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"/api/auth/refresh", "/api/auth/logout"})
+        void cookieOperationsNeverReadBearerCredentialsAndRequireATrustedOrigin(String path) throws Exception {
+            mvc.perform(post(path).header("Authorization", "Bearer " + token()).header("Origin", "http://localhost:5173"))
+                    .andExpect(status().isOk());
+            mvc.perform(post(path)).andExpect(status().isForbidden());
+            assertEquals(1, endpoints.effects.get());
+            verify(tokens, never()).parse(anyString());
+            verifyNoInteractions(users);
         }
 
         @Test
@@ -648,7 +678,7 @@ class JwtTokenProviderTest {
                             .header("Access-Control-Request-Method", "POST"))
                     .andExpect(status().isForbidden());
             verifyNoInteractions(users);
-            verify(tokens, never()).parseSubject(anyString());
+            verify(tokens, never()).parse(anyString());
             assertEquals(0, endpoints.effects.get());
         }
 
@@ -665,6 +695,49 @@ class JwtTokenProviderTest {
             errors.handle(new MockHttpServletRequest("GET", "/invalid path"), response,
                     new AccessDeniedException("Synthetic confidential"));
             assertProblem(response, 403, "Access is denied.", "/");
+        }
+    }
+
+    @Nested
+    class RefreshCookies {
+        private RefreshCookieSecurity cookies(String... origins) {
+            return new RefreshCookieSecurity(new AppConfig.CorsSettings(List.of(origins)));
+        }
+
+        @Test
+        void anyHttpsOriginSelectsTheHostPrefixedSecureCookie() {
+            for (var policy : List.of(cookies("https://codemastery.example.test"),
+                    cookies("https://codemastery.example.test", "http://localhost:5173"),
+                    cookies("http://codemastery.example.test"))) {
+                assertTrue(policy.secure());
+                String issued = policy.issue("a".repeat(43), NOW.plusSeconds(86_400), NOW).toString();
+                assertTrue(issued.matches("__Host-cm_refresh=a{43}; Path=/; Max-Age=86400; Expires=[^;]+; Secure; HttpOnly; SameSite=Strict"),
+                        issued);
+                assertEquals("__Host-cm_refresh=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict",
+                        policy.clear().toString());
+            }
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"http://localhost:5173", "http://127.0.0.1:4173", "http://[::1]:8080"})
+        void onlyPureHttpLoopbackOriginsSelectTheDevelopmentCookie(String origin) {
+            var policy = cookies(origin);
+            assertFalse(policy.secure());
+            assertEquals("cm_refresh", policy.name());
+            assertFalse(policy.issue("a".repeat(43), NOW.plusSeconds(60), NOW).toString().contains("Secure"));
+        }
+
+        @Test
+        void readsExactlyOneCookieAndTreatsDuplicatesAsUnusable() {
+            var policy = cookies("https://codemastery.example.test");
+            var request = new MockHttpServletRequest();
+            assertTrue(policy.read(request).isEmpty());
+            request.setCookies(new Cookie("cm_refresh", "loopback-name-ignored"));
+            assertTrue(policy.read(request).isEmpty());
+            request.setCookies(new Cookie("__Host-cm_refresh", "value"));
+            assertEquals(Optional.of("value"), policy.read(request));
+            request.setCookies(new Cookie("__Host-cm_refresh", "one"), new Cookie("__Host-cm_refresh", "two"));
+            assertEquals(Optional.of(""), policy.read(request));
         }
     }
 
@@ -686,7 +759,7 @@ class JwtTokenProviderTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     @EnableWebMvc
-    @Import({SecurityConfig.class, JwtTokenProvider.class, RestSecurityErrorHandler.class,
+    @Import({SecurityConfig.class, JwtTokenProvider.class, RestSecurityErrorHandler.class, RefreshCookieSecurity.class,
             JacksonAutoConfiguration.class, FixtureEndpoints.class})
     static class SecurityFixture {
         @Bean

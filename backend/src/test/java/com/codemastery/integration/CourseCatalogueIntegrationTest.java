@@ -147,6 +147,8 @@ class CourseCatalogueIntegrationTest extends AbstractIntegrationTest {
         jdbc.update("DELETE FROM public.lessons WHERE id IN (?,?,?)", lesson, hiddenLesson, foreignLesson);
         jdbc.update("DELETE FROM public.chapters WHERE id IN (?,?)", chapter, otherChapter);
         jdbc.update("DELETE FROM public.courses WHERE id IN (?,?)", course, otherCourse);
+        jdbc.update("DELETE FROM public.refresh_tokens WHERE session_id IN (SELECT id FROM public.refresh_sessions WHERE user_id IN (?,?,?,?))", owner, otherOwner, learner, outsider);
+        jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id IN (?,?,?,?)", owner, otherOwner, learner, outsider);
         jdbc.update("DELETE FROM public.users WHERE id IN (?,?,?,?)", owner, otherOwner, learner, outsider);
         STATEMENTS.remove();
         BEFORE_SYLLABUS.remove();
@@ -154,11 +156,20 @@ class CourseCatalogueIntegrationTest extends AbstractIntegrationTest {
         SecurityContextHolder.clearContext();
     }
 
+    /** ADR014: access JWTs are bound to an unrevoked refresh session of the same account. */
+    private UUID refreshSession(UUID user) {
+        UUID session = UUID.randomUUID();
+        // A missing account gets no session row, so its token stays unbound and is rejected.
+        jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) "
+                + "SELECT ?, id, now(), now() + interval '1 hour' FROM public.users WHERE id = ?", session, user);
+        return session;
+    }
+
     /** Exercise the actual configured JWT filter before application assertions, without inventing a REST endpoint. */
     private void admittedRequest(UUID user, Runnable assertion) throws Exception {
         SecurityContextHolder.clearContext();
         var request = new MockHttpServletRequest("GET", "/api/selected-consumer");
-        request.addHeader("Authorization", "Bearer " + tokens.createToken(user));
+        request.addHeader("Authorization", "Bearer " + tokens.createToken(user, refreshSession(user)));
         var filter = security.getFilterChains().getFirst().getFilters().stream()
                 .filter(JwtAuthenticationFilter.class::isInstance).findFirst().orElseThrow();
         var response = new MockHttpServletResponse();

@@ -15,8 +15,8 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.util.Optional;
-import java.util.UUID;
 
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -25,12 +25,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtTokenProvider jwtTokenProvider;
     private final UserRepository userRepository;
     private final RestSecurityErrorHandler errors;
+    private final Clock clock;
 
     public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider, UserRepository userRepository,
                                    RestSecurityErrorHandler errors) {
+        this(jwtTokenProvider, userRepository, errors, Clock.systemUTC());
+    }
+
+    JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider, UserRepository userRepository,
+                            RestSecurityErrorHandler errors, Clock clock) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.userRepository = userRepository;
         this.errors = errors;
+        this.clock = clock;
     }
 
     @Override
@@ -39,8 +46,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         Optional<String> bearer = bearerToken(request.getHeader(HttpHeaders.AUTHORIZATION));
         if (bearer.isPresent() && SecurityContextHolder.getContext().getAuthentication() == null) {
             try {
-                UUID userId = jwtTokenProvider.parseSubject(bearer.get());
-                userRepository.findById(userId)
+                JwtTokenProvider.AccessClaims claims = jwtTokenProvider.parse(bearer.get());
+                // ADR014 §3: current account state plus an unrevoked, unexpired bound session.
+                userRepository.findSessionUser(claims.userId(), claims.sessionId(), clock.instant())
                         .filter(user -> user.accountStatus() == AccountStatus.ACTIVE)
                         .ifPresent(user -> SecurityContextHolder.getContext()
                                 .setAuthentication(authentication(user, request)));
