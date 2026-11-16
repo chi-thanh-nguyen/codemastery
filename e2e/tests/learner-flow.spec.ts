@@ -1,7 +1,8 @@
 /**
  * Group A learner journey through the real frontend, REST API and PostgreSQL.
  * Runs against the disposable stack from fixtures/local-stack.ts (or E2E_BASE_URL).
- * No request is intercepted or mocked.
+ * No request is mocked. The two session-ordering tests (ADR014 §15) only delay one real
+ * refresh request until a chosen moment; its request and response are never altered.
  */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -255,6 +256,60 @@ test.describe('accounts and sessions', () => {
         // The session survived: a reload still restores it.
         await page.reload();
         await expect(page.getByRole('button', { name: accountMenuName(learner) })).toBeVisible();
+    });
+
+    /** Holds the next real refresh request of `target` until `release()`; nothing is altered. */
+    async function holdNextRefresh(target: import('@playwright/test').Page) {
+        let release!: () => void, intercepted!: () => void;
+        const gate = new Promise<void>((done) => { release = done; });
+        const seen = new Promise<void>((done) => { intercepted = done; });
+        await target.route((url) => url.pathname === '/api/auth/refresh', async (route) => { intercepted(); await gate; await route.continue(); }, { times: 1 });
+        return { seen, release: () => release() };
+    }
+
+    test('F04: a sign-out in another tab wins over that tab\'s pending session restore', async ({ page, context, learner }) => {
+        await signIn(page, learner);
+        const other = await context.newPage();
+        const held = await holdNextRefresh(other);
+        await other.goto('/profile');
+        await held.seen;
+        await expect(other.getByText('Restoring your session…')).toBeVisible();
+        // The sign-out broadcasts at once; its server request waits for the Web Lock the restore holds.
+        await signOut(page, learner);
+        const late = other.waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/refresh');
+        held.release();
+        expect((await late).status()).toBe(200);
+        await expect(other).toHaveURL(/\/login$/);
+        await expect(other.locator('main dl')).toHaveCount(0);
+        await expect(other.getByRole('button', { name: accountMenuName(learner) })).toHaveCount(0);
+        // Server side: the sign-out then revoked the session and deleted the cookie.
+        await expect.poll(async () => (await context.cookies()).length).toBe(0);
+        const status = await other.evaluate(async (url) => (await fetch(url, { method: 'POST', credentials: 'include' })).status,
+            new URL('/api/auth/refresh', target.api).href);
+        expect(status).toBe(401);
+        await other.close();
+    });
+
+    test('F05: an explicit sign-in queued behind a pending restore is sent and installs the chosen account', async ({ page, learner, request }) => {
+        const chosen = newAccount('Chosen');
+        await registerThroughApi(request, chosen);
+        await signIn(page, learner);
+        expect(await page.evaluate(() => typeof navigator.locks?.request)).toBe('function');
+        const logins: string[] = [];
+        page.on('request', (sent) => { if (new URL(sent.url()).pathname === '/api/auth/login') logins.push(sent.method()); });
+        const held = await holdNextRefresh(page);
+        await page.goto('/login');
+        await held.seen;
+        await page.locator('#login-email').fill(chosen.email);
+        await page.locator('#login-password').fill(chosen.password);
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Signing in…' })).toBeVisible();
+        expect(logins).toEqual([]);
+        held.release();
+        await expect(page).toHaveURL(/\/home$/);
+        await expect(page.getByRole('button', { name: accountMenuName(chosen) })).toBeVisible();
+        await expect(page.getByRole('button', { name: accountMenuName(learner) })).toHaveCount(0);
+        expect(logins).toEqual(['POST']);
     });
 
     test('rejects wrong credentials with a safe message and keeps the form', async ({ page, learner }) => {
