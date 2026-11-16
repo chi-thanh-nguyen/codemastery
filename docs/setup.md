@@ -69,7 +69,16 @@ feature usage remains pending. Vitest `5.0.5` and jsdom `27.4.0` are development
 frontend test dependencies. Playwright Test 1.63.0 is pinned in `e2e/package.json`;
 `npm ci` in `e2e/` installs it for both the E2E suite and the optional frontend
 browser harness, and `npx playwright install chromium firefox webkit` installs the
-browsers it expects. The E2E suite also needs Docker.
+browsers it expects. The E2E suite also needs Docker with a local daemon (a Unix-socket
+context, which includes Docker Desktop's local VM; remote `tcp://`/`ssh://` contexts are
+refused) and Python 3 on `PATH` as `python3`, standard library only, for the lifecycle
+coordinator `e2e/fixtures/lifecycle.py`. It keeps generated, non-secret run state in
+`~/.codemastery-e2e/` (outside the checkout; see
+[the run lifecycle](testing.md#browser-harness-and-e2e-suite)). Supported platforms: macOS
+(native `kinfo_proc` process start times) and Linux/Ubuntu (`/proc` start ticks with boot and
+PID-namespace identity); elsewhere automatic process recovery is unsupported and processes
+are preserved. Which hosts are actually qualified is recorded in
+[the FE24 testing record](testing.md#fe24-ct34-r2-lifecycle-implementation--13-november-2026).
 
 ## CT17 Final binding status — 9 November 2026
 

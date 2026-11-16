@@ -6,10 +6,10 @@
     "node": "^22.12.0 || ^24.0.0"
   },
   "scripts": {
-    "test": "playwright test",
-    "test:chromium": "playwright test --project=chromium-desktop --project=chromium-mobile",
-    "stack:down": "node fixtures/stack-down.mjs",
-    "report": "playwright show-report test-results/html"
+    "test": "python3 fixtures/lifecycle.py run -- playwright test",
+    "test:chromium": "python3 fixtures/lifecycle.py run -- playwright test --project=chromium-desktop --project=chromium-mobile",
+    "stack:down": "python3 fixtures/lifecycle.py recover",
+    "report": "python3 fixtures/lifecycle.py report -- playwright show-report test-results/html"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

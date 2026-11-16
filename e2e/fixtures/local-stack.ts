@@ -7,10 +7,11 @@
  * - Credentials (database, JWT secret, test accounts) are random per run, are passed
  *   to Docker through the environment rather than the command line, and are never
  *   printed or written inside the repository.
- * - Everything is removed by the returned teardown; `npm run stack:down` removes
- *   leftovers from an interrupted run. Containers and networks carry the shared label
- *   plus the run ID and the owning process ID, so stack:down never touches a run whose
- *   process is still alive (for example a concurrent run from another checkout).
+ * - Ownership is recorded in the run inventory of fixtures/lifecycle.py before anything is
+ *   created (ADR008 CT34-FIXTURES-2026-11-10-r2). The returned teardown, the coordinator's
+ *   finalization and `npm run stack:down` all reconcile that inventory through
+ *   fixtures/stack-recovery.mjs. Containers and networks carry the shared label, the run ID
+ *   and the owning UID only to corroborate the recorded IDs; another run is never touched.
  *
  * Set E2E_BASE_URL (and E2E_API_URL when the API has another origin) to run against an
  * already running environment instead. That mode never writes fixtures and skips the
@@ -20,27 +21,52 @@
 import { execFile, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { confirmRecordedWriter, processIdentity } from './host-identity.mjs';
+import { addIntent, inventoryPath, markerFile, observe, setIntent, updateInventory } from './run-inventory.mjs';
+import { STACK_LABEL, dockerIdentity, ownerLabel, reconcile, recordVolumeAssociation, runLabel } from './stack-recovery.mjs';
 
 const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..', '..');
-export const STACK_LABEL = 'codemastery.e2e=disposable';
-/** Labels that tie a resource to this run and to the process that owns it (read by stack-down.mjs). */
-const runLabels = (runId: string) => ['--label', STACK_LABEL, '--label', `codemastery.e2e.run=${runId}`, '--label', `codemastery.e2e.pid=${process.pid}`];
+export { STACK_LABEL };
+/**
+ * Labels that tie a resource to this run and to the OS account that owns it. The owning PID is
+ * deliberately *not* a label: under CT34-FIXTURES-2026-11-10-r2 a PID (or a label alone) is not
+ * ownership evidence, so ownership lives in the persistent inventory and these labels only
+ * corroborate the immutable IDs recorded there.
+ */
+const runLabels = (runId: string) => ['--label', STACK_LABEL, '--label', runLabel(runId), '--label', ownerLabel()];
+
+/**
+ * The endpoint of the daemon this run pinned. Once set, every Docker call of this run is bound to it
+ * through DOCKER_HOST (with DOCKER_CONTEXT cleared), so a `docker context use` elsewhere during the
+ * run cannot send a build, a creation or an inspection to another daemon.
+ */
+let pinnedEndpoint: string | null = null;
+function dockerEnv(extra: Record<string, string> = {}) {
+    const env: Record<string, string | undefined> = { ...process.env, ...extra };
+    if (pinnedEndpoint) {
+        env.DOCKER_HOST = pinnedEndpoint;
+        delete env.DOCKER_CONTEXT;
+    }
+    return env;
+}
 
 async function docker(args: string[], env: Record<string, string> = {}, input?: string) {
     if (input === undefined) {
-        const { stdout } = await run('docker', args, { env: { ...process.env, ...env }, maxBuffer: 32 * 1024 * 1024 });
+        const { stdout } = await run('docker', args, { env: dockerEnv(env), maxBuffer: 32 * 1024 * 1024 });
         return stdout.trim();
     }
     return new Promise<string>((done, fail) => {
-        const child = spawn('docker', args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+        const child = spawn('docker', args, { env: dockerEnv(env), stdio: ['pipe', 'pipe', 'pipe'] });
         let out = '', err = '';
         child.stdout.on('data', (chunk) => { out += chunk; });
         child.stderr.on('data', (chunk) => { err += chunk; });
@@ -118,7 +144,7 @@ export async function waitForPreview(child: ChildProcess, url: string, token: st
 /** A bounded Docker CLI call for state and diagnostics: it never hangs and never throws. */
 async function dockerQuery(args: string[], timeoutMs = 15_000) {
     try {
-        const { stdout, stderr } = await run('docker', args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 });
+        const { stdout, stderr } = await run('docker', args, { env: dockerEnv(), timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 });
         return { ok: true, stdout: String(stdout), stderr: String(stderr) };
     } catch (error) {
         const failure = error as { stdout?: unknown; stderr?: unknown; message?: string };
@@ -167,44 +193,159 @@ async function api(base: string, path: string, body: unknown) {
     return response.json() as Promise<Record<string, unknown>>;
 }
 
+/** The per-checkout layer-cache tag of one image, e.g. `codemastery-e2e/backend:co-16777230-4902041`. */
+export function cacheTag(component: 'backend' | 'postgres', lockKey = process.env.CODEMASTERY_E2E_LOCK_KEY ?? '') {
+    if (!/^[0-9]+-[0-9]+$/.test(lockKey)) throw new Error('No lifecycle lock key: the per-checkout image cache tag cannot be named');
+    return `codemastery-e2e/${component}:co-${lockKey}`;
+}
+
+/** The pinned Vite CLI of `frontend/`, from its manifest's `bin` field (its exports map does not expose the file). */
+function resolveViteBin(frontend: string) {
+    const manifest = createRequire(join(frontend, 'package.json')).resolve('vite/package.json');
+    const bin = JSON.parse(readFileSync(manifest, 'utf8')).bin;
+    return join(dirname(manifest), typeof bin === 'string' ? bin : bin.vite);
+}
+
+/**
+ * Records a writer process *before* it is spawned (no PID yet), so a crash between the spawn and the
+ * PID record leaves an unresolved writer that recovery preserves instead of an unknown one it misses.
+ */
+function intendProcess(inventoryFile: string, role: string, extra: Record<string, unknown> = {}) {
+    updateInventory(inventoryFile, (record) => {
+        record.processes[role] = { pid: null, birth: null, birthSource: null, role, state: 'starting', ...extra };
+    });
+}
+/** Records the spawned process with its OS birth identity, or that it never started. */
+function recordProcess(inventoryFile: string, role: string, child: ChildProcess) {
+    const identity = child.pid ? processIdentity(child.pid) : { birth: null, source: 'no-pid', reliable: false };
+    updateInventory(inventoryFile, (record) => {
+        record.processes[role] = child.pid
+            ? { ...record.processes[role], pid: child.pid, birth: identity.birth, birthSource: identity.source, state: 'live' }
+            : { ...record.processes[role], state: 'exited', why: 'the process could not be started' };
+    });
+    return identity;
+}
+
+/** Spawns one process, records it in the inventory as a writer while it runs, and resolves with its stderr tail. */
+async function runRecorded(inventoryFile: string, role: string, command: string, args: string[],
+    options: { cwd: string; env?: Record<string, string | undefined> }) {
+    intendProcess(inventoryFile, role);
+    const child = spawn(command, args, { cwd: options.cwd, env: { ...process.env, ...options.env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let tail = '';
+    child.stdout?.on('data', (chunk) => { tail = (tail + chunk).slice(-4000); });
+    child.stderr?.on('data', (chunk) => { tail = (tail + chunk).slice(-4000); });
+    recordProcess(inventoryFile, role, child);
+    const code = await new Promise<number | null>((done) => child.once('close', (status) => done(status)));
+    updateInventory(inventoryFile, (record) => {
+        record.processes[role] = { ...record.processes[role], state: 'exited', why: `exited with ${code}` };
+    });
+    if (code !== 0) throw new Error(`${role} (${command}) exited with ${code}: ${tail.trim().slice(-2000)}`);
+    return tail;
+}
+
+/**
+ * Confirms that the coordinator has recorded *this* process as the run's runner (it writes the
+ * runner's creation intent before the spawn and its PID and birth identity right after it) before
+ * global setup changes anything. The runner never records itself: a process that is not the recorded
+ * runner, whose coordinator is gone or whose generation was fenced out creates and writes nothing.
+ */
+export async function confirmRecordedRunner(inventoryFile: string, options: { timeoutMs?: number; intervalMs?: number } = {}) {
+    try {
+        return await confirmRecordedWriter(inventoryFile, 'runner', options);
+    } catch (error) {
+        throw new Error(String((error as Error).message).replace(/nothing was changed$/, 'nothing was created'), { cause: error });
+    }
+}
+
 export default async function globalSetup() {
+    // Ownership was taken by fixtures/lifecycle.py before this runner was started; a run that is
+    // not admitted has no inventory to write its resources into and must not create any.
+    const inventoryFile = inventoryPath();
+    if (!inventoryFile) {
+        throw new Error('The E2E suite must be started through the lifecycle coordinator, which takes exclusive ownership '
+            + 'of this checkout and its outputs before Playwright runs. Use `npm test` or `npm run test:chromium` from e2e/.');
+    }
+    const runId = process.env.CODEMASTERY_E2E_RUN_ID as string;
+    await confirmRecordedRunner(inventoryFile);
+    /** Reconciles this run through the shared r2 engine; incomplete recovery is never silent. */
+    const teardown = async (reason: string, previewHandle?: ChildProcess) => {
+        // The runner's own exit is not claimed here: the coordinator verifies it by birth identity
+        // after this process ends, and only then can the run become complete.
+        const outcome = await reconcile(inventoryFile, { reason, previewHandle });
+        if (!outcome.complete) {
+            throw new Error(`The disposable E2E stack was not fully recovered (${reason}). Its inventory is retained and this `
+                + 'checkout stays blocked until `npm run stack:down` completes; see the stack-down report above.');
+        }
+    };
+
     if (process.env.E2E_BASE_URL) {
         process.env.E2E_API_URL ??= process.env.E2E_BASE_URL;
         process.env.E2E_STACK = 'external';
-        return async () => undefined;
+        updateInventory(inventoryFile, (record) => {
+            record.mode = 'external';
+            observe(record, 'external target mode: this run owns no stack resource');
+        });
+        return () => teardown('external-mode teardown');
     }
-    const runId = `cm-e2e-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+
+    // The daemon this run will own resources on is pinned here — endpoint, context *and* daemon ID —
+    // and re-verified before anything is removed, so context or daemon drift preserves resources.
+    const daemon = dockerIdentity();
+    if (!daemon.ok) throw new Error(`Docker cannot own this run's disposable stack: ${daemon.why}`);
+    pinnedEndpoint = daemon.endpoint;
     const work = await mkdtemp(join(tmpdir(), 'codemastery-e2e-'));
-    const containers: string[] = [];
-    let network = '', preview: ChildProcess | undefined;
-    const teardown = async () => {
-        if (preview && preview.exitCode === null && preview.signalCode === null) {
-            preview.kill('SIGTERM');
-            await new Promise((gone) => { preview!.once('exit', gone); setTimeout(gone, 5000); });
-        }
-        for (const name of containers.reverse()) await docker(['rm', '-f', '-v', name]).catch(() => undefined);
-        if (network) await docker(['network', 'rm', network]).catch(() => undefined);
-        await rm(work, { recursive: true, force: true });
+    writeFileSync(markerFile(work), `${runId}\n`, { mode: 0o600 });
+    const workInfo = lstatSync(work), parentInfo = lstatSync(dirname(work));
+    updateInventory(inventoryFile, (record) => {
+        record.mode = 'disposable';
+        record.docker = { context: daemon.context, endpoint: daemon.endpoint, daemonId: daemon.daemonId };
+        record.temp = { path: work, dev: workInfo.dev, ino: workInfo.ino, parent: { dev: parentInfo.dev, ino: parentInfo.ino }, marker: runId, state: 'created' };
+        observe(record, `pinned docker daemon ${daemon.daemonId} on ${daemon.context}; temporary build recorded`);
+    });
+
+    /** Records a creation intent before the resource exists and returns its inventory ID. */
+    const intend = (fields: Record<string, unknown>) => {
+        let id = '';
+        updateInventory(inventoryFile, (record) => { id = addIntent(record, fields); });
+        return id;
     };
+    /** Persists the observed identity of a created resource before the run continues. */
+    const created = (id: string, dockerId: string, why: string) => {
+        updateInventory(inventoryFile, (record) => { setIntent(record, id, { dockerId, state: 'created', why }); });
+    };
+
+    let preview: ChildProcess | undefined;
     try {
         const secrets = {
             POSTGRES_DB: 'codemastery_e2e', POSTGRES_USER: 'codemastery_e2e', POSTGRES_PASSWORD: randomBytes(24).toString('hex'),
             JWT_SECRET: randomBytes(32).toString('hex'),
             STORAGE_ACCESS_KEY: `e2e-${randomBytes(6).toString('hex')}`, STORAGE_SECRET_KEY: randomBytes(24).toString('hex'),
         };
-        // Containers run the exact image ID this run built (printed by --quiet), not the shared tag, so a
-        // concurrent run from another checkout that rebuilds the tag cannot swap the image underneath.
+        // Containers run the exact image ID this run built (printed by --quiet); the tag is only a layer
+        // cache. It is per checkout: runs of one checkout are serialized by the lifecycle lock, so the tag
+        // never moves under a live run, while a concurrent run from another checkout uses its own tag.
+        // (With a containerd image store, retagging a shared tag deletes the previously tagged image, so
+        // a tag shared across checkouts could remove another run's exact image before it is started.)
         const backendImage = process.env.E2E_BACKEND_IMAGE
-            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', 'codemastery-e2e/backend:local', join(repo, 'backend')]);
+            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', cacheTag('backend'), join(repo, 'backend')]);
         const postgresImage = process.env.E2E_POSTGRES_IMAGE
-            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', 'codemastery-e2e/postgres:local', join(repo, 'infrastructure', 'postgres')]);
+            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', cacheTag('postgres'), join(repo, 'infrastructure', 'postgres')]);
 
-        network = runId;
+        const network = runId;
+        const networkIntent = intend({ kind: 'network', name: network });
         await docker(['network', 'create', ...runLabels(runId), network]);
+        created(networkIntent, await docker(['network', 'inspect', '--format', '{{.Id}}', network]), 'created by this run');
+
         const postgres = `${runId}-postgres`;
-        containers.push(postgres);
-        await docker(['run', '-d', '--name', postgres, ...runLabels(runId), '--network', network, '--network-alias', 'postgres',
+        // The container intent carries its volume association as pending until the container's own
+        // mounts are recorded, so a crash in between leaves an association recovery must settle.
+        const postgresIntent = intend({ kind: 'container', name: postgres, image: postgresImage, role: 'postgres', volumes: 'pending' });
+        const postgresId = await docker(['run', '-d', '--name', postgres, ...runLabels(runId), '--network', network, '--network-alias', 'postgres',
             '-e', 'POSTGRES_DB', '-e', 'POSTGRES_USER', '-e', 'POSTGRES_PASSWORD', postgresImage], secrets);
+        created(postgresIntent, postgresId, 'started by this run');
+        // The anonymous data volume this image declares is discovered from the owned container's
+        // mounts and recorded now, long before anything removes that container.
+        await recordAnonymousVolumes(inventoryFile, postgresIntent, postgresId, postgres);
         await waitFor('PostgreSQL', async () => {
             await docker(['exec', postgres, 'pg_isready', '-q', '-U', secrets.POSTGRES_USER, '-d', secrets.POSTGRES_DB]);
             return true;
@@ -213,25 +354,42 @@ export default async function globalSetup() {
         const backendPort = await freePort(), apiUrl = `http://127.0.0.1:${backendPort}`;
         // Production build pointed at this backend, marked with a per-run token in the temporary copy only.
         const frontend = join(repo, 'frontend'), dist = join(work, 'dist'), buildToken = randomBytes(16).toString('hex');
-        await run('npx', ['vite', 'build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'error'], { cwd: frontend, env: { ...process.env, VITE_API_BASE_URL: apiUrl }, maxBuffer: 32 * 1024 * 1024 });
+        // Vite is started from its resolved entry point rather than through `npx`, so the recorded PID
+        // is the real build/preview process and not a wrapper that exits before its child.
+        const viteBin = process.env.E2E_VITE_BIN ?? resolveViteBin(frontend);
+        await runRecorded(inventoryFile, 'builder', process.execPath,
+            [viteBin, 'build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'error'],
+            { cwd: frontend, env: { VITE_API_BASE_URL: apiUrl } });
         await markBuild(dist, buildToken);
 
-        // The frontend port is chosen immediately before vite preview binds it. The backend needs that origin for CORS,
+        // The frontend port is chosen immediately before the preview binds it. The backend needs that origin for CORS,
         // so it starts afterwards. Probing a port does not reserve it: readiness also requires this run's build marker,
         // so a collision fails instead of testing whatever server took the port.
         const frontendPort = await freePortExcept(backendPort), baseUrl = `http://127.0.0.1:${frontendPort}`;
-        preview = spawn('npx', ['vite', 'preview', '--outDir', dist, '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort'], { cwd: frontend, stdio: ['ignore', 'ignore', 'pipe'] });
+        const control = join(process.env.CODEMASTERY_E2E_SOCKETS as string, `${runId}.sock`);
+        intendProcess(inventoryFile, 'preview', { role: 'vite-preview', control });
+        preview = spawn(process.execPath, [join(here, 'preview-server.mjs'), '--root', frontend, '--outDir', dist,
+            '--host', '127.0.0.1', '--port', String(frontendPort), '--strictPort', '--control', control, '--run', runId],
+        { cwd: frontend, stdio: ['ignore', 'ignore', 'pipe'] });
         let previewError = '';
         preview.stderr?.on('data', (chunk) => { previewError = (previewError + chunk).slice(-2000); });
+        const previewIdentity = recordProcess(inventoryFile, 'preview', preview);
+        updateInventory(inventoryFile, (record) => {
+            observe(record, previewIdentity.reliable
+                ? 'preview recorded with its OS birth identity and private control channel'
+                : `preview birth identity is unavailable (${previewIdentity.source}): automatic recovery of this process is unsupported`);
+        });
         await waitForPreview(preview, baseUrl, buildToken, () => previewError);
 
         const backend = `${runId}-backend`;
-        containers.push(backend);
-        await docker(['run', '-d', '--name', backend, ...runLabels(runId), '--network', network, '-p', `127.0.0.1:${backendPort}:8080`,
+        const backendIntent = intend({ kind: 'container', name: backend, image: backendImage, role: 'backend', volumes: 'pending' });
+        const backendId = await docker(['run', '-d', '--name', backend, ...runLabels(runId), '--network', network, '-p', `127.0.0.1:${backendPort}:8080`,
             '-e', 'DB_HOST=postgres', '-e', 'DB_PORT=5432', '-e', 'DB_NAME', '-e', 'DB_USER', '-e', 'DB_PASSWORD', '-e', 'JWT_SECRET',
             '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY', '-e', `CORS_ALLOWED_ORIGINS=${baseUrl}`, '-e', 'SERVER_PORT=8080', backendImage],
         { DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD, JWT_SECRET: secrets.JWT_SECRET,
             STORAGE_ACCESS_KEY: secrets.STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY: secrets.STORAGE_SECRET_KEY });
+        created(backendIntent, backendId, 'started by this run');
+        await recordAnonymousVolumes(inventoryFile, backendIntent, backendId, backend);
         await waitForBackend(apiUrl, backend, [secrets.POSTGRES_PASSWORD, secrets.JWT_SECRET, secrets.STORAGE_ACCESS_KEY, secrets.STORAGE_SECRET_KEY]);
 
         // Instructor account through the real registration API, then promoted in the disposable database only.
@@ -250,9 +408,44 @@ export default async function globalSetup() {
             E2E_STACK: 'disposable', E2E_BASE_URL: baseUrl, E2E_API_URL: apiUrl,
             E2E_USERNAME: instructor.email, E2E_PASSWORD: instructor.password, E2E_FIXTURE: 'catalogue-fixture.sql',
         });
-        return teardown;
+        updateInventory(inventoryFile, (record) => observe(record, 'disposable stack ready; fixtures applied'));
+        return () => teardown('playwright teardown', preview);
     } catch (error) {
-        await teardown();
+        try {
+            updateInventory(inventoryFile, (record) => observe(record, `setup failed: ${String((error as Error).message).slice(0, 200)}`));
+        } catch (recordError) {
+            // Best effort: the original setup error is what the caller must see (for example when this
+            // runner no longer acts for its coordinator and may not write the record at all).
+            console.error(`E2E setup failed and the failure could not be recorded: ${String(recordError)}`);
+        }
+        await teardown('setup failure', preview).catch((cleanupError: unknown) => {
+            console.error(`E2E setup failed and cleanup did not complete: ${String(cleanupError)}`);
+        });
         throw error;
     }
+}
+
+/**
+ * Records the volumes a just-created container owns, before anything can remove it, and resolves the
+ * container's pending volume association. A mount inspection that fails or cannot be parsed is an
+ * error, never "no volumes": the association then stays pending for recovery to settle. Bind mounts
+ * and pre-existing named volumes are recorded as preserved: they are not this run's.
+ */
+async function recordAnonymousVolumes(inventoryFile: string, intentId: string, containerId: string, name: string) {
+    let mounts: unknown;
+    let why = 'unparsable mount list';
+    try {
+        mounts = JSON.parse(await docker(['inspect', '--type', 'container', '--format', '{{json .Mounts}}', containerId]));
+    } catch (error) {
+        why = String((error as Error).message).trim().split('\n').pop() as string;
+    }
+    if (!Array.isArray(mounts)) throw new Error(`The mounts of ${name} could not be read; its volume association stays pending for recovery (${why})`);
+    updateInventory(inventoryFile, (record) => {
+        const intent = record.intents.find((entry: { id: string }) => entry.id === intentId);
+        if (!intent) throw new Error(`The creation intent of ${name} is not recorded`);
+        const added = recordVolumeAssociation(record, intent, mounts as Array<Record<string, string>>);
+        observe(record, `recorded the volume association of ${name}: ${added.length
+            ? added.map((volume) => `${volume.exclusive ? 'owned anonymous' : 'preserved foreign'} volume ${volume.dockerId}`).join(', ')
+            : 'no volume'}`);
+    });
 }
