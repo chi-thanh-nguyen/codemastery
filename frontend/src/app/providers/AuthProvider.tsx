@@ -94,8 +94,8 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
     const alive = useRef(true), returnPath = useRef<'/profile' | null>(null);
     const pending = useRef(new Set<AbortController>()), lastLogin = useRef<AbortController | null>(null);
     const restoreRun = useRef(0), retryTimer = useRef<number | undefined>(undefined), lastWake = useRef(0);
-    /** A renewal result was discarded for a pending explicit sign-in; renew again if that sign-in fails. */
-    const renewalDeferred = useRef(false);
+    /** Settles when the latest explicit sign-in has finished, whatever its outcome (ADR014 §17, A01). */
+    const loginSettled = useRef<Promise<void>>(Promise.resolve());
     const channel = useRef<BroadcastChannel | null>(null);
     const eligible = useCallback(() => session.current && Date.now() < session.current.expiresAt ? session.current : null, []);
     const broadcast = useCallback((type: 'signed-in' | 'signed-out') => { try { channel.current?.postMessage({ type }); } catch { /* closed */ } }, []);
@@ -161,17 +161,23 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
     }, [clear, install]);
     /**
      * Proactive rotation for the current generation; a refusal ends the session, other failures retry.
-     * Renewal is the weakest operation (ADR014 §§15–16, N02): its result is discarded when an explicit
-     * sign-in is pending or started after it began, so it can neither replace the session under that
-     * sign-in nor abort it; a failed sign-in then renews again.
+     * Renewal is the weakest operation (ADR014 §§15–17, N02/A01): a completed renewal waits until no
+     * explicit sign-in is pending, so it can neither replace the session under that sign-in nor abort
+     * it, and then decides from the outcome, independent of which finished first. A sign-in that
+     * installed a session, a sign-out or an expiry advanced the generation: the result is discarded.
+     * A sign-in that overlapped this renewal and left the session in place (failed or cancelled) may
+     * have changed the cookie under it, so the session renews again from the current cookie — once
+     * per overlapping sign-in, never in a loop.
      */
     const renew = useCallback(async (value: number) => {
         window.clearTimeout(retryTimer.current);
         const startedAttempt = attempt.current;
+        let overlapped = !!lastLogin.current;
         try {
             const response = await coordinatedRefresh();
+            while (lastLogin.current) { overlapped = true; await loginSettled.current; }
             if (!alive.current || value !== generation.current || !session.current) return;
-            if (lastLogin.current || startedAttempt !== attempt.current) { renewalDeferred.current = true; return; }
+            if (overlapped || startedAttempt !== attempt.current) { void renew(value); return; }
             install(response, false);
         } catch (error) {
             if (!alive.current || value !== generation.current || !session.current) return;
@@ -251,6 +257,8 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
         lastLogin.current?.abort();
         const { controller, finish } = operation(signal);
         lastLogin.current = controller;
+        let settle!: () => void;
+        loginSettled.current = new Promise<void>((done) => { settle = done; });
         if (refreshSessions) { restoreRun.current++; if (alive.current) setRestoring(false); }
         const current = () => alive.current && !controller.signal.aborted && id === attempt.current;
         try {
@@ -260,7 +268,6 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
             expire();
             if (!current()) throw cancelled();
             const installed = install(response, true, controller);
-            renewalDeferred.current = false;
             if (refreshSessions) {
                 pendingSignOut(false);
                 restoreRun.current++; if (alive.current) setRestoring(false);
@@ -268,15 +275,15 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
             }
             return installed;
         } catch (error) {
-            // A failed sign-in leaves the browser as it was: the restore or renewal it superseded runs again.
+            // A failed sign-in leaves the browser as it was: the restore it superseded runs again. A
+            // renewal it superseded resumes by itself once this sign-in has settled (see renew).
             if (refreshSessions && current() && !(error instanceof ApiError && error.kind === 'cancelled')) {
                 lastLogin.current = null;
                 if (!session.current) void restore();
-                else if (renewalDeferred.current) { renewalDeferred.current = false; void renew(session.current.generation); }
             }
             throw error;
-        } finally { finish(); if (lastLogin.current === controller) lastLogin.current = null; }
-    }, [broadcast, expire, install, operation, refreshSessions, renew, restore]);
+        } finally { finish(); if (lastLogin.current === controller) lastLogin.current = null; settle(); }
+    }, [broadcast, expire, install, operation, refreshSessions, restore]);
     const register = useCallback(async (payload: RegisterRequest, signal?: AbortSignal) => {
         expire();
         const captured = generation.current, { controller, finish } = operation(signal);
