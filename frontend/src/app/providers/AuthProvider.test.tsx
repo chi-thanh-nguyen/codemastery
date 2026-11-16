@@ -436,6 +436,50 @@ describe('ADR014 hybrid refresh-session lifecycle', () => {
         await act(async () => work.resolve(json(session('Person B', sidB)))); await act(async () => { await signedIn; });
         expect(auth.user?.displayName).toBe('Person B');
     });
+    // ---- Second independent-review remediation N02 (ADR014 §16). Native-lock evidence is in e2e/. ----
+    const sidC = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    it('N02: a renewal resolving with another sid does not cancel a sign-in queued behind it', async () => {
+        const release = fifoLocks();
+        try {
+            fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+            const renewal = deferred(); fetcher.mockReturnValueOnce(renewal.promise);
+            await act(async () => vi.advanceTimersByTime(840_000));
+            fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+            let signedIn!: Promise<number>;
+            await act(async () => { signedIn = auth.login(payload); });
+            expect(calls('/api/auth/login')).toHaveLength(0);
+            await act(async () => renewal.resolve(json(session('Person C', sidC)))); await settle();
+            await act(async () => { await signedIn; });
+            expect(calls('/api/auth/login')).toHaveLength(1);
+            expect(auth.user?.displayName).toBe('Person B');
+        } finally { release(); }
+    });
+    it('N02: a renewal resolving while a sign-in is in flight does not abort or overwrite it', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const signIn = deferred(); fetcher.mockReturnValueOnce(signIn.promise);
+        let signedIn!: Promise<number>;
+        await act(async () => { signedIn = auth.login(payload); });
+        const loginSignal = calls('/api/auth/login')[0][1].signal as AbortSignal;
+        fetcher.mockResolvedValueOnce(json(session('Person C', sidC)));
+        await act(async () => vi.advanceTimersByTime(840_000)); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(2); expect(loginSignal.aborted).toBe(false);
+        expect(auth.user?.displayName).toBe('Person A');
+        await act(async () => signIn.resolve(json(session('Person B', sidB)))); await act(async () => { await signedIn; });
+        expect(auth.user?.displayName).toBe('Person B'); expect(calls('/api/auth/login')).toHaveLength(1);
+    });
+    it('N02: a failed sign-in renews the session whose renewal it superseded', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const generation = auth.generation, signIn = deferred(); fetcher.mockReturnValueOnce(signIn.promise);
+        let attempt!: Promise<unknown>;
+        await act(async () => { attempt = auth.login(payload).catch((e) => e); });
+        fetcher.mockResolvedValueOnce(json(session()));
+        await act(async () => vi.advanceTimersByTime(840_000)); await settle();
+        fetcher.mockResolvedValueOnce(json(session()));
+        await act(async () => signIn.resolve(json(null, 401)));
+        expect(await attempt).toMatchObject({ kind: 'http', status: 401 }); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(3);
+        expect(auth.user?.displayName).toBe('Person A'); expect(auth.generation).toBe(generation);
+    });
     it('a newer sign-out still cancels a pending sign-in', async () => {
         fetcher.mockResolvedValueOnce(json(null, 401)); await mountHybrid(); await settle();
         const work = deferred(); fetcher.mockReturnValueOnce(work.promise);

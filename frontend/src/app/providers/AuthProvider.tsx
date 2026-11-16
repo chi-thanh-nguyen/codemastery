@@ -94,6 +94,8 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
     const alive = useRef(true), returnPath = useRef<'/profile' | null>(null);
     const pending = useRef(new Set<AbortController>()), lastLogin = useRef<AbortController | null>(null);
     const restoreRun = useRef(0), retryTimer = useRef<number | undefined>(undefined), lastWake = useRef(0);
+    /** A renewal result was discarded for a pending explicit sign-in; renew again if that sign-in fails. */
+    const renewalDeferred = useRef(false);
     const channel = useRef<BroadcastChannel | null>(null);
     const eligible = useCallback(() => session.current && Date.now() < session.current.expiresAt ? session.current : null, []);
     const broadcast = useCallback((type: 'signed-in' | 'signed-out') => { try { channel.current?.postMessage({ type }); } catch { /* closed */ } }, []);
@@ -157,12 +159,20 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
             if (alive.current && run === restoreRun.current) setRestoring(false);
         }
     }, [clear, install]);
-    /** Proactive rotation for the current generation; a refusal ends the session, other failures retry. */
+    /**
+     * Proactive rotation for the current generation; a refusal ends the session, other failures retry.
+     * Renewal is the weakest operation (ADR014 §§15–16, N02): its result is discarded when an explicit
+     * sign-in is pending or started after it began, so it can neither replace the session under that
+     * sign-in nor abort it; a failed sign-in then renews again.
+     */
     const renew = useCallback(async (value: number) => {
         window.clearTimeout(retryTimer.current);
+        const startedAttempt = attempt.current;
         try {
             const response = await coordinatedRefresh();
-            if (alive.current && value === generation.current && session.current) install(response, false);
+            if (!alive.current || value !== generation.current || !session.current) return;
+            if (lastLogin.current || startedAttempt !== attempt.current) { renewalDeferred.current = true; return; }
+            install(response, false);
         } catch (error) {
             if (!alive.current || value !== generation.current || !session.current) return;
             if (refused(error)) { clear(); return; }
@@ -250,6 +260,7 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
             expire();
             if (!current()) throw cancelled();
             const installed = install(response, true, controller);
+            renewalDeferred.current = false;
             if (refreshSessions) {
                 pendingSignOut(false);
                 restoreRun.current++; if (alive.current) setRestoring(false);
@@ -257,13 +268,15 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
             }
             return installed;
         } catch (error) {
-            // A failed sign-in leaves the browser as it was: the restore it superseded runs again.
-            if (refreshSessions && current() && !session.current && !(error instanceof ApiError && error.kind === 'cancelled')) {
-                lastLogin.current = null; void restore();
+            // A failed sign-in leaves the browser as it was: the restore or renewal it superseded runs again.
+            if (refreshSessions && current() && !(error instanceof ApiError && error.kind === 'cancelled')) {
+                lastLogin.current = null;
+                if (!session.current) void restore();
+                else if (renewalDeferred.current) { renewalDeferred.current = false; void renew(session.current.generation); }
             }
             throw error;
         } finally { finish(); if (lastLogin.current === controller) lastLogin.current = null; }
-    }, [broadcast, expire, install, operation, refreshSessions, restore]);
+    }, [broadcast, expire, install, operation, refreshSessions, renew, restore]);
     const register = useCallback(async (payload: RegisterRequest, signal?: AbortSignal) => {
         expire();
         const captured = generation.current, { controller, finish } = operation(signal);
