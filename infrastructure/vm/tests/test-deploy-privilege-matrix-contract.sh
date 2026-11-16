@@ -10,7 +10,7 @@ bash -c '
   set -euo pipefail
   source "$1"
   runtime_matrix_values >/dev/null
-  [[ "$(runtime_matrix_values | wc -l | tr -d " ")" == 25 ]]  # CT17 r1 (24, V001-V006) + approved r2 password_reset_tokens
+  [[ "$(runtime_matrix_values | wc -l | tr -d " ")" == 27 ]]  # CT17 r1 (24, V001-V006) + r2 password_reset_tokens + r3 refresh_sessions/refresh_tokens (V008)
   approved="$RUNTIME_PRIVILEGE_MATRIX"
   reject() {
     RUNTIME_PRIVILEGE_MATRIX="$2"
@@ -52,9 +52,11 @@ for line in block.splitlines():
     executable[rel] = normalize(set() if tprivs == "-" else set(tprivs.split(",")), columns)
 section = record.split("## CT17 runtime database privileges and operation gates — 28 October 2026", 1)[1]
 # CT17-P6-PRIVILEGES-2026-10-28-r1 stays authentic history; the Leader-approved
-# CT17-P6-PRIVILEGES-2026-11-13-r2 section replaces/adds only its own rows.
+# CT17-P6-PRIVILEGES-2026-11-13-r2 section and the delegated-approved
+# CT17-P6-PRIVILEGES-2026-11-16-r3 section (ADR014) replace/add only their own rows.
 r1_part, r2_part = section.split("### CT17-P6-PRIVILEGES-2026-11-13-r2", 1)
-r2_part = r2_part.split("\n## ", 1)[0]
+r2_part = r2_part.split("\n## ", 1)[0].split("\n### ", 1)[0]
+r3_part = record.split("### CT17-P6-PRIVILEGES-2026-11-16-r3", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
 def documented_rows(text):
     rows = {}
     for rel, privileges in re.findall(r"^\| `([a-z_]+)` \([a-z]+\) \| ([^|]+?) \|", text, re.M):
@@ -72,15 +74,18 @@ def documented_rows(text):
     return rows
 r1 = documented_rows(r1_part)
 r2 = documented_rows(r2_part)
+r3 = documented_rows(r3_part)
 assert len(r1) == 24 and "password_reset_tokens" not in r1, "CT17 r1 history must stay the reviewed V001-V006 matrix"
 assert r1["users"] == normalize({"SELECT", "INSERT"}, set()), "CT17 r1 users row must stay SELECT, INSERT"
 assert r2 == {"users": normalize({"SELECT", "INSERT"}, {"UPDATE:password_hash"}),
               "password_reset_tokens": normalize({"SELECT", "INSERT", "DELETE"}, set())}, "CT17 r2 rows differ from the approved extension"
-documented = {**r1, **r2}
+assert r3 == {"refresh_sessions": normalize({"SELECT", "INSERT", "DELETE"}, {"UPDATE:revoked_at"}),
+              "refresh_tokens": normalize({"SELECT", "INSERT", "DELETE"}, {"UPDATE:consumed_at"})}, "CT17 r3 rows differ from the ADR014 extension"
+documented = {**r1, **r2, **r3}
 if executable != documented:
     for rel in sorted(set(executable) | set(documented)):
         if executable.get(rel) != documented.get(rel):
             print(f"mismatch for {rel}: script={executable.get(rel)} record={documented.get(rel)}", file=sys.stderr)
-    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the approved r2 rows")
-print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows)")
+    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the approved r2 and r3 rows")
+print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows) and r3 ({len(r3)} rows)")
 PY

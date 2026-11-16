@@ -1333,8 +1333,9 @@ SQL
 }
 
 # CT17-P6-PRIVILEGES-2026-10-28-r1 (docs/deployment.md) as extended by the
-# LEADER_APPROVED CT17-P6-PRIVILEGES-2026-11-13-r2 AU07 rows: the complete
-# runtime privilege matrix for the reviewed V001-V007 schema. Every relation in schema
+# LEADER_APPROVED CT17-P6-PRIVILEGES-2026-11-13-r2 AU07 rows and the
+# DELEGATED_APPROVED CT17-P6-PRIVILEGES-2026-11-16-r3 ADR014 refresh-session rows:
+# the complete runtime privilege matrix for the reviewed V001-V008 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
 # cannot silently widen a table-level grant. Nothing is granted to future objects.
 # Change a row only together with that record and an implemented, approved consumer.
@@ -1365,6 +1366,8 @@ notifications            -              -                                       
 content_reports          -              -                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at
 audit_logs               -              -                                        id,actor_id,action,target_type,target_reference,occurred_at
 password_reset_tokens    SELECT,INSERT,DELETE -                                  id,user_id,token_digest,issued_at,expires_at
+refresh_sessions         SELECT,INSERT,DELETE UPDATE(revoked_at)                 id,user_id,created_at,expires_at,revoked_at
+refresh_tokens           SELECT,INSERT,DELETE UPDATE(consumed_at)                id,session_id,token_digest,issued_at,expires_at,consumed_at
 flyway_schema_history    -              -                                        *
 '
 
@@ -1521,10 +1524,10 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
     || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
   if [[ -n "${violations}" ]]; then
     printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
-    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07 rows); reconcile explicitly. Ingress remains closed."
+    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07 and r3 refresh-session rows); reconcile explicitly. Ingress remains closed."
   fi
   if [[ "${mode}" == "complete" ]]; then
-    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07 rows) verified (every public relation reviewed)"
+    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07 and r3 refresh-session rows) verified (every public relation reviewed)"
   fi
   log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
 }
@@ -1558,6 +1561,8 @@ SQL
   expect_denied  "runtime role changing account roles" 42501 "${app}" "${app_pw}" <<<'UPDATE public.users SET role = role WHERE false;'
   expect_denied  "runtime role changing account email or status" 42501 "${app}" "${app_pw}" <<<'UPDATE public.users SET email = email, account_status = account_status WHERE false;'
   expect_denied  "runtime role rewriting reset-capability expiry" 42501 "${app}" "${app_pw}" <<<'UPDATE public.password_reset_tokens SET expires_at = expires_at WHERE false;'
+  expect_denied  "runtime role extending refresh-session lifetime" 42501 "${app}" "${app_pw}" <<<'UPDATE public.refresh_sessions SET expires_at = expires_at, user_id = user_id WHERE false;'
+  expect_denied  "runtime role rewriting refresh-token digests or expiry" 42501 "${app}" "${app_pw}" <<<'UPDATE public.refresh_tokens SET token_digest = token_digest, expires_at = expires_at WHERE false;'
   expect_denied  "runtime role changing Course publication" 42501 "${app}" "${app_pw}" <<<'UPDATE public.courses SET publication_status = publication_status WHERE false;'
   expect_denied  "runtime role deleting memberships" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.enrollments WHERE false;'
   expect_denied  "runtime role reading question answer keys" 42501 "${app}" "${app_pw}" <<<'SELECT correct_options FROM public.questions WHERE false;'
