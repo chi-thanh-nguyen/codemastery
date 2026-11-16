@@ -66,8 +66,11 @@ public interface UserRepository {
     /** Unlocked read of one session (its owner never changes). */
     Optional<RefreshSession> findRefreshSession(UUID sessionId);
 
-    /** Revokes the account's active sessions beyond the newest {@code keep}. */
-    int revokeRefreshSessionsBeyond(UUID userId, int keep, Instant now);
+    /**
+     * Keeps {@code issuing} plus the newest {@code keep - 1} other active sessions of the account and
+     * revokes the rest. The issuing session is never a candidate, whatever its timestamp (N01).
+     */
+    int revokeRefreshSessionsBeyond(UUID userId, int keep, Instant now, UUID issuing);
 
     /**
      * Deletes at most {@code limit} sessions expired at {@code now}, with their tokens. Rows locked by

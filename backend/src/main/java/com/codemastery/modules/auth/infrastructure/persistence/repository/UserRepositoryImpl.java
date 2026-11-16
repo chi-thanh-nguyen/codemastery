@@ -174,11 +174,11 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
-    public int revokeRefreshSessionsBeyond(UUID userId, int keep, Instant now) {
+    public int revokeRefreshSessionsBeyond(UUID userId, int keep, Instant now, UUID issuing) {
         return jdbc.update("UPDATE public.refresh_sessions SET revoked_at = ? WHERE id IN ("
                         + "SELECT id FROM public.refresh_sessions WHERE user_id = ? AND revoked_at IS NULL "
-                        + "AND expires_at > ? ORDER BY created_at DESC, id DESC OFFSET ?)",
-                Timestamp.from(now), userId, Timestamp.from(now), keep);
+                        + "AND expires_at > ? AND id <> ? ORDER BY created_at DESC, id DESC OFFSET ?)",
+                Timestamp.from(now), userId, Timestamp.from(now), issuing, Math.max(0, keep - 1));
     }
 
     @Override

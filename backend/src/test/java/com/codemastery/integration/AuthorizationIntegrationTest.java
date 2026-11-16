@@ -35,6 +35,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -112,6 +113,12 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private RefreshSessionService refreshSessions;
+
+    @Autowired
+    private com.codemastery.modules.auth.domain.repository.UserRepository userRepository;
+
+    @Autowired
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
 
     private final Set<String> testEmails = ConcurrentHashMap.newKeySet();
 
@@ -1323,6 +1330,69 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             } finally {
                 pool.shutdownNow();
             }
+        }
+
+        // ---- Second independent-review remediation N01 (ADR014 §16). ----
+
+        @Test
+        void n01DelayedIssuanceReturnsASessionItsOwnCapEnforcementDidNotRevoke() throws Exception {
+            String emailA = newEmail(), emailB = newEmail(), password = syntheticPassword();
+            insertActiveAccountWithPassword(emailA, password);
+            UUID userB = insertActiveAccountWithPassword(emailB, password);
+            Signed cookieOfA = signIn(emailA, password);
+            UUID sessionA = sessionOf(cookieOfA.refreshToken());
+            com.codemastery.modules.auth.domain.model.User verifiedB = authService.authenticate(emailB, password);
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            RefreshSessionService.IssuedSession delayed;
+            try {
+                Future<RefreshSessionService.IssuedSession> waiting;
+                // The sign-in to B presenting A's cookie waits on A's session row (cross-account
+                // replacement) while ten other sign-ins to B commit.
+                try (HeldLock ignored = new HeldLock("SELECT id FROM public.refresh_sessions WHERE id = ? FOR UPDATE",
+                        sessionA)) {
+                    waiting = pool.submit(() -> refreshSessions.start(verifiedB,
+                            java.util.Optional.of(cookieOfA.refreshToken())));
+                    awaitLockWaiters(1);
+                    for (int i = 0; i < 10; i++) {
+                        refreshSessions.start(verifiedB, java.util.Optional.empty());
+                    }
+                }
+                delayed = waiting.get(30, TimeUnit.SECONDS);
+            } finally {
+                pool.shutdownNow();
+            }
+            assertFalse(revoked(delayed.sessionId()), "issuance must not revoke the session it returns");
+            refresh(delayed.refreshToken()).andExpect(status().isOk());
+            assertEquals(RefreshSessionService.MAX_ACTIVE_SESSIONS, activeSessions(userB));
+            assertTrue(revoked(sessionA));
+            // A later, separately committed sign-in revokes the then-oldest session as usual.
+            UUID oldest = jdbc.queryForObject("SELECT id FROM public.refresh_sessions WHERE user_id = ? "
+                    + "AND revoked_at IS NULL ORDER BY created_at, id LIMIT 1", UUID.class, userB);
+            refreshSessions.start(verifiedB, java.util.Optional.empty());
+            assertTrue(revoked(oldest));
+            assertEquals(RefreshSessionService.MAX_ACTIVE_SESSIONS, activeSessions(userB));
+        }
+
+        @Test
+        void n01CapNeverSelectsTheIssuingSessionEvenOnATimestampTie() throws Exception {
+            UUID userId = insertUser("learner", "active");
+            Instant tie = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+            List<UUID> sessions = new ArrayList<>();
+            for (int i = 0; i < 11; i++) {
+                UUID session = UUID.randomUUID();
+                sessions.add(session);
+                jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) VALUES (?,?,?,?)",
+                        session, userId, java.sql.Timestamp.from(tie), java.sql.Timestamp.from(tie.plus(Duration.ofDays(7))));
+            }
+            for (UUID candidate : sessions) {
+                jdbc.update("UPDATE public.refresh_sessions SET revoked_at = NULL WHERE user_id = ?", userId);
+                Integer revokedRows = new org.springframework.transaction.support.TransactionTemplate(transactionManager)
+                        .execute(status -> userRepository.revokeRefreshSessionsBeyond(userId,
+                                RefreshSessionService.MAX_ACTIVE_SESSIONS, tie, candidate));
+                assertEquals(1, revokedRows);
+                assertFalse(revoked(candidate), "the issuing session is never a cap candidate");
+            }
+            assertEquals(RefreshSessionService.MAX_ACTIVE_SESSIONS, activeSessions(userId));
         }
 
         @Test

@@ -92,16 +92,13 @@ public class RefreshSessionService {
      * logout and purge lock only session rows (then tokens) and never wait for a User lock.
      */
     public IssuedSession start(User verified, Optional<String> presentedToken) {
-        Instant now = now();
         UUID sessionId = UUID.randomUUID();
         byte[] raw = newToken();
-        Instant sessionExpiry = now.plus(SESSION_LIFETIME);
-        Instant tokenExpiry = min(now.plus(TOKEN_IDLE_LIFETIME), sessionExpiry);
         Optional<RefreshSession> replaced = presentedSession(presentedToken);
         Optional<RefreshSession> replacedOwn = replaced.filter(session -> session.userId().equals(verified.id()));
         replaced.filter(session -> !session.userId().equals(verified.id())).ifPresent(other ->
-                transactions.executeWithoutResult(status -> users.revokeRefreshSession(other.id(), now)));
-        User issued = transactions.execute(status -> {
+                transactions.executeWithoutResult(status -> users.revokeRefreshSession(other.id(), now())));
+        IssuedSession issued = transactions.execute(status -> {
             User current = users.lockUserForSessionIssue(verified.id()).orElse(null);
             // Statements after the lock see every committed reset or status change. A BCrypt hash
             // is salted, so any reset (even to the same password) changes it.
@@ -109,17 +106,23 @@ public class RefreshSessionService {
                     || !current.passwordHash().equals(verified.passwordHash())) {
                 return null;
             }
+            // N01 (ADR014 §16): the issuance instant, both expiries and the cookie lifetime are
+            // taken only after the lock wait, so this session is never older than sessions
+            // committed while it waited; cap enforcement also excludes it explicitly.
+            Instant now = now();
+            Instant sessionExpiry = now.plus(SESSION_LIFETIME);
+            Instant tokenExpiry = min(now.plus(TOKEN_IDLE_LIFETIME), sessionExpiry);
             users.insertRefreshSession(sessionId, current.id(), now, sessionExpiry);
             users.insertRefreshToken(UUID.randomUUID(), sessionId, sha256(raw), now, tokenExpiry);
             replacedOwn.ifPresent(previous -> users.revokeRefreshSession(previous.id(), now));
-            users.revokeRefreshSessionsBeyond(current.id(), MAX_ACTIVE_SESSIONS, now);
-            return current;
+            users.revokeRefreshSessionsBeyond(current.id(), MAX_ACTIVE_SESSIONS, now, sessionId);
+            return new IssuedSession(current, sessionId, encode(raw), now, tokenExpiry);
         });
         if (issued == null) {
             throw rejected();
         }
-        purgeExpired(now);
-        return new IssuedSession(issued, sessionId, encode(raw), now, tokenExpiry);
+        purgeExpired(issued.issuedAt());
+        return issued;
     }
 
     /** Rotates a presented refresh token, or fails closed with the generic 401 exception. */
