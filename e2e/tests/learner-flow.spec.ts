@@ -343,6 +343,55 @@ test.describe('accounts and sessions', () => {
         expect(logins).toEqual(['POST']);
     });
 
+    /** Resolves with the Authorization header of the next real `/api/me/courses` request; compared in memory, never logged. */
+    function nextMembershipBearer(target: import('@playwright/test').Page) {
+        return target.waitForRequest((sent) => new URL(sent.url()).pathname === '/api/me/courses').then((sent) => sent.headers().authorization ?? '');
+    }
+    const showHome = (target: import('@playwright/test').Page) => target.evaluate(() => { history.pushState(null, '', '/home'); dispatchEvent(new PopStateEvent('popstate')); });
+
+    for (const outcome of ['abandoned', 'refused'] as const) {
+        test(`A01: a delayed renewal superseded by an explicit sign-in that is ${outcome} still renews the session from the cookie`, async ({ page, learner }) => {
+            await page.clock.install();
+            await signIn(page, learner);
+            expect(await page.evaluate(() => typeof navigator.locks?.request)).toBe('function');
+            const logins: number[] = [], refreshes: number[] = [], issued: Promise<string>[] = [];
+            page.on('response', (answer) => {
+                const pathname = new URL(answer.url()).pathname;
+                if (pathname === '/api/auth/login') logins.push(answer.status());
+                if (pathname === '/api/auth/refresh') {
+                    refreshes.push(answer.status());
+                    issued.push(answer.json().then((body: { accessToken?: string }) => body.accessToken ?? '', () => ''));
+                }
+            });
+            const held = await holdNextRefresh(page);
+            await page.clock.fastForward('14:05');
+            await held.seen;
+            await page.evaluate(() => { history.pushState(null, '', '/login'); dispatchEvent(new PopStateEvent('popstate')); });
+            await page.locator('#login-email').fill(learner.email);
+            await page.locator('#login-password').fill(outcome === 'refused' ? `${learner.password}-wrong` : learner.password);
+            await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+            await expect(page.getByRole('status').filter({ hasText: 'Signing in…' })).toBeVisible();
+            // The sign-in waits for the Web Lock the held renewal owns. 'abandoned': the user leaves
+            // the sign-in page, which cancels it (the old code then lost the renewal it superseded).
+            if (outcome === 'abandoned') await showHome(page);
+            held.release();
+            await expect.poll(() => refreshes).toEqual([200, 200]);
+            expect(logins).toEqual(outcome === 'refused' ? [401] : []);
+            if (outcome === 'refused') await expect(page.getByRole('alert')).toBeVisible();
+            // The recovered session is usable with the bearer issued by the recovery refresh. (Bearers
+            // are not compared with the sign-in's: two JWTs issued within one second are identical.)
+            await page.evaluate(() => { history.pushState(null, '', '/courses'); dispatchEvent(new PopStateEvent('popstate')); });
+            const after = nextMembershipBearer(page);
+            const membership = page.waitForResponse((answer) => new URL(answer.url()).pathname === '/api/me/courses');
+            await showHome(page);
+            expect((await membership).status()).toBe(200);
+            const recovered = await issued[1];
+            expect(recovered.length > 0, 'the recovery refresh issued an access token').toBe(true);
+            expect(await after === `Bearer ${recovered}`, 'the bearer is the one the recovery refresh issued').toBe(true);
+            await expect(page.getByRole('button', { name: accountMenuName(learner) })).toBeVisible();
+        });
+    }
+
     test('rejects wrong credentials with a safe message and keeps the form', async ({ page, learner }) => {
         await page.goto('/login');
         await page.locator('#login-email').fill(learner.email);
