@@ -20,6 +20,11 @@ export interface RequestOptions<T> {
     isCurrent?: () => boolean;
 }
 let authAccess: AuthSessionAccess | undefined;
+/**
+ * The only operations that may carry the HttpOnly refresh cookie (ADR014 §5). Every other
+ * request omits credentials, so the cookie never reaches unrelated endpoints.
+ */
+const cookieOperations = new Set(['/auth/login', '/auth/refresh', '/auth/logout']);
 /** The provider owns this binding; request callers cannot supply credentials. */
 export function bindAuthSession(access: AuthSessionAccess) {
     authAccess = access;
@@ -100,6 +105,7 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
             throw new ApiError('configuration', 'The API operation is not configured correctly.');
         }
         const session = options.auth === 'authenticated' ? access?.capture() : undefined;
+        const cookieOperation = options.auth === 'public' && options.method === 'POST' && cookieOperations.has(path);
         const signals = [options.signal, session?.signal].filter((signal): signal is AbortSignal => !!signal);
         const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
         const current = () => !signal?.aborted && options.isCurrent?.() !== false &&
@@ -119,8 +125,10 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
             response = await fetch(url.href, {
                 method: options.method, headers, signal,
                 body: options.body === undefined ? undefined : JSON.stringify(options.body),
-                credentials: 'omit', redirect: 'error',
-                ...(session || path === '/auth/login' || path === '/auth/register' ? { cache: 'no-store' as const } : {}),
+                credentials: cookieOperation ? 'include' : 'omit', redirect: 'error',
+                // Sign-out must reach the server even while the page unloads.
+                ...(cookieOperation && path === '/auth/logout' ? { keepalive: true } : {}),
+                ...(session || cookieOperation || path === '/auth/register' ? { cache: 'no-store' as const } : {}),
             });
         } catch {
             requireCurrent();
@@ -131,6 +139,12 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
         if (response.status === 401 && session) {
             access!.invalidate(session.generation);
             throw httpFailure(401, undefined, '', url.pathname);
+        }
+        if (response.status === 204 && options.expectedStatus === 204) {
+            // No representation: a 204 body is never read or decoded as data.
+            const decoded = options.decode(undefined);
+            requireCurrent();
+            return decoded;
         }
         const media = (response.headers.get('Content-Type') ?? '').split(';')[0].trim().toLowerCase();
         if (response.ok && (response.status !== options.expectedStatus || media !== 'application/json')) throw protocolError();

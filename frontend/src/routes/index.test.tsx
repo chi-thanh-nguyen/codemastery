@@ -143,6 +143,23 @@ describe('real declarative routing and Profile', () => {
         async function travel(action: () => void) { await act(async () => { const popped = new Promise<void>((done) => window.addEventListener('popstate', () => done(), { once: true })); action(); await popped; }); }
         await travel(() => window.history.back()); expect(location.pathname).toBe('/profile'); expect(host.querySelector('dl')).not.toBeNull(); await travel(() => window.history.forward()); expect(location.pathname).toBe('/courses/one'); await act(async () => auth.logout()); await travel(() => window.history.back()); expect(location.pathname).toBe('/login'); expect(host.querySelector('dl')).toBeNull();
     });
+    it('ADR014: a reload of a protected route waits for the refresh cookie instead of redirecting', async () => {
+        let resolve!: (response: Response) => void;
+        fetcher.mockImplementationOnce(() => new Promise<Response>((done) => { resolve = done; }));
+        window.history.replaceState(null, '', '/profile');
+        await act(async () => root.render(<App />));
+        expect(location.pathname).toBe('/profile'); expect(host.textContent).toContain('Restoring your session…');
+        expect(host.textContent).not.toContain('Sign in');
+        expect(new URL(fetcher.mock.calls[0][0]).pathname).toBe('/api/auth/refresh');
+        await act(async () => resolve(json(loginResponse('Person A'))));
+        expect(location.pathname).toBe('/profile'); expect(host.querySelector('dl')?.textContent).toContain('Person A');
+    });
+    it('ADR014: a refused restore sends a protected reload to Sign in without a session-ended notice', async () => {
+        fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'Authentication failed.', instance: '/api/auth/refresh' }), { status: 401, headers: { 'Content-Type': 'application/problem+json' } }));
+        window.history.replaceState(null, '', '/profile');
+        await act(async () => root.render(<App />));
+        expect(location.pathname).toBe('/login'); expect(host.textContent).not.toContain('Your session ended');
+    });
     it('composes the actual public catalogue/detail with current Auth navigation', async () => {
         window.history.replaceState(null, '', '/courses');
         await act(async () => root.render(<App />));
