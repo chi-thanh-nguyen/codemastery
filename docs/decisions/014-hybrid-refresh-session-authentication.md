@@ -121,7 +121,8 @@ request (requires storing recoverable token material); issuing sibling tokens in
 the grace window (forks the family and weakens replay detection); no grace window
 (legitimate cross-tab races would log users out and look like theft).
 
-**Sign-in.** One transaction inserts the session and its first token (the foreign-key
+**Sign-in.** *(Superseded in part by §15: credential revalidation under the User-row lock,
+single-account locking and the cross-account replacement order.)* One transaction inserts the session and its first token (the foreign-key
 check takes the User key-share lock first, the same User-before-session order as
 password reset and CT12), locks the account's active sessions in `id` order (§14), revokes
 the session of a refresh cookie the browser still presented (login replacement), then
@@ -397,4 +398,90 @@ the corrections stay within each revision's approved intent.
 
 Known residual, recorded and not changed: a sign-in request that hangs inside the Web
 Lock delays other tabs' renewals until it completes or the user cancels it.
+
+## 15. Independent review remediation — 17 November 2026
+
+**Source.** An independent Codex technical review of head
+`13dba679dee98124813dacab71fda5844a42bb9b` reported `CHANGES_REQUIRED`,
+`SECURITY_REVIEW: FAIL` and five blocking findings, each reproduced with PostgreSQL or
+Chromium. Claude Code remediated them under the delegated ADR014 authority (§1). This
+section records the **author's** remediation. Codex has **not** reviewed it yet, so
+independent re-review is pending. Revision identifiers are unchanged: each fix restores
+a guarantee the existing revisions already state (§§4–7). §§4 and 14 stay as history
+where this section supersedes them.
+
+| Finding | Root cause | Remediation |
+|---|---|---|
+| **F01 (P1)** A login verified with the old password could create a session after a password reset committed | Issuance trusted the earlier, unlocked BCrypt result | Issuance locks the account's User row (`FOR NO KEY UPDATE`) and, under that lock, requires the stored hash to equal the verified one and the account to be active; otherwise the generic 401, with nothing issued. The salted hash serves as the credential version. BCrypt still runs outside any lock. |
+| **F02 (P2)** Concurrent sign-ins exceeded the 10-session cap (11 reproduced) | With no committed session there was no common row to serialize on | The same User-row lock serializes every issuance of an account; the cap is decided by statements that run after the lock and see committed sessions. The test asserts exactly 10. |
+| **F03 (P2)** Opposite cross-account login replacements deadlocked (`40P01`) | Each transaction locked its own account's sessions, then the other account's | A sign-in locks at most one User row. A replaced session of **another** account is revoked first, in its own single-row transaction; a same-account replacement stays inside the locked issuance, where the cap counts it. |
+| **F04 (P2)** A sign-out in another tab was undone by a pending restore | The broadcast handler cleared only an installed session | `signed-out` now advances the restore epoch and the generation and settles `restoring`, so a late refresh response is discarded. |
+| **F05 (P2)** A pending restore cancelled an explicit sign-in queued behind the Web Lock | The sign-in captured the generation before waiting; the restore's installation changed it | An explicit sign-in now supersedes a pending restore (its result is discarded while a sign-in is pending). It is cancelled only by a newer sign-in or a sign-out, never by a restore or the old session ending. A failed sign-in re-runs the superseded restore. |
+
+**Backend lock order (all session writers).**
+
+1. User rows. Sign-in locks one row, `FOR NO KEY UPDATE`. Password reset and its request
+   worker lock one row, `FOR UPDATE`. CT12 (ADR012 §10.1) locks Administrator rows in id
+   order and then its target. Sign-in never locks a second User row, so it cannot form a
+   cycle with CT12 or with another sign-in.
+2. Session rows: the sign-in insert, the same-account replacement and cap revocation;
+   rotation's `FOR UPDATE`; logout; reset revocation; purge (`SKIP LOCKED`); the
+   cross-account replacement revoke, run as a separate single-row transaction.
+3. Token rows.
+
+Rotation, logout, purge and the cross-account revoke take step 2–3 locks only and never
+wait for a User lock. Every transaction acquires locks in increasing step order, so no
+cycle exists.
+
+Resulting invariants:
+
+- A reset or lock committed before issuance takes the User lock prevents issuance.
+- A session committed before a reset takes the lock is revoked by that reset (also
+  tested).
+- Sessions of one account are capped on committed state.
+- Rotation racing a reset ends with the session revoked either way.
+
+The runtime role needs no new grant: the User-row lock uses the existing
+`UPDATE (password_hash)` (r2). §14's sign-in lock on session rows is superseded by
+step 1.
+
+Consequence: a cross-account replaced session is revoked even if the subsequent
+issuance is rejected (for example by a concurrent reset). Its holder had already
+authenticated as another account and is replacing that cookie.
+
+**Frontend operation precedence (CT16-SESSION).** From weakest to strongest:
+
+1. Renewal of the current session.
+2. Restore or adoption (bootstrap, `signed-in` from another tab, wake-up).
+3. Explicit sign-in (latest wins).
+4. Sign-out, local or broadcast.
+
+A stronger operation discards pending weaker results. Expiry, a current-session 401 or
+a refused refresh end only the old session and do not cancel a pending sign-in.
+Cross-tab cookie operations remain serialized by the Web Lock, and no mutation is
+retried.
+
+**Evidence.** Regression tests at existing locations:
+
+- PostgreSQL, forced interleavings using real row locks held on a separate connection and
+  `pg_stat_activity` lock-waiter detection: `F01A–F01D`, `F02` (11 concurrent issuances
+  from no session; concurrent replacements above the cap), `F03`, rotation versus reset.
+- Vitest: F04, F05 (queued sign-in, failed sign-in, expiry during sign-in), sign-out
+  precedence.
+- Native browser Web Locks in Playwright: F04 and F05. One real refresh request is
+  delayed; nothing is mocked.
+
+Against the previous implementation, `F01A`, `F01B`, `F01D`, `F02`-from-empty
+(11 active), `F03` (HTTP 500 from a deadlock), the four Vitest F04/F05 tests and both
+Playwright tests fail; on the corrected code they pass. Executed commands are in
+[testing.md](../testing.md#independent-review-remediation--17-november-2026).
+
+Remaining:
+
+- Codex independent re-review of the new head.
+- CODEOWNER review.
+- QA01/QA07.
+- The §12 gates and residual risks, which are not Leader-accepted.
+- CT12.user, when implemented, must keep its ADR012 lock order and revoke sessions after
+  its User locks (§6). This is compatible with step 1.
 

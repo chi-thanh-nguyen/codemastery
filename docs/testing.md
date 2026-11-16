@@ -3292,3 +3292,54 @@ Note: forcing an `*IntegrationTest` into the Surefire unit run together with
 an ordering artifact of that ad hoc command: the classes pass separately and in the
 normal Surefire/Failsafe split above.
 
+## Independent review remediation — 17 November 2026
+
+An independent Codex review of `13dba67` reported five blocking findings (F01–F05).
+[ADR014 §15](decisions/014-hybrid-refresh-session-authentication.md#15-independent-review-remediation--17-november-2026)
+records the author's remediation; the Codex re-review is pending.
+
+**Regression tests (existing files).**
+
+| Finding | Test | Forcing mechanism |
+|---|---|---|
+| F01 | `AuthorizationIntegrationTest$RefreshSessions` `f01A` (reset commits between verification and issuance), `f01B` (reset commits while issuance waits for the account lock), `f01C` (issuance commits before a waiting reset, which revokes it), `f01D` (account locked after verification) | Service-level sequencing; a real User-row lock held on a separate connection; `pg_stat_activity` lock-waiter detection, no sleeps |
+| F02 | `f02ElevenConcurrentIssuancesFromNoSessionKeepExactlyTenActive` (exactly 10 active); `f02ConcurrentReplacementsAboveTheCapLeaveAtMostTenActive` (exactly 10) | 11 transactions queued on one held User-row lock and released together (test pool raised to 20 connections) |
+| F03 | `f03OppositeCrossAccountReplacementsBothSucceedWithoutDeadlock` | Both old session rows held, so the opposite switches overlap |
+| Combined | `rotationQueuedTogetherWithAResetEndsRevokedWhicheverRunsFirst` | Both queued on one held session row |
+| F04 | `AuthProvider.test.tsx` "F04 …"; Playwright "F04: a sign-out in another tab wins over that tab's pending session restore" | Real refresh request delayed in a second tab; native BroadcastChannel and Web Locks |
+| F05 | `AuthProvider.test.tsx` "F05 …" (queued sign-in, failed sign-in restores, expiry during sign-in), "a newer sign-out still cancels a pending sign-in"; Playwright "F05: an explicit sign-in queued behind a pending restore …" | FIFO lock stand-in (Vitest); native Web Locks with a delayed real refresh (Playwright) |
+| Privileges | `test-postgres-privilege-matrix-containment.sh` probes for the sign-in `FOR NO KEY UPDATE` and the purge `FOR UPDATE SKIP LOCKED` | Runtime role |
+
+**Shown to fail on the previous implementation** (code from `13dba67`, new tests,
+executed 17 November 2026):
+
+- `f01A`, `f01B`, `f01D`: no exception, so the stale session was issued.
+- `f02`-from-empty: 11 active sessions.
+- `f03`: HTTP 500 from a deadlock.
+- Vitest: the four F04/F05 tests.
+- Playwright Chromium: F04 stayed on `/profile` showing the old account; F05 sent no
+  login request and stayed on `/login`.
+
+`f01C`, the replacement-above-cap test and "a newer sign-out …" also pass on the old
+code; they guard properties that already held. Two unrelated Vitest tests failed there
+only through leakage from the failing F05 tests, and pass in isolation.
+
+**Executed on the corrected tree** (17 November 2026; macOS, Docker Desktop 29.8.1, Java
+25.0.4.1, Node 24.21.0; author evidence, not independent verification):
+
+| Command | Result |
+|---|---|
+| `cd backend && ./mvnw verify` | PASS — 631 unit, 207 integration, 0 failures |
+| `cd frontend && npm run build` / `npm test` | PASS — 16 files, 491 tests (also three shuffled runs of the provider file) |
+| `cd frontend && npm run test:browser` (Chromium) | PASS — 45 |
+| `cd e2e && npx playwright test` (chromium-desktop/mobile, webkit-desktop/mobile) | PASS — 73 passed, 3 skipped by design (F04/F05 run on all four projects) |
+| `test-deploy-privilege-matrix-contract.sh`, `test-postgres-privilege-matrix-containment.sh`, `test-runtime-real-backend-privileges.sh` | PASS |
+| `test-ingress-stub-backend.sh`, `test-ingress-real-backend.sh` | PASS |
+| `test-deploy-syntax-and-authorization-gates.sh`, `test-deploy-offline-compose-guards.sh` | PASS |
+
+Not run: `firefox-desktop` (cannot launch on this host). Limits: the forced interleavings
+use real PostgreSQL row locks and waiter detection. They do not reproduce every possible
+scheduling. In particular, a cycle between a sign-in and a future CT12 implementation is
+excluded by the lock order (ADR014 §15), not tested, because CT12.user is not
+implemented.
+

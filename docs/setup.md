@@ -2028,6 +2028,9 @@ integration. Current behavior:
   does not restore. The access token is renewed 60 seconds before expiry; the same
   user and `sid` is an in-place rotation (no page remount); a refusal ends the session
   with the existing notice; network failures retry every 10 seconds until expiry.
+- **Precedence** (ADR014 §15). A sign-out, local or from another tab, discards any pending
+  restore or sign-in. An explicit sign-in discards a pending restore and is not cancelled
+  by it or by the old session ending. If it fails, the superseded restore runs again.
 - **Tabs.** Sign-in, refresh and sign-out run under the Web Lock
   `codemastery-auth-session`; the `BroadcastChannel` `codemastery-auth` signs other tabs
   out (no request) or lets them adopt a new sign-in.
