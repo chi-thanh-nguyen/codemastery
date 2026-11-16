@@ -8,6 +8,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import com.codemastery.modules.auth.application.service.RefreshSessionService;
 import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailDelivery;
 import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailMessage;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,6 +57,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -105,6 +107,12 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     @MockitoBean
     private ResetEmailDelivery resetEmailDelivery;
 
+    @Autowired
+    private com.codemastery.modules.auth.application.service.AuthService authService;
+
+    @Autowired
+    private RefreshSessionService refreshSessions;
+
     private final Set<String> testEmails = ConcurrentHashMap.newKeySet();
 
     @BeforeEach
@@ -123,6 +131,8 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     @DynamicPropertySource
     static void provideEphemeralJwtSecret(DynamicPropertyRegistry registry) {
         registry.add("JWT_SECRET", () -> JWT_SECRET);
+        // F02 forces 11 concurrent issuance transactions plus one lock holder.
+        registry.add("spring.datasource.hikari.maximum-pool-size", () -> "20");
     }
 
     @AfterEach
@@ -1139,8 +1149,211 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                     .andExpect(status().isOk());
         }
 
+        // ---- Independent-review remediation F01–F03 (ADR014 §15): forced interleavings. ----
+
+        /** A row lock held on a separate connection; closing it commits (or rolls back) and releases. */
+        private final class HeldLock implements AutoCloseable {
+            private final java.sql.Connection connection;
+
+            HeldLock(String sql, Object... ids) throws Exception {
+                connection = dataSource.getConnection();
+                connection.setAutoCommit(false);
+                try (var statement = connection.prepareStatement(sql)) {
+                    for (int i = 0; i < ids.length; i++) {
+                        statement.setObject(i + 1, ids[i]);
+                    }
+                    statement.executeQuery().close();
+                }
+            }
+
+            void execute(String sql, Object... values) throws Exception {
+                try (var statement = connection.prepareStatement(sql)) {
+                    for (int i = 0; i < values.length; i++) {
+                        statement.setObject(i + 1, values[i]);
+                    }
+                    statement.executeUpdate();
+                }
+            }
+
+            @Override
+            public void close() throws Exception {
+                try {
+                    connection.commit();
+                } finally {
+                    connection.close();
+                }
+            }
+        }
+
+        /** Waits (bounded) until PostgreSQL reports at least {@code count} backends blocked on a lock. */
+        private void awaitLockWaiters(int count) throws Exception {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                    + "AND wait_event_type = 'Lock'", Integer.class) < count) {
+                assertTrue(System.nanoTime() < deadline, "expected " + count + " lock waiters");
+                Thread.onSpinWait();
+            }
+        }
+
+        private int activeSessions(UUID userId) {
+            return jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE user_id = ? "
+                    + "AND revoked_at IS NULL AND expires_at > now()", Integer.class, userId);
+        }
+
+        private org.springframework.test.web.servlet.ResultActions login(String email, String password, String cookie)
+                throws Exception {
+            var request = post("/api/auth/login").header("Origin", ORIGIN).contentType(MediaType.APPLICATION_JSON)
+                    .content(JSON.writeValueAsString(Map.of("email", email, "password", password)));
+            if (cookie != null) {
+                request.cookie(new jakarta.servlet.http.Cookie(COOKIE, cookie));
+            }
+            return mvc.perform(request);
+        }
+
         @Test
-        void concurrentSignInsReplacingDifferentCookiesAtTheCapBothSucceed() throws Exception {
+        void f01AResetCommittedAfterVerificationRejectsTheStaleSignIn() throws Exception {
+            String email = newEmail(), oldPassword = syntheticPassword(), newPassword = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, oldPassword);
+            com.codemastery.modules.auth.domain.model.User verified = authService.authenticate(email, oldPassword);
+            confirmReset(storedCapability(userId), newPassword).andExpect(status().isOk());
+            assertThrows(org.springframework.security.authentication.BadCredentialsException.class,
+                    () -> refreshSessions.start(verified, java.util.Optional.empty()));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE user_id = ?",
+                    Integer.class, userId));
+        }
+
+        @Test
+        void f01BResetCommittingWhileIssuanceWaitsForTheAccountLockRejectsIt() throws Exception {
+            String email = newEmail(), oldPassword = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, oldPassword);
+            com.codemastery.modules.auth.domain.model.User verified = authService.authenticate(email, oldPassword);
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> issuance;
+                try (HeldLock reset = new HeldLock("SELECT id FROM public.users WHERE id = ? FOR UPDATE", userId)) {
+                    issuance = pool.submit(() -> refreshSessions.start(verified, java.util.Optional.empty()));
+                    awaitLockWaiters(1);
+                    // The holder now commits exactly what a reset commits: a new hash.
+                    reset.execute("UPDATE public.users SET password_hash = ? WHERE id = ?",
+                            PASSWORDS.encode(syntheticPassword()), userId);
+                }
+                var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                        () -> issuance.get(30, TimeUnit.SECONDS));
+                assertTrue(failure.getCause() instanceof org.springframework.security.authentication.BadCredentialsException);
+            } finally {
+                pool.shutdownNow();
+            }
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE user_id = ?",
+                    Integer.class, userId));
+        }
+
+        @Test
+        void f01CIssuanceCommittingBeforeAWaitingResetIsRevokedByIt() throws Exception {
+            String email = newEmail(), oldPassword = syntheticPassword(), newPassword = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, oldPassword);
+            Signed earlier = signIn(email, oldPassword);
+            UUID earlierSession = sessionOf(earlier.refreshToken());
+            String capability = storedCapability(userId);
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<MvcResult> signIn;
+                Future<Integer> reset;
+                // Holding the earlier session row stops the sign-in after it took the account lock
+                // (its login-replacement revoke waits); the reset then queues on the account lock.
+                try (HeldLock ignored = new HeldLock("SELECT id FROM public.refresh_sessions WHERE id = ? FOR UPDATE",
+                        earlierSession)) {
+                    signIn = pool.submit(() -> login(email, oldPassword, earlier.refreshToken()).andReturn());
+                    awaitLockWaiters(1);
+                    reset = pool.submit(() -> confirmReset(capability, newPassword).andReturn().getResponse().getStatus());
+                    awaitLockWaiters(2);
+                }
+                MvcResult issued = signIn.get(30, TimeUnit.SECONDS);
+                assertEquals(200, issued.getResponse().getStatus());
+                assertEquals(200, reset.get(30, TimeUnit.SECONDS));
+                UUID issuedSession = sessionOf(cookieValue(issued));
+                assertTrue(revoked(issuedSession), "the reset revokes the session issued just before it");
+                refresh(cookieValue(issued)).andExpect(status().isUnauthorized());
+                String access = JSON.readTree(issued.getResponse().getContentAsString()).get("accessToken").asString();
+                assertEquals(401, protectedStatus(access));
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
+        void f01DAccountLockedAfterVerificationRejectsIssuance() throws Exception {
+            String email = newEmail(), password = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, password);
+            com.codemastery.modules.auth.domain.model.User verified = authService.authenticate(email, password);
+            jdbc.update("UPDATE public.users SET account_status = 'locked' WHERE id = ?", userId);
+            assertThrows(org.springframework.security.authentication.BadCredentialsException.class,
+                    () -> refreshSessions.start(verified, java.util.Optional.empty()));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE user_id = ?",
+                    Integer.class, userId));
+        }
+
+        @Test
+        void rotationQueuedTogetherWithAResetEndsRevokedWhicheverRunsFirst() throws Exception {
+            String email = newEmail(), oldPassword = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, oldPassword);
+            Signed first = signIn(email, oldPassword);
+            UUID session = sessionOf(first.refreshToken());
+            String capability = storedCapability(userId);
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<MvcResult> rotation;
+                Future<Integer> reset;
+                try (HeldLock ignored = new HeldLock("SELECT id FROM public.refresh_sessions WHERE id = ? FOR UPDATE", session)) {
+                    rotation = pool.submit(() -> refresh(first.refreshToken()).andReturn());
+                    awaitLockWaiters(1);
+                    reset = pool.submit(() -> confirmReset(capability, syntheticPassword()).andReturn().getResponse().getStatus());
+                    awaitLockWaiters(2);
+                }
+                MvcResult rotated = rotation.get(30, TimeUnit.SECONDS);
+                assertEquals(200, reset.get(30, TimeUnit.SECONDS));
+                assertTrue(revoked(session));
+                if (rotated.getResponse().getStatus() == 200) {
+                    refresh(cookieValue(rotated)).andExpect(status().isUnauthorized());
+                    String access = JSON.readTree(rotated.getResponse().getContentAsString()).get("accessToken").asString();
+                    assertEquals(401, protectedStatus(access));
+                } else {
+                    assertEquals(401, rotated.getResponse().getStatus());
+                }
+                assertEquals(401, protectedStatus(first.accessToken()));
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
+        void f02ElevenConcurrentIssuancesFromNoSessionKeepExactlyTenActive() throws Exception {
+            String email = newEmail(), password = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, password);
+            com.codemastery.modules.auth.domain.model.User verified = authService.authenticate(email, password);
+            int callers = 11;
+            ExecutorService pool = Executors.newFixedThreadPool(callers);
+            try {
+                List<Future<?>> issued = new ArrayList<>();
+                // All 11 transactions queue on the same lock and are released together.
+                try (HeldLock ignored = new HeldLock("SELECT id FROM public.users WHERE id = ? FOR UPDATE", userId)) {
+                    for (int i = 0; i < callers; i++) {
+                        issued.add(pool.submit(() -> refreshSessions.start(verified, java.util.Optional.empty())));
+                    }
+                    awaitLockWaiters(callers);
+                }
+                for (Future<?> result : issued) {
+                    result.get(60, TimeUnit.SECONDS);
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+            assertEquals(RefreshSessionService.MAX_ACTIVE_SESSIONS, activeSessions(userId));
+            assertEquals(callers, jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE user_id = ?",
+                    Integer.class, userId));
+        }
+
+        @Test
+        void f02ConcurrentReplacementsAboveTheCapLeaveAtMostTenActive() throws Exception {
             String email = newEmail(), password = syntheticPassword();
             UUID userId = insertActiveAccountWithPassword(email, password);
             Signed a = signIn(email, password), b = signIn(email, password);
@@ -1150,19 +1363,14 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             }
             ExecutorService pool = Executors.newFixedThreadPool(2);
             try {
-                CountDownLatch start = new CountDownLatch(1);
                 List<Future<Integer>> results = new ArrayList<>();
-                for (Signed presented : List.of(a, b)) {
-                    results.add(pool.submit(() -> {
-                        start.await(10, TimeUnit.SECONDS);
-                        return mvc.perform(post("/api/auth/login").header("Origin", ORIGIN)
-                                        .cookie(new jakarta.servlet.http.Cookie(COOKIE, presented.refreshToken()))
-                                        .contentType(MediaType.APPLICATION_JSON)
-                                        .content(JSON.writeValueAsString(Map.of("email", email, "password", password))))
-                                .andReturn().getResponse().getStatus();
-                    }));
+                try (HeldLock ignored = new HeldLock("SELECT id FROM public.users WHERE id = ? FOR UPDATE", userId)) {
+                    for (Signed presented : List.of(a, b)) {
+                        results.add(pool.submit(() -> login(email, password, presented.refreshToken())
+                                .andReturn().getResponse().getStatus()));
+                    }
+                    awaitLockWaiters(2);
                 }
-                start.countDown();
                 for (Future<Integer> result : results) {
                     assertEquals(200, result.get(60, TimeUnit.SECONDS));
                 }
@@ -1171,8 +1379,38 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             }
             assertTrue(revoked(sessionOf(a.refreshToken())));
             assertTrue(revoked(sessionOf(b.refreshToken())));
-            assertTrue(jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE user_id = ? "
-                    + "AND revoked_at IS NULL", Integer.class, userId) <= 11);
+            assertEquals(RefreshSessionService.MAX_ACTIVE_SESSIONS, activeSessions(userId));
+        }
+
+        @Test
+        void f03OppositeCrossAccountReplacementsBothSucceedWithoutDeadlock() throws Exception {
+            String emailA = newEmail(), emailB = newEmail(), password = syntheticPassword();
+            UUID userA = insertActiveAccountWithPassword(emailA, password);
+            UUID userB = insertActiveAccountWithPassword(emailB, password);
+            Signed cookieOfA = signIn(emailA, password), cookieOfB = signIn(emailB, password);
+            UUID sessionA = sessionOf(cookieOfA.refreshToken()), sessionB = sessionOf(cookieOfB.refreshToken());
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<Integer> browserX, browserY;
+                // Holding both old session rows makes the two sign-ins overlap: the previous design
+                // then locked A's then B's sessions in X and B's then A's in Y (PostgreSQL 40P01).
+                try (HeldLock ignored = new HeldLock("SELECT id FROM public.refresh_sessions WHERE id IN (?, ?) "
+                        + "ORDER BY id FOR UPDATE", sessionA, sessionB)) {
+                    browserX = pool.submit(() -> login(emailA, password, cookieOfB.refreshToken())
+                            .andReturn().getResponse().getStatus());
+                    browserY = pool.submit(() -> login(emailB, password, cookieOfA.refreshToken())
+                            .andReturn().getResponse().getStatus());
+                    awaitLockWaiters(2);
+                }
+                assertEquals(200, browserX.get(60, TimeUnit.SECONDS));
+                assertEquals(200, browserY.get(60, TimeUnit.SECONDS));
+            } finally {
+                pool.shutdownNow();
+            }
+            assertTrue(revoked(sessionA));
+            assertTrue(revoked(sessionB));
+            assertEquals(1, activeSessions(userA));
+            assertEquals(1, activeSessions(userB));
         }
 
         @Test

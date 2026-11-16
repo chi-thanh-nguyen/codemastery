@@ -155,8 +155,10 @@ public class PasswordResetService {
             if (!users.deleteResetToken(account.id(), digest)) {
                 throw invalidResetLink();
             }
-            // AUTH-SESSION-2026-11-16-r1 (ADR014 §6): a credential change ends every refresh
-            // session, and with it every session-bound access JWT, in the same transaction.
+            // AUTH-SESSION-2026-11-16-r1 (ADR014 §§6, 15): a credential change ends every refresh
+            // session, and with it every session-bound access JWT, in the same transaction. The
+            // User FOR UPDATE lock above precedes the session writes (global lock order), and a
+            // sign-in that verified the old hash is rejected when it revalidates under that lock.
             users.revokeRefreshSessionsOfUser(account.id(), now);
         });
         return new ResetCompletion(COMPLETION_MESSAGE);

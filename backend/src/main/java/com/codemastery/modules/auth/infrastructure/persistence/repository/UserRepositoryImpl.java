@@ -157,9 +157,20 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
-    public void lockActiveRefreshSessions(UUID userId, Instant now) {
-        jdbc.queryForList("SELECT id FROM public.refresh_sessions WHERE user_id = ? AND revoked_at IS NULL "
-                + "AND expires_at > ? ORDER BY id FOR UPDATE", UUID.class, userId, Timestamp.from(now));
+    public Optional<User> lockUserForSessionIssue(UUID userId) {
+        // FOR NO KEY UPDATE needs UPDATE on one column: the runtime role's UPDATE (password_hash).
+        return users("SELECT id, email, password_hash, display_name, role, account_status "
+                + "FROM public.users WHERE id = ? FOR NO KEY UPDATE", userId);
+    }
+
+    @Override
+    public Optional<RefreshSession> findRefreshSession(UUID sessionId) {
+        return jdbc.query("SELECT id, user_id, created_at, expires_at, revoked_at FROM public.refresh_sessions "
+                        + "WHERE id = ?",
+                (result, row) -> new RefreshSession(result.getObject("id", UUID.class),
+                        result.getObject("user_id", UUID.class), instant(result.getTimestamp("created_at")),
+                        instant(result.getTimestamp("expires_at")), instant(result.getTimestamp("revoked_at"))),
+                sessionId).stream().findFirst();
     }
 
     @Override

@@ -56,10 +56,15 @@ public interface UserRepository {
     int revokeRefreshSessionsOfUser(UUID userId, Instant revokedAt);
 
     /**
-     * Locks the account's active sessions in {@code id} order. Sign-in calls it before any other
-     * session write, so concurrent sign-ins of one account lock in the same order and cannot deadlock.
+     * Locks the account's User row {@code FOR NO KEY UPDATE} and returns its committed state. This is
+     * the per-account synchronization point of session issuance (ADR014 §15): it conflicts with
+     * password reset's {@code FOR UPDATE}, CT12 status changes and other sign-ins of the account, but
+     * not with foreign-key key-share checks. A sign-in never locks a second User row.
      */
-    void lockActiveRefreshSessions(UUID userId, Instant now);
+    Optional<User> lockUserForSessionIssue(UUID userId);
+
+    /** Unlocked read of one session (its owner never changes). */
+    Optional<RefreshSession> findRefreshSession(UUID sessionId);
 
     /** Revokes the account's active sessions beyond the newest {@code keep}. */
     int revokeRefreshSessionsBeyond(UUID userId, int keep, Instant now);

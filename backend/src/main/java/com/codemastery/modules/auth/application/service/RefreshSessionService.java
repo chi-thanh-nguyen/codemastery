@@ -76,30 +76,50 @@ public class RefreshSessionService {
     }
 
     /**
-     * Starts a new session for an already authenticated, active account. A refresh token
-     * the browser still presented (login replacement) has its whole family revoked.
+     * Issues a session for a credential verified by {@link AuthService#authenticate}. The BCrypt
+     * check runs before this call, without locks; issuance then revalidates that verification under
+     * the account lock, so a password reset or lock committed in between rejects the sign-in with
+     * the generic 401 and nothing is issued (ADR014 §15, F01). A refresh cookie the browser still
+     * presented (login replacement) has its session revoked.
+     *
+     * <p><b>Lock order</b> (global, every session writer): (1) at most one User row per transaction
+     * except CT12, which locks Administrator rows in id order and then its target; (2) session
+     * rows; (3) token rows. Concurrent sign-ins of one account serialize on its User row even when
+     * it has no session yet, so the 10-session cap is decided on committed state (F02). A replaced
+     * session of <em>another</em> account is revoked first, in its own single-row transaction, so a
+     * sign-in never holds two User rows and opposite account switches cannot deadlock (F03).
+     * Password reset (User {@code FOR UPDATE}, then sessions) and CT12 follow this order; rotation,
+     * logout and purge lock only session rows (then tokens) and never wait for a User lock.
      */
-    public IssuedSession start(User account, Optional<String> presentedToken) {
+    public IssuedSession start(User verified, Optional<String> presentedToken) {
         Instant now = now();
         UUID sessionId = UUID.randomUUID();
         byte[] raw = newToken();
         Instant sessionExpiry = now.plus(SESSION_LIFETIME);
         Instant tokenExpiry = min(now.plus(TOKEN_IDLE_LIFETIME), sessionExpiry);
-        Optional<UUID> replaced = presentedSession(presentedToken);
-        transactions.executeWithoutResult(status -> {
-            // The FK check on this insert takes the User key-share lock first, matching the
-            // User-before-session order of password reset and CT12 status changes.
-            users.insertRefreshSession(sessionId, account.id(), now, sessionExpiry);
+        Optional<RefreshSession> replaced = presentedSession(presentedToken);
+        Optional<RefreshSession> replacedOwn = replaced.filter(session -> session.userId().equals(verified.id()));
+        replaced.filter(session -> !session.userId().equals(verified.id())).ifPresent(other ->
+                transactions.executeWithoutResult(status -> users.revokeRefreshSession(other.id(), now)));
+        User issued = transactions.execute(status -> {
+            User current = users.lockUserForSessionIssue(verified.id()).orElse(null);
+            // Statements after the lock see every committed reset or status change. A BCrypt hash
+            // is salted, so any reset (even to the same password) changes it.
+            if (current == null || current.accountStatus() != AccountStatus.ACTIVE
+                    || !current.passwordHash().equals(verified.passwordHash())) {
+                return null;
+            }
+            users.insertRefreshSession(sessionId, current.id(), now, sessionExpiry);
             users.insertRefreshToken(UUID.randomUUID(), sessionId, sha256(raw), now, tokenExpiry);
-            // Lock the account's existing active sessions in one deterministic order before
-            // revoking any of them: two concurrent sign-ins (each replacing a different cookie,
-            // both trimming to the cap) would otherwise lock overlapping rows in opposite orders.
-            users.lockActiveRefreshSessions(account.id(), now);
-            replaced.ifPresent(previous -> users.revokeRefreshSession(previous, now));
-            users.revokeRefreshSessionsBeyond(account.id(), MAX_ACTIVE_SESSIONS, now);
+            replacedOwn.ifPresent(previous -> users.revokeRefreshSession(previous.id(), now));
+            users.revokeRefreshSessionsBeyond(current.id(), MAX_ACTIVE_SESSIONS, now);
+            return current;
         });
+        if (issued == null) {
+            throw rejected();
+        }
         purgeExpired(now);
-        return new IssuedSession(account, sessionId, encode(raw), now, tokenExpiry);
+        return new IssuedSession(issued, sessionId, encode(raw), now, tokenExpiry);
     }
 
     /** Rotates a presented refresh token, or fails closed with the generic 401 exception. */
@@ -110,6 +130,8 @@ public class RefreshSessionService {
         RefreshToken observed = users.findRefreshTokenByDigest(digest).orElseThrow(this::rejected);
         byte[] next = newToken();
         Outcome outcome = transactions.execute(status -> {
+            // Lock-order steps 2–3 only: the session row, then its tokens. The account is read
+            // without a lock; a reset or lock committing later revokes this session (step 2 wait).
             RefreshSession session = users.findRefreshSessionForUpdate(observed.sessionId()).orElse(null);
             if (session == null) {
                 return Outcome.failure(false);
@@ -156,14 +178,15 @@ public class RefreshSessionService {
 
     /** Ends the presented token's session. Unknown or malformed tokens are ignored (idempotent logout). */
     public void end(Optional<String> presentedToken) {
+        // A single-row session lock (lock-order step 2 only); logout never waits for a User lock.
         presentedSession(presentedToken).ifPresent(session -> transactions.executeWithoutResult(
-                status -> users.revokeRefreshSession(session, now())));
+                status -> users.revokeRefreshSession(session.id(), now())));
     }
 
-    private Optional<UUID> presentedSession(Optional<String> presentedToken) {
+    private Optional<RefreshSession> presentedSession(Optional<String> presentedToken) {
         return presentedToken.flatMap(RefreshSessionService::decode)
                 .flatMap(raw -> users.findRefreshTokenByDigest(sha256(raw)))
-                .map(RefreshToken::sessionId);
+                .flatMap(token -> users.findRefreshSession(token.sessionId()));
     }
 
     /** Best-effort hygiene after sign-in; failures never fail the sign-in itself. */
