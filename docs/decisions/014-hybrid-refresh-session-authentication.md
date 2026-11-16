@@ -327,6 +327,8 @@ Residual risks (**not accepted by the Leader**; recorded for review):
    open CT01 §11.5 gate.
 6. **Purge** runs only after sign-ins; expired rows of inactive accounts persist.
 7. **CT12.user lock revocation** is a binding on a future implementation, not yet code.
+8. **Cross-account early revocation** (added 17 November 2026, §16): a rejected sign-in
+   presenting another account's cookie leaves that session revoked (availability only).
 
 **Rollback.** Revert the PR before integration. After integration, the previous
 application code tolerates an applied V008: Flyway ignores a newer applied migration by
@@ -484,4 +486,68 @@ Remaining:
 - The §12 gates and residual risks, which are not Leader-accepted.
 - CT12.user, when implemented, must keep its ADR012 lock order and revoke sessions after
   its User locks (§6). This is compatible with step 1.
+
+## 16. Second independent review remediation — 17 November 2026
+
+**Source.** A second independent Codex review of head
+`56da61d7321a1fbad566616df42f138d9a3a50d7` confirmed that F01–F05 (§15) are corrected. It
+reported `CHANGES_REQUIRED` and `SECURITY_REVIEW: FAIL` with two new P2 findings and one
+P3 residual. This section records the **author's** remediation. It is **pending
+independent re-review**: Codex has not reviewed it. Revision identifiers are unchanged,
+because both fixes restore guarantees §§4, 7 and 15 already state. Earlier sections stay
+as history.
+
+| Finding | Root cause | Remediation |
+|---|---|---|
+| **N01 (P2)** A delayed issuance could return a session its own cap enforcement had already revoked; its first refresh returned 401 | `start()` captured the issuance instant and expiries before waiting for the cross-account revoke and the User-row lock. Sessions committed during that wait were newer, so the cap's "oldest first" ordering selected the new session. | The issuance instant, session and token expiries (and therefore the cookie `Max-Age`) are taken **after** the User-row lock is acquired. The cap query also **excludes the issuing session explicitly**: it keeps that session plus the newest nine others, so equal timestamps cannot select it either. A session can still be revoked later by another committed sign-in's cap, which is the normal, documented behavior. |
+| **N02 (P2)** A background renewal returning a different `sid` replaced the session and aborted a pending explicit sign-in | `restore()` respected sign-in intent (§15), but `renew()` installed unconditionally, and a replacement installation aborts pending controllers | Renewal, the weakest operation, discards its result when an explicit sign-in is pending or started after it began. If that sign-in fails, the deferred renewal runs again, so the existing session is not left unrenewed. |
+
+**Guarantees after the fix.**
+
+- A successful sign-in returns a session that is active when its transaction commits and
+  is never revoked by that transaction.
+- The account then has at most 10 active sessions.
+- Precedence is applied consistently: renewal < restore/adoption < explicit sign-in <
+  sign-out.
+
+The §15 lock order, F01 credential revalidation, single-User-row locking and grants are
+unchanged.
+
+**P3 residual — cross-account early revocation (`PENDING_LEADER_RISK_ACCEPTANCE`).**
+Under §15's F03 design, a sign-in that presents another account's refresh cookie revokes
+that session in its own transaction **before** the destination account is locked and
+revalidated. If the sign-in is then rejected, the other account's session stays revoked
+and the browser is signed out of it. Rejection causes include a concurrent reset of the
+destination account, a lock, or a stale verification.
+
+- **Trigger.** The browser must hold a valid cookie of account A and successfully verify
+  the password of account B, and B's issuance must then fail. A party that can do this
+  already holds A's session cookie, so it gains no access. The effect is availability
+  only: A must sign in again.
+- **Why the design stays.** Revoking after the destination commit would need a
+  post-commit step that can fail after a success response. Locking both accounts in one
+  transaction would reintroduce the CT12 lock-order conflict that §15 avoided. No
+  security reason was demonstrated for changing this, so the F03 design is kept.
+- **Status.** This record does **not** accept the residual. It is recorded with the
+  other §12 risks for a Leader decision.
+
+**Evidence.**
+
+- PostgreSQL: `n01DelayedIssuanceReturnsASessionItsOwnCapEnforcementDidNotRevoke`
+  forces the review's scenario (A's session row held, the sign-in to B presenting A's
+  cookie waits, ten other sign-ins to B commit, release). It then checks that the
+  returned session is active, refreshes successfully, exactly ten sessions are active,
+  and a later sign-in revokes the oldest.
+  `n01CapNeverSelectsTheIssuingSessionEvenOnATimestampTie` checks the exclusion
+  directly.
+- Vitest: N02 with a queued sign-in, with a sign-in already in flight (the path without
+  Web Locks), and with a failed sign-in that renews again.
+- Playwright with native Web Locks: a delayed real renewal returning another `sid`
+  (made genuine by a second real sign-in through the context's API client), with an
+  explicit sign-in queued behind it.
+
+On `56da61d`, the N01 scenario test, both N02 cancellation tests and the Playwright test
+fail; on the corrected code they pass. All F01–F05 regressions still pass. Executed
+commands are in
+[testing.md](../testing.md#second-independent-review-remediation--17-november-2026).
 

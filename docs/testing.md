@@ -3343,3 +3343,39 @@ scheduling. In particular, a cycle between a sign-in and a future CT12 implement
 excluded by the lock order (ADR014 §15), not tested, because CT12.user is not
 implemented.
 
+## Second independent review remediation — 17 November 2026
+
+A second independent Codex review of `56da61d` confirmed F01–F05 corrected and reported
+N01 and N02 (P2).
+[ADR014 §16](decisions/014-hybrid-refresh-session-authentication.md#16-second-independent-review-remediation--17-november-2026)
+records the author's remediation; independent re-review is pending.
+
+| Finding | Test | Mechanism |
+|---|---|---|
+| N01 | `AuthorizationIntegrationTest$RefreshSessions` `n01DelayedIssuanceReturnsASessionItsOwnCapEnforcementDidNotRevoke` | A's session row held; the sign-in to B presenting A's cookie waits (lock-waiter detection); ten sign-ins to B commit; release. Asserts the returned session is active, refreshes with 200, exactly 10 active, and a later sign-in revokes the oldest |
+| N01 | `n01CapNeverSelectsTheIssuingSessionEvenOnATimestampTie` | 11 sessions with equal `created_at`; each one passed as the issuing session is never revoked |
+| N02 | `AuthProvider.test.tsx` "N02: … queued behind it" (FIFO lock stand-in), "… while a sign-in is in flight …" (no Web Locks, the fallback path), "… failed sign-in renews …" | Deferred renewal responses with another `sid` |
+| N02 | Playwright "N02: a delayed renewal returning another session does not cancel an explicit sign-in queued behind it" | Native Web Locks; a second real sign-in through the context's API client makes the renewal genuinely return another `sid`; the real renewal is delayed with the Playwright clock |
+
+**Shown to fail on `56da61d`** (old code with the new tests, 17 November 2026):
+
+- the N01 scenario test ("issuance must not revoke the session it returns": revoked);
+- both N02 cancellation Vitest tests;
+- the Playwright N02 test (stayed on `/login`, no login request).
+
+The failed-sign-in renewal test checks the new re-renewal path. The tie test uses the new
+repository signature, so it does not compile against the old code.
+
+**Executed on the corrected tree** (author evidence, not independent verification):
+
+| Command | Result |
+|---|---|
+| `cd backend && ./mvnw verify` | PASS — 631 unit, 209 integration, 0 failures (a first run exposed an incorrect final assertion in the new tie test; that assertion was removed, three focused reruns and the full rerun passed) |
+| `cd frontend && npm run build` / `npm test` | PASS — 16 files, 494 tests (provider file also passed in two shuffled runs) |
+| `cd frontend && npm run test:browser` (Chromium) | PASS — 45 |
+| Playwright chromium/webkit desktop+mobile | PASS — 77 passed, 3 skipped by design (N02, F04, F05 on all four projects) |
+| Privilege contract, containment, real-backend privileges; ingress stub and real backend; deploy gates and offline guards | PASS |
+
+All F01–F05 regressions (PostgreSQL, Vitest, Playwright) pass again on this tree.
+`firefox-desktop` was not run (host limitation).
+
