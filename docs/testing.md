@@ -645,6 +645,17 @@ retries and no `continue-on-error`. An `always()` step then runs `npm run stack:
 reconciles the run inventory after the test process has ended and fails the job on its own
 when recovery is incomplete. It never prunes Docker or removes a resource the inventory does
 not prove belongs to the run. A test, setup, browser-launch or cleanup failure fails the job.
+On a step timeout or cancellation the Actions runner signals only the step's root process
+(SIGINT, then SIGTERM after 7.5 s, then a kill of that process alone after 2.5 s more). The
+suite step therefore `exec`s `npm test` with npm's script shell set to bash
+(`npm_config_script_shell=bash`): npm forwards the signal to its script shell, bash runs the
+single script command in place (Ubuntu's `/bin/sh`, dash, does not), and so the lifecycle
+coordinator receives it, forwards it to its runner and finalizes the run. Without this the
+coordinator received nothing and kept running the suite after the step had ended. The
+coordinator can still outlive the step while it finishes its teardown, so the recovery step
+retries `npm run stack:down` only while it exits 2 (another invocation owns the checkout;
+nothing was touched), at most 48 times 5 seconds; any other result, including incomplete
+recovery, is final.
 Step budgets (minutes): frontend install 5, E2E install 3, browsers 10, lifecycle tests 5,
 suite 25, recovery 8, summary 2. Their sum (58) leaves 12 minutes of the 70-minute job limit
 for checkout, Node setup, post steps and termination. They are sized from the first measured

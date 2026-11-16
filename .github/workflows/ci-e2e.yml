@@ -66,7 +66,13 @@ jobs:
           # The default owned disposable stack only: no external target and no
           # image override may reach setup.
           unset E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
-          E2E_WORKERS=1 npm test
+          # On a timeout or cancellation the runner signals only this step's root
+          # process (SIGINT, then SIGTERM, then a kill of that process alone).
+          # `exec` makes npm that process, npm forwards the signal to its script
+          # shell, and bash (unlike dash, Ubuntu's sh) runs the single script
+          # command in place, so the r2 lifecycle coordinator receives it,
+          # forwards it to its runner and finalizes the run.
+          E2E_WORKERS=1 npm_config_script_shell=bash exec npm test
       - name: Recover the disposable stack
         id: cleanup
         # Runs after the test process has ended, whatever its outcome, and fails
@@ -77,7 +83,22 @@ jobs:
         # partial results and still fails the job.
         if: ${{ always() }}
         timeout-minutes: 8
-        run: npm run stack:down
+        shell: bash
+        # Exit 2 means the run's coordinator still owns this checkout and nothing
+        # was touched: after a timeout or cancellation it can outlive the suite
+        # step while it finishes its own teardown. Only that result is retried,
+        # until the owner has exited (about 5 minutes at most); every other
+        # result, including incomplete recovery, is final.
+        run: |
+          for attempt in $(seq 1 48); do
+            status=0
+            npm run stack:down || status=$?
+            if [ "$status" -ne 2 ]; then exit "$status"; fi
+            echo "The run's coordinator still owns this checkout; waiting for it to finish (attempt $attempt of 48)."
+            sleep 5
+          done
+          echo "::error::The run's coordinator did not release this checkout in time; recovery did not run."
+          exit 2
       - name: Summarize E2E evidence
         if: ${{ always() }}
         timeout-minutes: 2
