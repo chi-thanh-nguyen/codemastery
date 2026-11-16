@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, and the two AU07 password-recovery operations in PR #239; see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, and the two AU07 password-recovery operations in PR #239; see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -103,7 +103,7 @@
         },
         "responses": {
           "200": {
-            "description": "Memory-only bearer credential",
+            "description": "Session-bound access token for memory-only use; starts a refresh session and sets the HttpOnly refresh cookie (ADR014)",
             "content": {
               "application/json": {
                 "schema": {
@@ -114,6 +114,9 @@
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "Set-Cookie": {
+                "$ref": "#/components/headers/RefreshCookieSet"
               }
             }
           },
@@ -150,6 +153,21 @@
               }
             }
           },
+          "403": {
+            "description": "Untrusted cookie-operation origin: Origin not exactly one of CORS_ALLOWED_ORIGINS (required for refresh/logout, checked for login when present), cross-site Sec-Fetch-Site, or a navigation Sec-Fetch-Mode. CT18 'Access is denied.'",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            }
+          },
           "500": {
             "description": "Safe internal failure",
             "content": {
@@ -166,7 +184,141 @@
             }
           }
         },
-        "description": "Public operation; no bearer credential required or consumed. Use canonical email and exact password. Malformed/missing/typed-invalid fields or invalid email syntax: 400. Missing account, incorrect password or locked account: identical generic 401; never truncate over-72-byte candidates."
+        "description": "Public operation; no bearer credential required or consumed. Use canonical email and exact password. Malformed/missing/typed-invalid fields or invalid email syntax: 400. Missing account, incorrect password or locked account: identical generic 401; never truncate over-72-byte candidates. ADR014: a successful login starts a new refresh session (7-day absolute, 24-hour idle), sets the refresh cookie and returns an access token bound to it through the sid claim. A refresh cookie still presented by the browser has its old session revoked; at most 10 active sessions per account are kept. The JSON request and response are unchanged."
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "operationId": "refreshSession",
+        "security": [
+          {
+            "refreshCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rotated session: a new access token for the same session (same sid) and a new refresh cookie; the presented token is consumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "Set-Cookie": {
+                "$ref": "#/components/headers/RefreshCookieSet"
+              }
+            }
+          },
+          "401": {
+            "description": "Generic refusal: missing, malformed, ambiguous, unknown, expired, consumed or revoked refresh token, expired or revoked session, missing or locked account. Never sets or deletes the cookie. A token consumed 30 seconds ago or earlier is a replay and revokes its whole session first.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "WWW-Authenticate": {
+                "$ref": "#/components/headers/BearerChallenge"
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted cookie-operation origin: Origin not exactly one of CORS_ALLOWED_ORIGINS (required for refresh/logout, checked for login when present), cross-site Sec-Fetch-Site, or a navigation Sec-Fetch-Mode. CT18 'Access is denied.'",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            }
+          }
+        },
+        "description": "ADR014 rotation. No request body and no bearer credential are read; the HttpOnly refresh cookie is the only credential, sent with credentials only by the SPA. Requires a trusted Origin. Atomic under the session row lock: concurrent presentations of one token produce exactly one rotation."
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "security": [
+          {
+            "refreshCookie": []
+          },
+          {}
+        ],
+        "responses": {
+          "204": {
+            "description": "The presented session (when known) is revoked, which also ends every access token bound to it; the refresh cookie is deleted. Idempotent: also 204 without a cookie or with an unknown one.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "Set-Cookie": {
+                "$ref": "#/components/headers/RefreshCookieClear"
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted cookie-operation origin: Origin not exactly one of CORS_ALLOWED_ORIGINS (required for refresh/logout, checked for login when present), cross-site Sec-Fetch-Site, or a navigation Sec-Fetch-Mode. CT18 'Access is denied.'",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            }
+          },
+          "500": {
+            "description": "Safe internal failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            }
+          }
+        },
+        "description": "ADR014 server logout. No request body; requires a trusted Origin. Other sessions of the account (other devices) stay valid."
       }
     },
     "/api/courses": {
@@ -8186,7 +8338,13 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "Authorization: Bearer <accessToken> only. No URL/cookie token transport. ADR002 CT01.core fixes cryptography/current-account checks; ADR001 section 11 records CT01-2026-10-21-r1 delegated technical approval pending protected integration. This scheme alone is not an operation authorization policy."
+        "description": "Authorization: Bearer <accessToken> only. No URL/cookie token transport. ADR002 CT01.core fixes cryptography/current-account checks; ADR001 section 11 records CT01-2026-10-21-r1 delegated technical approval pending protected integration. This scheme alone is not an operation authorization policy. ADR014: the access JWT additionally carries the required sid claim of its refresh session and is rejected once that session is revoked or expired; it is still never transported in a cookie."
+      },
+      "refreshCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-cm_refresh",
+        "description": "ADR014 HttpOnly refresh cookie, used only by POST /api/auth/refresh and /api/auth/logout (and read by login for replacement). Secure, HttpOnly, SameSite=Strict, Path=/, no Domain. Value: 43-character unpadded base64url encoding of 32 random bytes; only its SHA-256 digest is stored. When every CORS_ALLOWED_ORIGINS entry is an HTTP loopback origin (local development) the name is cm_refresh and Secure is omitted. Never accepted by any other endpoint."
       }
     },
     "schemas": {
@@ -8269,7 +8427,7 @@
         "properties": {
           "accessToken": {
             "type": "string",
-            "description": "Sensitive bearer credential; never persist/log."
+            "description": "Sensitive bearer credential; never persist/log. HS256 JWT for memory-only use; claims iss, aud, sub, sid (refresh session UUID), iat, exp = iat + 900."
           },
           "tokenType": {
             "type": "string",
@@ -13245,6 +13403,18 @@
         "schema": {
           "type": "integer",
           "minimum": 1
+        }
+      },
+      "RefreshCookieSet": {
+        "description": "Sets the refresh cookie: __Host-cm_refresh=<token>; Path=/; Max-Age=<seconds until the token's idle expiry, at most 86400>; Expires=<date>; Secure; HttpOnly; SameSite=Strict (cm_refresh without Secure in HTTP loopback development).",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "RefreshCookieClear": {
+        "description": "Deletes the refresh cookie: __Host-cm_refresh=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict.",
+        "schema": {
+          "type": "string"
         }
       }
     }

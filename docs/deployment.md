@@ -279,7 +279,7 @@ secret manager or fictitious environment variables.
 | `POSTGRES_*` / `DB_*` | Separate bootstrap administration from application identity; internal PostgreSQL connectivity, not public database access. No implicit credential aliases. |
 | `STORAGE_*` / `MINIO_ROOT_*` | Backend uses a separate bucket-scoped application identity; root credentials are confined to administration/provisioning. |
 | `JWT_SECRET` / `JWT_EXPIRATION` | Preserve CT01/CT38's random hex key and exact PT15M policy; no actual secret selected. Rebenchmark approved BCrypt work on the target host before deployment. |
-| `CORS_ALLOWED_ORIGINS` | Explicit actual approved HTTPS browser origin; no wildcard, localhost production default or cookie-based session inference. |
+| `CORS_ALLOWED_ORIGINS` | Explicit actual approved HTTPS browser origin; no wildcard, localhost production default or cookie-based session inference. *(ADR014, 16 November 2026: the same list is also the exact trusted Origin list of the three refresh-cookie operations and selects the `__Host-` cookie mode; see [CT17-INGRESS-COOKIE-2026-11-16-r1](#ct17-ingress-cookie-2026-11-16-r1--refresh-cookie-transport-delegated_approved-16-november-2026).)* |
 | `VITE_API_BASE_URL` | Propose `/api` for the single-origin deployed build; it is public build-time input, requiring an image rebuild when changed. |
 | Profiles / scheduling / other options | Forward only approved consumed settings; `prod` currently adds JSON logging, not a complete production policy. Do not promote unused scheduler/upload/reset defaults. |
 
@@ -339,6 +339,9 @@ Same-origin browser access avoids a cross-origin deployment requirement; CORS is
 not authentication or protection against non-browser callers. Backend CORS still
 uses only the approved origin and preserves CT38 constraints. No cookie/refresh
 session, wildcard origin, external storage origin or new JWT policy is introduced.
+*(Superseded in part on 16 November 2026 by [ADR014](decisions/014-hybrid-refresh-session-authentication.md):
+refresh sessions with a `__Host-` cookie, server logout and session-bound access JWTs
+now exist; the rest of this paragraph is history.)*
 Client-local logout is not token revocation. ADR001 §11.3 records the Leader's
 21 October acceptance of its precise residual-token risks; that decision is not
 reopened or expanded here. Real configured Auth/security verification, capacity/
@@ -1491,6 +1494,91 @@ Remaining gates:
 
 This approval executes no provisioning on any real database.
 
+
+### CT17-P6-PRIVILEGES-2026-11-16-r3 — ADR014 refresh sessions (DELEGATED_APPROVED, 16 November 2026)
+
+**DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** on 16 November 2026 by Claude Code
+under the Project Leader's explicit instruction "CodeMastery — End-to-End Hybrid
+Authentication Upgrade with Delegated Technical Approval", recorded in
+[ADR014 §8](decisions/014-hybrid-refresh-session-authentication.md#8-ingress-and-database-privileges).
+It follows the extension procedure above: the implemented consumer
+(`RefreshSessionService`, `UserRepositoryImpl`, the session-bound JWT filter and the
+AU07 reset transaction), `RUNTIME_PRIVILEGE_MATRIX` and the CI tests change together.
+The two relations are new in V008 and are outside the CT17-P6-PLAN ceiling, which
+lists only earlier relations. This is not personal Leader approval or review.
+
+The r1 and r2 records above are unchanged history. The effective matrix is r1 plus r2
+plus the two rows below; no other privilege, role elevation or change is approved.
+
+| Relation (owner) | Approved runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `refresh_sessions` (auth) | SELECT, INSERT, DELETE; UPDATE (revoked_at) | sign-in insert, per-request session join, rotation `FOR UPDATE` lock, revocation (logout, replay, reset, cap, locked account), purge of expired sessions | DELEGATED_APPROVED — r3 (AUTH-SESSION-2026-11-16-r1, V008) |
+| `refresh_tokens` (auth) | SELECT, INSERT, DELETE; UPDATE (consumed_at) | digest lookup, issue and successor insert, single consumption, purge with the session | DELEGATED_APPROVED — r3 (AUTH-SESSION-2026-11-16-r1, V008) |
+
+Least privilege exercised by the consumer:
+
+| Operation | SQL | Privilege |
+| --- | --- | --- |
+| Sign-in | `INSERT` session and first token; `UPDATE refresh_sessions SET revoked_at` for a presented cookie's session and beyond the 10-session cap | INSERT on both; UPDATE (revoked_at) |
+| Protected request | `SELECT … FROM users JOIN refresh_sessions …` | SELECT on both |
+| Rotation | `SELECT … FROM refresh_tokens WHERE token_digest = ?`; `SELECT … FROM refresh_sessions … FOR UPDATE`; `UPDATE refresh_tokens SET consumed_at`; `INSERT` successor | SELECT; row lock via UPDATE (revoked_at); UPDATE (consumed_at); INSERT |
+| Logout, replay, reset, locked account | `UPDATE refresh_sessions SET revoked_at …` | UPDATE (revoked_at) |
+| Purge after sign-in | `DELETE` expired sessions' tokens, then the sessions | DELETE on both |
+
+The runtime role still cannot do any of the following:
+
+- change a session's owner, creation time or absolute expiry;
+- rewrite a token's digest, session, issue time or expiry;
+- truncate either table.
+
+A compromised runtime role could insert or un-revoke sessions, which the sign-in and
+revocation transitions inherently require (`users` SELECT/INSERT already allow it to
+create accounts). `verify_role_separation` probes the expiry/owner and digest denials.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations);
+- `test-deploy-privilege-matrix-contract.sh`, which pins r1 history, the r2 rows and
+  these r3 rows against the script;
+- `test-postgres-privilege-matrix-containment.sh`: grants and denials on the real
+  V001–V008 schema;
+- `test-runtime-real-backend-privileges.sh`: real sign-in, rotation, logout and reset
+  revocation under the runtime role (Flyway history now 8/8).
+
+Remaining gates: `@tihh647-ui` infrastructure review and independent CODEOWNER
+review; protected integration; V008 execution and these grants on any shared or
+production database (Flyway applies V008 when any build containing it starts, so that
+execution must be authorized before deploying such a build; Leader-reserved). This
+approval executes no provisioning on any real database.
+
+## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
+
+**DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
+[ADR014 §§5 and 8](decisions/014-hybrid-refresh-session-authentication.md#5-cookie-transport-csrf-origin-and-cors).
+Bounded amendment of P7's request-header allowlist in the release image
+(`frontend/Dockerfile`, `release-config` stage):
+
+- `location = /api/auth/login`, `= /api/auth/refresh` and `= /api/auth/logout` repeat
+  the complete allowlist (`proxy_set_header` is not inherited by a location that sets
+  its own) and additionally forward `Cookie`, `Sec-Fetch-Site` and `Sec-Fetch-Mode`;
+- they keep the raw-path `;`/`%3B` rejection;
+- every other `/api` location, including `/api/auth/refresh/`, `/api/auth/refreshx` and
+  `/api/auth/login/extra`, still forwards no `Cookie` or Fetch Metadata;
+- `Set-Cookie` from the backend passes through unchanged; nothing is added or
+  rewritten at the ingress.
+
+Unchanged: single HTTPS origin, TLS/SNI/Host handling, `proxy_pass_request_headers
+off`, the forwarding-claim policy, API-before-SPA precedence and the local HTTP image.
+The backend's cookie policy is `__Host-cm_refresh` (Secure, HttpOnly, SameSite=Strict,
+Path=/) for this HTTPS origin, and `CORS_ALLOWED_ORIGINS` (which `deploy.sh` binds to
+`--origin`) is also the trusted Origin list of the cookie operations; no new runtime
+variable exists.
+
+Verification: `test-ingress-stub-backend.sh` (cookie and Fetch Metadata scoping,
+`Set-Cookie` pass-through, path-parameter rejection on the new locations) and
+`test-ingress-real-backend.sh` (issue, rotation, CSRF rejections and logout revocation
+through the ingress with the real backend). Remaining gates: infrastructure and
+CODEOWNER review, protected integration and a separately authorized deployment.
 ## DP01 HTTPS ingress integration — 31 October 2026
 
 ### Authority, inputs and boundary
@@ -4002,7 +4090,8 @@ records `CT17-P6-PLAN-2026-11-15-r2` (DELEGATED_APPROVED; r2 adds
 `enrollments.last_visited_at` for CT22.resume and `quiz_questions.position` for CT23
 to r1): a per-relation **ceiling**
 for the runtime-role grants that later consumers may request. It is not a matrix
-revision. The effective matrix stays r1 plus r2, and the extension procedure above
+revision. The effective matrix stays r1 plus r2 (and, since 16 November 2026, the
+ADR014 r3 rows for two new V008 relations outside this ceiling), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.

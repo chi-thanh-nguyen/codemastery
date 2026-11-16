@@ -3208,3 +3208,55 @@ in the existing `PracticeDifficultySelectorTest`, the service unit tests,
 learning frontend tests. CT35 adds A-4 (Hard versus Easy practice for contrasting
 learners, plus a Medium-to-Easy fallback), which CT20.F r2 makes release-required on
 `chromium-desktop` with A-1. All are specified, NOT_RUN.
+
+## ADR014 hybrid authentication verification — 16 November 2026
+
+`CT14-SESSION-2026-11-16-r1` (**DELEGATED_APPROVED**,
+[ADR014 §9](decisions/014-hybrid-refresh-session-authentication.md#9-ct14-session-2026-11-16-r1--verification-obligations))
+replaces the earlier session expectations: E2E no longer expects zero cookies or a
+signed-out reload. It expects exactly the HttpOnly refresh cookie, no token in Web
+Storage or `document.cookie`, and restoration on reload. The landing page no longer
+expects zero API requests. It expects exactly one bearer-less `POST /api/auth/refresh`
+session check. The earlier records above keep their dated wording.
+
+**Test locations (existing files only).**
+
+| Area | Location | Coverage |
+|---|---|---|
+| Backend unit | `modules/auth/JwtTokenProviderTest` | required canonical `sid` claim (missing, mistyped, upper-case, list, null); revoked/expired/foreign session rejects a valid token without a business effect; refresh/logout never read a bearer and need a trusted Origin; cookie mode selection (`__Host-` for any HTTPS origin, `cm_refresh` only for pure HTTP loopback), exact Set-Cookie/clear strings, duplicate cookies unusable |
+| Backend unit | `modules/auth/AuthServiceTest` | controller and security-slice wiring with the new collaborators |
+| Backend integration (PostgreSQL) | `integration/AuthorizationIntegrationTest$RefreshSessions` | issuance, attributes, digest-only storage and `sid` binding; rotation; reuse within 30 s without revocation; replay after 30 s revoking the family and its access JWTs; six concurrent refreshes → exactly one 200; logout (also without or with unknown cookie); malformed/unknown/duplicate/expired-token/expired-session cookies; locked account; role change; login replacement and the 10-session cap; untrusted/`null` Origin, cross-site Fetch Metadata and navigation mode; credentialed CORS only on cookie paths |
+| Backend integration | `AuthorizationIntegrationTest` (reset test) | a session-bound bearer issued before a password reset is rejected afterwards and its session is revoked (supersedes the ADR006 §9.4 residual assertion) |
+| Backend integration | `CourseCatalogueIntegrationTest`, `EnrollmentIntegrationTest`, `SampleDataSeedIntegrationTest` | fixtures bind tokens to sessions and clean session rows; no behavior change |
+| Frontend | `app/providers/AuthProvider.test.tsx` | restore (StrictMode, one request, nothing stored), refused restore, preview without restore, in-place renewal versus replacement, refused and transient renewal, late renewal after sign-out, sign-out with pending-sign-out retry, sign-in during restore, cross-tab messages, Web Lock use, wake-up restore, no mutation replay |
+| Frontend | `shared/components/presentation.browser.cjs` (optional harness) | landing sends only the anonymous session check |
+| Frontend | `shared/api/httpClient.test.ts`, `routes/index.test.tsx` | credentials only for the three cookie operations (keepalive for logout), 204 handling, refused refresh not invalidating; protected reload waits and then renders, refused restore redirects without the session-ended notice |
+| E2E | `e2e/tests/learner-flow.spec.ts` | cookie attributes and no stored token; reload restoration; second tab adopts the session and follows sign-out; renewal before expiry (Playwright clock) with a private request afterwards; cross-site (`localhost` versus `127.0.0.1`) refresh/logout refused with 403 and the session survives; session-ended notice after a refused refresh; sign-out deletes the cookie; landing page sends only the anonymous session check |
+| Ingress | `infrastructure/vm/tests/test-ingress-stub-backend.sh`, `test-ingress-real-backend.sh` | Cookie and Fetch Metadata only on the three exact locations; Set-Cookie pass-through; `;` rejection; real backend: issue, rotation, CSRF rejections, logout revocation through HTTPS |
+| Privileges | `test-deploy-privilege-matrix-contract.sh`, `test-postgres-privilege-matrix-containment.sh`, `test-runtime-real-backend-privileges.sh` | r3 rows pinned to the record (27 relations); grants and denials on V001–V008; sign-in, rotation, logout and reset revocation under the runtime role |
+
+**Executed on 16 November 2026** by Claude Code on the PR branch (macOS host, Docker
+Desktop 29.8.1, Java 25.0.4.1, Node 24.21.0). These results are implementation
+evidence by the author, not QA01/QA07 independent verification, CI or acceptance:
+
+| Command | Result |
+|---|---|
+| `cd backend && ./mvnw verify` | PASS — BUILD SUCCESS; 631 unit tests (Surefire) and 197 integration tests (Failsafe, PostgreSQL Testcontainers), 0 failures, 0 errors |
+| `cd frontend && npm run build` | PASS (typecheck and Vite build; the existing chunk-size warning is unchanged) |
+| `cd frontend && npm test` | PASS — 16 files, 486 tests |
+| `cd e2e && npx playwright test --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | PASS — 65 passed, 3 skipped by design (API-only smoke runs once) |
+| `firefox-desktop` project | NOT RUN — the pinned Playwright Firefox cannot launch on this macOS host (known environmental limitation) |
+| `bash infrastructure/vm/tests/test-ingress-stub-backend.sh` (release and local images built from the branch) | PASS — 168 assertions, `INGRESS_STUB_TESTS_PASS` |
+| `bash infrastructure/vm/tests/test-ingress-real-backend.sh` | PASS — 83 assertions, `INGRESS_BACKEND_TESTS_PASS` |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS — `MATRIX_CONTRACT_SYNC_PASS: 27 relations` |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | PASS — `MATRIX_TESTS_PASS`, both containment checks |
+| `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | PASS — `RUNTIME_CONSUMER_TESTS_PASS` (Flyway 8/8) |
+| `cd frontend && npm run test:browser` (Chromium) | PASS — 45 passed; the landing check now expects exactly the anonymous `POST /api/auth/refresh`, which the harness test double refuses with 401 |
+| `test-deploy-syntax-and-authorization-gates.sh`, `test-deploy-offline-compose-guards.sh`, `bash -n` on every VM test script | PASS |
+| `test-ingress-release-image-build.sh` | Images built; its Java-truststore sub-check FAILED locally on a Docker Desktop platform-resolution error (`no match for platform in manifest`) for a locally built tag; the backend Dockerfile is unchanged by this work. CI result pending |
+| `test-deploy-preflight-rendered-compose.sh` | FAILS on this macOS host identically on unmodified `main` (`stat -c` is GNU-only); CI runs it on Ubuntu. Not affected by this work |
+
+Not run: the browser harness on WebKit/Firefox, CI, and any test against a shared,
+staging or production environment. Remaining: CI on the PR,
+independent QA01/QA07 execution, and the review gates in ADR014 §12.
+
