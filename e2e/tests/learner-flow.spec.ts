@@ -1,7 +1,7 @@
 /**
  * Group A learner journey through the real frontend, REST API and PostgreSQL.
  * Runs against the disposable stack from fixtures/local-stack.ts (or E2E_BASE_URL).
- * No request is mocked. The two session-ordering tests (ADR014 §15) only delay one real
+ * No request is mocked. The session-ordering tests (ADR014 §§15–16) only delay one real
  * refresh request until a chosen moment; its request and response are never altered.
  */
 import { readFile } from 'node:fs/promises';
@@ -306,6 +306,37 @@ test.describe('accounts and sessions', () => {
         await expect(page.getByRole('status').filter({ hasText: 'Signing in…' })).toBeVisible();
         expect(logins).toEqual([]);
         held.release();
+        await expect(page).toHaveURL(/\/home$/);
+        await expect(page.getByRole('button', { name: accountMenuName(chosen) })).toBeVisible();
+        await expect(page.getByRole('button', { name: accountMenuName(learner) })).toHaveCount(0);
+        expect(logins).toEqual(['POST']);
+    });
+
+    test('N02: a delayed renewal returning another session does not cancel an explicit sign-in queued behind it', async ({ page, learner, request }) => {
+        const chosen = newAccount('Chosen');
+        await registerThroughApi(request, chosen);
+        await page.clock.install();
+        await signIn(page, learner);
+        expect(await page.evaluate(() => typeof navigator.locks?.request)).toBe('function');
+        // A second real sign-in through this context's API client replaces the shared cookie with a
+        // new session (no broadcast), so the tab's next renewal genuinely returns another sid.
+        const replaced = await page.request.post(new URL('/api/auth/login', target.api).href,
+            { headers: { Origin: new URL(target.base).origin }, data: { email: learner.email, password: learner.password } });
+        expect(replaced.status()).toBe(200);
+        const logins: string[] = [];
+        page.on('request', (sent) => { if (new URL(sent.url()).pathname === '/api/auth/login') logins.push(sent.method()); });
+        const held = await holdNextRefresh(page);
+        await page.clock.fastForward('14:05');
+        await held.seen;
+        await page.evaluate(() => { history.pushState(null, '', '/login'); dispatchEvent(new PopStateEvent('popstate')); });
+        await page.locator('#login-email').fill(chosen.email);
+        await page.locator('#login-password').fill(chosen.password);
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Signing in…' })).toBeVisible();
+        expect(logins).toEqual([]);
+        const renewed = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/refresh');
+        held.release();
+        expect((await renewed).status()).toBe(200);
         await expect(page).toHaveURL(/\/home$/);
         await expect(page.getByRole('button', { name: accountMenuName(chosen) })).toBeVisible();
         await expect(page.getByRole('button', { name: accountMenuName(learner) })).toHaveCount(0);
