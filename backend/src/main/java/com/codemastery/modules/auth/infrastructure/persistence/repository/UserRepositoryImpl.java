@@ -157,6 +157,12 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
+    public void lockActiveRefreshSessions(UUID userId, Instant now) {
+        jdbc.queryForList("SELECT id FROM public.refresh_sessions WHERE user_id = ? AND revoked_at IS NULL "
+                + "AND expires_at > ? ORDER BY id FOR UPDATE", UUID.class, userId, Timestamp.from(now));
+    }
+
+    @Override
     public int revokeRefreshSessionsBeyond(UUID userId, int keep, Instant now) {
         return jdbc.update("UPDATE public.refresh_sessions SET revoked_at = ? WHERE id IN ("
                         + "SELECT id FROM public.refresh_sessions WHERE user_id = ? AND revoked_at IS NULL "
@@ -167,7 +173,7 @@ public class UserRepositoryImpl implements UserRepository {
     @Override
     public int deleteExpiredRefreshSessions(Instant now, int limit) {
         List<UUID> expired = jdbc.queryForList("SELECT id FROM public.refresh_sessions WHERE expires_at <= ? "
-                + "ORDER BY expires_at LIMIT ?", UUID.class, Timestamp.from(now), limit);
+                + "ORDER BY expires_at, id LIMIT ? FOR UPDATE SKIP LOCKED", UUID.class, Timestamp.from(now), limit);
         int deleted = 0;
         for (UUID sessionId : expired) {
             jdbc.update("DELETE FROM public.refresh_tokens WHERE session_id = ?", sessionId);

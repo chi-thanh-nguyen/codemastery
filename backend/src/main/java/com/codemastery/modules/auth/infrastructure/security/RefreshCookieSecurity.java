@@ -30,11 +30,12 @@ import java.util.Set;
 /**
  * Refresh-cookie transport and its CSRF protection (AUTH-SESSION-2026-11-16-r1, ADR014 §5).
  *
- * <p>Production (any HTTPS origin configured): {@code __Host-cm_refresh}; Secure, HttpOnly,
- * SameSite=Strict, Path=/, no Domain, so no sibling host can set or read it. Only when
- * every configured origin is an HTTP loopback origin (the approved local development
- * exception of CT01 §11.5) is the cookie {@code cm_refresh} without Secure, because
- * some browsers drop Secure cookies on plain-HTTP loopback. The mode is derived from
+ * <p>Default (production, and any configuration with an origin that is not HTTP loopback):
+ * {@code __Host-cm_refresh}; Secure, HttpOnly, SameSite=Strict, Path=/, no Domain, so no
+ * sibling host can set or read it. Only when every configured origin is an HTTP loopback
+ * origin (the approved local development exception of CT01 §11.5) is the cookie
+ * {@code cm_refresh} without Secure, because some browsers drop Secure cookies on
+ * plain-HTTP loopback. The mode is derived from
  * {@code CORS_ALLOWED_ORIGINS}; no new variable exists and an HTTPS deployment cannot
  * select the loopback mode.
  *
@@ -106,8 +107,9 @@ public class RefreshCookieSecurity {
                 && LOOPBACK_HOSTS.contains(uri.getHost().toLowerCase(java.util.Locale.ROOT));
     }
 
+    /** Exact origin match, ignoring ASCII case like Spring's CORS check of the same list. */
     boolean trusted(String origin) {
-        return origin != null && trustedOrigins.contains(origin);
+        return origin != null && trustedOrigins.stream().anyMatch(origin::equalsIgnoreCase);
     }
 
     /**

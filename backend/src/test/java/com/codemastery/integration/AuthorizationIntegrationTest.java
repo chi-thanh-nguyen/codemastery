@@ -1112,6 +1112,70 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        void signInPurgesExpiredSessionsWithTheirTokensAndKeepsLiveOnes() throws Exception {
+            String email = newEmail(), password = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, password);
+            UUID expired = UUID.randomUUID(), live = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) VALUES "
+                    + "(?,?,now() - interval '9 days',now() - interval '2 days'),"
+                    + "(?,?,now() - interval '1 day',now() + interval '6 days')", expired, userId, live, userId);
+            jdbc.update("INSERT INTO public.refresh_tokens (id,session_id,token_digest,issued_at,expires_at) "
+                    + "VALUES (?,?,?,now() - interval '9 days',now() - interval '8 days')",
+                    UUID.randomUUID(), expired, sha256(new byte[]{1}));
+            signIn(email, password);
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE id = ?",
+                    Integer.class, expired));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.refresh_tokens WHERE session_id = ?",
+                    Integer.class, expired));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE id = ?",
+                    Integer.class, live));
+        }
+
+        @Test
+        void trustedOriginsMatchIgnoringAsciiCaseLikeCors() throws Exception {
+            Signed first = newSession();
+            mvc.perform(post("/api/auth/refresh").header("Origin", "HTTP://LOCALHOST:5173")
+                            .cookie(new jakarta.servlet.http.Cookie(COOKIE, first.refreshToken())))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        void concurrentSignInsReplacingDifferentCookiesAtTheCapBothSucceed() throws Exception {
+            String email = newEmail(), password = syntheticPassword();
+            UUID userId = insertActiveAccountWithPassword(email, password);
+            Signed a = signIn(email, password), b = signIn(email, password);
+            for (int i = 0; i < 10; i++) {
+                jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) VALUES "
+                        + "(?,?,now() - make_interval(hours => ?),now() + interval '1 day')", UUID.randomUUID(), userId, 30 - i);
+            }
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                CountDownLatch start = new CountDownLatch(1);
+                List<Future<Integer>> results = new ArrayList<>();
+                for (Signed presented : List.of(a, b)) {
+                    results.add(pool.submit(() -> {
+                        start.await(10, TimeUnit.SECONDS);
+                        return mvc.perform(post("/api/auth/login").header("Origin", ORIGIN)
+                                        .cookie(new jakarta.servlet.http.Cookie(COOKIE, presented.refreshToken()))
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(JSON.writeValueAsString(Map.of("email", email, "password", password))))
+                                .andReturn().getResponse().getStatus();
+                    }));
+                }
+                start.countDown();
+                for (Future<Integer> result : results) {
+                    assertEquals(200, result.get(60, TimeUnit.SECONDS));
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+            assertTrue(revoked(sessionOf(a.refreshToken())));
+            assertTrue(revoked(sessionOf(b.refreshToken())));
+            assertTrue(jdbc.queryForObject("SELECT count(*) FROM public.refresh_sessions WHERE user_id = ? "
+                    + "AND revoked_at IS NULL", Integer.class, userId) <= 11);
+        }
+
+        @Test
         void onlyCookieOperationsAdmitCredentialedCorsForTheConfiguredOrigin() throws Exception {
             mvc.perform(options("/api/auth/refresh").header("Origin", ORIGIN)
                             .header("Access-Control-Request-Method", "POST"))

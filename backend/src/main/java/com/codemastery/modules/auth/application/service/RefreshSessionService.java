@@ -91,6 +91,10 @@ public class RefreshSessionService {
             // User-before-session order of password reset and CT12 status changes.
             users.insertRefreshSession(sessionId, account.id(), now, sessionExpiry);
             users.insertRefreshToken(UUID.randomUUID(), sessionId, sha256(raw), now, tokenExpiry);
+            // Lock the account's existing active sessions in one deterministic order before
+            // revoking any of them: two concurrent sign-ins (each replacing a different cookie,
+            // both trimming to the cap) would otherwise lock overlapping rows in opposite orders.
+            users.lockActiveRefreshSessions(account.id(), now);
             replaced.ifPresent(previous -> users.revokeRefreshSession(previous, now));
             users.revokeRefreshSessionsBeyond(account.id(), MAX_ACTIVE_SESSIONS, now);
         });

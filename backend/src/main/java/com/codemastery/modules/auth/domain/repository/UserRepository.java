@@ -55,10 +55,19 @@ public interface UserRepository {
     /** Revokes every unrevoked session of the account (password reset, future CT12 lock). */
     int revokeRefreshSessionsOfUser(UUID userId, Instant revokedAt);
 
+    /**
+     * Locks the account's active sessions in {@code id} order. Sign-in calls it before any other
+     * session write, so concurrent sign-ins of one account lock in the same order and cannot deadlock.
+     */
+    void lockActiveRefreshSessions(UUID userId, Instant now);
+
     /** Revokes the account's active sessions beyond the newest {@code keep}. */
     int revokeRefreshSessionsBeyond(UUID userId, int keep, Instant now);
 
-    /** Deletes at most {@code limit} sessions expired at {@code now}, with their tokens. */
+    /**
+     * Deletes at most {@code limit} sessions expired at {@code now}, with their tokens. Rows locked by
+     * another transaction are skipped, so concurrent purges never wait for or deadlock with each other.
+     */
     int deleteExpiredRefreshSessions(Instant now, int limit);
 
     /** Auth-private refresh-session value; never exposed by a REST/API boundary. */

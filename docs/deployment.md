@@ -1519,11 +1519,11 @@ Least privilege exercised by the consumer:
 
 | Operation | SQL | Privilege |
 | --- | --- | --- |
-| Sign-in | `INSERT` session and first token; `UPDATE refresh_sessions SET revoked_at` for a presented cookie's session and beyond the 10-session cap | INSERT on both; UPDATE (revoked_at) |
+| Sign-in | `INSERT` session and first token; `SELECT … FROM refresh_sessions … ORDER BY id FOR UPDATE` (lock order); `UPDATE refresh_sessions SET revoked_at` for a presented cookie's session and beyond the 10-session cap | INSERT on both; row lock and UPDATE via UPDATE (revoked_at) |
 | Protected request | `SELECT … FROM users JOIN refresh_sessions …` | SELECT on both |
 | Rotation | `SELECT … FROM refresh_tokens WHERE token_digest = ?`; `SELECT … FROM refresh_sessions … FOR UPDATE`; `UPDATE refresh_tokens SET consumed_at`; `INSERT` successor | SELECT; row lock via UPDATE (revoked_at); UPDATE (consumed_at); INSERT |
 | Logout, replay, reset, locked account | `UPDATE refresh_sessions SET revoked_at …` | UPDATE (revoked_at) |
-| Purge after sign-in | `DELETE` expired sessions' tokens, then the sessions | DELETE on both |
+| Purge after sign-in | `SELECT … FOR UPDATE SKIP LOCKED` of expired sessions; `DELETE` their tokens, then the sessions | row lock via UPDATE (revoked_at); DELETE on both |
 
 The runtime role still cannot do any of the following:
 

@@ -66,10 +66,15 @@ function pendingSignOut(value?: boolean) {
     } catch { /* Storage can be unavailable; the server revocation is still attempted. */ }
     return false;
 }
-/** Revokes the server session; until confirmed, a later load retries sign-out instead of restoring. */
+/**
+ * Revokes the server session; until confirmed, a later load retries sign-out instead of restoring.
+ * The request is time-bounded like refresh: it runs inside the shared Web Lock, and a hung request
+ * would otherwise stall every tab's renewal and sign-in.
+ */
 function serverSignOut() {
     pendingSignOut(true);
-    return withSessionLock(() => endSession()).then(() => { pendingSignOut(false); }, () => undefined);
+    return withSessionLock(() => endSession(AbortSignal.timeout(REFRESH_TIMEOUT_MS)))
+        .then(() => { pendingSignOut(false); }, () => undefined);
 }
 /** The server refused the refresh credential (or answered unusably): the session is over. */
 const refused = (error: unknown) => error instanceof ApiError &&

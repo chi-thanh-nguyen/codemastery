@@ -3253,10 +3253,42 @@ evidence by the author, not QA01/QA07 independent verification, CI or acceptance
 | `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | PASS — `RUNTIME_CONSUMER_TESTS_PASS` (Flyway 8/8) |
 | `cd frontend && npm run test:browser` (Chromium) | PASS — 45 passed; the landing check now expects exactly the anonymous `POST /api/auth/refresh`, which the harness test double refuses with 401 |
 | `test-deploy-syntax-and-authorization-gates.sh`, `test-deploy-offline-compose-guards.sh`, `bash -n` on every VM test script | PASS |
-| `test-ingress-release-image-build.sh` | Images built; its Java-truststore sub-check FAILED locally on a Docker Desktop platform-resolution error (`no match for platform in manifest`) for a locally built tag; the backend Dockerfile is unchanged by this work. CI result pending |
+| `test-ingress-release-image-build.sh` | Images built; its Java-truststore sub-check FAILED locally on a Docker Desktop platform-resolution error (`no match for platform in manifest`) for a locally built tag; the backend Dockerfile is unchanged by this work. The CI job "VM HTTPS ingress", which runs this script first, passed on `8001e1a` |
 | `test-deploy-preflight-rendered-compose.sh` | FAILS on this macOS host identically on unmodified `main` (`stat -c` is GNU-only); CI runs it on Ubuntu. Not affected by this work |
 
 Not run: the browser harness on WebKit/Firefox, CI, and any test against a shared,
 staging or production environment. Remaining: CI on the PR,
 independent QA01/QA07 execution, and the review gates in ADR014 §12.
+
+### Author self-review rerun — 16 November 2026
+
+An **author self-review** of the whole PR #246 diff (not an independent review)
+produced the corrections in
+[ADR014 §14](decisions/014-hybrid-refresh-session-authentication.md#14-author-self-review-corrections--16-november-2026).
+They are: sign-in lock order, purge `FOR UPDATE SKIP LOCKED`, case-insensitive trusted
+Origins, a time-bounded sign-out inside the Web Lock, cookie-mode wording and the rollback
+note. New tests in `AuthorizationIntegrationTest$RefreshSessions` cover purge of expired
+sessions with their tokens, case-insensitive Origin matching and concurrent sign-ins
+replacing different cookies at the cap. The last one is a smoke test: the deadlock it
+guards against did not reproduce locally, even without the fix. `AuthProvider.test.tsx`
+now asserts the sign-out signal.
+
+CI on `8001e1a`, the head before these corrections: all eight jobs passed (Backend,
+Frontend, VM HTTPS ingress, VM deployment script, PostgreSQL and containment, runtime
+privileges, containerd, MinIO qualification).
+
+Re-executed on the corrected tree:
+
+| Command | Result |
+|---|---|
+| `cd backend && ./mvnw verify` | PASS — 631 unit, 200 integration, 0 failures |
+| `cd frontend && npm run build` / `npm test` | PASS — 16 files, 486 tests |
+| Playwright chromium/webkit desktop+mobile | PASS — 65 passed, 3 skipped by design |
+| `test-ingress-stub-backend.sh`, `test-ingress-real-backend.sh` | PASS |
+| `test-deploy-privilege-matrix-contract.sh`, `test-postgres-privilege-matrix-containment.sh`, `test-runtime-real-backend-privileges.sh` | PASS; no `42501` in the backend log (the new lock and purge statements run under the runtime role) |
+
+Note: forcing an `*IntegrationTest` into the Surefire unit run together with
+`AuthServiceTest$SmtpSubmissionPolicy` makes the SMTP log-capture tests fail. That is
+an ordering artifact of that ad hoc command: the classes pass separately and in the
+normal Surefire/Failsafe split above.
 

@@ -328,6 +328,8 @@ describe('ADR014 hybrid refresh-session lifecycle', () => {
         await act(async () => auth.logout()); await settle();
         expect(auth.user).toBeNull();
         expect(calls('/api/auth/logout')[0][1]).toMatchObject({ method: 'POST', credentials: 'include', keepalive: true });
+        // Time-bounded inside the shared Web Lock, like refresh.
+        expect(calls('/api/auth/logout')[0][1].signal).toBeInstanceOf(AbortSignal);
         expect(localStorage.getItem('codemastery.auth.pendingSignOut')).toBe('1');
         await act(async () => root.unmount()); root = createRoot(host);
         fetcher.mockResolvedValueOnce(empty()); await mountHybrid(); await settle();

@@ -2019,9 +2019,8 @@ integration. Current behavior:
   or logs. Each token carries the `sid` of its refresh session and stops working when
   that session is revoked.
 - **Refresh cookie.** Set by sign-in and each refresh; HttpOnly, SameSite=Strict,
-  `Path=/`; `__Host-cm_refresh` (Secure) whenever an HTTPS origin is configured, and
-  `cm_refresh` without Secure only when every `CORS_ALLOWED_ORIGINS` entry is an HTTP
-  loopback origin (local Compose `http://localhost:5173`, the E2E stack). Scripts never
+  `Path=/`; `__Host-cm_refresh` (Secure) by default, and `cm_refresh` without Secure
+  only when every `CORS_ALLOWED_ORIGINS` entry is an HTTP loopback origin (local Compose `http://localhost:5173`, the E2E stack). Scripts never
   see it.
 - **Restore and renewal.** `App` mounts `AuthProvider refreshSessions`. On load it calls
   `POST /api/auth/refresh` once (shared under React StrictMode); protected routes show

@@ -123,10 +123,11 @@ the grace window (forks the family and weakens replay detection); no grace windo
 
 **Sign-in.** One transaction inserts the session and its first token (the foreign-key
 check takes the User key-share lock first, the same User-before-session order as
-password reset and CT12), revokes the session of a refresh cookie the browser still
-presented (login replacement), then keeps at most **10 active sessions per account**,
-revoking the oldest. Afterwards, best effort and never failing the sign-in, up to 100
-globally expired sessions are purged with their tokens. A scheduled purge is not
+password reset and CT12), locks the account's active sessions in `id` order (§14), revokes
+the session of a refresh cookie the browser still presented (login replacement), then
+keeps at most **10 active sessions per account**, revoking the oldest. Afterwards, best
+effort and never failing the sign-in, up to 100 globally expired sessions are purged with
+their tokens; rows locked by another transaction are skipped (`FOR UPDATE SKIP LOCKED`). A scheduled purge is not
 introduced (scheduling stays disabled by default); expired rows of accounts that never
 sign in again remain until another sign-in purges them (§12).
 
@@ -134,7 +135,7 @@ sign in again remain until another sign-in purges them (§12).
 
 | Attribute | Selection |
 |---|---|
-| Name | `__Host-cm_refresh` whenever any configured origin is HTTPS (production). The `__Host-` prefix forces Secure, `Path=/` and no `Domain`, so no sibling host can set, toss or read it. |
+| Name | `__Host-cm_refresh` by default: in production and whenever any configured origin is not HTTP loopback (*corrected in §14*). The `__Host-` prefix forces Secure, `Path=/` and no `Domain`, so no sibling host can set, toss or read it. |
 | Attributes | `Secure; HttpOnly; SameSite=Strict; Path=/`; no `Domain`; `Max-Age` = the token's remaining idle lifetime. Deletion: same name/path/attributes with `Max-Age=0`. |
 | Loopback development mode | Only when **every** `CORS_ALLOWED_ORIGINS` entry is `http://localhost`, `http://127.0.0.1` or `http://[::1]` (any port) is the cookie `cm_refresh` without `Secure`, because WebKit drops Secure cookies on plain-HTTP loopback (observed on 16 November 2026 with the pinned Playwright WebKit; Chromium kept them). This is CT01 §11.5's existing loopback exception; HTTPS deployments cannot select it, and `deploy.sh` already requires `CORS_ALLOWED_ORIGINS` to equal the HTTPS origin. |
 | Scope | Read only by `POST /api/auth/login`, `/refresh` and `/logout`. The frontend sends credentials only for these three; the production ingress forwards `Cookie` only to these three exact paths (CT17-INGRESS-COOKIE). Ambiguous duplicate cookies fail closed. |
@@ -326,10 +327,15 @@ Residual risks (**not accepted by the Leader**; recorded for review):
 6. **Purge** runs only after sign-ins; expired rows of inactive accounts persist.
 7. **CT12.user lock revocation** is a binding on a future implementation, not yet code.
 
-**Rollback.** Revert the PR before integration. After integration, a code rollback to
-the previous release is compatible with an applied V008: the old code ignores the two
-new tables and the cookie, and old access tokens without `sid` are rejected only by
-the new code. V008 must not be edited; a later forward migration would drop the tables
+**Rollback.** Revert the PR before integration. After integration, the previous
+application code tolerates an applied V008: Flyway ignores a newer applied migration by
+default (`*:future`), Hibernate validates only mapped tables, the old code ignores the
+cookie, and its tokens without `sid` would be rejected only by the new code. **A rollback
+through `deploy.sh` is not automatic, however** (*corrected in §14*): an older release's
+`RUNTIME_PRIVILEGE_MATRIX` does not list `refresh_sessions`/`refresh_tokens`, so its
+privilege verification stops with "unexpected relation" and keeps ingress closed. Rolling
+back a deployed release needs either a deploy script that keeps the r3 rows or a
+Leader-authorized forward migration that drops the two tables. V008 must not be edited; a later forward migration would drop the tables
 if the design were withdrawn. An emergency kill switch for all sessions is rotating
 `JWT_SECRET` (access tokens) plus revoking all rows (`UPDATE refresh_sessions SET
 revoked_at = now()`), an operational action requiring Leader authorization.
@@ -357,3 +363,38 @@ Technical references (inform the analysis; approval comes from the authority in 
 [RFC 6265bis cookie prefixes](https://datatracker.ietf.org/doc/draft-ietf-httpbis-rfc6265bis/),
 [OWASP CSRF Prevention Cheat Sheet (Fetch Metadata, Origin verification)](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html),
 [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+
+## 14. Author self-review corrections — 16 November 2026
+
+An **author self-review** of the whole PR #246 diff (not an independent review)
+produced these corrections under the same delegated authority. They refine §§4, 5 and
+12. No other decision changes, and the six revision identifiers are unchanged, because
+the corrections stay within each revision's approved intent.
+
+- **Sign-in lock order (§4).** Sign-in now locks the account's active sessions in `id`
+  order (`SELECT … FOR UPDATE`) before revoking a replaced session or trimming to the cap.
+  Two concurrent sign-ins of one account that each replace a different cookie at the cap
+  previously locked overlapping rows in different orders. PostgreSQL would have aborted
+  one of them as a deadlock, giving a 500. Not reproduced locally (BCrypt spacing makes
+  the overlap rare); fixed by lock-order reasoning, and covered by a concurrent smoke test.
+- **Purge (§4).** The best-effort purge selects expired sessions `ORDER BY expires_at, id
+  … FOR UPDATE SKIP LOCKED`, so concurrent purges take disjoint rows and never wait on a
+  session locked by a rotation. Previously the order had ties, and concurrent purges
+  could wait on or deadlock with each other, adding latency to sign-in.
+- **Origin comparison (§5).** Trusted origins match ignoring ASCII case, the same rule
+  Spring's CORS check applies to `CORS_ALLOWED_ORIGINS`. Previously a mixed-case
+  configured origin passed CORS but failed every cookie operation with 403. This is not
+  a security relaxation: scheme and host are case-insensitive.
+- **Cookie mode wording (§5).** The Secure `__Host-` cookie is used whenever any
+  configured origin is not HTTP loopback, including a non-loopback `http://` origin
+  (the code and unit tests always did this; the earlier text said "HTTPS").
+- **Sign-out request bound (§7).** The sign-out request now has the same 15-second
+  timeout as refresh. It runs inside the cross-tab Web Lock, and a hung request
+  (captive portal, stalled connection) could otherwise stall every tab's renewal and
+  sign-in until the browser gave up.
+- **Rollback (§12).** Corrected as above: `deploy.sh` privilege verification blocks an
+  automatic rollback to a release without the r3 rows.
+
+Known residual, recorded and not changed: a sign-in request that hangs inside the Web
+Lock delays other tabs' renewals until it completes or the user cancels it.
+
