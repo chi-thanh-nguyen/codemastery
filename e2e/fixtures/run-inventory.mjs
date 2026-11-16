@@ -14,14 +14,17 @@
 // identity, immutable container, network and volume IDs with their creating-container association,
 // creation intents and per-resource observations. Credentials, tokens, environment dumps, request
 // bodies and executable cleanup commands are never stored.
+import { spawnSync } from 'node:child_process';
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, readSync, realpathSync, renameSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const SCHEMA = 'codemastery-e2e-inventory/1';
 export const CONTRACT = 'CT34-FIXTURES-2026-11-10-r2';
 export const MAX_RECORD_BYTES = 256 * 1024;
 export const MAX_INTENTS = 128;
 export const MAX_OBSERVATIONS = 96;
+export const MAX_PROCESSES = 64;
 /** States that still carry an unresolved ownership obligation; only `complete` releases a checkout. */
 export const NONTERMINAL = ['active', 'cleaning', 'incomplete'];
 /** Resource states an intent can resolve to (Section 10.3: pending/removed/absent/preserved/failed). */
@@ -35,6 +38,10 @@ const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 export class UntrustedInventory extends Error {}
 /** This process no longer acts for the coordinator that holds the checkout's lock (or for this run). */
 export class OwnershipLost extends Error {}
+/** The record changed since this process read it: its view is stale and was not written. */
+export class StaleInventory extends Error {}
+
+const coordinator = join(dirname(fileURLToPath(import.meta.url)), 'lifecycle.py');
 
 /** The record path handed down by the coordinator, or null when this process was not admitted. */
 export const inventoryPath = () => process.env.CODEMASTERY_E2E_INVENTORY || null;
@@ -51,15 +58,30 @@ export const inventoryPath = () => process.env.CODEMASTERY_E2E_INVENTORY || null
  * Outside a coordinated run (none of the hand-down variables present) there is no relationship to
  * check; the unit tests drive the engine that way. A partial hand-down is refused.
  */
-export function ownershipProblem(record, { env = process.env, ppid = process.ppid } = {}) {
+export function handDown(env = process.env) {
     const runId = env.CODEMASTERY_E2E_RUN_ID, key = env.CODEMASTERY_E2E_LOCK_KEY, supervisor = env.CODEMASTERY_E2E_SUPERVISOR;
     if (!runId && !key && !supervisor) return null;
-    if (!runId || !key || !supervisor) return 'the lifecycle hand-down is incomplete (run ID, lock key and coordinator are all required)';
-    if (Number(supervisor) !== ppid) {
-        return `the coordinator ${supervisor} that holds this checkout's lock is no longer this process' parent (parent ${ppid}); its run may already be recovered or replaced`;
+    const fence = env.CODEMASTERY_E2E_FENCE === undefined ? null : Number(env.CODEMASTERY_E2E_FENCE);
+    return { runId, key, supervisor: Number(supervisor), fence: Number.isInteger(fence) && fence > 0 ? fence : null, role: env.CODEMASTERY_E2E_ROLE ?? null };
+}
+
+/**
+ * A quick, advisory early refusal; the authoritative check is the fenced compare-and-swap that
+ * `commitInventory` performs under the record lock. `ppid` is read at every call (never captured
+ * once), so a writer whose coordinator died notices it at its next mutation.
+ */
+export function ownershipProblem(record, { env = process.env, ppid } = {}) {
+    const given = handDown(env);
+    if (!given) return null;
+    if (!given.runId || !given.key || !given.supervisor) return 'the lifecycle hand-down is incomplete (run ID, lock key and coordinator are all required)';
+    const parent = ppid ?? process.ppid;
+    if (given.supervisor !== parent) {
+        return `the coordinator ${given.supervisor} that holds this checkout's lock is no longer this process' parent (parent ${parent}); its run may already be recovered or replaced`;
     }
-    if (!record || record.runId !== runId) return `the record belongs to run ${record?.runId ?? '(none)'}, not to the handed-down run ${runId}`;
-    if (record.lockKey !== key) return `the record belongs to lock key ${record.lockKey}, not ${key}`;
+    if (!record || record.runId !== given.runId) return `the record belongs to run ${record?.runId ?? '(none)'}, not to the handed-down run ${given.runId}`;
+    if (record.lockKey !== given.key) return `the record belongs to lock key ${record.lockKey}, not ${given.key}`;
+    if (given.fence === null) return 'no ownership generation (fence) was handed down to this process';
+    if (record.fence !== given.fence) return `the record is at fence ${record.fence}, not this process' fence ${given.fence}; ownership was taken over`;
     return null;
 }
 
@@ -74,9 +96,11 @@ function validate(record, path) {
     if (![...NONTERMINAL, 'complete'].includes(record.state)) bad('state');
     const processes = record.processes ?? {};
     if (typeof processes !== 'object' || processes === null || Array.isArray(processes)) bad('processes');
+    if (Object.keys(processes).length > MAX_PROCESSES) bad('process bound');
     for (const [role, entry] of Object.entries(processes)) {
         if (!entry || typeof entry !== 'object') bad(`process ${role}`);
         if (entry.pid != null && !(Number.isInteger(entry.pid) && entry.pid > 0)) bad(`process ${role} PID`);
+        if (entry.group != null && !(Number.isInteger(entry.group) && entry.group > 0)) bad(`process ${role} group`);
         if (entry.control != null && typeof entry.control !== 'string') bad(`process ${role} control channel`);
     }
     const intents = record.intents ?? [];
@@ -88,6 +112,9 @@ function validate(record, path) {
         for (const field of ['dockerId', 'name', 'container']) {
             if (intent[field] != null && !(typeof intent[field] === 'string' && SAFE_NAME.test(intent[field]))) bad(`intent ${field}`);
         }
+    }
+    for (const field of ['fence', 'revision']) {
+        if (record[field] != null && !(Number.isInteger(record[field]) && record[field] > 0)) bad(field);
     }
     if (record.temp != null && (typeof record.temp !== 'object' || typeof record.temp.path !== 'string')) bad('temporary build');
     if (record.docker != null && (typeof record.docker !== 'object' || typeof record.docker.endpoint !== 'string'
@@ -199,15 +226,58 @@ export function writeInventory(path, record) {
  * that return the intent or the record they touched cannot accidentally become the record.
  */
 export function updateInventory(path, mutate, options = {}) {
-    const record = readInventory(path);
-    if (!record) throw new UntrustedInventory(`inventory ${path} disappeared; this run's ownership cannot be recorded`);
-    // Checked on every mutation: an orphan whose coordinator died must never write into a record that
-    // recovery or a later admitted run now owns.
-    const problem = ownershipProblem(record, options);
-    if (problem) throw new OwnershipLost(`refusing to change inventory ${path}: ${problem}`);
-    const replacement = mutate(record);
-    const next = replacement && typeof replacement === 'object' && replacement.schema === SCHEMA ? replacement : record;
-    return writeInventory(path, next);
+    for (let attempt = 1; ; attempt++) {
+        const record = readInventory(path);
+        if (!record) throw new UntrustedInventory(`inventory ${path} disappeared; this run's ownership cannot be recorded`);
+        // An orphan whose coordinator died must never write into a record that recovery or a later
+        // admitted run now owns: refused early here, and refused atomically by the fenced commit.
+        const problem = ownershipProblem(record, options);
+        if (problem) throw new OwnershipLost(`refusing to change inventory ${path}: ${problem}`);
+        const replacement = mutate(record);
+        const next = replacement && typeof replacement === 'object' && replacement.schema === SCHEMA ? replacement : record;
+        try {
+            return commitInventory(path, next, options);
+        } catch (error) {
+            // Another writer of the same generation committed in between: re-read and re-apply.
+            if (!(error instanceof StaleInventory) || attempt >= 5) throw error;
+        }
+    }
+}
+
+/**
+ * Durably replaces the record with `record`, which must be a mutation of the revision it carries.
+ *
+ * In a coordinated run (a lifecycle hand-down is present) the write is a fenced compare-and-swap
+ * performed by the coordinator's own `commit-record` helper under the record lock: the record on
+ * disk must still belong to this process' run ID, lock key and fence, and still be at the revision
+ * this process read; otherwise nothing is written (`OwnershipLost` or `StaleInventory`). So a writer
+ * that lost ownership, however long it was paused, can never replace a newer state. Without a
+ * hand-down (the fixture unit tests driving the engine directly) the record is written as is.
+ */
+export function commitInventory(path, record, { env = process.env } = {}) {
+    const given = handDown(env);
+    if (!given) {
+        record.revision = (record.revision ?? 0) + 1;
+        return writeInventory(path, record);
+    }
+    if (!given.runId || !given.key || !given.supervisor || given.fence === null) {
+        throw new OwnershipLost(`refusing to change inventory ${path}: the lifecycle hand-down (run ID, lock key, coordinator, fence) is incomplete`);
+    }
+    if (!Number.isInteger(record.revision)) throw new UntrustedInventory(`inventory ${path} carries no revision to compare`);
+    record.updatedAt = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    // The hand-down only supplies the expected owner (as arguments); the helper runs in this
+    // process' own environment.
+    const reply = spawnSync(env.E2E_PYTHON || process.env.E2E_PYTHON || 'python3',
+        [coordinator, 'commit-record', path, given.runId, given.key, String(given.fence), String(record.revision)],
+        { input: JSON.stringify(record), encoding: 'utf8', timeout: 60_000 });
+    const detail = (reply.stderr || reply.error?.message || '').trim().slice(0, 500);
+    if (reply.status === 0) {
+        record.revision = JSON.parse(reply.stdout).revision;
+        return record;
+    }
+    if (reply.status === 5) throw new OwnershipLost(`refusing to change inventory ${path}: ${detail}`);
+    if (reply.status === 6) throw new StaleInventory(`inventory ${path} changed since it was read: ${detail}`);
+    throw new UntrustedInventory(`inventory ${path} could not be committed (exit ${reply.status ?? 'timeout'}): ${detail}`);
 }
 
 const bound = (list, max) => (list.length > max ? list.slice(list.length - max) : list);

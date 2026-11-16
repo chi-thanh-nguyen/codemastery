@@ -20,11 +20,26 @@ Modes:
   report -- <command...> read-only pass-through for invocations that produce no output
   proc-identity <pid>   print one process' OS birth identity as JSON (helper for the Node side)
   proc-group <pgid>     print the live (non-zombie) members of one process group as JSON
+  commit-record <path> <runId> <lockKey> <fence> <revision>
+                        fenced compare-and-swap write of one inventory record (stdin: the record)
   host-identity         print host/boot/PID-namespace identity as JSON
   inspect               print the current inventory record for this checkout
 
 Exit codes: 0 success, 1 failure, 2 another invocation owns this checkout, 3 this checkout is
-blocked until recovery completes, 4 the environment is not qualified for safe exclusivity.
+blocked until recovery completes, 4 the environment is not qualified for safe exclusivity;
+commit-record also uses 5 (fenced: the writer no longer owns the record), 6 (revision conflict:
+the writer's view is stale) and 7 (the record lock could not be taken in time).
+
+Record ownership protocol. Exclusivity of a checkout is the coordinator's `flock` above. Every
+change of a run record additionally happens inside a short critical section under a second stable
+lock file next to the record (`.<key>.json.lock`), whoever makes it: the coordinator (admission,
+runner and finalizer registration, recovery takeover) or a Node writer through `commit-record`.
+Inside it the current record is re-read and the writer's handed-down run ID, lock key and `fence`
+must match it, and so must the `revision` the writer last read; the write then bumps `revision`.
+Recovery takes the record over by incrementing `fence`, so every writer of an earlier generation is
+fenced out permanently, however long it was paused. A new run has a new run ID. Writers (runner and
+finalizers) are recorded with their OS birth identity before they write, and recovery never
+completes while an earlier one may still be alive.
 """
 
 import ctypes
@@ -55,6 +70,10 @@ RUN_ID = re.compile(r"^cm-e2e-[a-z0-9-]{1,64}$")
 # after 30 s) before finalizing anyway. It bounds waiting only: finalization itself still refuses to
 # touch the build or the stack while any member of that group is alive.
 GROUP_SETTLE_SECONDS = 45
+# Bound on waiting for a record lock; a writer that cannot take it in time fails closed.
+RECORD_LOCK_SECONDS = 20
+MAX_PROCESSES = 64
+EXIT_FENCED, EXIT_CONFLICT_REVISION, EXIT_LOCK_BUSY = 5, 6, 7
 # Test hooks of the fixture tests. They are never handed to a coordinated run.
 TEST_HOOKS = ("E2E_VITE_BIN", "E2E_VITE_MODULE")
 # Output roots of CP-029, relative to the canonical checkout directory. Order is irrelevant; all
@@ -76,6 +95,18 @@ class Unqualified(Exception):
 
 class Blocked(Exception):
     """A previous run's ownership obligation is unresolved; this checkout must not be reused yet."""
+
+
+class Fenced(Exception):
+    """The writer's run ID, lock key or fence no longer matches the record: it lost ownership."""
+
+
+class StaleRevision(Exception):
+    """The record changed since the writer read it; its view is stale and is not written."""
+
+
+class LockBusy(Exception):
+    """The record lock could not be taken within the bound; nothing was written."""
 
 
 def fail(message):
@@ -175,6 +206,7 @@ def group_members(pgid):
     """
     system = platform.system()
     members = []
+    me = os.getpid()  # this helper may itself run inside the group it inspects
     try:
         if system == "Linux":
             for name in os.listdir("/proc"):
@@ -183,10 +215,14 @@ def group_members(pgid):
                 try:
                     with open("/proc/%s/stat" % name, "rb") as handle:
                         raw = handle.read().decode("utf-8", "replace")
-                except OSError:
-                    continue  # exited meanwhile, or another account's hidden process
+                except (FileNotFoundError, ProcessLookupError):
+                    continue  # verified gone between the listing and the read
+                # Any other error (EACCES, EPERM, EIO, ...) means a process could not be classified,
+                # so the enumeration is incomplete: it propagates and the answer is unreliable.
                 tail = raw[raw.rindex(")") + 1:].split()
-                if tail[0] == "Z" or int(tail[2]) != pgid:
+                if len(tail) < 20:
+                    raise ValueError("truncated /proc/%s/stat" % name)
+                if tail[0] == "Z" or int(tail[2]) != pgid or int(name) == me:
                     continue
                 members.append({"pid": int(name), "birth": "linux-starttime:%s" % tail[19]})
         elif system == "Darwin":
@@ -214,6 +250,10 @@ def group_members(pgid):
                 if data[offset + 36] == 5:
                     continue
                 pid = struct.unpack_from("@i", data, offset + 40)[0]
+                if pid <= 0:
+                    raise ValueError("implausible PID %d in KERN_PROC_PGRP reply" % pid)
+                if pid == me:
+                    continue
                 sec = struct.unpack_from("@q", data, offset)[0]
                 usec = struct.unpack_from("@i", data, offset + 8)[0]
                 members.append({"pid": pid, "birth": "darwin-starttime:%d.%06d" % (sec, usec)})
@@ -478,10 +518,7 @@ def read_record(path, tolerate=False):
         if tolerate:
             return None
         raise Blocked("inventory record %s belongs to uid %s" % (path, record.get("ownerUid")))
-    if len(record.get("intents") or []) > MAX_INTENTS:
-        if tolerate:
-            return None
-        raise Blocked("inventory record %s exceeds the intent bound" % path)
+    # Types are checked before any field is used (a malformed field must not crash the caller).
     problem = structure_problem(record)
     if problem:
         # Another checkout's malformed record is not ours to interpret: it is skipped, never
@@ -524,9 +561,21 @@ def structure_problem(record):
     for entry in processes.values():
         if not isinstance(entry, dict) or (entry.get("pid") is not None and not integer(entry.get("pid"))):
             return "process entry"
+    if len(processes) > MAX_PROCESSES:
+        return "process bound"
+    for entry in processes.values():
+        if entry.get("group") is not None and not integer(entry.get("group")):
+            return "process group"
+        if entry.get("spawned") is not None and not isinstance(entry.get("spawned"), bool):
+            return "process spawn flag"
     intents = record.get("intents")
     if not isinstance(intents, list) or not all(isinstance(entry, dict) for entry in intents):
         return "intents"
+    if len(intents) > MAX_INTENTS:
+        return "intent bound"
+    for field in ("fence", "revision"):
+        if not integer(record.get(field)) or record[field] < 1:
+            return field
     return None
 
 
@@ -550,6 +599,10 @@ def write_record(path, record):
         raise Unqualified("refusing to write a %d byte inventory record" % len(payload))
     directory = os.path.dirname(path)
     temporary = os.path.join(directory, ".%s.%d.tmp" % (os.path.basename(path), os.getpid()))
+    try:
+        os.unlink(temporary)  # a crashed earlier process with this PID; callers hold the record lock
+    except FileNotFoundError:
+        pass
     handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
         os.write(handle, payload)
@@ -562,6 +615,111 @@ def write_record(path, record):
         _durable_sync(folder)
     finally:
         os.close(folder)
+
+
+def record_lock_path(record_path):
+    """The stable lock file that serializes every change of one record (never unlinked)."""
+    return os.path.join(os.path.dirname(record_path), ".%s.lock" % os.path.basename(record_path))
+
+
+class RecordLock(object):
+    """Short, bounded exclusive section around one record change. Never held while waiting for
+    another process or another lock, so it cannot take part in a deadlock; a holder that crashes
+    releases it with its descriptor, and the atomic replacement leaves the old or the new record."""
+
+    def __init__(self, record_path, timeout=RECORD_LOCK_SECONDS):
+        self.path, self.timeout, self.fd = record_lock_path(record_path), timeout, None
+
+    def __enter__(self):
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            os.set_inheritable(fd, False)
+            info = os.fstat(fd)
+            if not statmodule.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid():
+                raise Unqualified("%s must be a single-link ordinary file of this account" % self.path)
+            if statmodule.S_IMODE(info.st_mode) != 0o600:
+                os.fchmod(fd, 0o600)
+            deadline = time.time() + self.timeout
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError as error:
+                    if error.errno not in (errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES):
+                        raise
+                if time.time() > deadline:
+                    raise LockBusy("the record lock %s was not released within %d s" % (self.path, self.timeout))
+                time.sleep(0.02)
+        except BaseException:
+            os.close(fd)
+            raise
+        self.fd = fd
+        return self
+
+    def __exit__(self, *_exc):
+        os.close(self.fd)
+        self.fd = None
+        return False
+
+
+def owner_problem(current, run_id, key, fence):
+    """Why a writer handed (run_id, key, fence) does not own `current`, or None."""
+    if current is None:
+        return "the record no longer exists"
+    if current.get("runId") != run_id:
+        return "the record belongs to run %s, not %s" % (current.get("runId"), run_id)
+    if current.get("lockKey") != key:
+        return "the record belongs to lock key %s, not %s" % (current.get("lockKey"), key)
+    if current.get("fence") != fence:
+        return "the record is at fence %s, not the writer's fence %s (ownership was taken over)" % (current.get("fence"), fence)
+    return None
+
+
+def locked_update(record_path, mutate, owner=None):
+    """Reads, mutates and durably rewrites the record under its lock. With `owner` = (run_id, key,
+    fence) the change is refused (Fenced) unless that writer still owns the record."""
+    with RecordLock(record_path):
+        current = read_record(record_path)
+        if owner is not None:
+            problem = owner_problem(current, *owner)
+            if problem:
+                raise Fenced(problem)
+        if current is None:
+            raise Blocked("inventory record %s disappeared" % record_path)
+        result = mutate(current)
+        current["revision"] = current["revision"] + 1
+        write_record(record_path, current)
+        return result, current
+
+
+def commit_record(path, run_id, key, fence, revision, payload):
+    """`commit-record`: the Node side's only way to change a record in a coordinated run. Under the
+    record lock, the on-disk record must still belong to (run_id, key, fence) and still be at
+    `revision`; the payload must describe the same run and generation. Returns the new revision."""
+    directory, name = os.path.dirname(path), os.path.basename(path)
+    if not os.path.isabs(path) or not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.json$", name):
+        raise Unqualified("%s is not an inventory record path" % path)
+    info = os.lstat(directory)
+    if not statmodule.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or statmodule.S_IMODE(info.st_mode) != 0o700:
+        raise Unqualified("%s must be a private (0700) directory of this account" % directory)
+    if not isinstance(payload, dict) or payload.get("schema") != SCHEMA or payload.get("ownerUid") != os.geteuid():
+        raise Unqualified("the payload is not an inventory record of this account")
+    if payload.get("runId") != run_id or payload.get("lockKey") != key or payload.get("fence") != fence:
+        raise Fenced("the payload does not describe the writer's own run and generation")
+    with RecordLock(path):
+        current = read_record(path)
+        problem = owner_problem(current, run_id, key, fence)
+        if problem:
+            raise Fenced(problem)
+        if current.get("revision") != revision:
+            raise StaleRevision("the record is at revision %s, not the writer's revision %s"
+                                % (current.get("revision"), revision))
+        payload["revision"] = revision + 1
+        problem = structure_problem(payload)
+        if problem:
+            raise Unqualified("the payload is malformed (%s)" % problem)
+        write_record(path, payload)
+        return payload["revision"]
 
 
 def new_run_id(registry, key):
@@ -702,7 +860,7 @@ def initial_record(registry, key, run_id, checkout, dev, ino, outputs, command):
     supervisor = process_identity(os.getpid())
     return {
         "schema": SCHEMA, "contract": CONTRACT, "runId": run_id, "state": "active",
-        "ownerUid": os.geteuid(), "lockKey": key,
+        "ownerUid": os.geteuid(), "lockKey": key, "fence": 1, "revision": 1,
         "host": {"hostname": host["hostname"], "machine": host["machine"], "boot": host["boot"],
                  "pidNamespace": host["pidNamespace"], "system": host["system"]},
         "checkout": {"path": checkout, "dev": dev, "ino": ino},
@@ -726,7 +884,7 @@ def initial_record(registry, key, run_id, checkout, dev, ino, outputs, command):
 
 # ------------------------------------------------------------------------------------- execution
 
-def child_environment(registry, key, run_id, record_path):
+def child_environment(registry, key, run_id, record_path, fence=None, role=None):
     """The environment the admitted Playwright invocation inherits. The ownership token proves to
     `playwright.config.ts` that this process entered through the coordinator; all values are
     non-secret run identity, never credentials."""
@@ -740,9 +898,14 @@ def child_environment(registry, key, run_id, record_path):
         "CODEMASTERY_E2E_SOCKETS": registry.sockets,
         "CODEMASTERY_E2E_CONTRACT": CONTRACT,
         "CODEMASTERY_E2E_SUPERVISOR": str(os.getpid()),
-        # The Node side asks this same interpreter for process identity.
+        # The Node side asks this same interpreter for process identity and record commits.
         "E2E_PYTHON": sys.executable,
     })
+    for name, value in (("CODEMASTERY_E2E_FENCE", fence), ("CODEMASTERY_E2E_ROLE", role)):
+        if value is None:
+            env.pop(name, None)
+        else:
+            env[name] = str(value)
     env.pop("CODEMASTERY_E2E_FINALIZED", None)
     for hook in TEST_HOOKS:
         env.pop(hook, None)
@@ -805,24 +968,25 @@ def run_child(command, env, cwd, on_spawn=None):
                 pass
 
 
-def mark_runner(record_path, fields):
-    """Merges `fields` into the recorded runner entry (the coordinator is the only writer while it
-    supervises the runner's start; the runner waits for this record before it writes anything)."""
-    record = read_record(record_path)
-    if record is None:
-        raise Blocked("inventory record %s disappeared" % record_path)
-    record["processes"].setdefault("runner", {"role": "playwright-runner"}).update(fields)
-    write_record(record_path, record)
+def mark_process(record_path, owner, role, fields):
+    """Merges `fields` into one recorded process entry, as the owner (run_id, key, fence)."""
+    def change(record):
+        record["processes"].setdefault(role, {"role": role}).update(fields)
+    locked_update(record_path, change, owner)
 
 
-def record_runner(record_path, child):
-    """Persists the spawned runner's PID, OS birth identity and process group. The handle is not yet
-    reaped, so the PID still names this child even if it has already exited. With
-    `start_new_session` a successful spawn guarantees that the child leads its own process group."""
+def record_spawned(record_path, owner, role, child, group=False):
+    """Persists a spawned writer's PID and OS birth identity (and, for the runner, its process
+    group). The handle is not yet reaped, so the PID still names this child even if it has already
+    exited. With `start_new_session` a successful spawn guarantees that the child leads its own
+    process group, whose ID is its PID."""
     identity = process_identity(child.pid)
     reliable = identity.get("reliable") and identity.get("exists")
-    mark_runner(record_path, {"pid": child.pid, "birth": identity.get("birth") if reliable else None,
-                              "birthSource": identity.get("source"), "state": "live", "group": child.pid})
+    fields = {"pid": child.pid, "birth": identity.get("birth") if reliable else None,
+              "birthSource": identity.get("source"), "state": "live", "spawned": True}
+    if group:
+        fields["group"] = child.pid
+    mark_process(record_path, owner, role, fields)
 
 
 def settle_runner_group(record_path, timeout=GROUP_SETTLE_SECONDS):
@@ -857,20 +1021,74 @@ def settle_runner_group(record_path, timeout=GROUP_SETTLE_SECONDS):
         time.sleep(0.25)
 
 
-def finalize(checkout, record_path, env, reason):
+def finalize(checkout, registry, key, record_path, reason, takeover, expected=None):
     """Reconciles and verifies the persisted inventory after the runner has finished or died.
 
     Delegates to the Node recovery engine, which owns the Docker/process/path protocol, and runs it
-    while this coordinator still holds exclusivity. Returns its exit status: nonzero means the run
-    is recorded incomplete and this checkout stays blocked until recovery succeeds.
+    while this coordinator still holds exclusivity. The finalizer is a writer like the runner: its
+    creation intent is recorded before it is spawned and its PID and birth identity right after, so
+    a later recovery waits for it. With `takeover` (recovery), the record's `fence` is incremented
+    first, which fences out every writer of an earlier generation permanently. Returns the engine's
+    exit status: nonzero means the run is recorded incomplete and this checkout stays blocked.
     """
+    owner, role = None, None
+    try:
+        with RecordLock(record_path):
+            current = read_record(record_path)
+            if current is not None and expected is not None:
+                problem = owner_problem(current, *expected)
+                if problem:
+                    raise Fenced(problem)
+            if current is not None:
+                if takeover:
+                    current["fence"] = current["fence"] + 1
+                    # Finalizers a previous pass verified as exited are dropped to keep the record bounded.
+                    for name in [n for n, e in current["processes"].items()
+                                 if n.startswith("finalizer-") and e.get("state") == "exited"]:
+                        del current["processes"][name]
+                role = "finalizer-%d" % current["fence"]
+                current["processes"][role] = {"pid": None, "birth": None, "birthSource": None,
+                                              "role": "finalizer", "state": "starting"}
+                current["revision"] = current["revision"] + 1
+                write_record(record_path, current)
+                owner = (current["runId"], key, current["fence"])
+    except (Blocked, Unqualified, LockBusy, Fenced) as error:
+        fail("the run record could not be prepared for finalization (%s); it stays unresolved" % error)
+        return EXIT_FAIL
+    env = child_environment(registry, key, owner[0] if owner else "none", record_path,
+                            owner[2] if owner else None, role)
     command = ["node", os.path.join("fixtures", "stack-down.mjs"), "--finalize", "--reason", reason]
     try:
-        return subprocess.run(command, cwd=checkout, env=env).returncode
+        child = subprocess.Popen(command, cwd=checkout, env=env, close_fds=True)
     except OSError as error:
-        fail("could not run the recovery engine (%s); inventory %s stays unresolved"
-             % (error, record_path))
+        fail("could not run the recovery engine (%s); inventory %s stays unresolved" % (error, record_path))
+        if owner:
+            try:
+                mark_process(record_path, owner, role, {"state": "exited", "spawned": False,
+                                                        "why": "the finalizer could not be started"})
+            except (Fenced, Blocked, Unqualified, LockBusy):
+                pass
         return EXIT_FAIL
+    if owner:
+        try:
+            record_spawned(record_path, owner, role, child)
+        except (Fenced, Blocked, Unqualified, LockBusy) as error:
+            # Without a recorded identity it must not write: stop it through our own unreaped handle.
+            fail("the finalizer's identity could not be recorded (%s); stopping it" % error)
+            child.terminate()
+    while True:
+        try:
+            status = child.wait()
+            break
+        except KeyboardInterrupt:
+            continue
+    if owner:
+        try:
+            # The reaped handle proves it exited; recorded so recovery need not wait for it.
+            mark_process(record_path, owner, role, {"state": "exited", "why": "reaped by its coordinator"})
+        except (Fenced, Blocked, Unqualified, LockBusy):
+            pass
+    return status
 
 
 def mode_run(registry, key, checkout, dev, ino, command):
@@ -879,26 +1097,29 @@ def mode_run(registry, key, checkout, dev, ino, command):
         raise Blocked("checkout %s has an unresolved run (%s, state %s) recorded under its earlier device "
                       "identity %s. Run `npm run stack:down` to reconcile it; its resources are preserved "
                       "until then." % (checkout, earlier.get("runId"), earlier.get("state"), earlier_key))
-    admit(registry, key, checkout, "run")
-    run_id = new_run_id(registry, key)
     record_path = registry.record_file(key)
-    # Ownership is persisted before the runner is started: a crash from here on leaves a
-    # nonterminal record that blocks reuse until recovery verifies completion.
-    write_record(record_path, initial_record(registry, key, run_id, checkout, dev, ino, outputs, command))
-    env = child_environment(registry, key, run_id, record_path)
+    with RecordLock(record_path):
+        admit(registry, key, checkout, "run")
+        run_id = new_run_id(registry, key)
+        # Ownership is persisted before the runner is started: a crash from here on leaves a
+        # nonterminal record that blocks reuse until recovery verifies completion.
+        write_record(record_path, initial_record(registry, key, run_id, checkout, dev, ino, outputs, command))
+    owner = (run_id, key, 1)
+    env = child_environment(registry, key, run_id, record_path, 1, "runner")
     note("run %s admitted for checkout %s (lock key %s)" % (run_id, checkout, key))
     try:
         status, interrupted = run_child(command, env, checkout,
-                                        on_spawn=lambda child: record_runner(record_path, child))
+                                        on_spawn=lambda child: record_spawned(record_path, owner, "runner", child, group=True))
     except OSError as error:
         # Popen reports a failed exec only after the child is gone, so no runner process exists.
         fail("the runner could not be started: %s" % error)
-        mark_runner(record_path, {"state": "exited", "why": "the runner could not be started: %s" % error})
-        finalize(checkout, record_path, env, "runner-not-started")
+        mark_process(record_path, owner, "runner", {"state": "exited", "spawned": False,
+                                                    "why": "the runner could not be started: %s" % error})
+        finalize(checkout, registry, key, record_path, "runner-not-started", takeover=False, expected=owner)
         return EXIT_FAIL
     settle_runner_group(record_path)
-    cleanup = finalize(checkout, record_path, env, "interrupted" if interrupted else
-                       ("runner-exit-%d" % status))
+    cleanup = finalize(checkout, registry, key, record_path, "interrupted" if interrupted else
+                       ("runner-exit-%d" % status), takeover=False, expected=owner)
     if status != 0 and cleanup != 0:
         fail("the runner failed (exit %d) and cleanup did not complete (exit %d); both are reported "
              "above and the inventory is retained" % (status, cleanup))
@@ -922,17 +1143,15 @@ def mode_recover(registry, key, checkout, ino):
         try:
             note("reconciling run %s, recorded under this checkout's earlier device identity %s"
                  % (earlier.get("runId"), earlier_key))
-            env = child_environment(registry, earlier_key, earlier.get("runId", "none"), earlier_path)
-            status = finalize(checkout, earlier_path, env, "recover-earlier-identity")
+            status = finalize(checkout, registry, earlier_key, earlier_path, "recover-earlier-identity", takeover=True)
         finally:
             lock.release()
         worst = worst or status
     record_path = registry.record_file(key)
     previous = admit(registry, key, checkout, "recover")
-    env = child_environment(registry, key, (previous or {}).get("runId", "none"), record_path)
     if previous is None:
         note("no inventory record for checkout %s; checking for unaccounted labelled resources" % checkout)
-    status = finalize(checkout, record_path, env, "recover")
+    status = finalize(checkout, registry, key, record_path, "recover", takeover=True)
     return worst or status
 
 
@@ -962,6 +1181,28 @@ def main(argv):
             fail("proc-group needs a process-group ID above 1")
             return EXIT_FAIL
         json.dump(group_members(int(rest[0])), sys.stdout)
+        sys.stdout.write("\n")
+        return EXIT_OK
+    if mode == "commit-record":
+        if len(rest) != 5 or not rest[3].isdigit() or not rest[4].isdigit():
+            fail("commit-record needs <path> <runId> <lockKey> <fence> <revision>")
+            return EXIT_FAIL
+        try:
+            payload = json.loads(sys.stdin.read(MAX_RECORD_BYTES + 1))
+            revision = commit_record(rest[0], rest[1], rest[2], int(rest[3]), int(rest[4]), payload)
+        except Fenced as error:
+            fail("fenced: %s" % error)
+            return EXIT_FENCED
+        except StaleRevision as error:
+            fail("stale: %s" % error)
+            return EXIT_CONFLICT_REVISION
+        except LockBusy as error:
+            fail("%s" % error)
+            return EXIT_LOCK_BUSY
+        except (Blocked, Unqualified, ValueError, OSError) as error:
+            fail("%s" % error)
+            return EXIT_FAIL
+        json.dump({"revision": revision}, sys.stdout)
         sys.stdout.write("\n")
         return EXIT_OK
     if mode == "host-identity":
@@ -1020,9 +1261,9 @@ def main(argv):
     except Blocked as error:
         fail("%s" % error)
         return EXIT_BLOCKED
-    except Unqualified as error:
+    except (Unqualified, LockBusy, Fenced) as error:
         fail("%s" % error)
-        return EXIT_UNQUALIFIED
+        return EXIT_UNQUALIFIED if isinstance(error, Unqualified) else EXIT_FAIL
     finally:
         lock.release()
 

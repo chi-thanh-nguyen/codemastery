@@ -42,7 +42,7 @@ import { connect } from 'node:net';
 import { lstatSync, readdirSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { classifyProcess, hostIdentity, processGroup, sameHost, verifyDirectory } from './host-identity.mjs';
-import { NONTERMINAL, OwnershipLost, observe, ownershipProblem, readInventory, setIntent, writeInventory } from './run-inventory.mjs';
+import { NONTERMINAL, OwnershipLost, StaleInventory, commitInventory, observe, ownershipProblem, readInventory, setIntent } from './run-inventory.mjs';
 
 export const STACK_LABEL = 'codemastery.e2e=disposable';
 export const runLabel = (runId) => `codemastery.e2e.run=${runId}`;
@@ -421,9 +421,9 @@ export async function reconcile(inventoryFile, options = {}) {
     try {
         return await reconcileOwned(inventoryFile, options, lines, report);
     } catch (error) {
-        if (!(error instanceof OwnershipLost)) throw error;
+        if (!(error instanceof OwnershipLost) && !(error instanceof StaleInventory)) throw error;
         report(error.message);
-        report('nothing further was changed: the lock holder (recovery or the next admitted run) owns this record now');
+        report('nothing further was changed: this reconciliation no longer owns the record (recovery or a later run does), and its stale view is abandoned');
         return { complete: false, record: null, report: lines, ownershipLost: true };
     }
 }
@@ -432,7 +432,9 @@ async function reconcileOwned(inventoryFile, options, lines, report) {
     const base = options.docker ?? makeDocker();
     const host = options.host ?? hostIdentity();
     const groupOf = options.processGroup ?? processGroup;
-    const relation = { env: options.env ?? process.env, ppid: options.ppid ?? process.ppid };
+    // `ppid` is re-read at every check (never captured once); the fenced commit is authoritative.
+    const relation = { env: options.env ?? process.env, ppid: options.ppid };
+    const parentPid = () => options.ppid ?? process.ppid;
     const registryRoot = options.registryRoot ?? process.env.CODEMASTERY_E2E_REGISTRY ?? null;
     const ownKey = options.lockKey ?? process.env.CODEMASTERY_E2E_LOCK_KEY ?? null;
 
@@ -450,11 +452,15 @@ async function reconcileOwned(inventoryFile, options, lines, report) {
         return { complete: true, record: null, report: lines };
     }
 
-    /** Every write re-checks that this process still acts for the coordinator holding the lock. */
+    /**
+     * Every write is a fenced compare-and-swap under the record lock (commitInventory): it lands only
+     * while the record still belongs to this process' run and generation and is still at the revision
+     * this reconciliation last wrote or read. Otherwise the whole reconciliation stops at once.
+     */
     const persist = () => {
         const problem = ownershipProblem(record, relation);
         if (problem) throw new OwnershipLost(`refusing to change inventory ${inventoryFile}: ${problem}`);
-        writeInventory(inventoryFile, record);
+        commitInventory(inventoryFile, record, { env: relation.env });
     };
     const runId = record.runId;
     record.state = 'cleaning';
@@ -465,113 +471,154 @@ async function reconcileOwned(inventoryFile, options, lines, report) {
     const sameMachine = sameHost(record.host, host);
     let writersGone = true;
     let selfAlive = false;
-    // The preview is the runner's own child and serves the runner's tests, so it is handled last and
-    // only asked to close once every other writer is verified gone: a coordinator's death alone never
-    // authorizes stopping what a surviving runner is still using.
-    const entries = Object.entries(record.processes ?? {}).sort(([a], [b]) => (a === 'preview') - (b === 'preview'));
-    for (const [role, recorded] of entries) {
-        if (role === 'supervisor' && recorded.pid === process.ppid) {
+    const markExited = (role, recorded, verdict) => {
+        recorded.state = 'exited';
+        recorded.why = verdict.why;
+        recorded.exitVerdict = verdict.state;
+        report(`${role} ${recorded.pid} is verifiably gone (${verdict.why})`);
+    };
+    const preserve = (role, recorded, why) => {
+        recorded.state = 'preserved';
+        recorded.why = why;
+        report(`preserved ${role} ${recorded.pid ?? '(no PID recorded)'}: ${why}`);
+        writersGone = false;
+    };
+
+    // a. Every recorded writer except the preview: the runner, the builder and every finalizer,
+    //    including finalizers of earlier generations (an older finalizer that is still alive keeps the
+    //    run incomplete, even though the fence already stops it from writing the record).
+    for (const [role, recorded] of Object.entries(record.processes ?? {})) {
+        if (role === 'preview') continue;
+        if (role === 'supervisor' && recorded.pid === parentPid()) {
             // The coordinator that is waiting for this call is not a writer to stop.
             observe(record, `supervisor ${recorded.pid} is this reconciliation's own coordinator`);
             recorded.state = 'live-coordinator';
             continue;
         }
-        if (recorded.state === 'exited') continue;
-        if (recorded.pid === process.pid && sameMachine) {
-            // The runner performing its own teardown: it does not write the temporary build, so it
-            // cannot block that cleanup, but the run is not complete until the coordinator has
-            // verified this process' exit by birth identity after it ends.
-            const self = classifyProcess(recorded, { host });
-            if (self.state === 'exact-live') {
-                recorded.state = 'reconciling-self';
+        if (recorded.pid === process.pid && sameMachine && classifyProcess(recorded, { host }).state === 'exact-live') {
+            recorded.state = 'reconciling-self';
+            if (role === 'runner') {
+                // The runner performing its own teardown: the run is not complete until the coordinator
+                // has verified this process' exit by birth identity after it ends.
                 selfAlive = true;
                 report(`${role} ${recorded.pid} is this reconciliation's own process; its exit is verified afterwards by the coordinator`);
-                continue;
+            } else {
+                report(`${role} ${recorded.pid} is this reconciliation's own process`);
             }
-        }
-        if (!sameMachine) {
-            recorded.state = 'preserved';
-            recorded.why = 'recorded on another host, boot or PID namespace; a local verdict is not valid';
-            report(`preserved ${role} ${recorded.pid}: ${recorded.why}`);
-            writersGone = false;
             continue;
         }
-        let verdict = classifyProcess(recorded, { host });
-        if (verdict.state === 'exact-live' && role === 'preview' && !writersGone) {
-            report(`preview ${recorded.pid} is left running: the runner or another writer that uses it has not been verified as exited`);
-        } else if (verdict.state === 'exact-live' && role === 'preview') {
-            const socketPath = recorded.control;
-            const expected = registryRoot ? join(registryRoot, 'sockets', `${runId}.sock`) : null;
-            if (!socketPath) {
-                report(`preview ${recorded.pid} is live but no control channel was recorded; it is preserved`);
-            } else if ((expected && socketPath !== expected) || basename(socketPath) !== `${runId}.sock`) {
-                report(`preview ${recorded.pid} is live but its recorded control path is not this run's private channel; it is preserved`);
-            } else {
-                const asked = await askPreviewToClose(socketPath, runId, recorded.birth, options.controlTimeoutMs);
-                if (asked.ok) {
-                    report(`preview ${recorded.pid} acknowledged the private control channel and is closing its own server`);
-                    verdict = await waitForExit(recorded, host, options.exitTimeoutMs);
+        if (recorded.state === 'exited') continue;
+        if (!sameMachine) {
+            preserve(role, recorded, 'recorded on another host, boot or PID namespace; a local verdict is not valid');
+            continue;
+        }
+        const verdict = classifyProcess(recorded, { host });
+        if (verdict.state === 'exited' || verdict.state === 'pid-reused') markExited(role, recorded, verdict);
+        else preserve(role, recorded, verdict.why);
+    }
+
+    // b. The runner leads its own process group (the coordinator starts it in a new session), which
+    //    holds every process it started: Playwright workers, the build and the preview. Workers are not
+    //    recorded individually, so the group, not the list of recorded writers, decides whether anyone
+    //    may still use the preview or write outputs. Any doubt (no runner, no or unusable group
+    //    identity, another boot, an incomplete enumeration) fails closed.
+    const runner = record.processes?.runner;
+    const preview = record.processes?.preview;
+    const previewActive = !!preview && preview.state !== 'exited';
+    const previewVerdict = previewActive && sameMachine ? classifyProcess(preview, { host }) : null;
+    const previewVerified = previewVerdict?.state === 'exact-live';
+    const groupCheck = (excludePreview) => {
+        if (!runner) return { ok: false, why: 'no runner is recorded (a legacy or malformed record), so its process group cannot be verified' };
+        const self = runner.state === 'reconciling-self' && runner.pid === process.pid;
+        if (!self && runner.state !== 'exited') return { ok: false, why: 'the runner has not been verified as exited' };
+        if (runner.spawned === false) return { ok: true, empty: true, why: 'the runner was never started' };
+        if (!sameMachine) return { ok: false, why: `the runner's process group was recorded on another host, boot or PID namespace` };
+        if (!(Number.isInteger(runner.group) && runner.group > 1 && runner.group === runner.pid)) {
+            return { ok: false, why: 'no verifiable process-group identity was recorded for the runner' };
+        }
+        if (!self && runner.groupState === 'empty') return { ok: true, empty: true, why: 'verified empty by an earlier pass' };
+        const group = groupOf(runner.group);
+        if (!group.reliable) return { ok: false, why: `the runner's process group ${runner.group} could not be fully inspected (${group.detail ?? 'unknown'})` };
+        const others = group.members.filter((member) => !(self && member.pid === process.pid)
+            && !(excludePreview && previewVerified && member.pid === preview.pid && member.birth === preview.birth));
+        if (others.length) {
+            return { ok: false, live: true, why: `the runner's process group ${runner.group} still has ${others.length} live process(es)${excludePreview && previewVerified ? ' besides the verified preview' : ''} (for example Playwright workers)` };
+        }
+        return { ok: true, empty: !self && group.members.length === 0, why: `the runner's process group ${runner.group} has no other live member` };
+    };
+    if (writersGone) {
+        const before = groupCheck(true);
+        if (!before.ok) {
+            if (before.live) runner.groupState = 'live';
+            report(`${before.why}; the preview, the build and the stack are preserved`);
+            writersGone = false;
+        } else if (before.empty && runner && runner.spawned !== false) {
+            runner.groupState = 'empty';
+        }
+    }
+
+    // c. The preview is asked to close itself only now, when no runner, worker or other writer can
+    //    still depend on it; a coordinator's death alone never authorizes stopping it.
+    if (previewActive) {
+        if (!sameMachine) {
+            preserve('preview', preview, 'recorded on another host, boot or PID namespace; a local verdict is not valid');
+        } else {
+            let verdict = previewVerdict;
+            if (verdict.state === 'exact-live' && !writersGone) {
+                report(`preview ${preview.pid} is left running: the runner, a worker of its process group or another writer that may use it has not been verified as exited`);
+            } else if (verdict.state === 'exact-live') {
+                const socketPath = preview.control;
+                const expected = registryRoot ? join(registryRoot, 'sockets', `${runId}.sock`) : null;
+                if (!socketPath) {
+                    report(`preview ${preview.pid} is live but no control channel was recorded; it is preserved`);
+                } else if ((expected && socketPath !== expected) || basename(socketPath) !== `${runId}.sock`) {
+                    report(`preview ${preview.pid} is live but its recorded control path is not this run's private channel; it is preserved`);
                 } else {
-                    report(`the private preview control channel could not stop ${recorded.pid}: ${asked.why}`);
-                    if (options.previewHandle && options.previewHandle.exitCode === null && options.previewHandle.signalCode === null && options.previewHandle.pid === recorded.pid) {
-                        // Supervised path only: an unreaped owned handle guarantees this PID is still
-                        // the same process, so stopping it cannot reach an unrelated one.
-                        report(`stopping the preview through this run's own unreaped process handle (no recovered PID is signalled)`);
-                        options.previewHandle.kill('SIGTERM');
-                        verdict = await waitForExit(recorded, host, options.exitTimeoutMs);
+                    const asked = await askPreviewToClose(socketPath, runId, preview.birth, options.controlTimeoutMs);
+                    if (asked.ok) {
+                        report(`preview ${preview.pid} acknowledged the private control channel and is closing its own server`);
+                        verdict = await waitForExit(preview, host, options.exitTimeoutMs);
                     } else {
-                        report('no PID-based fallback is authorized; the preview and its build are preserved and recovery is incomplete');
+                        report(`the private preview control channel could not stop ${preview.pid}: ${asked.why}`);
+                        if (options.previewHandle && options.previewHandle.exitCode === null && options.previewHandle.signalCode === null && options.previewHandle.pid === preview.pid) {
+                            // Supervised path only: an unreaped owned handle guarantees this PID is still
+                            // the same process, so stopping it cannot reach an unrelated one.
+                            report(`stopping the preview through this run's own unreaped process handle (no recovered PID is signalled)`);
+                            options.previewHandle.kill('SIGTERM');
+                            verdict = await waitForExit(preview, host, options.exitTimeoutMs);
+                        } else {
+                            report('no PID-based fallback is authorized; the preview and its build are preserved and recovery is incomplete');
+                        }
                     }
                 }
             }
-        }
-        if (verdict.state === 'exited' || verdict.state === 'pid-reused') {
-            recorded.state = 'exited';
-            recorded.why = verdict.why;
-            recorded.exitVerdict = verdict.state;
-            report(`${role} ${recorded.pid} is verifiably gone (${verdict.why})`);
-            // A preview that died without closing leaves its socket file. It is removed only when it is
-            // this run's own name inside the private registry and is a socket, never another path.
-            if (role === 'preview' && recorded.control && basename(recorded.control) === `${runId}.sock`
-                && (!registryRoot || dirname(recorded.control) === join(registryRoot, 'sockets'))) {
-                try {
-                    if (lstatSync(recorded.control).isSocket()) rmSync(recorded.control, { force: true });
-                } catch { /* already gone */ }
+            if (verdict.state === 'exited' || verdict.state === 'pid-reused') {
+                markExited('preview', preview, verdict);
+                // A preview that died without closing leaves its socket file. It is removed only when it is
+                // this run's own name inside the private registry and is a socket, never another path.
+                if (preview.control && basename(preview.control) === `${runId}.sock`
+                    && (!registryRoot || dirname(preview.control) === join(registryRoot, 'sockets'))) {
+                    try {
+                        if (lstatSync(preview.control).isSocket()) rmSync(preview.control, { force: true });
+                    } catch { /* already gone */ }
+                }
+            } else {
+                preserve('preview', preview, verdict.why);
             }
-        } else {
-            recorded.state = 'preserved';
-            recorded.why = verdict.why;
-            report(`preserved ${role} ${recorded.pid ?? '(no PID recorded)'}: ${verdict.why}`);
-            writersGone = false;
         }
     }
-    // The runner leads its own process group (the coordinator starts it in a new session), which
-    // holds every process it started: Playwright workers, the build and the preview. Once the runner
-    // is gone, a live member can still write outputs (a disconnected Playwright worker finishes its
-    // teardown before exiting), so nothing it may be using is removed until that group is empty.
-    const runner = record.processes?.runner;
-    if (runner && runner.state === 'exited' && Number.isInteger(runner.group) && runner.group === runner.pid && runner.groupState !== 'empty') {
-        if (!sameMachine) {
-            report(`the runner's process group ${runner.group} was recorded on another host, boot or PID namespace; it is preserved`);
+
+    // d. After the preview, the group is checked again, in full: only a verified empty group (apart
+    //    from this reconciliation's own runner process) lets the build or the stack be touched.
+    if (writersGone) {
+        const after = groupCheck(false);
+        if (!after.ok) {
+            if (after.live) runner.groupState = 'live';
+            report(`${after.why}; the build and the stack are preserved`);
             writersGone = false;
-        } else if (runner.exitVerdict === 'pid-reused') {
-            // While any member of a group is alive the kernel never hands out its ID as a new PID, so a
-            // reused runner PID proves the runner's group has no member left.
+        } else if (after.empty && runner.spawned !== false) {
             runner.groupState = 'empty';
-            report(`the runner's process group ${runner.group} has no member left (its leader PID now belongs to another process)`);
-        } else {
-            const group = groupOf(runner.group);
-            if (!group.reliable) {
-                report(`the runner's process group ${runner.group} could not be inspected (${group.detail ?? 'unknown'}); the build and the stack are preserved`);
-                writersGone = false;
-            } else if (group.members.length) {
-                runner.groupState = 'live';
-                report(`the runner's process group ${runner.group} still has ${group.members.length} live process(es) (for example Playwright workers finishing); the build and the stack are preserved until they exit`);
-                writersGone = false;
-            } else {
-                runner.groupState = 'empty';
-                report(`the runner's process group ${runner.group} has no live member`);
-            }
+            report(after.why);
         }
     }
     persist();

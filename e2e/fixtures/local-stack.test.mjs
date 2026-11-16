@@ -204,18 +204,18 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
         const host = hostIdentity(), inventory = join(stub, 'run.json');
         writeInventory(inventory, {
             schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-ls', state: 'active',
-            ownerUid: process.getuid(), lockKey: 'stub', host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
+            ownerUid: process.getuid(), lockKey: 'stub', fence: 1, revision: 1, host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
             // The coordinator is this runner's parent, exactly as when lifecycle.py starts Playwright, and it
             // has already recorded this process as the runner (intent before the spawn, identity after it).
             processes: {
                 supervisor: { pid: process.ppid, birth: null, role: 'coordinator', state: 'live' },
-                runner: { pid: process.pid, birth: processIdentity(process.pid).birth, birthSource: 'test', role: 'playwright-runner', state: 'live', ...runnerPatch },
+                runner: { pid: process.pid, birth: processIdentity(process.pid).birth, birthSource: 'test', role: 'playwright-runner', state: 'live', spawned: true, group: process.pid, ...runnerPatch },
             },
             checkout: { path: stub, dev: 0, ino: 0 }, outputs: [], docker: null, temp: null, intents: [], observations: [],
         });
         Object.assign(process.env, {
             CODEMASTERY_E2E_INVENTORY: inventory, CODEMASTERY_E2E_RUN_ID: 'cm-e2e-ls', CODEMASTERY_E2E_SOCKETS: stub,
-            CODEMASTERY_E2E_LOCK_KEY: 'stub', CODEMASTERY_E2E_SUPERVISOR: String(process.ppid), E2E_VITE_BIN: join(stub, 'vite.cjs'), E2E_VITE_MODULE: join(stub, 'vite-preview.mjs'),
+            CODEMASTERY_E2E_LOCK_KEY: 'stub', CODEMASTERY_E2E_SUPERVISOR: String(process.ppid), CODEMASTERY_E2E_FENCE: '1', E2E_VITE_BIN: join(stub, 'vite.cjs'), E2E_VITE_MODULE: join(stub, 'vite-preview.mjs'),
         });
         delete process.env.CODEMASTERY_E2E_REGISTRY;
         return inventory;

@@ -5,7 +5,7 @@
 // mismatching request, and stop itself — no PID is ever signalled.
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { connect, createServer as createSocketServer } from 'node:net';
@@ -163,11 +163,16 @@ describe('recovery stops an orphaned preview through that channel alone', () => 
         const preview = await startPreview(runId, `${runId}.sock`);
         const inventory = join(scratch, 'orphan.json');
         const identity = processIdentity(preview.child.pid);
+        const goneRunner = spawnSync(process.execPath, ['-e', '']).pid;
         writeInventory(inventory, {
             schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId,
             host: (({ hostname, boot, pidNamespace, system }) => ({ hostname, boot, pidNamespace, system }))(hostIdentity()),
-            state: 'active', ownerUid: process.getuid(), intents: [], temp: null, docker: null, outputs: [],
-            processes: { preview: { pid: preview.child.pid, birth: identity.birth, birthSource: identity.source, role: 'vite-preview', control: preview.control, state: 'live' } },
+            state: 'active', ownerUid: process.getuid(), lockKey: 'k-orphan', fence: 1, revision: 1, intents: [], temp: null, docker: null, outputs: [],
+            processes: {
+                // The runner that started it is gone and its process group is empty (as after a crash).
+                runner: { pid: goneRunner, birth: 'x-starttime:1', role: 'playwright-runner', state: 'live', spawned: true, group: goneRunner },
+                preview: { pid: preview.child.pid, birth: identity.birth, birthSource: identity.source, role: 'vite-preview', control: preview.control, state: 'live' },
+            },
         });
         const outcome = await reconcile(inventory, { log: false, reason: 'orphan test', registryRoot: null, docker: () => ({ ok: false, stdout: '', detail: 'no docker in this test' }) });
         assert.equal(outcome.complete, true, outcome.report.join('\n'));

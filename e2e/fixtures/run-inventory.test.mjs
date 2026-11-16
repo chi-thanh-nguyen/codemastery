@@ -21,7 +21,8 @@ const scratch = (body) => {
         rmSync(dir, { recursive: true, force: true });
     }
 };
-const base = () => ({ schema: SCHEMA, contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-test', state: 'active', ownerUid: process.getuid(), intents: [], processes: {}, observations: [] });
+const base = () => ({ schema: SCHEMA, contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-test', state: 'active', ownerUid: process.getuid(), intents: [], processes: {}, observations: [],
+    checkout: { path: '/nonexistent/checkout', dev: 1, ino: 2 }, outputs: [] });
 
 describe('the run inventory is durable, bounded and non-secret', () => {
     test('writes a 0600 single-link record and reads it back', () => scratch((dir, file) => {
@@ -174,21 +175,21 @@ describe('only the coordinator\'s current hand-down admits a process', () => {
 });
 
 describe('inventory mutations come only from a process acting for the lock holder\'s run', () => {
-    const handDown = { CODEMASTERY_E2E_RUN_ID: 'cm-e2e-test', CODEMASTERY_E2E_LOCK_KEY: 'k1', CODEMASTERY_E2E_SUPERVISOR: '4242' };
+    const handDown = { CODEMASTERY_E2E_RUN_ID: 'cm-e2e-test', CODEMASTERY_E2E_LOCK_KEY: 'k1', CODEMASTERY_E2E_SUPERVISOR: '4242', CODEMASTERY_E2E_FENCE: '1' };
     test('the coordinator\'s child changes its own run\'s record', () => scratch((dir, file) => {
-        writeInventory(file, { ...base(), lockKey: 'k1' });
+        writeInventory(file, { ...base(), lockKey: 'k1', fence: 1, revision: 1 });
         updateInventory(file, (record) => observe(record, 'allowed'), { env: handDown, ppid: 4242 });
         assert.match(readInventory(file).observations.at(-1), /allowed/);
     }));
     test('an orphan whose coordinator died changes nothing', () => scratch((dir, file) => {
-        writeInventory(file, { ...base(), lockKey: 'k1' });
+        writeInventory(file, { ...base(), lockKey: 'k1', fence: 1, revision: 1 });
         const before = readFileSync(file, 'utf8');
         assert.throws(() => updateInventory(file, (record) => observe(record, 'orphan'), { env: handDown, ppid: 1 }),
             (error) => error instanceof OwnershipLost && /coordinator 4242 .* is no longer this process' parent \(parent 1\)/.test(error.message));
         assert.equal(readFileSync(file, 'utf8'), before, 'the record is byte-identical');
     }));
     test('a later run\'s record at the same path is never changed by an earlier run\'s process', () => scratch((dir, file) => {
-        writeInventory(file, { ...base(), runId: 'cm-e2e-later', lockKey: 'k1' });
+        writeInventory(file, { ...base(), runId: 'cm-e2e-later', lockKey: 'k1', fence: 1, revision: 1 });
         const before = readFileSync(file, 'utf8');
         assert.throws(() => updateInventory(file, (record) => observe(record, 'stale'), { env: handDown, ppid: 4242 }),
             /belongs to run cm-e2e-later, not to the handed-down run cm-e2e-test/);

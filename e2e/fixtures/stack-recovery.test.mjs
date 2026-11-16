@@ -109,19 +109,29 @@ function fakeDocker(state = {}, options = {}) {
 }
 
 const labels = (run = RUN) => ({ 'codemastery.e2e': 'disposable', [`codemastery.e2e.run`]: run, 'codemastery.e2e.owner': String(process.getuid()) });
+/**
+ * The runner exactly as the coordinator records it once it has exited: its own process group
+ * (a new session), the PID long gone. Every record the coordinator writes has a runner entry.
+ */
+const exitedRunnerPid = spawnSync(process.execPath, ['-e', '']).pid;
+const exitedRunner = () => ({ pid: exitedRunnerPid, birth: 'x-starttime:runner', birthSource: 'test', role: 'playwright-runner', state: 'live', spawned: true, group: exitedRunnerPid });
 /** Writes a record describing a run that owns a network, two containers and an anonymous volume. */
 function seed(patch = {}) {
+    const { processes, ...rest } = patch;
     const record = {
         schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: RUN,
-        state: 'active', ownerUid: process.getuid(), lockKey: 'test',
+        state: 'active', ownerUid: process.getuid(), lockKey: 'test', fence: 1, revision: 1,
         host: { hostname: HOST.hostname, boot: HOST.boot, pidNamespace: HOST.pidNamespace, system: HOST.system },
-        checkout: { path: scratch, dev: 1, ino: 1 }, outputs: [], processes: {}, docker: { ...DAEMON },
-        temp: null, intents: [], observations: [], ...patch,
+        checkout: { path: scratch, dev: 1, ino: 1 }, outputs: [], docker: { ...DAEMON },
+        processes: { runner: exitedRunner(), ...(processes ?? {}) },
+        temp: null, intents: [], observations: [], ...rest,
     };
     writeInventory(inventory, record);
     return record;
 }
-const run = (docker, options = {}) => reconcile(inventory, { docker, host: HOST, log: false, reason: 'test', registryRoot: null, ...options });
+/** A verified, empty runner process group unless a test injects another answer. */
+const emptyGroup = () => ({ reliable: true, members: [] });
+const run = (docker, options = {}) => reconcile(inventory, { docker, host: HOST, log: false, reason: 'test', registryRoot: null, processGroup: emptyGroup, ...options });
 const stateOf = (record, name) => record.intents.find((intent) => intent.name === name)?.state;
 
 describe('Docker ownership is pinned to the recorded daemon', () => {
@@ -443,8 +453,8 @@ describe('processes are resolved by birth identity and never signalled by PID', 
 
     test('the runner reconciling its own teardown does not block cleanup but keeps the run nonterminal', async () => {
         const self = processIdentity(process.pid);
-        seed({ processes: { runner: { pid: process.pid, birth: self.birth, birthSource: self.source, role: 'playwright-runner', state: 'live' } } });
-        const outcome = await run(fakeDocker({}));
+        seed({ processes: { runner: { pid: process.pid, birth: self.birth, birthSource: self.source, role: 'playwright-runner', state: 'live', spawned: true, group: process.pid } } });
+        const outcome = await run(fakeDocker({}), { processGroup: () => ({ reliable: true, members: [{ pid: process.pid, birth: self.birth }] }) });
         assert.equal(outcome.complete, true, outcome.report.join('\n'));
         assert.equal(outcome.record.state, 'cleaning', 'completion waits for the coordinator to verify this process exited');
         assert.equal(outcome.record.processes.runner.state, 'reconciling-self');
@@ -505,16 +515,19 @@ describe('the runner\'s process group must be empty before the build or the stac
         const docker = fakeDocker(stackState());
         const outcome = await run(docker, { processGroup: () => ({ reliable: false, members: [], detail: 'no qualified enumeration' }) });
         assert.equal(outcome.complete, false);
-        assert.match(outcome.report.join('\n'), /could not be inspected \(no qualified enumeration\)/);
+        assert.match(outcome.report.join('\n'), /could not be fully inspected \(no qualified enumeration\)/);
         assert.ok(!docker.calls.some((call) => /^(rm |network rm|volume rm)/.test(call)));
     });
 
-    test('a reused runner PID proves the group is gone without enumerating it', async () => {
+    test('a reused runner PID is no shortcut: the group is still enumerated, and any member keeps the stack', async () => {
         const live = processIdentity(process.pid);
-        seed({ ...stack(), processes: { runner: { pid: process.pid, birth: `${live.birth}-earlier`, role: 'playwright-runner', state: 'live', group: process.pid } } });
-        const outcome = await run(fakeDocker(stackState()), { processGroup: () => { throw new Error('must not be asked'); } });
-        assert.equal(outcome.complete, true, outcome.report.join('\n'));
-        assert.match(outcome.report.join('\n'), /has no member left \(its leader PID now belongs to another process\)/);
+        seed({ ...stack(), processes: { runner: { pid: process.pid, birth: `${live.birth}-earlier`, role: 'playwright-runner', state: 'live', spawned: true, group: process.pid } } });
+        const asked = [];
+        const busy = await run(fakeDocker(stackState()), { processGroup: (pgid) => { asked.push(pgid); return { reliable: true, members: [{ pid: 5150, birth: 'x-starttime:9' }] }; } });
+        assert.deepEqual(asked, [process.pid], 'a PID now carrying another birth identity does not prove the old group empty');
+        assert.equal(busy.complete, false);
+        const idle = await run(fakeDocker(stackState()), { processGroup: () => ({ reliable: true, members: [] }) });
+        assert.equal(idle.complete, true, idle.report.join('\n'));
     });
 
     test('the real group enumeration sees a live member and its exit', async () => {
@@ -834,12 +847,156 @@ describe('a surviving runner keeps the preview it is testing against', () => {
             const outcome = await run(fakeDocker({}), { controlTimeoutMs: 500, exitTimeoutMs: 500 });
             assert.equal(outcome.complete, false);
             assert.equal(contacted, false, 'the live run\'s preview was not contacted');
-            assert.match(outcome.report.join('\n'), new RegExp(`preview ${preview.pid} is left running: the runner or another writer that uses it has not been verified as exited`));
+            assert.match(outcome.report.join('\n'), new RegExp(`preview ${preview.pid} is left running: the runner, a worker of its process group or another writer that may use it has not been verified as exited`));
             assert.equal(outcome.record.processes.preview.state, 'preserved');
             assert.equal(preview.child.exitCode, null);
         } finally {
             server.close();
         }
+    });
+});
+
+describe('round 3: the runner group decides preview shutdown, and uncertainty fails closed', () => {
+    const stackIntents = () => [{ id: 'i1', kind: 'network', name: RUN, dockerId: 'N1', state: 'created' }];
+    const stackState = () => ({ N1: { kind: 'network', name: RUN, present: true, labels: labels() } });
+
+    test('no recorded group identity: the group is never guessed empty and nothing is removed', async () => {
+        const runner = exitedRunner(); delete runner.group;
+        seed({ intents: stackIntents(), processes: { runner } });
+        const docker = fakeDocker(stackState());
+        const outcome = await run(docker, { processGroup: () => { throw new Error('an unusable identity must not be enumerated'); } });
+        assert.equal(outcome.complete, false);
+        assert.match(outcome.report.join('\n'), /no verifiable process-group identity was recorded for the runner/);
+        assert.ok(!docker.calls.some((call) => /^(rm |network rm|volume rm)/.test(call)), docker.calls.join('\n'));
+    });
+
+    test('a group identity that is not the runner\'s own PID is unusable as well', async () => {
+        seed({ intents: stackIntents(), processes: { runner: { ...exitedRunner(), group: 1 } } });
+        const outcome = await run(fakeDocker(stackState()));
+        assert.equal(outcome.complete, false);
+        assert.match(outcome.report.join('\n'), /no verifiable process-group identity/);
+    });
+
+    test('a record without any runner (legacy or malformed) is preserved', async () => {
+        seed({ intents: stackIntents(), processes: { runner: undefined } });
+        const record = readInventory(inventory); delete record.processes.runner; writeInventory(inventory, record);
+        const outcome = await run(fakeDocker(stackState()));
+        assert.equal(outcome.complete, false);
+        assert.match(outcome.report.join('\n'), /no runner is recorded \(a legacy or malformed record\)/);
+    });
+
+    test('a runner that was never started needs no group', async () => {
+        seed({ intents: stackIntents(), processes: { runner: { pid: null, birth: null, role: 'playwright-runner', state: 'exited', spawned: false } } });
+        const outcome = await run(fakeDocker(stackState()), { processGroup: () => { throw new Error('no group to inspect'); } });
+        assert.equal(outcome.complete, true, outcome.report.join('\n'));
+    });
+
+    test('a live worker in the runner\'s group keeps the verified preview running and is told apart from it by birth identity', async () => {
+        const preview = await liveWriter();
+        const channel = join(scratch, `${RUN}.sock`);
+        let contacted = false;
+        const server = createSocketServerForTest(channel, () => { contacted = true; });
+        try {
+            seed({ intents: stackIntents(), processes: { preview: { pid: preview.pid, birth: preview.identity.birth, role: 'vite-preview', state: 'live', control: channel } } });
+            const docker = fakeDocker(stackState());
+            // The same PID with another birth identity is *not* the preview: it counts as another member.
+            const impostor = await run(docker, { processGroup: () => ({ reliable: true, members: [{ pid: preview.pid, birth: `${preview.identity.birth}-other` }] }) });
+            assert.equal(impostor.complete, false);
+            assert.equal(contacted, false);
+            const busy = await run(docker, { processGroup: () => ({ reliable: true, members: [{ pid: preview.pid, birth: preview.identity.birth }, { pid: 4242, birth: 'x-starttime:worker' }] }) });
+            assert.equal(busy.complete, false);
+            assert.equal(contacted, false, 'the preview was not contacted while a worker of the group is live');
+            assert.match(busy.report.join('\n'), /still has 1 live process\(es\) besides the verified preview/);
+            assert.ok(!docker.calls.some((call) => /^(rm |network rm|volume rm)/.test(call)));
+        } finally {
+            server.close();
+        }
+    });
+
+    test('the group is checked again after the preview closed: a member that is still there keeps the stack', async () => {
+        const preview = await liveWriter();
+        const channel = join(scratch, `${RUN}.sock`);
+        // A control channel that acknowledges and lets the preview stop itself (as the real one does).
+        const server = netCreateServer((socket) => {
+            socket.once('data', () => socket.end(JSON.stringify({ ok: true, closing: true }), () => preview.child.kill('SIGKILL')));
+        }).listen(channel);
+        try {
+            seed({ intents: stackIntents(), processes: { preview: { pid: preview.pid, birth: preview.identity.birth, role: 'vite-preview', state: 'live', control: channel } } });
+            const answers = [
+                { reliable: true, members: [{ pid: preview.pid, birth: preview.identity.birth }] },
+                { reliable: true, members: [{ pid: 4242, birth: 'x-starttime:late' }] },
+            ];
+            const docker = fakeDocker(stackState());
+            const outcome = await run(docker, { processGroup: () => answers.shift() ?? { reliable: true, members: [] }, controlTimeoutMs: 2000, exitTimeoutMs: 3000 });
+            assert.match(outcome.report.join('\n'), /acknowledged the private control channel/);
+            assert.equal(outcome.complete, false, outcome.report.join('\n'));
+            assert.match(outcome.report.join('\n'), /still has 1 live process\(es\) \(for example Playwright workers\); the build and the stack are preserved/);
+            assert.ok(!docker.calls.some((call) => /^(rm |network rm|volume rm)/.test(call)));
+        } finally {
+            server.close();
+        }
+    });
+});
+
+describe('round 3: a stale reconciliation can never persist its view, even while its parent check passes', () => {
+    // The hand-down of a coordinated finalizer whose coordinator (4242) is, as far as the advisory
+    // parent check can tell, still alive: only the fenced compare-and-swap stands in the way.
+    const handDown = { CODEMASTERY_E2E_RUN_ID: RUN, CODEMASTERY_E2E_LOCK_KEY: 'test', CODEMASTERY_E2E_SUPERVISOR: '4242', CODEMASTERY_E2E_FENCE: '1' };
+    const coordinated = { env: handDown, ppid: 4242 };
+
+    test('a takeover in the middle of a reconciliation (a new fence) stops it before its next write', async () => {
+        seed({ intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created', volumes: 'recorded' }] });
+        const state = { C1: { kind: 'container', name: 'c', present: true, labels: labels() } };
+        const inner = fakeDocker(state);
+        let takenOver = '';
+        const docker = (args) => {
+            if (args[0] === 'rm' && !takenOver) {
+                // Recovery takes the record over while this reconciliation is inside a Docker removal.
+                const record = readInventory(inventory);
+                writeInventory(inventory, { ...record, fence: 2, revision: record.revision + 1, observations: [...record.observations, 'taken over'] });
+                takenOver = readFileSync(inventory, 'utf8');
+            }
+            return inner(args);
+        };
+        const outcome = await run(docker, coordinated);
+        assert.equal(outcome.ownershipLost, true, outcome.report.join('\n'));
+        assert.match(outcome.report.join('\n'), /fenced: the record is at fence 2, not the writer's fence 1/);
+        assert.equal(readFileSync(inventory, 'utf8'), takenOver, 'the new owner\'s record is byte-identical');
+    });
+
+    test('another writer of the same generation committing first makes this view stale: it is abandoned, not written', async () => {
+        seed({ intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created', volumes: 'recorded' }] });
+        const inner = fakeDocker({ C1: { kind: 'container', name: 'c', present: true, labels: labels() } });
+        let theirs = '';
+        const docker = (args) => {
+            if (args[0] === 'rm' && !theirs) {
+                const record = readInventory(inventory);
+                writeInventory(inventory, { ...record, revision: record.revision + 1, observations: [...record.observations, 'a concurrent commit'] });
+                theirs = readFileSync(inventory, 'utf8');
+            }
+            return inner(args);
+        };
+        const outcome = await run(docker, coordinated);
+        assert.equal(outcome.ownershipLost, true, outcome.report.join('\n'));
+        assert.match(outcome.report.join('\n'), /changed since it was read: .*stale: the record is at revision/);
+        assert.equal(readFileSync(inventory, 'utf8'), theirs, 'the stale in-memory view was never written');
+    });
+
+    test('a run that replaced the record (another run ID) is never overwritten', async () => {
+        const docker = (args) => {
+            if (args[0] === 'context' && args[1] === 'show') {
+                const record = readInventory(inventory);
+                writeInventory(inventory, { ...record, runId: 'cm-e2e-run-b', fence: 1, revision: 1, state: 'active' });
+            }
+            return fakeDocker({})(args);
+        };
+        seed({ intents: [{ id: 'i1', kind: 'network', name: RUN, dockerId: 'N1', state: 'created' }] });
+        const before = readFileSync(inventory, 'utf8');
+        const outcome = await run(docker, coordinated);
+        assert.equal(outcome.ownershipLost, true, outcome.report.join('\n'));
+        assert.match(readFileSync(inventory, 'utf8'), /cm-e2e-run-b/);
+        assert.notEqual(readFileSync(inventory, 'utf8'), before);
+        assert.equal(readInventory(inventory).runId, 'cm-e2e-run-b', "run B's record survives");
     });
 });
 

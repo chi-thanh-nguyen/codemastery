@@ -8,6 +8,8 @@
 // limited to resources the inventory proves belong to the recorded run; anything live, foreign,
 // unreadable, ambiguous or unaccounted is preserved and reported, and that makes this command exit
 // nonzero so an incomplete recovery can never look like success.
+import { confirmRecordedWriter } from './host-identity.mjs';
+import { readInventory } from './run-inventory.mjs';
 import { reconcile } from './stack-recovery.mjs';
 
 const argv = process.argv.slice(2);
@@ -26,6 +28,18 @@ if (!inventory || !process.env.CODEMASTERY_E2E_RUN_ID || !process.env.CODEMASTER
     process.exit(2);
 }
 
+// A finalizer is a recorded writer like the runner: it waits until the coordinator has recorded its
+// own PID and birth identity under its generation's role, and writes nothing otherwise.
+let existing = null;
+try { existing = readInventory(inventory); } catch { /* reconcile reports an untrusted record */ }
+if (existing) {
+    try {
+        await confirmRecordedWriter(inventory, process.env.CODEMASTERY_E2E_ROLE || 'finalizer');
+    } catch (error) {
+        process.stderr.write(`stack-down: ${error.message}\n`);
+        process.exit(1);
+    }
+}
 const outcome = await reconcile(inventory, { reason: flag('--reason', 'stack:down') });
 const counts = (outcome.record?.intents ?? []).reduce((all, intent) => {
     all[intent.state] = (all[intent.state] ?? 0) + 1;

@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readMarker } from './run-inventory.mjs';
+import { handDown, ownershipProblem, readInventory, readMarker } from './run-inventory.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const launcher = join(here, 'lifecycle.py');
@@ -47,6 +47,36 @@ export function processGroup(pgid) {
     const reply = ask(['proc-group', String(pgid)]);
     if (reply.error) return { pgid, reliable: false, members: [], detail: reply.error };
     return { pgid, reliable: reply.reliable === true, members: Array.isArray(reply.members) ? reply.members : [], detail: reply.detail };
+}
+
+/**
+ * Waits until the coordinator has recorded *this* process as the writer `role` (it records each
+ * writer's creation intent before the spawn and its PID and birth identity right after), and returns
+ * that entry. A writer never records itself and writes nothing before this: a process that is not
+ * the recorded one, whose coordinator is gone or whose generation was fenced out is refused.
+ */
+export async function confirmRecordedWriter(inventoryFile, role, { timeoutMs = 15_000, intervalMs = 100, env = process.env } = {}) {
+    const given = handDown(env);
+    if (!given || !given.runId || !given.key || !given.supervisor || given.fence === null) {
+        throw new Error(`No complete lifecycle hand-down (run ID, lock key, coordinator and fence); the ${role} writes nothing`);
+    }
+    const mine = processIdentity(process.pid);
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const record = readInventory(inventoryFile);
+        if (!record) throw new Error(`The run inventory ${inventoryFile} does not exist; nothing was changed`);
+        const problem = ownershipProblem(record, { env });
+        if (problem) throw new Error(`This ${role} no longer acts for its lifecycle coordinator (${problem}); nothing was changed`);
+        const entry = record.processes?.[role];
+        if (!entry) throw new Error(`The run record has no ${role} intent, so this process was not started by the coordinator; nothing was changed`);
+        if (entry.pid === process.pid) {
+            if (entry.birth && mine.birth && entry.birth !== mine.birth) throw new Error(`The recorded ${role} has another birth identity than this process; nothing was changed`);
+            return entry;
+        }
+        if (entry.pid != null) throw new Error(`The run record names ${role} ${entry.pid}, not this process (${process.pid}); nothing was changed`);
+        if (Date.now() > deadline) throw new Error(`The coordinator did not record this ${role}'s identity in time; nothing was changed`);
+        await new Promise((next) => setTimeout(next, intervalMs));
+    }
 }
 
 export function hostIdentity() {
