@@ -7,12 +7,13 @@
 // Run from e2e/: node --test fixtures/*.test.mjs
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hostIdentity } from './host-identity.mjs';
+import { hostIdentity, processIdentity } from './host-identity.mjs';
 import { readInventory, writeInventory } from './run-inventory.mjs';
 
 const script = join(dirname(fileURLToPath(import.meta.url)), 'stack-down.mjs');
@@ -29,12 +30,14 @@ else if (args[0] === 'context' && args[1] === 'inspect') console.log('unix:///va
 else if (args[0] === 'info') console.log(state.daemonId);
 else if (args[0] === 'ps' || (args[1] === 'ls')) {
     const kind = args[0] === 'ps' ? 'container' : args[0];
-    console.log(Object.entries(state.resources).filter(([, r]) => r.kind === kind && r.present).map(([k]) => k).join('\\n'));
+    const wanted = args.filter((arg, at) => args[at - 1] === '--filter' && arg.startsWith('label=')).map((arg) => arg.slice(6).split('='));
+    console.log(Object.entries(state.resources).filter(([, r]) => r.kind === kind && r.present
+        && wanted.every(([key, value]) => r.labels && r.labels[key] === value)).map(([k]) => k).join('\\n'));
 } else if (args[0] === 'inspect' || args[1] === 'inspect') {
-    if (!item || !item.present) fail('Error: No such object: ' + id);
+    if (!item || !item.present) fail(args[0] === 'network' ? 'Error response from daemon: network ' + id + ' not found' : 'Error response from daemon: No such container: ' + id);
     console.log(args[0] === 'inspect' ? JSON.stringify({ Id: id, Config: { Labels: item.labels }, Mounts: [], State: { Status: 'exited' } }) : JSON.stringify(item.labels));
 } else if (args[0] === 'rm' || args[1] === 'rm') {
-    if (!item || !item.present) fail('Error: No such object: ' + id);
+    if (!item || !item.present) fail('Error response from daemon: No such container: ' + id);
     if (item.refuse) fail('Error response from daemon: permission denied');
     item.present = false; save(); console.log(id);
 } else fail('unexpected docker ' + args.join(' '));
@@ -50,7 +53,13 @@ after(() => rmSync(dir, { recursive: true, force: true }));
 
 const host = hostIdentity();
 const labels = (run) => ({ 'codemastery.e2e': 'disposable', 'codemastery.e2e.run': run, 'codemastery.e2e.owner': String(process.getuid()) });
-function stackDown({ resources = {}, intents = [], daemonId = 'D1', recorded = true, inventory = true }) {
+const goneRunner = spawnSync(process.execPath, ['-e', '']).pid;
+/**
+ * Runs stack-down.mjs the way the coordinator does: the record (with the exited runner and its
+ * empty process group) holds the finalizer's creation intent before the spawn, and the finalizer's
+ * PID and birth identity are recorded right after it; stack-down waits for that before writing.
+ */
+async function stackDown({ resources = {}, intents = [], daemonId = 'D1', recorded = true, inventory = true, supervisor = String(process.pid) }) {
     const stateFile = join(dir, 'state.json'), calls = join(dir, 'calls.log'), record = join(dir, 'run.json');
     writeFileSync(stateFile, JSON.stringify({ daemonId, resources }));
     writeFileSync(calls, '');
@@ -58,37 +67,62 @@ function stackDown({ resources = {}, intents = [], daemonId = 'D1', recorded = t
     if (recorded) {
         writeInventory(record, {
             schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-cli', state: 'incomplete',
-            ownerUid: process.getuid(), host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
-            processes: {}, temp: null, outputs: [], observations: [], intents,
+            ownerUid: process.getuid(), lockKey: 'k-cli', fence: 2, revision: 1,
+            host: { hostname: host.hostname, machine: host.machine, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
+            processes: {
+                runner: { pid: goneRunner, birth: 'x-starttime:1', role: 'playwright-runner', state: 'exited', spawned: true, group: goneRunner },
+                'finalizer-2': { pid: null, birth: null, role: 'finalizer', state: 'starting' },
+            },
+            checkout: { path: dir, dev: 1, ino: 2 }, temp: null, outputs: [], observations: [], intents,
             docker: { context: 'stub-context', endpoint: 'unix:///var/run/docker.sock', daemonId: 'D1' },
         });
     }
     const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, STUB_STATE: stateFile, STUB_CALLS: calls };
     delete env.CODEMASTERY_E2E_REGISTRY;
     if (inventory) env.CODEMASTERY_E2E_INVENTORY = record; else delete env.CODEMASTERY_E2E_INVENTORY;
-    const result = spawnSync(process.execPath, [script, '--reason', 'test'], { encoding: 'utf8', env, timeout: 60_000 });
-    return { ...result, calls: readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean), record: recorded ? readInventory(record) : null };
+    // This test process plays the coordinator that starts stack-down.mjs directly.
+    if (supervisor) env.CODEMASTERY_E2E_SUPERVISOR = supervisor; else delete env.CODEMASTERY_E2E_SUPERVISOR;
+    Object.assign(env, { CODEMASTERY_E2E_RUN_ID: 'cm-e2e-cli', CODEMASTERY_E2E_LOCK_KEY: 'k-cli', CODEMASTERY_E2E_FENCE: '2', CODEMASTERY_E2E_ROLE: 'finalizer-2' });
+    const child = spawn(process.execPath, [script, '--reason', 'test'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    if (recorded) {
+        const current = readInventory(record);
+        current.processes['finalizer-2'] = { ...current.processes['finalizer-2'], pid: child.pid, birth: processIdentity(child.pid).birth, state: 'live', spawned: true };
+        current.revision += 1;
+        writeInventory(record, current);
+    }
+    const [status] = await once(child, 'close');
+    return { status, stdout, stderr, calls: readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean), record: recorded ? readInventory(record) : null };
 }
 
-test('refuses to run outside the lifecycle coordinator and touches no Docker resource', () => {
-    const result = stackDown({ inventory: false, resources: { C1: { kind: 'container', present: true, labels: labels('cm-e2e-cli') } } });
+test('refuses to run outside the lifecycle coordinator and touches no Docker resource', async () => {
+    const result = await stackDown({ inventory: false, resources: { C1: { kind: 'container', present: true, labels: labels('cm-e2e-cli') } } });
     assert.equal(result.status, 2);
     assert.match(result.stderr, /must run through the lifecycle coordinator/);
     assert.deepEqual(result.calls, []);
 });
 
-test('removes the recorded run\'s resources and exits 0 only when every one is verified absent', () => {
-    const result = stackDown({
+test('refuses exported lifecycle variables that do not name this process\' coordinator', async () => {
+    const result = await stackDown({ supervisor: '1', resources: { C1: { kind: 'container', present: true, labels: labels('cm-e2e-cli') } } });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /must run through the lifecycle coordinator/);
+    assert.deepEqual(result.calls, []);
+});
+
+test('removes the recorded run\'s resources and exits 0 only when every one is verified absent', async () => {
+    const result = await stackDown({
         resources: { C1: { kind: 'container', present: true, labels: labels('cm-e2e-cli') }, N1: { kind: 'network', present: true, labels: labels('cm-e2e-cli') } },
-        intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created' }, { id: 'i2', kind: 'network', name: 'n', dockerId: 'N1', state: 'created' }],
+        intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created', volumes: 'recorded' }, { id: 'i2', kind: 'network', name: 'n', dockerId: 'N1', state: 'created' }],
     });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stdout, /cm-e2e-cli — 2 removed; recovery complete/);
     assert.equal(result.record.state, 'complete');
 });
 
-test('a refused removal is reported and exits 1 with the inventory retained for retry', () => {
-    const result = stackDown({
+test('a refused removal is reported and exits 1 with the inventory retained for retry', async () => {
+    const result = await stackDown({
         resources: { C1: { kind: 'container', present: true, refuse: true, labels: labels('cm-e2e-cli') } },
         intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created' }],
     });
@@ -97,18 +131,18 @@ test('a refused removal is reported and exits 1 with the inventory retained for 
     assert.equal(result.record.state, 'incomplete');
 });
 
-test('a legacy resource labelled only with a dead owner PID is no longer removed', () => {
+test('a legacy resource labelled only with a dead owner PID is reported, never removed, and not this run\'s failure', async () => {
     const deadPid = String(spawnSync(process.execPath, ['-e', '']).pid);
-    const result = stackDown({
+    const result = await stackDown({
         resources: { OLD: { kind: 'container', present: true, labels: { 'codemastery.e2e': 'disposable', 'codemastery.e2e.pid': deadPid } } },
     });
-    assert.equal(result.status, 1, 'an unaccounted resource is reported as unresolved');
+    assert.equal(result.status, 0, 'a resource of no inventory does not block this checkout');
     assert.ok(!result.calls.some((call) => call.startsWith('rm ')), result.calls.join('\n'));
-    assert.match(result.stdout, /preserved container OLD: carries no run label \(a pre-r2 leftover\)/);
+    assert.match(result.stdout, /left container OLD untouched: it carries no run label \(a pre-r2 leftover\)/);
 });
 
-test('a daemon that changed since the run started preserves everything', () => {
-    const result = stackDown({
+test('a daemon that changed since the run started preserves everything', async () => {
+    const result = await stackDown({
         daemonId: 'D2',
         resources: { C1: { kind: 'container', present: true, labels: labels('cm-e2e-cli') } },
         intents: [{ id: 'i1', kind: 'container', name: 'c', dockerId: 'C1', state: 'created' }],

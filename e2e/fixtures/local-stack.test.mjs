@@ -14,8 +14,8 @@ import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import globalSetup, { buildMarker, cacheTag, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
-import { hostIdentity } from './host-identity.mjs';
+import globalSetup, { buildMarker, cacheTag, confirmRecordedRunner, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
+import { hostIdentity, processIdentity } from './host-identity.mjs';
 import { readInventory, writeInventory } from './run-inventory.mjs';
 
 // Stateful stub docker: resources live in STUB_DIR/resources.json and every call is appended to STUB_DIR/calls.log.
@@ -26,6 +26,7 @@ const DOCKER = `#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path');
 const dir = process.env.STUB_DIR, mode = process.env.STUB_MODE, args = process.argv.slice(2), id = args.at(-1);
 fs.appendFileSync(path.join(dir, 'calls.log'), args.join(' ') + '\\n');
+fs.appendFileSync(path.join(dir, 'hosts.log'), (process.env.DOCKER_HOST || '<unpinned>') + ' ' + (process.env.DOCKER_CONTEXT || '') + '|' + args.join(' ') + '\\n');
 const fail = (message) => { process.stderr.write(message + '\\n'); process.exit(1); };
 const dbFile = path.join(dir, 'resources.json'), db = fs.existsSync(dbFile) ? JSON.parse(fs.readFileSync(dbFile, 'utf8')) : {};
 const save = () => fs.writeFileSync(dbFile, JSON.stringify(db));
@@ -49,9 +50,12 @@ else if (args[0] === 'run') {
     const name = args[args.indexOf('--name') + 1], postgres = name.endsWith('-postgres');
     db['ctr-' + name] = { kind: 'container', name, labels: labelsOf(), present: true,
         mounts: postgres ? [{ Type: 'volume', Name: '${ANON}', Destination: '/var/lib/postgresql/data' }] : [] };
-    if (postgres) db['${ANON}'] = { kind: 'volume', labels: {}, present: true };
+    if (postgres) db['${ANON}'] = { kind: 'volume', labels: { 'com.docker.volume.anonymous': '' }, present: true };
     save(); console.log('ctr-' + name);
-} else if (args[0] === 'inspect' && args.includes('{{json .Mounts}}')) console.log(JSON.stringify(live(id).mounts));
+} else if (args[0] === 'inspect' && args.includes('{{json .Mounts}}')) {
+    if (mode === 'mounts-fail') fail('Error response from daemon: i/o timeout');
+    console.log(JSON.stringify(live(id).mounts));
+}
 else if (args[0] === 'inspect' && args.includes('{{json .}}')) { const r = live(id); console.log(JSON.stringify({ Id: id, Config: { Labels: r.labels }, Mounts: r.mounts, State: { Status: 'exited' } })); }
 else if (args[0] === 'inspect') {
     const inspects = (fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0) + 1;
@@ -99,7 +103,7 @@ before(() => {
 });
 beforeEach(() => {
     writeFileSync(join(stub, 'calls.log'), '');
-    for (const name of ['inspects', 'preview-stopped', 'resources.json', 'secret']) rmSync(join(stub, name), { force: true });
+    for (const name of ['inspects', 'preview-stopped', 'resources.json', 'secret', 'hosts.log']) rmSync(join(stub, name), { force: true });
 });
 after(() => { process.env = saved; rmSync(stub, { recursive: true, force: true }); });
 
@@ -196,18 +200,22 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
     });
 
     /** The record the lifecycle coordinator would have written before starting Playwright. */
-    function admit() {
+    function admit(runnerPatch = {}) {
         const host = hostIdentity(), inventory = join(stub, 'run.json');
         writeInventory(inventory, {
             schema: 'codemastery-e2e-inventory/1', contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-ls', state: 'active',
-            ownerUid: process.getuid(), lockKey: 'stub', host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
-            // The coordinator is this runner's parent, exactly as when lifecycle.py starts Playwright.
-            processes: { supervisor: { pid: process.ppid, birth: null, role: 'coordinator', state: 'live' } },
+            ownerUid: process.getuid(), lockKey: 'stub', fence: 1, revision: 1, host: { hostname: host.hostname, boot: host.boot, pidNamespace: host.pidNamespace, system: host.system },
+            // The coordinator is this runner's parent, exactly as when lifecycle.py starts Playwright, and it
+            // has already recorded this process as the runner (intent before the spawn, identity after it).
+            processes: {
+                supervisor: { pid: process.ppid, birth: null, role: 'coordinator', state: 'live' },
+                runner: { pid: process.pid, birth: processIdentity(process.pid).birth, birthSource: 'test', role: 'playwright-runner', state: 'live', spawned: true, group: process.pid, ...runnerPatch },
+            },
             checkout: { path: stub, dev: 0, ino: 0 }, outputs: [], docker: null, temp: null, intents: [], observations: [],
         });
         Object.assign(process.env, {
             CODEMASTERY_E2E_INVENTORY: inventory, CODEMASTERY_E2E_RUN_ID: 'cm-e2e-ls', CODEMASTERY_E2E_SOCKETS: stub,
-            CODEMASTERY_E2E_LOCK_KEY: 'stub', E2E_VITE_BIN: join(stub, 'vite.cjs'), E2E_VITE_MODULE: join(stub, 'vite-preview.mjs'),
+            CODEMASTERY_E2E_LOCK_KEY: 'stub', CODEMASTERY_E2E_SUPERVISOR: String(process.ppid), CODEMASTERY_E2E_FENCE: '1', E2E_VITE_BIN: join(stub, 'vite.cjs'), E2E_VITE_MODULE: join(stub, 'vite-preview.mjs'),
         });
         delete process.env.CODEMASTERY_E2E_REGISTRY;
         return inventory;
@@ -277,6 +285,65 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
         assert.ok(existsSync(join(stub, 'preview-stopped')));
         assert.deepEqual(leftovers, []);
         assert.equal(record.state, 'cleaning');
+    });
+    test('every Docker call after the daemon is pinned is bound to the recorded endpoint', async () => {
+        process.env.DOCKER_CONTEXT = 'some-other-context';
+        try {
+            const { record } = await setupFailure('exited');
+            const lines = readFileSync(join(stub, 'hosts.log'), 'utf8').trim().split('\n');
+            const bound = lines.filter((line) => !/\|context (show|inspect)/.test(line));
+            assert.ok(bound.some((line) => line.includes('|run -d ')) && bound.some((line) => line.includes('|rm -f ')), lines.join('\n'));
+            for (const line of bound) assert.ok(line.startsWith(`${record.docker.endpoint} |`), `bound to the pinned endpoint with no context: ${line}`);
+        } finally {
+            delete process.env.DOCKER_CONTEXT;
+        }
+    });
+    test('container volume associations are intents written before creation and resolved from the container\'s mounts', async () => {
+        const { record } = await setupFailure('exited');
+        const containers = record.intents.filter((intent) => intent.kind === 'container');
+        assert.deepEqual(containers.map((intent) => intent.volumes), ['recorded', 'recorded']);
+        assert.equal(record.processes.builder.state, 'exited');
+        assert.ok(record.processes.preview.pid > 0 && record.processes.preview.control.endsWith('cm-e2e-ls.sock'));
+    });
+    test('a mount inspection that fails is a setup error, never "no volume", and recovery still accounts for the volume', async () => {
+        const { error, record } = await setupFailure('mounts-fail');
+        assert.match(error.message, /The mounts of cm-e2e-ls-postgres could not be read; its volume association stays pending/);
+        const postgres = record.intents.find((intent) => intent.name === 'cm-e2e-ls-postgres');
+        assert.equal(postgres.volumes, 'recorded', 'recovery read the association from the container itself');
+        assert.equal(record.intents.find((intent) => intent.kind === 'volume')?.state, 'removed');
+        assert.ok(calls().indexOf('rm -f ctr-cm-e2e-ls-postgres') < calls().indexOf(`volume rm ${ANON}`));
+    });
+    test('a process the coordinator did not record as the runner creates nothing', async () => {
+        admit({ pid: 999_999, birth: 'x-starttime:1' });
+        await assert.rejects(globalSetup(), /The run record names runner 999999, not this process/);
+        assert.deepEqual(calls(), [], 'no Docker call was made');
+        assert.equal(readInventory(join(stub, 'run.json')).intents.length, 0, 'nothing was recorded');
+    });
+    test('a runner whose coordinator is gone (it was reparented) creates and writes nothing', async () => {
+        const inventory = admit();
+        process.env.CODEMASTERY_E2E_SUPERVISOR = '1';
+        try {
+            await assert.rejects(globalSetup(), /no longer acts for its lifecycle coordinator .* is no longer this process' parent/);
+        } finally {
+            process.env.CODEMASTERY_E2E_SUPERVISOR = String(process.ppid);
+        }
+        assert.deepEqual(calls(), [], 'no Docker call was made');
+        const record = readInventory(inventory);
+        assert.equal(record.docker, null, 'the record was not changed');
+        assert.equal(record.temp, null);
+    });
+    test('global setup waits for the coordinator to record the runner\'s identity after the spawn', async () => {
+        const inventory = admit({ pid: null, birth: null, state: 'starting' });
+        // The coordinator persists the PID and birth identity right after the spawn.
+        setTimeout(() => {
+            const record = readInventory(inventory);
+            record.processes.runner = { ...record.processes.runner, pid: process.pid, birth: processIdentity(process.pid).birth, state: 'live' };
+            writeInventory(inventory, record);
+        }, 300);
+        const runner = await confirmRecordedRunner(inventory, { timeoutMs: 5000, intervalMs: 50 });
+        assert.equal(runner.pid, process.pid);
+        await assert.rejects(confirmRecordedRunner(admit({ pid: null, birth: null, state: 'starting' }), { timeoutMs: 300, intervalMs: 50 }),
+            /did not record this runner's identity in time/);
     });
     test('a runner that was not admitted by the coordinator creates nothing', async () => {
         delete process.env.CODEMASTERY_E2E_INVENTORY;

@@ -2,11 +2,14 @@ package com.codemastery.integration;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailDelivery;
+import com.codemastery.modules.auth.application.service.PasswordResetService.ResetEmailMessage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
@@ -19,6 +22,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -28,6 +33,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -51,6 +57,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -90,6 +98,12 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private JwtTokenProvider tokens;
 
+    @Autowired
+    private javax.sql.DataSource dataSource;
+
+    @MockitoBean
+    private ResetEmailDelivery resetEmailDelivery;
+
     private final Set<String> testEmails = ConcurrentHashMap.newKeySet();
 
     @BeforeEach
@@ -113,6 +127,8 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     @AfterEach
     void cleanCommittedUsersAndSecurityContext() {
         for (String email : testEmails) {
+            jdbc.update("DELETE FROM public.password_reset_tokens WHERE user_id IN "
+                    + "(SELECT id FROM public.users WHERE email = ?)", email);
             jdbc.update("DELETE FROM public.users WHERE email = ?", email);
         }
         testEmails.clear();
@@ -156,6 +172,334 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         assertTrue(storedHash.startsWith("$2b$14$"));
         assertNotEquals(password, storedHash);
         assertTrue(PASSWORDS.matches(password, storedHash));
+    }
+
+    @Test
+    void passwordResetStoresOnlyDigestConsumesTokenAndRequiresOrdinarySignIn() throws Exception {
+        String email = newEmail();
+        String oldPassword = syntheticPassword();
+        String newPassword = syntheticPassword();
+        testEmails.add(email);
+        register(Map.of("email", email, "password", oldPassword, "displayName", "QA01 Reset Learner"))
+                .andExpect(status().isCreated());
+
+        UUID userId = jdbc.queryForObject("SELECT id FROM public.users WHERE email = ?", UUID.class, email);
+        String bearerIssuedBeforeReset = tokens.createToken(userId);
+        CountDownLatch delivered = new CountDownLatch(1);
+        AtomicReference<ResetEmailMessage> message = new AtomicReference<>();
+        doAnswer(invocation -> {
+            message.set(invocation.getArgument(0));
+            delivered.countDown();
+            return null;
+        }).when(resetEmailDelivery).send(any(ResetEmailMessage.class));
+
+        mvc.perform(post("/api/auth/password-reset-requests").contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("email", email))))
+                .andExpect(status().isAccepted())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.message")
+                        .value("If an account matches, a password reset link will be sent."));
+        assertTrue(delivered.await(10, TimeUnit.SECONDS), "Reset email should be delivered asynchronously");
+
+        String link = message.get().resetLink();
+        String capability = link.substring(link.indexOf("#token=") + "#token=".length());
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(java.util.Base64.getUrlDecoder().decode(capability));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.password_reset_tokens "
+                + "WHERE user_id = (SELECT id FROM public.users WHERE email = ?) AND token_digest = ?",
+                Integer.class, email, digest));
+
+        mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("token", capability, "password", newPassword))))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.message")
+                        .value("Password reset. Sign in with your new password."))
+                .andExpect(jsonPath("$.accessToken").doesNotExist());
+
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.password_reset_tokens "
+                + "WHERE user_id = (SELECT id FROM public.users WHERE email = ?)", Integer.class, email));
+        String storedHash = jdbc.queryForObject(
+                "SELECT password_hash FROM public.users WHERE email = ?", String.class, email);
+        assertTrue(PASSWORDS.matches(newPassword, storedHash));
+        assertFalse(PASSWORDS.matches(oldPassword, storedHash));
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("email", email, "password", oldPassword))))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("email", email, "password", newPassword))))
+                .andExpect(status().isOk());
+        // CT01 is unchanged (ADR006 9.4): an earlier bearer stays valid until its own PT15M
+        // expiry. This records the residual behavior; it is not a revocation guarantee.
+        mvc.perform(get("/api/me/courses").header("Authorization", "Bearer " + bearerIssuedBeforeReset))
+                .andExpect(status().isOk());
+    }
+
+    private static final String RESET_ACK = "{\"message\":\"If an account matches, a password reset link will be sent.\"}";
+
+    private String requestReset(String email) throws Exception {
+        return mvc.perform(post("/api/auth/password-reset-requests").contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.writeValueAsString(Map.of("email", email))))
+                .andExpect(status().isAccepted())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andReturn().getResponse().getContentAsString();
+    }
+
+    private org.springframework.test.web.servlet.ResultActions confirmReset(String capability, String password)
+            throws Exception {
+        return mvc.perform(post("/api/auth/password-resets").contentType(MediaType.APPLICATION_JSON)
+                .content(JSON.writeValueAsString(Map.of("token", capability, "password", password))));
+    }
+
+    /** Captures every delivered reset message; the FIFO single worker makes a later sentinel a drain barrier. */
+    private List<ResetEmailMessage> captureDeliveries(CountDownLatch delivered) {
+        List<ResetEmailMessage> messages = java.util.Collections.synchronizedList(new ArrayList<>());
+        doAnswer(invocation -> {
+            messages.add(invocation.getArgument(0));
+            delivered.countDown();
+            return null;
+        }).when(resetEmailDelivery).send(any(ResetEmailMessage.class));
+        return messages;
+    }
+
+    private static String capabilityOf(ResetEmailMessage message) {
+        String link = message.resetLink();
+        return link.substring(link.indexOf("#token=") + "#token=".length());
+    }
+
+    private static byte[] sha256(byte[] value) throws Exception {
+        return java.security.MessageDigest.getInstance("SHA-256").digest(value);
+    }
+
+    /** Inserts an active account with a known password and one valid stored capability; returns the capability. */
+    private String storedCapability(UUID userId) throws Exception {
+        byte[] raw = new byte[32];
+        new SecureRandom().nextBytes(raw);
+        jdbc.update("INSERT INTO public.password_reset_tokens (id,user_id,token_digest,issued_at,expires_at) "
+                        + "VALUES (?,?,?,now() - interval '1 minute',now() + interval '29 minutes')",
+                UUID.randomUUID(), userId, sha256(raw));
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+    }
+
+    private UUID insertActiveAccountWithPassword(String email, String password) {
+        UUID id = UUID.randomUUID();
+        testEmails.add(email);
+        jdbc.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) "
+                + "VALUES (?,?,?,'QA01 Reset Fixture','learner','active')", id, email, PASSWORDS.encode(password));
+        return id;
+    }
+
+    private String storedHash(UUID userId) {
+        return jdbc.queryForObject("SELECT password_hash FROM public.users WHERE id = ?", String.class, userId);
+    }
+
+    private int resetTokenCount(UUID userId) {
+        return jdbc.queryForObject("SELECT count(*) FROM public.password_reset_tokens WHERE user_id = ?",
+                Integer.class, userId);
+    }
+
+    @Test
+    void unknownLockedActiveAndRepeatedRequestsAreIndistinguishableAndOnlyEligibleOnesIssue() throws Exception {
+        CountDownLatch delivered = new CountDownLatch(2);
+        List<ResetEmailMessage> messages = captureDeliveries(delivered);
+        String activeEmail = newEmail();
+        UUID active = insertActiveAccountWithPassword(activeEmail, syntheticPassword());
+        UUID locked = insertUser("learner", "locked");
+        String lockedEmail = jdbc.queryForObject("SELECT email FROM public.users WHERE id = ?", String.class, locked);
+        String sentinelEmail = newEmail();
+        UUID sentinel = insertActiveAccountWithPassword(sentinelEmail, syntheticPassword());
+
+        List<String> bodies = List.of(requestReset(newEmail()), requestReset(lockedEmail),
+                requestReset(activeEmail), requestReset(activeEmail.toUpperCase(Locale.ROOT)),
+                requestReset(sentinelEmail));
+        bodies.forEach(body -> assertEquals(RESET_ACK, body));
+        // FIFO single worker: the sentinel's delivery proves every earlier request was processed.
+        assertTrue(delivered.await(20, TimeUnit.SECONDS), "active and sentinel deliveries");
+
+        assertEquals(List.of(activeEmail, sentinelEmail), messages.stream().map(ResetEmailMessage::recipient).toList());
+        assertEquals(1, resetTokenCount(active), "the PT1M repeat issued nothing new");
+        assertEquals(0, resetTokenCount(locked));
+        assertEquals(1, resetTokenCount(sentinel));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.password_reset_tokens WHERE user_id = ? "
+                + "AND token_digest = ?", Integer.class, active,
+                sha256(java.util.Base64.getUrlDecoder().decode(capabilityOf(messages.get(0))))));
+        assertEquals(Duration.ofMinutes(30), Duration.ofSeconds(jdbc.queryForObject(
+                "SELECT extract(epoch FROM expires_at - issued_at)::bigint FROM public.password_reset_tokens WHERE user_id = ?",
+                Long.class, active)));
+    }
+
+    @Test
+    void deliveryRunsOnlyAfterCommitAndWithoutHoldingTheUserLock() throws Exception {
+        String email = newEmail();
+        UUID userId = insertActiveAccountWithPassword(email, syntheticPassword());
+        CountDownLatch delivered = new CountDownLatch(1);
+        AtomicReference<String> observed = new AtomicReference<>();
+        doAnswer(invocation -> {
+            try {
+                int visible = resetTokenCount(userId);
+                // NOWAIT fails at once (55P03) if the worker still held the User row lock.
+                jdbc.queryForList("SELECT id FROM public.users WHERE id = ? FOR UPDATE NOWAIT", userId);
+                observed.set("committed=" + visible + ",unlocked");
+            } catch (RuntimeException failure) {
+                observed.set("failure:" + failure.getClass().getSimpleName());
+            } finally {
+                delivered.countDown();
+            }
+            return null;
+        }).when(resetEmailDelivery).send(any(ResetEmailMessage.class));
+
+        requestReset(email);
+
+        assertTrue(delivered.await(20, TimeUnit.SECONDS));
+        assertEquals("committed=1,unlocked", observed.get());
+    }
+
+    @Test
+    void concurrentConfirmationsOfOneCapabilityProduceExactlyOneSuccess() throws Exception {
+        String email = newEmail();
+        String original = syntheticPassword();
+        UUID userId = insertActiveAccountWithPassword(email, original);
+        String capability = storedCapability(userId);
+        List<String> passwords = List.of(syntheticPassword(), syntheticPassword());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Integer>> results = new ArrayList<>();
+            for (String password : passwords) {
+                results.add(executor.submit(() -> {
+                    ready.countDown();
+                    assertTrue(start.await(10, TimeUnit.SECONDS));
+                    return confirmReset(capability, password).andReturn().getResponse().getStatus();
+                }));
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
+            start.countDown();
+            List<Integer> statuses = new ArrayList<>(List.of(results.get(0).get(60, TimeUnit.SECONDS),
+                    results.get(1).get(60, TimeUnit.SECONDS)));
+            statuses.sort(Integer::compareTo);
+
+            assertEquals(List.of(200, 400), statuses);
+            assertEquals(0, resetTokenCount(userId));
+            String hash = storedHash(userId);
+            assertFalse(PASSWORDS.matches(original, hash));
+            assertEquals(1, passwords.stream().filter(password -> PASSWORDS.matches(password, hash)).count());
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void failedCapabilityConsumptionRollsBackThePasswordChange() throws Exception {
+        String email = newEmail();
+        String original = syntheticPassword();
+        UUID userId = insertActiveAccountWithPassword(email, original);
+        String capability = storedCapability(userId);
+        // Test-only fault injection on the real schema: deleting this user's capability fails
+        // after the password-hash UPDATE has already run inside the confirmation transaction.
+        jdbc.execute("CREATE FUNCTION public.qa01_fail_reset_consumption() RETURNS trigger LANGUAGE plpgsql AS "
+                + "$$BEGIN IF OLD.user_id = '" + userId + "'::uuid THEN RAISE EXCEPTION 'synthetic consumption failure'; "
+                + "END IF; RETURN OLD; END$$");
+        jdbc.execute("CREATE TRIGGER qa01_fail_reset_consumption BEFORE DELETE ON public.password_reset_tokens "
+                + "FOR EACH ROW EXECUTE FUNCTION public.qa01_fail_reset_consumption()");
+        try {
+            String body = confirmReset(capability, syntheticPassword())
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(jsonPath("$.detail").value("An unexpected error occurred."))
+                    .andReturn().getResponse().getContentAsString();
+            assertFalse(body.contains("synthetic consumption failure"));
+        } finally {
+            jdbc.execute("DROP TRIGGER qa01_fail_reset_consumption ON public.password_reset_tokens");
+            jdbc.execute("DROP FUNCTION public.qa01_fail_reset_consumption()");
+        }
+
+        assertTrue(PASSWORDS.matches(original, storedHash(userId)), "password update rolled back");
+        assertEquals(1, resetTokenCount(userId), "capability still present after rollback");
+        confirmReset(capability, syntheticPassword()).andExpect(status().isOk());
+    }
+
+    @Test
+    void confirmationRechecksTheCapabilityAfterWaitingForTheUserLock() throws Exception {
+        String email = newEmail();
+        String original = syntheticPassword();
+        UUID userId = insertActiveAccountWithPassword(email, original);
+        String capability = storedCapability(userId);
+        byte[] replacement = sha256(UUID.randomUUID().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try (java.sql.Connection lockHolder = dataSource.getConnection()) {
+            lockHolder.setAutoCommit(false);
+            try (var lock = lockHolder.prepareStatement("SELECT id FROM public.users WHERE id = ? FOR UPDATE")) {
+                lock.setObject(1, userId);
+                lock.executeQuery().close();
+            }
+            Future<Integer> confirmation = executor.submit(() ->
+                    confirmReset(capability, syntheticPassword()).andReturn().getResponse().getStatus());
+            // Condition wait (not an ordering sleep): the confirmation has resolved the digest
+            // and is now blocked on the User row lock held above.
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+                    + "AND query LIKE '%FROM public.users WHERE id = $1 FOR UPDATE%'", Integer.class) == 0) {
+                assertFalse(confirmation.isDone(), "confirmation finished without waiting for the User lock");
+                assertTrue(System.nanoTime() < deadline, "confirmation never waited for the User lock");
+                Thread.onSpinWait();
+            }
+            // A competing eligible request replaces the sole capability under the same User lock.
+            try (var replace = lockHolder.prepareStatement(
+                    "DELETE FROM public.password_reset_tokens WHERE user_id = ?")) {
+                replace.setObject(1, userId);
+                replace.executeUpdate();
+            }
+            try (var insert = lockHolder.prepareStatement("INSERT INTO public.password_reset_tokens "
+                    + "(id,user_id,token_digest,issued_at,expires_at) VALUES (?,?,?,now(),now() + interval '30 minutes')")) {
+                insert.setObject(1, UUID.randomUUID());
+                insert.setObject(2, userId);
+                insert.setBytes(3, replacement);
+                insert.executeUpdate();
+            }
+            lockHolder.commit();
+
+            assertEquals(400, confirmation.get(30, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+        assertTrue(PASSWORDS.matches(original, storedHash(userId)));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.password_reset_tokens WHERE user_id = ? "
+                + "AND token_digest = ?", Integer.class, userId, replacement));
+    }
+
+    @Test
+    void expiredFutureLockedAndReusedCapabilitiesShareTheGenericErrorAndChangeNothing() throws Exception {
+        String original = syntheticPassword();
+        UUID expired = insertActiveAccountWithPassword(newEmail(), original);
+        UUID future = insertActiveAccountWithPassword(newEmail(), original);
+        UUID locked = insertActiveAccountWithPassword(newEmail(), original);
+        String expiredCapability = storedCapability(expired);
+        String futureCapability = storedCapability(future);
+        String lockedCapability = storedCapability(locked);
+        jdbc.update("UPDATE public.password_reset_tokens SET issued_at = now() - interval '31 minutes', "
+                + "expires_at = now() - interval '1 minute' WHERE user_id = ?", expired);
+        jdbc.update("UPDATE public.password_reset_tokens SET issued_at = now() + interval '5 minutes', "
+                + "expires_at = now() + interval '35 minutes' WHERE user_id = ?", future);
+        jdbc.update("UPDATE public.users SET account_status = 'locked' WHERE id = ?", locked);
+
+        for (String capability : List.of(expiredCapability, futureCapability, lockedCapability,
+                java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]))) {
+            String body = confirmReset(capability, syntheticPassword())
+                    .andExpect(status().isBadRequest())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.detail").value("Reset link is invalid or expired."))
+                    .andExpect(jsonPath("$.errors").doesNotExist())
+                    .andReturn().getResponse().getContentAsString();
+            assertFalse(body.contains(capability));
+        }
+        for (UUID userId : List.of(expired, future, locked)) {
+            assertTrue(PASSWORDS.matches(original, storedHash(userId)));
+            assertEquals(1, resetTokenCount(userId));
+        }
+        assertEquals("locked", jdbc.queryForObject("SELECT account_status FROM public.users WHERE id = ?",
+                String.class, locked), "recovery never unlocks an account");
     }
 
     @ParameterizedTest
@@ -374,6 +718,24 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void recoveryMediaTypesAndUnlistedApiPathsReachTheProductionHandlersInTheFullContext() throws Exception {
+        // Test-only controllers must not be component-scanned into the application context, or a
+        // catch-all fixture would answer these permitted paths and hide the production 415.
+        for (String path : List.of("/api/auth/password-reset-requests", "/api/auth/password-resets")) {
+            mvc.perform(post(path).contentType(MediaType.TEXT_PLAIN).content("{}"))
+                    .andExpect(status().isUnsupportedMediaType())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.detail").value("The request media type is not supported."));
+        }
+        String valid = tokens.createToken(insertUser("learner", "active"));
+        // An operation that is not explicitly listed stays deny-by-default, even for a valid bearer.
+        mvc.perform(get("/api/au07-unlisted-probe").header("Authorization", "Bearer " + valid))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    @Test
     void protectedOperationStillRequiresValidBearerForActiveAccount() throws Exception {
         String valid = tokens.createToken(insertUser("learner", "active"));
         String tampered = valid.substring(0, valid.length() - 2) + (valid.endsWith("AA") ? "BB" : "AA");
@@ -399,6 +761,39 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + tokens.createToken(insertUser(role, "active"))))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    /** Unconfigured delivery: the rest of the backend runs; recovery acknowledges but never issues. */
+    @Nested
+    @TestPropertySource(properties = {"codemastery.security.password-reset.smtp-host=",
+            "codemastery.security.password-reset.smtp-password=<SET_ME_SMTP_PASSWORD>"})
+    class UnconfiguredRecoveryDelivery {
+
+        @Autowired
+        private com.codemastery.common.config.AppConfig.PasswordResetActivation activation;
+
+        @Test
+        void unrelatedOperationsAndHealthWorkWhileRecoveryIssuesNothing() throws Exception {
+            assertFalse(activation.isActive(), "this context must run with recovery delivery inactive");
+            assertTrue(activation.inactiveReason().endsWith("SMTP_HOST"), activation.inactiveReason());
+            mvc.perform(get("/actuator/health")).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("UP"));
+            String email = newEmail();
+            String password = syntheticPassword();
+            testEmails.add(email);
+            register(Map.of("email", email, "password", password, "displayName", "QA01 Inactive Recovery"))
+                    .andExpect(status().isCreated());
+            mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                            .content(JSON.writeValueAsString(Map.of("email", email, "password", password))))
+                    .andExpect(status().isOk());
+
+            assertEquals(RESET_ACK, requestReset(email));
+            assertEquals(RESET_ACK, requestReset(newEmail()));
+
+            UUID userId = jdbc.queryForObject("SELECT id FROM public.users WHERE email = ?", UUID.class, email);
+            assertEquals(0, resetTokenCount(userId));
+            org.mockito.Mockito.verifyNoInteractions(resetEmailDelivery);
+        }
     }
 
     /** Only the aggregate status and probe group names; no components, details or diagnostics. */

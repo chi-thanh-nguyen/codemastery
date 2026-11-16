@@ -8,9 +8,9 @@
 // there is one qualified implementation rather than two.
 import { spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readMarker } from './run-inventory.mjs';
+import { handDown, ownershipProblem, readInventory, readMarker } from './run-inventory.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const launcher = join(here, 'lifecycle.py');
@@ -37,17 +37,64 @@ export function processIdentity(pid) {
     return reply;
 }
 
+/**
+ * `{reliable, members:[{pid, birth}]}`: the live (non-zombie) members of one process group, read from
+ * the OS without signalling anything. `reliable:false` means the group could not be inspected, which
+ * is never proof that it is empty.
+ */
+export function processGroup(pgid) {
+    if (!Number.isInteger(pgid) || pgid <= 1) return { pgid, reliable: false, members: [], detail: 'invalid process-group ID' };
+    const reply = ask(['proc-group', String(pgid)]);
+    if (reply.error) return { pgid, reliable: false, members: [], detail: reply.error };
+    return { pgid, reliable: reply.reliable === true, members: Array.isArray(reply.members) ? reply.members : [], detail: reply.detail };
+}
+
+/**
+ * Waits until the coordinator has recorded *this* process as the writer `role` (it records each
+ * writer's creation intent before the spawn and its PID and birth identity right after), and returns
+ * that entry. A writer never records itself and writes nothing before this: a process that is not
+ * the recorded one, whose coordinator is gone or whose generation was fenced out is refused.
+ */
+export async function confirmRecordedWriter(inventoryFile, role, { timeoutMs = 15_000, intervalMs = 100, env = process.env } = {}) {
+    const given = handDown(env);
+    if (!given || !given.runId || !given.key || !given.supervisor || given.fence === null) {
+        throw new Error(`No complete lifecycle hand-down (run ID, lock key, coordinator and fence); the ${role} writes nothing`);
+    }
+    const mine = processIdentity(process.pid);
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const record = readInventory(inventoryFile);
+        if (!record) throw new Error(`The run inventory ${inventoryFile} does not exist; nothing was changed`);
+        const problem = ownershipProblem(record, { env });
+        if (problem) throw new Error(`This ${role} no longer acts for its lifecycle coordinator (${problem}); nothing was changed`);
+        const entry = record.processes?.[role];
+        if (!entry) throw new Error(`The run record has no ${role} intent, so this process was not started by the coordinator; nothing was changed`);
+        if (entry.pid === process.pid) {
+            if (entry.birth && mine.birth && entry.birth !== mine.birth) throw new Error(`The recorded ${role} has another birth identity than this process; nothing was changed`);
+            return entry;
+        }
+        if (entry.pid != null) throw new Error(`The run record names ${role} ${entry.pid}, not this process (${process.pid}); nothing was changed`);
+        if (Date.now() > deadline) throw new Error(`The coordinator did not record this ${role}'s identity in time; nothing was changed`);
+        await new Promise((next) => setTimeout(next, intervalMs));
+    }
+}
+
 export function hostIdentity() {
     const reply = ask(['host-identity']);
-    if (reply.error) return { system: process.platform, hostname: null, boot: null, pidNamespace: null, uid: process.getuid(), detail: reply.error };
+    if (reply.error) return { system: process.platform, hostname: null, machine: null, boot: null, pidNamespace: null, uid: process.getuid(), detail: reply.error };
     return reply;
 }
 
-/** True when `recorded` describes the same host, boot and PID namespace we are running in now. */
+/**
+ * True when `recorded` describes the same host, boot and PID namespace we are running in now. The
+ * host is the OS machine identity (macOS host UUID, Linux machine-id) when both sides have one; a
+ * network-assigned hostname changes with the network and is only the fallback for records without it.
+ * A missing boot identity never matches.
+ */
 export function sameHost(recorded, current = hostIdentity()) {
-    if (!recorded) return false;
-    return recorded.hostname === current.hostname && recorded.boot === current.boot
-        && (recorded.pidNamespace ?? null) === (current.pidNamespace ?? null);
+    if (!recorded || !current || !recorded.boot || recorded.boot !== current.boot) return false;
+    const host = recorded.machine && current.machine ? recorded.machine === current.machine : recorded.hostname === current.hostname;
+    return host && (recorded.pidNamespace ?? null) === (current.pidNamespace ?? null);
 }
 
 /**
@@ -84,6 +131,9 @@ export function classifyProcess(recorded, options = {}) {
  */
 export function verifyDirectory(recorded, runId) {
     if (!recorded?.path || !isAbsolute(recorded.path)) return { ok: false, why: 'no absolute path recorded' };
+    // Path ancestry: only a directory this lifecycle creates (`mkdtemp(<tmpdir>/codemastery-e2e-…)`)
+    // can ever be a removal target, whatever else a record might name.
+    if (!/^codemastery-e2e-[A-Za-z0-9]{6,}$/.test(basename(recorded.path))) return { ok: false, why: 'the recorded path is not a temporary build directory of this lifecycle' };
     let parent, self;
     try {
         parent = lstatSync(dirname(recorded.path));

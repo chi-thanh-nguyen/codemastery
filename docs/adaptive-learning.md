@@ -598,3 +598,89 @@ evidence. CT08.execution/failure/verification-plan, CT22.atomic, CT07/CT25 and
 notification bindings retain their separate gates. Schema approval does not prove
 real-time mastery, delivery, replay or atomic progress. Earlier payload-deferral
 text is historical to the extent resolved by this explicit, bounded reference.
+
+## Batch 6 adaptive runtime — 12 November 2026
+
+[ADR011](decisions/011-batch-06-contract-approvals.md) technically approves the
+adaptive runtime under explicit delegation; nothing is implemented. Submitting a
+quiz publishes `QuizSubmittedEvent` synchronously inside the guarded submission
+transaction; Adaptive recomputes each assessed skill from its latest evidence under
+the Course policy and, when the Course is enabled and ready, applies test-out and
+records recommendations. Result, mastery, `LessonProgress` and recommendation history
+commit or roll back together; an unconfigured Course gets no Adaptive effect, and a
+disabled or not-ready Course gets mastery updates only (ADR005 §7.2). A failing
+Adaptive step fails the submission, and the answers sent with it roll back; an
+Attempt that expires meanwhile is later graded from its last committed answer save,
+so the quiz client saves the answers before every submit. This protects a tab's
+saved set only while no other accepted writer changes it: A-save-M, B-save-N,
+A-submit-M rollback retains N, and finalization grades N if unchanged. Equal saved
+masks guarantee equal grading only, not identical later mastery/routing inputs.
+The client reconciles the fresh Attempt without automatically overwriting another
+tab's set. Recovery removes the cause
+through approved routes, including disabling adaptive mode for routing-stage
+failures, and lets ordinary resubmission or the scheduler re-execute (ADR011 §5).
+Those operational consequences await Leader risk acceptance.
+
+Routing (ADR011 §7): Lessons whose mapped skills are all Mastered are tested out
+(completed and marked mastery-skipped, never reversed); a Weak skill with an
+unmastered direct prerequisite yields a remedial recommendation for that
+prerequisite's Lesson; otherwise the learner continues with the first incomplete
+Lesson in canonical order. Prerequisite gaps only produce warnings. Reasons use fixed
+English templates (§9). Practice difficulty maps Unknown/Weak to easy, Learning to
+medium and Mastered to hard (§8); applying it to quiz capture awaits a Leader-reserved
+amendment of CT04/CT08 evidence rules. The placement diagnostic is an ordinary quiz
+whose scope is its questions' skills; the server names the diagnostic Quiz to offer,
+and skipping is a navigation, not a server write. The Mastery Map, learner
+guidance, learner-home recommendations and Instructor insights are read contracts
+(§§12–15); learners see the current recommendation only while the Course is
+adaptive-enabled, its target Lesson is published and re-evaluating the routing rules
+on current data still yields it; history keeps every row. All Lessons completed
+does not hide a still-selected remedial review; no remaining remedial candidate
+and no incomplete Lesson yields no draft. A rename matters only if the selected
+draft/reason changes. Home includes only ACTIVE published-Course memberships:
+COMPLETED membership omits the Course row even when course guidance still admits
+that learner and shows a valid review; an included row without guidance has null
+recommendation and target title. Both reads use the same visibility predicate.
+Mastery states reflect the latest submitted quiz evidence for each skill; screens must say
+so. Earlier deferral text above is historical to the extent resolved by these
+bounded revisions.
+
+## Batch 7 recommendation notifications — 15 November 2026
+
+[ADR012 §9.4](decisions/012-batch-07-contract-approvals.md#94-ct29--recommendation-created)
+completes the Adaptive → Interaction interaction of §9. `AdaptiveDecisionService`
+publishes one `RecommendationCreatedEvent` per processing run that inserted
+recommendation rows, inside the submission unit; Interaction consumes it only after
+that unit commits, in its own transaction, so a notification failure never rolls
+back mastery, progress or recommendations and a rolled-back unit never notifies.
+Only inserted `remedial` rows (with their CT07.reasons text) and test-out `skip`
+rows notify; `continue` rows do not. Reporting (ADR012 §13) reads mastery
+distributions and quiz outcomes as descriptive metrics only and owns no adaptive
+decision. Adaptive rules, thresholds and recommendation history are unchanged.
+
+## Batch 8 evaluation scenarios and measures — 15 November 2026
+
+[ADR013 §§5–6](decisions/013-batch-08-contract-approvals.md#5-ct36f-scenarios)
+makes §12's evaluation concrete on the `final-v1` Course (twenty skills, twenty-four
+prerequisite edges, one Lesson per skill). Profiles answer the placement quiz with
+all-correct or all-incorrect answers per skill, so the expected results hold for any
+valid policy: **P1** tests out L01–L10 and continues to L11; **P2** (Loops gap) tests
+out L01–L07 and receives a remedial recommendation for L08 (“While Loops”, because
+“Loop Control” is Weak); **P3** receives a remedial recommendation for L01. Path
+divergence counts skipped Lessons plus inserted remedial steps that differ from a
+linear continuation (expected 10, 7 and 0 against the baseline's 0); routing
+correctness uses one gap scenario per edge (G01–G24) plus discriminating variants
+G′01–G′24 and P2-R, and keeps the ≥80% figure as an evaluation target only;
+mastery-update correctness uses cases M01–M11; learning gain is simulated and
+labelled as a procedure demonstration. No real-student pilot is selected (ADR013
+§16.2). The demonstration Course uses `weak 1/2`, `mastered 4/5`,
+`minimumQuestionsPerSkill 6` (ADR013 §16.1). **Practice difficulty (Leader decision
+E02, ADR013 §19):** for a Lesson, Adaptive takes the CT07.difficulty target of the
+Lesson's weakest mapped skill (Unknown and Weak give Easy, Learning gives Medium,
+Mastered gives Hard) and recommends a published practice Quiz whose questions all
+have that difficulty, falling back in CT07.difficulty's order, with a fixed reason.
+The guidance for the next step and the Lesson page show it; it never blocks access
+and is not persisted. Quiz capture, evidence and mastery mathematics are unchanged.
+Accepted limitation (Leader, academic Final only): because the latest attempt decides
+with equal question weight, a few correct Easy answers can make a skill Mastered;
+this is disclosed and is not evidence of learning. No result is claimed.

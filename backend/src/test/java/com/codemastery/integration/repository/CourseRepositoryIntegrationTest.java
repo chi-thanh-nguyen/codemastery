@@ -90,12 +90,21 @@ class CourseRepositoryIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void shouldPersistAndRetrieveCourseHierarchySuccessfully() {
-        // Verify Flyway migrations V001 through V006 are applied and validated
+        // Every discovered migration (V001 onward, contiguous) is applied and validated;
+        // a new versioned migration needs no edit here, but gaps or pending ones fail.
         MigrationInfo[] appliedMigrations = flyway.info().applied();
         List<String> versions = Arrays.stream(appliedMigrations)
                 .map(info -> info.getVersion().getVersion())
                 .toList();
-        assertEquals(List.of("001", "002", "003", "004", "005", "006"), versions);
+        List<String> discovered = Arrays.stream(flyway.info().all())
+                .map(info -> info.getVersion().getVersion())
+                .toList();
+        assertEquals(discovered, versions);
+        assertEquals(0, flyway.info().pending().length);
+        assertEquals(List.of("001", "002", "003", "004", "005", "006"), versions.subList(0, 6));
+        for (int index = 0; index < versions.size(); index++) {
+            assertEquals(String.format("%03d", index + 1), versions.get(index));
+        }
 
         UUID authorId = UUID.randomUUID();
         persistInstructor(authorId, "author-" + authorId + "@example.test", "Dr. Ada Lovelace");

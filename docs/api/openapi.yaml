@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101; see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, and the two AU07 password-recovery operations in PR #239; see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -3247,11 +3247,11 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Public no bearer consumed. Canonical CT01 email; same 202 for known/unknown/locked/full queue. Auth FIFO capacity128, one worker; no lookup/SMTP on response path. Best-effort processing, no delivery guarantee. Active-account PT1M issuance interval; send only after commit. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Implemented under AU07 (PR #239). Public; no bearer consumed; JSON only (other media types 415). Canonical CT01 email; same 202 for known/unknown/locked/full queue and while recovery delivery is unconfigured (then no lookup, capability or email). Auth FIFO capacity128, one worker; no lookup/SMTP on response path. Best-effort processing, no delivery guarantee. Active-account PT1M issuance interval; send only after commit. Real SMTP provider qualification, deployment binding and public exposure remain gated. ADR006 §9 is authoritative; §10 records gate status.",
         "security": [],
         "responses": {
           "202": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Generic acknowledgement; proves no account match or delivery.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3268,11 +3268,13 @@
           "400": {
             "$ref": "#/components/responses/Batch2Invalid"
           },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
+          },
           "500": {
             "$ref": "#/components/responses/Batch2Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -3292,11 +3294,11 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Public no bearer consumed. Opaque 32-byte/43-character Base64url capability, digest-only storage, exact PT30M validity. Generic400 invalid/replaced/used/expired/locked; password CT01 predicate. User-first lock and atomic password-update/token-delete; no auto-login/JWT. Existing tokens retain CT01 validity; reset-specific risk acceptance before exposure is pending. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Implemented under AU07 (PR #239). Public; no bearer consumed; JSON only (other media types 415). Opaque 32-byte/43-character Base64url capability, digest-only storage, exact PT30M validity. Generic400 invalid/replaced/used/expired/locked; password CT01 predicate. User-first lock and atomic password-update/token-delete; no auto-login/JWT. CT01 is unchanged: existing bearer tokens remain valid until their own expiry (at most PT15M); no revocation is implemented, and reset-specific residual-risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public exposure. ADR006 §9 is authoritative; §10 records gate status.",
         "security": [],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Password changed and capability consumed after commit; no credential is returned.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3313,11 +3315,13 @@
           "400": {
             "$ref": "#/components/responses/Batch2Invalid"
           },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
+          },
           "500": {
             "$ref": "#/components/responses/Batch2Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -4798,6 +4802,3381 @@
         },
         "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials": {
+      "post": {
+        "operationId": "b5CreateFileMaterial",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; multipart parts title and file only. Admission precedes reading the part; PDF only by extension and leading bytes; store then commit inside the existing Course configuration guard. Creates a hidden file material; no key, filename or URL in JSON. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMaterialMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "413": {
+            "$ref": "#/components/responses/B5TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/B5MaterialUpload"
+              },
+              "encoding": {
+                "file": {
+                  "contentType": "application/octet-stream"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}": {
+      "put": {
+        "operationId": "b5UpdateFileMaterialTitle",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; replaces the trimmed nonblank title of a file material only. Course guard. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMaterialMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B5FileMaterialTitleWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}/file": {
+      "put": {
+        "operationId": "b5ReplaceFileMaterialFile",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; multipart part file only. New object key; the superseded object is deleted only after a confirmed commit and the new object only when the transaction provably did not commit; an unknown commit outcome is 500 and keeps both (ADR010 §5). ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMaterialMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "413": {
+            "$ref": "#/components/responses/B5TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/B5FileUpload"
+              },
+              "encoding": {
+                "file": {
+                  "contentType": "application/octet-stream"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}/publication": {
+      "put": {
+        "operationId": "b5SetFileMaterialPublication",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; explicit hidden or published for a file material. Course guard; no cascade. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMaterialMetadata"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/file": {
+      "get": {
+        "operationId": "b5DownloadMaterialFile",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Admitted Learner (published Course, Lesson and material; ACTIVE/COMPLETED membership) or owning Instructor preview, through the CT03 material read predicate. Streams through the backend; no pre-signed URL; no database transaction or connection is held while the body is written. Missing object for an existing row is 500. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "materialId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete file body, attachment disposition; a download racing a committed replacement re-admits once and serves the current file (ADR010 §11); specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "Content-Disposition": {
+                "$ref": "#/components/headers/B5AttachmentDisposition"
+              },
+              "X-Content-Type-Options": {
+                "$ref": "#/components/headers/B5NoSniff"
+              },
+              "Content-Length": {
+                "$ref": "#/components/headers/B5ContentLength"
+              }
+            },
+            "content": {
+              "application/pdf": {}
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/assignments": {
+      "post": {
+        "operationId": "b5CreateAssignment",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor (Lesson ownership when lessonId is set); creates a hidden Assignment. Deadline is an RFC 3339 instant with at most microsecond precision. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B5AssignmentWrite"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "b5ListLearnerAssignments",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Self Learner with current visibility; published assignments only, ordered by deadlineAt then UUID. open is derived from server time. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5LearnerAssignmentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/assignments/{assignmentId}": {
+      "get": {
+        "operationId": "b5ReadLearnerAssignment",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Self Learner with current visibility; own submission and own grade only. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5LearnerAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/assignments/{assignmentId}/submission": {
+      "put": {
+        "operationId": "b5PutOwnSubmission",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Self Learner; multipart part file only (PDF or ZIP). Admitted only if server now is before deadlineAt (equality is late), sampled after the Assignment row lock, and the current submission is ungraded. A replacement records a strictly later submittedAt; a non-advancing clock is 500 with rollback. Errors follow ADR010 §14 precedence. 201 when created, 200 when replaced. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5LearnerSubmission"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5LearnerSubmission"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B5Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/B5TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/B5FileUpload"
+              },
+              "encoding": {
+                "file": {
+                  "contentType": "application/octet-stream"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/assignments/{assignmentId}/submission/file": {
+      "get": {
+        "operationId": "b5DownloadOwnSubmission",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Self Learner with current visibility; own current submission file only. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete file body, attachment disposition; a download racing a committed replacement re-admits once and serves the current file (ADR010 §11); specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "Content-Disposition": {
+                "$ref": "#/components/headers/B5AttachmentDisposition"
+              },
+              "X-Content-Type-Options": {
+                "$ref": "#/components/headers/B5NoSniff"
+              },
+              "Content-Length": {
+                "$ref": "#/components/headers/B5ContentLength"
+              }
+            },
+            "content": {
+              "application/pdf": {},
+              "application/zip": {}
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments": {
+      "get": {
+        "operationId": "b5ListOwnedAssignments",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; hidden and published, ordered by title COLLATE C then UUID, with submission and graded counts. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignmentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}": {
+      "get": {
+        "operationId": "b5ReadOwnedAssignment",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; hidden or published Assignment. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      },
+      "put": {
+        "operationId": "b5ReplaceAssignment",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; full replacement of title, instructions, deadlineAt and lessonId. Locks the Assignment row; affects only later admissions. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B5AssignmentWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}/publication": {
+      "put": {
+        "operationId": "b5SetAssignmentPublication",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; explicit hidden or published. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5OwnedAssignment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}/submissions": {
+      "get": {
+        "operationId": "b5ListSubmissions",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; current submissions ordered by submittedAt then UUID, learner display names resolved through Course and Auth. No object keys. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5SubmissionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}/submissions/{submissionId}/file": {
+      "get": {
+        "operationId": "b5DownloadSubmission",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; submission of an Assignment in the owned Course. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "submissionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete file body, attachment disposition; a download racing a committed replacement re-admits once and serves the current file (ADR010 §11); specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              },
+              "Content-Disposition": {
+                "$ref": "#/components/headers/B5AttachmentDisposition"
+              },
+              "X-Content-Type-Options": {
+                "$ref": "#/components/headers/B5NoSniff"
+              },
+              "Content-Length": {
+                "$ref": "#/components/headers/B5ContentLength"
+              }
+            },
+            "content": {
+              "application/pdf": {},
+              "application/zip": {}
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/owned-assignments/{assignmentId}/submissions/{submissionId}/grade": {
+      "put": {
+        "operationId": "b5GradeSubmission",
+        "tags": [
+          "Batch 5 contracts"
+        ],
+        "description": "Owning Instructor; grade 0-100 with at most two decimals, nonblank feedback and the reviewed submittedAt as a precondition (mismatch 409). Regrade replaces all three fields. Publishes no quiz event and changes no mastery or progress; the graded event is CT27. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "submissionId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B5SubmissionSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B5Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B5Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B5Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/B5UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B5Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B5GradeWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{courseId}/mastery-map": {
+      "get": {
+        "operationId": "b6ReadMasteryMap",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Self Learner with ACTIVE/COMPLETED membership in a published Course. Every Course skill with stored state (absent is unknown), direct prerequisites, published related Lessons and latest per-skill score from the latest eligible attempt. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6MasteryMap"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/adaptive-guidance": {
+      "get": {
+        "operationId": "b6ReadAdaptiveGuidance",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Self Learner. Placement offer with the server-chosen diagnostic Quiz to start or resume (ADR011 §11), the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted, and per-Lesson prerequisite warnings (empty when adaptiveEnabled is false). Guidance only; never blocks access. Completing every Lesson does not suppress a still-selected remedial review; only a changed/absent draft fails validity. A rename matters only if the selected draft/reason changes. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6AdaptiveGuidance"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/courses/{courseId}/lessons/{lessonId}/practice-recommendation": {
+      "get": {
+        "operationId": "b8ReadPracticeRecommendation",
+        "tags": [
+          "Batch 8 contracts"
+        ],
+        "description": "Self Learner. Mastery-based practice recommendation for one published Lesson (ADR013 §19, CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1; Leader decision E02 option a). Admission as /adaptive-guidance (CT03 learner Course access, ACTIVE/COMPLETED membership); the Lesson must be a currently published Lesson of that Course, else 404. recommendation is null unless the Course's stored adaptiveEnabled is true, the Lesson has mapped skills and at least one published practice Quiz of uniform difficulty covers only those skills. The governing skill is the Lesson skill with the easiest CT07.difficulty target (unknown/weak easy, learning medium, mastered hard; ties by skill name order); the Quiz is chosen at that level, else by the CT07.difficulty fallback order, then by title and id. Advisory only: never blocks or reorders access, writes nothing, and does not change quiz capture, evidence or mastery. ADR013 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lessonId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B8PracticeRecommendation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B8Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/013-batch-08-contract-approvals.md"
+      }
+    },
+    "/api/me/recommendations": {
+      "get": {
+        "operationId": "b6ListMyRecommendations",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Self Learner. One row per ACTIVE membership of a published Course, same population, order and paging as /api/me/course-progress, with the Course title, the visible current recommendation (ADR011 §15) and its target Lesson title: null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted and nothing is written. Same validity rule as /adaptive-guidance; clients add no filter. COMPLETED membership omits the Course row here, while course guidance can still show a valid completed remedial review. An included ACTIVE row without valid guidance has null recommendation and targetLessonTitle. No cross-Course ranking. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6MyRecommendationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners": {
+      "get": {
+        "operationId": "b6ListCourseLearners",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Owning Instructor; ACTIVE/COMPLETED learners ordered by learner UUID, with CT22 progress, mastery state counts and the unfiltered current recommendation marker (ADR011 §14). Display names via the ADR010 learner-name read. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6CourseLearnerPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners/{learnerId}": {
+      "get": {
+        "operationId": "b6ReadCourseLearner",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "One learner row. Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "learnerId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6CourseLearner"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners/{learnerId}/mastery-map": {
+      "get": {
+        "operationId": "b6ReadLearnerMasteryMap",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Mastery Map of that learner. Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "learnerId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6MasteryMap"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners/{learnerId}/recommendations": {
+      "get": {
+        "operationId": "b6ListLearnerRecommendations",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Full recommendation history (continue, skip, remedial) with target Lesson, reason and time, ordered by recommendedAt descending, then continue/remedial before skip, then target Lesson UUID ascending (ADR011 §9). Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "learnerId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6RecommendationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/instructor/courses/{courseId}/learners/{learnerId}/attempts": {
+      "get": {
+        "operationId": "b6ListLearnerAttempts",
+        "tags": [
+          "Batch 6 contracts"
+        ],
+        "description": "Submitted quiz attempts of that learner in the Course, newest first, without answer keys. Owning Instructor only; the learner must hold an ACTIVE or COMPLETED Enrollment in the Course (otherwise 404); Administrator 403. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "learnerId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B6LearnerAttemptPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B6Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B6Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B6Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
+      }
+    },
+    "/api/me/notifications": {
+      "get": {
+        "operationId": "b7ListMyNotifications",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Any authenticated active account; own notifications only, newest first (createdAt desc, then id desc); unreadOnly filters unread rows. Message-only rows (CT11-READ-FIELDS r1) rendered as plain text. Read-only REPEATABLE READ. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "unreadOnly",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7NotificationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/me/notifications/unread-count": {
+      "get": {
+        "operationId": "b7CountMyUnreadNotifications",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Any authenticated active account; count of own unread notifications. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7UnreadCount"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/me/notifications/{notificationId}/read": {
+      "put": {
+        "operationId": "b7MarkMyNotificationRead",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Marks one own notification read; idempotent; no body is needed and any body is ignored. A missing or foreign notification is the same 404. There is no mark-unread or delete. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notificationId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7Notification"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/me/notifications/read-all": {
+      "put": {
+        "operationId": "b7MarkAllMyNotificationsRead",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Marks every own unread notification read in one statement and returns how many changed; no body is needed. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7MarkedCount"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/lessons/{lessonId}/discussion": {
+      "get": {
+        "operationId": "b7ListLessonDiscussion",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "CT03 requireLessonReadAccess on the Lesson (active/completed Learner member of the published Course and published Lesson, or owning Instructor including hidden preview); Administrator 403; other denials are the concealed 404. Questions newest first with all visible replies oldest first; hidden posts and replies of hidden questions never appear. CT30-ACCESS/POSTS/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lessonId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7DiscussionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      },
+      "post": {
+        "operationId": "b7CreateLessonDiscussionPost",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Same admission as the list. Creates a question (no parentPostId) or a one-level reply to a visible question of this Lesson; a reply to a reply is 400 and a hidden, missing or foreign parent is 404. Content is stored verbatim. A reply notifies the question author in the same transaction (CT30-NOTIFY-2026-11-15-r1). No edit or delete operation exists. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lessonId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7DiscussionPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7DiscussionPostWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/{lessonId}/reports": {
+      "post": {
+        "operationId": "b7ReportLesson",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Same admission as the discussion list. Reports the Lesson itself; status open; duplicates are allowed and resolved together by moderation. CT30-REPORTS-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lessonId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7ContentReportReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7ContentReportWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lessons/{lessonId}/discussion/{postId}/reports": {
+      "post": {
+        "operationId": "b7ReportDiscussionPost",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Same admission as the discussion list; the post must be a visible post of this Lesson, else 404. Status open; duplicates are allowed. CT30-REPORTS-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lessonId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "postId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7ContentReportReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7ContentReportWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/audit-logs": {
+      "get": {
+        "operationId": "b7ListAuditLogs",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Optional AND filters; occurredFrom inclusive and occurredTo exclusive (RFC 3339, at most microsecond precision, from before to). Ordered occurredAt desc, then id desc. CT31-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "actorId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user_role_set_learner",
+                "user_role_set_instructor",
+                "user_role_set_admin",
+                "user_locked",
+                "user_unlocked",
+                "course_hidden",
+                "report_post_hidden",
+                "report_lesson_hidden",
+                "report_dismissed"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "targetType",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "course",
+                "content_report"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "targetReference",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "occurredFrom",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "occurredTo",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AuditLogPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "b7SearchUsers",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Optional trimmed query matches a case-insensitive substring of email or display name; optional exact role and accountStatus filters; ordered by email (C collation), then id. No credential data. CT12-USER-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "Learner",
+                "Instructor",
+                "Administrator"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "accountStatus",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "locked"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminUserPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/users/{userId}/role": {
+      "put": {
+        "operationId": "b7ChangeUserRole",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Same role is changed=false and not audited. Own role, or removing the last active Administrator, is 409; an actor who is no longer an active Administrator under lock is 403. Audited as user_role_set_* in the same transaction. Takes effect on the user's next request. CT12-USER-2026-11-15-r2, CT12-REST-2026-11-15-r1, CT31-ACTIONS/CONSISTENCY-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminUserChange"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B7Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7AdminRoleWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{userId}/account-status": {
+      "put": {
+        "operationId": "b7ChangeUserAccountStatus",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Lock or unlock. Same status is changed=false and not audited. Own status, or locking the last active Administrator, is 409. Audited as user_locked or user_unlocked in the same transaction; a locked account never authenticates. CT12-USER-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminUserChange"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B7Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7AdminAccountStatusWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/courses": {
+      "get": {
+        "operationId": "b7ListCoursesForAdministration",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Hidden and published Courses; optional case-insensitive title substring and publicationStatus filter; ordered by title (C collation), then id. instructorDisplayName comes from Auth user summaries for the page's instructor IDs (null for a missing account), never from the published-catalogue name lookup. CT12-COURSE-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "publicationStatus",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hidden",
+                "published"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminCoursePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/courses/{courseId}/publication": {
+      "put": {
+        "operationId": "b7HideCourseAsAdministrator",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Only hidden is accepted (published is 400). Same effects as the Instructor hidden publication change, under the Course root lock taken first; already hidden is changed=false and not audited; otherwise audited as course_hidden in the same transaction. The owner may republish. CT12-COURSE-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7AdminCourseChange"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7AdminCoursePublicationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/content-reports": {
+      "get": {
+        "operationId": "b7ListContentReports",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Reports with one status (default open), ordered createdAt ascending, then id; post content is shown verbatim as plain text, including hidden posts. CT32-QUEUE/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "resolved",
+                "dismissed"
+              ],
+              "default": "open"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7ModerationReportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/content-reports/{reportId}/decision": {
+      "put": {
+        "operationId": "b7DecideContentReport",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). On an open report only (else 409). hide: hides the post or the Lesson and resolves every open report on that target, one audit row each; dismiss: dismisses only this report. Statuses never reopen; nothing is deleted. CT32-HIDE/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reportId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7ModerationDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "409": {
+            "$ref": "#/components/responses/B7Conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/B7UnsupportedMedia"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/B7ModerationDecisionWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/metrics/courses": {
+      "get": {
+        "operationId": "b7ListCourseMetrics",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). Per-Course enrollment counts, completion and quiz-outcome figures for hidden and published Courses, ordered by title (C collation), then id; computed at read time by the owning modules in one read-only snapshot. CT13-METRICS/READS/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7CourseMetricsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
+      }
+    },
+    "/api/admin/metrics/courses/{courseId}": {
+      "get": {
+        "operationId": "b7ReadCourseMetrics",
+        "tags": [
+          "Batch 7 contracts"
+        ],
+        "description": "Administrator only (any other role 403 before resource lookup). The Course's figures plus the mastery-state distribution of joined learners per skill (Unknown includes learners without a mastery row). CT13-METRICS/READS/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "courseId",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/AuthenticationNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/B7CourseMetricsDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/B7Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/ProtectedUnauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ProtectedForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/B7Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/B7Failure"
+          }
+        },
+        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     }
   },
@@ -7046,6 +10425,2355 @@
           }
         ],
         "description": "Active/overdue captured view or submitted immutable result; never null correctness or keys."
+      },
+      "B5FileUpload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "description": "Raw binary file bytes; multipart Content-Disposition must carry the original filename. No base64 or text conversion."
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "description": "Exactly one part named file. Extension and leading bytes decide the type; the part Content-Type is ignored."
+      },
+      "B5MaterialUpload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "file": {
+            "description": "Raw binary file bytes; multipart Content-Disposition must carry the original filename. No base64 or text conversion."
+          }
+        },
+        "required": [
+          "title",
+          "file"
+        ],
+        "description": "Exactly the parts title and file; PDF only."
+      },
+      "B5FileMaterialTitleWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "B5AssignmentWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "instructions": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "deadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "title",
+          "instructions",
+          "deadlineAt",
+          "lessonId"
+        ]
+      },
+      "B5OwnedAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "instructions": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "deadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "submissionCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "gradedCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "lessonId",
+          "title",
+          "instructions",
+          "deadlineAt",
+          "publicationStatus",
+          "submissionCount",
+          "gradedCount"
+        ]
+      },
+      "B5OwnedAssignmentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B5OwnedAssignment"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B5LearnerAssignmentSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "deadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "submissionStatus": {
+            "type": "string",
+            "enum": [
+              "none",
+              "submitted",
+              "graded"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "lessonId",
+          "title",
+          "deadlineAt",
+          "open",
+          "submissionStatus"
+        ],
+        "description": "open is true when server now is before deadlineAt."
+      },
+      "B5LearnerAssignmentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B5LearnerAssignmentSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B5LearnerSubmission": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "originalFilename": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Verbatim client filename; at most 255 UTF-8 bytes, no path separators or control characters."
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "graded": {
+            "type": "boolean"
+          },
+          "gradePercentage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "feedback": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          },
+          "gradedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "originalFilename",
+          "submittedAt",
+          "graded",
+          "gradePercentage",
+          "feedback",
+          "gradedAt"
+        ],
+        "description": "Own current submission. Grade, feedback and gradedAt are all null before grading and all present after."
+      },
+      "B5LearnerAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "instructions": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "deadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "submission": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B5LearnerSubmission"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "courseId",
+          "lessonId",
+          "title",
+          "instructions",
+          "deadlineAt",
+          "open",
+          "submission"
+        ]
+      },
+      "B5SubmissionSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "learnerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "learnerDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "originalFilename": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Verbatim client filename; at most 255 UTF-8 bytes, no path separators or control characters."
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Microsecond instant; also the grade precondition token, to be echoed as this exact string (ADR010 §9)."
+          },
+          "graded": {
+            "type": "boolean"
+          },
+          "gradePercentage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "feedback": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          },
+          "gradedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "assignmentId",
+          "learnerId",
+          "learnerDisplayName",
+          "originalFilename",
+          "submittedAt",
+          "graded",
+          "gradePercentage",
+          "feedback",
+          "gradedAt"
+        ],
+        "description": "Owner view; never an object key. learnerDisplayName is null when the name lookup omits the learner."
+      },
+      "B5SubmissionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B5SubmissionSummary"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B5GradeWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gradePercentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "feedback": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gradePercentage",
+          "feedback",
+          "submittedAt"
+        ],
+        "description": "submittedAt is an opaque token: echo the exact RFC 3339 string received in the submission row (microsecond digits included, never round-tripped through a millisecond Date). It must equal the current submittedAt instant; a stale value is 409, nonzero sub-microsecond digits are 400. Every replacement records a strictly later value."
+      },
+      "B6MasterySkill": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "learning",
+              "mastered",
+              "weak"
+            ]
+          },
+          "prerequisiteSkillIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          },
+          "relatedLessonIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          },
+          "latestScore": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          },
+          "latestAssessedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "state",
+          "prerequisiteSkillIds",
+          "relatedLessonIds",
+          "latestScore",
+          "latestAssessedAt"
+        ],
+        "description": "prerequisiteSkillIds: direct prerequisites (skill depends on them), sorted. relatedLessonIds: published mapped Lessons in canonical order. latestScore/latestAssessedAt null without evidence."
+      },
+      "B6MasteryMap": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "learnerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6MasterySkill"
+            }
+          }
+        },
+        "required": [
+          "courseId",
+          "learnerId",
+          "adaptiveEnabled",
+          "skills"
+        ],
+        "description": "Skills ordered by lowercase UUID. States reflect the latest submitted quiz evidence for each skill."
+      },
+      "B6CurrentRecommendation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "remedial"
+            ]
+          },
+          "targetLessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "recommendedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "targetCompleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "targetLessonId",
+          "reason",
+          "recommendedAt",
+          "targetCompleted"
+        ],
+        "description": "Current continue/remedial row (ADR011 §7: unique greatest recommendedAt per Enrollment); reason verbatim. Learner reads return it only while it is still valid under ADR011 §15 (adaptive enabled, target published, and re-evaluating the routing rules on current data yields the same type, target and reason). All Lessons completed can still yield a valid remedial review with targetCompleted=true; no draft requires no remaining remedial candidate as well. A rename invalidates it only if the selected draft/reason changes. targetCompleted can be true only for a remedial review target."
+      },
+      "B6LessonGuidance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "unmasteredPrerequisiteSkillIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "lessonId",
+          "unmasteredPrerequisiteSkillIds"
+        ],
+        "description": "Warning only; never an access rule."
+      },
+      "B6AdaptiveGuidance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "placementOffered": {
+            "type": "boolean"
+          },
+          "placementQuizId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The diagnostic Quiz the learner can start or resume now (ADR011 §11); non-null exactly when placementOffered is true. Clients offer only this Quiz."
+          },
+          "currentRecommendation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B6CurrentRecommendation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lessons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6LessonGuidance"
+            }
+          }
+        },
+        "required": [
+          "courseId",
+          "adaptiveEnabled",
+          "placementOffered",
+          "placementQuizId",
+          "currentRecommendation",
+          "lessons"
+        ],
+        "description": "lessons covers every published Lesson in canonical order. ACTIVE/COMPLETED learners remain admitted; completing all Lessons alone does not suppress a still-valid remedial review. The visibility predicate is identical to the Home read within its ACTIVE-only population."
+      },
+      "B8PracticeRecommendation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adaptiveEnabled": {
+            "type": "boolean"
+          },
+          "recommendation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B8RecommendedPractice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "courseId",
+          "lessonId",
+          "adaptiveEnabled",
+          "recommendation"
+        ],
+        "description": "Computed on read from the learner's stored mastery states and the published Quiz bank; not persisted and not a path recommendation. Clients show it as returned, add no selection of their own, and keep every Quiz available."
+      },
+      "B8RecommendedPractice": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizTitle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ],
+            "description": "Uniform difficulty of every Question of the recommended Quiz."
+          },
+          "targetDifficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ],
+            "description": "CT07.difficulty target of the governing skill's state."
+          },
+          "fallback": {
+            "type": "boolean",
+            "description": "True exactly when difficulty differs from targetDifficulty."
+          },
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skillName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skillState": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "learning",
+              "mastered",
+              "weak"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Fixed English template (ADR013 §19.4), shown verbatim."
+          }
+        },
+        "required": [
+          "quizId",
+          "quizTitle",
+          "difficulty",
+          "targetDifficulty",
+          "fallback",
+          "skillId",
+          "skillName",
+          "skillState",
+          "reason"
+        ]
+      },
+      "B6MyRecommendation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "courseTitle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recommendation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B6CurrentRecommendation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "targetLessonTitle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "description": "Stored title of the recommendation's target Lesson; null exactly when recommendation is null."
+          }
+        },
+        "required": [
+          "courseId",
+          "courseTitle",
+          "recommendation",
+          "targetLessonTitle"
+        ],
+        "description": "recommendation is the visible current recommendation of ADR011 §15, or null when the Course's adaptiveEnabled is false, no current row exists, its target is not a published Lesson or the routing rules evaluated on current data no longer yield it. courseTitle and targetLessonTitle come from Course data, so Learner Home needs no per-Course request. Only ACTIVE memberships of published Courses have rows; COMPLETED/LEFT/absent memberships and hidden Courses are omitted. An included row without visible guidance has both recommendation and targetLessonTitle null."
+      },
+      "B6MyRecommendationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6MyRecommendation"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B6RecommendationEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "skip",
+              "remedial"
+            ]
+          },
+          "targetLessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "recommendedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "targetLessonId",
+          "reason",
+          "recommendedAt"
+        ]
+      },
+      "B6RecommendationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6RecommendationEntry"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B6MasteryCounts": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "unknown": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "learning": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mastered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "weak": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "unknown",
+          "learning",
+          "mastered",
+          "weak"
+        ]
+      },
+      "B6RecommendationMarker": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "remedial"
+            ]
+          },
+          "recommendedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "type",
+          "recommendedAt"
+        ]
+      },
+      "B6CourseLearner": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "learnerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "membershipStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed"
+            ]
+          },
+          "completedLessons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalLessons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "progressPercentage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "masteryCounts": {
+            "$ref": "#/components/schemas/B6MasteryCounts"
+          },
+          "currentRecommendation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/B6RecommendationMarker"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "learnerId",
+          "displayName",
+          "membershipStatus",
+          "completedLessons",
+          "totalLessons",
+          "progressPercentage",
+          "masteryCounts",
+          "currentRecommendation"
+        ]
+      },
+      "B6CourseLearnerPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6CourseLearner"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B6LearnerAttempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quizTitle": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quizKind": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "practice",
+              "test"
+            ]
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scorePercentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "multipleOf": 0.01
+          }
+        },
+        "required": [
+          "attemptId",
+          "quizId",
+          "quizTitle",
+          "quizKind",
+          "attemptNumber",
+          "submittedAt",
+          "scorePercentage"
+        ]
+      },
+      "B6LearnerAttemptPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B6LearnerAttempt"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7Notification": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "message",
+          "read",
+          "createdAt"
+        ]
+      },
+      "B7NotificationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7Notification"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7UnreadCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "unreadCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "unreadCount"
+        ]
+      },
+      "B7MarkedCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "markedCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "markedCount"
+        ]
+      },
+      "B7DiscussionReply": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parentPostId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "Learner",
+              "Instructor",
+              "Administrator",
+              null
+            ]
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "parentPostId",
+          "authorId",
+          "authorDisplayName",
+          "authorRole",
+          "mine",
+          "content",
+          "createdAt"
+        ]
+      },
+      "B7DiscussionThread": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "Learner",
+              "Instructor",
+              "Administrator",
+              null
+            ]
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "replies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7DiscussionReply"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "authorId",
+          "authorDisplayName",
+          "authorRole",
+          "mine",
+          "content",
+          "createdAt",
+          "replies"
+        ]
+      },
+      "B7DiscussionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7DiscussionThread"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7DiscussionPostWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Stored verbatim; plain text."
+          },
+          "parentPostId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Null or absent for a question; a visible question of the same Lesson for a reply."
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "B7DiscussionPost": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parentPostId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "Learner",
+              "Instructor",
+              "Administrator",
+              null
+            ]
+          },
+          "mine": {
+            "type": "boolean"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "lessonId",
+          "parentPostId",
+          "authorId",
+          "authorDisplayName",
+          "authorRole",
+          "mine",
+          "content",
+          "createdAt"
+        ]
+      },
+      "B7ContentReportWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Stored verbatim; plain text."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "B7ContentReportReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "const": "open"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "createdAt"
+        ]
+      },
+      "B7AuditLogEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "user_role_set_learner",
+              "user_role_set_instructor",
+              "user_role_set_admin",
+              "user_locked",
+              "user_unlocked",
+              "course_hidden",
+              "report_post_hidden",
+              "report_lesson_hidden",
+              "report_dismissed"
+            ]
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "user",
+              "course",
+              "content_report"
+            ]
+          },
+          "targetReference": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "actorId",
+          "actorDisplayName",
+          "action",
+          "targetType",
+          "targetReference",
+          "occurredAt"
+        ]
+      },
+      "B7AuditLogPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7AuditLogEntry"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7AdminUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "minLength": 1
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "Learner",
+              "Instructor",
+              "Administrator"
+            ]
+          },
+          "accountStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "locked"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "email",
+          "displayName",
+          "role",
+          "accountStatus"
+        ]
+      },
+      "B7AdminUserPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7AdminUser"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7AdminRoleWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "Learner",
+              "Instructor",
+              "Administrator"
+            ]
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "B7AdminAccountStatusWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accountStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "locked"
+            ]
+          }
+        },
+        "required": [
+          "accountStatus"
+        ]
+      },
+      "B7AdminUserChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/B7AdminUser"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "user",
+          "changed"
+        ]
+      },
+      "B7AdminCourse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "instructorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "instructorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "courseId",
+          "title",
+          "publicationStatus",
+          "instructorId",
+          "instructorDisplayName"
+        ]
+      },
+      "B7AdminCoursePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7AdminCourse"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7AdminCoursePublicationWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "publicationStatus": {
+            "type": "string",
+            "const": "hidden",
+            "description": "Only hidden is accepted; published is 400."
+          }
+        },
+        "required": [
+          "publicationStatus"
+        ]
+      },
+      "B7AdminCourseChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "course": {
+            "$ref": "#/components/schemas/B7AdminCourse"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "course",
+          "changed"
+        ]
+      },
+      "B7ModerationReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reporterId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reporterDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "discussion_post",
+              "lesson"
+            ]
+          },
+          "postId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "postContent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postAuthorId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "postAuthorDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postHidden": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "lessonId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lessonTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lessonPublicationStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "hidden",
+              "published",
+              null
+            ]
+          },
+          "courseId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "courseTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "reportId",
+          "status",
+          "reason",
+          "createdAt",
+          "resolvedAt",
+          "reporterId",
+          "reporterDisplayName",
+          "targetType",
+          "postId",
+          "postContent",
+          "postAuthorId",
+          "postAuthorDisplayName",
+          "postHidden",
+          "lessonId",
+          "lessonTitle",
+          "lessonPublicationStatus",
+          "courseId",
+          "courseTitle"
+        ]
+      },
+      "B7ModerationReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7ModerationReport"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7ModerationDecisionWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "hide",
+              "dismiss"
+            ]
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "B7ModerationDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "hide",
+              "dismiss"
+            ]
+          },
+          "resolvedReportIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "resolvedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "decision",
+          "resolvedReportIds",
+          "status",
+          "resolvedAt"
+        ]
+      },
+      "B7CourseMetrics": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "activeEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completedEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "leftEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "joinedLearners": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completedLearners": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completionRatePercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "averageQuizScore": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Exact mean rounded half-up to two fraction digits; null when no attempt qualifies."
+          },
+          "scoredLearnerQuizPairs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "courseId",
+          "title",
+          "publicationStatus",
+          "activeEnrollments",
+          "completedEnrollments",
+          "leftEnrollments",
+          "joinedLearners",
+          "completedLearners",
+          "completionRatePercent",
+          "scoredLearnerQuizPairs",
+          "averageQuizScore"
+        ]
+      },
+      "B7CourseMetricsPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7CourseMetrics"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "totalElements": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPages": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "content",
+          "page",
+          "size",
+          "totalElements",
+          "totalPages"
+        ]
+      },
+      "B7SkillMasteryCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skillName": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "unknown": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "learning": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mastered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "weak": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "skillId",
+          "skillName",
+          "unknown",
+          "learning",
+          "mastered",
+          "weak"
+        ]
+      },
+      "B7CourseMetricsDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "courseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "publicationStatus": {
+            "type": "string",
+            "enum": [
+              "hidden",
+              "published"
+            ]
+          },
+          "activeEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completedEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "leftEnrollments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "joinedLearners": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completedLearners": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completionRatePercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "averageQuizScore": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Exact mean rounded half-up to two fraction digits; null when no attempt qualifies."
+          },
+          "masteryDistribution": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/B7SkillMasteryCount"
+            }
+          },
+          "scoredLearnerQuizPairs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "courseId",
+          "title",
+          "publicationStatus",
+          "activeEnrollments",
+          "completedEnrollments",
+          "leftEnrollments",
+          "joinedLearners",
+          "completedLearners",
+          "completionRatePercent",
+          "scoredLearnerQuizPairs",
+          "averageQuizScore",
+          "masteryDistribution"
+        ]
       }
     },
     "responses": {
@@ -7124,6 +12852,21 @@
       },
       "Batch2Invalid": {
         "description": "Malformed/unknown/duplicate input or invalid feature payload. Recovery capability failures are indistinguishable: Reset link is invalid or expired. No sensitive values.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "Batch2UnsupportedMedia": {
+        "description": "Request is not application/json; no effect and no account information.",
         "headers": {
           "Cache-Control": {
             "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7241,6 +12984,231 @@
             }
           }
         }
+      },
+      "B5Invalid": {
+        "description": "Malformed identifier, JSON, page, multipart parts, filename, file type or signature, empty file, grade, precision or deadline; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5Unavailable": {
+        "description": "Safe unavailable resource: missing, hidden or foreign Course, Lesson, material, assignment or submission; no identifiers or keys.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5Conflict": {
+        "description": "Valid request in an invalid lifecycle state: deadline reached, graded submission, or stale submittedAt grade precondition.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5TooLarge": {
+        "description": "File part exceeds the configured upload limit (CT18-B5-ERRORS-2026-11-12-r1); no storage write.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5UnsupportedMedia": {
+        "description": "Request media type does not match the operation (multipart versus JSON); no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B5Failure": {
+        "description": "Safe storage, integrity, clock or transaction failure; no automatic retry. A failure before the commit phase rolls back and deletes the new object; an unknown commit outcome keeps both objects and the client must reload the resource before another attempt (ADR010 §5).",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B6Invalid": {
+        "description": "Malformed identifier or page; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B8Unavailable": {
+        "description": "Safe unavailable resource: missing or hidden Course (CT03 stage 3), or, for a Learner with an ACTIVE/COMPLETED Enrollment, a Lesson that is missing, hidden or not in that Course; no identifiers. A LEFT or absent Enrollment on a published Course is 403 (CT03 stage 4), not 404.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B6Unavailable": {
+        "description": "Safe unavailable resource: missing or hidden Course, or a learner without an ACTIVE/COMPLETED Enrollment in the owned Course; no identifiers.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B6Failure": {
+        "description": "Safe provider, integrity or snapshot failure; no partial representation.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7Invalid": {
+        "description": "Malformed identifier, query value, page or JSON body, or a field rule failure (for example a blank text, a reply to a reply or an unsupported filter value); no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7Unavailable": {
+        "description": "Safe unavailable resource: missing, hidden or foreign Lesson, post, notification, user, Course or report, including CT03 concealment; no identifiers.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7Conflict": {
+        "description": "Valid request in a forbidden state: report already decided, self role or status change, or the last active Administrator would be removed; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7UnsupportedMedia": {
+        "description": "JSON operation received another request media type; no effects.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "B7Failure": {
+        "description": "Safe provider, integrity, clock or transaction failure; the whole unit rolled back, including any audit row; no automatic retry.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/AuthenticationNoStore"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
       }
     },
     "headers": {
@@ -7256,6 +13224,27 @@
         "schema": {
           "type": "string",
           "const": "Bearer"
+        }
+      },
+      "B5AttachmentDisposition": {
+        "description": "attachment; filename=\"<ASCII fallback>\"; filename*=UTF-8''<percent-encoded original filename> (RFC 6266/8187).",
+        "schema": {
+          "type": "string",
+          "pattern": "^attachment; "
+        }
+      },
+      "B5NoSniff": {
+        "description": "Prevents content sniffing of downloaded files.",
+        "schema": {
+          "type": "string",
+          "const": "nosniff"
+        }
+      },
+      "B5ContentLength": {
+        "description": "Exact stored object length in bytes.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }
@@ -7364,7 +13353,8 @@
       "approvalDisposition": "DELEGATED_APPROVED",
       "effectiveOnMain": false,
       "scope": "U07 structural/no-extra-read prerequisite technically resolved; bounded Course structure/guard/settings boundaries added. Original seven assertions, U03/U04 and access/error policy unchanged. New PR integration pending.",
-      "focusedCorrectionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026"
+      "focusedCorrectionReference": "../decisions/005-batch-01-contract-approvals.md#13-focused-f1f4-amendments--8-november-2026",
+      "currentStateCorrection": "Current-state correction, 15 November 2026 (ADR012 §20 F7-15): PR #228 merged ADR005 into main as 81806fc on 9 November 2026 with no approving review recorded; the effectiveOnMain/integrationStatus values in this object are the historical preparation state. Independent review remains outstanding."
     }
   },
   "x-fe07-delegated-approval": {
@@ -7458,12 +13448,13 @@
       "effectiveOnMain": false,
       "scope": "Same-snapshot guarded PUT preconditions, generic safe 412 wording, explicit shared-client no-content mode for five unchanged 204 operations, existing verification allocations. Preserves N1 validator-free PUT success, original revisions and all other scopes. Approved, not implemented.",
       "scopePrecedence": "ADR005 section 16 replaces only the listed conditional input/comparison/error clauses and adds bounded CT16 no-content handling; sections 13 and 15 continue to govern all unaffected scopes. Earlier currentRevisions fields identify their historical amendment, not blanket precedence."
-    }
+    },
+    "currentStateCorrection": "Current-state correction, 15 November 2026 (ADR012 §20 F7-15): PR #228 merged ADR005 into main as 81806fc on 9 November 2026 with no approving review recorded; the effectiveOnMain/integrationStatus values in this object are the historical preparation state. Independent review remains outstanding."
   },
   "x-batch-02-contracts": {
     "decisionReference": "../decisions/006-batch-02-contract-approvals.md",
     "status": "DELEGATED_APPROVED",
-    "implementation": "NOT_IMPLEMENTED",
+    "implementation": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_239",
     "checkpoints": [
       "CT22.progress",
       "CT22.resume",
@@ -7477,11 +13468,11 @@
     "authority": "Codex delegated technical approval under explicit Project Leader Batch 2 instruction, 9 November 2026; Leader separately authorized reset-only email exception and bounded visit-time schema/read.",
     "retainedGates": [
       "Independent owner/CODEOWNER review, CI and protected merge",
-      "Separate implementation authorization, NEW migrations and runtime privilege qualification",
-      "SMTP adapter/provider/trusted origin and abuse/load qualification",
-      "Reset-specific residual-token risk acceptance before public recovery exposure",
+      "Other Batch 2 implementation work, NEW migrations and runtime privilege qualification remain separately gated",
+      "SMTP provider, real credentials, trusted origin binding and abuse/load qualification (adapter and placement LEADER_APPROVED in ADR006 §10.2)",
+      "Reset-specific residual-token risk acceptance (PENDING_LEADER_RISK_ACCEPTANCE) before public recovery exposure (ADR006 §9.4, §10.4)",
       "CT09/CT12/CT26/CT22.atomic/CT33 remain separately governed",
-      "CT22 schema/read explicitly authorized; no migration or privilege change performed"
+      "CT22 schema/read remains separately gated; AU07 implementation and V007 (AU07-IMPL-2026-11-13-r1) and runtime DML (CT17-P6-PRIVILEGES-2026-11-13-r2) are LEADER_APPROVED; V007 grants nothing and shared/production migration execution is not authorized"
     ]
   },
   "x-batch-03-contracts": {
@@ -7510,6 +13501,7 @@
       "CT08.execution/failure/verification-plan and CT22.atomic remain pending",
       "CT25 diagnostic and CT28 notification binding remain pending",
       "Configuration values and scheduler/deadline/privilege qualification"
-    ]
+    ],
+    "currentStateCorrection": "Current-state correction, 15 November 2026 (ADR012 §20 F7-15): PR #230 merged ADR007 as 3eeacc8 on 9 November 2026. The retained gate naming CT08.execution/failure/verification-plan and CT22.atomic as pending is historical: ADR011 approved them (PR #236, c80fda9). CT25 is approved in ADR011 and CT28 in ADR012 (PR #244, open). No approving review is recorded for these merges."
   }
 }

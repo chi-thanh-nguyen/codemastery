@@ -5,12 +5,12 @@
 // Nothing here touches Docker, Vite, a browser or the real registry.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-    MAX_INTENTS, MAX_OBSERVATIONS, MAX_RECORD_BYTES, SCHEMA, UntrustedInventory,
-    addIntent, markerFile, observe, readInventory, readMarker, setIntent, updateInventory, writeInventory,
+    MAX_INTENTS, MAX_OBSERVATIONS, MAX_RECORD_BYTES, OwnershipLost, SCHEMA, UntrustedInventory,
+    addIntent, admissionProblem, ownershipProblem, markerFile, observe, readInventory, readMarker, setIntent, updateInventory, writeInventory,
 } from './run-inventory.mjs';
 
 const scratch = (body) => {
@@ -21,7 +21,8 @@ const scratch = (body) => {
         rmSync(dir, { recursive: true, force: true });
     }
 };
-const base = () => ({ schema: SCHEMA, contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-test', state: 'active', ownerUid: process.getuid(), intents: [], processes: {}, observations: [] });
+const base = () => ({ schema: SCHEMA, contract: 'CT34-FIXTURES-2026-11-10-r2', runId: 'cm-e2e-test', state: 'active', ownerUid: process.getuid(), intents: [], processes: {}, observations: [],
+    checkout: { path: '/nonexistent/checkout', dev: 1, ino: 2 }, outputs: [] });
 
 describe('the run inventory is durable, bounded and non-secret', () => {
     test('writes a 0600 single-link record and reads it back', () => scratch((dir, file) => {
@@ -59,12 +60,35 @@ describe('the run inventory is durable, bounded and non-secret', () => {
         assert.throws(() => writeInventory(file, huge), /refusing to write/);
     }));
 
-    test('rejects a record whose mode was widened or that gained a second link', () => scratch((dir, file) => {
+    test('rejects a record whose mode was widened, that gained a second link or that is reached through a symlink', () => scratch((dir, file) => {
         writeInventory(file, base());
         chmodSync(file, 0o644);
-        assert.ok(readInventory(file), 'a widened mode alone still parses; ownership is what gates it');
-        writeFileSync(join(dir, 'other.json'), JSON.stringify(base()), { mode: 0o600 });
-        assert.ok(readInventory(join(dir, 'other.json')));
+        assert.throws(() => readInventory(file), /has mode 644, not 600/);
+        chmodSync(file, 0o600);
+        assert.ok(readInventory(file));
+        linkSync(file, join(dir, 'second-link.json'));
+        assert.throws(() => readInventory(file), /not a single-link ordinary file/);
+        rmSync(join(dir, 'second-link.json'));
+        symlinkSync(file, join(dir, 'alias.json'));
+        assert.throws(() => readInventory(join(dir, 'alias.json')), /a symlink is never followed/);
+    }));
+
+    test('rejects malformed fields before any of them can reach Docker, a signal or a path', () => scratch((dir, file) => {
+        const write = (patch) => writeFileSync(file, JSON.stringify({ ...base(), ...patch }), { mode: 0o600 });
+        for (const [patch, what] of [
+            [{ runId: '../../etc' }, /run ID/],
+            [{ state: 'done' }, /state/],
+            [{ processes: { preview: { pid: -1 } } }, /process preview PID/],
+            [{ processes: { preview: { pid: 5, control: 7 } } }, /control channel/],
+            [{ intents: [{ id: 'i1', kind: 'image', dockerId: 'x' }] }, /intent kind/],
+            [{ intents: [{ id: 'i1', kind: 'container', dockerId: '--all' }] }, /intent dockerId/],
+            [{ intents: [{ id: 'i1', kind: 'volume', name: 'a/b' }] }, /intent name/],
+            [{ docker: { endpoint: 5 } }, /docker identity/],
+            [{ temp: { path: null } }, /temporary build/],
+        ]) {
+            write(patch);
+            assert.throws(() => readInventory(file), what, JSON.stringify(patch));
+        }
     }));
 
     test('bounds observations instead of growing without limit', () => scratch((dir, file) => {
@@ -110,4 +134,69 @@ describe('creation intents survive a crash between creation and identity persist
         writeFileSync(markerFile(dir), 'cm-e2e-abc\n', { mode: 0o600 });
         assert.equal(readMarker(dir), 'cm-e2e-abc');
     }));
+});
+
+describe('only the coordinator\'s current hand-down admits a process', () => {
+    const handDown = (dir, file, patch = {}) => {
+        writeInventory(file, { ...base(), runId: 'cm-e2e-adm', lockKey: '1-2', processes: { supervisor: { pid: 4242 } }, ...patch });
+        return {
+            CODEMASTERY_E2E_OWNERSHIP: '1-2:cm-e2e-adm', CODEMASTERY_E2E_RUN_ID: 'cm-e2e-adm', CODEMASTERY_E2E_LOCK_KEY: '1-2',
+            CODEMASTERY_E2E_INVENTORY: file, CODEMASTERY_E2E_SUPERVISOR: '4242',
+        };
+    };
+    test('the coordinator\'s child with the active record is admitted', () => scratch((dir, file) => {
+        assert.equal(admissionProblem({ env: handDown(dir, file), ppid: 4242 }), null);
+    }));
+    test('exported variables in another process, a finished run or a mismatched token are refused', () => scratch((dir, file) => {
+        const env = handDown(dir, file);
+        assert.match(admissionProblem({ env, ppid: 1 }), /not started by the coordinator/);
+        assert.match(admissionProblem({ env: { ...env, CODEMASTERY_E2E_OWNERSHIP: '1-2:cm-e2e-other' }, ppid: 4242 }), /token does not name/);
+        assert.match(admissionProblem({ env: {}, ppid: 4242 }), /no lifecycle ownership/);
+        handDown(dir, file, { state: 'complete' });
+        assert.match(admissionProblem({ env, ppid: 4242 }), /the run is complete, not active/);
+    }));
+    test('once the coordinator has recorded the runner, only that process is admitted', () => scratch((dir, file) => {
+        const env = handDown(dir, file, { processes: { supervisor: { pid: 4242 }, runner: { pid: 5150, state: 'live' } } });
+        assert.equal(admissionProblem({ env, ppid: 4242, pid: 5150 }), null);
+        assert.match(admissionProblem({ env, ppid: 4242, pid: 5151 }), /names runner 5150, not this process/);
+        handDown(dir, file, { processes: { supervisor: { pid: 4242 }, runner: { pid: null, state: 'starting' } } });
+        assert.equal(admissionProblem({ env, ppid: 4242, pid: 5151 }), null, 'while only the intent exists, the coordinator\'s child is admitted');
+    }));
+
+    test('a configuration of another checkout is refused even with a valid hand-down', () => scratch((dir, file) => {
+        const env = handDown(dir, file);
+        assert.match(admissionProblem({ env, ppid: 4242, checkoutDir: dir }), /belongs to another checkout/);
+        const info = lstatSync(dir);
+        const own = handDown(dir, file, { lockKey: `${info.dev}-${info.ino}` });
+        own.CODEMASTERY_E2E_LOCK_KEY = `${info.dev}-${info.ino}`;
+        own.CODEMASTERY_E2E_OWNERSHIP = `${info.dev}-${info.ino}:cm-e2e-adm`;
+        assert.equal(admissionProblem({ env: own, ppid: 4242, checkoutDir: dir }), null);
+    }));
+});
+
+describe('inventory mutations come only from a process acting for the lock holder\'s run', () => {
+    const handDown = { CODEMASTERY_E2E_RUN_ID: 'cm-e2e-test', CODEMASTERY_E2E_LOCK_KEY: 'k1', CODEMASTERY_E2E_SUPERVISOR: '4242', CODEMASTERY_E2E_FENCE: '1' };
+    test('the coordinator\'s child changes its own run\'s record', () => scratch((dir, file) => {
+        writeInventory(file, { ...base(), lockKey: 'k1', fence: 1, revision: 1 });
+        updateInventory(file, (record) => observe(record, 'allowed'), { env: handDown, ppid: 4242 });
+        assert.match(readInventory(file).observations.at(-1), /allowed/);
+    }));
+    test('an orphan whose coordinator died changes nothing', () => scratch((dir, file) => {
+        writeInventory(file, { ...base(), lockKey: 'k1', fence: 1, revision: 1 });
+        const before = readFileSync(file, 'utf8');
+        assert.throws(() => updateInventory(file, (record) => observe(record, 'orphan'), { env: handDown, ppid: 1 }),
+            (error) => error instanceof OwnershipLost && /coordinator 4242 .* is no longer this process' parent \(parent 1\)/.test(error.message));
+        assert.equal(readFileSync(file, 'utf8'), before, 'the record is byte-identical');
+    }));
+    test('a later run\'s record at the same path is never changed by an earlier run\'s process', () => scratch((dir, file) => {
+        writeInventory(file, { ...base(), runId: 'cm-e2e-later', lockKey: 'k1', fence: 1, revision: 1 });
+        const before = readFileSync(file, 'utf8');
+        assert.throws(() => updateInventory(file, (record) => observe(record, 'stale'), { env: handDown, ppid: 4242 }),
+            /belongs to run cm-e2e-later, not to the handed-down run cm-e2e-test/);
+        assert.equal(readFileSync(file, 'utf8'), before);
+    }));
+    test('a partial hand-down is refused; no hand-down at all is the uncoordinated unit-test path', () => {
+        assert.match(ownershipProblem(base(), { env: { CODEMASTERY_E2E_RUN_ID: 'cm-e2e-test' }, ppid: 1 }), /hand-down is incomplete/);
+        assert.equal(ownershipProblem(base(), { env: {}, ppid: 1 }), null);
+    });
 });

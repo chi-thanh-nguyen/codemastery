@@ -30,6 +30,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
+import org.springframework.boot.test.context.TestComponent;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -714,7 +715,13 @@ class JwtTokenProviderTest {
         }
     }
 
-    /** Test-only effect target; production adds no endpoint or protected operation. */
+    /**
+     * Test-only effect target; production adds no endpoint or protected operation. Registered only
+     * through {@link SecurityFixture}'s import; {@code @TestComponent} keeps Spring Boot's test
+     * component-scan filter from adding this catch-all {@code /api/**} handler to application
+     * contexts, where it would answer unmatched requests and hide production 404/415 behavior.
+     */
+    @TestComponent
     @RestController
     static class FixtureEndpoints {
         private final AtomicInteger effects = new AtomicInteger();
