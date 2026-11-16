@@ -1,3 +1,13 @@
 codemastery:
   scheduling:
     enabled: false
+
+  security:
+    # Synthetic, non-routable recovery inputs so integration tests exercise active
+    # recovery; delivery itself is replaced by a test double where it is observed.
+    password-reset:
+      frontend-origin: https://codemastery.test
+      email-from: auth@codemastery.test
+      smtp-host: smtp.codemastery.test
+      smtp-username: test-smtp-user
+      smtp-password: test-smtp-password

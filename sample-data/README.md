@@ -375,3 +375,39 @@ domain and cannot reach a real mailbox.
   implemented. No file-material row is seeded and no object is uploaded to MinIO.
 - **Environments.** Nothing here provisions object storage, deploys an environment
   or authorizes seeding outside your own disposable database.
+
+## Final dataset `final-v1` — approved contract, not yet authored
+
+[ADR013 §§3–4](../docs/decisions/013-batch-08-contract-approvals.md#3-ct15f-admin-account--trial-accounts-per-role)
+approves the Final dataset contract (`CT15-F-ADMIN-ACCOUNT-2026-11-15-r1`,
+`CT15-F-ASSESSMENT-2026-11-15-r2` and, except its demonstration policy values,
+`CT15-F-ADAPTIVE-2026-11-15-r1`). **None of it is in the seed files yet**; the
+`interim-v1` instructions above are unchanged and remain the only loadable dataset.
+
+- **IDs.** UUIDv5 in the URL namespace for
+  `https://codemastery.test/final-v1/<logical-key>`, insert-only and no-overwrite as
+  above.
+- **Accounts (`01-users.sql`).** The existing `interim-v1` Instructor and Learner rows
+  are reused unchanged (a second row with the same email would conflict). New:
+  `admin@example.test` (Administrator) and the profile learners `p1@`, `p2@` and
+  `p3@example.test`. Every password is chosen at load time and only its hash is
+  passed in through the environment; nothing is committed.
+- **Course (`02`–`03`).** “Python Fundamentals”: six Chapters, twenty published
+  Lessons L01–L20 with text materials, twenty skills S01–S20 mapped one to one, and
+  the twenty-four prerequisite edges listed in ADR013 §4.2. The PDF material on L01
+  is uploaded through the application after loading.
+- **Assessment (`04`).** 120 questions (six per skill: two easy, two medium, two
+  hard), a placement quiz over S01–S10, one mixed practice quiz per skill, three
+  per-difficulty practice quizzes per skill (Easy, Medium, Hard; two questions each,
+  sixty in total, ADR013 §19.6), one final test and two file assignments whose
+  deadlines are load-time inputs.
+- **Profiles (`05`).** Accounts and active enrolments only. Mastery, progress and
+  recommendations are produced by taking the quizzes in the application, never
+  seeded.
+- **Adaptive policy.** Three load-time inputs validated by ADR005 §6.2. The approved
+  demonstration values are `weak 1/2`, `mastered 4/5` and
+  `minimumQuestionsPerSkill 6` (ADR013 §16.1); they are demonstration-course data,
+  not a system default.
+- **Deployed trial accounts.** Seeding a deployment target needs the Leader's
+  authorization; credentials are handed to the lecturer only through a
+  Leader-controlled secure location.

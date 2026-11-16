@@ -570,3 +570,241 @@ is inferred from technical approval.
 Security mechanism reference: [OWASP recovery guidance](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html).
 It supports side-channel possession, indistinguishable requests and expiring single
 use; the exact CodeMastery values/semantics above come from this delegated decision.
+
+## 10. AU07 implementation record and gate status — 12–13 November 2026
+
+This section records the AU07 implementation in
+[PR #239](https://github.com/chi-thanh-nguyen/codemastery/pull/239) and the Project
+Leader's bounded decisions about it. **It does not re-approve, supersede or modify any
+CT02 revision.** `CT02-DELIVERY/WORKFLOW/TOKEN/REST-2026-11-09-r1` and
+`ARCH-RESET-EMAIL-2026-11-09-r1` remain effective exactly as written in §§7.1 and 9.
+The §9.1 sentence "No SMTP library, adapter file or production binding is added by this
+PR" described PR #229; the approved adapter below answers the §9.1 adapter gate rather
+than superseding it.
+
+### 10.1 Authorization provenance
+
+- **12 November 2026, relayed claim (historical, never confirmed as relayed).** The PR
+  author @duyduyit relayed, in a Codex session, a Leader instruction authorizing AU07
+  implementation, V007 with runtime grants, and the SMTP adapter, and stating that the
+  reset-specific JWT risk had been accepted. No Leader-authored record of it was found.
+  It is not an authority source. §10.2 replaces it for the items listed there; the
+  risk-acceptance part remains unconfirmed.
+- **13 November 2026, Leader remediation instruction.** In a Claude Code session, the
+  Leader instructed remediation engineering of PR #239 and an independent technical
+  assessment, explicitly not as approval of new contracts or risk acceptance. It is the
+  authority for the corrections listed after the table in §10.3.
+- **13 November 2026, Leader decisions.** The authority for §10.2.
+
+### 10.2 Leader decisions — `AU07-IMPL-2026-11-13-r1` and `CT17-P6-PRIVILEGES-2026-11-13-r2`
+
+**LEADER_APPROVED, 13 November 2026 (Asia/Ho_Chi_Minh).** Authority: the explicit
+instruction of Project Leader and repository Owner @chi-thanh-nguyen, "CodeMastery —
+PR #239 Leader Authorization, Contract Synchronization & PR Finalization", given in a
+Claude Code session and recorded on
+[Issue #180](https://github.com/chi-thanh-nguyen/codemastery/issues/180) from the
+authenticated Leader account. These are personal Leader approvals of bounded technical
+choices and implementation scope. They are not independent review, CI or merge evidence.
+
+`AU07-IMPL-2026-11-13-r1` approves:
+
+1. **AU07 implementation authorization:** the password-recovery implementation under
+   the four CT02 r1 revisions, including the existing Auth service, REST endpoints,
+   persistence integration and required tests.
+2. **Flyway V007:** `V007__create_password_reset_tokens.sql` exactly as specified in
+   §9.2, with no embedded runtime GRANT and no Flyway role placeholder. This approves
+   inclusion in the repository and execution in controlled test environments (CI,
+   Testcontainers and disposable qualification databases). It does **not** authorize
+   execution against a shared or production database.
+3. **SMTP adapter and structure:** Spring Mail (`spring-boot-starter-mail`,
+   Boot-managed version) and the Auth-owned `SmtpPasswordResetEmailAdapter` under
+   `modules/auth/infrastructure/email/`. Transport stays fixed: authenticated SMTP on
+   port 587, mandatory STARTTLS, certificate and hostname verification, finite
+   timeouts, and transactional reset email only (`ARCH-RESET-EMAIL-2026-11-09-r1`).
+4. **Feature-scoped fail-closed behavior:** the backend stays operational without valid
+   SMTP/recovery settings. The reset request then keeps the generic 202, issues no
+   token and sends no email. Unrelated functionality and backend health are unaffected.
+
+`CT17-P6-PRIVILEGES-2026-11-13-r2` approves a bounded AU07 extension of the CT17 r1
+runtime matrix: `users` keeps SELECT, INSERT and adds UPDATE (password_hash);
+`password_reset_tokens` gets SELECT, INSERT, DELETE. It approves no other privilege,
+role elevation or change. The
+[deployment record](../deployment.md#ct17-p6-privileges-2026-11-13-r2--au07-extension-leader_approved-13-november-2026)
+holds the revision; the r1 record stays unchanged as history.
+
+**Exclusions:** public recovery exposure, production provisioning, real SMTP
+credentials, VM deployment, bypass of independent review, and merging PR #239. The
+reset-specific JWT residual risk (§9.4) remains **PENDING_LEADER_RISK_ACCEPTANCE**;
+CT01 is unchanged.
+
+### 10.3 Implementation decisions and their status
+
+| Decision | Gate addressed | Status |
+| --- | --- | --- |
+| Spring Mail with the Auth-owned adapter in `modules/auth/infrastructure/email/`. The adapter builds its own `JavaMailSenderImpl`, so there is no `spring.mail.*` binding and no Spring Boot mail sender or health contributor | §9.1 adapter, dependency and placement | LEADER_APPROVED (§10.2 item 3) |
+| Fixed transport policy: authenticated submission on port 587; STARTTLS enabled and required; server-identity check; 5000 ms connect, read and write deadlines; no trust override or plaintext fallback; plain-text message | §9.1 TLS and finite deadlines | LEADER_APPROVED (§10.2 item 3) |
+| Feature-scoped activation. Recovery is active only when `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `PASSWORD_RESET_EMAIL_FROM` (a bare address) and `PASSWORD_RESET_FRONTEND_ORIGIN` are valid and `PASSWORD_RESET_TOKEN_TTL` is PT30M. A valid origin is HTTPS with a lowercase host and has no path, query, fragment, userinfo or wildcard. Otherwise: identical 202, no lookup, capability or email; one variable-named startup warning and an aggregate counter. Confirmation, unrelated features and health are unaffected | B2-O16 | LEADER_APPROVED (§10.2 item 4) |
+| `management.health.mail.enabled: false` | §9.1 failure isolation | Conforms (item 4) |
+| V007 creates exactly the §9.2 table and grants nothing | §9.2; §9.4 migration gate | LEADER_APPROVED (§10.2 item 2) |
+| Runtime privileges come only from the CT17 matrix | §9.4 minimal runtime privileges | LEADER_APPROVED (`CT17-P6-PRIVILEGES-2026-11-13-r2`) |
+| Confirmation re-reads the capability after the User lock, without a token row lock, because every capability write holds that lock | §9.2 | Conforms; no contract change |
+| Queue capacity 128, single worker, PT1M reissue and PT30M lifetime | §9.1/§9.2 | Unchanged CT02 r1 values |
+| JSON-only operations (other media types get CT18 415); strict closed DTOs; generic 400 detail from a code-fixed `BusinessRuleException` public detail (no new exception class or status) | §9.3, §8 | Conforms |
+| Tests in `AuthServiceTest` and `AuthorizationIntegrationTest`, plus required updates to existing `CourseRepositoryIntegrationTest` and the CT17 VM test scripts | §8 placement | Existing files only; covered by item 1 |
+
+The 12 November draft also contained a V007 `GRANT … TO ${runtime-role}`, a global
+lowercase `DB_USER` rule, required `spring.mail.*` settings and Compose variables that
+every environment had to supply. These broke direct-SQL migration paths, the CT17
+verification, application health and the VM release, and the 13 November remediation
+replaced them as above.
+
+### 10.4 Gates that remain open
+
+- **Reset-specific JWT residual risk:** §9.4 remains PENDING_LEADER_RISK_ACCEPTANCE. CT01
+  is unchanged and nothing is revoked; a previously issued bearer stays valid until its
+  own PT15M expiry. An integration test records this behavior and does not establish a
+  revocation guarantee. Public recovery exposure requires a separate Leader acceptance.
+- **Independent review and integration:**
+  - CODEOWNER reviews: Leader for `common/`, configuration, migration, `pom.xml` and
+    docs; @tihh647-ui for `infrastructure/`; @TamiaoNguyen for
+    `CourseRepositoryIntegrationTest`;
+  - the eligible non-last-pusher approval required by the ruleset;
+  - required CI on the final head;
+  - protected merge, which is not authorized here.
+- **Migration execution** on any shared or production database: separately Leader-reserved.
+- **Deployment-only:**
+  - a separately authorized SMTP binding (the VM release environment allowlist passes
+    no SMTP variables, so recovery stays inactive there);
+  - real provider delivery and failure qualification;
+  - ingress abuse and load qualification;
+  - the FE06 frontend handoff.
+
+### 10.5 Delegated decisions on the independent-review findings — `AU07-REVIEW-2026-11-13-r1` and `CT38-PASSWORD-RESET-2026-11-13-r1`
+
+**DELEGATED_APPROVED, 13 November 2026 (Asia/Ho_Chi_Minh).** Authority line:
+DELEGATED_TECHNICAL_APPROVAL. Authority: the explicit instruction of Project Leader and
+repository Owner @chi-thanh-nguyen, "CodeMastery — PR #239 Remaining Findings
+Remediation", given in a Claude Code session. It authorized the agent to reassess the
+seven P2 findings of the independent review of PR #239 head `e685b24`, to resolve the
+CT38 variable-name and §9.4 gate-classification findings with contract-compatible
+decisions, and to approve and record bounded technical decisions on the Leader's behalf
+where they are verified as necessary, sound, secure and consistent with existing
+approved contracts. That instruction excludes, and these decisions do not grant:
+
+- acceptance of the reset-specific JWT residual risk (§9.4 stays
+  PENDING_LEADER_RISK_ACCEPTANCE);
+- production provisioning, shared-database migration execution, public exposure and
+  deployment;
+- review bypass or merge of PR #239.
+
+These decisions are additions. They re-approve, supersede or modify none of the CT02 r1
+revisions, `ARCH-RESET-EMAIL-2026-11-09-r1`, `AU07-IMPL-2026-11-13-r1`,
+`CT17-P6-PRIVILEGES-2026-11-13-r2`, CT38.core or any other record. They were made
+through AI-assisted development and are not independent review evidence.
+
+#### 10.5.1 `CT38-PASSWORD-RESET-2026-11-13-r1` — CT38.feature.password-reset
+
+CT38.core retains a fixed variable list and notes that inventing new names expands the
+contract; CT38.remaining stays DEFERRED. The AU07 delivery inputs therefore need their
+own bounded slice, following the `CT38-QUIZ-EXPIRY-2026-11-09-r1` pattern (ADR007
+§3.2). This slice approves exactly these backend host/process inputs, bound in existing
+`common/config/AppConfig.java` and `application.yml` and consumed only by the Auth
+recovery activation and its SMTP adapter:
+
+| Environment input | Spring property (`codemastery.security.password-reset.*`) | Validation |
+|---|---|---|
+| `PASSWORD_RESET_TOKEN_TTL` | `token-ttl` | Existing name and PT30M default (already on `main`); must equal PT30M (`CT02-TOKEN-2026-11-09-r1`) |
+| `PASSWORD_RESET_FRONTEND_ORIGIN` | `frontend-origin` | HTTPS origin; lowercase host equal to its ASCII form; no userinfo, path, query, fragment or wildcard |
+| `PASSWORD_RESET_EMAIL_FROM` | `email-from` | One bare address, strictly parsed; no display name or list |
+| `SMTP_HOST` | `smtp-host` | Required; no whitespace |
+| `SMTP_USERNAME` | `smtp-username` | Required; never logged or echoed |
+| `SMTP_PASSWORD` | `smtp-password` | Required secret; never logged or echoed; no default |
+
+Every input except the TTL rejects blank values and the existing placeholder rule:
+values containing `${` or `<SET_ME`, or exactly `changeme` or `placeholder`. The slice applies `AU07-IMPL-2026-11-13-r1`
+item 4 instead of CT38.core's startup failure. Recovery is active only when all six
+inputs are valid. Otherwise the backend still starts, recovery stays inactive, and one
+warning names the variables but never their values. This matches CT38.core's rule that
+optional integrations are validated only when actually consumed. The following stay
+fixed in code and have no input:
+
+- the submission port 587;
+- mandatory STARTTLS, certificate and hostname verification;
+- mandatory SMTP authentication (§10.5.2 item 3);
+- finite timeouts.
+
+No `spring.mail.*` binding and no `VITE_*` variable are approved. Local Compose and the
+VM release environment allowlist pass none of these inputs. Production values, a
+deployment binding and real credentials remain deployment gates, and secrets stay out
+of the repository.
+
+#### 10.5.2 `AU07-REVIEW-2026-11-13-r1` — findings dispositions
+
+1. **Implementation file scope.** The AU07 additions to existing shared files are
+   bounded consequences of approved contracts and stay within `AU07-IMPL-2026-11-13-r1`
+   item 1. No new file outside the approved structure is involved.
+   - `AppConfig`: the typed settings and activation holder for §10.5.1. This is the
+     same placement the CT38.feature precedent uses.
+   - `BusinessRuleException` / `GlobalExceptionHandler`: the code-fixed public detail
+     for the exact §9.2 400 message. No new exception class, status or error envelope is
+     added.
+2. **§9.4 gate classification.** §9.4 lists items "required before implementation
+   acceptance/exposure". It is read without removing any item.
+   - **Before implementation acceptance (independent CODEOWNER review, protected merge
+     and CI):** deterministic repository tests of delivery, failure, timing and queue
+     behavior, and of current-account lock races. These include the real SMTP exchanges
+     with an isolated loopback server, the full-queue and after-commit tests, and the
+     runtime-role request-worker run.
+   - **Before exposure:** everything in §9.4 that needs a real environment, as listed
+     in §10.4. This covers real-provider delivery and failure qualification, timing and
+     queue-load or abuse qualification in the deployed environment, configured trusted
+     origin, sender and TLS secrets, migration execution authorization, and Leader risk
+     acceptance.
+   - Merging therefore does not expose recovery or accept any risk. Recovery stays
+     inactive wherever the §10.5.1 inputs are absent.
+3. **Mandatory SMTP authentication.** An isolated test server reproduced the defect on
+   PR head `e685b24`: when the server's post-STARTTLS EHLO did not offer AUTH, the
+   adapter delivered the reset message unauthenticated. With `mail.smtp.auth=true`,
+   Jakarta Mail skips authentication in that case. §9.1 and §10.2 item 3 require
+   authenticated SMTP.
+   - The adapter's sender now refuses the connection before `MAIL FROM` unless AUTH
+     was offered. When AUTH is offered, Jakarta Mail authenticates during connect and
+     fails on rejection.
+   - The check uses the Jakarta Mail implementation that `spring-boot-starter-mail`
+     already supplies, `org.eclipse.angus:angus-mail`. It is declared at compile scope
+     with its Boot-managed version, so no new library, version or technology is added
+     (within §10.2 item 3).
+4. **Confirmation lock duration.** Confirmation resolves the digest without a lock
+   first, so an unknown, used or replaced capability costs no BCrypt work. It then
+   computes the cost-14 hash and only after that takes the User row lock to re-read,
+   check and write.
+   - The §9.2 order (private digest resolution, User-first lock, re-read after locking,
+     status and exact expiry checks, atomic update and delete) is unchanged.
+   - The lock is no longer held for about a second of hashing, which used to delay the
+     same user's foreign-key inserts.
+   - The `FOR UPDATE` lock mode is unchanged.
+5. **Test-context isolation.** A test-only catch-all `/api/**` controller in
+   `JwtTokenProviderTest` was component-scanned into the integration application
+   context. There it answered permitted paths and hid the production 415. It is now a
+   Spring Boot `@TestComponent`, registered only by its own fixture. An integration test
+   asserts the production 415 for both recovery operations and the deny-by-default 403
+   for an unlisted operation.
+6. **Runtime-role request worker.** `test-runtime-real-backend-privileges.sh` restarts
+   the real backend image with recovery activated by synthetic inputs. The SMTP host is
+   an unresolvable `.invalid` name, so delivery fails after commit. Under the CT17 r2
+   runtime role the run verifies:
+   - issuance with a PT30M lifetime and a 32-byte digest;
+   - PT1M suppression and FIFO processing;
+   - no capability for locked or unknown accounts;
+   - no recipient address in the logs;
+   - no permission failure.
+7. **OpenAPI status vocabulary.** The AU07 operations drop the per-operation marker,
+   following the precedent of the PR #101 implemented operations. The Batch 2 summary
+   uses the existing `SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_…` form, so neither goes
+   stale at merge.
+
+The gates in §10.4 remain open, as do Flyway's automatic application of V007 whenever a
+build containing it starts against a database and the remaining operational gates in
+the [CT17 r2 record](../deployment.md#ct17-p6-privileges-2026-11-13-r2--au07-extension-leader_approved-13-november-2026).
+Starting any such build against a shared or production database executes V007. That
+execution remains Leader-reserved under §10.2 item 2 and is not authorized.

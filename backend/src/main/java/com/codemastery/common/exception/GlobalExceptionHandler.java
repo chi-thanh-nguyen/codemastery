@@ -49,7 +49,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(BusinessRuleException.class)
     public ResponseEntity<Object> handleBusinessRule(BusinessRuleException exception, WebRequest request) {
-        return response(exception.getStatus(), HttpHeaders.EMPTY, request, List.of());
+        return response(exception.getStatus(), HttpHeaders.EMPTY, request, List.of(), exception.getPublicDetail());
     }
 
     @ExceptionHandler(Exception.class)
@@ -110,12 +110,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private ResponseEntity<Object> response(HttpStatusCode status, HttpHeaders originalHeaders,
             WebRequest request, List<ValidationError> errors) {
+        return response(status, originalHeaders, request, errors, null);
+    }
+
+    /** contractDetail is a code-fixed constant from BusinessRuleException, never exception text. */
+    private ResponseEntity<Object> response(HttpStatusCode status, HttpHeaders originalHeaders,
+            WebRequest request, List<ValidationError> errors, String contractDetail) {
         if (request instanceof ServletWebRequest servletRequest
                 && servletRequest.getResponse() != null && servletRequest.getResponse().isCommitted()) {
             return null;
         }
         HttpStatus standardStatus = HttpStatus.resolve(status.value());
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, safeDetail(status.value()));
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status,
+                contractDetail == null ? safeDetail(status.value()) : contractDetail);
         problem.setType(URI.create("about:blank"));
         problem.setTitle(standardStatus == null ? "HTTP Error" : standardStatus.getReasonPhrase());
         if (request instanceof ServletWebRequest servletRequest) {

@@ -957,3 +957,20 @@ path (`AttemptService` and the event) imports no Adaptive type; Assessment's exi
 approved `SkillGraphService` uses and the Assessment-owned difficulty port are
 unchanged, and Admin/Interaction ownership is unchanged. Review,
 integration, implementation and real transaction verification remain gates.
+
+## 17. Batch 7 interaction and administration boundaries — 15 November 2026
+
+[ADR012](012-batch-07-contract-approvals.md) records the delegated Batch 7
+decisions. Course, Assessment and Adaptive reach Interaction only through the
+approved events (`ContentPublishedEvent`, `AssignmentGradedEvent`,
+`QuizSubmittedEvent`, `RecommendationCreatedEvent`), each consumed by Interaction's
+`NotificationEventListener` **after commit** in its own transaction, so a
+notification can neither roll back nor outlive its producer's unit. ADR011's single
+in-transaction subscriber of `QuizSubmittedEvent` is unchanged; the after-commit
+Interaction subscriber is the separate contract §16 above anticipated. Interaction
+calls bounded Course, Auth and Assessment reads (titles and publication state,
+joined learners, author names, reminder candidates); Admin calls Auth, Course,
+Interaction, Assessment and Adaptive public methods and writes its audit row in the
+same transaction as the audited action. Nothing calls Admin, no module reads another
+module's tables, and Admin/Reporting owns no adaptive decision. Review, integration,
+runtime grants and implementation remain gates.

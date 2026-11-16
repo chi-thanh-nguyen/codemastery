@@ -342,6 +342,27 @@ added after checkout in the `deployment-script` job; it runs `bash -n` on every
 script in the directory. No new job, test framework, directory, deployment, ruleset,
 required-check or protected-review change is approved.
 
+## Bounded AU07 file additions — 13 November 2026
+
+On 2026-11-13 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen explicitly approved, in the instruction "CodeMastery — PR #239
+Leader Authorization, Contract Synchronization & PR Finalization", the following two
+file additions for AU07
+([PR #239](https://github.com/chi-thanh-nguyen/codemastery/pull/239);
+`AU07-IMPL-2026-11-13-r1`,
+[ADR006 §10.2](decisions/006-batch-02-contract-approvals.md#102-leader-decisions--au07-impl-2026-11-13-r1-and-ct17-p6-privileges-2026-11-13-r2)):
+
+| File | Purpose |
+| --- | --- |
+| `backend/src/main/java/com/codemastery/modules/auth/infrastructure/email/SmtpPasswordResetEmailAdapter.java` | Auth-owned implementation of the CT02 delivery port: plain-text SMTP submission with mandatory STARTTLS, in a new `infrastructure/email/` directory of the owning Auth module |
+| `backend/src/main/resources/db/migration/V007__create_password_reset_tokens.sql` | The NEW migration for the ADR006 §9.2 `password_reset_tokens` design, with no grant |
+
+Both files are shown in the tree below. The existing Auth-module and migration-directory
+CODEOWNERS rules cover them and are unchanged. The immutable canonical tree remains
+unchanged; this is an explicit addition, not a reinterpretation of its original
+inventory. No other directory, module or file and no execution of V007 against a
+shared or production database are approved.
+
 ## Bounded FE24 E2E lifecycle inventory addition — 13 November 2026
 
 On 2026-11-13 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
@@ -528,17 +549,21 @@ codemastery/
 
 │       │   │               │       │       └── UserRepositoryImpl.java
 
-│       │   │               │       └── security/
+│       │   │               │       ├── security/
 
-│       │   │               │           ├── AuthenticatedUser.java
+│       │   │               │       │   ├── AuthenticatedUser.java
 
-│       │   │               │           ├── JwtAuthenticationFilter.java
+│       │   │               │       │   ├── JwtAuthenticationFilter.java
 
-│       │   │               │           ├── JwtTokenProvider.java
+│       │   │               │       │   ├── JwtTokenProvider.java
 
-│       │   │               │           ├── RestSecurityErrorHandler.java
+│       │   │               │       │   ├── RestSecurityErrorHandler.java
 
-│       │   │               │           └── SecurityConfig.java
+│       │   │               │       │   └── SecurityConfig.java
+
+│       │   │               │       └── email/
+
+│       │   │               │           └── SmtpPasswordResetEmailAdapter.java
 
 │       │   │               ├── course/
 
@@ -1138,7 +1163,9 @@ codemastery/
 
 │       │               ├── V005__create_mastery_and_recommendation_schema.sql
 
-│       │               └── V006__create_interaction_and_audit_schema.sql
+│       │               ├── V006__create_interaction_and_audit_schema.sql
+
+│       │               └── V007__create_password_reset_tokens.sql
 
 │       └── test/
 
@@ -2088,3 +2115,21 @@ loader-script or helper path is added.
 
 The approved `sample-data/` inventory is unchanged: `README.md`,
 `materials/sample-slides.pdf` and `seed/01`–`05` keep their existing paths.
+
+### Batch 7 delegated integration-test placement — 15 November 2026
+
+`CT14-INTEGRATION-PLACEMENT-2026-11-15-r1` is **DELEGATED_APPROVED** under the Project
+Leader's explicit instruction of 15 November 2026, “CodeMastery — Final Contract
+Resolution & Comprehensive Independent Re-Audit of PR #244 and #245”, which delegated
+the bounded test-structure decision for the gaps ADR008 §5 recorded
+([ADR012 §19.3](decisions/012-batch-07-contract-approvals.md#193-ct14-integration-placement-2026-11-15-r1--interactionadmin-and-storage-suites)).
+Exactly these two test files may be added; they are not yet created:
+
+- backend/src/test/java/com/codemastery/integration/InteractionAdminIntegrationTest.java
+- backend/src/test/java/com/codemastery/integration/FileStorageIntegrationTest.java
+
+Both extend the existing `AbstractIntegrationTest`. The storage suite uses a
+Testcontainers `GenericContainer` from the already declared test dependency with the
+MinIO image digest pinned in `infrastructure/docker-compose.yml`; no new dependency,
+directory or production file is approved. The canonical tree above is unchanged; this
+is an explicit addition.

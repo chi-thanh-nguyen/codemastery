@@ -33,6 +33,8 @@ public class SecurityConfig {
     static final RequestMatcher PUBLIC_OPERATIONS = new OrRequestMatcher(
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/register"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/login"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/password-reset-requests"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/password-resets"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}"));
 

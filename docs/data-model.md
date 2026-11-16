@@ -452,13 +452,14 @@ The approved initial physical decisions above are no longer deferred. Later
 changes require new Flyway migrations after this baseline; an applied or possibly
 applied migration must never be edited.
 
-Still deferred: public APIs/DTOs, password-reset persistence/security workflow,
-additional profiles/storage metadata/submission history, numeric mastery if an
-approved algorithm needs it, adaptive configuration keys/thresholds/routing and
-evidence aggregation, module interfaces/events/transaction execution, and proven
-future indexes. These require their feature contracts before implementation.
-Seed/demo content remains separate under `sample-data/`; no versioned migration
-in this foundation supplies application records.
+Still deferred: additional profiles/storage metadata/submission history, numeric
+mastery if an approved algorithm needs it, adaptive configuration
+keys/thresholds/routing and evidence aggregation, module interfaces/events/
+transaction execution, and proven future indexes. Password recovery is
+implemented under AU07 (PR #239) using the approved CT02 contract and the additive
+V007 table, which grants nothing; real SMTP delivery and independent review remain
+outstanding. Seed/demo content remains separate under `sample-data/`; no migration
+supplies application account records.
 
 ### CT01 account/identity contract supplement — approved, integration pending
 
@@ -654,7 +655,7 @@ Additive physical design for later NEW Flyway migration(s), not V001–V006 edit
 | Object | Approved design | Authority / remaining gate |
 |---|---|---|
 | enrollments.last_visited_at | nullable timestamptz, Java Instant, no default/backfill; legacy null means unknown; successful visit captures PostgreSQL clock_timestamp once under Course/Enrollment locks and writes pointer/time together | `CT22-RESUME-SCHEMA-2026-11-09-r1`, explicit additional Leader authorization; migration implementation and runtime grants still required |
-| password_reset_tokens | Auth-owned id uuid PK; user_id uuid unique FK users; token_digest bytea unique, exactly 32 bytes; issued_at/expires_at timestamptz NOT NULL, expires_at > issued_at; no defaults | `CT02-TOKEN-2026-11-09-r1`; exact constraint names and no-action/nondeferrable FK in [ADR006 §9.2](decisions/006-batch-02-contract-approvals.md#92-capability-storage-and-confirmation-transaction); separately authorized NEW migration required |
+| password_reset_tokens | Auth-owned id uuid PK; user_id uuid unique FK users; token_digest bytea unique, exactly 32 bytes; issued_at/expires_at timestamptz NOT NULL, expires_at > issued_at; no defaults | `CT02-TOKEN-2026-11-09-r1`; exact constraint names and no-action/nondeferrable FK in [ADR006 §9.2](decisions/006-batch-02-contract-approvals.md#92-capability-storage-and-confirmation-transaction); implemented by V007 exactly as approved, without grants; V007 and AU07 implementation `AU07-IMPL-2026-11-13-r1` and runtime DML `CT17-P6-PRIVILEGES-2026-11-13-r2` are LEADER_APPROVED (13 November 2026, [ADR006 §10.2](decisions/006-batch-02-contract-approvals.md#102-leader-decisions--au07-impl-2026-11-13-r1-and-ct17-p6-privileges-2026-11-13-r2)); execution against a shared or production database is not authorized |
 
 One outstanding reset row per User; active eligible request replaces it, successful
 confirmation updates BCrypt hash and deletes matching capability atomically under
@@ -666,8 +667,14 @@ here, rather than authority inferred from the dormant configuration default.
 Learner-level resume selects only accessible recorded ACTIVE Course visits by time
 descending and Course UUID ascending on ties; legacy null times never become fake
 visits. No cross-course adaptive logic. CT01 membership/identity/JWT contracts and
-all existing physical constraints remain effective. NEW migrations, grants,
-implementation/security review and reset exposure risk acceptance stay separate.
+all existing physical constraints remain effective. AU07 adds V007 (no grant); the
+runtime role's `users` UPDATE (password_hash) and `password_reset_tokens` SELECT,
+INSERT, DELETE are the LEADER_APPROVED `CT17-P6-PRIVILEGES-2026-11-13-r2` rows. Under
+unchanged CT01, already-issued JWTs remain valid until their original expiry (at most
+PT15M) after reset; this is not global logout or account-compromise recovery, and
+reset-specific risk acceptance remains PENDING_LEADER_RISK_ACCEPTANCE before public
+exposure. Real SMTP delivery and protected review remain outstanding; public exposure
+is not authorized by this implementation.
 
 
 ## Batch 3 assessment lifecycle contract — no physical change
@@ -717,3 +724,24 @@ that inserts rows uses an instant strictly later than the Enrollment's latest
 `recommended_at`, so the current row is unique without a new column. All of
 these share the submission's transaction and lock order (ADR011 §4). No migration,
 column, index or ledger is added.
+
+## Batch 7 interaction, administration and reporting — no physical change
+
+[ADR012](decisions/012-batch-07-contract-approvals.md) uses the V006 tables
+unchanged. `notifications.id` is a name-based UUID derived from the notification's
+purpose and source identifiers and inserted with `ON CONFLICT (id) DO NOTHING`, so
+the primary key de-duplicates event deliveries and deadline reminders (one per
+learner, Assignment and deadline value) without a new column or ledger. Rows stay
+message-only (CT11-READ-FIELDS r1); `is_read` only moves from false to true and no
+row is deleted. `discussion_posts` holds questions (`parent_post_id` null) and
+one-level replies; `is_hidden` is set only by moderation and conceals the post and,
+for a question, its replies; posts are never edited or deleted. `content_reports`
+moves `open → resolved` (content hidden; every open report on the same target) or
+`open → dismissed` and never reopens; `resolved_at` is the decision instant.
+`audit_logs.action` takes the closed CT31 catalogue codes (`user_role_set_*`,
+`user_locked`, `user_unlocked`, `course_hidden`, `report_post_hidden`,
+`report_lesson_hidden`, `report_dismissed`) with `target_type` `user`, `course` or
+`content_report` and a lowercase UUID `target_reference`; rows are written in the
+audited action's transaction and never updated or deleted. Reporting metrics are
+computed at read time by the owning modules; nothing is stored. No migration,
+column, index or retention policy is added.

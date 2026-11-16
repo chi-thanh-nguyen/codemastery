@@ -644,3 +644,43 @@ recommendation and target title. Both reads use the same visibility predicate.
 Mastery states reflect the latest submitted quiz evidence for each skill; screens must say
 so. Earlier deferral text above is historical to the extent resolved by these
 bounded revisions.
+
+## Batch 7 recommendation notifications — 15 November 2026
+
+[ADR012 §9.4](decisions/012-batch-07-contract-approvals.md#94-ct29--recommendation-created)
+completes the Adaptive → Interaction interaction of §9. `AdaptiveDecisionService`
+publishes one `RecommendationCreatedEvent` per processing run that inserted
+recommendation rows, inside the submission unit; Interaction consumes it only after
+that unit commits, in its own transaction, so a notification failure never rolls
+back mastery, progress or recommendations and a rolled-back unit never notifies.
+Only inserted `remedial` rows (with their CT07.reasons text) and test-out `skip`
+rows notify; `continue` rows do not. Reporting (ADR012 §13) reads mastery
+distributions and quiz outcomes as descriptive metrics only and owns no adaptive
+decision. Adaptive rules, thresholds and recommendation history are unchanged.
+
+## Batch 8 evaluation scenarios and measures — 15 November 2026
+
+[ADR013 §§5–6](decisions/013-batch-08-contract-approvals.md#5-ct36f-scenarios)
+makes §12's evaluation concrete on the `final-v1` Course (twenty skills, twenty-four
+prerequisite edges, one Lesson per skill). Profiles answer the placement quiz with
+all-correct or all-incorrect answers per skill, so the expected results hold for any
+valid policy: **P1** tests out L01–L10 and continues to L11; **P2** (Loops gap) tests
+out L01–L07 and receives a remedial recommendation for L08 (“While Loops”, because
+“Loop Control” is Weak); **P3** receives a remedial recommendation for L01. Path
+divergence counts skipped Lessons plus inserted remedial steps that differ from a
+linear continuation (expected 10, 7 and 0 against the baseline's 0); routing
+correctness uses one gap scenario per edge (G01–G24) plus discriminating variants
+G′01–G′24 and P2-R, and keeps the ≥80% figure as an evaluation target only;
+mastery-update correctness uses cases M01–M11; learning gain is simulated and
+labelled as a procedure demonstration. No real-student pilot is selected (ADR013
+§16.2). The demonstration Course uses `weak 1/2`, `mastered 4/5`,
+`minimumQuestionsPerSkill 6` (ADR013 §16.1). **Practice difficulty (Leader decision
+E02, ADR013 §19):** for a Lesson, Adaptive takes the CT07.difficulty target of the
+Lesson's weakest mapped skill (Unknown and Weak give Easy, Learning gives Medium,
+Mastered gives Hard) and recommends a published practice Quiz whose questions all
+have that difficulty, falling back in CT07.difficulty's order, with a fixed reason.
+The guidance for the next step and the Lesson page show it; it never blocks access
+and is not persisted. Quiz capture, evidence and mastery mathematics are unchanged.
+Accepted limitation (Leader, academic Final only): because the latest attempt decides
+with equal question weight, a few correct Easy answers can make a skill Mastered;
+this is disclosed and is not evidence of learning. No result is claimed.

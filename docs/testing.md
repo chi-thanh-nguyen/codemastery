@@ -61,7 +61,7 @@ verification is separate work.
 
 | Suite | Added by | What it exercises |
 | --- | --- | --- |
-| `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). Uses an ephemeral JWT secret. |
+| `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). AU07 additions (PR #239): digest-only issuance and single-use confirmation; identical 202s for unknown/locked/repeated requests, with only eligible accounts issued; delivery after commit without a held User lock; two concurrent confirmations yield exactly one success; rollback when consumption fails; re-check after the User-lock wait; generic 400 for expired, future, locked and reused capabilities; unchanged CT01 bearer validity; a nested context with unconfigured delivery, where health, registration and login work and nothing is issued; and the production 415 for both recovery operations plus the deny-by-default 403 in the full application context (test-only controllers are `@TestComponent`s and are not component-scanned). `AuthServiceTest` adds real SMTP exchanges with an isolated loopback STARTTLS server: delivery only after STARTTLS and successful AUTH, and no message for a server that does not offer AUTH, rejected credentials, missing STARTTLS, or an untrusted or wrongly named certificate. Uses an ephemeral JWT secret. |
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
 | `EnrollmentIntegrationTest` | FE07, PR #101 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods |
@@ -73,6 +73,56 @@ verification is separate work.
 
 Merged test code does not complete QA01 or QA02: each Issue's own acceptance
 criteria, independent review and any environment-specific evidence remain open.
+
+### AU07 SMTP diagnostic and negative regression coverage
+
+`AuthServiceTest$SmtpSubmissionPolicy` uses synthetic credentials and an isolated
+loopback STARTTLS server. Its 72 diagnostic exchanges cover LOGIN, PLAIN and a
+test-only NTLM override at DEBUG/TRACE for success, rejected authentication and
+rejection after DATA. Capture paths are raw JUL, an explicit JUL-to-SLF4J bridge,
+direct Session output, and actual Spring Boot initialization in fresh JVMs. Boot's
+logging API and JUL levels are raised after sender construction. Forked JVMs keep
+Boot's logging lifecycle out of other test contexts; captured streams, handlers,
+levels and filters are restored, and temporary process output is deleted.
+
+Production permits only `LOGIN PLAIN` over mandatory certificate/hostname-verified
+STARTTLS and explicitly disables SASL. NTLM, DIGEST-MD5, XOAUTH2 and unknown-only
+offers fail before AUTH or message submission. NTLM is deliberately enabled only
+inside the diagnostic test to exercise the second defense independently of the
+production allowlist. The server decodes the UTF-16LE username and verifies the
+NTLMv2 proof against its synthetic secret. Tests inspect actual exchanged bytes,
+including PLAIN's `username\0username\0password` authorization identity, LOGIN
+credentials, and NTLM messages/responses in Base64 and hexadecimal form. Positive
+leak controls prove encoded identity and response detection works; independent
+JUL, SLF4J and stream controls prove ordinary application logging remains available.
+No reset URL/capability, credential, recipient, sender or sensitive payload is
+observed in these supported logging configurations.
+
+The diagnostic-source inventory was checked against resolved Angus Mail 2.0.5:
+
+| Source | Relevant path and policy |
+| --- | --- |
+| `org.eclipse.angus.mail.smtp` | SMTP transport, LOGIN/PLAIN, DIGEST-MD5 and the SMTP SASL helper; source-level reject-all filter |
+| `org.eclipse.angus.mail.smtp.protocol` | SMTP commands, replies and message data; separate source-level reject-all filter |
+| `org.eclipse.angus.mail.auth` | NTLM Type 1/2/3 helper diagnostics; source-level reject-all filter even in the test-only NTLM override |
+| `org.eclipse.angus.mail.util.socket` | Socket/TLS diagnostics; source-level reject-all filter |
+| Jakarta Mail Session debug | Disabled on every sender Session access with a discarded debug stream |
+
+The four named JUL filters are JVM-wide and strongly retained. They do not filter
+application loggers. The fixed sender exposes no `spring.mail.*` binding, alternate
+provider or SASL configuration input. Provider exceptions can contain sensitive
+details in memory; the recovery worker catches them and records only its aggregate
+failure counter. These checks do not claim confidentiality under arbitrary
+in-process replacement of the fixed transport or its logging filters.
+
+Negative exchanges include incompatible-only AUTH, a reserved non-listening
+loopback endpoint (connection refusal or connection timeout, depending on the OS),
+and stalls at the greeting and post-STARTTLS AUTH response. The stall tests retain
+the production 5000 ms read deadline and assert a timeout with no message
+submission. Connection/read/write timeout settings remain asserted at 5000 ms;
+a write-buffer stall is not forced for the small reset message. Existing STARTTLS,
+trust, hostname and rejected-credential tests remain. No real provider or deployed
+qualification is implied.
 
 ### Latest recorded results
 
@@ -3140,6 +3190,88 @@ oracles B6-R01–B6-R16 (ADR011 §10) belong to the existing decision and master
 tests; CT36.F keeps the evaluation scenarios. Faults come only from test-scoped bean
 overrides, outcomes from independent committed reads and concurrency from barriers.
 No new test file, dependency or result is claimed.
+
+## Batch 7 acceptance obligations — specified, NOT_RUN
+
+[ADR012 §15](decisions/012-batch-07-contract-approvals.md#15-acceptance-oracles--specified-not_run)
+specifies oracles B7-O01–B7-O12: derived notification IDs and idempotent reminders;
+after-commit subscriptions that never notify for a rolled-back unit and never fail
+their producer, with exactly the two approved `QuizSubmittedEvent` subscribers
+(this also fixes the expected set of ADR011's B6-V04); the exclusive reminder window;
+owner-scoped notification reads; CT03 Q&A admission, hidden-post concealment and
+one-level replies; reply notifications; same-transaction audit rows and no-op
+non-auditing; self and last-Administrator protections under concurrency; Course-root
+locking for Administrator hiding; moderation resolution of every open report on a
+target; hand-computed reporting metrics; and OpenAPI/plain-text rendering. They use
+ADR008 §5's existing placements (`NotificationEventListenerTest`,
+`DeadlineReminderSchedulerTest`, `UserManagementServiceTest`,
+`AuthorizationIntegrationTest` and the owning modules' existing suites). *Update, 15
+November 2026:* ADR012 §19.3 (`CT14-INTEGRATION-PLACEMENT-2026-11-15-r1`) closes the
+structural gaps with exactly two new suites extending `AbstractIntegrationTest`:
+`InteractionAdminIntegrationTest` for the real-PostgreSQL Batch 7 cases (including
+B7-O13 pool exhaustion) and `FileStorageIntegrationTest` for ADR010's real MinIO cases,
+using the pinned Compose MinIO image in a `GenericContainer`. Neither file exists yet,
+no dependency is added and no result is claimed. Reminder tests supply explicitly
+named CT38 case values and a fixed injected clock.
+
+*Independent review remediation, 15 November 2026* ([ADR012 §21](decisions/012-batch-07-contract-approvals.md#21-independent-review-remediation--15-november-2026-third-instruction)):
+B7-O02 now expects Adaptive's plain in-transaction `QuizSubmittedEvent` listener and
+Interaction's after-commit listener as the only subscribers, and five oracles are
+added to `InteractionAdminIntegrationTest`'s scope or the consumer's CT17-P6 test:
+B7-O14 (an Adaptive fault rolls back the submission unit and suppresses notifications;
+an Interaction fault does not affect the committed unit), B7-O15 (Assignment
+admission under concurrency through the `FOR SHARE` `lockNotificationState`: hide,
+deadline edit, rebinding and submission races for reminders and graded
+notifications), B7-O16 (the foreign-key lock cycle between a reply notification and an
+Administrator mutation finishes without deadlock under `FOR NO KEY UPDATE`), B7-O17
+(Administrator Course names through `userSummaries`, never the published-scope
+`instructorDisplayNames`) and B7-O18 (runtime-role ceiling for the CT22.resume
+pointer and time and for `quiz_questions.position`). All remain specified, NOT_RUN.
+
+## Batch 8 E2E selection, evaluation and Final coverage — specified, NOT_RUN
+
+[ADR013](decisions/013-batch-08-contract-approvals.md) selects the Final E2E cases
+and evaluation procedures. **CT19:** the fourteen merged `learner-flow.spec.ts` tests
+are adopted as cases L-A1–L-A5 (historical results are not accepted), and FE25 adds
+L-N1 (lesson completion, progress, resume), L-N2 (timed quiz and results), L-N3
+(assignment submission, grading and notification) and L-N4 (lesson Q&A reply
+notification and report); L-N3/L-N4 depend on ADR012. **CT35:** FE26 implements A-1
+(two contrasting placement profiles with different guidance and Mastery Maps), A-2
+(prerequisite warning without a hard block) and A-3 (skipped placement) in
+`adaptive-flow.spec.ts`. Both suites keep CT34 r2's disposable stack and build their
+data per test through approved REST operations as isolated records whose Course titles
+start with `~E2E Journey `; because those published Courses join the shared catalogue,
+L-A1/L-A4 assert fixture-relative results (first twenty fixture Courses on page 1,
+total at least 21). No new fixture file or shared seed is used. *(ADR013 §17 F8-02.)* **CT36:** profile scripts P1–P3, gap scenarios G01–G24 and mastery cases
+M01–M11 and the discriminating
+variants G′01–G′24 and P2-R are policy-independent where stated and live in the existing scenario JSON
+files and evaluation/integration tests. **CT20.F:** release requires L-A3, L-A4,
+L-N1 and L-N2 on `chromium-desktop` and `chromium-mobile`, A-1 on `chromium-desktop`,
+the CT36.F-measures report, deployment smoke checks, sample-data loading and the CI
+jobs on one exact commit; other cases and projects are attempted and reported but do
+not block release. No case has been executed for this record.
+
+*Independent review remediation, 15 November 2026* ([ADR013 §18](decisions/013-batch-08-contract-approvals.md#18-independent-review-remediation--15-november-2026-third-instruction)):
+the fixture-relative rule now also covers L-A5, whose far-page check keeps the exact
+`content`, `page` and `size` but asserts `totalElements ≥ 21` and
+`totalPages = ceil(totalElements / 20)` from the same response. Journey Courses must
+not contain `foundations` and must have no prerequisite text, so L-A1's search and
+filter results stay exact. L-N3 runs against a per-run MinIO added to the
+disposable stack by ADR013 §7.3: Compose-pinned images, a private network, generated
+credentials, a bucket provisioned by the unchanged Compose initializer, and
+removal with the run. L-N3 checks an upload/download byte round trip. Nothing is
+implemented or run.
+
+*Leader decision E02, 15 November 2026* ([ADR013 §19](decisions/013-batch-08-contract-approvals.md#19-leader-decision-e02-and-practice-difficulty-consumption--15-november-2026)): the
+mastery-based practice recommendation adds oracles B8-P01–B8-P11. They cover the
+mapping, the governing skill and its ties, the candidate Quizzes, fallback, null
+results, admission, read-only isolation from quiz capture and evidence, the
+Assessment read's allowlist, the SD04 outputs and the frontend entry. They are placed
+in the existing `PracticeDifficultySelectorTest`, the service unit tests,
+`AuthorizationIntegrationTest`, `AdaptiveLearningFlowIntegrationTest` and the
+learning frontend tests. CT35 adds A-4 (Hard versus Easy practice for contrasting
+learners, plus a Medium-to-Easy fallback), which CT20.F r2 makes release-required on
+`chromium-desktop` with A-1. All are specified, NOT_RUN.
 
 ## FE24 CT34 r2 lifecycle implementation — 13 November 2026
 
