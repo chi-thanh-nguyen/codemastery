@@ -376,6 +376,75 @@ describe('ADR014 hybrid refresh-session lifecycle', () => {
         await act(async () => window.dispatchEvent(new Event('focus'))); await settle();
         expect(calls('/api/auth/refresh')).toHaveLength(3);
     });
+    // ---- Independent-review remediation F04/F05 (ADR014 §15). Native-lock evidence is in e2e/. ----
+    function fifoLocks() {
+        let tail: Promise<unknown> = Promise.resolve();
+        const value = { request: (_name: string, work: () => Promise<unknown>) => { const run = tail.then(work, work); tail = run.catch(() => undefined); return run; } };
+        Object.defineProperty(navigator, 'locks', { configurable: true, value });
+        return () => Reflect.deleteProperty(navigator, 'locks');
+    }
+    function channels() {
+        const list: { onmessage: ((event: MessageEvent) => void) | null }[] = [];
+        vi.stubGlobal('BroadcastChannel', class { onmessage: ((event: MessageEvent) => void) | null = null; constructor() { list.push(this); } postMessage() { /* test double */ } close() { /* test double */ } });
+        return list;
+    }
+    it('F04: a signed-out broadcast during a pending restore discards the late response', async () => {
+        const tabs = channels(); const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        await mountHybrid(); expect(auth.restoring).toBe(true);
+        await act(async () => tabs.at(-1)!.onmessage?.({ data: { type: 'signed-out' } } as MessageEvent));
+        expect(auth.restoring).toBe(false);
+        await act(async () => work.resolve(json(session('Person A')))); await settle();
+        expect(auth.user).toBeNull(); expect(host.textContent).toBe('Anonymous'); expect(auth.restoring).toBe(false);
+    });
+    it('F05: an explicit sign-in queued behind a pending restore is sent and wins', async () => {
+        const release = fifoLocks();
+        try {
+            const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+            await mountHybrid();
+            fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+            let signedIn!: Promise<number>;
+            await act(async () => { signedIn = auth.login(payload); });
+            expect(calls('/api/auth/login')).toHaveLength(0);
+            await act(async () => work.resolve(json(session('Person A')))); await settle();
+            await act(async () => { await signedIn; });
+            expect(calls('/api/auth/login')).toHaveLength(1);
+            expect(auth.user?.displayName).toBe('Person B'); expect(auth.restoring).toBe(false);
+        } finally { release(); }
+    });
+    it('F05: a failed explicit sign-in restores the session it superseded', async () => {
+        const release = fifoLocks();
+        try {
+            const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+            await mountHybrid();
+            fetcher.mockResolvedValueOnce(json(null, 401));
+            let attempt!: Promise<unknown>;
+            await act(async () => { attempt = auth.login(payload).catch((e) => e); });
+            fetcher.mockResolvedValueOnce(json(session('Person A')));
+            await act(async () => work.resolve(json(session('Person A')))); await settle();
+            expect(await attempt).toMatchObject({ kind: 'http', status: 401 }); await settle();
+            expect(calls('/api/auth/refresh')).toHaveLength(2); expect(auth.user?.displayName).toBe('Person A');
+        } finally { release(); }
+    });
+    it('F05: the old session expiring while a sign-in is in flight does not cancel it', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        let signedIn!: Promise<number>;
+        await act(async () => { signedIn = auth.login(payload); });
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        vi.setSystemTime(new Date(Date.now() + 901_000));
+        await act(async () => window.dispatchEvent(new Event('focus'))); await settle();
+        await act(async () => work.resolve(json(session('Person B', sidB)))); await act(async () => { await signedIn; });
+        expect(auth.user?.displayName).toBe('Person B');
+    });
+    it('a newer sign-out still cancels a pending sign-in', async () => {
+        fetcher.mockResolvedValueOnce(json(null, 401)); await mountHybrid(); await settle();
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        let attempt!: Promise<unknown>;
+        await act(async () => { attempt = auth.login(payload).catch((e) => e); });
+        fetcher.mockResolvedValueOnce(empty()); await act(async () => auth.logout());
+        await act(async () => work.resolve(json(session('Person B', sidB))));
+        expect(await attempt).toMatchObject({ kind: 'cancelled' }); expect(auth.user).toBeNull();
+    });
     it('never retries a mutation after a refusal or renewal', async () => {
         fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
         fetcher.mockResolvedValueOnce(json(null, 401));

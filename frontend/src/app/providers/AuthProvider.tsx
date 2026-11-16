@@ -97,10 +97,18 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
     const channel = useRef<BroadcastChannel | null>(null);
     const eligible = useCallback(() => session.current && Date.now() < session.current.expiresAt ? session.current : null, []);
     const broadcast = useCallback((type: 'signed-in' | 'signed-out') => { try { channel.current?.postMessage({ type }); } catch { /* closed */ } }, []);
-    const clear = useCallback((explicit = false) => {
-        generation.current++; attempt.current++;
-        for (const controller of pending.current) controller.abort();
-        pending.current.clear(); lastLogin.current = null;
+    /**
+     * Ends the installed session. `endsIntent` (sign-out here or in another tab, unmount) also cancels
+     * a pending explicit sign-in: a newer sign-out wins. Expiry, a current-session 401 or a refused
+     * refresh end only the old session and leave a pending sign-in to complete (ADR014 §15, F05).
+     */
+    const clear = useCallback((explicit = false, endsIntent = explicit) => {
+        generation.current++;
+        const keep = endsIntent ? null : lastLogin.current;
+        if (endsIntent) attempt.current++;
+        for (const controller of pending.current) if (controller !== keep) controller.abort();
+        pending.current.clear(); if (keep) pending.current.add(keep);
+        lastLogin.current = keep;
         session.current?.controller.abort(); session.current = null;
         window.clearTimeout(retryTimer.current);
         explicitLogout.current = explicit;
@@ -130,16 +138,21 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
         session.current = next; if (alive.current) setSnapshot(next);
         return next.generation;
     }, []);
-    /** Restores (or adopts another tab's) session from the cookie; never redirects while running. */
+    /**
+     * Restores (or adopts another tab's) session from the cookie; never redirects while running. Its
+     * result is discarded when anything newer happened: an explicit sign-in started (`restoreRun` is
+     * advanced and a sign-in is pending), a sign-out (here or broadcast), or another installation.
+     */
     const restore = useCallback(async () => {
         const run = ++restoreRun.current, captured = generation.current;
+        const stillCurrent = () => alive.current && run === restoreRun.current && captured === generation.current && !lastLogin.current;
         if (alive.current) setRestoring(true);
         try {
             if (pendingSignOut()) { await serverSignOut(); return; }
             const response = await coordinatedRefresh();
-            if (alive.current && captured === generation.current) install(response, false);
+            if (stillCurrent()) install(response, false);
         } catch (error) {
-            if (alive.current && captured === generation.current && session.current && refused(error)) clear();
+            if (stillCurrent() && session.current && refused(error)) clear();
         } finally {
             if (alive.current && run === restoreRun.current) setRestoring(false);
         }
@@ -182,8 +195,12 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
         if (typeof BroadcastChannel === 'undefined') return;
         const tabs = new BroadcastChannel(CHANNEL);
         tabs.onmessage = (event: MessageEvent<{ type?: unknown }>) => {
-            // Another tab signed out: clear this tab without another server call.
-            if (event.data?.type === 'signed-out') { if (session.current) clear(); }
+            // Another tab signed out: clear this tab without another server call, and discard any
+            // pending restore, so a late refresh response cannot bring the old account back (F04).
+            if (event.data?.type === 'signed-out') {
+                restoreRun.current++; clear(false, true);
+                if (alive.current) setRestoring(false);
+            }
             // Another tab signed in (its sign-in revoked any previous cookie session): adopt it.
             else if (event.data?.type === 'signed-in') void restore();
         };
@@ -213,13 +230,19 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
         pending.current.add(controller);
         return { controller, finish: () => { pending.current.delete(controller); signal?.removeEventListener('abort', abort); } };
     }, []);
+    /**
+     * Explicit sign-in. It supersedes a pending restore (whose result is discarded) and is itself
+     * superseded only by a newer sign-in or a sign-out, never by a restore or by the old session
+     * ending while it waits for the shared Web Lock (ADR014 §15, F05).
+     */
     const login = useCallback(async (payload: LoginRequest, signal?: AbortSignal) => {
         expire();
-        const id = ++attempt.current, captured = generation.current;
+        const id = ++attempt.current;
         lastLogin.current?.abort();
         const { controller, finish } = operation(signal);
         lastLogin.current = controller;
-        const current = () => alive.current && !controller.signal.aborted && id === attempt.current && captured === generation.current;
+        if (refreshSessions) { restoreRun.current++; if (alive.current) setRestoring(false); }
+        const current = () => alive.current && !controller.signal.aborted && id === attempt.current;
         try {
             const response = await (refreshSessions
                 ? withSessionLock(() => apiLogin(payload, controller.signal, current))
@@ -233,8 +256,14 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
                 broadcast('signed-in');
             }
             return installed;
+        } catch (error) {
+            // A failed sign-in leaves the browser as it was: the restore it superseded runs again.
+            if (refreshSessions && current() && !session.current && !(error instanceof ApiError && error.kind === 'cancelled')) {
+                lastLogin.current = null; void restore();
+            }
+            throw error;
         } finally { finish(); if (lastLogin.current === controller) lastLogin.current = null; }
-    }, [broadcast, expire, install, operation, refreshSessions]);
+    }, [broadcast, expire, install, operation, refreshSessions, restore]);
     const register = useCallback(async (payload: RegisterRequest, signal?: AbortSignal) => {
         expire();
         const captured = generation.current, { controller, finish } = operation(signal);
