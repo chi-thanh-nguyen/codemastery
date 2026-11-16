@@ -3601,3 +3601,49 @@ paths were exercised locally through the same `npm` entrypoints
 ([FE24 record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)). The step budgets
 were then set from these durations. `E2E` is not a required check. No raw report was
 uploaded. Coverage is the existing suite only, so this is not Final main-flow acceptance.
+
+These first executions tested the pre-remediation FE24 lifecycle that the stacked branch then
+carried (85 lifecycle tests). They are historical and are superseded by the record below.
+
+## SH07 synchronization with the merged FE24 lifecycle — 17 November 2026
+
+FE24 PR [#240](https://github.com/chi-thanh-nguyen/codemastery/pull/240) merged as `main`
+`46a4540794bb1d31e2d24483cae48b19db1ad539`. `main` was merged into the SH07 branch rather than
+rebased. Every FE24 lifecycle file (`e2e/fixtures/*` other than `ci-evidence.mjs`,
+`e2e/package.json` and `e2e/playwright.config.ts`) takes `main`'s version unchanged. The SH07
+diff against `main` is the workflow, `ci-evidence.mjs` and this documentation only.
+
+Auditing the workflow against the final lifecycle found one SH07 defect: the signal path on a
+step timeout or cancellation (see [CI](#ci)). The Actions runner signals only a step's root
+process on Unix. Under the original step that process was bash, which absorbed SIGINT and died
+on SIGTERM, so the coordinator never received a signal and kept running the suite after the step
+had ended. The fix is the `exec`, bash-script-shell suite step and the exit-2 wait in the
+recovery step. The lifecycle files did not change.
+
+| Check | Result |
+| --- | --- |
+| `node --test fixtures/*.test.mjs` (macOS, Python 3.9.6, Node 24.21) | PASS 152/152, 25 s |
+| Local `E2E_WORKERS=1 npm test`, then `npm run stack:down` (macOS, Docker 29.8.1) | 53 passed, 4 skipped (API-only), 13 failed: every `firefox-desktop` case, `browserType.launch: Failed to launch the browser process`. This is the known local Firefox launch failure on this host, not a lifecycle or suite result. Run complete; recovery exit 0; no Docker leftovers |
+| Runner cancellation replayed against the original step (SIGINT to the step root, SIGTERM after 7.5 s, then a kill of the root alone) | The coordinator received no signal and was still running after the step ended. Recovery exited 2. The orphaned coordinator ran the rest of the suite to completion about 53 s later |
+| The same replay against the fixed step | The coordinator logged `received signal 2; forwarding it to the runner`, Playwright stopped (1 interrupted, 23 did not run), and the run was finalized within 4 s. The recovery step then exited 0, `complete`, with no leftovers |
+| The recovery step while a live run owned the checkout | Waited 23 times on exit 2, then recovered once the run ended. Exit 0, `complete` |
+| The recovery step with stubbed `stack:down` exits 0, 1, 3 and 2 | Step exits 0, 1 and 3 after one call; on a permanent exit 2 it stops after 48 calls with an error and exit 2 |
+| Shell behavior on `ubuntu:24.04` | `bash -c` runs a single command in place; `sh` (dash 0.5.12) does not |
+| npm signal forwarding | Exercised on macOS (npm 11.19.0, real coordinator) and in a Debian container (npm 10.9.9, dash), where only the bash script shell delivered the signal |
+
+CI run [43951662691](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/43951662691)
+tested PR head `beb25e830c911dca774ef1a5f27f345361ddee7a` as merge commit `a35b757` into `main`
+`46a4540`. It ran on `ubuntu-24.04` (image 20261111.370.1) with Node 24.22.2 and Playwright
+1.63.0 with its pinned browsers.
+
+| Step | Result |
+| --- | --- |
+| Install pinned browsers (`--with-deps`) | success, 46 s |
+| `node --test fixtures/*.test.mjs` | PASS 152/152, 38 s: the final fencing, CAS, process-group and recovery tests on Linux |
+| `E2E_WORKERS=1 npm test` (bash script shell, `exec`) | success, 5.0 min: 70 results, **66 passed, 4 skipped, 0 failed**, 14 per project on all five projects. The 4 skips are the API-only REST smoke on the four non-`chromium-desktop` projects. The run was admitted before Playwright started, finalized by the coordinator with 4 resources removed, and became `complete` after the runner's exit was verified |
+| `npm run stack:down` (`always()`) | success: the completed run was re-verified and nothing was left |
+
+Not exercised in CI: deliberate setup, assertion, browser or cleanup failure, and a real
+timeout or cancellation inside the hosted workflow. The cancellation path was replayed locally
+only, as listed above. `E2E` is not a required check. Coverage is the existing suite only, so
+this is not Final main-flow acceptance.
