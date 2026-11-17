@@ -2109,6 +2109,27 @@ canonical tree and the inventory tree below are unchanged; this is an explicit
 addition. No other directory, module, file or dependency, and no execution of V008
 against a shared or production database, is approved.
 
+## CO08 resume-time migration addition — 17 November 2026
+
+`STRUCT-CO08-V009-2026-11-17-r1` records one file addition explicitly authorized by the
+Project Leader on 17 November 2026, within the "CodeMastery — Fully Implement CO08,
+CO07 and CO16 in Three Existing PRs" instruction, for CO08
+([#174](https://github.com/chi-thanh-nguyen/codemastery/issues/174),
+[PR #248](https://github.com/chi-thanh-nguyen/codemastery/pull/248)). It implements the
+NEW migration required by `CT22-RESUME-SCHEMA-2026-11-09-r1`
+([ADR006 §7.2](decisions/006-batch-02-contract-approvals.md#72-bounded-visit-time-schema-and-learner-level-resume-read)),
+inside the existing migration directory:
+
+| File | Purpose |
+| --- | --- |
+| `backend/src/main/resources/db/migration/V009__add_enrollment_last_visited_at.sql` | The NEW migration adding `enrollments.last_visited_at timestamptz NULL`, with no default, backfill or grant |
+
+The existing migration-directory CODEOWNERS rule covers it and is unchanged. The CO08
+implementation otherwise uses existing Course files and existing test files only. The
+immutable canonical tree and the inventory tree below are unchanged; this is an
+explicit addition. No other directory, module, file or dependency, and no execution of
+V009 against a shared or production database, is approved.
+
 ## Bounded Interim FE03/FE07 test inventory
 
 **CT14-INTERIM-FE03-FE07-2026-10-24-r1 —
