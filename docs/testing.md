@@ -3892,6 +3892,31 @@ F04, F05 and N02 Playwright regressions passed in the final run.
 non-`chromium-desktop` projects; the N02, F04 and F05 tests ran. `firefox-desktop` was
 not run (host limitation).
 
+## CO07 My Courses in-progress and completed verification — 17 November 2026
+
+CO07 ([#173](https://github.com/chi-thanh-nguyen/codemastery/issues/173),
+[PR #247](https://github.com/chi-thanh-nguyen/codemastery/pull/247)) adds no new
+operation or payload field. `GET /api/me/courses` already returns each Course's stored
+membership `status` and accepts `status=joined|active|completed|left|all`
+(FE07-2026-10-27-r1). Under `CT22-PROGRESS-2026-11-09-r1`
+([ADR006 §3](decisions/006-batch-02-contract-approvals.md#3-ct22progress)) that stored
+status is the in-progress (`active`) versus completed (`completed`) distinction: CO08
+(PR #248) writes it on manual completion, and membership PUT keeps an existing
+`completed` and turns `left` into `active` without recalculation. Calculated
+`isComplete` and percentages stay in `GET /api/me/course-progress`.
+
+| Acceptance criterion | Covered by |
+| --- | --- |
+| In-progress and completed Courses are distinguished | `EnrollmentServiceTest.myCoursesForwardsTheSelectedStatusAndReportsStoredInProgressCompletedOrLeftStatus` (all five filters), `EnrollmentIntegrationTest.myCoursesDistinguishesInProgressFromCompletedCoursesByStoredCt22Status` (joined/active/completed/all views, per-learner scoping, hidden Courses excluded) |
+| Membership operations and shapes unchanged | Existing FE07 suites unchanged and passing; the new integration test also checks join-keeps-completed, leave and rejoin-as-active, and that no progress field enters the payload |
+| No duplicated membership functionality | No new production file or method; `EnrollmentServiceTest.myCoursesNeverRecalculatesCompletionOrWritesMembership` |
+
+Executed locally on the PR #247 working tree after merging `main` `78e783d`:
+`cd backend && ./mvnw -Dtest=EnrollmentServiceTest -Dit.test=EnrollmentIntegrationTest verify`
+ran 18 unit and 59 PostgreSQL integration tests with 0 failures or errors; the full
+`./mvnw verify` result is recorded in the pull request. These are local developer
+runs, not independent QA or CI evidence.
+
 ## PR #246 CI failures on `aa6995d` — 17 November 2026
 
 `aa6995d` has the same tree as `be8bef0`, on which all CI checks had passed; only its commit metadata changed. On `aa6995d`, two jobs failed. Neither failure came from the hybrid-authentication change.

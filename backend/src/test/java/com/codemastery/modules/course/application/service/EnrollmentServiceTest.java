@@ -64,6 +64,36 @@ class EnrollmentServiceTest {
         learner(); doThrow(new ResourceNotFoundException("Unavailable")).when(access).requireEnrolmentEligibility(course);
         assertThrows(ResourceNotFoundException.class, () -> service.membership(course)); verifyNoInteractions(repository);
     }
+    // CO07.status: My Courses tells in-progress (stored ACTIVE) from completed (stored COMPLETED) Courses
+    // through the closed MembershipCourse.status field; CT22.progress (CO08) owns the transitions.
+    @ParameterizedTest @ValueSource(strings = {"joined", "active", "completed", "left", "all"})
+    void myCoursesForwardsTheSelectedStatusAndReportsStoredInProgressCompletedOrLeftStatus(String filter) {
+        learner();
+        UUID inProgress = UUID.randomUUID(), done = UUID.randomUUID(), left = UUID.randomUUID(), instructor = UUID.randomUUID();
+        var rows = java.util.List.of(
+                new EnrollmentRepository.MembershipCourse(inProgress, "Alpha", "In progress", instructor, EnrollmentStatus.ACTIVE),
+                new EnrollmentRepository.MembershipCourse(done, "Beta", "Completed", instructor, EnrollmentStatus.COMPLETED),
+                new EnrollmentRepository.MembershipCourse(left, "Gamma", "Left", instructor, EnrollmentStatus.LEFT));
+        var pageable = org.springframework.data.domain.PageRequest.of(1, 3);
+        when(repository.list(actor, filter, pageable)).thenReturn(new org.springframework.data.domain.PageImpl<>(rows, pageable, 7));
+        when(identities.instructorDisplayNames(java.util.Set.of(instructor))).thenReturn(java.util.Map.of(instructor, "Ada"));
+        var page = service.myCourses(1, 3, filter);
+        assertEquals(java.util.List.of(inProgress, done, left), page.content().stream().map(EnrollmentService.MembershipCourse::id).toList());
+        assertEquals(java.util.List.of("active", "completed", "left"), page.content().stream().map(EnrollmentService.MembershipCourse::status).toList());
+        assertEquals(java.util.List.of("Ada", "Ada", "Ada"), page.content().stream().map(EnrollmentService.MembershipCourse::instructorDisplayName).toList());
+        assertEquals(1, page.page()); assertEquals(3, page.size()); assertEquals(7, page.totalElements()); assertEquals(3, page.totalPages());
+        verify(repository).list(actor, filter, pageable); verifyNoMoreInteractions(repository); verifyNoInteractions(access);
+    }
+    @Test void myCoursesNeverRecalculatesCompletionOrWritesMembership() {
+        learner();
+        var pageable = org.springframework.data.domain.PageRequest.of(0, 20);
+        when(repository.list(actor, "completed", pageable)).thenReturn(new org.springframework.data.domain.PageImpl<>(java.util.List.of(), pageable, 0));
+        when(identities.instructorDisplayNames(java.util.Set.of())).thenReturn(java.util.Map.of());
+        var page = service.myCourses(0, 20, "completed");
+        assertTrue(page.content().isEmpty()); assertEquals(0, page.totalElements()); assertEquals(0, page.totalPages());
+        verify(repository, never()).updateStatus(any(), any()); verify(repository, never()).insert(any());
+        verify(repository, never()).lockPublishedCourse(any());
+    }
     @ParameterizedTest @ValueSource(strings = {"GET", "PUT", "DELETE"})
     void malformedUuidIsRejectedBeforeCallingMembershipApplicationCode(String method) throws Exception {
         var application = mock(EnrollmentService.class);
