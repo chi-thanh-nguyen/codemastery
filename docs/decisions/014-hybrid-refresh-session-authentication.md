@@ -551,3 +551,61 @@ fail; on the corrected code they pass. All F01–F05 regressions still pass. Exe
 commands are in
 [testing.md](../testing.md#second-independent-review-remediation--17-november-2026).
 
+
+## 17. Comprehensive audit remediation (A01) and main integration — 17 November 2026
+
+**Source.** A comprehensive independent Codex audit of PR head
+`b18d3cf8ef92b1cb548847315ea81a7c8caba80d` (against `main` at `46a4540`) found F01–F05 and
+N01 fixed, and N02 **partially fixed**. It reported one remaining P2 defect, A01, and a
+textual conflict with `main` in `docs/testing.md`. This section records the **author's**
+remediation. It is **pending independent re-review**: Codex has not reviewed it. Revision
+identifiers are unchanged, because the fix restores the §16 guarantee that a failed
+sign-in does not leave the session unrenewed. Earlier sections stay as history.
+
+| Finding | Root cause | Remediation |
+|---|---|---|
+| **A01 (P2)** A renewal superseded by an explicit sign-in was lost when the sign-in failed **before** the renewal completed. The tab then kept the old access token, and no further renewal was scheduled, although the refresh cookie was usable | §16 used a `renewalDeferred` flag set by the renewal when it completed, and read by the failed sign-in's error handler. Recovery therefore depended on completion order. If the handler ran first it saw no flag. The flag was then set and never consumed. A sign-in cancelled while queued (for example, the user leaving the sign-in page) was never treated as a failure either, so it lost the renewal in both orders | The flag is removed. Each explicit sign-in publishes a promise that settles when it finishes, whatever the outcome. A completed renewal waits while any sign-in is pending, then decides from the state: (1) a sign-in that installed a session, a sign-out or an expiry advanced the generation, so the renewal result is discarded; (2) a sign-in overlapped the renewal and left the session in place (failed or cancelled), and it may have changed the cookie under the renewal, so the session renews once more from the current cookie; (3) otherwise the result is installed. A failed sign-in's error handler restores only a session it superseded during bootstrap (F05, unchanged). |
+
+**Both completion orders.**
+
+- **Order A** (renewal first, then the sign-in fails): the renewal is suspended until the
+  sign-in settles, then renews again.
+- **Order B** (the sign-in fails first, then the renewal completes): the renewal sees that a
+  newer attempt overlapped it, the generation is unchanged and no sign-in is pending, so
+  it renews again.
+- **Cancelled sign-in**: a sign-in abandoned while queued settles as cancelled and is
+  handled like a failure.
+
+The recovery is a normal renewal. It goes through the same single flight and Web Lock,
+and a refusal ends the session. A different `sid` is a replacement with a new
+generation, so a stale bearer is never kept as a valid session. It runs at most once per
+overlapping sign-in, so it cannot loop. Precedence is unchanged: renewal <
+restore/adoption < explicit sign-in < sign-out. No mutation is replayed. The public
+`AuthContextValue`, the backend, the REST contracts and the database are unchanged.
+
+**Main integration.** `main` (`46a4540`, the FE24 CT34 r2 E2E run lifecycle from PR #240)
+was merged into the PR branch by an ordinary merge commit: no rebase, no force-push.
+`docs/testing.md` conflicted only because both sides appended sections at the end. Both
+are kept whole, in date order. `docs/setup.md` and `docs/repository-structure.md` merged
+automatically. No application file changed. The Playwright suite now runs through the
+lifecycle coordinator (`npm test` / `npm run test:chromium` in `e2e/`).
+
+**Evidence.** These are author-run checks, not independent verification:
+
+- Vitest: both completion orders; the renewal completing while the sign-in is queued and
+  while it is in flight; a successful sign-in while the renewal is delayed; a sign-out
+  before the delayed renewal; a newer sign-in superseding an older one (one recovery
+  only, and a newer success winning); a recovery with another `sid`; a refused recovery;
+  and an abandoned queued sign-in. Each test asserts the installed bearer and the next
+  scheduled renewal.
+- Playwright with native Web Locks and the real backend: a delayed real renewal
+  superseded by a queued sign-in that is abandoned, or refused with wrong credentials.
+
+On `b18d3cf`, the Order B tests, the other-`sid` and refused-recovery tests, the abandoned
+sign-in Vitest test and the abandoned-sign-in Playwright test fail. On the corrected code
+all of them pass. The F01–F05, N01 and N02 regressions still pass. Executed commands are
+in
+[testing.md](../testing.md#comprehensive-audit-remediation-a01-and-main-integration--17-november-2026).
+
+The §12 residual risks and the §16 P3 cross-account early-revocation residual remain
+`PENDING_LEADER_RISK_ACCEPTANCE`.

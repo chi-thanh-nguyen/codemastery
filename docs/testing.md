@@ -3702,3 +3702,72 @@ repository signature, so it does not compile against the old code.
 
 All F01–F05 regressions (PostgreSQL, Vitest, Playwright) pass again on this tree.
 `firefox-desktop` was not run (host limitation).
+
+## Comprehensive audit remediation (A01) and main integration — 17 November 2026
+
+A comprehensive independent Codex audit of `b18d3cf` found F01–F05 and N01 fixed, and N02
+partially fixed. It reported A01 (P2) and a `docs/testing.md` conflict with `main`.
+[ADR014 §17](decisions/014-hybrid-refresh-session-authentication.md#17-comprehensive-audit-remediation-a01-and-main-integration--17-november-2026)
+records the author's remediation and the merge of `main` (`46a4540`, FE24 lifecycle).
+Independent re-review is pending.
+
+| Scenario | Test |
+|---|---|
+| Renewal completes first, then the explicit sign-in fails (order A) | `AuthProvider.test.tsx` "A01 order A: …" |
+| Sign-in fails first, then the delayed renewal completes (order B, the audit's A01) | "A01 order B: …" |
+| Renewal completes while the sign-in is queued (FIFO lock stand-in) / in flight (no Web Locks) | "A01: a renewal that completes while the sign-in is queued …" / "… in flight neither aborts nor installs …" |
+| Sign-in succeeds while the renewal is delayed | "A01: an explicit sign-in that succeeds while the renewal is delayed wins …" |
+| Sign-out before the delayed renewal completes | "A01: a sign-out before the delayed renewal completes wins …" |
+| Newer sign-in supersedes an older one | "A01: a newer sign-in supersedes the older one …" (one recovery only), "A01: a newer successful sign-in …" |
+| Recovery returns another `sid` / is refused | "A01: the recovery … installs another sid as a replacement …", "A01: a refused recovery … ends the session …" |
+| Queued sign-in abandoned by the user | "A01: a queued sign-in the user abandons …" |
+| Native Web Locks, real backend | Playwright "A01: a delayed renewal superseded by an explicit sign-in that is abandoned / refused still renews the session from the cookie" |
+
+Each Vitest test asserts the bearer actually sent afterwards and the next scheduled
+renewal, not internal flags. The Playwright test asserts two `200` refreshes, the login
+outcome, a `200` private request carrying the bearer the recovery refresh issued, and
+the account menu.
+
+**Shown to fail on `b18d3cf`** (old `AuthProvider.tsx` with the new tests):
+
+- Vitest: order B, the other-`sid` and refused-recovery tests, and the abandoned queued
+  sign-in (4 of 12);
+- Playwright: the abandoned case (one refresh instead of two) on `chromium-desktop` and
+  `chromium-mobile`.
+
+The order A, queued/in-flight-failure, success, sign-out and newer-sign-in tests also
+pass on `b18d3cf`. The old code already handled those orders, and the tests now guard
+them.
+
+**Merge of `main`.** The only conflict was `docs/testing.md`, where both sides had
+appended sections at the end. Both were kept whole: the FE24 section (13 November)
+precedes the ADR014 sections. A line comparison found every line of both sides present,
+except 15 merge-base lines that `main` itself rewrote. `docs/setup.md` and
+`docs/repository-structure.md` merged automatically. No application file changed.
+
+**Executed on the merged tree** (author evidence, not independent verification):
+
+| Command | Result |
+|---|---|
+| `cd frontend && npm test` / `npm run build` | PASS — 16 files, 505 tests; build OK |
+| `cd frontend && npm run test:browser` (Chromium) | PASS — 45 |
+| `cd backend && ./mvnw verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='AuthorizationIntegrationTest$RefreshSessions'` | PASS — 24 of 24, including F01A–F01D, both F02, F03, both N01 and rotation-versus-reset (backend unchanged since `b18d3cf`) |
+| `cd e2e && node --test fixtures/*.test.mjs` | PASS — 152 |
+| `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` (FE24 lifecycle coordinator) | PASS — 85 passed, 3 skipped (the API-only REST smoke, which runs only on `chromium-desktop`); every owned resource was verified absent, and recovery completed |
+
+**Earlier runs in this remediation:**
+
+- A first full run failed the new Playwright test on all four projects. The test compared
+  bearers with the sign-in's, and two access JWTs issued within one second are identical.
+  It now compares with the token the recovery refresh returned.
+- A second full run had one WebKit-desktop failure in the shared sign-in helper of
+  "shows the profile snapshot, signs out and guards private routes again". The email
+  field was invalid at submit, before any renewal. It did not reproduce in three repeats
+  of every session test on both WebKit projects (78 passed).
+
+F04, F05 and N02 Playwright regressions passed in the final run.
+
+**Correction.** The earlier "Second independent review remediation" table attributes its
+3 skips to N02, F04 and F05. In fact they were this same API-only REST smoke on the three
+non-`chromium-desktop` projects; the N02, F04 and F05 tests ran. `firefox-desktop` was
+not run (host limitation).
