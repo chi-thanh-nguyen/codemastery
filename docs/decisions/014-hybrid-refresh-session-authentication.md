@@ -583,11 +583,16 @@ overlapping sign-in, so it cannot loop. Precedence is unchanged: renewal <
 restore/adoption < explicit sign-in < sign-out. No mutation is replayed. The public
 `AuthContextValue`, the backend, the REST contracts and the database are unchanged.
 
-**Main integration.** `main` (`46a4540`, the FE24 CT34 r2 E2E run lifecycle from PR #240)
-was merged into the PR branch by an ordinary merge commit: no rebase, no force-push.
-`docs/testing.md` conflicted only because both sides appended sections at the end. Both
-are kept whole, in date order. `docs/setup.md` and `docs/repository-structure.md` merged
-automatically. No application file changed. The Playwright suite now runs through the
+**Main integration.** `main` was merged into the PR branch twice, each time by an ordinary
+merge commit (no rebase, no force-push):
+
+- `46a4540`: the FE24 CT34 r2 E2E run lifecycle from PR #240;
+- `cc6e9b7`: the SH07 `CI E2E` workflow from PR #241, which landed during this work.
+
+Both times `docs/testing.md` conflicted only because both sides appended sections at the
+end. Each side's sections are kept whole: `main`'s FE24 and SH07 records (from 13
+November) come before the ADR014 records (16–17 November). `docs/setup.md` and
+`docs/repository-structure.md` merged automatically. No application file changed. The Playwright suite now runs through the
 lifecycle coordinator (`npm test` / `npm run test:chromium` in `e2e/`).
 
 **Evidence.** These are author-run checks, not independent verification:

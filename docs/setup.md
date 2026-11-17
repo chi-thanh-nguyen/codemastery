@@ -36,7 +36,7 @@ Issues remain open.
 | Frontend | Router with the public landing page at `/`, `/courses`, `/courses/:courseId`, `/login`, `/register`, Learner-only `/home` and `/my-courses`, authenticated `/profile` and the design preview at `/preview` (sample data for every designed screen, including the React Flow Mastery Map and Instructor/Administrator screens); shared HTTP client; memory-only access token with ADR014 session restoration, renewal and cross-tab coordination | Production routes and API integration for lessons, assessments, Mastery Map, notifications, Instructor and Administrator screens (their contracts are pending) |
 | Sample data | SD01 Users and SD02 Courses in `sample-data/seed/01-…` and `02-…`, with a disposable-target loader procedure in [sample-data/README.md](../sample-data/README.md) | Seeds 03–05 are empty; no object is uploaded to MinIO |
 | Runtime | Local Docker Compose stack (this guide) and the one-VM release tooling `infrastructure/vm/deploy.sh`, `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` image target ([deployment.md](deployment.md)) | No deployment has been performed |
-| E2E | Local Playwright Test suite in `e2e/` with a disposable Docker stack and deterministic fixture ([testing.md](testing.md#browser-harness-and-e2e-suite)) | An E2E CI job; `e2e/tests/adaptive-flow.spec.ts` |
+| E2E | Playwright Test suite in `e2e/` with a disposable Docker stack and deterministic fixture, run locally and by the non-required `CI E2E` workflow ([testing.md](testing.md#ci)) | A required E2E check; `e2e/tests/adaptive-flow.spec.ts` |
 
 Exact request and response shapes are in [the OpenAPI document](api/openapi.yaml);
 approved behavior is in [ADR002](decisions/002-interim-delegated-contracts.md) and
@@ -767,14 +767,15 @@ Testcontainers integration tests. Frontend uses Node 22 and runs `npm ci`,
 downloads using the committed build inputs. Six further jobs, in CI VM, test
 `infrastructure/vm/deploy.sh`, the VM override, the frontend `release` image and
 the MinIO initializer image against real containers on the runner; they do not
-deploy anywhere. CodeQL code
+deploy anywhere. The separate, non-required `CI E2E` workflow runs the Playwright suite on
+all five projects against a disposable stack owned by the run. CodeQL code
 scanning runs through GitHub's default setup, which has no workflow file in this
 repository.
 
 The job list, the required checks and the latest recorded results are in
 [testing.md](testing.md#ci). A workflow definition alone does not establish a
-successful run. CI does not start the full local Compose stack and has no E2E
-job.
+successful run. CI does not start the full local Compose stack; the E2E job builds its
+own disposable stack instead.
 
 ## Authorized Interim configuration targets (implementation pending)
 

@@ -1,0 +1,138 @@
+name: CI E2E
+
+# SH07: executable E2E job under ADR008 CT34-CI-2026-11-09-r1 (§7), consuming
+# CT34-FIXTURES-2026-11-10-r2 (§4 as amended by §10). It runs the existing suite
+# on all five projects against a disposable stack owned by this run. It is not a
+# required check, and a green run is not CT19/CT35/CT20.F Final coverage
+# acceptance.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: E2E
+    runs-on: ubuntu-24.04
+    # Outer budget (ADR008 §10.5). The step budgets below sum to 58 minutes and
+    # leave 12 for checkout, Node setup, post steps and termination grace, so
+    # recovery and the summary keep their own time after a timed-out suite.
+    # First measured run (ubuntu-24.04, cold image builds): browsers 66 s,
+    # lifecycle tests 33 s, suite 5.2 min, recovery 1 s, whole job about 7 min.
+    timeout-minutes: 70
+    defaults:
+      run:
+        working-directory: e2e
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Node
+        id: setup
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+      - name: Install frontend dependencies
+        id: install-frontend
+        working-directory: frontend
+        timeout-minutes: 5
+        run: npm ci
+      - name: Install E2E dependencies
+        id: install-e2e
+        timeout-minutes: 3
+        run: npm ci
+      - name: Install pinned Playwright browsers and OS dependencies
+        id: browsers
+        timeout-minutes: 10
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run E2E lifecycle regression tests
+        id: lifecycle
+        timeout-minutes: 5
+        run: node --test fixtures/*.test.mjs
+      - name: Run the E2E suite on all five projects
+        id: e2e
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The default owned disposable stack only: no external target and no
+          # image override may reach setup.
+          unset E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+          # On a timeout or cancellation the runner signals only this step's root
+          # process (SIGINT, then SIGTERM, then a kill of that process alone).
+          # `exec` makes npm that process, npm forwards the signal to its script
+          # shell, and bash (unlike dash, Ubuntu's sh) runs the single script
+          # command in place, so the r2 lifecycle coordinator receives it,
+          # forwards it to its runner and finalizes the run.
+          E2E_WORKERS=1 npm_config_script_shell=bash exec npm test
+      - name: Recover the disposable stack
+        id: cleanup
+        # Runs after the test process has ended, whatever its outcome, and fails
+        # the job on its own when recovery is incomplete. It never prunes Docker
+        # and never removes a resource its run inventory does not prove it owns.
+        # Its budget covers bounded Docker retries against a slow daemon; the
+        # inventory is persisted after each resource, so a timeout keeps the
+        # partial results and still fails the job.
+        if: ${{ always() }}
+        timeout-minutes: 8
+        shell: bash
+        # Exit 2 means the run's coordinator still owns this checkout and nothing
+        # was touched: after a timeout or cancellation it can outlive the suite
+        # step while it finishes its own teardown. Only that result is retried,
+        # until the owner has exited (about 5 minutes at most); every other
+        # result, including incomplete recovery, is final.
+        run: |
+          for attempt in $(seq 1 48); do
+            status=0
+            npm run stack:down || status=$?
+            if [ "$status" -ne 2 ]; then exit "$status"; fi
+            echo "The run's coordinator still owns this checkout; waiting for it to finish (attempt $attempt of 48)."
+            sleep 5
+          done
+          echo "::error::The run's coordinator did not release this checkout in time; recovery did not run."
+          exit 2
+      - name: Summarize E2E evidence
+        if: ${{ always() }}
+        timeout-minutes: 2
+        shell: bash
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LIFECYCLE_OUTCOME: ${{ steps.lifecycle.outcome }}
+          E2E_OUTCOME: ${{ steps.e2e.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
+          BROWSERS_OUTCOME: ${{ steps.browsers.outcome }}
+        # Informational only; the steps above are the gate. Raw reports, traces,
+        # screenshots and logs are not published: they can contain the run's
+        # synthetic credentials and session material.
+        run: |
+          {
+            echo '### E2E run'
+            echo
+            echo '| Item | Value |'
+            echo '| --- | --- |'
+            echo "| Tested commit (checked-out \`HEAD\`) | \`$(git rev-parse HEAD 2>/dev/null || echo unavailable)\` |"
+            echo "| Pull request head | \`${PR_HEAD_SHA:-n/a ($GITHUB_EVENT_NAME)}\` |"
+            echo "| Event, ref | \`$GITHUB_EVENT_NAME\`, \`$GITHUB_REF\` |"
+            echo "| Runner OS | \`$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME" || echo unavailable)\`, \`$(uname -r)\` |"
+            echo "| Node, npm, Python | \`$(node --version 2>/dev/null || echo unavailable)\`, \`$(npm --version 2>/dev/null || echo unavailable)\`, \`$(python3 --version 2>/dev/null || echo unavailable)\` |"
+            echo "| Docker server | \`$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unavailable)\` |"
+            echo "| \`e2e/package-lock.json\` SHA-256 | \`$(sha256sum package-lock.json 2>/dev/null | cut -c1-64 || echo unavailable)\` |"
+            echo "| Command | \`E2E_WORKERS=1 npm test\` (external target and image overrides cleared) |"
+            echo
+            echo '| Step | Outcome |'
+            echo '| --- | --- |'
+            echo "| Install pinned browsers | \`${BROWSERS_OUTCOME:-unknown}\` |"
+            echo "| Lifecycle regression tests | \`${LIFECYCLE_OUTCOME:-unknown}\` |"
+            echo "| E2E suite | \`${E2E_OUTCOME:-unknown}\` |"
+            echo "| Recover the disposable stack | \`${CLEANUP_OUTCOME:-unknown}\` |"
+            echo
+            node fixtures/ci-evidence.mjs || echo 'The E2E evidence summary could not be generated.'
+          } >> "$GITHUB_STEP_SUMMARY" || echo "::warning::E2E evidence summary could not be written."
