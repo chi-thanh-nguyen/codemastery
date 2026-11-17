@@ -96,7 +96,7 @@ start_backend() {  # env-file
   [[ "$started" == yes ]] || backend_started || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
 }
 start_backend "$work/backend.env"
-check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "8/8 $(env_get SPRING_FLYWAY_USER)"
+check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "9/9 $(env_get SPRING_FLYWAY_USER)"
 harden_after_migration
 verify_role_separation >/dev/null
 echo "  verify_role_separation: PASS (exact matrix on the real Flyway schema)"
@@ -205,6 +205,27 @@ wait
 check "concurrent mutations by two learners both succeed" "$(cat "$work/c1")/$(cat "$work/b1")" "200/200"
 check "membership rows after the concurrent operations" "$(psql_admin <<<"SELECT string_agg(u.email || '=' || e.status, ',' ORDER BY u.email) FROM public.enrollments e JOIN public.users u ON u.id=e.user_id;")" "learner.a@example.test=active,learner.b@example.test=left,learner.c@example.test=active"
 
+echo "== CO08 progress and resume (lesson_progress SELECT, INSERT, UPDATE(completed); enrollments UPDATE(status, resume_lesson_id, last_visited_at))"
+lesson=40000000-0000-0000-0000-0000000000e1
+call GET "/api/courses/$course/progress" "$token_a"
+check "progress read (published Lessons only, canonical order)" "$STATUS/$(field completedLessons)/$(field totalLessons)/$(field progressPercentage)/$(field nextLessonId)" "200/0/1/0/$lesson"
+call PUT "/api/courses/$course/resume" "$token_a" "{\"lessonId\":\"$lesson\"}"
+check "visit (Course root and Enrollment locks, pointer + server time)" "$STATUS/$(field resumeLessonId)" "200/$lesson"
+check "visit stored the pointer and the server time together" "$(psql_admin <<<"SELECT (e.resume_lesson_id='$lesson' AND e.last_visited_at IS NOT NULL)::text FROM public.enrollments e JOIN public.users u ON u.id=e.user_id WHERE u.email='learner.a@example.test';")" "true"
+call GET "/api/me/resume" "$token_a"
+check "account-level resume position" "$STATUS/$(field position.courseId)/$(field position.lessonId)" "200/$course/$lesson"
+call PUT "/api/courses/$course/lessons/$lesson/completion" "$token_a" '{"completed":true}'
+check "manual completion (upsert) completes the Course (UPDATE status)" "$STATUS/$(field progressPercentage)/$(field isComplete)/$(field membershipStatus)" "200/100/True/completed"
+call PUT "/api/courses/$course/lessons/$lesson/completion" "$token_a" '{"completed":true}'
+check "repeated completion is idempotent (ON CONFLICT DO UPDATE)" "$STATUS/$(field completedLessons)" "200/1"
+check "one progress row for the learner and Lesson" "$(psql_admin <<<"SELECT count(*) FROM public.lesson_progress;")" 1
+call GET "/api/me/course-progress" "$token_a"
+check "ACTIVE-only progress summary excludes the completed Course" "$STATUS/$(field totalElements)" "200/0"
+call GET "/api/me/courses?status=completed" "$token_a"
+check "My Courses lists the Course as completed" "$STATUS/$(field totalElements)/$(field content.0.status)" "200/1/completed"
+call GET "/api/courses/$course/resume" "$token_a"
+check "per-Course resume keeps the pointer; no next Lesson remains" "$STATUS/$(field resumeLessonId)/$(field nextLessonId)" "200/$lesson/None"
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
@@ -269,7 +290,7 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail and CT22 membership under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership and CO08 progress/resume under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \

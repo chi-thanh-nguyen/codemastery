@@ -1551,6 +1551,67 @@ production database (Flyway applies V008 when any build containing it starts, so
 execution must be authorized before deploying such a build; Leader-reserved). This
 approval executes no provisioning on any real database.
 
+### CT17-P6-PRIVILEGES-2026-11-17-r4 — CO08 progress and resume (within the ADR012 §19.2 ceiling, 17 November 2026)
+
+Prepared for CO08 ([#174](https://github.com/chi-thanh-nguyen/codemastery/issues/174),
+[PR #248](https://github.com/chi-thanh-nguyen/codemastery/pull/248)) under the Project
+Leader's explicit instruction of 17 November 2026 to implement CO08 together with its
+strictly necessary database-grant support. It follows the extension procedure above
+and stays inside the DELEGATED_APPROVED `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)):
+the implemented consumer (`LessonProgressService`, `EnrollmentRepositoryImpl`), V009,
+`RUNTIME_PRIVILEGE_MATRIX` and the CI tests change together, and every privilege below
+is exercised by that consumer's SQL. No approval beyond that ceiling is claimed; this
+is not personal Leader review.
+
+The r1–r3 records above are unchanged history. The effective matrix is r1 plus r2
+plus r3, with the two rows below replacing the named relations; no other privilege,
+role elevation or change is introduced.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `enrollments` (course) | SELECT, INSERT; UPDATE (status, resume_lesson_id, last_visited_at) | r1 membership consumers, plus the CT22 Enrollment `FOR UPDATE` lock, the completion status reconciliation and the atomic visit write of pointer and server time; reviewed columns now include V009 `last_visited_at` | r4 within ceiling (CT22-PROGRESS-2026-11-09-r1, CT22-RESUME-2026-11-09-r1, CT22-RESUME-SCHEMA-2026-11-09-r1) |
+| `lesson_progress` (course) | SELECT, INSERT; UPDATE (completed) | progress reads in canonical order, idempotent manual completion (`INSERT … ON CONFLICT … DO UPDATE SET completed = true`) | r4 within ceiling (CT22-PROGRESS-2026-11-09-r1) |
+
+Least privilege exercised by the consumer:
+
+| Operation | SQL | Privilege |
+| --- | --- | --- |
+| Completion and visit lock the Course root first | `SELECT id FROM courses WHERE id = ? FOR UPDATE` | existing r1 SELECT and UPDATE (id); no new grant |
+| Then the self Enrollment | `SELECT … FROM enrollments … FOR UPDATE` | SELECT plus the existing UPDATE (status) |
+| Manual completion | `INSERT INTO lesson_progress … ON CONFLICT (enrollment_id, lesson_id) DO UPDATE SET completed = true` | SELECT, INSERT, UPDATE (completed) |
+| Completion reconciliation | `UPDATE enrollments SET status = ? WHERE id = ?` | existing UPDATE (status) |
+| Visit | `UPDATE enrollments SET resume_lesson_id = ?, last_visited_at = clock_timestamp() WHERE id = ?` | UPDATE (resume_lesson_id, last_visited_at) |
+| Progress, resume and summary reads | `SELECT` over `courses`, `chapters`, `lessons`, `enrollments`, `lesson_progress` | SELECT |
+
+The runtime role still cannot do any of the following:
+
+- change an Enrollment's id, learner or Course, or delete it;
+- write `mastery_skipped` (CT22.atomic, CO15, adds it within the ceiling when it is
+  implemented) or delete progress rows;
+- truncate either table.
+
+A compromised runtime role could mark any Lesson complete or rewrite any learner's
+resume pointer and visit time, which the approved transitions inherently require.
+`verify_role_separation` probes the re-ownership, mastery-skip and progress-deletion
+denials.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009);
+- `test-deploy-privilege-matrix-contract.sh`, which pins r1 history and the r2, r3 and
+  r4 rows against the script;
+- `test-postgres-privilege-matrix-containment.sh`: grants and denials on the real
+  V001–V009 schema;
+- `test-runtime-real-backend-privileges.sh`: real completion, visit and resume reads
+  under the runtime role (Flyway history now 9/9).
+
+Remaining gates: owning-module (Course @TamiaoNguyen), `@tihh647-ui` infrastructure and
+independent Leader CODEOWNER review; protected integration; V009 execution and these
+grants on any shared or production database (Flyway applies V009 when any build
+containing it starts, so that execution must be authorized before deploying such a
+build; Leader-reserved). This revision executes no provisioning on any real database.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4091,7 +4152,8 @@ records `CT17-P6-PLAN-2026-11-15-r2` (DELEGATED_APPROVED; r2 adds
 to r1): a per-relation **ceiling**
 for the runtime-role grants that later consumers may request. It is not a matrix
 revision. The effective matrix stays r1 plus r2 (and, since 16 November 2026, the
-ADR014 r3 rows for two new V008 relations outside this ceiling), and the extension procedure above
+ADR014 r3 rows for two new V008 relations outside this ceiling; since 17 November 2026,
+the CO08 r4 rows for `enrollments` and `lesson_progress` inside it), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.

@@ -88,8 +88,9 @@ for f in "$MIGRATIONS"/V*.sql; do
   { printf 'BEGIN;\n'; cat "$f"; printf "INSERT INTO public.flyway_schema_history VALUES (%d,'%d','m','SQL','%s',0,current_user,now(),1,true);\nCOMMIT;\n" "$n" "$n" "${f##*/}"; } | as_mig >/dev/null
 done
 echo "  applied $n migrations"
-# The violation report is sorted and capped at 25 lines; assert an early, stable entry.
-expect_failure "migrated tables before hardening (no runtime grants yet)" "column privilege INSERT on public.users.email: expected true" verify_runtime_privileges complete
+# The violation report is sorted and capped at 25 lines; assert an early, stable entry
+# (r4 adds lesson_progress INSERT columns, which push users.email beyond the cap).
+expect_failure "migrated tables before hardening (no runtime grants yet)" "column privilege INSERT on public.enrollments.course_id: expected true" verify_runtime_privileges complete
 harden_after_migration
 verify_role_separation >/dev/null
 echo "  verify_role_separation: PASS (exact matrix)"
@@ -114,6 +115,7 @@ probe "users: AU07 reset password-hash update"               ok "UPDATE public.u
 probe "password_reset_tokens: issue, re-read and consume"    ok "INSERT INTO public.password_reset_tokens VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000a1',decode(repeat('ab',32),'hex'),now(),now()+interval '30 minutes'); SELECT user_id, token_digest, issued_at, expires_at FROM public.password_reset_tokens WHERE token_digest=decode(repeat('ab',32),'hex'); DELETE FROM public.password_reset_tokens WHERE user_id='00000000-0000-0000-0000-0000000000a1' AND token_digest=decode(repeat('ab',32),'hex');"
 probe "users: ADR014 sign-in account lock (FOR NO KEY UPDATE)" ok "SELECT id, password_hash, account_status FROM public.users WHERE id='00000000-0000-0000-0000-0000000000a1' FOR NO KEY UPDATE;"
 probe "refresh_sessions/tokens: ADR014 sign-in, rotation, revoke, purge" ok "INSERT INTO public.refresh_sessions VALUES ('00000000-0000-0000-0000-0000000000a2','00000000-0000-0000-0000-0000000000a1',now(),now()+interval '7 days',NULL); INSERT INTO public.refresh_tokens VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000a2',decode(repeat('cd',32),'hex'),now(),now()+interval '1 day',NULL); SELECT id, session_id, token_digest, issued_at, expires_at, consumed_at FROM public.refresh_tokens WHERE token_digest=decode(repeat('cd',32),'hex'); SELECT id FROM public.refresh_sessions WHERE id='00000000-0000-0000-0000-0000000000a2' FOR UPDATE; SELECT id FROM public.refresh_sessions WHERE expires_at <= now() ORDER BY expires_at, id LIMIT 100 FOR UPDATE SKIP LOCKED; UPDATE public.refresh_tokens SET consumed_at=now() WHERE session_id='00000000-0000-0000-0000-0000000000a2' AND consumed_at IS NULL; INSERT INTO public.refresh_tokens VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000a2',decode(repeat('ce',32),'hex'),now(),now()+interval '1 day',NULL); UPDATE public.refresh_sessions SET revoked_at=now() WHERE user_id='00000000-0000-0000-0000-0000000000a1' AND revoked_at IS NULL; SELECT u.id FROM public.users u JOIN public.refresh_sessions s ON s.user_id=u.id WHERE s.revoked_at IS NULL; DELETE FROM public.refresh_tokens WHERE session_id='00000000-0000-0000-0000-0000000000a2'; DELETE FROM public.refresh_sessions WHERE id='00000000-0000-0000-0000-0000000000a2';"
+probe "enrollments/lesson_progress: CO08 r4 completion and visit" ok "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b2','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c1','active',NULL,NULL); SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE; SELECT id, status, resume_lesson_id FROM public.enrollments WHERE id='00000000-0000-0000-0000-0000000000b2' FOR UPDATE; INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b2','00000000-0000-0000-0000-0000000000e1',true,false) ON CONFLICT (enrollment_id,lesson_id) DO UPDATE SET completed=true; INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b2','00000000-0000-0000-0000-0000000000e1',true,false) ON CONFLICT (enrollment_id,lesson_id) DO UPDATE SET completed=true; SELECT l.id, COALESCE(p.completed,false), COALESCE(p.mastery_skipped,false) FROM public.lessons l LEFT JOIN public.lesson_progress p ON p.lesson_id=l.id AND p.enrollment_id='00000000-0000-0000-0000-0000000000b2'; UPDATE public.enrollments SET status='completed' WHERE id='00000000-0000-0000-0000-0000000000b2'; UPDATE public.enrollments SET resume_lesson_id='00000000-0000-0000-0000-0000000000e1', last_visited_at=clock_timestamp() WHERE id='00000000-0000-0000-0000-0000000000b2'; SELECT course_id, resume_lesson_id, last_visited_at FROM public.enrollments WHERE last_visited_at IS NOT NULL;"
 echo "== everything else is denied"
 probe "users: change role"                                   42501 "UPDATE public.users SET role='admin';"
 probe "users: change email"                                  42501 "UPDATE public.users SET email='x@example.test';"
@@ -134,10 +136,13 @@ probe "courses: re-key a referenced Course (FK NO ACTION)"   23503 "UPDATE publi
 probe "chapters/lessons: modify structure"                   42501 "UPDATE public.lessons SET publication_status='published';"
 probe "learning_materials: read payload/object keys"         42501 "SELECT object_key, text_content FROM public.learning_materials;"
 probe "learning_materials: SELECT *"                         42501 "SELECT * FROM public.learning_materials;"
-probe "enrollments: change resume target"                    42501 "UPDATE public.enrollments SET resume_lesson_id=NULL;"
 probe "enrollments: reassign learner/Course"                 42501 "UPDATE public.enrollments SET user_id=user_id;"
+probe "enrollments: reassign Course or re-key"                42501 "UPDATE public.enrollments SET course_id=course_id, id=id;"
 probe "enrollments: delete history"                          42501 "DELETE FROM public.enrollments;"
-probe "lesson_progress: read"                                42501 "SELECT 1 FROM public.lesson_progress;"
+probe "lesson_progress: write mastery-skip flag (CT22.atomic)" 42501 "UPDATE public.lesson_progress SET mastery_skipped=true;"
+probe "lesson_progress: re-target a progress row"            42501 "UPDATE public.lesson_progress SET enrollment_id=enrollment_id, lesson_id=lesson_id;"
+probe "lesson_progress: delete history"                      42501 "DELETE FROM public.lesson_progress;"
+probe "lesson_progress: TRUNCATE"                            42501 "TRUNCATE public.lesson_progress;"
 probe "questions: read answer keys"                          42501 "SELECT correct_options FROM public.questions;"
 probe "attempts: rewrite scores"                             42501 "UPDATE public.attempts SET score_percentage=100;"
 probe "attempt_answers: delete"                              42501 "DELETE FROM public.attempt_answers;"
