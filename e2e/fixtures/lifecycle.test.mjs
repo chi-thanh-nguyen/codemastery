@@ -754,6 +754,9 @@ describe('P1-1: a writer that lost ownership is fenced out of the record permane
             childB = startGated(checkout, gateB);
             const recordB = await awaitActive(checkout.key);
             assert.notEqual(recordB.runId, runA);
+            // B's own coordinator records its runner right after admission (revision 1 -> 2); the
+            // snapshot is taken after that last legitimate write, so only A's attempts are compared.
+            await until('run B to record its live runner', () => readRecord(checkout.key)?.processes?.runner?.state === 'live');
             const before = readFileSync(recordFile(checkout.key), 'utf8');
             for (const fence of [1, 2, completeA.fence]) {
                 const stale = commit(checkout, { runId: runA, fence, revision: completeA.revision }, { ...completeA, state: 'complete', fence });

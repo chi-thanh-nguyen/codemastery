@@ -14,9 +14,12 @@ function PreviewFallback() {
     return <Box sx={{ minHeight: '100dvh', bgcolor: color.canvas100, p: 5 }}><LoadingView message="Loading design preview" variant="tiles" /></Box>;
 }
 
+/** The isolated design preview sends no request (CT14), so a document opened there restores no session. */
+const openedAtPreview = () => /^\/preview(\/|$)/.test(globalThis.location?.pathname ?? '');
+
 export default function App() {
     return <ThemeProvider theme={appTheme}><CssBaseline />
-        <BrowserRouter><AuthProvider>
+        <BrowserRouter><AuthProvider refreshSessions restoreOnLoad={!openedAtPreview()}>
             <AppRouter preview={<Suspense fallback={<PreviewFallback />}><PreviewApp /></Suspense>} />
         </AuthProvider></BrowserRouter>
     </ThemeProvider>;

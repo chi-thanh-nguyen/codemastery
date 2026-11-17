@@ -630,6 +630,9 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
             execute(db, "DELETE FROM public.lessons WHERE chapter_id IN (SELECT id FROM public.chapters WHERE course_id IN ('" + INTRO + "','" + PRACTICE + "'))");
             execute(db, "DELETE FROM public.chapters WHERE course_id IN ('" + INTRO + "','" + PRACTICE + "')");
             execute(db, "DELETE FROM public.courses WHERE id IN ('" + INTRO + "','" + PRACTICE + "','" + DRAFT + "')");
+            // ADR014: the sign-ins above created refresh sessions for the seeded accounts.
+            execute(db, "DELETE FROM public.refresh_tokens WHERE session_id IN (SELECT id FROM public.refresh_sessions WHERE user_id IN ('" + INSTRUCTOR + "','" + LEARNER + "'))");
+            execute(db, "DELETE FROM public.refresh_sessions WHERE user_id IN ('" + INSTRUCTOR + "','" + LEARNER + "')");
             execute(db, "DELETE FROM public.users WHERE id IN ('" + INSTRUCTOR + "','" + LEARNER + "')");
             execute(db, "ALTER DATABASE " + db + " RESET codemastery.seed_target");
         }

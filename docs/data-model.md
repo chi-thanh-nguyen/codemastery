@@ -745,3 +745,31 @@ moves `open → resolved` (content hidden; every open report on the same target)
 audited action's transaction and never updated or deleted. Reporting metrics are
 computed at read time by the owning modules; nothing is stored. No migration,
 column, index or retention policy is added.
+
+## ADR014 refresh sessions — V008 (16 November 2026)
+
+`AUTH-SESSION-2026-11-16-r1` is **DELEGATED_APPROVED** under the Project Leader's
+explicit instruction of 16 November 2026
+([ADR014 §4](decisions/014-hybrid-refresh-session-authentication.md#4-refresh-tokens-sessions-and-schema-v008)).
+`V008__create_refresh_sessions.sql` adds two Auth-owned tables after V001–V007; no
+earlier migration changes and the migration contains no grants. They are technical
+authentication state, not a new conceptual entity of the approved data model: a
+`User` has zero or more refresh sessions, and a session has one or more refresh
+tokens, at most one of them unconsumed.
+
+| Table | Columns, constraints and indexes | Owner / writers |
+|---|---|---|
+| `refresh_sessions` | `id` uuid PK (`pk_refresh_sessions`); `user_id` uuid NOT NULL FK `users(id)` (`fk_refresh_sessions_user`, NO ACTION, not deferrable); `created_at`, `expires_at` timestamptz NOT NULL, `ck_refresh_sessions_expiry` (`expires_at > created_at`); `revoked_at` timestamptz NULL, `ck_refresh_sessions_revoked` (`revoked_at >= created_at`); indexes `ix_refresh_sessions_user`, `ix_refresh_sessions_expires` | Auth only (`RefreshSessionService`, AU07 reset transaction, the JWT filter's read; CT12.user lock must revoke, ADR014 §6) |
+| `refresh_tokens` | `id` uuid PK (`pk_refresh_tokens`); `session_id` uuid NOT NULL FK `refresh_sessions(id)` (`fk_refresh_tokens_session`, NO ACTION, not deferrable); `token_digest` bytea NOT NULL, `uq_refresh_tokens_digest`, `ck_refresh_tokens_digest` (exactly 32 bytes, SHA-256 of the 32-byte token); `issued_at`, `expires_at` timestamptz NOT NULL, `ck_refresh_tokens_expiry` (`expires_at > issued_at`); `consumed_at` timestamptz NULL, `ck_refresh_tokens_consumed` (`consumed_at >= issued_at`); index `ix_refresh_tokens_session`; partial unique index `uq_refresh_tokens_session_current` on `session_id` where `consumed_at IS NULL` | Auth only (`RefreshSessionService`) |
+
+Lifecycle: a session lasts at most 7 days (`expires_at`); each token expires 24 hours
+after issue, capped by the session; rotation sets `consumed_at` and inserts the
+successor under the session row lock; logout, replay detection, password reset, a
+locked account and the 10-active-session cap set `revoked_at`. Expired sessions and
+their tokens are deleted after sign-ins (at most 100 per sign-in). The application
+supplies every UUID and timestamp; there are no defaults. Runtime privileges are
+`CT17-P6-PRIVILEGES-2026-11-16-r3` ([deployment record](deployment.md#ct17-p6-privileges-2026-11-16-r3--adr014-refresh-sessions-delegated_approved-16-november-2026)).
+Execution of V008 against a shared or production database is not authorized here.
+No other module reads or writes these tables, and they never appear in a REST
+representation.
+

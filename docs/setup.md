@@ -27,13 +27,13 @@ Issues remain open.
 
 | Area | Implemented in the repository | Not implemented |
 | --- | --- | --- |
-| Auth | Registration and login (`POST /api/auth/register`, `/api/auth/login`), BCrypt password storage, stateless JWT bearer authentication with Learner/Instructor/Administrator role claims (registration creates Learners only) and locked-account rejection | Logout endpoint, password reset, account administration |
+| Auth | Registration and login (`POST /api/auth/register`, `/api/auth/login`), BCrypt password storage, JWT bearer authentication with per-request account-status and role checks (registration creates Learners only) and locked-account rejection; password recovery (AU07); ADR014 hybrid sessions: PostgreSQL refresh sessions with rotating opaque refresh tokens in the HttpOnly `__Host-cm_refresh` cookie (`POST /api/auth/refresh`), server logout (`POST /api/auth/logout`) and session-bound access JWTs | Account administration (CT12) |
 | Course | Public published-course catalogue with search, prerequisite filter and pagination (`GET /api/courses`); published course detail (`GET /api/courses/{courseId}`); Learner membership (`GET`/`PUT`/`DELETE /api/courses/{courseId}/membership`) and My Courses (`GET /api/me/courses`) | Course authoring, lesson content delivery, lesson progress |
 | Security | Anonymous `GET /actuator/health` (nondetailed, for the private probe); every other route, including the rest of `/actuator/**`, `/v3/api-docs` and Swagger UI, is denied by Spring Security | — |
 | Adaptive | Pure mastery calculator and state classifier (no database, events or API) | Skill graph, mastery persistence, routing, recommendations |
 | Assessment, Interaction, Admin | — | Source files are empty scaffolds |
 | Object storage | Local MinIO and its least-privilege initializer | Backend storage adapter and file delivery (CT09) |
-| Frontend | Router with the public landing page at `/`, `/courses`, `/courses/:courseId`, `/login`, `/register`, Learner-only `/home` and `/my-courses`, authenticated `/profile` and the design preview at `/preview` (sample data for every designed screen, including the React Flow Mastery Map and Instructor/Administrator screens); shared HTTP client; memory-only session | Production routes and API integration for lessons, assessments, Mastery Map, notifications, Instructor and Administrator screens (their contracts are pending) |
+| Frontend | Router with the public landing page at `/`, `/courses`, `/courses/:courseId`, `/login`, `/register`, Learner-only `/home` and `/my-courses`, authenticated `/profile` and the design preview at `/preview` (sample data for every designed screen, including the React Flow Mastery Map and Instructor/Administrator screens); shared HTTP client; memory-only access token with ADR014 session restoration, renewal and cross-tab coordination | Production routes and API integration for lessons, assessments, Mastery Map, notifications, Instructor and Administrator screens (their contracts are pending) |
 | Sample data | SD01 Users and SD02 Courses in `sample-data/seed/01-…` and `02-…`, with a disposable-target loader procedure in [sample-data/README.md](../sample-data/README.md) | Seeds 03–05 are empty; no object is uploaded to MinIO |
 | Runtime | Local Docker Compose stack (this guide) and the one-VM release tooling `infrastructure/vm/deploy.sh`, `infrastructure/vm/docker-compose.vm.yml` and the frontend `release` image target ([deployment.md](deployment.md)) | No deployment has been performed |
 | E2E | Playwright Test suite in `e2e/` with a disposable Docker stack and deterministic fixture, run locally and by the non-required `CI E2E` workflow ([testing.md](testing.md#ci)) | A required E2E check; `e2e/tests/adaptive-flow.spec.ts` |
@@ -338,7 +338,11 @@ After startup, the stack has no users or courses. To use the application:
    you chose for the hash. As the Learner, join a Course from its detail page and
    open `/my-courses`.
 
-The frontend keeps the session in memory only; reloading the page signs you out.
+The frontend keeps the access token in memory only. Signing in also sets the
+HttpOnly refresh cookie, so reloading the page restores the session until you sign
+out, stay idle for 24 hours or reach the 7-day limit
+([ADR014](decisions/014-hybrid-refresh-session-authentication.md)). With the local
+HTTP origins the cookie is `cm_refresh`; over HTTPS it is `__Host-cm_refresh`.
 
 ### Services and Local URLs
 
@@ -965,6 +969,13 @@ checks is required because abort can race with already-resolved promises.
 
 ### CT16.auth — memory session and concurrency
 
+> **Superseded in part (16 November 2026):** the memory-only reload, no-cookie,
+> no-refresh and client-local logout clauses of this CT16 record are superseded by
+> `CT16-SESSION-2026-11-16-r1` and `AUTH-SESSION-2026-11-16-r1`
+> ([ADR014 §§7, 11](decisions/014-hybrid-refresh-session-authentication.md#11-supersession-register));
+> the rest stays effective. The text below is unchanged history.
+
+
 Reuse effective ADR002 memory-only access-token storage in existing
 `app/providers/AuthProvider.tsx`; expose Auth state through existing
 `features/auth/hooks/useAuth.ts`. Never persist token/user session snapshots in
@@ -1097,6 +1108,13 @@ Do not bypass protections. No application, browser, deployment or security
 verification is claimed by this contract selection or documentation validation.
 
 ## CT16 delegated technical approval — 24 October 2026
+
+> **Superseded in part (16 November 2026):** the memory-only reload, no-cookie,
+> no-refresh and client-local logout clauses of this CT16 record are superseded by
+> `CT16-SESSION-2026-11-16-r1` and `AUTH-SESSION-2026-11-16-r1`
+> ([ADR014 §§7, 11](decisions/014-hybrid-refresh-session-authentication.md#11-supersession-register));
+> the rest stays effective. The text below is unchanged history.
+
 
 ### Authority, revision and effective-scope boundary
 
@@ -1321,6 +1339,13 @@ contributor's non-owner review or push alone does not resolve it. No reviewer,
 protection bypass or personal Leader review is asserted.
 
 ## CT16 consolidation and bounded Final approvals — 25 October 2026
+
+> **Superseded in part (16 November 2026):** the memory-only reload, no-cookie,
+> no-refresh and client-local logout clauses of this CT16 record are superseded by
+> `CT16-SESSION-2026-11-16-r1` and `AUTH-SESSION-2026-11-16-r1`
+> ([ADR014 §§7, 11](decisions/014-hybrid-refresh-session-authentication.md#11-supersession-register));
+> the rest stays effective. The text below is unchanged history.
+
 
 ### Authority, provenance and canonical review path
 
@@ -1990,3 +2015,49 @@ reloaded on route change and the list when the bell or notifications page opens.
 Notification messages and Q&A posts are rendered as plain text, never as Markdown
 or HTML. Administrator screens (FE20–FE23) consume only the `/api/admin/**`
 operations in OpenAPI; frontend route guards remain no security boundary.
+
+## ADR014 hybrid authentication session — 16 November 2026
+
+`CT16-SESSION-2026-11-16-r1` and `AUTH-SESSION-2026-11-16-r1` are
+**DELEGATED_APPROVED** under the Project Leader's explicit instruction of 16 November
+2026 ([ADR014](decisions/014-hybrid-refresh-session-authentication.md)); they are
+implemented in the same PR and become effective on `main` with its protected
+integration. Current behavior:
+
+- **Access token.** Memory-only in `AuthProvider`, sent only as `Authorization: Bearer`
+  to protected endpoints; never stored in cookies, Web Storage, IndexedDB, URLs, history
+  or logs. Each token carries the `sid` of its refresh session and stops working when
+  that session is revoked.
+- **Refresh cookie.** Set by sign-in and each refresh; HttpOnly, SameSite=Strict,
+  `Path=/`; `__Host-cm_refresh` (Secure) by default, and `cm_refresh` without Secure
+  only when every `CORS_ALLOWED_ORIGINS` entry is an HTTP loopback origin (local Compose `http://localhost:5173`, the E2E stack). Scripts never
+  see it.
+- **Restore and renewal.** `App` mounts `AuthProvider refreshSessions`. On load it calls
+  `POST /api/auth/refresh` once (shared under React StrictMode); protected routes show
+  “Restoring your session…” instead of redirecting. A document opened at `/preview`
+  does not restore. The access token is renewed 60 seconds before expiry; the same
+  user and `sid` is an in-place rotation (no page remount); a refusal ends the session
+  with the existing notice; network failures retry every 10 seconds until expiry.
+- **Precedence** (ADR014 §15). A sign-out, local or from another tab, discards any pending
+  restore or sign-in. An explicit sign-in discards a pending restore and is not cancelled
+  by it or by the old session ending. If it fails, the superseded restore runs again.
+- **Tabs.** Sign-in, refresh and sign-out run under the Web Lock
+  `codemastery-auth-session`; the `BroadcastChannel` `codemastery-auth` signs other tabs
+  out (no request) or lets them adopt a new sign-in.
+- **Sign-out.** Clears the tab at once, notifies other tabs and calls
+  `POST /api/auth/logout` (`keepalive`). If the call cannot be confirmed, the non-secret
+  marker `codemastery.auth.pendingSignOut` makes the next load retry sign-out instead of
+  restoring.
+- **Transport.** `httpClient.ts` uses `credentials: 'include'` only for public `POST`
+  `/auth/login`, `/auth/refresh` and `/auth/logout`; all other requests keep
+  `credentials: 'omit'`. No mutation is ever retried automatically.
+
+**Configuration.** No new environment variable. `CORS_ALLOWED_ORIGINS` is also the
+exact trusted Origin list of the three cookie operations (a request from another origin
+gets 403) and selects the cookie mode. Local development therefore works with the
+existing Compose value `http://localhost:5173` and a backend on `http://localhost:8080`
+(same site, credentialed CORS only on the cookie paths). Open the frontend through the
+configured origin: a frontend served from another origin can sign in only if that
+origin is listed. `VITE_API_BASE_URL` is unchanged. Applying V008 to a local database
+happens automatically when the backend starts; doing so on any shared or production
+database is Leader-reserved.

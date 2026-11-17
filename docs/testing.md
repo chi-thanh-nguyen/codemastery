@@ -3647,3 +3647,258 @@ Not exercised in CI: deliberate setup, assertion, browser or cleanup failure, an
 timeout or cancellation inside the hosted workflow. The cancellation path was replayed locally
 only, as listed above. `E2E` is not a required check. Coverage is the existing suite only, so
 this is not Final main-flow acceptance.
+
+## ADR014 hybrid authentication verification — 16 November 2026
+
+`CT14-SESSION-2026-11-16-r1` (**DELEGATED_APPROVED**,
+[ADR014 §9](decisions/014-hybrid-refresh-session-authentication.md#9-ct14-session-2026-11-16-r1--verification-obligations))
+replaces the earlier session expectations: E2E no longer expects zero cookies or a
+signed-out reload. It expects exactly the HttpOnly refresh cookie, no token in Web
+Storage or `document.cookie`, and restoration on reload. The landing page no longer
+expects zero API requests. It expects exactly one bearer-less `POST /api/auth/refresh`
+session check. The earlier records above keep their dated wording.
+
+**Test locations (existing files only).**
+
+| Area | Location | Coverage |
+|---|---|---|
+| Backend unit | `modules/auth/JwtTokenProviderTest` | required canonical `sid` claim (missing, mistyped, upper-case, list, null); revoked/expired/foreign session rejects a valid token without a business effect; refresh/logout never read a bearer and need a trusted Origin; cookie mode selection (`__Host-` for any HTTPS origin, `cm_refresh` only for pure HTTP loopback), exact Set-Cookie/clear strings, duplicate cookies unusable |
+| Backend unit | `modules/auth/AuthServiceTest` | controller and security-slice wiring with the new collaborators |
+| Backend integration (PostgreSQL) | `integration/AuthorizationIntegrationTest$RefreshSessions` | issuance, attributes, digest-only storage and `sid` binding; rotation; reuse within 30 s without revocation; replay after 30 s revoking the family and its access JWTs; six concurrent refreshes → exactly one 200; logout (also without or with unknown cookie); malformed/unknown/duplicate/expired-token/expired-session cookies; locked account; role change; login replacement and the 10-session cap; untrusted/`null` Origin, cross-site Fetch Metadata and navigation mode; credentialed CORS only on cookie paths |
+| Backend integration | `AuthorizationIntegrationTest` (reset test) | a session-bound bearer issued before a password reset is rejected afterwards and its session is revoked (supersedes the ADR006 §9.4 residual assertion) |
+| Backend integration | `CourseCatalogueIntegrationTest`, `EnrollmentIntegrationTest`, `SampleDataSeedIntegrationTest` | fixtures bind tokens to sessions and clean session rows; no behavior change |
+| Frontend | `app/providers/AuthProvider.test.tsx` | restore (StrictMode, one request, nothing stored), refused restore, preview without restore, in-place renewal versus replacement, refused and transient renewal, late renewal after sign-out, sign-out with pending-sign-out retry, sign-in during restore, cross-tab messages, Web Lock use, wake-up restore, no mutation replay |
+| Frontend | `shared/components/presentation.browser.cjs` (optional harness) | landing sends only the anonymous session check |
+| Frontend | `shared/api/httpClient.test.ts`, `routes/index.test.tsx` | credentials only for the three cookie operations (keepalive for logout), 204 handling, refused refresh not invalidating; protected reload waits and then renders, refused restore redirects without the session-ended notice |
+| E2E | `e2e/tests/learner-flow.spec.ts` | cookie attributes and no stored token; reload restoration; second tab adopts the session and follows sign-out; renewal before expiry (Playwright clock) with a private request afterwards; cross-site (`localhost` versus `127.0.0.1`) refresh/logout refused with 403 and the session survives; session-ended notice after a refused refresh; sign-out deletes the cookie; landing page sends only the anonymous session check |
+| Ingress | `infrastructure/vm/tests/test-ingress-stub-backend.sh`, `test-ingress-real-backend.sh` | Cookie and Fetch Metadata only on the three exact locations; Set-Cookie pass-through; `;` rejection; real backend: issue, rotation, CSRF rejections, logout revocation through HTTPS |
+| Privileges | `test-deploy-privilege-matrix-contract.sh`, `test-postgres-privilege-matrix-containment.sh`, `test-runtime-real-backend-privileges.sh` | r3 rows pinned to the record (27 relations); grants and denials on V001–V008; sign-in, rotation, logout and reset revocation under the runtime role |
+
+**Executed on 16 November 2026** by Claude Code on the PR branch (macOS host, Docker
+Desktop 29.8.1, Java 25.0.4.1, Node 24.21.0). These results are implementation
+evidence by the author, not QA01/QA07 independent verification, CI or acceptance:
+
+| Command | Result |
+|---|---|
+| `cd backend && ./mvnw verify` | PASS — BUILD SUCCESS; 631 unit tests (Surefire) and 197 integration tests (Failsafe, PostgreSQL Testcontainers), 0 failures, 0 errors |
+| `cd frontend && npm run build` | PASS (typecheck and Vite build; the existing chunk-size warning is unchanged) |
+| `cd frontend && npm test` | PASS — 16 files, 486 tests |
+| `cd e2e && npx playwright test --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | PASS — 65 passed, 3 skipped by design (API-only smoke runs once) |
+| `firefox-desktop` project | NOT RUN — the pinned Playwright Firefox cannot launch on this macOS host (known environmental limitation) |
+| `bash infrastructure/vm/tests/test-ingress-stub-backend.sh` (release and local images built from the branch) | PASS — 168 assertions, `INGRESS_STUB_TESTS_PASS` |
+| `bash infrastructure/vm/tests/test-ingress-real-backend.sh` | PASS — 83 assertions, `INGRESS_BACKEND_TESTS_PASS` |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS — `MATRIX_CONTRACT_SYNC_PASS: 27 relations` |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | PASS — `MATRIX_TESTS_PASS`, both containment checks |
+| `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | PASS — `RUNTIME_CONSUMER_TESTS_PASS` (Flyway 8/8) |
+| `cd frontend && npm run test:browser` (Chromium) | PASS — 45 passed; the landing check now expects exactly the anonymous `POST /api/auth/refresh`, which the harness test double refuses with 401 |
+| `test-deploy-syntax-and-authorization-gates.sh`, `test-deploy-offline-compose-guards.sh`, `bash -n` on every VM test script | PASS |
+| `test-ingress-release-image-build.sh` | Images built; its Java-truststore sub-check FAILED locally on a Docker Desktop platform-resolution error (`no match for platform in manifest`) for a locally built tag; the backend Dockerfile is unchanged by this work. The CI job "VM HTTPS ingress", which runs this script first, passed on `8001e1a` |
+| `test-deploy-preflight-rendered-compose.sh` | FAILS on this macOS host identically on unmodified `main` (`stat -c` is GNU-only); CI runs it on Ubuntu. Not affected by this work |
+
+Not run: the browser harness on WebKit/Firefox, CI, and any test against a shared,
+staging or production environment. Remaining: CI on the PR,
+independent QA01/QA07 execution, and the review gates in ADR014 §12.
+
+### Author self-review rerun — 16 November 2026
+
+An **author self-review** of the whole PR #246 diff (not an independent review)
+produced the corrections in
+[ADR014 §14](decisions/014-hybrid-refresh-session-authentication.md#14-author-self-review-corrections--16-november-2026).
+They are: sign-in lock order, purge `FOR UPDATE SKIP LOCKED`, case-insensitive trusted
+Origins, a time-bounded sign-out inside the Web Lock, cookie-mode wording and the rollback
+note. New tests in `AuthorizationIntegrationTest$RefreshSessions` cover purge of expired
+sessions with their tokens, case-insensitive Origin matching and concurrent sign-ins
+replacing different cookies at the cap. The last one is a smoke test: the deadlock it
+guards against did not reproduce locally, even without the fix. `AuthProvider.test.tsx`
+now asserts the sign-out signal.
+
+CI on `8001e1a`, the head before these corrections: all eight jobs passed (Backend,
+Frontend, VM HTTPS ingress, VM deployment script, PostgreSQL and containment, runtime
+privileges, containerd, MinIO qualification).
+
+Re-executed on the corrected tree:
+
+| Command | Result |
+|---|---|
+| `cd backend && ./mvnw verify` | PASS — 631 unit, 200 integration, 0 failures |
+| `cd frontend && npm run build` / `npm test` | PASS — 16 files, 486 tests |
+| Playwright chromium/webkit desktop+mobile | PASS — 65 passed, 3 skipped by design |
+| `test-ingress-stub-backend.sh`, `test-ingress-real-backend.sh` | PASS |
+| `test-deploy-privilege-matrix-contract.sh`, `test-postgres-privilege-matrix-containment.sh`, `test-runtime-real-backend-privileges.sh` | PASS; no `42501` in the backend log (the new lock and purge statements run under the runtime role) |
+
+Note: forcing an `*IntegrationTest` into the Surefire unit run together with
+`AuthServiceTest$SmtpSubmissionPolicy` makes the SMTP log-capture tests fail. That is
+an ordering artifact of that ad hoc command: the classes pass separately and in the
+normal Surefire/Failsafe split above.
+
+## Independent review remediation — 17 November 2026
+
+An independent Codex review of `13dba67` reported five blocking findings (F01–F05).
+[ADR014 §15](decisions/014-hybrid-refresh-session-authentication.md#15-independent-review-remediation--17-november-2026)
+records the author's remediation; the Codex re-review is pending.
+
+**Regression tests (existing files).**
+
+| Finding | Test | Forcing mechanism |
+|---|---|---|
+| F01 | `AuthorizationIntegrationTest$RefreshSessions` `f01A` (reset commits between verification and issuance), `f01B` (reset commits while issuance waits for the account lock), `f01C` (issuance commits before a waiting reset, which revokes it), `f01D` (account locked after verification) | Service-level sequencing; a real User-row lock held on a separate connection; `pg_stat_activity` lock-waiter detection, no sleeps |
+| F02 | `f02ElevenConcurrentIssuancesFromNoSessionKeepExactlyTenActive` (exactly 10 active); `f02ConcurrentReplacementsAboveTheCapLeaveAtMostTenActive` (exactly 10) | 11 transactions queued on one held User-row lock and released together (test pool raised to 20 connections) |
+| F03 | `f03OppositeCrossAccountReplacementsBothSucceedWithoutDeadlock` | Both old session rows held, so the opposite switches overlap |
+| Combined | `rotationQueuedTogetherWithAResetEndsRevokedWhicheverRunsFirst` | Both queued on one held session row |
+| F04 | `AuthProvider.test.tsx` "F04 …"; Playwright "F04: a sign-out in another tab wins over that tab's pending session restore" | Real refresh request delayed in a second tab; native BroadcastChannel and Web Locks |
+| F05 | `AuthProvider.test.tsx` "F05 …" (queued sign-in, failed sign-in restores, expiry during sign-in), "a newer sign-out still cancels a pending sign-in"; Playwright "F05: an explicit sign-in queued behind a pending restore …" | FIFO lock stand-in (Vitest); native Web Locks with a delayed real refresh (Playwright) |
+| Privileges | `test-postgres-privilege-matrix-containment.sh` probes for the sign-in `FOR NO KEY UPDATE` and the purge `FOR UPDATE SKIP LOCKED` | Runtime role |
+
+**Shown to fail on the previous implementation** (code from `13dba67`, new tests,
+executed 17 November 2026):
+
+- `f01A`, `f01B`, `f01D`: no exception, so the stale session was issued.
+- `f02`-from-empty: 11 active sessions.
+- `f03`: HTTP 500 from a deadlock.
+- Vitest: the four F04/F05 tests.
+- Playwright Chromium: F04 stayed on `/profile` showing the old account; F05 sent no
+  login request and stayed on `/login`.
+
+`f01C`, the replacement-above-cap test and "a newer sign-out …" also pass on the old
+code; they guard properties that already held. Two unrelated Vitest tests failed there
+only through leakage from the failing F05 tests, and pass in isolation.
+
+**Executed on the corrected tree** (17 November 2026; macOS, Docker Desktop 29.8.1, Java
+25.0.4.1, Node 24.21.0; author evidence, not independent verification):
+
+| Command | Result |
+|---|---|
+| `cd backend && ./mvnw verify` | PASS — 631 unit, 207 integration, 0 failures |
+| `cd frontend && npm run build` / `npm test` | PASS — 16 files, 491 tests (also three shuffled runs of the provider file) |
+| `cd frontend && npm run test:browser` (Chromium) | PASS — 45 |
+| `cd e2e && npx playwright test` (chromium-desktop/mobile, webkit-desktop/mobile) | PASS — 73 passed, 3 skipped by design (F04/F05 run on all four projects) |
+| `test-deploy-privilege-matrix-contract.sh`, `test-postgres-privilege-matrix-containment.sh`, `test-runtime-real-backend-privileges.sh` | PASS |
+| `test-ingress-stub-backend.sh`, `test-ingress-real-backend.sh` | PASS |
+| `test-deploy-syntax-and-authorization-gates.sh`, `test-deploy-offline-compose-guards.sh` | PASS |
+
+Not run: `firefox-desktop` (cannot launch on this host). Limits: the forced interleavings
+use real PostgreSQL row locks and waiter detection. They do not reproduce every possible
+scheduling. In particular, a cycle between a sign-in and a future CT12 implementation is
+excluded by the lock order (ADR014 §15), not tested, because CT12.user is not
+implemented.
+
+## Second independent review remediation — 17 November 2026
+
+A second independent Codex review of `56da61d` confirmed F01–F05 corrected and reported
+N01 and N02 (P2).
+[ADR014 §16](decisions/014-hybrid-refresh-session-authentication.md#16-second-independent-review-remediation--17-november-2026)
+records the author's remediation; independent re-review is pending.
+
+| Finding | Test | Mechanism |
+|---|---|---|
+| N01 | `AuthorizationIntegrationTest$RefreshSessions` `n01DelayedIssuanceReturnsASessionItsOwnCapEnforcementDidNotRevoke` | A's session row held; the sign-in to B presenting A's cookie waits (lock-waiter detection); ten sign-ins to B commit; release. Asserts the returned session is active, refreshes with 200, exactly 10 active, and a later sign-in revokes the oldest |
+| N01 | `n01CapNeverSelectsTheIssuingSessionEvenOnATimestampTie` | 11 sessions with equal `created_at`; each one passed as the issuing session is never revoked |
+| N02 | `AuthProvider.test.tsx` "N02: … queued behind it" (FIFO lock stand-in), "… while a sign-in is in flight …" (no Web Locks, the fallback path), "… failed sign-in renews …" | Deferred renewal responses with another `sid` |
+| N02 | Playwright "N02: a delayed renewal returning another session does not cancel an explicit sign-in queued behind it" | Native Web Locks; a second real sign-in through the context's API client makes the renewal genuinely return another `sid`; the real renewal is delayed with the Playwright clock |
+
+**Shown to fail on `56da61d`** (old code with the new tests, 17 November 2026):
+
+- the N01 scenario test ("issuance must not revoke the session it returns": revoked);
+- both N02 cancellation Vitest tests;
+- the Playwright N02 test (stayed on `/login`, no login request).
+
+The failed-sign-in renewal test checks the new re-renewal path. The tie test uses the new
+repository signature, so it does not compile against the old code.
+
+**Executed on the corrected tree** (author evidence, not independent verification):
+
+| Command | Result |
+|---|---|
+| `cd backend && ./mvnw verify` | PASS — 631 unit, 209 integration, 0 failures (a first run exposed an incorrect final assertion in the new tie test; that assertion was removed, three focused reruns and the full rerun passed) |
+| `cd frontend && npm run build` / `npm test` | PASS — 16 files, 494 tests (provider file also passed in two shuffled runs) |
+| `cd frontend && npm run test:browser` (Chromium) | PASS — 45 |
+| Playwright chromium/webkit desktop+mobile | PASS — 77 passed, 3 skipped by design (N02, F04, F05 on all four projects) |
+| Privilege contract, containment, real-backend privileges; ingress stub and real backend; deploy gates and offline guards | PASS |
+
+All F01–F05 regressions (PostgreSQL, Vitest, Playwright) pass again on this tree.
+`firefox-desktop` was not run (host limitation).
+
+## Comprehensive audit remediation (A01) and main integration — 17 November 2026
+
+A comprehensive independent Codex audit of `b18d3cf` found F01–F05 and N01 fixed, and N02
+partially fixed. It reported A01 (P2) and a `docs/testing.md` conflict with `main`.
+[ADR014 §17](decisions/014-hybrid-refresh-session-authentication.md#17-comprehensive-audit-remediation-a01-and-main-integration--17-november-2026)
+records the author's remediation and the merges of `main`: `46a4540` (FE24 lifecycle) and
+then `cc6e9b7` (SH07 `CI E2E` workflow).
+Independent re-review is pending.
+
+| Scenario | Test |
+|---|---|
+| Renewal completes first, then the explicit sign-in fails (order A) | `AuthProvider.test.tsx` "A01 order A: …" |
+| Sign-in fails first, then the delayed renewal completes (order B, the audit's A01) | "A01 order B: …" |
+| Renewal completes while the sign-in is queued (FIFO lock stand-in) / in flight (no Web Locks) | "A01: a renewal that completes while the sign-in is queued …" / "… in flight neither aborts nor installs …" |
+| Sign-in succeeds while the renewal is delayed | "A01: an explicit sign-in that succeeds while the renewal is delayed wins …" |
+| Sign-out before the delayed renewal completes | "A01: a sign-out before the delayed renewal completes wins …" |
+| Newer sign-in supersedes an older one | "A01: a newer sign-in supersedes the older one …" (one recovery only), "A01: a newer successful sign-in …" |
+| Recovery returns another `sid` / is refused | "A01: the recovery … installs another sid as a replacement …", "A01: a refused recovery … ends the session …" |
+| Queued sign-in abandoned by the user | "A01: a queued sign-in the user abandons …" |
+| Native Web Locks, real backend | Playwright "A01: a delayed renewal superseded by an explicit sign-in that is abandoned / refused still renews the session from the cookie" |
+
+Each Vitest test asserts the bearer actually sent afterwards and the next scheduled
+renewal, not internal flags. The Playwright test asserts two `200` refreshes, the login
+outcome, a `200` private request carrying the bearer the recovery refresh issued, and
+the account menu.
+
+**Shown to fail on `b18d3cf`** (old `AuthProvider.tsx` with the new tests):
+
+- Vitest: order B, the other-`sid` and refused-recovery tests, and the abandoned queued
+  sign-in (4 of 12);
+- Playwright: the abandoned case (one refresh instead of two) on `chromium-desktop` and
+  `chromium-mobile`.
+
+The order A, queued/in-flight-failure, success, sign-out and newer-sign-in tests also
+pass on `b18d3cf`. The old code already handled those orders, and the tests now guard
+them.
+
+**Merges of `main`.** Both merges (`46a4540`, then `cc6e9b7`) conflicted only in
+`docs/testing.md`, where both sides had appended sections at the end. Each side's
+sections were kept whole: `main`'s FE24 and SH07 sections precede the ADR014 sections.
+Line comparisons found every line of both sides present, except merge-base lines that
+`main` itself rewrote: 15 in the first merge, 3 in the second. `docs/setup.md` and
+`docs/repository-structure.md` merged automatically. No application file changed. The
+local runs below were made on the first merge. The second merge adds only
+`.github/workflows/ci-e2e.yml`, `e2e/fixtures/ci-evidence.mjs` and documentation, and its
+`CI E2E` job runs the suite in CI for this PR.
+
+**Executed on the merged tree** (author evidence, not independent verification):
+
+| Command | Result |
+|---|---|
+| `cd frontend && npm test` / `npm run build` | PASS — 16 files, 505 tests; build OK |
+| `cd frontend && npm run test:browser` (Chromium) | PASS — 45 |
+| `cd backend && ./mvnw verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='AuthorizationIntegrationTest$RefreshSessions'` | PASS — 24 of 24, including F01A–F01D, both F02, F03, both N01 and rotation-versus-reset (backend unchanged since `b18d3cf`) |
+| `cd e2e && node --test fixtures/*.test.mjs` | PASS — 152 |
+| `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` (FE24 lifecycle coordinator) | PASS — 85 passed, 3 skipped (the API-only REST smoke, which runs only on `chromium-desktop`); every owned resource was verified absent, and recovery completed |
+
+**Earlier runs in this remediation:**
+
+- A first full run failed the new Playwright test on all four projects. The test compared
+  bearers with the sign-in's, and two access JWTs issued within one second are identical.
+  It now compares with the token the recovery refresh returned.
+- A second full run had one WebKit-desktop failure in the shared sign-in helper of
+  "shows the profile snapshot, signs out and guards private routes again". The email
+  field was invalid at submit, before any renewal. It did not reproduce in three repeats
+  of every session test on both WebKit projects (78 passed).
+
+F04, F05 and N02 Playwright regressions passed in the final run.
+
+**Correction.** The earlier "Second independent review remediation" table attributes its
+3 skips to N02, F04 and F05. In fact they were this same API-only REST smoke on the three
+non-`chromium-desktop` projects; the N02, F04 and F05 tests ran. `firefox-desktop` was
+not run (host limitation).
+
+## PR #246 CI failures on `aa6995d` — 17 November 2026
+
+`aa6995d` has the same tree as `be8bef0`, on which all CI checks had passed; only its commit metadata changed. On `aa6995d`, two jobs failed. Neither failure came from the hybrid-authentication change.
+
+| Job | Actual cause | Action |
+|---|---|---|
+| `CI E2E` / `E2E`, step "Run E2E lifecycle regression tests" | A race in the FE24 test "finalizer A paused in a Docker removal, … B is never touched" (`e2e/fixtures/lifecycle.test.mjs`). The test snapshotted run B's record as soon as it was `active`, but B's own coordinator then records its spawned runner (revision 1 → 2, runner `starting` → `live`). The CI diff shows exactly that write and no write by A. | The test now waits for B's live runner, B's last write before its gate, then takes the snapshot. The fencing assertions are unchanged. |
+| `CI` / "VM runtime privileges with the real backend", step "Build the backend image from this revision" | Transient. `./mvnw package -DskipTests` inside `docker build -q` exited 1 after about 13 s; the quiet build hides Maven's output. The same tree built without cache locally (BUILD SUCCESS), and the job's rerun on `aa6995d` (attempt 2) passed. | None: no workflow or build change. |
+
+Executed (author evidence): the fixed test passed 5 times in isolation, and all 152 tests passed in `cd e2e && node --test fixtures/*.test.mjs`. The backend image built with `docker build --no-cache` locally. The `aa6995d` VM job rerun passed.

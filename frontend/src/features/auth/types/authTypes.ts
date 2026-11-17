@@ -75,6 +75,16 @@ export function loginExpiresAt(response: LoginResponse, receivedAt: number): num
     if (expiry <= receivedAt) throw protocolError();
     return expiry;
 }
+/**
+ * The access token's refresh-session claim (`sid`, ADR014 §3), decoded only so the provider can
+ * tell an in-place rotation from a different session. It authorizes nothing; null when absent.
+ */
+export function accessSessionId(accessToken: string): string | null {
+    try {
+        const claims = jwtPart(accessToken.split('.')[1] ?? '');
+        return isRecord(claims) && typeof claims.sid === 'string' && uuid.test(claims.sid) ? claims.sid.toLowerCase() : null;
+    } catch { return null; }
+}
 export function decodeLoginResponse(value: unknown): LoginResponse {
     if (!isRecord(value) || !exactKeys(value, ['accessToken', 'tokenType', 'expiresIn', 'user']) ||
         typeof value.accessToken !== 'string' || value.tokenType !== 'Bearer' || value.expiresIn !== 900) throw protocolError();

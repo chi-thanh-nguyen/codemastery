@@ -102,6 +102,8 @@ function createApi() {
             const body = request.postDataJSON();
             return body.password === 'wrong-password-123' ? route.fulfill(problem(401, 'Invalid email or password.', url.pathname)) : route.fulfill(ok(loginBody()));
         }
+        // ADR014: the harness browser holds no refresh cookie, so the load-time session check is refused.
+        if (p === '/auth/refresh' && request.method() === 'POST') return route.fulfill(problem(401, 'Authentication failed.', url.pathname));
         if (p === '/courses' && request.method() === 'GET') {
             const q = (url.searchParams.get('q') || '').toLowerCase(), pre = url.searchParams.get('prerequisites') || 'any';
             const page = Number(url.searchParams.get('page') || 0), size = Number(url.searchParams.get('size') || 20);
@@ -322,14 +324,14 @@ async function runEngine(playwright, engine, baseUrl) {
                     assert(shot.lit > size * 2 && shot.sky > 0 && (size < 24 || shot.violet > 0), `${size}px: ${JSON.stringify(shot)}`);
                 }
             });
-            await check('the landing page at / loads only its example-map chunk, never the preview, and sends no API request', async () => {
+            await check('the landing page at / loads only its example-map chunk, never the preview, and sends only the anonymous session check', async () => {
                 const { context: landingContext, page: landing, api: landingApi } = await newPage();
                 await landing.goto(url('/')); await ready(landing);
                 await landing.getByText('Illustration · not learner data').waitFor();
                 const scripts = await landing.evaluate(() => performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname));
                 assert(scripts.some((s) => /ExampleMasteryMap/.test(s)), scripts.join(','));
                 assert(!scripts.some((s) => /PreviewApp/.test(s)));
-                assert.deepEqual(landingApi.state.requests, []);
+                assert.deepEqual(landingApi.state.requests, ['POST /api/auth/refresh']);
                 const links = await landing.getByRole('navigation', { name: 'Main navigation' }).getByRole('link').evaluateAll((list) => list.map((a) => [a.textContent, a.getAttribute('href')]));
                 assert.deepEqual(links, [['Catalogue', '/courses'], ['Sign in', '/login'], ['Create account', '/register']]);
                 await landing.screenshot({ path: path.join(dir, 'landing-1280.png'), fullPage: true });

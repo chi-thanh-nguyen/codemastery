@@ -18,3 +18,11 @@ export function login(payload: LoginRequest, signal?: AbortSignal, isCurrent?: (
         body: loginInput(payload), signal, isCurrent,
     });
 }
+/** ADR014 rotation: the HttpOnly cookie is the only credential; the result has the login shape. */
+export function refreshSession(signal?: AbortSignal) {
+    return request('/auth/refresh', { method: 'POST', auth: 'public', expectedStatus: 200, decode: decodeLoginResponse, signal });
+}
+/** ADR014 logout: revokes this browser's server session and deletes its cookie (204). */
+export function endSession(signal?: AbortSignal) {
+    return request('/auth/logout', { method: 'POST', auth: 'public', expectedStatus: 204, decode: () => undefined, signal });
+}

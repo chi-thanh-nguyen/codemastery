@@ -18,7 +18,7 @@ const listing: MembershipPage = { content: [{ id, title: 'Programming', descript
 let host: HTMLDivElement, root: Root, auth: AuthContextValue;
 beforeEach(() => {
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-    auth = { user: { id, displayName: 'Learner', role: 'Learner' }, generation: 1, isAuthenticated: true,
+    auth = { user: { id, displayName: 'Learner', role: 'Learner' }, generation: 1, isAuthenticated: true, restoring: false,
         isCurrent: (generation) => generation === 1, login: vi.fn(), register: vi.fn(), logout: vi.fn(), rememberProfile: vi.fn(), consumeReturn: () => '/courses' };
     vi.mocked(getCourseMembership).mockResolvedValue({ courseId: id, status: 'none' }); vi.mocked(getMyEnrolledCourses).mockResolvedValue(listing);
     vi.mocked(enrollInCourse).mockResolvedValue({ courseId: id, status: 'active' }); vi.mocked(leaveCourse).mockResolvedValue({ courseId: id, status: 'left' });
