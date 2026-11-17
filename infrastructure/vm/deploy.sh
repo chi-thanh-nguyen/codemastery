@@ -1623,7 +1623,7 @@ SQL
   expect_denied  "runtime role changing Course publication" 42501 "${app}" "${app_pw}" <<<'UPDATE public.courses SET publication_status = publication_status WHERE false;'
   expect_denied  "runtime role deleting memberships" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.enrollments WHERE false;'
   expect_denied  "runtime role re-owning memberships" 42501 "${app}" "${app_pw}" <<<'UPDATE public.enrollments SET user_id = user_id, course_id = course_id WHERE false;'
-  expect_denied  "runtime role writing mastery-skip flags" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_progress SET mastery_skipped = mastery_skipped WHERE false;'
+  expect_denied  "runtime role updating mastery-skip flags" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_progress SET mastery_skipped = mastery_skipped WHERE false;'
   expect_denied  "runtime role erasing lesson progress" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.lesson_progress WHERE false;'
   expect_denied  "runtime role reading question answer keys" 42501 "${app}" "${app_pw}" <<<'SELECT correct_options FROM public.questions WHERE false;'
   expect_denied  "runtime role reading protected material payloads" 42501 "${app}" "${app_pw}" <<<'SELECT object_key FROM public.learning_materials WHERE false;'

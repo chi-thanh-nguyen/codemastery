@@ -1587,14 +1587,23 @@ Least privilege exercised by the consumer:
 The runtime role still cannot do any of the following:
 
 - change an Enrollment's id, learner or Course, or delete it;
-- write `mastery_skipped` (CT22.atomic, CO15, adds it within the ceiling when it is
-  implemented) or delete progress rows;
+- update `mastery_skipped` on an existing row (CT22.atomic, CO15, adds UPDATE
+  (mastery_skipped) within the ceiling when it is implemented) or delete progress rows;
 - truncate either table.
 
 A compromised runtime role could mark any Lesson complete or rewrite any learner's
 resume pointer and visit time, which the approved transitions inherently require.
-`verify_role_separation` probes the re-ownership, mastery-skip and progress-deletion
-denials.
+The table-level INSERT on `lesson_progress` also covers `mastery_skipped`: that column
+is `NOT NULL` without a default, and manual completion inserts it explicitly as
+`false`. A compromised runtime role could therefore insert a new progress row with
+`completed = true, mastery_skipped = true`; the V002 check constraint still rejects a
+skip without completion. This is within the ADR012 §19.2 ceiling, which grants INSERT
+on `lesson_progress` for CT22.progress and CT22.atomic, and no API path reaches it: the
+completion operation accepts only `{"completed":true}` and never a skip flag. Removing
+that column from the INSERT grant would need a schema default, which no approved
+contract provides. `verify_role_separation` probes the re-ownership, mastery-skip
+update and progress-deletion denials; the containment test also records the accepted
+INSERT capability.
 
 **Upgrade of an existing V008 database (independent-review remediation, 17 November
 2026).** `deploy` and `provision` run `provision_db_roles` before the backend starts,
@@ -1611,7 +1620,13 @@ recorded V009 without its column, unreviewed columns or excess privileges) defer
 nothing and fails closed. After Flyway V009, `harden_after_migration` grants the whole
 matrix and the complete verification requires it exactly. The matrix rows, their
 privileges and the r1–r4 records are unchanged; a fresh database and an already
-migrated V009 database defer nothing.
+migrated V009 database defer nothing. When the column already exists, provisioning
+treats the schema as current and grants exactly the r4 matrix, as every earlier
+revision did for existing tables. Provisioning never grants beyond the matrix, and
+Flyway and the deploy gate own the migration state. If the column was added by hand to
+a V008 database, or the Flyway history is missing or has a failed V009 row, the real
+backend's Flyway refuses to start. `deploy` then stops before hardening and ingress,
+and its Flyway-history gate also rejects failed rows.
 
 The following stay synchronized with this record:
 
