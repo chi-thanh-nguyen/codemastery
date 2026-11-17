@@ -1,13 +1,16 @@
 /**
  * Group A learner journey through the real frontend, REST API and PostgreSQL.
  * Runs against the disposable stack from fixtures/local-stack.ts (or E2E_BASE_URL).
- * No request is intercepted or mocked.
+ * No request is mocked. The session-ordering tests (ADR014 §§15–16) only delay one real
+ * refresh request until a chosen moment; its request and response are never altered.
  */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { accountMenuName, expect, expectNoPageOverflow, fixture, newAccount, registerThroughApi, signIn, signOut, target, test, watchAuthorization } from '../fixtures/auth-fixture';
 
 const desktop = (name: string) => name.endsWith('-desktop');
+/** ADR014 cookie name: `__Host-` over HTTPS, the HTTP loopback development name otherwise. */
+const refreshCookie = () => new URL(target.base).protocol === 'https:' ? '__Host-cm_refresh' : 'cm_refresh';
 
 test.describe('catalogue and course detail (anonymous)', () => {
     test.skip(!target.fixture, 'Needs the deterministic catalogue fixture of the disposable stack.');
@@ -104,7 +107,7 @@ test.describe('catalogue and course detail (anonymous)', () => {
 });
 
 test.describe('public landing and Learner start', () => {
-    test('serves the landing page at / with public navigation and no API request', async ({ page }) => {
+    test('serves the landing page at / with public navigation and only the anonymous session check', async ({ page }) => {
         const api = watchAuthorization(page);
         await page.goto('/');
         await expect(page.getByRole('heading', { level: 1, name: 'Learn programming at the pace of what you actually know.' })).toBeVisible();
@@ -113,7 +116,8 @@ test.describe('public landing and Learner start', () => {
         await expect(nav.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
         await expect(page.getByText('Illustration · not learner data')).toBeVisible();
         await expectNoPageOverflow(page);
-        expect(api).toEqual([]);
+        // ADR014: the only request is one bearer-less session check against the (absent) refresh cookie.
+        expect(api).toEqual([{ method: 'POST', path: '/api/auth/refresh', bearer: false }]);
         await page.getByRole('link', { name: 'Browse courses' }).click();
         await expect(page).toHaveURL(/\/courses$/);
         await expect(page.getByRole('link', { name: 'CodeMastery home' })).toHaveAttribute('href', '/');
@@ -142,9 +146,11 @@ test.describe('public landing and Learner start', () => {
         await expectNoPageOverflow(page);
     });
 
-    test('says the session ended after the 15-minute expiry, once', async ({ page, learner }) => {
+    test('says the session ended once when the refresh credential is refused', async ({ page, context, learner }) => {
         await page.clock.install();
         await signIn(page, learner);
+        // ADR014: without a usable refresh cookie, renewal before the 15-minute expiry is refused.
+        await context.clearCookies();
         await page.getByRole('button', { name: accountMenuName(learner) }).click();
         await page.getByRole('menuitem', { name: 'Profile' }).click();
         await expect(page).toHaveURL(/\/profile$/);
@@ -162,7 +168,7 @@ test.describe('public landing and Learner start', () => {
 });
 
 test.describe('accounts and sessions', () => {
-    test('registers through the form, then signs in; the session lives in memory only', async ({ page, context }) => {
+    test('registers through the form, then signs in; the access token stays in memory and reload restores the session', async ({ page, context }) => {
         const account = newAccount('Registrant');
         await page.goto('/register');
         await expect(page.getByRole('heading', { level: 1, name: 'Create account' })).toBeVisible();
@@ -185,14 +191,206 @@ test.describe('accounts and sessions', () => {
         expect(duplicate.status()).toBe(409);
 
         await signIn(page, account);
-        const stored = await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }));
-        expect(stored).toEqual({ local: 0, session: 0 });
-        expect((await context.cookies()).length).toBe(0);
-        // Reloading Learner home loses the memory-only session, so the protected route sends the visitor to Sign in.
+        const stored = await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length, cookie: document.cookie }));
+        expect(stored).toEqual({ local: 0, session: 0, cookie: '' });
+        // ADR014: the only cookie is the HttpOnly, SameSite=Strict refresh cookie; scripts cannot read it.
+        const cookies = await context.cookies();
+        expect(cookies.map((cookie) => cookie.name)).toEqual([refreshCookie()]);
+        expect(cookies[0]).toMatchObject({ httpOnly: true, sameSite: 'Strict', path: '/' });
+        // Reloading Learner home restores the session from the refresh cookie; nothing is stored by the page.
         await page.reload();
-        await expect(page).toHaveURL(/\/login$/);
-        await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+        await expect(page).toHaveURL(/\/home$/);
+        await expect(page.getByRole('button', { name: accountMenuName(account) })).toBeVisible();
+        expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
     });
+
+    test('a second tab adopts the session and signing out in one tab signs out both', async ({ page, context, learner }) => {
+        await signIn(page, learner);
+        const other = await context.newPage();
+        await other.goto('/profile');
+        await expect(other.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
+        await expect(other.locator('main dl')).toContainText(learner.displayName);
+        await signOut(page, learner);
+        // The other tab follows the sign-out without a reload, and the cookie is gone for both.
+        await expect(other).toHaveURL(/\/login$/);
+        await expect.poll(async () => (await context.cookies()).length).toBe(0);
+        await other.reload();
+        await expect(other).toHaveURL(/\/login$/);
+        await other.close();
+    });
+
+    test('renews the access token before it expires without a reload or a new sign-in', async ({ page, learner }) => {
+        await page.clock.install();
+        await signIn(page, learner);
+        const renewed = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/refresh');
+        await page.clock.fastForward('14:05');
+        expect((await renewed).status()).toBe(200);
+        // Learner home's private request now uses the renewed bearer; the server checks real time.
+        await page.getByRole('link', { name: 'Browse the catalogue' }).click();
+        await expect(page).toHaveURL(/\/courses$/);
+        const membership = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/me/courses');
+        await page.getByRole('link', { name: 'CodeMastery home' }).click();
+        expect((await membership).status()).toBe(200);
+        await expect(page.getByRole('heading', { name: "You haven't joined a course yet" })).toBeVisible();
+        await expect(page.getByRole('button', { name: accountMenuName(learner) })).toBeVisible();
+    });
+
+    test('a cross-site page cannot refresh or end the session (Origin guard, SameSite=Strict)', async ({ page, context, learner }) => {
+        test.skip(new URL(target.base).hostname !== '127.0.0.1', 'Needs the loopback stack: localhost is a different site there.');
+        await signIn(page, learner);
+        // http://localhost is another site than http://127.0.0.1, on the same loopback network.
+        const attacker = await context.newPage(), answers: { path: string; status: number }[] = [];
+        attacker.on('response', (response) => {
+            const url = new URL(response.url());
+            if (url.pathname.startsWith('/api/auth/')) answers.push({ path: url.pathname, status: response.status() });
+        });
+        const other = new URL(target.base); other.hostname = 'localhost';
+        await attacker.goto(new URL('/courses', other).href);
+        for (const operation of ['refresh', 'logout']) {
+            await attacker.evaluate(async (url) => { await fetch(url, { method: 'POST', credentials: 'include', mode: 'no-cors' }).catch(() => undefined); },
+                new URL(`/api/auth/${operation}`, target.api).href);
+        }
+        await expect.poll(() => ['/api/auth/refresh', '/api/auth/logout'].every((path) => answers.some((answer) => answer.path === path))).toBe(true);
+        expect(answers.every((answer) => answer.status === 403), JSON.stringify(answers)).toBe(true);
+        await attacker.close();
+        // The session survived: a reload still restores it.
+        await page.reload();
+        await expect(page.getByRole('button', { name: accountMenuName(learner) })).toBeVisible();
+    });
+
+    /** Holds the next real refresh request of `target` until `release()`; nothing is altered. */
+    async function holdNextRefresh(target: import('@playwright/test').Page) {
+        let release!: () => void, intercepted!: () => void;
+        const gate = new Promise<void>((done) => { release = done; });
+        const seen = new Promise<void>((done) => { intercepted = done; });
+        await target.route((url) => url.pathname === '/api/auth/refresh', async (route) => { intercepted(); await gate; await route.continue(); }, { times: 1 });
+        return { seen, release: () => release() };
+    }
+
+    test('F04: a sign-out in another tab wins over that tab\'s pending session restore', async ({ page, context, learner }) => {
+        await signIn(page, learner);
+        const other = await context.newPage();
+        const held = await holdNextRefresh(other);
+        await other.goto('/profile');
+        await held.seen;
+        await expect(other.getByText('Restoring your session…')).toBeVisible();
+        // The sign-out broadcasts at once; its server request waits for the Web Lock the restore holds.
+        await signOut(page, learner);
+        const late = other.waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/refresh');
+        held.release();
+        expect((await late).status()).toBe(200);
+        await expect(other).toHaveURL(/\/login$/);
+        await expect(other.locator('main dl')).toHaveCount(0);
+        await expect(other.getByRole('button', { name: accountMenuName(learner) })).toHaveCount(0);
+        // Server side: the sign-out then revoked the session and deleted the cookie.
+        await expect.poll(async () => (await context.cookies()).length).toBe(0);
+        const status = await other.evaluate(async (url) => (await fetch(url, { method: 'POST', credentials: 'include' })).status,
+            new URL('/api/auth/refresh', target.api).href);
+        expect(status).toBe(401);
+        await other.close();
+    });
+
+    test('F05: an explicit sign-in queued behind a pending restore is sent and installs the chosen account', async ({ page, learner, request }) => {
+        const chosen = newAccount('Chosen');
+        await registerThroughApi(request, chosen);
+        await signIn(page, learner);
+        expect(await page.evaluate(() => typeof navigator.locks?.request)).toBe('function');
+        const logins: string[] = [];
+        page.on('request', (sent) => { if (new URL(sent.url()).pathname === '/api/auth/login') logins.push(sent.method()); });
+        const held = await holdNextRefresh(page);
+        await page.goto('/login');
+        await held.seen;
+        await page.locator('#login-email').fill(chosen.email);
+        await page.locator('#login-password').fill(chosen.password);
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Signing in…' })).toBeVisible();
+        expect(logins).toEqual([]);
+        held.release();
+        await expect(page).toHaveURL(/\/home$/);
+        await expect(page.getByRole('button', { name: accountMenuName(chosen) })).toBeVisible();
+        await expect(page.getByRole('button', { name: accountMenuName(learner) })).toHaveCount(0);
+        expect(logins).toEqual(['POST']);
+    });
+
+    test('N02: a delayed renewal returning another session does not cancel an explicit sign-in queued behind it', async ({ page, learner, request }) => {
+        const chosen = newAccount('Chosen');
+        await registerThroughApi(request, chosen);
+        await page.clock.install();
+        await signIn(page, learner);
+        expect(await page.evaluate(() => typeof navigator.locks?.request)).toBe('function');
+        // A second real sign-in through this context's API client replaces the shared cookie with a
+        // new session (no broadcast), so the tab's next renewal genuinely returns another sid.
+        const replaced = await page.request.post(new URL('/api/auth/login', target.api).href,
+            { headers: { Origin: new URL(target.base).origin }, data: { email: learner.email, password: learner.password } });
+        expect(replaced.status()).toBe(200);
+        const logins: string[] = [];
+        page.on('request', (sent) => { if (new URL(sent.url()).pathname === '/api/auth/login') logins.push(sent.method()); });
+        const held = await holdNextRefresh(page);
+        await page.clock.fastForward('14:05');
+        await held.seen;
+        await page.evaluate(() => { history.pushState(null, '', '/login'); dispatchEvent(new PopStateEvent('popstate')); });
+        await page.locator('#login-email').fill(chosen.email);
+        await page.locator('#login-password').fill(chosen.password);
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Signing in…' })).toBeVisible();
+        expect(logins).toEqual([]);
+        const renewed = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/refresh');
+        held.release();
+        expect((await renewed).status()).toBe(200);
+        await expect(page).toHaveURL(/\/home$/);
+        await expect(page.getByRole('button', { name: accountMenuName(chosen) })).toBeVisible();
+        await expect(page.getByRole('button', { name: accountMenuName(learner) })).toHaveCount(0);
+        expect(logins).toEqual(['POST']);
+    });
+
+    /** Resolves with the Authorization header of the next real `/api/me/courses` request; compared in memory, never logged. */
+    function nextMembershipBearer(target: import('@playwright/test').Page) {
+        return target.waitForRequest((sent) => new URL(sent.url()).pathname === '/api/me/courses').then((sent) => sent.headers().authorization ?? '');
+    }
+    const showHome = (target: import('@playwright/test').Page) => target.evaluate(() => { history.pushState(null, '', '/home'); dispatchEvent(new PopStateEvent('popstate')); });
+
+    for (const outcome of ['abandoned', 'refused'] as const) {
+        test(`A01: a delayed renewal superseded by an explicit sign-in that is ${outcome} still renews the session from the cookie`, async ({ page, learner }) => {
+            await page.clock.install();
+            await signIn(page, learner);
+            expect(await page.evaluate(() => typeof navigator.locks?.request)).toBe('function');
+            const logins: number[] = [], refreshes: number[] = [], issued: Promise<string>[] = [];
+            page.on('response', (answer) => {
+                const pathname = new URL(answer.url()).pathname;
+                if (pathname === '/api/auth/login') logins.push(answer.status());
+                if (pathname === '/api/auth/refresh') {
+                    refreshes.push(answer.status());
+                    issued.push(answer.json().then((body: { accessToken?: string }) => body.accessToken ?? '', () => ''));
+                }
+            });
+            const held = await holdNextRefresh(page);
+            await page.clock.fastForward('14:05');
+            await held.seen;
+            await page.evaluate(() => { history.pushState(null, '', '/login'); dispatchEvent(new PopStateEvent('popstate')); });
+            await page.locator('#login-email').fill(learner.email);
+            await page.locator('#login-password').fill(outcome === 'refused' ? `${learner.password}-wrong` : learner.password);
+            await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+            await expect(page.getByRole('status').filter({ hasText: 'Signing in…' })).toBeVisible();
+            // The sign-in waits for the Web Lock the held renewal owns. 'abandoned': the user leaves
+            // the sign-in page, which cancels it (the old code then lost the renewal it superseded).
+            if (outcome === 'abandoned') await showHome(page);
+            held.release();
+            await expect.poll(() => refreshes).toEqual([200, 200]);
+            expect(logins).toEqual(outcome === 'refused' ? [401] : []);
+            if (outcome === 'refused') await expect(page.getByRole('alert')).toBeVisible();
+            // The recovered session is usable with the bearer issued by the recovery refresh. (Bearers
+            // are not compared with the sign-in's: two JWTs issued within one second are identical.)
+            await page.evaluate(() => { history.pushState(null, '', '/courses'); dispatchEvent(new PopStateEvent('popstate')); });
+            const after = nextMembershipBearer(page);
+            const membership = page.waitForResponse((answer) => new URL(answer.url()).pathname === '/api/me/courses');
+            await showHome(page);
+            expect((await membership).status()).toBe(200);
+            const recovered = await issued[1];
+            expect(recovered.length > 0, 'the recovery refresh issued an access token').toBe(true);
+            expect(await after === `Bearer ${recovered}`, 'the bearer is the one the recovery refresh issued').toBe(true);
+            await expect(page.getByRole('button', { name: accountMenuName(learner) })).toBeVisible();
+        });
+    }
 
     test('rejects wrong credentials with a safe message and keeps the form', async ({ page, learner }) => {
         await page.goto('/login');
@@ -204,7 +402,7 @@ test.describe('accounts and sessions', () => {
         await expect(page.locator('#login-email')).toHaveValue(learner.email);
     });
 
-    test('shows the profile snapshot, signs out and guards private routes again', async ({ page, learner }) => {
+    test('shows the profile snapshot, signs out and guards private routes again', async ({ page, context, learner }) => {
         await signIn(page, learner);
         await page.getByRole('button', { name: accountMenuName(learner) }).click();
         await page.getByRole('menuitem', { name: 'Profile' }).click();
@@ -217,6 +415,8 @@ test.describe('accounts and sessions', () => {
 
         await signOut(page, learner);
         await expect(page.getByText('Your session ended')).toHaveCount(0);
+        // ADR014: sign-out revoked the server session and deleted the refresh cookie, so a reload stays signed out.
+        await expect.poll(async () => (await context.cookies()).length).toBe(0);
         for (const path of ['/my-courses', '/profile']) {
             await page.goto(path);
             await expect(page).toHaveURL(/\/login$/);
@@ -229,7 +429,7 @@ test.describe('accounts and sessions', () => {
         test.skip(!instructor, 'Needs an Instructor account (created by the disposable stack).');
         await signIn(page, instructor!, 'courses');
         await expect(page.getByRole('link', { name: 'My courses' })).toHaveCount(0);
-        // In-app history navigation keeps the memory-only session (a typed URL would reload and sign out).
+        // In-app history navigation keeps the in-memory session (a typed URL would reload and restore it from the cookie).
         await page.evaluate(() => { history.pushState(null, '', '/my-courses'); dispatchEvent(new PopStateEvent('popstate')); });
         await expect(page.getByRole('heading', { level: 1, name: "You don't have access to this page" })).toBeVisible();
         await expect(page.getByText("You're signed in as an Instructor. This page is for learners.")).toBeVisible();
@@ -254,7 +454,7 @@ test.describe('membership', () => {
 
     test('enrolls from course detail, leaves from the My courses tile menu and re-enrolls', async ({ page, learner }, testInfo) => {
         const auth = watchAuthorization(page);
-        // The session is memory-only, so stay inside the app (no full reload) after signing in.
+        // Stay inside the app after signing in, so every request below belongs to one in-memory session.
         await signIn(page, learner);
         // Sign-in lands on Learner home; the catalogue is one in-app link away.
         await page.getByRole('link', { name: 'Browse the catalogue' }).click();

@@ -119,6 +119,45 @@ token="$(printf '%s' "$BODY" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
 [[ -n "$token" ]] || fail "no access token in the login response"
 pass "bearer token issued"
 
+echo "== ADR014 refresh cookie through the ingress: issue, rotate, CSRF guard, logout"
+cookie_of() { printf '%s\n' "$HEADERS" | sed -n 's/^Set-Cookie: __Host-cm_refresh=\([A-Za-z0-9_-]*\);.*/\1/p'; }
+contains "login sets the host-only Secure HttpOnly SameSite=Strict refresh cookie" "$HEADERS" \
+  "; Path=/; Max-Age=86400; Expires="
+contains "refresh cookie attributes" "$HEADERS" "; Secure; HttpOnly; SameSite=Strict"
+lacks "refresh cookie has no Domain" "$HEADERS" "Domain="
+refresh_cookie="$(cookie_of)"
+[[ "${#refresh_cookie}" == 43 ]] || fail "no __Host-cm_refresh cookie in the login response"
+lacks "refresh token never appears in the JSON body" "$BODY" "$refresh_cookie"
+request POST /api/auth/refresh -H "Cookie: __Host-cm_refresh=$refresh_cookie"
+expect "refresh without Origin is refused by the CSRF guard" "$STATUS" 403
+request POST /api/auth/refresh -H 'Origin: https://evil.example' -H "Cookie: __Host-cm_refresh=$refresh_cookie"
+expect "refresh from a foreign Origin is refused" "$STATUS" 403
+request POST /api/auth/refresh -H "Origin: $origin" -H 'Sec-Fetch-Site: cross-site' -H "Cookie: __Host-cm_refresh=$refresh_cookie"
+expect "cross-site Fetch Metadata is refused (forwarded by the ingress)" "$STATUS" 403
+request POST /api/auth/refresh -H "Origin: $origin" -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
+  -H "Cookie: __Host-cm_refresh=$refresh_cookie"
+expect "refresh with the cookie through the ingress" "$STATUS" 200
+contains "refresh Cache-Control" "$HEADERS" "Cache-Control: no-store"
+rotated="$(cookie_of)"
+[[ "${#rotated}" == 43 && "$rotated" != "$refresh_cookie" ]] || fail "refresh did not rotate the cookie"
+pass "refresh rotated the cookie"
+refreshed_token="$(printf '%s' "$BODY" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
+request GET /api/me/courses -H "Authorization: Bearer $refreshed_token"
+expect "the refreshed bearer authenticates" "$STATUS" 200
+request POST /api/auth/refresh -H "Origin: $origin" -H "Cookie: __Host-cm_refresh=$refresh_cookie"
+expect "the consumed cookie is rejected (concurrency grace, no rotation)" "$STATUS" 401
+lacks "a rejected refresh sets no cookie" "$HEADERS" "Set-Cookie"
+request POST /api/auth/logout -H "Origin: $origin" -H "Cookie: __Host-cm_refresh=$rotated"
+expect "logout through the ingress" "$STATUS" 204
+contains "logout deletes the cookie" "$HEADERS" "Set-Cookie: __Host-cm_refresh=; Path=/; Max-Age=0;"
+request GET /api/me/courses -H "Authorization: Bearer $refreshed_token"
+expect "logout revokes the session-bound bearer immediately" "$STATUS" 401
+request POST /api/auth/refresh -H "Origin: $origin" -H "Cookie: __Host-cm_refresh=$rotated"
+expect "refresh after logout" "$STATUS" 401
+request POST /api/auth/login -H "$json" -H "Origin: $origin" --data "$credentials"
+expect "sign in again for the remaining checks" "$STATUS" 200
+token="$(printf '%s' "$BODY" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
+
 echo "== REST through the ingress keeps the /api prefix in paths and ProblemDetail"
 request GET '/api/courses?page=0&size=20'
 expect "public catalogue" "$STATUS" 200; expect "catalogue content type" "$TYPE" application/json

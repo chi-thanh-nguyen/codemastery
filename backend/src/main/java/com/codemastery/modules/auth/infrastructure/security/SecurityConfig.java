@@ -33,6 +33,9 @@ public class SecurityConfig {
     static final RequestMatcher PUBLIC_OPERATIONS = new OrRequestMatcher(
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/register"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/login"),
+            // ADR014: cookie-authenticated session operations; no bearer is read on them.
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/refresh"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/logout"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/password-reset-requests"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/password-resets"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses"),
@@ -62,10 +65,14 @@ public class SecurityConfig {
                                             JwtTokenProvider jwtTokenProvider,
                                             UserRepository userRepository,
                                             RestSecurityErrorHandler restSecurityErrorHandler,
-                                            AppConfig.CorsSettings corsSettings) throws Exception {
+                                            AppConfig.CorsSettings corsSettings,
+                                            RefreshCookieSecurity refreshCookies) throws Exception {
         JwtAuthenticationFilter jwtAuthenticationFilter =
                 new JwtAuthenticationFilter(jwtTokenProvider, userRepository, restSecurityErrorHandler);
         http
+                // Spring's token CSRF is not selected: bearer endpoints carry no ambient
+                // credential, and the three refresh-cookie operations are protected by
+                // RefreshCookieSecurity.TrustedOriginFilter below (ADR014 §5).
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
                 .httpBasic(basic -> basic.disable())
                 .formLogin(form -> form.disable())
@@ -85,17 +92,30 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/membership").hasRole("LEARNER")
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
+                .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),
+                        UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
     private static CorsConfigurationSource corsConfigurationSource(AppConfig.CorsSettings corsSettings) {
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        // ADR014 §5: only the cookie operations admit credentials, for the same explicit
+        // origins (a same-site loopback development frontend on another port). Registered
+        // first: the first matching pattern applies. They take no Authorization header.
+        CorsConfiguration cookieOperations = new CorsConfiguration();
+        cookieOperations.setAllowedOrigins(corsSettings.allowedOrigins());
+        cookieOperations.setAllowedMethods(List.of(HttpMethod.POST.name(), HttpMethod.OPTIONS.name()));
+        cookieOperations.setAllowedHeaders(List.of(HttpHeaders.CONTENT_TYPE));
+        cookieOperations.setAllowCredentials(true);
+        for (String path : List.of("/api/auth/login", "/api/auth/refresh", "/api/auth/logout")) {
+            source.registerCorsConfiguration(path, cookieOperations);
+        }
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(corsSettings.allowedOrigins());
         configuration.setAllowedMethods(List.of(HttpMethod.GET.name(), HttpMethod.POST.name(), HttpMethod.PUT.name(), HttpMethod.DELETE.name(), HttpMethod.OPTIONS.name()));
         configuration.setAllowedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
         configuration.setAllowCredentials(false);
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }

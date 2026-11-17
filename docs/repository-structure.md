@@ -2087,6 +2087,28 @@ codemastery/
 └── CONTRIBUTING.md
 ```
 
+## ADR014 hybrid-authentication file additions — 16 November 2026
+
+`STRUCT-AUTH-SESSION-2026-11-16-r1` is **DELEGATED_APPROVED** under the Project
+Leader's explicit instruction "CodeMastery — End-to-End Hybrid Authentication Upgrade
+with Delegated Technical Approval" of 16 November 2026
+([ADR014 §10](decisions/014-hybrid-refresh-session-authentication.md#10-struct-auth-session-2026-11-16-r1--file-additions)).
+Exactly these three files are added, inside existing directories of the owning Auth
+module and the migration directory:
+
+| File | Purpose |
+| --- | --- |
+| `backend/src/main/java/com/codemastery/modules/auth/application/service/RefreshSessionService.java` | Auth application service for refresh-session start, rotation, replay detection and logout |
+| `backend/src/main/java/com/codemastery/modules/auth/infrastructure/security/RefreshCookieSecurity.java` | Refresh-cookie policy and the Origin/Fetch Metadata guard of the cookie operations |
+| `backend/src/main/resources/db/migration/V008__create_refresh_sessions.sql` | The NEW migration for `refresh_sessions` and `refresh_tokens`, with no grant |
+
+The existing Auth-module and migration-directory CODEOWNERS rules cover them and are
+unchanged. Persistence methods extend the existing `UserRepository` and
+`UserRepositoryImpl`; tests were added to existing test files only. The immutable
+canonical tree and the inventory tree below are unchanged; this is an explicit
+addition. No other directory, module, file or dependency, and no execution of V008
+against a shared or production database, is approved.
+
 ## Bounded Interim FE03/FE07 test inventory
 
 **CT14-INTERIM-FE03-FE07-2026-10-24-r1 —

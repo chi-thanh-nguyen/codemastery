@@ -96,7 +96,7 @@ start_backend() {  # env-file
   [[ "$started" == yes ]] || backend_started || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
 }
 start_backend "$work/backend.env"
-check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "7/7 $(env_get SPRING_FLYWAY_USER)"
+check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "8/8 $(env_get SPRING_FLYWAY_USER)"
 harden_after_migration
 verify_role_separation >/dev/null
 echo "  verify_role_separation: PASS (exact matrix on the real Flyway schema)"
@@ -131,6 +131,28 @@ for who in a b c; do
   check "login learner.$who" "$STATUS" 200
   printf -v "token_$who" '%s' "$(field accessToken)"
 done
+
+echo "== ADR014 refresh sessions (refresh_sessions/refresh_tokens SELECT, INSERT, DELETE; UPDATE(revoked_at), UPDATE(consumed_at))"
+origin=https://codemastery.example.test
+auth_call() {  # path cookie [json] -> STATUS BODY COOKIE (the rotated __Host-cm_refresh value, if any)
+  local args=(-s -o "$work/body" -D "$work/headers" -w '%{http_code}' -X POST "$api$1" -H "Origin: $origin" -H 'Accept: application/json')
+  [[ -z "$2" ]] || args+=(-H "Cookie: __Host-cm_refresh=$2")
+  [[ -z "${3:-}" ]] || args+=(-H 'Content-Type: application/json' --data-binary "$3")
+  STATUS="$(curl "${args[@]}")"; BODY="$(cat "$work/body")"
+  COOKIE="$(tr -d '\r' < "$work/headers" | sed -n 's/^[Ss]et-[Cc]ookie: __Host-cm_refresh=\([^;]*\);.*/\1/p')"
+}
+auth_call /api/auth/login "" "{\"email\":\"learner.a@example.test\",\"password\":\"$password\"}"
+check "login issues a refresh cookie under the runtime role" "$STATUS/${#COOKIE}" "200/43"
+first="$COOKIE"
+auth_call /api/auth/refresh "$first"
+check "refresh rotates (row lock, consume, insert)" "$STATUS/${#COOKIE}" "200/43"
+rotated="$COOKIE"; refreshed_token="$(field accessToken)"
+check "rotation kept one current token in the session" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE t.consumed_at IS NULL) || '/' || count(*) FROM public.refresh_tokens t JOIN public.refresh_sessions s ON s.id=t.session_id WHERE s.id=(SELECT session_id FROM public.refresh_tokens WHERE token_digest=sha256(decode(translate('$rotated','-_','+/') || '=','base64')));")" "1/2"
+call GET "/api/me/courses" "$refreshed_token"; check "refreshed bearer authenticates (session join)" "$STATUS" 200
+auth_call /api/auth/logout "$rotated"
+check "logout revokes (UPDATE revoked_at) and deletes the cookie" "$STATUS/$COOKIE" "204/"
+call GET "/api/me/courses" "$refreshed_token"; check "logout ends the session-bound bearer at once" "$STATUS" 401
+auth_call /api/auth/refresh "$rotated"; check "refresh after logout" "$STATUS" 401
 
 echo "== catalogue and detail (courses/chapters/lessons SELECT; instructor names via users SELECT)"
 call GET /api/courses ""
@@ -200,6 +222,8 @@ new_password='Reset-Horse-Battery-2026'
 call POST /api/auth/password-resets "" "{\"token\":\"$capability\",\"password\":\"$new_password\"}"
 check "reset confirmation commits under the runtime role" "$STATUS" 200
 check "capability consumed in the same transaction" "$(psql_admin <<<"SELECT count(*) FROM public.password_reset_tokens;")" 0
+check "reset revoked every refresh session of the account" "$(psql_admin <<<"SELECT count(*) FROM public.refresh_sessions s JOIN public.users u ON u.id=s.user_id WHERE u.email='learner.b@example.test' AND s.revoked_at IS NULL;")" 0
+call GET "/api/me/courses" "$token_b"; check "a bearer issued before the reset is rejected" "$STATUS" 401
 call POST /api/auth/password-resets "" "{\"token\":\"$capability\",\"password\":\"$new_password\"}"
 check "reused capability is rejected" "$STATUS" 400
 call POST /api/auth/login "" "{\"email\":\"learner.b@example.test\",\"password\":\"$password\"}"
@@ -245,7 +269,7 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, AU07 request worker and reset confirmation, catalogue/detail and CT22 membership under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail and CT22 membership under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \

@@ -94,11 +94,118 @@ public class UserRepositoryImpl implements UserRepository {
                 userId, digest) == 1;
     }
 
-    private Optional<User> users(String sql, Object argument) {
-        List<User> rows = jdbc.query(sql, (result, row) -> userMapper.toDomain(new UserEntity(
+    @Override
+    public Optional<User> findSessionUser(UUID userId, UUID sessionId, Instant now) {
+        List<User> rows = jdbc.query("SELECT u.id, u.email, u.password_hash, u.display_name, u.role, "
+                        + "u.account_status FROM public.users u JOIN public.refresh_sessions s ON s.user_id = u.id "
+                        + "WHERE u.id = ? AND s.id = ? AND s.revoked_at IS NULL AND s.expires_at > ?",
+                (result, row) -> user(result), userId, sessionId, Timestamp.from(now));
+        return rows.stream().findFirst();
+    }
+
+    @Override
+    public void insertRefreshSession(UUID sessionId, UUID userId, Instant createdAt, Instant expiresAt) {
+        jdbc.update("INSERT INTO public.refresh_sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                sessionId, userId, Timestamp.from(createdAt), Timestamp.from(expiresAt));
+    }
+
+    @Override
+    public void insertRefreshToken(UUID tokenId, UUID sessionId, byte[] digest, Instant issuedAt,
+                                   Instant expiresAt) {
+        jdbc.update("INSERT INTO public.refresh_tokens (id, session_id, token_digest, issued_at, expires_at) "
+                        + "VALUES (?, ?, ?, ?, ?)",
+                tokenId, sessionId, digest, Timestamp.from(issuedAt), Timestamp.from(expiresAt));
+    }
+
+    @Override
+    public Optional<RefreshToken> findRefreshTokenByDigest(byte[] digest) {
+        return jdbc.query("SELECT id, session_id, token_digest, issued_at, expires_at, consumed_at "
+                        + "FROM public.refresh_tokens WHERE token_digest = ?",
+                (result, row) -> new RefreshToken(result.getObject("id", UUID.class),
+                        result.getObject("session_id", UUID.class), result.getBytes("token_digest"),
+                        instant(result.getTimestamp("issued_at")), instant(result.getTimestamp("expires_at")),
+                        instant(result.getTimestamp("consumed_at"))),
+                digest).stream().findFirst();
+    }
+
+    @Override
+    public Optional<RefreshSession> findRefreshSessionForUpdate(UUID sessionId) {
+        return jdbc.query("SELECT id, user_id, created_at, expires_at, revoked_at "
+                        + "FROM public.refresh_sessions WHERE id = ? FOR UPDATE",
+                (result, row) -> new RefreshSession(result.getObject("id", UUID.class),
+                        result.getObject("user_id", UUID.class), instant(result.getTimestamp("created_at")),
+                        instant(result.getTimestamp("expires_at")), instant(result.getTimestamp("revoked_at"))),
+                sessionId).stream().findFirst();
+    }
+
+    @Override
+    public boolean consumeRefreshToken(UUID tokenId, Instant consumedAt) {
+        return jdbc.update("UPDATE public.refresh_tokens SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
+                Timestamp.from(consumedAt), tokenId) == 1;
+    }
+
+    @Override
+    public boolean revokeRefreshSession(UUID sessionId, Instant revokedAt) {
+        return jdbc.update("UPDATE public.refresh_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+                Timestamp.from(revokedAt), sessionId) == 1;
+    }
+
+    @Override
+    public int revokeRefreshSessionsOfUser(UUID userId, Instant revokedAt) {
+        return jdbc.update("UPDATE public.refresh_sessions SET revoked_at = ? "
+                + "WHERE user_id = ? AND revoked_at IS NULL", Timestamp.from(revokedAt), userId);
+    }
+
+    @Override
+    public Optional<User> lockUserForSessionIssue(UUID userId) {
+        // FOR NO KEY UPDATE needs UPDATE on one column: the runtime role's UPDATE (password_hash).
+        return users("SELECT id, email, password_hash, display_name, role, account_status "
+                + "FROM public.users WHERE id = ? FOR NO KEY UPDATE", userId);
+    }
+
+    @Override
+    public Optional<RefreshSession> findRefreshSession(UUID sessionId) {
+        return jdbc.query("SELECT id, user_id, created_at, expires_at, revoked_at FROM public.refresh_sessions "
+                        + "WHERE id = ?",
+                (result, row) -> new RefreshSession(result.getObject("id", UUID.class),
+                        result.getObject("user_id", UUID.class), instant(result.getTimestamp("created_at")),
+                        instant(result.getTimestamp("expires_at")), instant(result.getTimestamp("revoked_at"))),
+                sessionId).stream().findFirst();
+    }
+
+    @Override
+    public int revokeRefreshSessionsBeyond(UUID userId, int keep, Instant now, UUID issuing) {
+        return jdbc.update("UPDATE public.refresh_sessions SET revoked_at = ? WHERE id IN ("
+                        + "SELECT id FROM public.refresh_sessions WHERE user_id = ? AND revoked_at IS NULL "
+                        + "AND expires_at > ? AND id <> ? ORDER BY created_at DESC, id DESC OFFSET ?)",
+                Timestamp.from(now), userId, Timestamp.from(now), issuing, Math.max(0, keep - 1));
+    }
+
+    @Override
+    public int deleteExpiredRefreshSessions(Instant now, int limit) {
+        List<UUID> expired = jdbc.queryForList("SELECT id FROM public.refresh_sessions WHERE expires_at <= ? "
+                + "ORDER BY expires_at, id LIMIT ? FOR UPDATE SKIP LOCKED", UUID.class, Timestamp.from(now), limit);
+        int deleted = 0;
+        for (UUID sessionId : expired) {
+            jdbc.update("DELETE FROM public.refresh_tokens WHERE session_id = ?", sessionId);
+            deleted += jdbc.update("DELETE FROM public.refresh_sessions WHERE id = ?", sessionId);
+        }
+        return deleted;
+    }
+
+    private static Instant instant(Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant();
+    }
+
+    private User user(java.sql.ResultSet result) throws java.sql.SQLException {
+        return userMapper.toDomain(new UserEntity(
                 result.getObject("id", UUID.class), result.getString("email"),
                 result.getString("password_hash"), result.getString("display_name"),
-                result.getString("role"), result.getString("account_status"))), argument);
+                result.getString("role"), result.getString("account_status")));
+    }
+
+    private Optional<User> users(String sql, Object argument) {
+        List<User> rows = jdbc.query(sql, (result, row) -> user(result), argument);
         return rows.stream().findFirst();
     }
 

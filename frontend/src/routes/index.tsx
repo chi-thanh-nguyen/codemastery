@@ -10,7 +10,7 @@ import { useAuth } from '../features/auth/hooks/useAuth';
 import { DashboardLayout, Page } from '../layouts/DashboardLayout';
 import { AccountMenu, AccountMenuDivider } from '../shared/components/AppHeader';
 import { PresentationIcon } from '../shared/components/PresentationIcon';
-import { SystemStateView } from '../shared/components/StatusViews';
+import { LoadingView, SystemStateView } from '../shared/components/StatusViews';
 import type { NavItem } from '../shared/components/SidebarNav';
 import { CourseCataloguePage } from '../features/catalogue/pages/CourseCataloguePage';
 import { CourseMembershipActions, MyCoursesPage } from '../features/learning/pages/MyCoursesPage';
@@ -23,9 +23,10 @@ import type { UserRole } from '../features/auth/types/authTypes';
 const ExampleMasteryMap = lazy(() => import('../features/mastery/components/ExampleMasteryMap'));
 
 /**
- * F2 session-ended notice. The provider's lifecycle is unchanged: this only observes
- * that a session present in this document ended without the user signing out
- * (15-minute expiry or a current-session 401), and the sign-in page says so once.
+ * F2 session-ended notice. This only observes that a session present in this document ended
+ * without the user signing out here (refresh refused, a current-session 401, or sign-out in
+ * another tab), and the sign-in page says so once. A wake-up that the refresh cookie restores
+ * clears the notice again.
  */
 interface SessionEnd { ended: boolean; dismiss: () => void; signOut: () => void }
 const SessionEndContext = createContext<SessionEnd>({ ended: false, dismiss: () => undefined, signOut: () => undefined });
@@ -57,6 +58,8 @@ const startFor = (role?: UserRole) => role === 'Learner' ? '/home' : '/courses';
 /** Header utilities: account menu for a session, sign-in actions otherwise. Hiding links is not authorization. */
 export function SessionNavigation() {
     const auth = useAuth(), navigate = useNavigate(), { signOut } = useContext(SessionEndContext);
+    // No sign-in actions flash while a reload restores the session from the refresh cookie.
+    if (!auth.isAuthenticated && auth.restoring) return null;
     if (auth.isAuthenticated && auth.user) return <AccountMenu displayName={auth.user.displayName} role={auth.user.role} renderItems={(close) => [
         <MenuItem key="profile" component={Link} to="/profile" onClick={close}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="user" sx={{ fontSize: 20 }} /></ListItemIcon>Profile</MenuItem>,
         <AccountMenuDivider key="divider" />,
@@ -114,6 +117,7 @@ function CourseDetail() {
 function Landing() {
     const auth = useAuth();
     if (auth.isAuthenticated) return <Navigate to={startFor(auth.user?.role)} replace />;
+    if (auth.restoring) return <Box sx={{ p: { xs: 2, md: 5 } }}><LoadingView message="Restoring your session…" variant="none" /></Box>;
     return <LandingPage exampleMap={<Suspense fallback={<Box role="status" aria-label="Loading the example map" sx={{ minHeight: 360 }} />}><ExampleMasteryMap /></Suspense>} />;
 }
 function NotFound() {

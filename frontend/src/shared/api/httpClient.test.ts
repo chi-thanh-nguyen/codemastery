@@ -110,6 +110,40 @@ describe('CT16 HTTP boundary', () => {
     });
 });
 
+describe('ADR014 refresh-cookie transport', () => {
+    it.each(['/auth/login', '/auth/refresh', '/auth/logout'])('includes credentials only for the cookie operation %s', async (path) => {
+        fetcher.mockResolvedValue(path === '/auth/logout' ? new Response(null, { status: 204 }) : json(user));
+        const { access } = sessionAccess();
+        await createHttpClient('https://api.test', access)(path, operation({ method: 'POST', ...(path === '/auth/logout' ? { expectedStatus: 204, decode: () => user } : {}) }));
+        const init = fetcher.mock.calls[0][1];
+        expect(init).toMatchObject({ credentials: 'include', redirect: 'error', cache: 'no-store' });
+        expect(init.headers.has('Authorization')).toBe(false); expect(init.headers.has('Cookie')).toBe(false);
+        expect(Boolean(init.keepalive)).toBe(path === '/auth/logout');
+    });
+    it.each([
+        ['/auth/register', 'POST', 'public'], ['/auth/password-reset-requests', 'POST', 'public'], ['/courses', 'GET', 'public'],
+        ['/me/courses', 'GET', 'authenticated'], ['/auth/refresh', 'GET', 'public'], ['/auth/refresh', 'POST', 'authenticated'],
+    ] as const)('omits credentials for %s %s (%s)', async (path, method, auth) => {
+        const { access } = sessionAccess();
+        await createHttpClient('https://api.test', access)(path, operation({ method, auth })).catch(() => undefined);
+        expect(fetcher.mock.calls[0][1].credentials).toBe('omit');
+    });
+    it('returns a 204 without reading a body and rejects an unexpected 204', async () => {
+        const body = vi.fn();
+        fetcher.mockResolvedValue({ ok: true, status: 204, headers: new Headers(), json: body });
+        const decode = vi.fn(() => user);
+        await expect(createHttpClient('https://api.test')('/auth/logout', operation({ method: 'POST', expectedStatus: 204, decode }))).resolves.toBe(user);
+        expect(body).not.toHaveBeenCalled(); expect(decode).toHaveBeenCalledWith(undefined);
+        fetcher.mockResolvedValue(new Response(null, { status: 204 }));
+        await expect(createHttpClient('https://api.test')('/courses', operation())).rejects.toMatchObject({ kind: 'protocol' });
+    });
+    it('a refused refresh is a public 401 that never invalidates the in-memory session', async () => {
+        const { access } = sessionAccess(); fetcher.mockResolvedValue(json(null, 401));
+        await expect(createHttpClient('https://api.test', access)('/auth/refresh', operation({ method: 'POST' }))).rejects.toMatchObject({ kind: 'http', status: 401 });
+        expect(access.invalidate).not.toHaveBeenCalled();
+    });
+});
+
 it('suppresses session replacement during JSON decoding, not only during fetch', async () => {
     let finish!: (value: unknown) => void; const body = new Promise<unknown>((done) => { finish = done; });
     fetcher.mockResolvedValue({ ok: true, status: 200, headers: new Headers({ 'Content-Type': 'application/json' }), json: () => body });

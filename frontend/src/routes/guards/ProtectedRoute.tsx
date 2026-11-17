@@ -5,7 +5,7 @@ import { Button } from '@mui/material';
 import { useAuth } from '../../features/auth/hooks/useAuth';
 import type { UserRole } from '../../features/auth/types/authTypes';
 import { Page } from '../../layouts/DashboardLayout';
-import { SystemStateView } from '../../shared/components/StatusViews';
+import { LoadingView, SystemStateView } from '../../shared/components/StatusViews';
 
 const audience: Record<UserRole, string> = { Learner: 'learners', Instructor: 'instructors', Administrator: 'administrators' };
 const article = (role: UserRole) => role === 'Learner' ? 'a Learner' : role === 'Instructor' ? 'an Instructor' : 'an Administrator';
@@ -16,10 +16,14 @@ export function ProtectedRoute({ children, roles }: { children: ReactNode; roles
     // Eligibility is read before the protected subtree can mount, including throttled timers.
     const eligible = auth.isAuthenticated;
     const previouslyEligible = useRef(eligible);
+    // While the refresh cookie is being checked (reload, wake-up or another tab's sign-in), wait.
+    const waiting = !eligible && auth.restoring;
     useLayoutEffect(() => {
+        if (waiting) return;
         if (!eligible && location.pathname === '/profile') auth.rememberProfile(previouslyEligible.current);
         previouslyEligible.current = eligible;
-    }, [eligible, location.pathname, auth]);
+    }, [eligible, waiting, location.pathname, auth]);
+    if (waiting) return <Page><LoadingView message="Restoring your session…" variant="block" /></Page>;
     if (!eligible) return <Navigate to="/login" replace />;
     if (roles && !roles.includes(auth.user!.role)) return <Page><SystemStateView icon="shield" title="You don't have access to this page"
         message={`You're signed in as ${article(auth.user!.role)}. This page is for ${roles.map((role) => audience[role]).join(' and ')}.`}

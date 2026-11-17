@@ -69,6 +69,11 @@ server {
     location = /api/problem-404 { default_type application/problem+json; return 404 '{"type":"about:blank","status":404}'; }
     location = /api/server-error { default_type application/problem+json; return 500 '{"type":"about:blank","status":500}'; }
     location = /api/json { default_type application/json; return 200 '{"ok":true}'; }
+    # ADR014 cookie operations and a non-cookie Auth path: echo what reaches them.
+    location /api/auth/ {
+        add_header Set-Cookie '__Host-cm_refresh=rotated; Path=/; Max-Age=60; Secure; HttpOnly; SameSite=Strict' always;
+        return 200 "reached uri=$request_uri auth=$http_authorization origin=$http_origin cookie=$http_cookie sfs=$http_sec_fetch_site sfm=$http_sec_fetch_mode xff=$http_x_forwarded_for end\n";
+    }
     location / { return 200 "reached backend-non-api uri=$request_uri\n"; }
 }
 NGINX
@@ -203,6 +208,31 @@ for header in forwarded xff xfh xfproto xfport xfprefix xfserver xfssl xrealip \
               override cookie proxyauth ua; do
   contains "caller-supplied $header dropped" "$BODY" " $header= "
 done
+echo "== ADR014 refresh cookie: forwarded only to the three exact cookie operations"
+for path in /api/auth/login /api/auth/refresh /api/auth/logout; do
+  request "$path" -X POST -H "Origin: https://$host" -H 'Cookie: __Host-cm_refresh=presented' \
+    -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' -H 'X-Forwarded-For: 198.51.100.7' \
+    -H 'Authorization: Bearer test-token'
+  contains "$path forwards the refresh cookie" "$BODY" "cookie=__Host-cm_refresh=presented "
+  contains "$path forwards Sec-Fetch-Site" "$BODY" "sfs=same-origin "
+  contains "$path forwards Sec-Fetch-Mode" "$BODY" "sfm=cors "
+  contains "$path forwards Origin" "$BODY" "origin=https://$host "
+  contains "$path keeps the rest of the allowlist" "$BODY" "auth=Bearer test-token "
+  contains "$path still drops forwarding claims" "$BODY" " xff= "
+  contains "$path passes Set-Cookie through" "$HEADERS" "Set-Cookie: __Host-cm_refresh=rotated; Path=/; Max-Age=60; Secure; HttpOnly; SameSite=Strict"
+done
+for path in /api/auth/register /api/auth/password-resets /api/auth/refresh/ /api/auth/refreshx /api/auth/login/extra; do
+  request "$path" -X POST -H 'Cookie: __Host-cm_refresh=presented' -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
+  contains "$path is proxied" "$BODY" "reached uri=$path "
+  contains "$path drops the cookie" "$BODY" " cookie= "
+  contains "$path drops Sec-Fetch-Site" "$BODY" " sfs= "
+done
+for path in '/api/auth/refresh;x' '/api/auth/logout%3Bx' '/api/auth/login;jsessionid=1'; do
+  request "$path" --path-as-is -X POST -H 'Cookie: __Host-cm_refresh=presented'
+  expect "';' path parameter $path rejected at the ingress" "$STATUS" 400
+  lacks "$path never reaches the backend" "$BODY" reached
+done
+
 request /api/problem-401
 expect "API 401 status" "$STATUS" 401; expect "API 401 content type" "$TYPE" application/problem+json
 contains "WWW-Authenticate preserved" "$HEADERS" "WWW-Authenticate: Bearer"

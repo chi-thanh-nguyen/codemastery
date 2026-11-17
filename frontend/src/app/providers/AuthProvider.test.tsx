@@ -248,3 +248,404 @@ it.each(['login', 'register'])('real %s form suppresses a rejected continuation 
     fetcher.mockResolvedValueOnce(json(null, kind === 'login' ? 401 : 400)); await submit();
     expect(host.querySelector('[role="alert"]')).toBeNull(); expect(auth.user).toBeNull();
 });
+
+describe('ADR014 hybrid refresh-session lifecycle', () => {
+    const sidA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', sidB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const session = (name = 'Person A', sid = sidA, role: UserRole = 'Learner') => response(name, role, { sid });
+    const path = (call: unknown[]) => new URL(call[0] as string).pathname;
+    const calls = (pathname: string) => fetcher.mock.calls.filter((call) => path(call) === pathname);
+    const empty = () => new Response(null, { status: 204 });
+    async function mountHybrid(strict = false, restoreOnLoad = true) {
+        const tree = <ThemeProvider theme={appTheme}><MemoryRouter><AuthProvider refreshSessions restoreOnLoad={restoreOnLoad}><Probe /></AuthProvider></MemoryRouter></ThemeProvider>;
+        await act(async () => root.render(strict ? <StrictMode>{tree}</StrictMode> : tree));
+    }
+    async function settle() { for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); }); }
+    const bearer = async () => {
+        fetcher.mockResolvedValueOnce(json({ ok: true }));
+        await act(async () => { await request('/me/courses', { method: 'GET', auth: 'authenticated', expectedStatus: 200, decode: (v) => v }); });
+        return (fetcher.mock.calls.at(-1)![1].headers as Headers).get('Authorization');
+    };
+
+    it('restores on load from the cookie with one credentialed refresh, also under StrictMode, and stores nothing', async () => {
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        await mountHybrid(true);
+        expect(auth.restoring).toBe(true); expect(auth.isAuthenticated).toBe(false);
+        await act(async () => work.resolve(json(session())));
+        await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(1);
+        expect(calls('/api/auth/refresh')[0][1]).toMatchObject({ method: 'POST', credentials: 'include', cache: 'no-store', body: undefined });
+        expect(auth.user?.displayName).toBe('Person A'); expect(auth.restoring).toBe(false);
+        expect(localStorage.length + sessionStorage.length).toBe(0); expect(document.cookie).toBe('');
+    });
+    it('a refused restore leaves an anonymous, settled provider', async () => {
+        fetcher.mockResolvedValueOnce(json(null, 401)); await mountHybrid(); await settle();
+        expect(auth.user).toBeNull(); expect(auth.restoring).toBe(false); expect(calls('/api/auth/refresh')).toHaveLength(1);
+    });
+    it('a document opened at the design preview does not restore', async () => {
+        await mountHybrid(false, false); await settle();
+        expect(fetcher).not.toHaveBeenCalled(); expect(auth.restoring).toBe(false);
+    });
+    it('renews before expiry in place: same generation, new bearer', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const generation = auth.generation, before = await bearer();
+        const next = session(); next.accessToken = next.accessToken.replace(/\.[^.]+$/, `.${'B'.repeat(42)}A`);
+        fetcher.mockResolvedValueOnce(json(next));
+        await act(async () => vi.advanceTimersByTime(900_000 - 60_000)); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(2);
+        expect(auth.generation).toBe(generation); expect(auth.isAuthenticated).toBe(true);
+        expect(await bearer()).not.toBe(before);
+    });
+    it('a renewal for another session or account is a replacement with a new generation', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const generation = auth.generation; fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+        await act(async () => vi.advanceTimersByTime(840_000)); await settle();
+        expect(auth.generation).toBeGreaterThan(generation); expect(auth.user?.displayName).toBe('Person B');
+    });
+    it.each([401, 403])('a refused renewal (%s) ends the session', async (status) => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        fetcher.mockResolvedValueOnce(json(null, status)); await act(async () => vi.advanceTimersByTime(840_000)); await settle();
+        expect(auth.user).toBeNull();
+    });
+    it('a transient renewal failure retries and keeps the session', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        fetcher.mockRejectedValueOnce(new Error('offline')); await act(async () => vi.advanceTimersByTime(840_000)); await settle();
+        expect(auth.isAuthenticated).toBe(true);
+        fetcher.mockResolvedValueOnce(json(session())); await act(async () => vi.advanceTimersByTime(10_000)); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(3); expect(auth.isAuthenticated).toBe(true);
+    });
+    it('a late renewal cannot revive a session signed out meanwhile', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        await act(async () => vi.advanceTimersByTime(840_000));
+        fetcher.mockResolvedValueOnce(empty());
+        await act(async () => auth.logout());
+        await act(async () => work.resolve(json(session()))); await settle();
+        expect(auth.user).toBeNull();
+    });
+    it('sign-out clears at once, revokes with keepalive and is retried on the next load when unconfirmed', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        fetcher.mockRejectedValueOnce(new Error('offline'));
+        await act(async () => auth.logout()); await settle();
+        expect(auth.user).toBeNull();
+        expect(calls('/api/auth/logout')[0][1]).toMatchObject({ method: 'POST', credentials: 'include', keepalive: true });
+        // Time-bounded inside the shared Web Lock, like refresh.
+        expect(calls('/api/auth/logout')[0][1].signal).toBeInstanceOf(AbortSignal);
+        expect(localStorage.getItem('codemastery.auth.pendingSignOut')).toBe('1');
+        await act(async () => root.unmount()); root = createRoot(host);
+        fetcher.mockResolvedValueOnce(empty()); await mountHybrid(); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(1); expect(calls('/api/auth/logout')).toHaveLength(2);
+        expect(localStorage.length).toBe(0); expect(auth.user).toBeNull(); expect(auth.restoring).toBe(false);
+    });
+    it('sign-in while a restore is in flight wins and the late restore is ignored', async () => {
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise); await mountHybrid();
+        await signIn('Person B'); expect(auth.restoring).toBe(false);
+        await act(async () => work.resolve(json(session('Person A', sidB)))); await settle();
+        expect(auth.user?.displayName).toBe('Person B');
+    });
+    it('follows other tabs: signed-out clears without a request, signed-in adopts the cookie session', async () => {
+        const channels: { onmessage: ((event: MessageEvent) => void) | null; posted: unknown[] }[] = [];
+        vi.stubGlobal('BroadcastChannel', class { onmessage: ((event: MessageEvent) => void) | null = null; posted: unknown[] = []; constructor() { channels.push(this); } postMessage(value: unknown) { this.posted.push(value); } close() { /* test double */ } });
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const channel = channels.at(-1)!, requests = fetcher.mock.calls.length;
+        await act(async () => channel.onmessage?.({ data: { type: 'signed-out' } } as MessageEvent));
+        expect(auth.user).toBeNull(); expect(fetcher.mock.calls.length).toBe(requests);
+        fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+        await act(async () => channel.onmessage?.({ data: { type: 'signed-in' } } as MessageEvent)); await settle();
+        expect(auth.user?.displayName).toBe('Person B');
+        fetcher.mockResolvedValueOnce(json(session('Person C', sidA))); await act(async () => { await auth.login(payload); });
+        expect(channel.posted).toContainEqual({ type: 'signed-in' });
+        fetcher.mockResolvedValueOnce(empty()); await act(async () => auth.logout());
+        expect(channel.posted).toContainEqual({ type: 'signed-out' });
+    });
+    it('runs sign-in, refresh and sign-out under one Web Lock', async () => {
+        const held: string[] = [];
+        Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: (name: string, work: () => Promise<unknown>) => { held.push(name); return work(); } } });
+        try {
+            fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+            await signIn('Person B'); fetcher.mockResolvedValueOnce(empty()); await act(async () => auth.logout()); await settle();
+            expect(held).toEqual(['codemastery-auth-session', 'codemastery-auth-session', 'codemastery-auth-session']);
+        } finally { Reflect.deleteProperty(navigator, 'locks'); }
+    });
+    it('waking after expiry restores from the cookie once, rate-limited', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        vi.setSystemTime(new Date(Date.now() + 901_000));
+        fetcher.mockResolvedValueOnce(json(session()));
+        await act(async () => window.dispatchEvent(new Event('focus'))); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(2); expect(auth.user?.displayName).toBe('Person A'); expect(auth.restoring).toBe(false);
+        vi.setSystemTime(new Date(Date.now() + 901_000));
+        await act(async () => window.dispatchEvent(new Event('focus'))); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(3);
+    });
+    // ---- Independent-review remediation F04/F05 (ADR014 §15). Native-lock evidence is in e2e/. ----
+    function fifoLocks() {
+        let tail: Promise<unknown> = Promise.resolve();
+        const value = { request: (_name: string, work: () => Promise<unknown>) => { const run = tail.then(work, work); tail = run.catch(() => undefined); return run; } };
+        Object.defineProperty(navigator, 'locks', { configurable: true, value });
+        return () => Reflect.deleteProperty(navigator, 'locks');
+    }
+    function channels() {
+        const list: { onmessage: ((event: MessageEvent) => void) | null }[] = [];
+        vi.stubGlobal('BroadcastChannel', class { onmessage: ((event: MessageEvent) => void) | null = null; constructor() { list.push(this); } postMessage() { /* test double */ } close() { /* test double */ } });
+        return list;
+    }
+    it('F04: a signed-out broadcast during a pending restore discards the late response', async () => {
+        const tabs = channels(); const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        await mountHybrid(); expect(auth.restoring).toBe(true);
+        await act(async () => tabs.at(-1)!.onmessage?.({ data: { type: 'signed-out' } } as MessageEvent));
+        expect(auth.restoring).toBe(false);
+        await act(async () => work.resolve(json(session('Person A')))); await settle();
+        expect(auth.user).toBeNull(); expect(host.textContent).toBe('Anonymous'); expect(auth.restoring).toBe(false);
+    });
+    it('F05: an explicit sign-in queued behind a pending restore is sent and wins', async () => {
+        const release = fifoLocks();
+        try {
+            const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+            await mountHybrid();
+            fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+            let signedIn!: Promise<number>;
+            await act(async () => { signedIn = auth.login(payload); });
+            expect(calls('/api/auth/login')).toHaveLength(0);
+            await act(async () => work.resolve(json(session('Person A')))); await settle();
+            await act(async () => { await signedIn; });
+            expect(calls('/api/auth/login')).toHaveLength(1);
+            expect(auth.user?.displayName).toBe('Person B'); expect(auth.restoring).toBe(false);
+        } finally { release(); }
+    });
+    it('F05: a failed explicit sign-in restores the session it superseded', async () => {
+        const release = fifoLocks();
+        try {
+            const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+            await mountHybrid();
+            fetcher.mockResolvedValueOnce(json(null, 401));
+            let attempt!: Promise<unknown>;
+            await act(async () => { attempt = auth.login(payload).catch((e) => e); });
+            fetcher.mockResolvedValueOnce(json(session('Person A')));
+            await act(async () => work.resolve(json(session('Person A')))); await settle();
+            expect(await attempt).toMatchObject({ kind: 'http', status: 401 }); await settle();
+            expect(calls('/api/auth/refresh')).toHaveLength(2); expect(auth.user?.displayName).toBe('Person A');
+        } finally { release(); }
+    });
+    it('F05: the old session expiring while a sign-in is in flight does not cancel it', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        let signedIn!: Promise<number>;
+        await act(async () => { signedIn = auth.login(payload); });
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        vi.setSystemTime(new Date(Date.now() + 901_000));
+        await act(async () => window.dispatchEvent(new Event('focus'))); await settle();
+        await act(async () => work.resolve(json(session('Person B', sidB)))); await act(async () => { await signedIn; });
+        expect(auth.user?.displayName).toBe('Person B');
+    });
+    // ---- Second independent-review remediation N02 (ADR014 §16). Native-lock evidence is in e2e/. ----
+    const sidC = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    it('N02: a renewal resolving with another sid does not cancel a sign-in queued behind it', async () => {
+        const release = fifoLocks();
+        try {
+            fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+            const renewal = deferred(); fetcher.mockReturnValueOnce(renewal.promise);
+            await act(async () => vi.advanceTimersByTime(840_000));
+            fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+            let signedIn!: Promise<number>;
+            await act(async () => { signedIn = auth.login(payload); });
+            expect(calls('/api/auth/login')).toHaveLength(0);
+            await act(async () => renewal.resolve(json(session('Person C', sidC)))); await settle();
+            await act(async () => { await signedIn; });
+            expect(calls('/api/auth/login')).toHaveLength(1);
+            expect(auth.user?.displayName).toBe('Person B');
+        } finally { release(); }
+    });
+    it('N02: a renewal resolving while a sign-in is in flight does not abort or overwrite it', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const signIn = deferred(); fetcher.mockReturnValueOnce(signIn.promise);
+        let signedIn!: Promise<number>;
+        await act(async () => { signedIn = auth.login(payload); });
+        const loginSignal = calls('/api/auth/login')[0][1].signal as AbortSignal;
+        fetcher.mockResolvedValueOnce(json(session('Person C', sidC)));
+        await act(async () => vi.advanceTimersByTime(840_000)); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(2); expect(loginSignal.aborted).toBe(false);
+        expect(auth.user?.displayName).toBe('Person A');
+        await act(async () => signIn.resolve(json(session('Person B', sidB)))); await act(async () => { await signedIn; });
+        expect(auth.user?.displayName).toBe('Person B'); expect(calls('/api/auth/login')).toHaveLength(1);
+    });
+    it('N02: a failed sign-in renews the session whose renewal it superseded', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        const generation = auth.generation, signIn = deferred(); fetcher.mockReturnValueOnce(signIn.promise);
+        let attempt!: Promise<unknown>;
+        await act(async () => { attempt = auth.login(payload).catch((e) => e); });
+        fetcher.mockResolvedValueOnce(json(session()));
+        await act(async () => vi.advanceTimersByTime(840_000)); await settle();
+        fetcher.mockResolvedValueOnce(json(session()));
+        await act(async () => signIn.resolve(json(null, 401)));
+        expect(await attempt).toMatchObject({ kind: 'http', status: 401 }); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(3);
+        expect(auth.user?.displayName).toBe('Person A'); expect(auth.generation).toBe(generation);
+    });
+    // ---- Final remediation A01 (ADR014 §17): renewal versus a failed sign-in, both completion orders. ----
+    /** A response for `sid` whose bearer is recognisable by its signature letter. */
+    const signed = (letter: string, name = 'Person A', sid = sidA) => { const value = session(name, sid); value.accessToken = value.accessToken.replace(/\.[^.]+$/, `.${letter.repeat(42)}A`); return value; };
+    const bearerOf = (value: { accessToken: string }) => `Bearer ${value.accessToken}`;
+    /** Installs session A through a load-time restore and starts its delayed renewal. */
+    async function renewalPending() {
+        const first = signed('O'); fetcher.mockResolvedValueOnce(json(first)); await mountHybrid(); await settle();
+        const renewal = deferred(); fetcher.mockReturnValueOnce(renewal.promise);
+        await act(async () => vi.advanceTimersByTime(840_000));
+        expect(calls('/api/auth/refresh')).toHaveLength(2);
+        return { first, renewal, generation: auth.generation };
+    }
+    /** The recovered session is usable: its bearer is sent, and its own renewal is scheduled again. */
+    async function expectUsable(recovered: { accessToken: string }, refreshes: number, sid = sidA) {
+        expect(auth.isAuthenticated).toBe(true); expect(await bearer()).toBe(bearerOf(recovered));
+        const next = signed('N', 'Person A', sid); fetcher.mockResolvedValueOnce(json(next));
+        await act(async () => vi.advanceTimersByTime(840_000)); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(refreshes + 1); expect(await bearer()).toBe(bearerOf(next));
+    }
+    it('A01 order A: the renewal completes first, then the explicit sign-in fails; the session renews from the cookie', async () => {
+        const { first, renewal, generation } = await renewalPending();
+        const signIn = deferred(); fetcher.mockReturnValueOnce(signIn.promise);
+        let attempt!: Promise<unknown>;
+        await act(async () => { attempt = auth.login(payload).catch((e) => e); });
+        await act(async () => renewal.resolve(json(signed('R')))); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(2); expect(await bearer()).toBe(bearerOf(first));
+        const recovered = signed('C'); fetcher.mockResolvedValueOnce(json(recovered));
+        await act(async () => signIn.resolve(json(null, 401)));
+        expect(await attempt).toMatchObject({ kind: 'http', status: 401 }); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(3); expect(auth.generation).toBe(generation);
+        await expectUsable(recovered, 3);
+    });
+    it('A01 order B: the explicit sign-in fails first, then the delayed renewal completes; the session renews from the cookie', async () => {
+        const { first, renewal, generation } = await renewalPending();
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        await act(async () => { await expect(auth.login(payload)).rejects.toMatchObject({ kind: 'http', status: 401 }); });
+        await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(2); expect(await bearer()).toBe(bearerOf(first));
+        const recovered = signed('C'); fetcher.mockResolvedValueOnce(json(recovered));
+        await act(async () => renewal.resolve(json(signed('R')))); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(3); expect(auth.generation).toBe(generation);
+        // Neither the original bearer nor the superseded renewal's bearer is kept.
+        await expectUsable(recovered, 3);
+    });
+    it('A01: a renewal that completes while the sign-in is queued behind it waits; a failed sign-in then recovers', async () => {
+        const release = fifoLocks();
+        try {
+            const { first, renewal } = await renewalPending();
+            fetcher.mockResolvedValueOnce(json(null, 401));
+            let attempt!: Promise<unknown>;
+            await act(async () => { attempt = auth.login(payload).catch((e) => e); });
+            expect(calls('/api/auth/login')).toHaveLength(0);
+            const recovered = signed('C'); fetcher.mockResolvedValueOnce(json(recovered));
+            await act(async () => renewal.resolve(json(signed('R')))); await settle();
+            expect(await attempt).toMatchObject({ kind: 'http', status: 401 }); await settle();
+            expect(calls('/api/auth/login')).toHaveLength(1); expect(calls('/api/auth/refresh')).toHaveLength(3);
+            expect(await bearer()).not.toBe(bearerOf(first));
+            await expectUsable(recovered, 3);
+        } finally { release(); }
+    });
+    it('A01: a queued sign-in the user abandons settles as cancelled; the renewal it superseded still recovers', async () => {
+        const release = fifoLocks();
+        try {
+            const { first, renewal, generation } = await renewalPending();
+            const leave = new AbortController();
+            let attempt!: Promise<unknown>;
+            await act(async () => { attempt = auth.login(payload, leave.signal).catch((e) => e); });
+            await act(async () => leave.abort());
+            const recovered = signed('C'); fetcher.mockResolvedValueOnce(json(recovered));
+            await act(async () => renewal.resolve(json(signed('R')))); await settle();
+            expect(await attempt).toMatchObject({ kind: 'cancelled' }); await settle();
+            expect(calls('/api/auth/login')).toHaveLength(0); expect(calls('/api/auth/refresh')).toHaveLength(3);
+            expect(auth.generation).toBe(generation); expect(await bearer()).not.toBe(bearerOf(first));
+            await expectUsable(recovered, 3);
+        } finally { release(); }
+    });
+    it('A01: a renewal that completes while the sign-in is in flight neither aborts nor installs before the sign-in fails', async () => {
+        const { renewal } = await renewalPending();
+        const signIn = deferred(); fetcher.mockReturnValueOnce(signIn.promise);
+        let attempt!: Promise<unknown>;
+        await act(async () => { attempt = auth.login(payload).catch((e) => e); });
+        const loginSignal = calls('/api/auth/login')[0][1].signal as AbortSignal;
+        await act(async () => renewal.resolve(json(signed('R', 'Person C', sidC)))); await settle();
+        expect(loginSignal.aborted).toBe(false); expect(auth.user?.displayName).toBe('Person A');
+        const recovered = signed('C'); fetcher.mockResolvedValueOnce(json(recovered));
+        await act(async () => signIn.resolve(json(null, 401)));
+        expect(await attempt).toMatchObject({ kind: 'http', status: 401 }); await settle();
+        expect(auth.user?.displayName).toBe('Person A'); await expectUsable(recovered, 3);
+    });
+    it('A01: an explicit sign-in that succeeds while the renewal is delayed wins; the late renewal changes nothing', async () => {
+        const { renewal, generation } = await renewalPending();
+        const chosen = signed('B', 'Person B', sidB); fetcher.mockResolvedValueOnce(json(chosen));
+        await act(async () => { await auth.login(payload); });
+        const installed = auth.generation; expect(installed).toBeGreaterThan(generation);
+        await act(async () => renewal.resolve(json(signed('R')))); await settle();
+        expect(auth.user?.displayName).toBe('Person B'); expect(auth.generation).toBe(installed);
+        expect(calls('/api/auth/refresh')).toHaveLength(2); expect(await bearer()).toBe(bearerOf(chosen));
+    });
+    it('A01: a sign-out before the delayed renewal completes wins, also while a failed sign-in was pending', async () => {
+        const { renewal } = await renewalPending();
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        await act(async () => { await expect(auth.login(payload)).rejects.toMatchObject({ status: 401 }); });
+        fetcher.mockResolvedValueOnce(empty()); await act(async () => auth.logout());
+        await act(async () => renewal.resolve(json(signed('R')))); await settle();
+        expect(auth.user).toBeNull(); expect(calls('/api/auth/refresh')).toHaveLength(2); expect(calls('/api/auth/logout')).toHaveLength(1);
+    });
+    it('A01: a newer sign-in supersedes the older one; the renewal waits for the newest and recovers only once', async () => {
+        const { renewal } = await renewalPending();
+        const older = deferred(), newer = deferred(); fetcher.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+        let first!: Promise<unknown>, second!: Promise<unknown>;
+        await act(async () => { first = auth.login(payload).catch((e) => e); });
+        await act(async () => renewal.resolve(json(signed('R')))); await settle();
+        await act(async () => { second = auth.login(payload).catch((e) => e); });
+        await act(async () => older.resolve(json(signed('X', 'Person X', sidC))));
+        expect(await first).toMatchObject({ kind: 'cancelled' }); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(2); expect(auth.user?.displayName).toBe('Person A');
+        const recovered = signed('C'); fetcher.mockResolvedValueOnce(json(recovered));
+        await act(async () => newer.resolve(json(null, 401)));
+        expect(await second).toMatchObject({ kind: 'http', status: 401 }); await settle();
+        expect(calls('/api/auth/refresh')).toHaveLength(3); await expectUsable(recovered, 3);
+    });
+    it('A01: a newer successful sign-in after a superseded one wins over the waiting renewal', async () => {
+        const { renewal } = await renewalPending();
+        const older = deferred(); fetcher.mockReturnValueOnce(older.promise);
+        let first!: Promise<unknown>;
+        await act(async () => { first = auth.login(payload).catch((e) => e); });
+        await act(async () => renewal.resolve(json(signed('R')))); await settle();
+        const chosen = signed('B', 'Person B', sidB); fetcher.mockResolvedValueOnce(json(chosen));
+        await act(async () => { await auth.login(payload); });
+        await act(async () => older.resolve(json(signed('X', 'Person X', sidC))));
+        expect(await first).toMatchObject({ kind: 'cancelled' }); await settle();
+        expect(auth.user?.displayName).toBe('Person B'); expect(calls('/api/auth/refresh')).toHaveLength(2);
+        expect(await bearer()).toBe(bearerOf(chosen));
+    });
+    it('A01: the recovery after a failed sign-in installs another sid as a replacement, never the stale bearer', async () => {
+        const { first, renewal, generation } = await renewalPending();
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        await act(async () => { await expect(auth.login(payload)).rejects.toMatchObject({ status: 401 }); });
+        const recovered = signed('D', 'Person A', sidB); fetcher.mockResolvedValueOnce(json(recovered));
+        await act(async () => renewal.resolve(json(signed('R')))); await settle();
+        expect(auth.generation).toBeGreaterThan(generation); expect(auth.user?.displayName).toBe('Person A');
+        expect(await bearer()).not.toBe(bearerOf(first)); await expectUsable(recovered, 3, sidB);
+    });
+    it('A01: a refused recovery after a failed sign-in ends the session instead of keeping the stale bearer', async () => {
+        const { renewal } = await renewalPending();
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        await act(async () => { await expect(auth.login(payload)).rejects.toMatchObject({ status: 401 }); });
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        await act(async () => renewal.resolve(json(signed('R')))); await settle();
+        expect(auth.user).toBeNull(); expect(calls('/api/auth/refresh')).toHaveLength(3);
+    });
+    it('a newer sign-out still cancels a pending sign-in', async () => {
+        fetcher.mockResolvedValueOnce(json(null, 401)); await mountHybrid(); await settle();
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        let attempt!: Promise<unknown>;
+        await act(async () => { attempt = auth.login(payload).catch((e) => e); });
+        fetcher.mockResolvedValueOnce(empty()); await act(async () => auth.logout());
+        await act(async () => work.resolve(json(session('Person B', sidB))));
+        expect(await attempt).toMatchObject({ kind: 'cancelled' }); expect(auth.user).toBeNull();
+    });
+    it('never retries a mutation after a refusal or renewal', async () => {
+        fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        await act(async () => { await expect(request('/courses/x/membership', { method: 'PUT', auth: 'authenticated', expectedStatus: 200, decode: (v) => v })).rejects.toMatchObject({ status: 401 }); });
+        await settle();
+        expect(fetcher.mock.calls.filter((call) => (call[1] as RequestInit).method === 'PUT')).toHaveLength(1);
+        expect(auth.user).toBeNull();
+    });
+});

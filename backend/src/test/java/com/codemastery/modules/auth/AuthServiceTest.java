@@ -54,6 +54,8 @@ import com.codemastery.modules.auth.application.service.UserAccountService.Ident
 import com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser;
 import com.codemastery.modules.auth.infrastructure.security.SecurityConfig;
 import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import com.codemastery.modules.auth.infrastructure.security.RefreshCookieSecurity;
+import com.codemastery.modules.auth.application.service.RefreshSessionService;
 import com.codemastery.modules.auth.infrastructure.security.RestSecurityErrorHandler;
 import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.domain.repository.CourseRepository;
@@ -1622,7 +1624,7 @@ class AuthServiceTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     @EnableWebMvc
-    @Import({SecurityConfig.class, JwtTokenProvider.class, RestSecurityErrorHandler.class,
+    @Import({SecurityConfig.class, JwtTokenProvider.class, RestSecurityErrorHandler.class, RefreshCookieSecurity.class,
             JacksonAutoConfiguration.class, UserAccountService.class, CourseAccessService.class})
     static class IdentityFixture {
         @Bean UserRepository users() { return mock(UserRepository.class); }
@@ -1649,7 +1651,8 @@ class AuthServiceTest {
             application = mock(AuthService.class);
             resets = mock(PasswordResetService.class);
             mvc = MockMvcBuilders.standaloneSetup(new AuthController(application, mock(JwtTokenProvider.class),
-                            resets))
+                            resets, mock(RefreshSessionService.class),
+                            new RefreshCookieSecurity(new AppConfig.CorsSettings(List.of("http://localhost:5173")))))
                     .setControllerAdvice(new GlobalExceptionHandler(), new AuthController.RegistrationCacheAdvice())
                     .setValidator(new SpringValidatorAdapter(validator)).build();
         }

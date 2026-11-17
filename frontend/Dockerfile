@@ -91,6 +91,61 @@ server {
         proxy_pass $backend;
     }
 
+    # ADR014 refresh-cookie operations: the only locations that forward the
+    # caller's Cookie (the HttpOnly refresh cookie) and the Fetch Metadata the
+    # backend's CSRF guard checks. A location with its own proxy_set_header
+    # inherits none from the server level, so the full allowlist is repeated.
+    # Exact matches only; every other /api path keeps dropping Cookie.
+    # Set-Cookie responses pass through unchanged.
+    location = /api/auth/login {
+        if ($request_uri ~* "^[^?]*(;|%3b)") {
+            return 400;
+        }
+        proxy_set_header Connection                     "";
+        proxy_set_header Authorization                  $http_authorization;
+        proxy_set_header Accept                         $http_accept;
+        proxy_set_header Content-Type                   $content_type;
+        proxy_set_header Origin                         $http_origin;
+        proxy_set_header Access-Control-Request-Method  $http_access_control_request_method;
+        proxy_set_header Access-Control-Request-Headers $http_access_control_request_headers;
+        proxy_set_header Cookie                         $http_cookie;
+        proxy_set_header Sec-Fetch-Site                 $http_sec_fetch_site;
+        proxy_set_header Sec-Fetch-Mode                 $http_sec_fetch_mode;
+        proxy_pass $backend;
+    }
+    location = /api/auth/refresh {
+        if ($request_uri ~* "^[^?]*(;|%3b)") {
+            return 400;
+        }
+        proxy_set_header Connection                     "";
+        proxy_set_header Authorization                  $http_authorization;
+        proxy_set_header Accept                         $http_accept;
+        proxy_set_header Content-Type                   $content_type;
+        proxy_set_header Origin                         $http_origin;
+        proxy_set_header Access-Control-Request-Method  $http_access_control_request_method;
+        proxy_set_header Access-Control-Request-Headers $http_access_control_request_headers;
+        proxy_set_header Cookie                         $http_cookie;
+        proxy_set_header Sec-Fetch-Site                 $http_sec_fetch_site;
+        proxy_set_header Sec-Fetch-Mode                 $http_sec_fetch_mode;
+        proxy_pass $backend;
+    }
+    location = /api/auth/logout {
+        if ($request_uri ~* "^[^?]*(;|%3b)") {
+            return 400;
+        }
+        proxy_set_header Connection                     "";
+        proxy_set_header Authorization                  $http_authorization;
+        proxy_set_header Accept                         $http_accept;
+        proxy_set_header Content-Type                   $content_type;
+        proxy_set_header Origin                         $http_origin;
+        proxy_set_header Access-Control-Request-Method  $http_access_control_request_method;
+        proxy_set_header Access-Control-Request-Headers $http_access_control_request_headers;
+        proxy_set_header Cookie                         $http_cookie;
+        proxy_set_header Sec-Fetch-Site                 $http_sec_fetch_site;
+        proxy_set_header Sec-Fetch-Mode                 $http_sec_fetch_mode;
+        proxy_pass $backend;
+    }
+
     # A missing build asset or other file is a real 404, never index.html.
     location /assets/ {
         try_files $uri =404;
