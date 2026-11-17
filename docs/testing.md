@@ -4033,3 +4033,16 @@ checks for both JSON writes, and My Courses assertions after completion and
 reconciliation. No production code changed; the updated results are recorded in
 PR #248.
 
+Independent-review remediation (P2, 17–18 November 2026): an existing V008 database
+could not be upgraded, because `provision_db_roles` runs before the backend applies V009
+and the first r4 revision granted `UPDATE (last_visited_at)` and checked the V009 column
+list before that column existed. The fix and its upgrade path are described in the
+[r4 record](deployment.md#ct17-p6-privileges-2026-11-17-r4--co08-progress-and-resume-within-the-adr012-192-ceiling-17-november-2026).
+Run locally on the remediated working tree:
+
+| Command | Result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | Run against the previous `deploy.sh` with the new upgrade section: fails with `column "last_visited_at" of relation "enrollments" does not exist`. With the fix: `UPGRADE_TESTS_PASS`. The test covers a fresh cluster, V001–V008 with the r3 grants, pre-migration provisioning and its idempotency, eight fail-closed drift cases, V009, r4 hardening, the complete verification, and an already-migrated V009 database. `MATRIX_TESTS_PASS` and both containment passes still hold |
+| `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS`. Real Flyway stops at V008 (`spring.flyway.target=8`) and the r3 grants are applied. Pre-migration provisioning is then exact, the backend applies V009, and hardening gives the exact r4 matrix. A visit and a completion succeed under the runtime role with no `42501` |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`. The migration-added list is pinned to `enrollments.last_visited_at` (V009), must name a reviewed column, and is never deferred in complete mode; malformed lists are rejected |
+

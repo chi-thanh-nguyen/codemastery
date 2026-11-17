@@ -31,12 +31,32 @@ users SELECT - id"
   reject "extra field" "users SELECT - id extra"
   reject "non-identifier relation" "Users SELECT - id"
   reject "empty matrix" ""
+  RUNTIME_PRIVILEGE_MATRIX="$approved"
+  added="$RUNTIME_MIGRATION_ADDED_COLUMNS"
+  [[ "$(runtime_deferred_columns complete)" == "ARRAY[]::text[]" ]]  # never deferred after migration
+  for bad in "enrollments last_visited_at" "enrollments last_visited_at 0" "Enrollments last_visited_at 9" "enrollments last_visited_at 9 extra" "enrollments last-visited 9"; do
+    RUNTIME_MIGRATION_ADDED_COLUMNS="$bad"
+    if (runtime_deferred_columns complete) >/dev/null 2>&1; then
+      echo "Malformed migration-added column list accepted: $bad" >&2; exit 1
+    fi
+    if (ENV_FILE=/dev/null; application_grants_sql) >/dev/null 2>&1; then
+      echo "Grant SQL produced from a malformed migration-added column list: $bad" >&2; exit 1
+    fi
+  done
+  RUNTIME_MIGRATION_ADDED_COLUMNS="$added"
+  echo "  rejected malformed migration-added column lists"
 ' _ "$script"
 # The executable matrix must equal the dated contract record exactly.
 python3 - "$script" docs/deployment.md <<'PY'
 import re, sys
 script, record = (open(path, encoding="utf-8").read() for path in sys.argv[1:3])
 block = re.search(r"^RUNTIME_PRIVILEGE_MATRIX='\n(.*?)^'$", script, re.M | re.S).group(1)
+# CT17-P6 r4: only V009's enrollments.last_visited_at may be deferred, and only if reviewed.
+added = re.search(r"^RUNTIME_MIGRATION_ADDED_COLUMNS='\n(.*?)^'$", script, re.M | re.S).group(1)
+added_rows = [tuple(line.split()) for line in added.splitlines() if line.strip()]
+assert added_rows == [("enrollments", "last_visited_at", "9")], f"unexpected migration-added columns: {added_rows}"
+reviewed = {line.split()[0]: line.split()[3].split(",") for line in block.splitlines() if line.strip()}
+assert all(col in reviewed[rel] for rel, col, _ in added_rows), "a migration-added column must be a reviewed matrix column"
 def normalize(table_privs, column_privs):
     return frozenset(table_privs), frozenset(column_privs)
 executable = {}

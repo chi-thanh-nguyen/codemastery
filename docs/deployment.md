@@ -1596,15 +1596,34 @@ resume pointer and visit time, which the approved transitions inherently require
 `verify_role_separation` probes the re-ownership, mastery-skip and progress-deletion
 denials.
 
+**Upgrade of an existing V008 database (independent-review remediation, 17 November
+2026).** `deploy` and `provision` run `provision_db_roles` before the backend starts,
+so on an existing V008 database the r4 grant `UPDATE (last_visited_at)` and the
+reviewed column list name a column that only V009 creates; the first r4 revision
+therefore failed with `column "last_visited_at" of relation "enrollments" does not
+exist`. `RUNTIME_MIGRATION_ADDED_COLUMNS` now names that one column and the migration
+that adds it (V009). Pre-migration provisioning defers it only when the database is
+exactly the V008 predecessor: the column is absent and the Flyway history holds
+exactly the successful versioned migrations 1–8, each once. It then grants every other
+r4 privilege and checks the column inventory without that column. Any other state
+(missing, extra, failed, repeatable or out-of-sequence history rows, no history, a
+recorded V009 without its column, unreviewed columns or excess privileges) defers
+nothing and fails closed. After Flyway V009, `harden_after_migration` grants the whole
+matrix and the complete verification requires it exactly. The matrix rows, their
+privileges and the r1–r4 records are unchanged; a fresh database and an already
+migrated V009 database defer nothing.
+
 The following stay synchronized with this record:
 
-- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009);
+- `RUNTIME_PRIVILEGE_MATRIX` and `RUNTIME_MIGRATION_ADDED_COLUMNS` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009);
 - `test-deploy-privilege-matrix-contract.sh`, which pins r1 history and the r2, r3 and
   r4 rows against the script;
 - `test-postgres-privilege-matrix-containment.sh`: grants and denials on the real
-  V001–V009 schema;
+  V001–V009 schema, and the V008/r3 → pre-migration provisioning → V009 → r4 upgrade
+  with its fail-closed drift cases on a fresh cluster;
 - `test-runtime-real-backend-privileges.sh`: real completion, visit and resume reads
-  under the runtime role (Flyway history now 9/9).
+  under the runtime role (Flyway history now 9/9), and the same upgrade with real
+  Flyway stopped at V008 and then run to V009 by the backend.
 
 Remaining gates: owning-module (Course @TamiaoNguyen), `@tihh647-ui` infrastructure and
 independent Leader CODEOWNER review; protected integration; V009 execution and these

@@ -1189,7 +1189,7 @@ expect_allowed() {  # description role password; SQL on stdin
 }
 
 provision_db_roles() {
-  local db app app_pw mig mig_pw sql existing_roles
+  local db app app_pw mig mig_pw sql existing_roles deferred
   db="$(env_get POSTGRES_DB)"
   app="$(env_get DB_USER)";            app_pw="$(env_get DB_PASSWORD)"
   mig="$(env_get SPRING_FLYWAY_USER)"; mig_pw="$(env_get SPRING_FLYWAY_PASSWORD)"
@@ -1248,7 +1248,10 @@ SQL
   sql="${sql//@MIG@/${mig}}";      sql="${sql//@APP@/${app}}";  sql="${sql//@DB@/${db}}"
 
   log "Provisioning PostgreSQL roles: migrator and runtime (existing roles are not overwritten)."
-  if ! { printf '%s\n' "${sql}"; role_policy_sql; application_grants_sql; printf 'COMMIT;\n'; } | psql_admin >/dev/null 2>&1; then
+  deferred="$(runtime_deferred_columns present)" || fail "Could not inspect the migration state before provisioning."
+  [[ "${deferred}" == "ARRAY[]::text[]" ]] \
+    || log "Exact predecessor schema recognized; grants on the columns its pending migration adds are deferred to post-migration hardening: ${deferred}"
+  if ! { printf '%s\n' "${sql}"; role_policy_sql; application_grants_sql present; printf 'COMMIT;\n'; } | psql_admin >/dev/null 2>&1; then
     fail "PostgreSQL role provisioning failed (output suppressed: it may contain credentials). Check role state with the bootstrap administrator."
   fi
   verify_db_credentials
@@ -1372,6 +1375,18 @@ refresh_tokens           SELECT,INSERT,DELETE UPDATE(consumed_at)               
 flyway_schema_history    -              -                                        *
 '
 
+# Reviewed columns that a NEW migration adds to an already reviewed table (CT17-P6 r4:
+# V009 adds enrollments.last_visited_at). The matrix above stays the single exact policy.
+# Only pre-migration provisioning may defer such a column, and only while the database
+# is exactly that migration's predecessor: the column is absent and the Flyway history
+# holds exactly the successful versioned migrations 1..(version-1), each once. Grants on
+# the deferred column are then applied by harden_after_migration, and the complete
+# verification requires the whole matrix. Any other state defers nothing, so
+# provisioning fails closed. Fields: relation, column, version of the adding migration.
+RUNTIME_MIGRATION_ADDED_COLUMNS='
+enrollments              last_visited_at  9
+'
+
 runtime_matrix_values() {  # the matrix as SQL VALUES rows; non-zero on any malformed row
   local rel tprivs cprivs cols extra group priv col t c k rows="" seen="," nl=$'\n'
   local ident='[a-z_][a-z0-9_]*'
@@ -1401,10 +1416,48 @@ runtime_matrix_values() {  # the matrix as SQL VALUES rows; non-zero on any malf
   printf '%s\n' "${rows}"
 }
 
-application_grants_sql() {
-  local sql app mig values
+runtime_deferred_columns() {  # present|complete -> SQL text[] of relation:column deferred on the exact predecessor
+  local mode="$1" rel col version extra state entries=""
+  local ident='[a-z_][a-z0-9_]*'
+  [[ "${mode}" == "present" || "${mode}" == "complete" ]] || fail "Unknown privilege verification mode."
+  while read -r rel col version extra; do
+    [[ -n "${rel}" ]] || continue
+    [[ -z "${extra}" && "${rel}" =~ ^${ident}$ && "${col}" =~ ^${ident}$ && "${version}" =~ ^[1-9][0-9]{0,3}$ ]] \
+      || fail "The migration-added column list is malformed."
+    [[ "${mode}" == "present" ]] || continue
+    state="$(psql_admin 2>/dev/null <<SQL
+SELECT CASE
+  WHEN to_regclass('public.${rel}') IS NULL THEN 'no-table'
+  WHEN EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('public.${rel}')
+               AND attname = '${col}' AND attnum > 0 AND NOT attisdropped) THEN 'present'
+  WHEN to_regclass('public.flyway_schema_history') IS NULL THEN 'drift'
+  ELSE 'history' END;
+SQL
+    )" || fail "Could not inspect the migration state before provisioning."
+    if [[ "${state}" == "history" ]]; then
+      # Flyway records V009 as '009'; compare numerically and reject anything else.
+      state="$(psql_admin 2>/dev/null <<SQL
+SELECT CASE WHEN count(*) = ${version} - 1
+             AND count(*) = count(*) FILTER (WHERE success AND version ~ '^[0-9]{1,4}\$')
+             AND count(DISTINCT version) = count(*)
+             AND ARRAY(SELECT (h.version)::int FROM public.flyway_schema_history h
+                       WHERE h.version ~ '^[0-9]{1,4}\$' ORDER BY 1)
+                 = ARRAY(SELECT generate_series(1, ${version} - 1))
+            THEN 'predecessor' ELSE 'drift' END
+  FROM public.flyway_schema_history;
+SQL
+      )" || fail "Could not inspect the Flyway history before provisioning."
+    fi
+    [[ "${state}" != "predecessor" ]] || entries+="${entries:+,}'${rel}:${col}'"
+  done <<<"${RUNTIME_MIGRATION_ADDED_COLUMNS}"
+  printf 'ARRAY[%s]::text[]\n' "${entries}"
+}
+
+application_grants_sql() {  # [present|complete]; complete (the default) grants the whole matrix
+  local sql app mig values deferred mode="${1:-complete}"
   app="$(env_get DB_USER)"; mig="$(env_get SPRING_FLYWAY_USER)"
   values="$(runtime_matrix_values)" || fail "The runtime privilege matrix is malformed; nothing was granted."
+  deferred="$(runtime_deferred_columns "${mode}")" || fail "Could not determine deferred migration columns; nothing was granted."
   read -r -d '' sql <<'SQL' || true
 DO $grants$
 DECLARE obj record; entry record; item text;
@@ -1434,6 +1487,8 @@ BEGIN
                      array_to_string(entry.table_privs, ', '), entry.relname, '@APP@');
     END IF;
     FOREACH item IN ARRAY entry.column_privs LOOP
+      -- Only the exact predecessor schema defers a migration-added column (see above).
+      CONTINUE WHEN (entry.relname || ':' || split_part(item, ':', 2)) = ANY (@DEFERRED@);
       EXECUTE format('GRANT %s (%I) ON TABLE public.%I TO %I',
                      split_part(item, ':', 1), split_part(item, ':', 2), entry.relname, '@APP@');
     END LOOP;
@@ -1441,15 +1496,16 @@ BEGIN
 END
 $grants$;
 SQL
-  sql="${sql//@MATRIX@/${values}}"
+  sql="${sql//@MATRIX@/${values}}"; sql="${sql//@DEFERRED@/${deferred}}"
   printf '%s\n' "${sql//@APP@/${app}}" | sed "s/@MIG@/${mig}/g"
 }
 
 runtime_privilege_violations_sql() {  # present|complete; one row per violation, none when exact
-  local sql app values mode="$1"
+  local sql app values deferred mode="$1"
   [[ "${mode}" == "present" || "${mode}" == "complete" ]] || fail "Unknown privilege verification mode."
   app="$(env_get DB_USER)"
   values="$(runtime_matrix_values)" || fail "The runtime privilege matrix is malformed."
+  deferred="$(runtime_deferred_columns "${mode}")" || fail "Could not determine deferred migration columns."
   # Effective privileges count PUBLIC and inherited grants. has_table_privilege
   # ignores column grants, so both levels are compared separately.
   read -r -d '' sql <<'SQL' || true
@@ -1477,7 +1533,7 @@ SELECT 'columns differ from the reviewed matrix on public.' || v.relname FROM re
  WHERE cardinality(v.columns) > 0
    AND ARRAY(SELECT a.attname::text FROM pg_attribute a
              WHERE a.attrelid=v.oid AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attname::text COLLATE "C")
-       <> ARRAY(SELECT x FROM unnest(v.columns) x ORDER BY x COLLATE "C")
+       <> ARRAY(SELECT x FROM unnest(v.columns) x WHERE (v.relname || ':' || x) <> ALL (@DEFERRED@) ORDER BY x COLLATE "C")
 UNION ALL
 SELECT format('table privilege %s on public.%s: expected %s', p.priv, v.relname, (p.priv = ANY (v.table_privs))::text)
   FROM reviewed v CROSS JOIN app CROSS JOIN table_priv p
@@ -1505,7 +1561,7 @@ SELECT 'default privileges grant future ' || CASE d.defaclobjtype WHEN 'r' THEN 
    AND (x.grantee=0 OR x.grantee IN (SELECT oid FROM app))
 ORDER BY 1;
 SQL
-  sql="${sql//@MATRIX@/${values}}"; sql="${sql//@MODE@/${mode}}"
+  sql="${sql//@MATRIX@/${values}}"; sql="${sql//@MODE@/${mode}}"; sql="${sql//@DEFERRED@/${deferred}}"
   printf '%s\n' "${sql//@APP@/${app}}"
 }
 
@@ -1535,7 +1591,7 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
 
 harden_after_migration() {
   report_runtime_privilege_drift
-  { printf 'BEGIN;\n'; role_policy_sql; application_grants_sql; printf 'COMMIT;\n'; } | psql_admin >/dev/null 2>&1 \
+  { printf 'BEGIN;\n'; role_policy_sql; application_grants_sql complete; printf 'COMMIT;\n'; } | psql_admin >/dev/null 2>&1 \
     || fail "Application grants/history hardening failed; ingress remains closed. Reconcile unexpected ownership/privileges explicitly."
 }
 
