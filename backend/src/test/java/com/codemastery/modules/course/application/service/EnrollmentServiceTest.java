@@ -98,7 +98,7 @@ class EnrollmentServiceTest {
     void malformedUuidIsRejectedBeforeCallingMembershipApplicationCode(String method) throws Exception {
         var application = mock(EnrollmentService.class);
         var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
-                new com.codemastery.modules.course.api.controller.EnrollmentController(application, mock(LessonProgressService.class)))
+                new com.codemastery.modules.course.api.controller.EnrollmentController(application, mock(LessonProgressService.class), access))
                 .setControllerAdvice(new com.codemastery.common.exception.GlobalExceptionHandler()).build();
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request(
                 org.springframework.http.HttpMethod.valueOf(method), "/api/courses/0-0-4000-8000-2/membership"))

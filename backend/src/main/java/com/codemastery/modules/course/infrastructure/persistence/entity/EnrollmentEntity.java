@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Entity
@@ -27,6 +28,10 @@ public class EnrollmentEntity {
     @Column(name = "resume_lesson_id", nullable = true)
     private UUID resumeLessonId;
 
+    /** CT22.resume server visit time (V009); null for legacy or never-visited rows. */
+    @Column(name = "last_visited_at", nullable = true)
+    private Instant lastVisitedAt;
+
     protected EnrollmentEntity() {}
 
     public EnrollmentEntity(UUID id, UUID userId, UUID courseId, String status, UUID resumeLessonId) {
@@ -35,6 +40,12 @@ public class EnrollmentEntity {
         this.courseId = courseId;
         this.status = status;
         this.resumeLessonId = resumeLessonId;
+    }
+
+    public EnrollmentEntity(UUID id, UUID userId, UUID courseId, String status, UUID resumeLessonId,
+                            Instant lastVisitedAt) {
+        this(id, userId, courseId, status, resumeLessonId);
+        this.lastVisitedAt = lastVisitedAt;
     }
 
     public UUID getId() {
@@ -55,5 +66,9 @@ public class EnrollmentEntity {
 
     public UUID getResumeLessonId() {
         return resumeLessonId;
+    }
+
+    public Instant getLastVisitedAt() {
+        return lastVisitedAt;
     }
 }

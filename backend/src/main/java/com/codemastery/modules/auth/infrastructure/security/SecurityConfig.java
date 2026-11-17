@@ -90,6 +90,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/me/courses", "/api/courses/{courseId}/membership").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/membership").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/membership").hasRole("LEARNER")
+                        // CT22.progress/resume (ADR006 §§3, 4, 7.2): self Learner only.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/progress", "/api/courses/{courseId}/resume",
+                                "/api/me/course-progress", "/api/me/resume").hasRole("LEARNER")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/lessons/{lessonId}/completion",
+                                "/api/courses/{courseId}/resume").hasRole("LEARNER")
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),
