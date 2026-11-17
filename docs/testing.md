@@ -3891,3 +3891,14 @@ F04, F05 and N02 Playwright regressions passed in the final run.
 3 skips to N02, F04 and F05. In fact they were this same API-only REST smoke on the three
 non-`chromium-desktop` projects; the N02, F04 and F05 tests ran. `firefox-desktop` was
 not run (host limitation).
+
+## PR #246 CI failures on `aa6995d` — 17 November 2026
+
+`aa6995d` has the same tree as `be8bef0`, on which all CI checks had passed; only its commit metadata changed. On `aa6995d`, two jobs failed. Neither failure came from the hybrid-authentication change.
+
+| Job | Actual cause | Action |
+|---|---|---|
+| `CI E2E` / `E2E`, step "Run E2E lifecycle regression tests" | A race in the FE24 test "finalizer A paused in a Docker removal, … B is never touched" (`e2e/fixtures/lifecycle.test.mjs`). The test snapshotted run B's record as soon as it was `active`, but B's own coordinator then records its spawned runner (revision 1 → 2, runner `starting` → `live`). The CI diff shows exactly that write and no write by A. | The test now waits for B's live runner, B's last write before its gate, then takes the snapshot. The fencing assertions are unchanged. |
+| `CI` / "VM runtime privileges with the real backend", step "Build the backend image from this revision" | Transient. `./mvnw package -DskipTests` inside `docker build -q` exited 1 after about 13 s; the quiet build hides Maven's output. The same tree built without cache locally (BUILD SUCCESS), and the job's rerun on `aa6995d` (attempt 2) passed. | None: no workflow or build change. |
+
+Executed (author evidence): the fixed test passed 5 times in isolation, and all 152 tests passed in `cd e2e && node --test fixtures/*.test.mjs`. The backend image built with `docker build --no-cache` locally. The `aa6995d` VM job rerun passed.
