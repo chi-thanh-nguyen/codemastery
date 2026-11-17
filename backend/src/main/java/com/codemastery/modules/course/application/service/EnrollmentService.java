@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -67,14 +68,35 @@ public class EnrollmentService {
                 row.instructorId(), names.get(row.instructorId()), row.status().getStatus())).toList(), page, size,
                 result.getTotalElements(), result.getTotalPages());
     }
+    /**
+     * CT13.reads (ADR012 §13.1/§13.2): per-Course enrolment and completion figures for every Course,
+     * hidden and published, ordered by title COLLATE "C" then id. Actorless: the only caller, Admin's
+     * PlatformMetricsService, admits an active Administrator first and composes this read inside its
+     * own read-only REPEATABLE READ transaction. Joined learner IDs are internal and never leave the
+     * backend. Set-based Course-owned queries; no row is locked or written.
+     */
     @Transactional(readOnly = true, propagation = Propagation.MANDATORY)
     public PageResponse<CourseEnrollmentMetrics> readEnrollmentMetrics(int page, int size) {
-        throw new UnsupportedOperationException();
+        PageResponse.validateRequest(page, size);
+        var rows = enrollments.enrollmentMetrics(PageRequest.of(page, size));
+        var joined = enrollments.joinedLearnerIds(rows.stream().map(EnrollmentRepository.EnrollmentMetricsRow::courseId).toList());
+        return new PageResponse<>(rows.stream().map(row -> metrics(row, joined)).toList(), page, size, rows.getTotalElements());
     }
 
+    /** CT13.reads for one Course (hidden or published); empty when the Course does not exist. */
     @Transactional(readOnly = true, propagation = Propagation.MANDATORY)
     public Optional<CourseEnrollmentMetrics> readEnrollmentMetrics(UUID courseId) {
-        throw new UnsupportedOperationException();
+        if (courseId == null) throw new IllegalArgumentException("Identifier must not be null");
+        return enrollments.enrollmentMetrics(courseId).map(row -> metrics(row, enrollments.joinedLearnerIds(List.of(courseId))));
+    }
+
+    private static CourseEnrollmentMetrics metrics(EnrollmentRepository.EnrollmentMetricsRow row, Map<UUID, Set<UUID>> joined) {
+        var learners = joined.getOrDefault(row.courseId(), Set.of());
+        if (learners.size() != row.activeEnrollments() + row.completedEnrollments() || row.completedLearners() > learners.size()) {
+            throw new IllegalStateException("Inconsistent enrolment metrics snapshot");
+        }
+        return new CourseEnrollmentMetrics(row.courseId(), row.title(), row.publicationStatus(), row.activeEnrollments(),
+                row.completedEnrollments(), row.leftEnrollments(), row.completedLearners(), learners);
     }
 
     private CurrentIdentity learner() {

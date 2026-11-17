@@ -11,6 +11,24 @@ import java.util.UUID;
 
 /** Course-internal CT22.membership/progress/resume persistence; callers own the transaction. */
 public interface EnrollmentRepository {
+    // CT13.reads (ADR012 §13.1/§13.2): set-based reads over Course-owned tables only.
+
+    /** One row per Course (hidden and published) of the requested page, ordered by title COLLATE "C", then id. */
+    Page<EnrollmentMetricsRow> enrollmentMetrics(Pageable page);
+
+    /** The same figures for one Course of any publication status; empty when it does not exist. */
+    Optional<EnrollmentMetricsRow> enrollmentMetrics(UUID courseId);
+
+    /** Learners whose Enrollment is active or completed, per requested Course, in one query. */
+    java.util.Map<UUID, java.util.Set<UUID>> joinedLearnerIds(java.util.Collection<UUID> courseIds);
+
+    /**
+     * Stored status counts plus completedLearners: joined learners for whom CT22.progress isComplete
+     * would hold (R = currently published Lessons; a zero-Lesson Course completes nobody).
+     */
+    record EnrollmentMetricsRow(UUID courseId, String title, String publicationStatus, long activeEnrollments,
+            long completedEnrollments, long leftEnrollments, long completedLearners) {}
+
     boolean lockPublishedCourse(UUID courseId);
     Optional<Enrollment> find(UUID userId, UUID courseId);
     void insert(Enrollment enrollment);

@@ -226,6 +226,126 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         }));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.enrollments WHERE user_id=? AND course_id=?", Integer.class, LEARNER, COURSE));
     }
+
+    // ---- CO16: CT13.reads enrolment and completion figures (ADR012 §13.1/§13.2, B7-O11) on real PostgreSQL
+
+    @Autowired com.codemastery.modules.course.application.service.EnrollmentService enrollmentService;
+    private static final UUID X1 = id("metrics-x1"), X2 = id("metrics-x2"), X3 = id("metrics-x3");
+    private static final UUID TWIN = id("metrics-twin"), LOWER = id("metrics-lower");
+    private static final UUID L2 = id("metrics-lesson-2"), HIDDEN_CHAPTER = id("metrics-hidden-chapter"), HIDDEN_COURSE_LESSON = id("metrics-hidden-course-lesson");
+    private <T> T reportingRead(java.util.function.Supplier<T> read) {
+        var template = new TransactionTemplate(transactions);
+        template.setReadOnly(true);
+        template.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        return template.execute(status -> read.get());
+    }
+    private void progress(UUID enrollment, UUID lesson, boolean completed, boolean skipped) {
+        jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (?,?,?,?,?)", UUID.randomUUID(), enrollment, lesson, completed, skipped);
+    }
+    private UUID enrol(UUID user, UUID course, String status) {
+        UUID enrollment = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,?)", enrollment, user, course, status);
+        return enrollment;
+    }
+    private void metricsFixtures() {
+        for (var user : List.of(X1, X2, X3))
+            jdbc.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) VALUES (?,?,'not-a-login-fixture','Metrics learner','learner','active')", user, user + "@example.test");
+        jdbc.update("INSERT INTO public.courses (id,instructor_id,title,description,prerequisite_description,publication_status,adaptive_enabled) VALUES (?,?,'Alpha','Twin title',NULL,'hidden',false),(?,?,'alpha','Lower-case title',NULL,'published',false)", TWIN, OWNER, LOWER, OWNER);
+        // R(COURSE) = {LESSON, L2}; HIDDEN_LESSON is hidden and never counts.
+        jdbc.update("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) VALUES (?,?,'Second published lesson',1,'published')", L2, EMPTY_CHAPTER);
+        jdbc.update("INSERT INTO public.chapters (id,course_id,title,position) VALUES (?,?,'Hidden course chapter',1)", HIDDEN_CHAPTER, HIDDEN);
+        jdbc.update("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) VALUES (?,?,'Published lesson of a hidden course',1,'published')", HIDDEN_COURSE_LESSON, HIDDEN_CHAPTER);
+    }
+    private void metricsCleanup() {
+        jdbc.update("DELETE FROM public.lesson_progress WHERE enrollment_id IN (SELECT id FROM public.enrollments WHERE course_id IN (?,?,?,?,?))", COURSE, SECOND, HIDDEN, TWIN, LOWER);
+        jdbc.update("DELETE FROM public.enrollments WHERE course_id IN (?,?,?,?,?)", COURSE, SECOND, HIDDEN, TWIN, LOWER);
+        jdbc.update("DELETE FROM public.lessons WHERE id IN (?,?)", L2, HIDDEN_COURSE_LESSON);
+        jdbc.update("DELETE FROM public.chapters WHERE id=?", HIDDEN_CHAPTER);
+        jdbc.update("DELETE FROM public.courses WHERE id IN (?,?)", TWIN, LOWER);
+        jdbc.update("DELETE FROM public.users WHERE id IN (?,?,?)", X1, X2, X3);
+    }
+
+    @Test void enrollmentMetricsFollowTheExactCt22CompletionRuleForEveryPopulation() {
+        metricsFixtures();
+        try {
+            // LEARNER: active, every R member complete (one by mastery skip) -> completed learner.
+            UUID learner = enrol(LEARNER, COURSE, "active"); progress(learner, LESSON, true, false); progress(learner, L2, true, true);
+            // OTHER: stored completed, but R grew since (only LESSON done) -> joined, not a completed learner.
+            UUID other = enrol(OTHER, COURSE, "completed"); progress(other, LESSON, true, false);
+            // X1: a hidden Lesson never substitutes for an R member.
+            UUID x1 = enrol(X1, COURSE, "active"); progress(x1, LESSON, true, false); progress(x1, HIDDEN_LESSON, true, false);
+            // X2: left learners are excluded from joined and completed populations even when complete.
+            UUID x2 = enrol(X2, COURSE, "left"); progress(x2, LESSON, true, false); progress(x2, L2, true, false);
+            // X3: progress rows that are not completed count as incomplete.
+            UUID x3 = enrol(X3, COURSE, "active"); progress(x3, LESSON, false, false); progress(x3, L2, false, false);
+            // A zero-Lesson Course completes nobody, even with a stored completed status.
+            enrol(X1, SECOND, "completed"); enrol(X2, SECOND, "left");
+            // A hidden Course is reported with the same formula (R = its published Lessons).
+            UUID hidden = enrol(LEARNER, HIDDEN, "active"); progress(hidden, HIDDEN_COURSE_LESSON, true, false); enrol(OTHER, HIDDEN, "active");
+
+            var alpha = reportingRead(() -> enrollmentService.readEnrollmentMetrics(COURSE)).orElseThrow();
+            assertEquals(new com.codemastery.modules.course.application.service.EnrollmentService.CourseEnrollmentMetrics(
+                    COURSE, "Alpha", "published", 3, 1, 1, 1, java.util.Set.of(LEARNER, OTHER, X1, X3)), alpha);
+            var empty = reportingRead(() -> enrollmentService.readEnrollmentMetrics(SECOND)).orElseThrow();
+            assertEquals(new com.codemastery.modules.course.application.service.EnrollmentService.CourseEnrollmentMetrics(
+                    SECOND, "Beta", "published", 0, 1, 1, 0, java.util.Set.of(X1)), empty);
+            var concealed = reportingRead(() -> enrollmentService.readEnrollmentMetrics(HIDDEN)).orElseThrow();
+            assertEquals(new com.codemastery.modules.course.application.service.EnrollmentService.CourseEnrollmentMetrics(
+                    HIDDEN, "Hidden", "hidden", 2, 0, 0, 1, java.util.Set.of(LEARNER, OTHER)), concealed);
+            var none = reportingRead(() -> enrollmentService.readEnrollmentMetrics(TWIN)).orElseThrow();
+            assertEquals(new com.codemastery.modules.course.application.service.EnrollmentService.CourseEnrollmentMetrics(
+                    TWIN, "Alpha", "hidden", 0, 0, 0, 0, java.util.Set.of()), none);
+            assertEquals(java.util.Optional.empty(), reportingRead(() -> enrollmentService.readEnrollmentMetrics(id("metrics-missing"))));
+
+            // Completing the last R member flips OTHER; hiding L2 then completes X1 too; hiding every Lesson completes nobody.
+            progress(other, L2, true, false);
+            assertEquals(2, reportingRead(() -> enrollmentService.readEnrollmentMetrics(COURSE)).orElseThrow().completedLearners());
+            jdbc.update("UPDATE public.lessons SET publication_status='hidden' WHERE id=?", L2);
+            assertEquals(3, reportingRead(() -> enrollmentService.readEnrollmentMetrics(COURSE)).orElseThrow().completedLearners());
+            jdbc.update("UPDATE public.lessons SET publication_status='hidden' WHERE id=?", LESSON);
+            assertEquals(0, reportingRead(() -> enrollmentService.readEnrollmentMetrics(COURSE)).orElseThrow().completedLearners());
+            jdbc.update("UPDATE public.lessons SET publication_status='published' WHERE id IN (?,?)", LESSON, L2);
+
+            // Reads write nothing.
+            assertEquals("completed", jdbc.queryForObject("SELECT status FROM public.enrollments WHERE id=?", String.class, other));
+            assertEquals("active", jdbc.queryForObject("SELECT status FROM public.enrollments WHERE id=?", String.class, learner));
+        } finally { metricsCleanup(); }
+    }
+
+    @Test void enrollmentMetricsPagesEveryCourseInTitleCollateCThenIdOrderWithExactTotals() {
+        metricsFixtures();
+        try {
+            UUID learner = enrol(LEARNER, COURSE, "active"); progress(learner, LESSON, true, false); progress(learner, L2, true, false);
+            enrol(OTHER, TWIN, "left");
+            List<UUID> expected = jdbc.queryForList("SELECT id FROM public.courses ORDER BY title COLLATE \"C\" ASC, id ASC", UUID.class);
+            long total = expected.size();
+            var paged = new java.util.ArrayList<com.codemastery.modules.course.application.service.EnrollmentService.CourseEnrollmentMetrics>();
+            for (int page = 0; page * 2L < total; page++) {
+                int current = page;
+                var result = reportingRead(() -> enrollmentService.readEnrollmentMetrics(current, 2));
+                assertEquals(total, result.totalElements()); assertEquals(2, result.size()); assertEquals((total + 1) / 2, result.totalPages());
+                paged.addAll(result.content());
+            }
+            assertEquals(expected, paged.stream().map(com.codemastery.modules.course.application.service.EnrollmentService.CourseEnrollmentMetrics::courseId).toList());
+            // Byte order: both "Alpha" Courses (by UUID), then "Beta", "Hidden" and lower-case "alpha".
+            List<UUID> alphas = jdbc.queryForList("SELECT id FROM public.courses WHERE id IN (?,?) ORDER BY id ASC", UUID.class, COURSE, TWIN);
+            assertEquals(List.of(alphas.get(0), alphas.get(1), SECOND, HIDDEN, LOWER), expected.stream().filter(List.of(COURSE, TWIN, SECOND, HIDDEN, LOWER)::contains).toList());
+            for (var row : paged) {
+                if (row.courseId().equals(COURSE)) assertEquals(new com.codemastery.modules.course.application.service.EnrollmentService.CourseEnrollmentMetrics(
+                        COURSE, "Alpha", "published", 1, 0, 0, 1, java.util.Set.of(LEARNER)), row);
+                if (row.courseId().equals(TWIN)) assertEquals(new com.codemastery.modules.course.application.service.EnrollmentService.CourseEnrollmentMetrics(
+                        TWIN, "Alpha", "hidden", 0, 0, 1, 0, java.util.Set.of()), row);
+                assertEquals(reportingRead(() -> enrollmentService.readEnrollmentMetrics(row.courseId())).orElseThrow(), row);
+            }
+            var beyond = reportingRead(() -> enrollmentService.readEnrollmentMetrics(50, 100));
+            assertTrue(beyond.content().isEmpty()); assertEquals(total, beyond.totalElements());
+        } finally { metricsCleanup(); }
+    }
+
+    @Test void enrollmentMetricsRequireTheCallerTransaction() {
+        assertThrows(org.springframework.transaction.IllegalTransactionStateException.class, () -> enrollmentService.readEnrollmentMetrics(0, 20));
+        assertThrows(org.springframework.transaction.IllegalTransactionStateException.class, () -> enrollmentService.readEnrollmentMetrics(COURSE));
+    }
     @Test void actualLoginBindsExistingCredentialsJwtAndPublicUserWithoutLeakingCredentials() throws Exception {
         String password = UUID.randomUUID().toString();
         String hash = new BCryptPasswordEncoder(BCryptPasswordEncoder.BCryptVersion.$2B, 14).encode(password);
