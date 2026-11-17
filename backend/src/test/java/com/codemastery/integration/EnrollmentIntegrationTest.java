@@ -337,6 +337,12 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
                         METRICS_TWIN, "Alpha", "hidden", 0, 0, 1, 0, java.util.Set.of()), row);
                 assertEquals(reportingRead(() -> enrollmentService.readEnrollmentMetrics(row.courseId())).orElseThrow(), row);
             }
+            // A progress row for another Course's published Lesson on the same page never completes this Course.
+            UUID crossCourse = enrol(METRICS_X1, COURSE, "active"); progress(crossCourse, LESSON, true, false); progress(crossCourse, METRICS_HIDDEN_COURSE_LESSON, true, false);
+            var onePage = reportingRead(() -> enrollmentService.readEnrollmentMetrics(0, 100));
+            assertEquals(new com.codemastery.modules.course.application.service.EnrollmentService.CourseEnrollmentMetrics(
+                    COURSE, "Alpha", "published", 2, 0, 0, 1, java.util.Set.of(LEARNER, METRICS_X1)),
+                    onePage.content().stream().filter(row -> row.courseId().equals(COURSE)).findFirst().orElseThrow());
             var beyond = reportingRead(() -> enrollmentService.readEnrollmentMetrics(50, 100));
             assertTrue(beyond.content().isEmpty()); assertEquals(total, beyond.totalElements());
         } finally { metricsCleanup(); }

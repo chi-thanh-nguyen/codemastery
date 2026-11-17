@@ -3848,7 +3848,10 @@ this change, so no REST operation, OpenAPI shape or runtime caller is added.
 B7-O11's Course part is covered by `EnrollmentIntegrationTest`
 (`enrollmentMetricsFollowTheExactCt22CompletionRuleForEveryPopulation`,
 `enrollmentMetricsPagesEveryCourseInTitleCollateCThenIdOrderWithExactTotals`,
-`enrollmentMetricsRequireTheCallerTransaction`) on real PostgreSQL, and by the
+`enrollmentMetricsRequireTheCallerTransaction`) on real PostgreSQL, including a
+self-audit regression (17 November 2026) proving that a progress row for another
+Course's published Lesson on the same page never completes a Course (it fails if the
+`r.course_id = m.course_id` guard is removed), and by the
 `EnrollmentServiceTest` mapping, validation, snapshot-consistency and transaction-
 attribute cases. Executed locally on the PR #249 working tree after merging `main`
 `78e783d`: `cd backend && ./mvnw -Dtest=EnrollmentServiceTest -Dit.test=EnrollmentIntegrationTest verify`
