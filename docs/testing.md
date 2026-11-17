@@ -4004,9 +4004,9 @@ the required Lesson set (CO06) are not part of this change.
 | --- | --- |
 | B2-O01 calculation, zero-Lesson and complete Courses | `LessonProgressServiceTest`; `EnrollmentIntegrationTest.progressCompletionAndReconciliationFollowTheExactCt22Rules`, `zeroLessonCourseReportsZeroAndCannotBeCompletedVacuously` |
 | B2-O02 idempotent true-only completion, skip preserved, invalid bodies 400 without writes | `LessonProgressServiceTest` (strict body parsers, controller precedence); `EnrollmentIntegrationTest.completionAdmissionPrecedenceConcealmentAndNoDeniedWrites`, `concurrentCompletionsOfOneLessonConvergeOnOneRow` |
-| B2-O03 ACTIVE/COMPLETED reconciliation on completion; leave/rejoin unchanged | `EnrollmentIntegrationTest.progressCompletionAndReconciliationFollowTheExactCt22Rules`, `storedMembershipAndComputedCompletionStayDistinctAcrossLeaveAndRejoin` |
+| B2-O03 ACTIVE/COMPLETED reconciliation on completion; leave/rejoin unchanged; My Courses (CO07) shows the stored transition | `EnrollmentIntegrationTest.progressCompletionAndReconciliationFollowTheExactCt22Rules`, `storedMembershipAndComputedCompletionStayDistinctAcrossLeaveAndRejoin` |
 | B2-O04 Course-root serialization, rollback, independent Courses | `EnrollmentIntegrationTest.completionSerializesOnTheCourseRootAndRereadsCommittedState` (barrier on `pg_stat_activity` lock waits, leave and publication interleavings), `failureAfterTheWriteRollsBackProgressStatusPointerAndTimeTogether` |
-| B2-O05 per-Course resume | `EnrollmentIntegrationTest.perCourseResumeRecordsExplicitVisitsOnlyAndRetainsHistory` |
+| B2-O05 per-Course resume; same-Course visits follow the Course-root lock | `EnrollmentIntegrationTest.perCourseResumeRecordsExplicitVisitsOnlyAndRetainsHistory` (including 415/400 bodies), `visitSerializesOnTheCourseRootAndRechecksTheTargetAfterTheWait` |
 | B2-O06 ACTIVE/published paginated summary; My Courses unchanged | `EnrollmentIntegrationTest.myCourseProgressListsOnlySelfActivePublishedCoursesInTitleOrderWithExactCounts` |
 | B2-O11 account-level resume ranking, legacy NULL, tie-break, fallback | `EnrollmentIntegrationTest.accountResumeSelectsTheLatestValidRecordedVisitWithDeterministicTieBreak` |
 | B7-O18 (CT22.resume part) runtime role writes pointer and time together | `test-runtime-real-backend-privileges.sh` CO08 section; `test-postgres-privilege-matrix-containment.sh` r4 probes |
@@ -4017,7 +4017,7 @@ working tree after merging `main` `78e783d`:
 | Command | Result |
 | --- | --- |
 | `cd backend && ./mvnw -Dtest='LessonProgressServiceTest,EnrollmentServiceTest' test` | 52 and 12 tests, 0 failures or errors |
-| `cd backend && ./mvnw -Dit.test=EnrollmentIntegrationTest verify` (PostgreSQL Testcontainer) | 70 tests, 0 failures or errors |
+| `cd backend && ./mvnw -Dit.test=EnrollmentIntegrationTest verify` (PostgreSQL Testcontainer) | 70 tests, 0 failures or errors; 71 after the self-audit additions below |
 | `cd backend && ./mvnw verify` | BUILD SUCCESS; Surefire 683, Failsafe 221, 0 failures, errors or skips |
 | `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history intact, r2, r3 and r4 rows match the record |
 | `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | `MATRIX_TESTS_PASS` and both containment passes on the real V001–V009 schema, including the r4 grants and denials |
@@ -4025,3 +4025,11 @@ working tree after merging `main` `78e783d`:
 
 These are local developer runs, not independent QA, CI or deployment evidence.
 Frontend progress/resume types and screens remain FE08/FE33-owned and unchanged.
+
+Self-audit additions (17 November 2026, same day): a test proving that a visit waiting
+on a held Course root rechecks the target after the wait (it fails with 200 instead of
+404 if the access check is moved before the lock), stricter 415/400 representation
+checks for both JSON writes, and My Courses assertions after completion and
+reconciliation. No production code changed; the updated results are recorded in
+PR #248.
+

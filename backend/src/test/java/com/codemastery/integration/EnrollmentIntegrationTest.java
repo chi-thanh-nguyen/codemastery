@@ -398,6 +398,10 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.nextLessonId").value(nullValue())).andExpect(jsonPath("$.membershipStatus").value("completed"));
         assertEquals("completed", storedStatus());
         assertEquals(3, progressRows());
+        // CO07: My Courses now lists the Course as completed, not in progress.
+        mvc.perform(as(get("/api/me/courses").param("status", "completed"), LEARNER)).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(COURSE.toString())).andExpect(jsonPath("$.content[0].status").value("completed"));
+        mvc.perform(as(get("/api/me/courses").param("status", "active"), LEARNER)).andExpect(jsonPath("$.totalElements").value(0));
         // CT21 publication (simulated) adds an incomplete Lesson: reads never rewrite stored status.
         jdbc.update("UPDATE public.lessons SET publication_status='published' WHERE id=?", HIDDEN_LESSON);
         mvc.perform(as(get(progressPath(COURSE)), LEARNER)).andExpect(jsonPath("$.isComplete").value(false))
@@ -406,6 +410,8 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         // The next qualifying completion reconciles inside the Course unit.
         complete(LEARNER, COURSE, LESSON).andExpect(jsonPath("$.membershipStatus").value("active")).andExpect(jsonPath("$.progressPercentage").value(75));
         assertEquals("active", storedStatus());
+        mvc.perform(as(get("/api/me/courses").param("status", "active"), LEARNER)).andExpect(jsonPath("$.content[0].id").value(COURSE.toString()))
+                .andExpect(jsonPath("$.content[0].status").value("active"));
         complete(LEARNER, COURSE, HIDDEN_LESSON).andExpect(jsonPath("$.membershipStatus").value("completed")).andExpect(jsonPath("$.isComplete").value(true));
         // Manual completion never writes mastery, evidence or recommendations.
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.learner_skill_masteries WHERE user_id=?", Integer.class, LEARNER));
@@ -451,7 +457,9 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         for (var body : List.of("{\"completed\":false}", "{\"completed\":true,\"masterySkipped\":true}", "{\"completed\":true,\"enrollmentId\":\"" + ENROLLMENT + "\"}", "{}", "{\"completed\":true,\"completed\":true}"))
             mvc.perform(as(put(completion(COURSE, LESSON)), LEARNER).contentType("application/json").content(body)).andExpect(status().isBadRequest())
                     .andExpect(header().string("Cache-Control", "no-store")).andExpect(content().contentTypeCompatibleWith("application/problem+json"));
-        mvc.perform(as(put(completion(COURSE, LESSON)), LEARNER).contentType("text/plain").content(DONE)).andExpect(status().isUnsupportedMediaType());
+        mvc.perform(as(put(completion(COURSE, LESSON)), LEARNER).contentType("text/plain").content(DONE)).andExpect(status().isUnsupportedMediaType())
+                .andExpect(header().string("Cache-Control", "no-store")).andExpect(content().contentTypeCompatibleWith("application/problem+json"));
+        mvc.perform(as(put(completion(COURSE, LESSON)), LEARNER).content(DONE)).andExpect(status().isUnsupportedMediaType());
         mvc.perform(as(put(completion(COURSE, LESSON)), LEARNER).param("learnerId", OTHER.toString()).contentType("application/json").content(DONE)).andExpect(status().isBadRequest());
         // Hidden Lesson, foreign Lesson, hidden Course and missing Course are concealed alike.
         complete(LEARNER, COURSE, HIDDEN_LESSON).andExpect(status().isNotFound()).andExpect(jsonPath("$.detail").value("The requested resource is unavailable."));
@@ -519,6 +527,11 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         visit(LEARNER, COURSE, SECOND_LESSON).andExpect(status().isNotFound());
         visit(OWNER, COURSE, LESSON).andExpect(status().isForbidden());
         mvc.perform(as(put(resumePath(COURSE)), LEARNER).contentType("application/json").content("{\"lessonId\":\"" + L2 + "\",\"visitedAt\":\"2000-01-01T00:00:00Z\"}")).andExpect(status().isBadRequest());
+        mvc.perform(as(put(resumePath(COURSE)), LEARNER).contentType("text/plain").content(visitBody(L2))).andExpect(status().isUnsupportedMediaType())
+                .andExpect(header().string("Cache-Control", "no-store")).andExpect(content().contentTypeCompatibleWith("application/problem+json"));
+        for (var body : List.of("{}", "{\"lessonId\":null}", "{\"lessonId\":\"not-a-uuid\"}", "{\"lessonId\":\"" + L2 + "\",\"lessonId\":\"" + L2 + "\"}", "[]"))
+            mvc.perform(as(put(resumePath(COURSE)), LEARNER).contentType("application/json").content(body)).andExpect(status().isBadRequest())
+                    .andExpect(header().string("Cache-Control", "no-store")).andExpect(content().contentTypeCompatibleWith("application/problem+json"));
         assertEquals(LESSON, jdbc.queryForObject("SELECT resume_lesson_id FROM public.enrollments WHERE id=?", UUID.class, ENROLLMENT));
         // Hiding the stored target reads as null plus canonical next, without deleting history.
         jdbc.update("UPDATE public.lessons SET publication_status='hidden' WHERE id=?", LESSON);
@@ -629,6 +642,34 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
                 assertEquals("active", storedStatus());
             }
         }
+    }
+
+    /** ADR006 §§4, 7.2: a visit waits for the held Course root, then rechecks access against committed state. */
+    @Test void visitSerializesOnTheCourseRootAndRechecksTheTargetAfterTheWait() throws Exception {
+        moreLessons(); row("active");
+        visit(LEARNER, COURSE, LESSON).andExpect(status().isOk());
+        var before = jdbc.queryForObject("SELECT last_visited_at FROM public.enrollments WHERE id=?", java.time.OffsetDateTime.class, ENROLLMENT);
+        var locked = new CountDownLatch(1); var release = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var holder = pool.submit(() -> new TransactionTemplate(transactions).execute(status -> {
+                jdbc.queryForList("SELECT id FROM public.courses WHERE id=? FOR UPDATE", UUID.class, COURSE);
+                locked.countDown();
+                try { assertTrue(release.await(20, TimeUnit.SECONDS)); } catch (InterruptedException e) { throw new IllegalStateException(e); }
+                jdbc.update("UPDATE public.lessons SET publication_status='hidden' WHERE id=?", L2);
+                return null;
+            }));
+            assertTrue(locked.await(10, TimeUnit.SECONDS));
+            var waiting = pool.submit(() -> visit(LEARNER, COURSE, L2).andReturn().getResponse().getStatus());
+            awaitLockWaiters(1);
+            assertFalse(waiting.isDone());
+            release.countDown(); holder.get(20, TimeUnit.SECONDS);
+            assertEquals(404, waiting.get(20, TimeUnit.SECONDS));
+        }
+        assertEquals(LESSON, jdbc.queryForObject("SELECT resume_lesson_id FROM public.enrollments WHERE id=?", UUID.class, ENROLLMENT));
+        assertEquals(before, jdbc.queryForObject("SELECT last_visited_at FROM public.enrollments WHERE id=?", java.time.OffsetDateTime.class, ENROLLMENT));
+        // After the wait a still-valid target is written; the last committed visit wins.
+        visit(LEARNER, COURSE, L3).andExpect(status().isOk()).andExpect(jsonPath("$.resumeLessonId").value(L3.toString()));
+        assertEquals(L3, jdbc.queryForObject("SELECT resume_lesson_id FROM public.enrollments WHERE id=?", UUID.class, ENROLLMENT));
     }
 
     private void awaitLockWaiters(int expected) throws InterruptedException {
