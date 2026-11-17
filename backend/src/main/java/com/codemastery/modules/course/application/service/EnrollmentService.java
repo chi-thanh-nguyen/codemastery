@@ -1,6 +1,5 @@
 package com.codemastery.modules.course.application.service;
 
-import com.codemastery.common.api.PageResponse;
 import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
@@ -12,11 +11,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -67,16 +63,6 @@ public class EnrollmentService {
                 row.instructorId(), names.get(row.instructorId()), row.status().getStatus())).toList(), page, size,
                 result.getTotalElements(), result.getTotalPages());
     }
-    @Transactional(readOnly = true, propagation = Propagation.MANDATORY)
-    public PageResponse<CourseEnrollmentMetrics> readEnrollmentMetrics(int page, int size) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Transactional(readOnly = true, propagation = Propagation.MANDATORY)
-    public Optional<CourseEnrollmentMetrics> readEnrollmentMetrics(UUID courseId) {
-        throw new UnsupportedOperationException();
-    }
-
     private CurrentIdentity learner() {
         var actor = identities.requireCurrentIdentity();
         if (actor.role() != IdentityRole.LEARNER) throw new AccessDeniedException("Access denied");
@@ -88,9 +74,4 @@ public class EnrollmentService {
     public record Membership(UUID courseId, String status) {}
     public record MembershipCourse(UUID id, String title, String description, UUID instructorId, String instructorDisplayName, String status) {}
     public record MembershipPage(List<MembershipCourse> content, int page, int size, long totalElements, int totalPages) {}
-    public record CourseEnrollmentMetrics(UUID courseId, String title, String publicationStatus,
-            long activeEnrollments, long completedEnrollments, long leftEnrollments,
-            long completedLearners, Set<UUID> joinedLearnerIds) {
-        public CourseEnrollmentMetrics { joinedLearnerIds = Set.copyOf(joinedLearnerIds); }
-    }
 }
