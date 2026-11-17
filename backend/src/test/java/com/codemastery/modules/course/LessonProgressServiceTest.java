@@ -374,6 +374,12 @@ class LessonProgressServiceTest {
         assertFalse(CourseProgressResponse.isCompletionWrite(null));
         assertEquals(Optional.of(a), CourseProgressResponse.visitLessonId("{\"lessonId\":\"" + a + "\"}"));
         assertEquals(Optional.empty(), CourseProgressResponse.visitLessonId("{\"lessonId\":\"{" + a + "}\"}"));
+        // Trailing content after the single JSON object is rejected (Jackson 3 FAIL_ON_TRAILING_TOKENS default).
+        for (String trailing : List.of(" garbage", "{}", "{\"completed\":true}", "[]", "1", ",", "}", " null"))
+            assertFalse(CourseProgressResponse.isCompletionWrite("{\"completed\":true}" + trailing), trailing);
+        for (String trailing : List.of(" garbage", "{}", "{\"lessonId\":\"" + a + "\"}", "]", " 0"))
+            assertEquals(Optional.empty(), CourseProgressResponse.visitLessonId("{\"lessonId\":\"" + a + "\"}" + trailing), trailing);
+        assertTrue(CourseProgressResponse.isCompletionWrite(" {\"completed\":true} \n"));
     }
 
     private static void assertTransaction(String method, boolean readOnly, Isolation isolation, Class<?>... parameters) throws Exception {

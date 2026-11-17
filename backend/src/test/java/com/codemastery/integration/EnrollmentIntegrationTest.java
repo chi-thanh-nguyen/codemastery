@@ -454,7 +454,8 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         complete(LEARNER, COURSE, LESSON).andExpect(status().isForbidden());
         jdbc.update("UPDATE public.enrollments SET status='active' WHERE id=?", ENROLLMENT);
         mvc.perform(as(put("/api/courses/" + COURSE + "/lessons/0-0-4000-8000-2/completion"), LEARNER).contentType("application/json").content(DONE)).andExpect(status().isBadRequest());
-        for (var body : List.of("{\"completed\":false}", "{\"completed\":true,\"masterySkipped\":true}", "{\"completed\":true,\"enrollmentId\":\"" + ENROLLMENT + "\"}", "{}", "{\"completed\":true,\"completed\":true}"))
+        for (var body : List.of("{\"completed\":false}", "{\"completed\":true,\"masterySkipped\":true}", "{\"completed\":true,\"enrollmentId\":\"" + ENROLLMENT + "\"}", "{}", "{\"completed\":true,\"completed\":true}",
+                "{\"completed\":true} garbage", "{\"completed\":true}{\"completed\":true}", "{\"completed\":true}[]"))
             mvc.perform(as(put(completion(COURSE, LESSON)), LEARNER).contentType("application/json").content(body)).andExpect(status().isBadRequest())
                     .andExpect(header().string("Cache-Control", "no-store")).andExpect(content().contentTypeCompatibleWith("application/problem+json"));
         mvc.perform(as(put(completion(COURSE, LESSON)), LEARNER).contentType("text/plain").content(DONE)).andExpect(status().isUnsupportedMediaType())
@@ -529,7 +530,8 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         mvc.perform(as(put(resumePath(COURSE)), LEARNER).contentType("application/json").content("{\"lessonId\":\"" + L2 + "\",\"visitedAt\":\"2000-01-01T00:00:00Z\"}")).andExpect(status().isBadRequest());
         mvc.perform(as(put(resumePath(COURSE)), LEARNER).contentType("text/plain").content(visitBody(L2))).andExpect(status().isUnsupportedMediaType())
                 .andExpect(header().string("Cache-Control", "no-store")).andExpect(content().contentTypeCompatibleWith("application/problem+json"));
-        for (var body : List.of("{}", "{\"lessonId\":null}", "{\"lessonId\":\"not-a-uuid\"}", "{\"lessonId\":\"" + L2 + "\",\"lessonId\":\"" + L2 + "\"}", "[]"))
+        for (var body : List.of("{}", "{\"lessonId\":null}", "{\"lessonId\":\"not-a-uuid\"}", "{\"lessonId\":\"" + L2 + "\",\"lessonId\":\"" + L2 + "\"}", "[]",
+                visitBody(L2) + " garbage", visitBody(L2) + visitBody(L3), visitBody(L2) + "{}"))
             mvc.perform(as(put(resumePath(COURSE)), LEARNER).contentType("application/json").content(body)).andExpect(status().isBadRequest())
                     .andExpect(header().string("Cache-Control", "no-store")).andExpect(content().contentTypeCompatibleWith("application/problem+json"));
         assertEquals(LESSON, jdbc.queryForObject("SELECT resume_lesson_id FROM public.enrollments WHERE id=?", UUID.class, ENROLLMENT));

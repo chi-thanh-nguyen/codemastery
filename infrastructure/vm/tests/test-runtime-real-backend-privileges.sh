@@ -357,6 +357,49 @@ pre_fix="$( { printf 'BEGIN;\n'; application_grants_sql complete; printf 'ROLLBA
 check "whole r4 matrix before V009 fails as the pre-fix provisioning did" \
   "$([[ "$pre_fix" == *'column "last_visited_at" of relation "enrollments" does not exist'* ]] && echo reproduced)" reproduced
 
+echo "== a column-present schema is provisioned as current, then real Flyway refuses an untracked state"
+# Provisioning checks objects and privileges; migration state stays Flyway's and the deploy
+# gate's responsibility (flyway_schema_history must be all successful before hardening).
+mig_sql() { psql_as "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)" >/dev/null; }
+expect_backend_refuses() {  # label: the real backend must stop before 'Started', leaving history unchanged
+  local label="$1" before after logs started=no
+  before="$(psql_admin <<<"SELECT coalesce(string_agg(version || ':' || success, ',' ORDER BY installed_rank), 'none') FROM public.flyway_schema_history;" 2>/dev/null || echo no-history)"
+  docker run -d --name "$backend" --network "$PGTEST_NETWORK" --env-file "$work/upgrade.env" "$BACKEND_IMAGE" >/dev/null
+  for _ in $(seq 1 180); do
+    [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || break
+    logs="$(docker logs "$backend" 2>&1)"; [[ "$logs" != *'Started CodeMasteryApplication'* ]] || { started=yes; break; }
+    sleep 1
+  done
+  logs="$(docker logs "$backend" 2>&1)"
+  docker rm -f "$backend" >/dev/null
+  after="$(psql_admin <<<"SELECT coalesce(string_agg(version || ':' || success, ',' ORDER BY installed_rank), 'none') FROM public.flyway_schema_history;" 2>/dev/null || echo no-history)"
+  check "$label: backend refused to start" "$started/$([[ "$logs" == *FlywayValidateException* || "$logs" == *'Migration V009'*failed* || "$logs" == *'non-empty schema'* || "$logs" == *'already exists'* ]] && echo flyway)" "no/flyway"
+  check "$label: Flyway history unchanged" "$after" "$before"
+}
+mig_sql <<<"ALTER TABLE public.enrollments ADD COLUMN last_visited_at timestamptz NULL;"
+provision_db_roles >/dev/null
+check "manually added column on V008: provisioning grants the r4 matrix (Copilot's observation)" "$(verify_runtime_privileges present >/dev/null && echo exact)" exact
+expect_backend_refuses "manually added column on V008"
+# Without any Flyway history (dumped, dropped and later restored by the administrator; a
+# renamed or moved table would itself be rejected by provisioning or the role policy).
+history_dump="$(docker exec "$PGTEST_CONTAINER" pg_dump -U "$(env_get POSTGRES_USER)" -d "$(env_get POSTGRES_DB)" --table=public.flyway_schema_history)"
+psql_admin >/dev/null <<<"DROP TABLE public.flyway_schema_history;"
+provision_db_roles >/dev/null
+expect_backend_refuses "column present without Flyway history"
+printf '%s\n' "$history_dump" | psql_admin >/dev/null
+check "Flyway history restored" "$(history)" "8/8"
+psql_admin >/dev/null <<<"INSERT INTO public.flyway_schema_history VALUES (9,'009','add enrollment last visited at','SQL','V009__add_enrollment_last_visited_at.sql',0,'$(env_get SPRING_FLYWAY_USER)',now(),1,false);"
+provision_db_roles >/dev/null
+expect_backend_refuses "column present with a failed V009 history row"
+psql_admin >/dev/null <<<"DELETE FROM public.flyway_schema_history WHERE installed_rank=9;"
+mig_sql <<<"ALTER TABLE public.enrollments DROP COLUMN last_visited_at;"
+application_grants_sql present | psql_admin >/dev/null
+psql_admin >/dev/null <<SQL
+REVOKE UPDATE (resume_lesson_id) ON public.enrollments FROM "$(env_get DB_USER)";
+REVOKE ALL ON public.lesson_progress FROM "$(env_get DB_USER)";
+SQL
+check "exact V008 predecessor with r3 grants restored" "$(history)/$(has_column)" "8/8/0"
+
 echo "== deploy path: pre-migration provisioning, real Flyway V009, r4 hardening"
 provision_db_roles >/dev/null
 check "pre-migration verification on the V008 predecessor" "$(verify_runtime_privileges present >/dev/null && echo exact)" exact

@@ -4046,3 +4046,12 @@ Run locally on the remediated working tree:
 | `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS`. Real Flyway stops at V008 (`spring.flyway.target=8`) and the r3 grants are applied. Pre-migration provisioning is then exact, the backend applies V009, and hardening gives the exact r4 matrix. A visit and a completion succeed under the runtime role with no `42501` |
 | `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`. The migration-added list is pinned to `enrollments.last_visited_at` (V009), must name a reviewed column, and is never deferred in complete mode; malformed lists are rejected |
 
+Review-findings verification (18 November 2026). The disposition of each finding is in
+PR #248 and PR #247:
+
+| Finding | Evidence executed |
+| --- | --- |
+| Trailing JSON after the body object | Jackson 3.1.8 enables `FAIL_ON_TRAILING_TOKENS` by default, and the strict mapper reports it enabled. New `LessonProgressServiceTest` cases and `EnrollmentIntegrationTest` bodies send JSON followed by garbage or by a second value. Both writes return a `no-store` 400 ProblemDetail, with no progress row and an unchanged resume pointer |
+| `mastery_skipped` through INSERT | The containment test records the accepted INSERT of `completed = true, mastery_skipped = true` (ADR012 §19.2 ceiling). The V002 check rejects a skip without completion (`23514`), and UPDATE of the flag stays denied (`42501`). The r4 record wording is corrected |
+| Column already present | The runtime test runs the real backend against three states: a V008 database with the column added by hand, no Flyway history, and a failed V009 row. Provisioning grants the exact r4 matrix, and Flyway refuses to start each time with the history unchanged. The V008 → V009 upgrade then passes as before |
+
