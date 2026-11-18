@@ -47,15 +47,19 @@ else if (args[0] === 'rm') { live(id).present = false; save(); console.log(id); 
 else if (args[0] === 'exec') { /* pg_isready and psql succeed */ }
 else if (args[0] === 'build') {
     // Plain progress goes to stderr, as with BuildKit. 'build-fails' imitates the wrapper's download failing after a long log.
+    // The log is one write and the exit status is set without process.exit(), which could drop queued pipe output.
     if (mode === 'build-fails') {
-        for (let line = 1; line <= 200; line++) process.stderr.write('#11 ' + line + '.000 Downloaded from central: artifact-' + line + '.pom\\n');
-        process.stderr.write('#11 0.285 Exception in thread "main" java.net.UnknownHostException: repo.maven.apache.org\\n');
-        if (process.env.STUB_LEAK) process.stderr.write('#11 0.300 echoed ' + process.env.STUB_LEAK + '\\n');
-        fail('ERROR: failed to build: failed to solve: process "/bin/sh -c ./mvnw package -DskipTests" did not complete successfully: exit code: 1');
+        const log = Array.from({ length: 200 }, (_, at) => '#11 ' + (at + 1) + '.000 Downloaded from central: artifact-' + (at + 1) + '.pom\\n');
+        log.push('#11 0.285 Exception in thread "main" java.net.UnknownHostException: repo.maven.apache.org\\n');
+        if (process.env.STUB_LEAK) log.push('#11 0.300 echoed ' + process.env.STUB_LEAK + '\\n');
+        log.push('ERROR: failed to build: failed to solve: process "/bin/sh -c ./mvnw package -DskipTests" did not complete successfully: exit code: 1\\n');
+        process.stderr.write(log.join(''));
+        process.exitCode = 1;
+    } else {
+        fs.writeFileSync(path.join(dir, 'build-progress'), process.env.BUILDKIT_PROGRESS || '<unset>');
+        fs.writeFileSync(args[args.indexOf('--iidfile') + 1], mode === 'build-no-id' ? 'not-an-image-id\\n' : 'sha256:' + 'b'.repeat(64));
+        process.stderr.write('#1 [internal] load build definition from Dockerfile\\n');
     }
-    fs.writeFileSync(path.join(dir, 'build-progress'), process.env.BUILDKIT_PROGRESS || '<unset>');
-    fs.writeFileSync(args[args.indexOf('--iidfile') + 1], mode === 'build-no-id' ? 'not-an-image-id\\n' : 'sha256:' + 'b'.repeat(64));
-    process.stderr.write('#1 [internal] load build definition from Dockerfile\\n');
 }
 else if (args[0] === 'run') {
     if (process.env.JWT_SECRET) fs.writeFileSync(path.join(dir, 'secret'), process.env.JWT_SECRET);

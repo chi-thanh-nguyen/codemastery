@@ -4138,6 +4138,15 @@ Python 3.12.3, a 4-CPU cgroup quota, host networking, the checkout on an ext4 vo
 | `E2E_WORKERS=1 npm test` (all five projects) on the Linux harness, twice, with real image builds | 106 passed, 4 skipped each run (6.0 and 6.5 min). Every recorded resource was removed |
 | `node --test fixtures/*.test.mjs` | 155/155 on macOS. Linux with `docker run --init`: 155/155. Without an init process (PID 1 `sleep`) four coordinator-SIGKILL tests fail because orphans are never reaped; this is a harness property, not a regression |
 
+The first CI run of this change (PR #253, `6b95699`) failed in the lifecycle step on one
+of the new tests. The Docker stub had ended with `process.exit()`, which can drop queued pipe
+output. Only 180 of 203 lines arrived, so the asserted exception was lost. The stub now writes
+its log once and sets `process.exitCode`. Under six CPU burners in the 4-CPU harness the old
+stub failed 8 of 40 runs and the fixed stub passed 40 of 40. `buildImage()` itself was not
+involved: the real Docker CLI does not use the stub. That runner was again image
+`20261111.127.1`, with browser OS packages fetched at 91.3 kB/s (22 min 50 s). This is the
+same slow-network signature as failure A.
+
 Limits: neither failure was reproduced. The harness is arm64, not the amd64 runners,
 and its backend and PostgreSQL containers are not CPU-capped. The diagnostics make the
 next occurrence attributable; they do not prevent an external download from failing or
