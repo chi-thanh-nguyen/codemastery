@@ -474,7 +474,10 @@ therefore reports the failing step's last 80 output lines (redacted), for exampl
 download error, instead of only `exit code: 1`. When the shared `signIn()` helper fails, its error
 adds the page path, the visible status and alert texts and a timeline of the page's `/api/auth/*`
 requests (method, path, status or network failure, milliseconds). Headers, cookies, bodies, query
-strings and field values are never read. Containers and the network carry the run and owner labels, which
+strings and field values are never read. `signIn()` and the tests that type into a freshly loaded
+`/login` or `/register` page first call `gotoAfterRestore()`, which waits until the page's load-time
+session restore was answered and the frontend released its session Web Lock (see the 19 November
+2026 record). Containers and the network carry the run and owner labels, which
 only corroborate the IDs in the run inventory; the teardown stops the preview over its
 control channel and removes exactly the recorded containers, their anonymous volume,
 the network and the temporary directory, as described above. Each test registers its own synthetic Learner,
@@ -602,7 +605,7 @@ Together they define eight independent jobs on `ubuntu-24.04`:
 | Frontend (`frontend`) | Node 22; `npm ci`, `npm test`, then `npm run build` from `frontend/` |
 | VM deployment script (`deployment-script`) | Checks of `infrastructure/vm/deploy.sh` without starting the application: shell syntax, authorization gates, Compose and provisioning guards, the runtime privilege matrix, env-file custody, preflight against rendered Compose, release-archive identity models and image identity through a real `docker save`/`load` round trip |
 | VM deployment PostgreSQL and containment tests (`deployment-script-postgres`) | The runtime privilege matrix on the real migrated schema, failure containment and published-port verification against real containers |
-| VM runtime privileges with the real backend (`deployment-script-runtime`) | Builds the backend image and exercises real Auth, catalogue and membership under the approved privilege matrix |
+| VM runtime privileges with the real backend (`deployment-script-runtime`) | Builds the backend image (quiet on success; on failure the last 80 lines of the plain build log and Docker's exit status) and exercises real Auth, catalogue and membership under the approved privilege matrix |
 | VM deployment containerd image store (`deployment-script-containerd`) | Release-archive verification through real `docker save`/`load` round trips with the containerd image store |
 | VM HTTPS ingress (`deployment-ingress`) | Builds the release and local frontend images; exercises the HTTPS ingress against a stub and the real backend; runs `deploy.sh preflight` with the committed override |
 | VM MinIO initializer qualification (`minio-initializer`) | Pulls the digest-pinned Golithus server, `mc` (the suite's test client) and Chainguard candidate server images, builds `infrastructure/minio` for linux/amd64 on its digest-pinned Chainguard `minio-client` base (pulled by the build) and runs `infrastructure/minio/test-minio-init.sh` against disposable MinIO servers and the effective VM Compose model, first with the Golithus server and then with `MINIO_INIT_TEST_SERVER=chainguard`. It then builds `infrastructure/vm/Dockerfile.minio-server` for linux/amd64 as the local non-release tag `codemastery-test/minio-server:qualification`, without pushing it, and runs the suite with `MINIO_INIT_TEST_SERVER=minimal`. The later suites run even when an earlier suite fails, provided the pull, and for the minimal suite its build, succeeded; any failure fails the job ([record](deployment.md#dp01-minio-community-initializer--31-october-2026), [candidate](deployment.md#dp01-chainguard-minio-release-server-candidate--1-november-2026), [minimal](deployment.md#dp01-minimal-minio-server-candidate--1-november-2026)) |
@@ -4113,7 +4116,7 @@ timeouts, retries and the lifecycle are unchanged.
 | Failure | Historical evidence | Classification |
 | --- | --- | --- |
 | A. Backend image build, `Dockerfile:10` `./mvnw package -DskipTests` exit 1 (run 44289337659 attempt 1, `5f312a5`) | Attempt 2 on the same commit passed, and so did the Backend job. The failing runner (image `20261111.127.1`) fetched the 125 MB of browser OS packages at 76.9 kB/s (27 min 8 s), against 6–29 MB/s for the other attempts. The build failed 11.6 s after the run was admitted. A local timed build spends about 2 s in the silent Maven Wrapper bootstrap and 42 s downloading 864 artifacts before `javac` starts at 44 s, so a compile error is excluded | Failure in the network download phase: HIGH_CONFIDENCE. Exact failing download: UNDETERMINED, because `docker build --quiet` discarded the step output (CONFIRMED) |
-| B. `webkit-desktop` F05, initial `signIn()` still at `/login` after 10 s (runs 44296326736 attempt 1 on `7778b89`; 44247097650 attempt 1 on `6d29d699`, before CO08 merged) | The trace is identical on both branches except for the port. Both failures were test 56, directly after F04. The other four projects passed F05 in the same runs. Reruns passed with and without step debug logging | Step that stalled: UNDETERMINED. Not caused by CO08 (CONFIRMED). No application defect demonstrated |
+| B. `webkit-desktop` F05, initial `signIn()` still at `/login` after 10 s (runs 44296326736 attempt 1 on `7778b89`; 44247097650 attempt 1 on `6d29d699`, before CO08 merged) | The trace is identical on both branches except for the port. Both failures were test 56, directly after F04. The other four projects passed F05 in the same runs. Reruns passed with and without step debug logging | Step that stalled: UNDETERMINED at the time; found later the same day: the email entry is discarded (see the PR #253 extension below). Not caused by CO08 (CONFIRMED) |
 
 Debug logging only adds runner `##[debug]` lines. Nothing in the repository or in its
 E2E toolchain reads `RUNNER_DEBUG` or `ACTIONS_STEP_DEBUG` (Playwright reads only
@@ -4153,4 +4156,105 @@ next occurrence attributable; they do not prevent an external download from fail
 a sign-in step from stalling. Possible follow-ups, each needing its own decision: a
 retrying or cached Maven bootstrap (which changes the production Dockerfile), and making
 the shared `signIn()` wait for the load-time restore, which is only worth doing once
-the diagnostics show that this restore is what stalls.
+the diagnostics show that this restore is what stalls (done: see the extension below).
+
+## PR #253 extension: VM backend build and WebKit sign-in loss — 19 November 2026
+
+This extends the record above under the same Leader authorization, on `fix/ci-e2e-flakiness`.
+
+### VM backend image build (PR #252, run 44370098810)
+
+PR #252 changes only `DESIGN.md`. Its required job "VM runtime privileges with the real
+backend" failed at `docker build -q -t codemastery-backend:privilege-test backend >/dev/null`
+with the same `Dockerfile:10 … exit code: 1` output as failure A.
+
+| Occurrence | Runner image | Time to failure | Rerun |
+| --- | --- | --- | --- |
+| PR #246 `aa6995d`, run 44057785370, job 133951474432 (VM) | `20261111.127.1` | 11.3 s | Attempt 2 passed on the same image version (34.3 s build) |
+| PR #248 `5f312a5`, run 44289337659, job 134750155957 (E2E) | `20261111.127.1` | at most 11.6 s | Attempt 2 passed |
+| PR #252 `f5dacb3`, run 44370098810, job 135034229939 (VM) | `20261111.127.1` | 11.2 s | Attempt 2 passed on the same image version (40.7 s build) |
+
+The three failures are on unrelated changes, and reruns of the same commits passed. The
+runner image version correlates with them but is not sufficient, because reruns on that
+version also passed. Fault injection on the pinned JDK image's wrapper bootstrap
+(`docker run` of `./mvnw -v`) gave:
+
+| Fault | Result |
+| --- | --- |
+| DNS server unreachable (`--dns 10.255.255.1`) | `UnknownHostException` after 11.2 s |
+| No network | `UnknownHostException` after 1.0 s |
+| Name resolves, connection blocked | `ConnectException` after 75.9 s |
+| Healthy | Maven starts after 1.9 s |
+
+Classification: failure in the build's first network access, HIGH_CONFIDENCE. The time to
+failure is consistent with a 10 s DNS resolution timeout (glibc 5 s × 2) inside the build
+container. The CI totals include any base-image pull, though, and the runners' image cache
+is unknown, so the exact failing operation remains UNDETERMINED.
+
+Build paths:
+
+| Path | Builds the Maven stage | Failure output before this change | Now |
+| --- | --- | --- | --- |
+| `ci-vm.yml` "Build the backend image from this revision" | Yes | Hidden (`-q`, stdout to `/dev/null`) | Plain log; on failure its last 80 lines and Docker's exit status |
+| `infrastructure/vm/tests/test-java-truststore.sh`, verifier stage | Yes (normally cached after the ingress job's backend build) | Hidden (`-q`) | Same handling |
+| `e2e/fixtures/local-stack.ts` | Yes | Hidden (`--quiet`) | `buildImage()` (record above) |
+| `infrastructure/vm/tests/test-ingress-release-image-build.sh` | Yes | Already plain log, tail 80 | Unchanged |
+| `ci-backend.yml` `./mvnw verify` on the runner | Host Maven | Visible | Unchanged |
+| PostgreSQL, MinIO and containerd test builds (`-q`) | No | Hidden | Unchanged: no failure observed; follow-up candidate |
+
+Prevention was evaluated and not implemented:
+- A BuildKit or Maven cache is empty on a fresh runner. Exporting one to the Actions cache
+  needs a different builder and a dependency layer in the production Dockerfile.
+- A retry would act blindly while the failing operation is unknown. The builds now print
+  it, so a targeted retry can be decided on evidence.
+- The failures are fast, not hangs, so timeouts would not help.
+
+Dependency pins and integrity are unchanged.
+
+### WebKit sign-in loss (failure B), root cause found
+
+During local verification, webkit-desktop A01 failed in its initial `signIn()`. Its new
+diagnostics showed the restore answered 401 after 5 ms, the form submitted, **no
+`POST /api/auth/login`**, and the alert "Please check the supplied information.". The page
+snapshot showed the email field empty while the password field held 25 characters.
+Scratch probes (never committed) then logged `focusin`, `input`, the email value after a
+microtask and after a task, element identity, and the restore's timing:
+
+| Probe (webkit-desktop, macOS WebKit 26.6) | Result |
+| --- | --- |
+| Plain `signIn` sequence, 120 runs (with and without `page.clock.install()`) | 1 lost (without clock) |
+| Same with value checks, 240 runs | 3 lost. In each, the `input` event carried the full email (61 characters) 1–2 ms after the restore's 401; the value was intact after a microtask and empty after the next task; same element, still connected |
+| `flushSync` around the restore's `setRestoring(false)` (experiment, reverted), 480 runs | 4 lost: a pending re-render is not the cause |
+| Value setter wrapped before the app loads, 480 runs | 0 lost: the instrumentation masks it |
+| Input timing against the restore, 480 runs | 1 lost, 1 ms after the 401. Bucket counts: before the 401 206/0, 0–4 ms after 35/1, 4–10 ms 173/0, >10 ms 65/0 |
+| Route-held refresh released during `fill` or `pressSequentially`, 80 runs (WebKit and Chromium) | 0 lost |
+
+All nine logged losses had the email entry land 1–3 ms after the load-time restore's 401,
+a window that holds about 7% of runs. Classification: in WebKit, a form entry that lands
+within a few milliseconds of the load-time session restore completing is discarded,
+HIGH_CONFIDENCE. The login request is never sent. The exact engine-level mechanism is
+UNDETERMINED (React's restoring render is excluded, and instrumenting the value property
+masks the bug).
+
+This explains both historical F05 failures: the initial `signIn()`, test 56, stayed on
+`/login`. It is not a network, backend, lock-wait or CO08 issue. Exposure in production is
+limited to an entry made within milliseconds of page load (for example load-time autofill).
+The visible result is the validation message on an empty email field. No security property
+is affected, and the frontend is unchanged.
+
+Fix: `gotoAfterRestore()` in `e2e/fixtures/auth-fixture.ts` waits until the page's
+load-time restore request (refresh, or logout) was answered and the frontend released its
+`codemastery-auth-session` Web Lock. It uses a lock request, not a timer, so it also works
+with an installed clock. `signIn()`, the registration form test and the wrong-credentials
+test use it. F05, N02 and A01 still exercise a sign-in queued behind a held refresh.
+
+| After the fix | Result |
+| --- | --- |
+| The same probe with `gotoAfterRestore()`, 960 runs | 0 lost. The email entry lands 15–496 ms after the 401 (median 22 ms); none within 4 ms |
+
+A new E2E test, "sign-in failure diagnostics carry no credential or session material",
+runs on the desktop projects. It forces `signIn()` to fail after a successful sign-in and
+checks in memory that the error contains no password, email, access token, cookie value,
+bearer or JWT-shaped text. Only booleans are asserted, so a failure cannot print a value.
+`request.failure()?.errorText` is a browser network error description, and auth URLs carry
+nothing secret (only the path is recorded).
