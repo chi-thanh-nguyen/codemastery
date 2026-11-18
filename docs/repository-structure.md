@@ -2180,3 +2180,25 @@ Testcontainers `GenericContainer` from the already declared test dependency with
 MinIO image digest pinned in `infrastructure/docker-compose.yml`; no new dependency,
 directory or production file is approved. The canonical tree above is unchanged; this
 is an explicit addition.
+
+### IN06.repo test placement — 18 November 2026
+
+`CT14-IN06-REPO-PLACEMENT-2026-11-18-r1` is
+**[LEADER_APPROVED](decisions/README.md#approval-status-labels)**: the Project Leader
+approved it on 18 November 2026 (Asia/Ho_Chi_Minh), in response to the placement question
+raised during the instruction "CodeMastery — PR #250 Complete Remediation, Git Attribution
+& Cross-PR Integration". ADR008 §5 records Q&A and reporting test inventories as a gap,
+and ADR012 §19.3's `InteractionAdminIntegrationTest.java` has a different responsibility
+(B7-O01–O03 and O06–O11). Exactly these two test files are added inside existing directories:
+
+| File | Responsibility |
+| --- | --- |
+| `backend/src/test/java/com/codemastery/modules/interaction/InteractionMapperTest.java` | Unit tests of `InteractionMapper`: entity/domain round trips and exact V006 report status codes |
+| `backend/src/test/java/com/codemastery/integration/repository/InteractionRepositoryIntegrationTest.java` | Real-PostgreSQL IN06.repo regression: insert and permitted updates, immutable-field rejection, hidden-post filtering before paging and counting, caller-provided ordering, V006 checks, and execution under a transaction-scoped role that holds exactly the ADR012 §19.2 ceiling for `discussion_posts` and `content_reports`; extends `AbstractIntegrationTest` |
+
+CODEOWNERS is unchanged: the existing Interaction test rule (@tihh647-ui,
+@chi-thanh-nguyen) covers the unit test; like other unlisted integration suites, the
+integration test matches no rule, and adding one is outside this record. No production file,
+dependency, directory or other test path is approved. `InteractionAdminIntegrationTest.java`
+keeps its §19.3 scope and is not created by this addition. The canonical tree above is
+unchanged; this is an explicit addition.

@@ -3924,6 +3924,60 @@ ran 18 unit and 59 PostgreSQL integration tests with 0 failures or errors; the f
 `./mvnw verify` result is recorded in the pull request. These are local developer
 runs, not independent QA or CI evidence.
 
+## IN06.repo repository regression coverage — 18 November 2026
+
+IN06.repo ([#181](https://github.com/chi-thanh-nguyen/codemastery/issues/181),
+[PR #250](https://github.com/chi-thanh-nguyen/codemastery/pull/250)) adds the Interaction
+discussion-post and content-report repositories and `InteractionMapper`. It adds no
+operation, service or schema change. An independent review found that `save()` of an
+existing row went through a JPA merge. The resulting full-row `UPDATE` wrote columns
+that the ADR012 §19.2 ceiling (`CT17-P6-PLAN-2026-11-15-r2`) never grants. The adapters
+now insert new rows, update existing rows with one targeted statement
+(`discussion_posts.is_hidden`, or `content_reports.status` and `resolved_at`), and reject
+any change to another field before SQL runs. The rejection surfaces as Spring's
+`InvalidDataAccessApiUsageException` with an `IllegalArgumentException` cause. Lifecycle
+rules (CT30/CT32) stay with the future services.
+
+Placement: `CT14-IN06-REPO-PLACEMENT-2026-11-18-r1`
+([repository structure](repository-structure.md#in06repo-test-placement--18-november-2026)).
+
+| Obligation | Covered by |
+| --- | --- |
+| Mapper round trips; exact `open`/`resolved`/`dismissed` codes; other spellings rejected | `InteractionMapperTest` (17 cases) |
+| Insert and read-back from PostgreSQL; permitted updates; same-transaction reads not stale | `InteractionRepositoryIntegrationTest`: `insertsPostAndReport…`, `existingPostUpdatesOnlyTheHiddenFlag…`, `existingReportUpdatesOnlyStatusAndResolutionTime`, `unchangedExistingRows…` |
+| Immutable fields cannot be overwritten | `changingAnyImmutablePostField…`, `changingAnyImmutableReportField…` (every immutable field; row unchanged) |
+| Hidden posts filtered before paging and counting; caller-only ordering, stable across ties | `hiddenPostsAreFilteredBeforePagingAndCounting`, `orderingComesOnlyFromTheCallerAndIsStableAcrossTies` |
+| V006 checks | `v006PostChecks…`, `v006ReportChecks…` (text, self-parent, parent FK, exclusive target, resolution, times, status code) |
+| SQL under the §19.2 ceiling | `repositorySqlRunsUnderTheSection192PrivilegeCeiling`; negative controls `ceilingRejectsTheFullRowPostUpdate…`, `ceilingRejectsTheFullRowReportUpdate…` (the old merge path fails with `42501`) and `ceilingRejectsUpdatesOfImmutable…` |
+
+The privilege tests create a `NOLOGIN` role inside the test transaction. The role holds
+exactly `SELECT, INSERT, UPDATE (is_hidden)` on `discussion_posts` and
+`SELECT, INSERT, UPDATE (status, resolved_at)` on `content_reports`, and the tests run
+`SET LOCAL ROLE`. The rollback removes the role and its grants. This proves the SQL is
+compatible with the ceiling. It is not the CT17-P6 matrix, the deployed runtime role or
+B7-O18. No runtime grant, matrix revision, script or CI change is made. The dated matrix
+revision for these tables remains a completion gate for the IN06 PR that first exercises
+them through the real backend.
+
+Executed locally on 18 November 2026, macOS host with Docker, project PostgreSQL image:
+
+- `cd backend && ./mvnw -Dtest=InteractionMapperTest -Dit.test=InteractionRepositoryIntegrationTest verify`
+  ran 17 unit and 14 integration tests, with 0 failures or errors.
+- Mutation check: with only the two adapters reverted to the original merge-based `save()`,
+  the integration suite failed (4 failures and 1 `42501` error).
+- The first full `./mvnw verify` on the branch showed that a new cached Spring context
+  exhausted the shared container's connections (`SampleDataSeedIntegrationTest`: "too many
+  clients already"). The suite now closes its context after the class (`@DirtiesContext`).
+- The rerun of full `./mvnw verify` on the branch (merged with `main` `65d14ca`) ran 654 unit
+  and 224 integration tests: BUILD SUCCESS.
+- A simulated combined tree (`main` + PR #248 `f50a156` + PR #249 `4204045` + this branch)
+  merged without conflicts and passed `./mvnw verify` (713 unit and 240 integration tests),
+  `test-deploy-privilege-matrix-contract.sh` and
+  `test-postgres-privilege-matrix-containment.sh` (r4 and V009).
+
+These are author-side developer runs, not independent QA or CI evidence. The real-backend
+runtime privilege job runs in CI. QA06 and the §15 oracles remain NOT_RUN.
+
 ## PR #246 CI failures on `aa6995d` — 17 November 2026
 
 `aa6995d` has the same tree as `be8bef0`, on which all CI checks had passed; only its commit metadata changed. On `aa6995d`, two jobs failed. Neither failure came from the hybrid-authentication change.
