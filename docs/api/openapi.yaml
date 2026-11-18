@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, and the two AU07 password-recovery operations in PR #239; see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, and the six CO08 CT22.progress/resume operations (#174); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -1779,7 +1779,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current self Learner ACTIVE/COMPLETED membership; all published Lessons only, canonical order. Floor integer percentage; empty Course 0%, not complete. REPEATABLE READ; no write. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current self Learner ACTIVE/COMPLETED membership; all published Lessons only, canonical order. Floor integer percentage; empty Course 0%, not complete. REPEATABLE READ; no write. Implemented under CO08 (#174) in the Course module; its runtime grants are CT17-P6-PRIVILEGES-2026-11-17-r4 within the ADR012 §19.2 ceiling (docs/deployment.md); independent review, CI and protected integration remain gated. ADR006 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1787,7 +1787,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Current progress, published Lessons only, in canonical order.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -1817,7 +1817,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -1838,7 +1837,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Self Learner; explicit CT03 Lesson access rechecked after locking Course root. True-only idempotent completion preserves skip; recompute joined status atomically; no mastery update. No automatic retry. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Self Learner; explicit CT03 Lesson access rechecked after locking Course root. True-only idempotent completion preserves skip; recompute joined status atomically; no mastery update. No automatic retry. Implemented under CO08 (#174) in the Course module; its runtime grants are CT17-P6-PRIVILEGES-2026-11-17-r4 within the ADR012 §19.2 ceiling (docs/deployment.md); independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -1846,7 +1845,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Completion recorded after commit; returns the recalculated progress.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -1863,6 +1862,9 @@
           "400": {
             "$ref": "#/components/responses/Batch2Invalid"
           },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
+          },
           "500": {
             "$ref": "#/components/responses/Batch2Failure"
           },
@@ -1876,7 +1878,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -1916,7 +1917,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current self Learner ACTIVE/published Courses only. Existing title COLLATE C/UUID order and page limits; coherent list/count/progress; no per-Course frontend fan-out. Existing /api/me/courses unchanged. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current self Learner ACTIVE/published Courses only. Existing title COLLATE C/UUID order and page limits; coherent list/count/progress; no per-Course frontend fan-out. Existing /api/me/courses unchanged. Implemented under CO08 (#174) in the Course module; its runtime grants are CT17-P6-PRIVILEGES-2026-11-17-r4 within the ADR012 §19.2 ceiling (docs/deployment.md); independent review, CI and protected integration remain gated. ADR006 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1924,7 +1925,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Page of progress summaries for current ACTIVE memberships of published Courses.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -1954,7 +1955,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -1985,7 +1985,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Self ACTIVE/COMPLETED Learner, published Course. Pointer is null unless currently published same-Course Lesson; canonical next is separate. Read-only REPEATABLE READ, never clears history. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Self ACTIVE/COMPLETED Learner, published Course. Pointer is null unless currently published same-Course Lesson; canonical next is separate. Read-only REPEATABLE READ, never clears history. Implemented under CO08 (#174) in the Course module; its runtime grants are CT17-P6-PRIVILEGES-2026-11-17-r4 within the ADR012 §19.2 ceiling (docs/deployment.md); independent review, CI and protected integration remain gated. ADR006 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1993,7 +1993,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Stored pointer when still a published same-Course Lesson, otherwise null, plus the canonical next Lesson.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2023,7 +2023,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2042,7 +2041,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Explicit admitted self Learner visit only, after content loaded; root-first READ COMMITTED unit updates pointer/server visit time atomically. Same-Course writes serialize. Repeat refreshes visit time; no automatic retries. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Explicit admitted self Learner visit only, after content loaded; root-first READ COMMITTED unit updates pointer/server visit time atomically. Same-Course writes serialize. Repeat refreshes visit time; no automatic retries. Implemented under CO08 (#174) in the Course module; its runtime grants are CT17-P6-PRIVILEGES-2026-11-17-r4 within the ADR012 §19.2 ceiling (docs/deployment.md); independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2050,7 +2049,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Visit recorded after commit; returns the same representation as GET.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2067,6 +2066,9 @@
           "400": {
             "$ref": "#/components/responses/Batch2Invalid"
           },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
+          },
           "500": {
             "$ref": "#/components/responses/Batch2Failure"
           },
@@ -2080,7 +2082,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2111,7 +2112,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Self Learner; latest currently accessible recorded visit among ACTIVE/published Courses, descending last_visited_at then Course UUID ascending. Null historical times excluded; no valid candidate returns position:null. Needs separately authorized NEW migration and grants; no adaptive ranking. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Self Learner; latest currently accessible recorded visit among ACTIVE/published Courses, descending last_visited_at then Course UUID ascending. Null historical times excluded; no valid candidate returns position:null. Needs separately authorized NEW migration and grants; no adaptive ranking. Implemented under CO08 (#174) in the Course module; its runtime grants are CT17-P6-PRIVILEGES-2026-11-17-r4 within the ADR012 §19.2 ceiling (docs/deployment.md); independent review, CI and protected integration remain gated. ADR006 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -2119,7 +2120,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Latest valid recorded visit, or position null.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2149,7 +2150,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md"
       }
     },
