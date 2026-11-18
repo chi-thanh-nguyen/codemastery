@@ -64,7 +64,7 @@ verification is separate work.
 | `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). AU07 additions (PR #239): digest-only issuance and single-use confirmation; identical 202s for unknown/locked/repeated requests, with only eligible accounts issued; delivery after commit without a held User lock; two concurrent confirmations yield exactly one success; rollback when consumption fails; re-check after the User-lock wait; generic 400 for expired, future, locked and reused capabilities; unchanged CT01 bearer validity; a nested context with unconfigured delivery, where health, registration and login work and nothing is issued; and the production 415 for both recovery operations plus the deny-by-default 403 in the full application context (test-only controllers are `@TestComponent`s and are not component-scanned). `AuthServiceTest` adds real SMTP exchanges with an isolated loopback STARTTLS server: delivery only after STARTTLS and successful AUTH, and no message for a server that does not offer AUTH, rejected credentials, missing STARTTLS, or an untrusted or wrongly named certificate. Uses an ephemeral JWT secret. |
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
-| `EnrollmentIntegrationTest` | FE07, PR #101 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods |
+| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)) |
 | `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
 | `SharedRestInfrastructureIntegrationTest` | SH01, PR #78 | Spring MVC ProblemDetail, validation and paging with test-only routes; it does not start PostgreSQL or the security chain |
 
@@ -3825,6 +3825,46 @@ repository signature, so it does not compile against the old code.
 All F01–F05 regressions (PostgreSQL, Vitest, Playwright) pass again on this tree.
 `firefox-desktop` was not run (host limitation).
 
+## CO16 Course-owned reporting handoff verification — 17 November 2026
+
+CO16 ([#179](https://github.com/chi-thanh-nguyen/codemastery/issues/179),
+[PR #249](https://github.com/chi-thanh-nguyen/codemastery/pull/249)) implements the
+Course part of `CT13-METRICS-2026-11-15-r1` and `CT13-READS-2026-11-15-r1`
+([ADR012 §§13.1–13.2](decisions/012-batch-07-contract-approvals.md#13-ct13-reporting)):
+both `EnrollmentService.readEnrollmentMetrics` methods and the `CourseEnrollmentMetrics`
+record. They are actorless, read-only and `Propagation.MANDATORY`, so they run only
+inside the caller's transaction; the approved caller, Admin's `PlatformMetricsService`
+(IN12), opens one REPEATABLE READ transaction after admitting an Administrator. IN12,
+the Assessment and Adaptive reads and `GET /api/admin/metrics/courses…` are not part of
+this change, so no REST operation, OpenAPI shape or runtime caller is added.
+
+| Figure (ADR012 §13.1) | Implementation |
+| --- | --- |
+| `activeEnrollments`, `completedEnrollments`, `leftEnrollments` | Counts of stored statuses per Course, hidden and published |
+| `joinedLearnerIds` | Learners with `active` or `completed` status, one set-based query per page; internal only |
+| `completedLearners` | Joined learners whose CT22.progress `isComplete` holds: R = the Course's currently published Lessons, R nonempty and every R member has a `completed = true` row of that Enrollment; hidden Lessons never count, a zero-Lesson Course completes nobody, left learners are excluded |
+| Ordering and paging | Every Course by `title COLLATE "C"`, then `id`; CT18 page/size bounds; one aggregate statement per page plus one learner-ID statement |
+
+B7-O11's Course part is covered by `EnrollmentIntegrationTest`
+(`enrollmentMetricsFollowTheExactCt22CompletionRuleForEveryPopulation`,
+`enrollmentMetricsPagesEveryCourseInTitleCollateCThenIdOrderWithExactTotals`,
+`enrollmentMetricsRequireTheCallerTransaction`) on real PostgreSQL, including a
+self-audit regression (17 November 2026) proving that a progress row for another
+Course's published Lesson on the same page never completes a Course (it fails if the
+`r.course_id = m.course_id` guard is removed), and by the
+`EnrollmentServiceTest` mapping, validation, snapshot-consistency and transaction-
+attribute cases. Executed locally on the PR #249 working tree after merging `main`
+`78e783d`: `cd backend && ./mvnw -Dtest=EnrollmentServiceTest -Dit.test=EnrollmentIntegrationTest verify`
+ran 19 unit and 61 PostgreSQL integration tests with 0 failures or errors; the full
+`./mvnw verify` result is recorded in the pull request. These are local developer runs,
+not independent QA or CI evidence.
+
+Runtime grants: the reads use SELECT on `courses`, `chapters`, `lessons`,
+`enrollments` and `lesson_progress`. The first four are already in the effective
+matrix; `lesson_progress` SELECT is added by CO08's `CT17-P6-PRIVILEGES-2026-11-17-r4`
+(PR #248). No runtime caller exists until IN12, which must not be deployed before that
+grant is effective.
+
 ## Comprehensive audit remediation (A01) and main integration — 17 November 2026
 
 A comprehensive independent Codex audit of `b18d3cf` found F01–F05 and N01 fixed, and N02
@@ -3924,6 +3964,60 @@ ran 18 unit and 59 PostgreSQL integration tests with 0 failures or errors; the f
 `./mvnw verify` result is recorded in the pull request. These are local developer
 runs, not independent QA or CI evidence.
 
+## IN06.repo repository regression coverage — 18 November 2026
+
+IN06.repo ([#181](https://github.com/chi-thanh-nguyen/codemastery/issues/181),
+[PR #250](https://github.com/chi-thanh-nguyen/codemastery/pull/250)) adds the Interaction
+discussion-post and content-report repositories and `InteractionMapper`. It adds no
+operation, service or schema change. An independent review found that `save()` of an
+existing row went through a JPA merge. The resulting full-row `UPDATE` wrote columns
+that the ADR012 §19.2 ceiling (`CT17-P6-PLAN-2026-11-15-r2`) never grants. The adapters
+now insert new rows, update existing rows with one targeted statement
+(`discussion_posts.is_hidden`, or `content_reports.status` and `resolved_at`), and reject
+any change to another field before SQL runs. The rejection surfaces as Spring's
+`InvalidDataAccessApiUsageException` with an `IllegalArgumentException` cause. Lifecycle
+rules (CT30/CT32) stay with the future services.
+
+Placement: `CT14-IN06-REPO-PLACEMENT-2026-11-18-r1`
+([repository structure](repository-structure.md#in06repo-test-placement--18-november-2026)).
+
+| Obligation | Covered by |
+| --- | --- |
+| Mapper round trips; exact `open`/`resolved`/`dismissed` codes; other spellings rejected | `InteractionMapperTest` (17 cases) |
+| Insert and read-back from PostgreSQL; permitted updates; same-transaction reads not stale | `InteractionRepositoryIntegrationTest`: `insertsPostAndReport…`, `existingPostUpdatesOnlyTheHiddenFlag…`, `existingReportUpdatesOnlyStatusAndResolutionTime`, `unchangedExistingRows…` |
+| Immutable fields cannot be overwritten | `changingAnyImmutablePostField…`, `changingAnyImmutableReportField…` (every immutable field; row unchanged) |
+| Hidden posts filtered before paging and counting; caller-only ordering, stable across ties | `hiddenPostsAreFilteredBeforePagingAndCounting`, `orderingComesOnlyFromTheCallerAndIsStableAcrossTies` |
+| V006 checks | `v006PostChecks…`, `v006ReportChecks…` (text, self-parent, parent FK, exclusive target, resolution, times, status code) |
+| SQL under the §19.2 ceiling | `repositorySqlRunsUnderTheSection192PrivilegeCeiling`; negative controls `ceilingRejectsTheFullRowPostUpdate…`, `ceilingRejectsTheFullRowReportUpdate…` (the old merge path fails with `42501`) and `ceilingRejectsUpdatesOfImmutable…` |
+
+The privilege tests create a `NOLOGIN` role inside the test transaction. The role holds
+exactly `SELECT, INSERT, UPDATE (is_hidden)` on `discussion_posts` and
+`SELECT, INSERT, UPDATE (status, resolved_at)` on `content_reports`, and the tests run
+`SET LOCAL ROLE`. The rollback removes the role and its grants. This proves the SQL is
+compatible with the ceiling. It is not the CT17-P6 matrix, the deployed runtime role or
+B7-O18. No runtime grant, matrix revision, script or CI change is made. The dated matrix
+revision for these tables remains a completion gate for the IN06 PR that first exercises
+them through the real backend.
+
+Executed locally on 18 November 2026, macOS host with Docker, project PostgreSQL image:
+
+- `cd backend && ./mvnw -Dtest=InteractionMapperTest -Dit.test=InteractionRepositoryIntegrationTest verify`
+  ran 17 unit and 14 integration tests, with 0 failures or errors.
+- Mutation check: with only the two adapters reverted to the original merge-based `save()`,
+  the integration suite failed (4 failures and 1 `42501` error).
+- The first full `./mvnw verify` on the branch showed that a new cached Spring context
+  exhausted the shared container's connections (`SampleDataSeedIntegrationTest`: "too many
+  clients already"). The suite now closes its context after the class (`@DirtiesContext`).
+- The rerun of full `./mvnw verify` on the branch (merged with `main` `65d14ca`) ran 654 unit
+  and 224 integration tests: BUILD SUCCESS.
+- A simulated combined tree (`main` + PR #248 `f50a156` + PR #249 `4204045` + this branch)
+  merged without conflicts and passed `./mvnw verify` (713 unit and 240 integration tests),
+  `test-deploy-privilege-matrix-contract.sh` and
+  `test-postgres-privilege-matrix-containment.sh` (r4 and V009).
+
+These are author-side developer runs, not independent QA or CI evidence. The real-backend
+runtime privilege job runs in CI. QA06 and the §15 oracles remain NOT_RUN.
+
 ## PR #246 CI failures on `aa6995d` — 17 November 2026
 
 `aa6995d` has the same tree as `be8bef0`, on which all CI checks had passed; only its commit metadata changed. On `aa6995d`, two jobs failed. Neither failure came from the hybrid-authentication change.
@@ -3934,3 +4028,70 @@ runs, not independent QA or CI evidence.
 | `CI` / "VM runtime privileges with the real backend", step "Build the backend image from this revision" | Transient. `./mvnw package -DskipTests` inside `docker build -q` exited 1 after about 13 s; the quiet build hides Maven's output. The same tree built without cache locally (BUILD SUCCESS), and the job's rerun on `aa6995d` (attempt 2) passed. | None: no workflow or build change. |
 
 Executed (author evidence): the fixed test passed 5 times in isolation, and all 152 tests passed in `cd e2e && node --test fixtures/*.test.mjs`. The backend image built with `docker build --no-cache` locally. The `aa6995d` VM job rerun passed.
+
+## CO08 progress, completion and resume verification — 17 November 2026
+
+Implementation of CO08 ([#174](https://github.com/chi-thanh-nguyen/codemastery/issues/174),
+[PR #248](https://github.com/chi-thanh-nguyen/codemastery/pull/248)) against
+`CT22-PROGRESS-2026-11-09-r1`, `CT22-RESUME-2026-11-09-r1` and
+`CT22-RESUME-SCHEMA-2026-11-09-r1` ([ADR006 §§3, 4, 7.2](decisions/006-batch-02-contract-approvals.md#3-ct22progress)),
+with the runtime grants of `CT17-P6-PRIVILEGES-2026-11-17-r4`
+([deployment record](deployment.md#ct17-p6-privileges-2026-11-17-r4--co08-progress-and-resume-within-the-adr012-192-ceiling-17-november-2026)).
+CT22.atomic (CO15) and the authoring-side completion reconciliation after a change to
+the required Lesson set (CO06) are not part of this change.
+
+| Oracle (ADR006 §8) | Covered by |
+| --- | --- |
+| B2-O01 calculation, zero-Lesson and complete Courses | `LessonProgressServiceTest`; `EnrollmentIntegrationTest.progressCompletionAndReconciliationFollowTheExactCt22Rules`, `zeroLessonCourseReportsZeroAndCannotBeCompletedVacuously` |
+| B2-O02 idempotent true-only completion, skip preserved, invalid bodies 400 without writes | `LessonProgressServiceTest` (strict body parsers, controller precedence); `EnrollmentIntegrationTest.completionAdmissionPrecedenceConcealmentAndNoDeniedWrites`, `concurrentCompletionsOfOneLessonConvergeOnOneRow` |
+| B2-O03 ACTIVE/COMPLETED reconciliation on completion; leave/rejoin unchanged; My Courses (CO07) shows the stored transition | `EnrollmentIntegrationTest.progressCompletionAndReconciliationFollowTheExactCt22Rules`, `storedMembershipAndComputedCompletionStayDistinctAcrossLeaveAndRejoin` |
+| B2-O04 Course-root serialization, rollback, independent Courses | `EnrollmentIntegrationTest.completionSerializesOnTheCourseRootAndRereadsCommittedState` (barrier on `pg_stat_activity` lock waits, leave and publication interleavings), `failureAfterTheWriteRollsBackProgressStatusPointerAndTimeTogether` |
+| B2-O05 per-Course resume; same-Course visits follow the Course-root lock | `EnrollmentIntegrationTest.perCourseResumeRecordsExplicitVisitsOnlyAndRetainsHistory` (including 415/400 bodies), `visitSerializesOnTheCourseRootAndRechecksTheTargetAfterTheWait` |
+| B2-O06 ACTIVE/published paginated summary; My Courses unchanged | `EnrollmentIntegrationTest.myCourseProgressListsOnlySelfActivePublishedCoursesInTitleOrderWithExactCounts` |
+| B2-O11 account-level resume ranking, legacy NULL, tie-break, fallback | `EnrollmentIntegrationTest.accountResumeSelectsTheLatestValidRecordedVisitWithDeterministicTieBreak` |
+| B7-O18 (CT22.resume part) runtime role writes pointer and time together | `test-runtime-real-backend-privileges.sh` CO08 section; `test-postgres-privilege-matrix-containment.sh` r4 probes |
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25, Docker 29.8.1) on the PR #248
+working tree after merging `main` `78e783d`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -Dtest='LessonProgressServiceTest,EnrollmentServiceTest' test` | 52 and 12 tests, 0 failures or errors |
+| `cd backend && ./mvnw -Dit.test=EnrollmentIntegrationTest verify` (PostgreSQL Testcontainer) | 70 tests, 0 failures or errors; 71 after the self-audit additions below |
+| `cd backend && ./mvnw verify` | BUILD SUCCESS; Surefire 683, Failsafe 221, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history intact, r2, r3 and r4 rows match the record |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | `MATRIX_TESTS_PASS` and both containment passes on the real V001–V009 schema, including the r4 grants and denials |
+| `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS`; Flyway 9/9; CO08 progress, visit, account resume, completion and idempotent repeat under the runtime role; no `42501` in the backend log |
+
+These are local developer runs, not independent QA, CI or deployment evidence.
+Frontend progress/resume types and screens remain FE08/FE33-owned and unchanged.
+
+Self-audit additions (17 November 2026, same day): a test proving that a visit waiting
+on a held Course root rechecks the target after the wait (it fails with 200 instead of
+404 if the access check is moved before the lock), stricter 415/400 representation
+checks for both JSON writes, and My Courses assertions after completion and
+reconciliation. No production code changed; the updated results are recorded in
+PR #248.
+
+Independent-review remediation (P2, 17–18 November 2026): an existing V008 database
+could not be upgraded, because `provision_db_roles` runs before the backend applies V009
+and the first r4 revision granted `UPDATE (last_visited_at)` and checked the V009 column
+list before that column existed. The fix and its upgrade path are described in the
+[r4 record](deployment.md#ct17-p6-privileges-2026-11-17-r4--co08-progress-and-resume-within-the-adr012-192-ceiling-17-november-2026).
+Run locally on the remediated working tree:
+
+| Command | Result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | Run against the previous `deploy.sh` with the new upgrade section: fails with `column "last_visited_at" of relation "enrollments" does not exist`. With the fix: `UPGRADE_TESTS_PASS`. The test covers a fresh cluster, V001–V008 with the r3 grants, pre-migration provisioning and its idempotency, eight fail-closed drift cases, V009, r4 hardening, the complete verification, and an already-migrated V009 database. `MATRIX_TESTS_PASS` and both containment passes still hold |
+| `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS`. Real Flyway stops at V008 (`spring.flyway.target=8`) and the r3 grants are applied. Pre-migration provisioning is then exact, the backend applies V009, and hardening gives the exact r4 matrix. A visit and a completion succeed under the runtime role with no `42501` |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`. The migration-added list is pinned to `enrollments.last_visited_at` (V009), must name a reviewed column, and is never deferred in complete mode; malformed lists are rejected |
+
+Review-findings verification (18 November 2026). The disposition of each finding is in
+PR #248 and PR #247:
+
+| Finding | Evidence executed |
+| --- | --- |
+| Trailing JSON after the body object | Jackson 3.1.8 enables `FAIL_ON_TRAILING_TOKENS` by default, and the strict mapper reports it enabled. New `LessonProgressServiceTest` cases and `EnrollmentIntegrationTest` bodies send JSON followed by garbage or by a second value. Both writes return a `no-store` 400 ProblemDetail, with no progress row and an unchanged resume pointer |
+| `mastery_skipped` through INSERT | The containment test records the accepted INSERT of `completed = true, mastery_skipped = true` (ADR012 §19.2 ceiling). The V002 check rejects a skip without completion (`23514`), and UPDATE of the flag stays denied (`42501`). The r4 record wording is corrected |
+| Column already present | The runtime test runs the real backend against three states: a V008 database with the column added by hand, no Flyway history, and a failed V009 row. Provisioning grants the exact r4 matrix, and Flyway refuses to start each time with the history unchanged. The V008 → V009 upgrade then passes as before |
+

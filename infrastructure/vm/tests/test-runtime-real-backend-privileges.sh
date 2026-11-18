@@ -34,15 +34,19 @@ EOF
 chmod 600 "$work/env/.env"
 # Not --internal: the backend API is published to the runner's loopback only.
 docker network create "$network" >/dev/null
-docker run --detach --name "$container" --network "$network" --network-alias postgres \
-  --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=256m \
-  -e POSTGRES_USER=cm_bootstrap -e POSTGRES_PASSWORD="$bootstrap_password" \
-  -e POSTGRES_DB=codemastery postgres:17.11-bookworm >/dev/null
-for attempt in {1..60}; do
-  if docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null 2>&1; then break; fi
-  sleep 1
-done
-docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null
+start_postgres() {  # a fresh, empty cluster under the same name and network alias
+  docker rm -f "$container" >/dev/null 2>&1 || true
+  docker run --detach --name "$container" --network "$network" --network-alias postgres \
+    --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=256m \
+    -e POSTGRES_USER=cm_bootstrap -e POSTGRES_PASSWORD="$bootstrap_password" \
+    -e POSTGRES_DB=codemastery postgres:17.11-bookworm >/dev/null
+  for attempt in {1..60}; do
+    if docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null 2>&1; then break; fi
+    sleep 1
+  done
+  docker exec "$container" pg_isready -U cm_bootstrap -d codemastery >/dev/null
+}
+start_postgres
 cat > "$work/exercise-runtime.sh" <<'BASH'
 set -Eeuo pipefail
 source "$1"
@@ -96,7 +100,7 @@ start_backend() {  # env-file
   [[ "$started" == yes ]] || backend_started || backend_failed "no 'Started CodeMasteryApplication' within 180 s"
 }
 start_backend "$work/backend.env"
-check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "8/8 $(env_get SPRING_FLYWAY_USER)"
+check "backend started (Flyway + Hibernate validate) before any runtime grant" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) || ' ' || string_agg(DISTINCT installed_by, ',') FROM public.flyway_schema_history WHERE version IS NOT NULL;")" "9/9 $(env_get SPRING_FLYWAY_USER)"
 harden_after_migration
 verify_role_separation >/dev/null
 echo "  verify_role_separation: PASS (exact matrix on the real Flyway schema)"
@@ -205,6 +209,27 @@ wait
 check "concurrent mutations by two learners both succeed" "$(cat "$work/c1")/$(cat "$work/b1")" "200/200"
 check "membership rows after the concurrent operations" "$(psql_admin <<<"SELECT string_agg(u.email || '=' || e.status, ',' ORDER BY u.email) FROM public.enrollments e JOIN public.users u ON u.id=e.user_id;")" "learner.a@example.test=active,learner.b@example.test=left,learner.c@example.test=active"
 
+echo "== CO08 progress and resume (lesson_progress SELECT, INSERT, UPDATE(completed); enrollments UPDATE(status, resume_lesson_id, last_visited_at))"
+lesson=40000000-0000-0000-0000-0000000000e1
+call GET "/api/courses/$course/progress" "$token_a"
+check "progress read (published Lessons only, canonical order)" "$STATUS/$(field completedLessons)/$(field totalLessons)/$(field progressPercentage)/$(field nextLessonId)" "200/0/1/0/$lesson"
+call PUT "/api/courses/$course/resume" "$token_a" "{\"lessonId\":\"$lesson\"}"
+check "visit (Course root and Enrollment locks, pointer + server time)" "$STATUS/$(field resumeLessonId)" "200/$lesson"
+check "visit stored the pointer and the server time together" "$(psql_admin <<<"SELECT (e.resume_lesson_id='$lesson' AND e.last_visited_at IS NOT NULL)::text FROM public.enrollments e JOIN public.users u ON u.id=e.user_id WHERE u.email='learner.a@example.test';")" "true"
+call GET "/api/me/resume" "$token_a"
+check "account-level resume position" "$STATUS/$(field position.courseId)/$(field position.lessonId)" "200/$course/$lesson"
+call PUT "/api/courses/$course/lessons/$lesson/completion" "$token_a" '{"completed":true}'
+check "manual completion (upsert) completes the Course (UPDATE status)" "$STATUS/$(field progressPercentage)/$(field isComplete)/$(field membershipStatus)" "200/100/True/completed"
+call PUT "/api/courses/$course/lessons/$lesson/completion" "$token_a" '{"completed":true}'
+check "repeated completion is idempotent (ON CONFLICT DO UPDATE)" "$STATUS/$(field completedLessons)" "200/1"
+check "one progress row for the learner and Lesson" "$(psql_admin <<<"SELECT count(*) FROM public.lesson_progress;")" 1
+call GET "/api/me/course-progress" "$token_a"
+check "ACTIVE-only progress summary excludes the completed Course" "$STATUS/$(field totalElements)" "200/0"
+call GET "/api/me/courses?status=completed" "$token_a"
+check "My Courses lists the Course as completed" "$STATUS/$(field totalElements)/$(field content.0.status)" "200/1/completed"
+call GET "/api/courses/$course/resume" "$token_a"
+check "per-Course resume keeps the pointer; no next Lesson remains" "$STATUS/$(field resumeLessonId)/$(field nextLessonId)" "200/$lesson/None"
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
@@ -269,8 +294,152 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail and CT22 membership under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership and CO08 progress/resume under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \
   bash "$work/exercise-runtime.sh" "$script" "$work/env/.env" "$work/http"
+
+# CT17-P6 r4 upgrade with the real backend and real Flyway on a fresh cluster: Flyway
+# stops at V008 (spring.flyway.target), the previous release's r3 grants are applied,
+# then the deploy path's pre-migration provisioning, Flyway V009 and r4 hardening run.
+cat > "$work/exercise-upgrade.sh" <<'BASH'
+set -Eeuo pipefail
+source "$1"
+ENV_FILE="$2"; work="$3"
+pgcompose() {
+  [[ "$1" == exec ]] || return 97; shift
+  [[ "$1" == -T ]] && shift
+  [[ "$1" == postgres ]] && shift
+  docker exec -i "$PGTEST_CONTAINER" "$@"
+}
+COMPOSE=(pgcompose)
+backend="${PGTEST_CONTAINER}-backend"
+port="${BACKEND_PORT:-18080}"
+api="http://127.0.0.1:${port}"
+trap 'docker rm -f "$backend" >/dev/null 2>&1 || true' EXIT
+check() { [[ "$2" == "$3" ]] || { echo "CHECK FAILED: $1 (expected $3, got $2)" >&2; docker logs "$backend" 2>&1 | tail -20 >&2; exit 1; }; printf '  ok: %-64s %s\n' "$1" "$2"; }
+call() {  # method path token body -> sets STATUS and BODY
+  local args=(-s -o "$work/body" -w '%{http_code}' -X "$1" "$api$2" -H 'Accept: application/json')
+  [[ -z "$3" ]] || args+=(-H "Authorization: Bearer $3")
+  [[ -z "${4:-}" ]] || args+=(-H 'Content-Type: application/json' --data-binary "$4")
+  STATUS="$(curl "${args[@]}")"; BODY="$(cat "$work/body")"
+}
+field() { python3 -c 'import json,sys; d=json.loads(sys.argv[1]); [d:=d[int(k)] if isinstance(d,list) else d[k] for k in sys.argv[2].split(".")]; print(d)' "$BODY" "$1"; }
+history() { psql_admin <<<"SELECT count(*) FILTER (WHERE success) || '/' || count(*) FROM public.flyway_schema_history WHERE version IS NOT NULL;"; }
+has_column() { psql_admin <<<"SELECT count(*) FROM pg_attribute WHERE attrelid='public.enrollments'::regclass AND attname='last_visited_at' AND NOT attisdropped;"; }
+
+echo "== upgrade: provision an empty database, then real Flyway up to V008 only"
+provision_db_roles >/dev/null
+umask 077
+{ printf 'DB_HOST=postgres\nDB_PORT=5432\nDB_NAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\n' "$(env_get DB_NAME)" "$(env_get DB_USER)" "$(env_get DB_PASSWORD)"
+  printf 'SPRING_FLYWAY_URL=%s\nSPRING_FLYWAY_USER=%s\nSPRING_FLYWAY_PASSWORD=%s\n' "$(env_get SPRING_FLYWAY_URL)" "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)"
+  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\n' "$(openssl rand -hex 32)"
+} > "$work/upgrade.env"
+{ cat "$work/upgrade.env"; printf 'SPRING_FLYWAY_TARGET=8\n'; } > "$work/upgrade-v008.env"
+# This build's entities expect V009, so schema validation stops it once Flyway has
+# committed V001-V008; only the migrated schema is used.
+docker run -d --name "$backend" --network "$PGTEST_NETWORK" --env-file "$work/upgrade-v008.env" "$BACKEND_IMAGE" >/dev/null
+for _ in $(seq 1 180); do
+  [[ "$(history 2>/dev/null)" == "8/8" ]] && break
+  sleep 1
+done
+docker rm -f "$backend" >/dev/null
+check "real Flyway stopped at V008 (8 successful versioned migrations)" "$(history)" "8/8"
+check "V008 schema has no enrollments.last_visited_at" "$(has_column)" 0
+# The previous release's r3 grants: this release's predecessor grants minus the r4 rows.
+application_grants_sql present | psql_admin >/dev/null
+psql_admin >/dev/null <<SQL
+REVOKE UPDATE (resume_lesson_id) ON public.enrollments FROM "$(env_get DB_USER)";
+REVOKE ALL ON public.lesson_progress FROM "$(env_get DB_USER)";
+SQL
+pre_fix="$( { printf 'BEGIN;\n'; application_grants_sql complete; printf 'ROLLBACK;\n'; } | psql_admin 2>&1 || true)"
+check "whole r4 matrix before V009 fails as the pre-fix provisioning did" \
+  "$([[ "$pre_fix" == *'column "last_visited_at" of relation "enrollments" does not exist'* ]] && echo reproduced)" reproduced
+
+echo "== a column-present schema is provisioned as current, then real Flyway refuses an untracked state"
+# Provisioning checks objects and privileges; migration state stays Flyway's and the deploy
+# gate's responsibility (flyway_schema_history must be all successful before hardening).
+mig_sql() { psql_as "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)" >/dev/null; }
+expect_backend_refuses() {  # label: the real backend must stop before 'Started', leaving history unchanged
+  local label="$1" before after logs started=no
+  before="$(psql_admin <<<"SELECT coalesce(string_agg(version || ':' || success, ',' ORDER BY installed_rank), 'none') FROM public.flyway_schema_history;" 2>/dev/null || echo no-history)"
+  docker run -d --name "$backend" --network "$PGTEST_NETWORK" --env-file "$work/upgrade.env" "$BACKEND_IMAGE" >/dev/null
+  for _ in $(seq 1 180); do
+    [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || break
+    logs="$(docker logs "$backend" 2>&1)"; [[ "$logs" != *'Started CodeMasteryApplication'* ]] || { started=yes; break; }
+    sleep 1
+  done
+  logs="$(docker logs "$backend" 2>&1)"
+  docker rm -f "$backend" >/dev/null
+  after="$(psql_admin <<<"SELECT coalesce(string_agg(version || ':' || success, ',' ORDER BY installed_rank), 'none') FROM public.flyway_schema_history;" 2>/dev/null || echo no-history)"
+  check "$label: backend refused to start" "$started/$([[ "$logs" == *FlywayValidateException* || "$logs" == *'Migration V009'*failed* || "$logs" == *'non-empty schema'* || "$logs" == *'already exists'* ]] && echo flyway)" "no/flyway"
+  check "$label: Flyway history unchanged" "$after" "$before"
+}
+mig_sql <<<"ALTER TABLE public.enrollments ADD COLUMN last_visited_at timestamptz NULL;"
+provision_db_roles >/dev/null
+check "manually added column on V008: provisioning grants the r4 matrix (Copilot's observation)" "$(verify_runtime_privileges present >/dev/null && echo exact)" exact
+expect_backend_refuses "manually added column on V008"
+# Without any Flyway history (dumped, dropped and later restored by the administrator; a
+# renamed or moved table would itself be rejected by provisioning or the role policy).
+history_dump="$(docker exec "$PGTEST_CONTAINER" pg_dump -U "$(env_get POSTGRES_USER)" -d "$(env_get POSTGRES_DB)" --table=public.flyway_schema_history)"
+psql_admin >/dev/null <<<"DROP TABLE public.flyway_schema_history;"
+provision_db_roles >/dev/null
+expect_backend_refuses "column present without Flyway history"
+printf '%s\n' "$history_dump" | psql_admin >/dev/null
+check "Flyway history restored" "$(history)" "8/8"
+psql_admin >/dev/null <<<"INSERT INTO public.flyway_schema_history VALUES (9,'009','add enrollment last visited at','SQL','V009__add_enrollment_last_visited_at.sql',0,'$(env_get SPRING_FLYWAY_USER)',now(),1,false);"
+provision_db_roles >/dev/null
+expect_backend_refuses "column present with a failed V009 history row"
+psql_admin >/dev/null <<<"DELETE FROM public.flyway_schema_history WHERE installed_rank=9;"
+mig_sql <<<"ALTER TABLE public.enrollments DROP COLUMN last_visited_at;"
+application_grants_sql present | psql_admin >/dev/null
+psql_admin >/dev/null <<SQL
+REVOKE UPDATE (resume_lesson_id) ON public.enrollments FROM "$(env_get DB_USER)";
+REVOKE ALL ON public.lesson_progress FROM "$(env_get DB_USER)";
+SQL
+check "exact V008 predecessor with r3 grants restored" "$(history)/$(has_column)" "8/8/0"
+
+echo "== deploy path: pre-migration provisioning, real Flyway V009, r4 hardening"
+provision_db_roles >/dev/null
+check "pre-migration verification on the V008 predecessor" "$(verify_runtime_privileges present >/dev/null && echo exact)" exact
+docker run -d --name "$backend" --network "$PGTEST_NETWORK" -p "127.0.0.1:${port}:8080" --env-file "$work/upgrade.env" "$BACKEND_IMAGE" >/dev/null
+started=no
+for _ in $(seq 1 180); do
+  logs="$(docker logs "$backend" 2>&1)" && [[ "$logs" == *'Started CodeMasteryApplication'* ]] && { started=yes; break; }
+  [[ "$(docker inspect -f '{{.State.Running}}' "$backend")" == true ]] || break
+  sleep 1
+done
+check "backend applied V009 and started" "$started/$(history)/$(has_column)" "yes/9/9/1"
+harden_after_migration
+verify_role_separation >/dev/null
+check "complete r4 verification after the upgrade" "$(verify_runtime_privileges complete >/dev/null && echo exact)" exact
+
+echo "== CO08 visit on the upgraded database under the runtime role"
+psql_admin >/dev/null <<'SQL'
+INSERT INTO public.users VALUES ('10000000-0000-0000-0000-0000000000a1','instructor@example.test','not-a-login-hash','Test Instructor','instructor','active');
+INSERT INTO public.courses VALUES ('20000000-0000-0000-0000-0000000000c1','10000000-0000-0000-0000-0000000000a1','Algorithms','Published course',NULL,'published',false,NULL);
+INSERT INTO public.chapters VALUES ('30000000-0000-0000-0000-0000000000d1','20000000-0000-0000-0000-0000000000c1','Basics',1);
+INSERT INTO public.lessons VALUES ('40000000-0000-0000-0000-0000000000e1','30000000-0000-0000-0000-0000000000d1','Published lesson','Body',1,'published');
+SQL
+course=20000000-0000-0000-0000-0000000000c1; lesson=40000000-0000-0000-0000-0000000000e1
+password='Correct-Horse-Battery-2026'
+call POST /api/auth/register "" "{\"email\":\"upgrade.learner@example.test\",\"password\":\"$password\",\"displayName\":\"Upgrade learner\"}"
+check "register" "$STATUS" 201
+call POST /api/auth/login "" "{\"email\":\"upgrade.learner@example.test\",\"password\":\"$password\"}"
+check "login" "$STATUS" 200
+token="$(field accessToken)"
+call PUT "/api/courses/$course/membership" "$token"; check "join" "$STATUS/$(field status)" "200/active"
+call PUT "/api/courses/$course/resume" "$token" "{\"lessonId\":\"$lesson\"}"
+check "visit writes pointer and server time" "$STATUS/$(field resumeLessonId)" "200/$lesson"
+check "stored pointer and visit time" "$(psql_admin <<<"SELECT (resume_lesson_id='$lesson' AND last_visited_at IS NOT NULL)::text FROM public.enrollments;")" "true"
+call PUT "/api/courses/$course/lessons/$lesson/completion" "$token" '{"completed":true}'
+check "completion on the upgraded database" "$STATUS/$(field membershipStatus)" "200/completed"
+check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
+echo "RUNTIME_UPGRADE_TESTS_PASS: real Flyway V008 with r3 grants -> pre-migration provisioning -> V009 -> exact r4 and CO08 writes"
+BASH
+docker rm -f "${container}-backend" >/dev/null 2>&1 || true
+start_postgres
+PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
+  BACKEND_IMAGE=codemastery-backend:privilege-test \
+  bash "$work/exercise-upgrade.sh" "$script" "$work/env/.env" "$work/http"

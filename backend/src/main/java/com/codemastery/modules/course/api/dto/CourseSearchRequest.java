@@ -20,6 +20,13 @@ public record CourseSearchRequest(int page, int size, String query, String filte
                 || !(membership ? Set.of("joined", "active", "completed", "left", "all") : Set.of("any", "none", "described")).contains(filter)) throw invalid();
         return new CourseSearchRequest(page, size, query, filter);
     }
+    /** Existing page/size defaults and bounds (0/20, 1..100) with no other query keys. */
+    public static CourseSearchRequest parsePage(MultiValueMap<String, String> params) {
+        if (!Set.of("page", "size").containsAll(params.keySet()) || params.values().stream().anyMatch(values -> values.size() != 1)) throw invalid();
+        int page = number(params.getFirst("page"), 0), size = number(params.getFirst("size"), 20);
+        if (page < 0 || size < 1 || size > 100) throw invalid();
+        return new CourseSearchRequest(page, size, "", null);
+    }
     public static void noQuery(MultiValueMap<String, String> params) { if (!params.isEmpty()) throw invalid(); }
 
     public static UUID parseCourseId(String value) {
