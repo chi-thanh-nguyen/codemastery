@@ -6,7 +6,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { accountMenuName, expect, expectNoPageOverflow, fixture, newAccount, registerThroughApi, signIn, signOut, target, test, watchAuthorization } from '../fixtures/auth-fixture';
+import { accountMenuName, expect, expectNoPageOverflow, fixture, gotoAfterRestore, newAccount, registerThroughApi, signIn, signOut, target, test, watchAuthorization } from '../fixtures/auth-fixture';
 
 const desktop = (name: string) => name.endsWith('-desktop');
 /** ADR014 cookie name: `__Host-` over HTTPS, the HTTP loopback development name otherwise. */
@@ -170,7 +170,7 @@ test.describe('public landing and Learner start', () => {
 test.describe('accounts and sessions', () => {
     test('registers through the form, then signs in; the access token stays in memory and reload restores the session', async ({ page, context }) => {
         const account = newAccount('Registrant');
-        await page.goto('/register');
+        await gotoAfterRestore(page, '/register');
         await expect(page.getByRole('heading', { level: 1, name: 'Create account' })).toBeVisible();
         await page.locator('#register-displayName').fill(account.displayName);
         await page.locator('#register-email').fill(account.email);
@@ -392,8 +392,27 @@ test.describe('accounts and sessions', () => {
         });
     }
 
+    test('sign-in failure diagnostics carry no credential or session material', async ({ page, context, learner }, testInfo) => {
+        test.skip(!desktop(testInfo.project.name), 'The diagnostics do not depend on the viewport; the desktop projects cover each engine.');
+        // A real sign-in that succeeds (access token issued, refresh cookie set), checked against the wrong start
+        // page, so signIn() fails after the most sensitive traffic and adds its diagnostics. Values are compared in
+        // memory and only booleans are asserted, so a failure here never prints them.
+        const issued = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/auth/login')
+            .then(async (response) => ({ status: response.status(), token: ((await response.json()) as { accessToken?: string }).accessToken ?? '' }));
+        const failure = await signIn(page, learner, 'courses').then(() => null, (error: unknown) => error);
+        const login = await issued, cookies = (await context.cookies()).map((cookie) => cookie.value);
+        expect(failure instanceof Error, 'signIn() fails on the wrong start page').toBe(true);
+        const message = (failure as Error).message;
+        expect(message.includes('Sign-in diagnostics (page: /home;'), 'the diagnostics name the page reached').toBe(true);
+        expect(/\+\d+ms POST \/api\/auth\/login 200/.test(message), 'the diagnostics list the sign-in request').toBe(true);
+        expect(login.status === 200 && login.token.length > 0 && cookies.length > 0, 'a token and a cookie were issued').toBe(true);
+        const leaked = [learner.password, learner.email, login.token, ...cookies].filter((value) => message.includes(value));
+        expect(leaked.length, 'the diagnostics contain a password, email, token or cookie value').toBe(0);
+        expect(/Bearer|eyJ/.test(message), 'the diagnostics contain bearer or JWT-shaped text').toBe(false);
+    });
+
     test('rejects wrong credentials with a safe message and keeps the form', async ({ page, learner }) => {
-        await page.goto('/login');
+        await gotoAfterRestore(page, '/login');
         await page.locator('#login-email').fill(learner.email);
         await page.locator('#login-password').fill(`${learner.password}x`);
         await page.getByRole('button', { name: 'Sign in', exact: true }).click();

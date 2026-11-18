@@ -74,6 +74,24 @@ async function signInState(page: Page) {
     return `page: ${new URL(page.url()).pathname}; status: ${JSON.stringify(await texts('status'))}; alert: ${JSON.stringify(await texts('alert'))}`;
 }
 
+/** The Web Lock under which the frontend runs every session cookie operation (AuthProvider `LOCK`). */
+const SESSION_LOCK = 'codemastery-auth-session';
+const RESTORE_PATHS = ['/api/auth/refresh', '/api/auth/logout'];
+
+/**
+ * Loads `path` and returns once the page's load-time session restore has finished: its request (a refresh, or
+ * the logout that retries an unconfirmed sign-out) was answered and the frontend released its session Web Lock.
+ * The lock is requested, not polled, so this needs no page timer and works with an installed clock.
+ * In WebKit, text entered into a form within a few milliseconds of that restore completing was observed to be
+ * discarded (about 1 in 100 sign-ins), so tests wait for it before typing into a freshly loaded page.
+ */
+export async function gotoAfterRestore(page: Page, path: string) {
+    const restore = page.waitForResponse((response) => RESTORE_PATHS.includes(new URL(response.url()).pathname));
+    await page.goto(path);
+    await restore;
+    await page.evaluate((lock) => navigator.locks?.request(lock, () => undefined), SESSION_LOCK);
+}
+
 /**
  * Signs in through the form. A Learner lands on Learner home; Instructors and Administrators keep the
  * catalogue (Leader instruction of 7 November 2026; the one-use /profile return is unchanged).
@@ -82,7 +100,8 @@ async function signInState(page: Page) {
 export async function signIn(page: Page, account: Account, start: 'home' | 'courses' = 'home') {
     const traffic = watchAuthTraffic(page);
     try {
-        await page.goto('/login');
+        await gotoAfterRestore(page, '/login');
+        traffic.mark('load-time restore finished');
         await page.locator('#login-email').fill(account.email);
         await page.locator('#login-password').fill(account.password);
         traffic.mark('form submitted');
