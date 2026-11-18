@@ -20,12 +20,12 @@ jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-24.04
-    # Outer budget (ADR008 §10.5). The step budgets below sum to 58 minutes and
+    # Outer budget (ADR008 §10.5). The step budgets below sum to 88 minutes and
     # leave 12 for checkout, Node setup, post steps and termination grace, so
     # recovery and the summary keep their own time after a timed-out suite.
     # First measured run (ubuntu-24.04, cold image builds): browsers 66 s,
     # lifecycle tests 33 s, suite 5.2 min, recovery 1 s, whole job about 7 min.
-    timeout-minutes: 70
+    timeout-minutes: 100
     defaults:
       run:
         working-directory: e2e
@@ -51,7 +51,12 @@ jobs:
         run: npm ci
       - name: Install pinned Playwright browsers and OS dependencies
         id: browsers
-        timeout-minutes: 10
+        # The OS dependencies are 125 MB of Ubuntu packages (181 new) from the
+        # runner's apt mirror. Successful runs took 37-97 s, but on 18 November
+        # 2026 five attempts on a throttled mirror fetched only 0.07-0.13 MB/s,
+        # projecting 16-31 minutes, and timed out at 10. This budget covers the
+        # slowest observed rate with margin and still bounds a stalled install.
+        timeout-minutes: 40
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Run E2E lifecycle regression tests
         id: lifecycle

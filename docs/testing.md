@@ -656,12 +656,19 @@ coordinator can still outlive the step while it finishes its teardown, so the re
 retries `npm run stack:down` only while it exits 2 (another invocation owns the checkout;
 nothing was touched), at most 48 times 5 seconds; any other result, including incomplete
 recovery, is final.
-Step budgets (minutes): frontend install 5, E2E install 3, browsers 10, lifecycle tests 5,
-suite 25, recovery 8, summary 2. Their sum (58) leaves 12 minutes of the 70-minute job limit
+Step budgets (minutes): frontend install 5, E2E install 3, browsers 40, lifecycle tests 5,
+suite 25, recovery 8, summary 2. Their sum (88) leaves 12 minutes of the 100-minute job limit
 for checkout, Node setup, post steps and termination. They are sized from the first measured
 run (browsers 66 s, lifecycle tests 33 s, suite 5.2 min including cold image builds, recovery
 1 s, job about 7 min) with headroom for cold dependency downloads, and the recovery budget
-covers bounded Docker retries against a slow daemon. A timed-out suite step still leaves recovery and
+covers bounded Docker retries against a slow daemon. The browsers budget was raised from 10
+minutes after five attempts on 18 November 2026 timed out in that step before any test ran.
+Each was downloading the same 125 MB of Ubuntu packages (181 new) that Playwright's
+`--with-deps` installs, from the runner's `us-east-2.ec2.archive.ubuntu.com` mirror, at only
+0.07–0.13 MB/s, which projects 16–31 minutes for the download alone. Sampled runs on healthy
+mirrors fetched the same packages in 9–17 s, and the whole step took 37–97 s in all 24
+attempts where it succeeded between 12 and 18 November. Forty minutes covers the slowest observed rate with margin and still
+bounds a stalled install. A timed-out suite step still leaves recovery and
 summary their own budgets. An `always()` step is best effort and cannot run after a forced
 loss of the runner. The final step writes an informational job summary: tested commit and
 pull request head, runner OS, Node, npm, Python and Docker versions, the lockfile hash, the
