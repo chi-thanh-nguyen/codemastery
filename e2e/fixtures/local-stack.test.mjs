@@ -14,7 +14,7 @@ import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import globalSetup, { buildMarker, cacheTag, confirmRecordedRunner, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
+import globalSetup, { BUILD_FAILURE_LINES, STACK_LABEL, buildImage, buildMarker, cacheTag, confirmRecordedRunner, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
 import { hostIdentity, processIdentity } from './host-identity.mjs';
 import { readInventory, writeInventory } from './run-inventory.mjs';
 
@@ -45,6 +45,18 @@ else if ((args[0] === 'network' || args[0] === 'volume') && args[1] === 'rm') { 
 else if (args[0] === 'ps') list('container');
 else if (args[0] === 'rm') { live(id).present = false; save(); console.log(id); }
 else if (args[0] === 'exec') { /* pg_isready and psql succeed */ }
+else if (args[0] === 'build') {
+    // Plain progress goes to stderr, as with BuildKit. 'build-fails' imitates the wrapper's download failing after a long log.
+    if (mode === 'build-fails') {
+        for (let line = 1; line <= 200; line++) process.stderr.write('#11 ' + line + '.000 Downloaded from central: artifact-' + line + '.pom\\n');
+        process.stderr.write('#11 0.285 Exception in thread "main" java.net.UnknownHostException: repo.maven.apache.org\\n');
+        if (process.env.STUB_LEAK) process.stderr.write('#11 0.300 echoed ' + process.env.STUB_LEAK + '\\n');
+        fail('ERROR: failed to build: failed to solve: process "/bin/sh -c ./mvnw package -DskipTests" did not complete successfully: exit code: 1');
+    }
+    fs.writeFileSync(path.join(dir, 'build-progress'), process.env.BUILDKIT_PROGRESS || '<unset>');
+    fs.writeFileSync(args[args.indexOf('--iidfile') + 1], mode === 'build-no-id' ? 'not-an-image-id\\n' : 'sha256:' + 'b'.repeat(64));
+    process.stderr.write('#1 [internal] load build definition from Dockerfile\\n');
+}
 else if (args[0] === 'run') {
     if (process.env.JWT_SECRET) fs.writeFileSync(path.join(dir, 'secret'), process.env.JWT_SECRET);
     const name = args[args.indexOf('--name') + 1], postgres = name.endsWith('-postgres');
@@ -103,7 +115,7 @@ before(() => {
 });
 beforeEach(() => {
     writeFileSync(join(stub, 'calls.log'), '');
-    for (const name of ['inspects', 'preview-stopped', 'resources.json', 'secret', 'hosts.log']) rmSync(join(stub, name), { force: true });
+    for (const name of ['inspects', 'preview-stopped', 'resources.json', 'secret', 'hosts.log', 'build-progress']) rmSync(join(stub, name), { force: true });
 });
 after(() => { process.env = saved; rmSync(stub, { recursive: true, force: true }); });
 
@@ -171,6 +183,50 @@ describe('image cache tags never cross checkouts', () => {
         assert.notEqual(cacheTag('postgres', '1-2'), cacheTag('postgres', '1-3'), 'two checkouts never share a tag that could move under a live run');
         assert.throws(() => cacheTag('backend', ''), /No lifecycle lock key/);
         assert.throws(() => cacheTag('backend', 'local'), /No lifecycle lock key/);
+    });
+});
+
+describe('image builds record the exact image ID and report a failing step\'s own output', () => {
+    const work = () => mkdtempSync(join(tmpdir(), 'codemastery-local-stack-build-'));
+
+    test('the image ID comes from an ID file in the run\'s temporary directory, with plain progress instead of --quiet', async () => {
+        process.env.STUB_MODE = 'running';
+        process.env.BUILDKIT_PROGRESS = 'quiet';
+        const dir = work();
+        try {
+            assert.equal(await buildImage('/checkout/backend', 'codemastery-e2e/backend:co-1-2', dir), `sha256:${'b'.repeat(64)}`);
+            const build = calls().find((call) => call.startsWith('build ')).split(' ');
+            assert.ok(!build.includes('--quiet') && !build.some((arg) => arg.startsWith('--progress')), `no output-suppressing or BuildKit-only flag: ${build.join(' ')}`);
+            assert.equal(readFileSync(join(stub, 'build-progress'), 'utf8'), 'plain', 'plain progress is set for this build, over an inherited value');
+            assert.ok(build[build.indexOf('--iidfile') + 1].startsWith(`${dir}/`), 'the ID file lives in the recorded temporary build directory');
+            assert.equal(build[build.indexOf('--label') + 1], STACK_LABEL);
+            assert.equal(build[build.indexOf('-t') + 1], 'codemastery-e2e/backend:co-1-2');
+            assert.equal(build.at(-1), '/checkout/backend');
+        } finally { delete process.env.BUILDKIT_PROGRESS; rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    test('a failed build reports the failing step\'s own message from a bounded, redacted output tail', async () => {
+        process.env.STUB_MODE = 'build-fails';
+        process.env.STUB_LEAK = 'f'.repeat(48);
+        const dir = work();
+        try {
+            const error = await buildImage('/checkout/backend', 'codemastery-e2e/backend:co-1-2', dir, ['f'.repeat(48)]).then(() => null, (reason) => reason);
+            assert.ok(error instanceof Error, 'the build must fail');
+            assert.match(error.message, /^docker build of \/checkout\/backend failed \(1\); last 80 of 203 output lines:\n/);
+            assert.match(error.message, /java\.net\.UnknownHostException: repo\.maven\.apache\.org/, 'the cause --quiet used to discard is reported');
+            assert.match(error.message, /did not complete successfully: exit code: 1$/);
+            assert.equal(error.message.split('\n').length - 1, BUILD_FAILURE_LINES, 'only the output tail is kept');
+            assert.ok(!error.message.includes('artifact-123.pom') && error.message.includes('artifact-124.pom'), 'older lines are dropped');
+            assert.ok(!error.message.includes('f'.repeat(48)) && error.message.includes('echoed [redacted]'), 'secrets are redacted');
+        } finally { delete process.env.STUB_LEAK; rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    test('a build that records no valid image ID is refused instead of running an unknown image', async () => {
+        process.env.STUB_MODE = 'build-no-id';
+        const dir = work();
+        try {
+            await assert.rejects(buildImage('/checkout/backend', 'codemastery-e2e/backend:co-1-2', dir), /recorded no valid image ID: "not-an-image-id"/);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
     });
 });
 
