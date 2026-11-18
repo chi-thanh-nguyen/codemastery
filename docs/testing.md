@@ -4188,8 +4188,8 @@ version also passed. Fault injection on the pinned JDK image's wrapper bootstrap
 
 Classification: failure in the build's first network access, HIGH_CONFIDENCE. The time to
 failure is consistent with a 10 s DNS resolution timeout (glibc 5 s × 2) inside the build
-container. The CI totals include any base-image pull, though, and the runners' image cache
-is unknown, so the exact failing operation remains UNDETERMINED.
+container. The CI totals include any base-image pull, though, so the exact failing operation
+of these three remains UNDETERMINED. A later occurrence was captured with its output (below).
 
 Build paths:
 
@@ -4202,14 +4202,46 @@ Build paths:
 | `ci-backend.yml` `./mvnw verify` on the runner | Host Maven | Visible | Unchanged |
 | PostgreSQL, MinIO and containerd test builds (`-q`) | No | Hidden | Unchanged: no failure observed; follow-up candidate |
 
-Prevention was evaluated and not implemented:
-- A BuildKit or Maven cache is empty on a fresh runner. Exporting one to the Actions cache
-  needs a different builder and a dependency layer in the production Dockerfile.
-- A retry would act blindly while the failing operation is unknown. The builds now print
-  it, so a targeted retry can be decided on evidence.
-- The failures are fast, not hangs, so timeouts would not help.
+The first CI run of this extension (PR #253 `d0a7d05`, job 135103826130, "VM HTTPS
+ingress", image `20261111.127.1`) failed in the backend build of
+`test-ingress-release-image-build.sh`. That build already printed its log, and this PR
+does not change it. The log shows the cause: the wrapper's `Downloader.java` got
+`Server returned HTTP response code: 429` (Too Many Requests) from `repo.maven.apache.org`
+for `apache-maven-3.9.16-bin.tar.gz`, 0.97 s into the step. Base-image pull and extraction
+had taken about 2 s. **Maven Central rate-limiting of the wrapper bootstrap is therefore
+CONFIRMED as one cause of this failure class.** The three earlier failures remain
+unattributed: their output was hidden, and their timing differs (about 11 s).
 
-Dependency pins and integrity are unchanged.
+Maven 3.9.16 bundles resolver 1.9.27, whose HTTP transport has
+`ResolverServiceUnavailableRetryStrategy`, so dependency downloads already retry 429 and
+503. The only unretried network step in the image build is the wrapper bootstrap. The
+JDK image has no `curl` or `wget`, so the wrapper falls back to a single
+`URL.openStream()`.
+
+Prevention implemented: `backend/Dockerfile` now runs the bootstrap (`./mvnw --version`,
+which downloads and installs the distribution and needs no other network access) in a
+layer of its own. It retries at most three times, after pauses of 5, 15 and 30 s, then
+makes a final attempt whose failure fails the build. `./mvnw package -DskipTests` still
+runs once, so a compile or dependency error is never retried. The distribution URL, the
+wrapper, the base images and the runtime stage are unchanged; only the build-stage
+layering changes, with the distribution cached separately from the sources. The
+retry acts at the source, so it covers every path that builds this Dockerfile (CI E2E,
+CI VM and deployment builds).
+
+| Fault injection on the Dockerfile bootstrap | Result |
+| --- | --- |
+| `docker build --network none --no-cache-filter build --target build backend` | Four attempts at 0.4, 5.7, 21.0 and 51.3 s, each `UnknownHostException` visible, then exit 1 (51 s) |
+| The exact bootstrap command, extracted from the Dockerfile, in the pinned JDK image with `MVNW_REPOURL` pointing to a local stand-in that answers 429 twice, then serves the checksum-verified distribution | 429, 429, 200; `Apache Maven 3.9.16` installed after 21 s |
+| The previous single `./mvnw` call against a stand-in that answers 429 once | Exit 1 |
+
+Not implemented:
+- A BuildKit or Maven cache: it is empty on a fresh runner, and an Actions-cache export
+  needs a different builder.
+- Timeouts: the observed failures are fast, not hangs.
+- A retry of the whole build or the job.
+
+Dependency pins and integrity are unchanged. The wrapper has no `distributionSha256Sum`,
+which is pre-existing and a follow-up candidate.
 
 ### WebKit sign-in loss (failure B), root cause found
 
