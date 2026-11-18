@@ -167,6 +167,39 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         mvc.perform(as(get("/api/me/courses").param("status", "left"), LEARNER)).andExpect(jsonPath("$.content", hasSize(1))).andExpect(jsonPath("$.content[0].id").value(SECOND.toString()));
         mvc.perform(as(get("/api/me/courses").param("status", "unknown"), LEARNER)).andExpect(status().isBadRequest());
     }
+    /** CO07.status: in-progress (stored ACTIVE) versus completed (stored COMPLETED, set by CT22.progress) Courses. */
+    @Test void myCoursesDistinguishesInProgressFromCompletedCoursesByStoredCt22Status() throws Exception {
+        row("active");
+        jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,'completed'),(?,?,?,'completed'),(?,?,?,'completed')",
+                id("completed"), LEARNER, SECOND, id("hidden-completed"), LEARNER, HIDDEN, id("other-completed"), OTHER, COURSE);
+        // The default joined view lists both, in title order, each with its own status; the closed payload gains no progress fields.
+        mvc.perform(as(get("/api/me/courses"), LEARNER)).andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[*].id").value(contains(COURSE.toString(), SECOND.toString())))
+                .andExpect(jsonPath("$.content[*].status").value(contains("active", "completed")))
+                .andExpect(jsonPath("$.content[0].progressPercentage").doesNotExist()).andExpect(jsonPath("$.content[0].isComplete").doesNotExist());
+        mvc.perform(as(get("/api/me/courses").param("status", "active"), LEARNER)).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(COURSE.toString())).andExpect(jsonPath("$.content[0].status").value("active"));
+        mvc.perform(as(get("/api/me/courses").param("status", "completed"), LEARNER)).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(SECOND.toString())).andExpect(jsonPath("$.content[0].status").value("completed"));
+        // Each learner sees only their own statuses.
+        mvc.perform(as(get("/api/me/courses").param("status", "completed"), OTHER)).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(COURSE.toString()));
+        mvc.perform(as(get("/api/me/courses").param("status", "active"), OTHER)).andExpect(jsonPath("$.totalElements").value(0));
+        // FE07 membership semantics are unchanged: joining a completed Course keeps it completed, leaving moves it to
+        // left, and rejoining makes it in progress again without recalculating completion.
+        mvc.perform(as(put(membership(SECOND)), LEARNER)).andExpect(jsonPath("$.status").value("completed"));
+        mvc.perform(as(delete(membership(SECOND)), LEARNER)).andExpect(jsonPath("$.status").value("left"));
+        mvc.perform(as(get("/api/me/courses").param("status", "completed"), LEARNER)).andExpect(jsonPath("$.totalElements").value(0));
+        mvc.perform(as(get("/api/me/courses"), LEARNER)).andExpect(jsonPath("$.totalElements").value(1)).andExpect(jsonPath("$.content[0].id").value(COURSE.toString()));
+        mvc.perform(as(put(membership(SECOND)), LEARNER)).andExpect(jsonPath("$.status").value("active"));
+        mvc.perform(as(get("/api/me/courses").param("status", "active"), LEARNER))
+                .andExpect(jsonPath("$.content[*].id").value(contains(COURSE.toString(), SECOND.toString())));
+        // A hidden Course is absent from every view while its stored completed status is retained.
+        mvc.perform(as(get("/api/me/courses").param("status", "all"), LEARNER)).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(content().string(not(containsString(HIDDEN.toString()))));
+        assertEquals("completed", jdbc.queryForObject("SELECT status FROM public.enrollments WHERE id=?", String.class, id("hidden-completed")));
+    }
     @Test void concurrentInitialJoinsCreateExactlyOneRow() throws Exception { concurrentMutations(true); }
     @Test void concurrentLeavesConvergeWithoutDeletingTheRow() throws Exception {
         row("active"); concurrentMutations(false);
