@@ -53,7 +53,7 @@ verification is separate work.
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
 | E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`lifecycle.test.mjs`, `run-inventory.test.mjs`, `stack-recovery.test.mjs`, `preview-control.test.mjs`, `local-stack.test.mjs`, `stack-down.test.mjs`); Python 3 (standard library only) and Node 22.18+ or 24; the coordinator tests use disposable fake checkouts and the real per-account registry, the recovery tests an injected fake Docker CLI, the other tests a stub `docker` on `PATH`, a stub Vite build entry point and a stub Vite preview module | No | CT34 r2: exclusive ownership taken and persisted before Playwright starts; same-checkout and path-alias conflicts refused without touching outputs; isolated checkouts concurrent; nonterminal, corrupt, widened-mode or earlier-device-identity records block reuse; a stale or exported hand-down is refused; unsafe output roots refused; birth-identity process classification (PID reuse never signalled); cooperative preview shutdown over the private channel with no PID fallback; no build or Docker removal while a writer lives; endpoint-bound Docker calls and daemon-confirmed absence (a lost daemon socket is never absence; recorded states are re-verified); interrupted-intent reconciliation; volume associations and unaccounted volumes; verified temporary-path removal; bounded idempotent retry; readiness marker and backend diagnostics | Real Docker, Vite, browsers or the E2E flows themselves ([real-Docker record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)) |
-| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` and by the non-required `E2E` job of `CI E2E` ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
+| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` and by the `E2E` job of `CI E2E`, a required check ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
 | VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
 
@@ -307,7 +307,7 @@ Vite configuration without emitting files. The `build` script already runs
 Build output goes to `frontend/dist/`. Development-only Vitest `5.0.5` and jsdom
 `27.4.0` execute the bounded frontend suite through `npm test` (`vitest run`).
 No lint script is implemented. The required Frontend CI job runs `npm ci`, `npm test`, then `npm run build`.
-The optional browser harness is not run by CI; the E2E suite runs in the separate, non-required `CI E2E` workflow ([CI](#ci)).
+The optional browser harness is not run by CI; the E2E suite runs in the separate `CI E2E` workflow, whose `E2E` check is required ([CI](#ci)).
 Build success alone does not establish behavioral coverage or deployment readiness.
 
 ### Browser harness and E2E suite
@@ -468,7 +468,13 @@ exits) instead of testing another server. If the backend container stops while
 setup waits for health, setup fails at once; on that or on the 180 s timeout the
 error carries the container state (status, exit code, OOM, error) and its last 100
 log lines, with the generated secrets redacted, captured before the teardown removes
-the container. Containers and the network carry the run and owner labels, which
+the container. The two images are built without `--quiet` (with `BUILDKIT_PROGRESS=plain`) and
+the exact image ID is read from a `--iidfile` in the run's temporary directory. A failed build
+therefore reports the failing step's last 80 output lines (redacted), for example a Maven Wrapper
+download error, instead of only `exit code: 1`. When the shared `signIn()` helper fails, its error
+adds the page path, the visible status and alert texts and a timeline of the page's `/api/auth/*`
+requests (method, path, status or network failure, milliseconds). Headers, cookies, bodies, query
+strings and field values are never read. Containers and the network carry the run and owner labels, which
 only corroborate the IDs in the run inventory; the teardown stops the preview over its
 control channel and removes exactly the recorded containers, their anonymous volume,
 the network and the temporary directory, as described above. Each test registers its own synthetic Learner,
@@ -627,8 +633,9 @@ CI runner: they deploy nothing and do not reach the real VM. No job starts the
 full local Compose stack. The VM jobs start their containers with `docker run`;
 only the MinIO initializer job uses Compose, starting just the `minio` and
 `minio-init` services (and a placeholder backend under the VM override) in
-disposable projects. A fourth workflow, `CI E2E` (described below), runs the E2E suite and is
-not a required check. No workflow uploads artifacts. Workflow configuration does not prove a successful run; see
+disposable projects. A fourth workflow, `CI E2E` (described below), runs the E2E suite. The `main-quality-gates`
+ruleset lists its `E2E` check as required (observed 19 November 2026; the ruleset was last
+updated on 18 November 2026, and no repository record documents when `E2E` was added). No workflow uploads artifacts. Workflow configuration does not prove a successful run; see
 [Latest recorded results](#latest-recorded-results).
 
 `CI E2E` ([ci-e2e.yml](../.github/workflows/ci-e2e.yml)) has one job, `E2E` (`e2e`), on
@@ -676,8 +683,8 @@ pinned Playwright and browser revisions, the run ID, the final inventory state, 
 and per-resource outcomes, per-project pass/fail/flaky/skip counts, and the titles and skip
 reasons of non-passing tests. It copies no error messages, traces, screenshots, request data,
 storage state or logs, because those can contain the run's synthetic credentials and session
-material. Raw reports are not uploaded. Making `E2E` a required check is a separate Project
-Leader decision. A green run is infrastructure evidence, not CT19/CT35/CT20.F Final coverage
+material. Raw reports are not uploaded. `E2E` is a required check of the `main-quality-gates` ruleset
+(see above). A green run is infrastructure evidence, not CT19/CT35/CT20.F Final coverage
 acceptance.
 
 The Backend and Frontend jobs end with an informational evidence step that writes
@@ -4095,3 +4102,46 @@ PR #248 and PR #247:
 | `mastery_skipped` through INSERT | The containment test records the accepted INSERT of `completed = true, mastery_skipped = true` (ADR012 §19.2 ceiling). The V002 check rejects a skip without completion (`23514`), and UPDATE of the flag stays denied (`42501`). The r4 record wording is corrected |
 | Column already present | The runtime test runs the real backend against three states: a V008 database with the column added by hand, no Flyway history, and a failed V009 row. Provisioning grants the exact r4 matrix, and Flyway refuses to start each time with the history unchanged. The V008 → V009 upgrade then passes as before |
 
+
+## E2E CI intermittent failures — 19 November 2026
+
+Leader-authorized investigation of the two intermittent `E2E` failures of 18 November
+2026, on branch `fix/ci-e2e-flakiness` from `main` at `298b1de`. The change adds
+diagnostics only: application behavior, the production Dockerfile, the five projects,
+timeouts, retries and the lifecycle are unchanged.
+
+| Failure | Historical evidence | Classification |
+| --- | --- | --- |
+| A. Backend image build, `Dockerfile:10` `./mvnw package -DskipTests` exit 1 (run 44289337659 attempt 1, `5f312a5`) | Attempt 2 on the same commit passed, and so did the Backend job. The failing runner (image `20261111.127.1`) fetched the 125 MB of browser OS packages at 76.9 kB/s (27 min 8 s), against 6–29 MB/s for the other attempts. The build failed 11.6 s after the run was admitted. A local timed build spends about 2 s in the silent Maven Wrapper bootstrap and 42 s downloading 864 artifacts before `javac` starts at 44 s, so a compile error is excluded | Failure in the network download phase: HIGH_CONFIDENCE. Exact failing download: UNDETERMINED, because `docker build --quiet` discarded the step output (CONFIRMED) |
+| B. `webkit-desktop` F05, initial `signIn()` still at `/login` after 10 s (runs 44296326736 attempt 1 on `7778b89`; 44247097650 attempt 1 on `6d29d699`, before CO08 merged) | The trace is identical on both branches except for the port. Both failures were test 56, directly after F04. The other four projects passed F05 in the same runs. Reruns passed with and without step debug logging | Step that stalled: UNDETERMINED. Not caused by CO08 (CONFIRMED). No application defect demonstrated |
+
+Debug logging only adds runner `##[debug]` lines. Nothing in the repository or in its
+E2E toolchain reads `RUNNER_DEBUG` or `ACTIONS_STEP_DEBUG` (Playwright reads only
+`PW_RUNNER_DEBUG`), and three reruns on 18 November passed with debug off. Its link
+with passing reruns is correlation: a rerun gets a new runner and new timing.
+
+The pinned JDK build image has no `wget`, `curl` or `unzip`. The wrapper therefore
+compiles a `Downloader.java` that calls `URL.openStream()` with no timeout or retry, does
+not check its exit status, and fetches `apache-maven-3.9.16-bin.tar.gz`.
+
+Executed verification (macOS 27.2 arm64, Docker 29.8.1, buildx v0.37.1; Linux harness:
+`mcr.microsoft.com/playwright:v1.63.0-noble` arm64 with WebKit 2359, Node 24.20.0 and
+Python 3.12.3, a 4-CPU cgroup quota, host networking, the checkout on an ext4 volume):
+
+| Command / experiment | Result |
+| --- | --- |
+| `docker build --network none --no-cache-filter build --target build backend`, once with `--quiet` and once with `--progress=plain` (fault injection) | Both exit 1 within 1 s. `--quiet` prints only the `Dockerfile:10 … exit code: 1` block seen in CI. Plain progress shows `java.net.UnknownHostException: repo.maven.apache.org` from `Downloader.main` |
+| `buildImage()` on real Docker: BuildKit (macOS) and the legacy builder (Linux, no buildx) | The recorded `--iidfile` ID equals the tagged image ID on both. A failing probe step's own stdout and stderr lines appear in the error on both. A `--progress` flag was rejected by the legacy builder (`unknown flag`), so the build uses `BUILDKIT_PROGRESS=plain` instead |
+| `npm test -- --project=webkit-desktop --grep "accounts and sessions" --repeat-each=8` (macOS WebKit 26.6, before the change) | 104/104 passed; 8 × F04→F05, F05 4.9–5.0 s |
+| Same on the Linux harness, `--repeat-each=15`, `E2E_WORKERS=1` | 195/195 passed; 15 × F04→F05, F05 5.0–5.7 s (CI passes: 5.0–6.6 s). Not reproduced |
+| Scratch-only probe (not committed): the initial sign-in with `/api/auth/refresh` or `/api/auth/login` held for 12 s | Both reproduce the CI symptom (`/login`, 10 s, `Signing in…` shown). The new diagnostics tell them apart: the restore stall shows the refresh sent with no answer and no login sent; the login stall shows refresh `401` after about 13 ms, then the login sent with no answer |
+| `E2E_WORKERS=1 npm test` (all five projects) on the Linux harness, twice, with real image builds | 106 passed, 4 skipped each run (6.0 and 6.5 min). Every recorded resource was removed |
+| `node --test fixtures/*.test.mjs` | 155/155 on macOS. Linux with `docker run --init`: 155/155. Without an init process (PID 1 `sleep`) four coordinator-SIGKILL tests fail because orphans are never reaped; this is a harness property, not a regression |
+
+Limits: neither failure was reproduced. The harness is arm64, not the amd64 runners,
+and its backend and PostgreSQL containers are not CPU-capped. The diagnostics make the
+next occurrence attributable; they do not prevent an external download from failing or
+a sign-in step from stalling. Possible follow-ups, each needing its own decision: a
+retrying or cached Maven bootstrap (which changes the production Dockerfile), and making
+the shared `signIn()` wait for the load-time restore, which is only worth doing once
+the diagnostics show that this restore is what stalls.
