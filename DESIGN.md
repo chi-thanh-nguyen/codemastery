@@ -473,10 +473,10 @@ contract that supplies it and designs only what that contract returns.
 
 | Item | Value |
 | --- | --- |
-| Revision | `DESIGN-2026-11-18-r9` — **Final Design Candidate**, pending the normal review and integration process. r9 remediates r8: the Theme control is available to every visitor on every page (D9-1 supersedes D8-3), and a completeness audit resolves or dispositions gaps G1–G4 and twelve further omissions. r8 reconciled every screen and flow with the effective technical contracts of Batches 1–8 (ADR005–ADR013) and ADR014 and added the three-theme system (light, dark, system). Earlier revisions are listed in the [revision history](#revision-history). |
-| Repository state audited | r9: `origin/main` re-fetched on 18 November 2026, unchanged at `65d14ca`; `DESIGN.md` on `main` still equals r7, so r8 applies without conflict. r9 additionally inspected the frontend API clients and view-model types (`features/assessment/api/quizApi.ts`, `assignmentApi.ts` and `features/instructor/grading/api/gradingApi.ts` are empty files; `assessmentTypes.ts` and `learningTypes.ts` hold preview view models) and ADR007 §7 (learner Quiz list semantics). r8: `origin/main` at `65d14ca54b1d9c517b0cc72f954ffe89d6a49377` (18 November 2026, Asia/Ho_Chi_Minh), fetched the same day; read from source: decision records ADR001–ADR014 and their index, OpenAPI (108 operations), `docs/setup.md`, `docs/data-model.md`, `docs/adaptive-learning.md`, `docs/testing.md`, `docs/deployment.md`, `docs/requirements.md`, `docs/architecture.md`, `docs/repository-structure.md`, `CONTRIBUTING.md`, and the frontend (`frontend/src/**`, `frontend/index.html`, `frontend/package.json`). The source of this revision is r7 at `5a83a00cd20d263ef0feee4be5618882aeaf3d09`, unchanged on `main` since 8 November 2026. Open PRs #248 (CT22 progress and resume, backend), #249 (CT13 metrics reads, backend) and #250 (Interaction repositories, backend) were not merged on that commit and are treated as unmerged. No browser check was run for r8. Earlier audits are recorded in the revision history. |
-| Design authority | The Leader's instruction of 6 November 2026 delegated UI/UX and frontend-presentation decisions in this file (visual direction, design tokens, component specifications, layouts, interaction patterns and UX copy). The Leader's instruction of 18 November 2026, "CodeMastery — Final DESIGN.md Reconstruction, Full Contract Reconciliation & Three-Theme Design System", renewed that delegation for r8 and expressly authorized revising existing UI/UX decisions for consistency, accessibility, design quality or conformity with effective contracts. A further instruction of 18 November 2026, "CodeMastery — Final DESIGN.md Remediation, Completeness Audit & Dedicated Pull Request", explicitly overrode D8-3 (theme selection must be available to all users throughout the website) and authorized r9. None of these delegations approves API contracts, route paths, role or permission rules, dependencies, new repository files, business rules, storage policies, security policy or implementation start. The session user is identified only by the local Git identity. |
-| Prepared by | r9 and r8 by Claude Code (Anthropic, Claude Opus 5.5) under the two 18 November 2026 instructions. r1–r7 by Claude Code with the installed Impeccable design skill; the 5 November 2026 baseline with OpenAI Codex. No reviewer approval, browser verification or acceptance is claimed for r8 or r9. |
+| Revision | `DESIGN-2026-11-18-r10` — **Final Design Candidate**, pending the normal review and integration process. r10 remediates the thirteen findings (F01–F13) of the independent Codex review of PR #252 at `0030d6e`, puts a Theme control in the quiz Focus bar at the Leader's instruction, and refreshes the implementation baseline to `main` `298b1de`. r9 remediated r8: the Theme control is available to every visitor on every page (D9-1 supersedes D8-3), and a completeness audit resolves or dispositions gaps G1–G4 and twelve further omissions. r8 reconciled every screen and flow with the effective technical contracts of Batches 1–8 (ADR005–ADR013) and ADR014 and added the three-theme system (light, dark, system). Earlier revisions are listed in the [revision history](#revision-history). |
+| Repository state audited | r10: `origin/main` at `298b1dea262727d0d7213bdd739875b3a6acee98` (18 November 2026), which adds PRs #248 (CT22 progress and resume, backend), #249 (CT13 Course-side metric reads) and #250 (Interaction discussion and report persistence); OpenAPI now marks 18 of its 108 operations implemented; no frontend file and no `DESIGN.md` change; review history of PRs #228–#246 read with the GitHub API; `frontend/src/app/providers/AuthProvider.tsx` re-read for preview isolation; ADR005 §15, ADR007 §§4–11, ADR010 §§9–13, ADR012 §§8–9 and §19.5, and CT16.shell (`docs/setup.md`) re-read for the findings. r9: `origin/main` re-fetched on 18 November 2026, unchanged at `65d14ca`; `DESIGN.md` on `main` still equals r7, so r8 applies without conflict. r9 additionally inspected the frontend API clients and view-model types (`features/assessment/api/quizApi.ts`, `assignmentApi.ts` and `features/instructor/grading/api/gradingApi.ts` are empty files; `assessmentTypes.ts` and `learningTypes.ts` hold preview view models) and ADR007 §7 (learner Quiz list semantics). r8: `origin/main` at `65d14ca54b1d9c517b0cc72f954ffe89d6a49377` (18 November 2026, Asia/Ho_Chi_Minh), fetched the same day; read from source: decision records ADR001–ADR014 and their index, OpenAPI (108 operations), `docs/setup.md`, `docs/data-model.md`, `docs/adaptive-learning.md`, `docs/testing.md`, `docs/deployment.md`, `docs/requirements.md`, `docs/architecture.md`, `docs/repository-structure.md`, `CONTRIBUTING.md`, and the frontend (`frontend/src/**`, `frontend/index.html`, `frontend/package.json`). The source of this revision is r7 at `5a83a00cd20d263ef0feee4be5618882aeaf3d09`, unchanged on `main` since 8 November 2026. Open PRs #248 (CT22 progress and resume, backend), #249 (CT13 metrics reads, backend) and #250 (Interaction repositories, backend) were not merged on that commit and are treated as unmerged. No browser check was run for r8. Earlier audits are recorded in the revision history. |
+| Design authority | The Leader's instruction of 6 November 2026 delegated UI/UX and frontend-presentation decisions in this file (visual direction, design tokens, component specifications, layouts, interaction patterns and UX copy). The Leader's instruction of 18 November 2026, "CodeMastery — Final DESIGN.md Reconstruction, Full Contract Reconciliation & Three-Theme Design System", renewed that delegation for r8 and expressly authorized revising existing UI/UX decisions for consistency, accessibility, design quality or conformity with effective contracts. A further instruction of 18 November 2026, "CodeMastery — Final DESIGN.md Remediation, Completeness Audit & Dedicated Pull Request", explicitly overrode D8-3 (theme selection must be available to all users throughout the website) and authorized r9. The instruction of 18 November 2026 "CodeMastery — PR #252 Independent Review Findings Verification & Complete Remediation" authorized r10 and decided that the Theme control must also be available during quiz and diagnostic attempts. None of these delegations approves API contracts, route paths, role or permission rules, dependencies, new repository files, business rules, storage policies, security policy or implementation start. The session user is identified only by the local Git identity. |
+| Prepared by | r10, r9 and r8 by Claude Code (Anthropic, Claude Opus 5.5) under the three 18 November 2026 instructions; r10 responds to an independent review by Codex, which has not reviewed r10. r1–r7 by Claude Code with the installed Impeccable design skill; the 5 November 2026 baseline with OpenAI Codex. No reviewer approval, browser verification or acceptance is claimed for r8, r9 or r10. |
 | Version control | Tracked in Git at the repository root from r6; earlier revisions were a local file excluded from Git. |
 | Visual reference | "E-learning Platform — Learning Plan Dashboard" by Bogdan Nikitin for Nixtio, published on Dribbble (shot 23956256). Its visual language was studied. No logo, artwork, illustration, avatar, copy or screen composition from it is reused (see [Reference Analysis](#reference-analysis)). The reference has no dark scheme; the dark scheme of r8 is derived from CodeMastery's own tokens. |
 | Governs | Root `CLAUDE.md` § Impeccable: this file is the authoritative UI/UX specification. It is subordinate to mandatory requirements, approved architecture, repository structure, ADRs and API contracts. If those conflict with this file, they win and the Blocker Protocol applies. |
@@ -509,7 +509,7 @@ preview is not an approved contract.
 | **Preview only** | Built as presentation components and shown only inside `/preview` with sample data. The preview may lag this file; [Known source discrepancies](#known-source-discrepancies-reported-not-resolved-here) lists where. |
 | **Not built** | Specified here; no frontend code exists. |
 | **Unmerged** | Exists only on an open branch or PR; not on `main`. |
-| **Specified (r8)** / **Specified (r9)** | Introduced by that revision (for example the dark scheme in r8, the global Theme control in r9); no code exists yet. |
+| **Specified (r8)** / **(r9)** / **(r10)** | Introduced by that revision (for example the dark scheme in r8, the global Theme control in r9, the Focus-bar Theme control in r10); no code exists yet. |
 
 **Design decision** remains a third, separate notion: a choice made in this file
 under the design delegation. It is binding for implementation unless a later
@@ -529,7 +529,7 @@ under its activation rule (see [Sitemap](#sitemap)).
 | Product, user stories, adaptive flow | [architecture](docs/architecture.md) §§1–7, US-01–US-17 | Page inventory, flows, "Mastered" label for skipped lessons (US-04), non-blocking warnings (US-06) |
 | Adaptive semantics | [adaptive-learning](docs/adaptive-learning.md), [ADR005](docs/decisions/005-batch-01-contract-approvals.md) §6, [ADR011](docs/decisions/011-batch-06-contract-approvals.md) §§7–15 | Four states, routing rules, fixed reason templates, visible-recommendation rule, placement diagnostic, Mastery Map and insights reads |
 | Data semantics | [data-model](docs/data-model.md) | State catalogues, lesson progress flags, quiz scoring, submission and report lifecycles |
-| Approved API | [OpenAPI](docs/api/openapi.yaml) | 108 operations: 12 implemented on `main`, 96 `APPROVED_NOT_IMPLEMENTED` (listed per screen in [Implementation Handoff](#implementation-handoff)) |
+| Approved API | [OpenAPI](docs/api/openapi.yaml) | 108 operations: 18 implemented on `main` `298b1de`, 90 `APPROVED_NOT_IMPLEMENTED` (listed per screen in [Implementation Handoff](#implementation-handoff)); "implemented" is the backend operation, not a frontend consumer |
 | Contract batches | [ADR005](docs/decisions/005-batch-01-contract-approvals.md)–[ADR013](docs/decisions/013-batch-08-contract-approvals.md) | Every screen's data, lifecycle and error behavior (see [Contract batches verified](#contract-batches-verified)) |
 | Authentication and session | [ADR014](docs/decisions/014-hybrid-refresh-session-authentication.md) §§6–7, 11; [setup](docs/setup.md#adr014-hybrid-authentication-session--16-november-2026) | Session restore, renewal, cross-tab coordination, server sign-out (F2, S1, S2) |
 | Frontend contracts | [setup](docs/setup.md) CT16-2026-10-24-r1, CT16-FINAL-2026-10-25-r1 (F1, F2), CT16-PROFILE-2026-10-25-r1, CT16.routes, CT16.learner-home, CT37.markdown; [ADR002](docs/decisions/002-interim-delegated-contracts.md) FE07-2026-10-27-r1; ADR006 §6 (CT37.embed); ADR010 §13 (CT37.widget) | Routing, Profile, membership, Markdown, video embed, file widget |
@@ -538,23 +538,28 @@ under its activation rule (see [Sitemap](#sitemap)).
 
 ### Contract batches verified
 
-Integration state checked with the GitHub CLI on 18 November 2026. Every PR is
-merged into `main`; none records an approving review (`REVIEW_REQUIRED`), so
-independent and module-owner review remain outstanding gates as each record
-states. The task observation that all were merged "on 18 November 2026" is
-corrected by the merge times below; the state on 18 November is the same.
+Integration state and review history checked with the GitHub CLI and API on 18
+November 2026. Every PR is merged into `main`. Only PR #246 (ADR014) records an
+approving review: `tihh647-ui` (the Infrastructure CODEOWNER) approved its final
+head `4bb1dd2` on 17 November 2026 at 13:00 UTC, before the merge. PRs #233 and
+#236 carry only Copilot `COMMENTED` reviews, and the other PRs no review. An
+approving review is not full CODEOWNER coverage, contract acceptance, runtime
+readiness or release authorization: ADR014 §12 still lists the Auth, Frontend and
+Leader CODEOWNER reviews, and the other records keep their independent and
+module-owner review gates. The task observation that all were merged "on 18
+November 2026" is corrected by the merge times below.
 
-| Batch | Checkpoints | Authoritative record | PR | Merge commit (UTC merge time) |
+| Batch | Checkpoints | Authoritative record | PR | Merge commit (UTC merge time) · reviews |
 | --- | --- | --- | --- | --- |
 | 1 | CP-002–010 | [ADR005](docs/decisions/005-batch-01-contract-approvals.md) | #228 | `81806fc` (9 Nov 02:12) |
 | 2 | CP-011–018 | [ADR006](docs/decisions/006-batch-02-contract-approvals.md) | #229 | `912d432` (9 Nov 07:51) |
 | 3 | CP-019–028 | [ADR007](docs/decisions/007-batch-03-contract-approvals.md) | #230 | `3eeacc8` (9 Nov 13:31) |
-| 4 | CP-029–036 | [ADR008](docs/decisions/008-batch-04-contract-approvals.md) + [ADR009](docs/decisions/009-ct17-final-runtime-recovery.md) | #231 + #233 | `b6fa24b` (10 Nov 05:47), `fe73f9a` (11 Nov 09:16) |
+| 4 | CP-029–036 | [ADR008](docs/decisions/008-batch-04-contract-approvals.md) + [ADR009](docs/decisions/009-ct17-final-runtime-recovery.md) | #231 + #233 | `b6fa24b` (10 Nov 05:47), `fe73f9a` (11 Nov 09:16) · #233: Copilot comments only |
 | 5 | CP-037–046 | [ADR010](docs/decisions/010-batch-05-contract-approvals.md) | #235 | `c9d1427` (13 Nov 04:29) |
-| 6 | CP-047–063 | [ADR011](docs/decisions/011-batch-06-contract-approvals.md) | #236 | `c80fda9` (13 Nov 05:02) |
+| 6 | CP-047–063 | [ADR011](docs/decisions/011-batch-06-contract-approvals.md) | #236 | `c80fda9` (13 Nov 05:02) · Copilot comments only |
 | 7 | CP-064–090 | [ADR012](docs/decisions/012-batch-07-contract-approvals.md) | #244 | `093c659` (14 Nov 22:25) |
 | 8 | CP-091–100 | [ADR013](docs/decisions/013-batch-08-contract-approvals.md) | #245 | `7aafe96` (15 Nov 05:52) |
-| Later | AUTH-SESSION, CT16-SESSION and four related revisions | [ADR014](docs/decisions/014-hybrid-refresh-session-authentication.md) | #246 | `78e783d` (17 Nov 14:32) |
+| Later | AUTH-SESSION, CT16-SESSION and four related revisions | [ADR014](docs/decisions/014-hybrid-refresh-session-authentication.md) | #246 | `78e783d` (17 Nov 14:32) · approved by `tihh647-ui` at `4bb1dd2` |
 
 Batch 4 governs testing, clocks and runtime recovery; it has no direct screen
 effect beyond the E2E cases that exercise screens (ADR013 §§7–8). The decision
@@ -565,19 +570,21 @@ selects practice difficulty through fixed, published, per-difficulty practice
 Quizzes recommended by `CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1`; ADR011 §17's
 adaptive practice-capture amendment is not adopted.
 
-### Implementation status (18 November 2026)
+### Implementation status (18 November 2026, `main` `298b1de`)
 
-This is the state of the UI on `main` at `65d14ca`. Statuses per screen are in
-the [page inventory](#page-inventory).
+This is the state on `main` at `298b1de`. Statuses per screen are in the
+[page inventory](#page-inventory). A backend operation being implemented does not
+make the screen that consumes it delivered.
 
 | Delivery | What it covers |
 | --- | --- |
 | **Live** | Shell (ink frame, top bar with canvas reach, mobile drawer, canvas); landing `/`; catalogue `/courses`; course detail and membership `/courses/:courseId`; sign in `/login` with the session-ended notice; create account `/register`; Learner home `/home` (active memberships only); My courses `/my-courses`; Profile `/profile`; Page not found; Access denied; design preview `/preview`. The ADR014 hybrid session is Live: restore on load ("Restoring your session…"), renewal, cross-tab sign-in and sign-out, server sign-out. Fonts, logo palette, header lockup, course marks and account avatar as specified. Light scheme only. |
 | **Preview only** | Full Learner home; course workspace (Path); lesson reader with Q&A; placement diagnostic; course assessments; quiz introduction, attempt, result and history; assignment; Mastery Map; notifications; forgot password, reset password and expired reset link; Instructor Teaching home, course and lesson editors, question bank, quiz and assignment editors, lesson Q&A, skill graph editor, grading, learner insights; Administrator overview, users, courses, content reports and audit log. Parts of these previews predate the contracts and differ from this file. |
-| **Not built** | Every approved-but-unimplemented frontend consumer of the 96 `APPROVED_NOT_IMPLEMENTED` operations; Instructor and Administrator navigation and start pages in production (both roles see only Catalogue and start at `/courses`); the approved routes marked `†` in the sitemap; the Markdown renderer; the YouTube embed control; the file widget transport. |
-| **Specified (r8, r9)** | The dark scheme, the system preference and every dark-scheme token (r8); the Theme control in every shell, the on-chrome segmented control, the Instructor Lesson Q&A screen, the owner attempt-result sheet and the route-identity rules of G2–G4 (r9). |
-| **Backend only** | Password recovery (`POST /api/auth/password-reset-requests`, `POST /api/auth/password-resets`) is implemented under AU07 (PR #239) but inactive until a deployment binding supplies SMTP, sender and origin values; the frontend recovery pages are Preview only. |
-| **Unmerged** | Backend work for CT22 progress and resume (PR #248), CT13 metrics reads (PR #249) and Interaction repositories (PR #250). |
+| **Backend only** | Password recovery (2 operations, AU07, PR #239), inactive until a deployment binding supplies SMTP, sender and origin values. CT22 progress, completion and resume (6 operations, PR #248, merged 18 November 2026; V009 migration; runtime grants `CT17-P6-PRIVILEGES-2026-11-17-r4` remain review-gated). No frontend consumer of these 8 operations exists yet. |
+| **Backend partial** | CT13: Course-side enrolment and completion metric reads (PR #249); the Administrator REST operations `b7ListCourseMetrics` and `b7ReadCourseMetrics` are not implemented. Interaction: discussion and report persistence (PR #250); no CT30 REST operation is implemented. |
+| **Not built** | Every frontend consumer of the 90 `APPROVED_NOT_IMPLEMENTED` operations and of the 8 backend-only operations; Instructor and Administrator navigation and start pages in production (both roles see only Catalogue and start at `/courses`); the approved routes marked `†` in the sitemap; the Markdown renderer; the YouTube embed control; the file widget transport; the shared-transport response-metadata capability for ETags (setup, Batch 1 handoff). The frontend API clients `quizApi.ts`, `assignmentApi.ts` and `gradingApi.ts` are empty files. |
+| **Specified (r8–r10)** | The dark scheme, the system preference and every dark-scheme token (r8); the Theme control in every shell, the on-chrome segmented control, the Instructor Lesson Q&A screen, the owner attempt-result sheet and the route-identity rules of G2–G4 (r9); the Focus-bar Theme control, unsaved-answer retention, the settings write states and the authoring refusal states (r10). |
+| **Implementation defect (recorded)** | Preview isolation is incomplete: a `/preview` document can send `POST /api/auth/refresh` when another tab signs in (see [S26](#s26-design-preview), A13). |
 
 ## Overview
 
@@ -865,22 +872,31 @@ marked.
 | `ink-700` on `lilac-100` | 8.20 | `ink-600` on `sky-100` | 6.77 |
 | `data-mastered` / `-learning` / `-weak` / `-unknown` on `surface` | 3.43 / 5.01 / 3.73 / 3.71 | `brand-600` glyph on `sky-100` | 4.46 |
 
-**Dark scheme**
+**Dark scheme** (recomputed from the frontmatter hex values in r10)
 
 | Pair | Ratio | Pair | Ratio |
 | --- | --- | --- | --- |
-| `mist-50` on `graphite-900` / `-800` / `-850` / `-700` | 15.31 / 12.93 / 13.94 / 11.30 | `brand-300` on `graphite-900` / `-800` / `-850` / `-700` | 7.60 / 6.24 / 6.73 / 5.46 |
-| `mist-200` on `graphite-800` / `-850` / `-700` / `-750` | 8.50 / 8.21 / 6.65 / 6.92 | `brand-200` (link hover) on `graphite-800` | 8.74 |
-| `mist-300` on `graphite-900` / `-850` / `-800` / `-700` / `-750` | 6.82 / 6.21 / 5.76 / 5.03 / 5.23 | `focus-on-chrome` on `graphite-800` / `-700` | 8.12 / 6.36 |
-| `graphite-400` (line) on `graphite-900` / `-800` / `-850` / `-700` / `-750` | 4.57 / 3.86 / 4.17 / 3.37 / 3.51 | `brand-400` path on `graphite-900` | 6.43 (decorative) |
+| `mist-50` on `graphite-900` / `-850` / `-800` / `-700` | 15.31 / 13.94 / 12.93 / 11.30 | `brand-300` on `graphite-900` / `-850` / `-800` / `-700` | 7.39 / 6.73 / 6.24 / 5.46 |
+| `mist-200` on `graphite-900` / `-850` / `-800` / `-700` / `-750` | 9.01 / 8.21 / 7.61 / 6.65 / 6.92 | `brand-200` (link hover) on `graphite-800` / `-700` | 7.83 / 6.84 |
+| `mist-300` on `graphite-900` / `-850` / `-800` / `-700` / `-750` | 6.82 / 6.21 / 5.76 / 5.03 / 5.23 | `focus-on-chrome` on `graphite-900` / `-800` / `-700` | 8.61 / 7.28 / 6.36 |
+| `graphite-400` (line) on `graphite-900` / `-800` / `-850` / `-700` / `-750` | 4.57 / 3.86 / 4.17 / 3.37 / 3.51 | `brand-400` path on `graphite-900` | 6.25 (decorative) |
 | `ink-900` on `mist-50` (primary label) | 15.31 | `mist-50` pill vs `graphite-900` (button boundary) | 15.31 |
 | `surface` on `rose-500` (danger label) / hover on `rose-700` | 4.79 / 6.57 | `rose-500` vs `graphite-900` (danger boundary) | 3.74 |
 | `mist-50` on `sky-900` / `mint-900` / `butter-900` / `lilac-900` / `rose-900` | 11.20 / 10.79 / 10.82 / 11.86 / 12.24 | `mist-200` on the same tints | 6.59 / 6.35 / 6.37 / 6.99 / 7.21 |
 | sky / mint / butter / lilac / rose strong on own tint | 5.41 / 6.63 / 7.09 / 6.62 / 6.50 | strong on own soft layer | 6.72 / 8.40 / 8.69 / 7.82 / 7.69 |
-| strong colours on `graphite-800` (rose, mint, butter, lilac) | 6.87 / 7.94 / 8.47 / 7.21 | `mist-50` / `brand-300` / `mist-200` on `brand-900` | 11.61 / 5.61 / 6.84 |
+| strong colours on `graphite-800` (rose, mint, butter, lilac) | 6.87 / 7.94 / 8.47 / 7.21 | `mist-50` / `brand-300` / `mist-200` / `mist-300` on `brand-900` | 11.61 / 5.61 / 6.84 / 5.17 |
 | `mist-50` on `brand-800` (selection) | 7.52 | `ink-900` on `mist-100` (tooltip, toast) | 14.61 |
-| `brand-700` on `mist-100` (toast action) | 5.68 | `mist-100` on `graphite-980` (code) / `mist-200` (code caption) | 15.49 / 9.63 |
-| `data-*-dark` on `graphite-800` (mastered / learning / weak / unknown) | 6.37 / 5.05 / 6.59 / 4.13 | `ink-900` on `mint-300` (check in completed node) / on `brand-300` (selected option letter) | 9.40 / 7.39 |
+| `brand-700` on `mist-100` (toast action) | 5.68 | `mist-100` on `graphite-980` (code) / `mist-200` (code caption) | 15.60 / 9.63 |
+| `data-*-dark` on `graphite-800` (mastered / learning / weak / unknown) | 6.37 / 5.05 / 6.59 / 4.13 | `data-*-dark` on `graphite-700` (map nodes) | 5.57 / 4.41 / 5.76 / 3.61 |
+| `ink-900` on `mint-300` (check in completed node) / on `brand-300` (selected option letter) | 9.40 / 7.39 | `focus-on-chrome` on `sky-900` / `butter-900` / `lilac-900` | 6.30 / 6.09 / 6.68 |
+
+r8 published six dark ratios computed from a superseded draft canvas
+(`#121418`) instead of the final tokens; r10 corrects them (for example
+`brand-300` on `graphite-900` 7.60 → 7.39, `mist-200` on `graphite-800` 8.50 →
+7.61, `brand-200` on `graphite-800` 8.74 → 7.83, `focus-on-chrome` on
+`graphite-800` 8.12 → 7.28, `mist-100` on `graphite-980` 15.49 → 15.60,
+`brand-400` on `graphite-900` 6.43 → 6.25). Every pair still meets its
+threshold.
 
 Contrast between neighbouring surfaces is not a WCAG requirement and is kept low
 on purpose (tiles on canvas 1.08 light, about 1.2 dark); boundaries that carry
@@ -953,11 +969,12 @@ preference would need its own contract. **Delivery:** Specified (r8; global plac
 
 ### Theme selector
 
-Every visitor, signed in or anonymous, can choose the theme from every page.
-One control model, the **Theme control**, appears in every shell, and each shell
-has exactly one placement, so no page shows two competing selectors (design
-decision D9-1, which supersedes D8-3 at the Leader's instruction of 18 November
-2026).
+Every visitor, signed in or anonymous, can choose the theme from every page,
+including an active quiz or placement-diagnostic attempt. One control model, the
+**Theme control**, appears in every shell, and each shell has exactly one
+placement, so no page shows two competing selectors (design decision D9-1, which
+supersedes D8-3 at the Leader's instruction of 18 November 2026, amended by D10-1
+for the Focus bar at the Leader's instruction of the same day).
 
 | Shell | Width | Placement | Form |
 | --- | --- | --- | --- |
@@ -967,7 +984,7 @@ decision D9-1, which supersedes D8-3 at the Leader's instruction of 18 November
 | Split auth layout: sign in, create account, forgot and reset password (S2) | ≥ 900 px | Top row of the ink brand panel, right-aligned opposite the lockup | Theme button + menu |
 | Split auth layout | < 900 px | Right end of the 120 px ink header that replaces the brand panel | Theme button + menu |
 | Design preview (S26) | Per rendered shell | The same placements as the shell being previewed, preview-local ([Preview behavior](#preview-behavior)) | As the shell |
-| Quiz and diagnostic attempt Focus bar (S11) | — | No control. The effective scheme still applies, including live System changes; the control is one step away on the quiz intro and result pages | — |
+| Quiz and diagnostic attempt Focus bar (S11, S9) | All widths | Immediately right of the exit button, before the quiz title (D10-1) | Theme button + menu |
 
 The account menu carries no Theme group: the r8 placement there is withdrawn
 so that signed-in pages do not show the control twice; the top-bar button (or
@@ -991,9 +1008,10 @@ the drawer below 900 px) serves every role.
   Space selects, Escape closes the menu and returns focus to the button.
 - **Drawer control.** In the mobile drawer footer, a caption label "Theme"
   (`chrome-muted`) above a full-width on-chrome segmented control
-  (`segmented-control-on-chrome`): `chrome-raised` track, 4 px padding, 44 px
-  tall, three 36 px segments "System", "Light", "Dark", each with a 16 px glyph
-  and its label; the selected segment is a white pill with an `ink-950` label;
+  (`segmented-control-on-chrome`): `chrome-raised` track, 44 px tall, three
+  segments "System", "Light", "Dark", each with a 16 px glyph and its label;
+  each segment's hit area is the full 44 px track height and a third of its
+  width, and its visible pill is 36 px tall, inset by the 4 px track padding; the selected segment is a white pill with an `ink-950` label;
   inactive labels `chrome-muted`, hover `chrome-hover` with a white label. It is
   a `role="radiogroup"` labelled "Theme" with `role="radio"` segments and arrow
   keys. Under it, for System, the caption "Matches your device (Dark now)". The
@@ -1003,6 +1021,13 @@ the drawer below 900 px) serves every role.
   item so the change can be compared. One polite `role="status"` message
   announces the result: "Theme set to Dark." / "Theme set to Light." / "Theme
   set to System (Dark)."
+- **In the Focus bar** (D10-1): the same 44 px Theme button, placed right of the
+  exit button so it is far from "Submit quiz" and the timer. Opening its menu
+  never pauses or changes the timer, never moves focus out of the attempt except
+  into the menu, and does not save, submit or change answers; Escape returns focus
+  to the button. Below 600 px the bar keeps the exit button, the Theme button,
+  the timer and "Submit quiz"; the quiz title and "Question 4 of 10" move into
+  the navigator strip under the bar.
 - **Session independence.** The control never depends on the session: it
   renders while the ADR014 restore runs (when the sign-in actions are still
   hidden), for visitors, and for every role; signing in or out does not move or
@@ -1068,7 +1093,9 @@ the drawer below 900 px) serves every role.
 
 - `/preview` renders in the person's effective scheme on load (reading the
   stored preference is allowed; the preview never **writes** browser storage,
-  an existing tested rule).
+  an existing tested rule). Theme handling adds no network request; see
+  [S26](#s26-design-preview) for the separate, recorded authentication
+  isolation defect.
 - Every previewed shell carries the Theme control in its production placement
   (top bar ≥ 900 px, drawer below, landing header, auth brand panel or header).
   In the preview a selection applies to the whole preview document **in memory
@@ -1077,8 +1104,7 @@ the drawer below 900 px) serves every role.
   the stored preference, including changes made in another tab. "Reset sample
   data" does not change the scheme.
 - Screens rendered without a role shell keep their own placement: the landing
-  and auth samples show their Theme button; the quiz attempt has none (as in
-  production) and uses the scheme chosen elsewhere in the preview.
+  and auth samples and the quiz attempt show their Theme button.
 - The index's design reference shows each colour token in both schemes side by
   side (light value, dark value, role name), plus the semantic families,
   mastery tags and data fills in both schemes, so a reviewer can compare without
@@ -1373,7 +1399,7 @@ reuse them instead of styling buttons locally.
 | **Tertiary** | `variant="text"` | No fill or border, `accent.link` label (12 px padding) | `accent.link-hover` + underline | Low-emphasis inline actions ("Skip and start from the beginning", "View result", alert actions); on tinted grounds it may take `text.primary` (`color="inherit"`) |
 | **Destructive** | `variant="contained" color="error"` | `control.danger` pill, white label | `control.danger` hover | Only to confirm destroying, hiding or locking (inside its confirmation dialog); the trigger is secondary ("Leave course") or a menu item |
 
-- **Shared states:** 48 px (40 px `size="small"`), label type, pill radius; pressed scale 0.98; focus 2 px `focus.ring` with 2 px offset (on the frame `focus-on-chrome`); disabled primary and destructive `control.disabled`, disabled secondary keeps its surface and border with `text.disabled`, disabled tertiary has no fill; busy submits keep their width and announce progress (`aria-busy` or a status line).
+- **Shared states:** 48 px (40 px visible for `size="small"`, with its hit area extended to 44 px), label type, pill radius; pressed scale 0.98; focus 2 px `focus.ring` with 2 px offset (on the frame `focus-on-chrome`); disabled primary and destructive `control.disabled`, disabled secondary keeps its surface and border with `text.disabled`, disabled tertiary has no fill; busy submits keep their width and announce progress (`aria-busy` or a status line).
 - **On the ink frame** (`color="onChrome"`): primary is a white pill with an ink label (hover `fill-150`); secondary is a graphite pill with a white label (hover `chrome-hover`). Used by the top-bar and landing "Create account", the landing hero and the quiz "Submit quiz". Identical in both schemes because the frame is.
 - **Circular actions** (`CircleAction`, 44 px, 20 px icon, accessible name and tooltip): `ink` = primary circle (`control.primary`), `fill` = secondary outlined circle, `plain` = no surface. Overflow "More actions" buttons and the lesson bar's previous/next circles use the secondary surface.
 - **Tile arrow** (`CircleAffordance`, decorative because the tile's title link covers the tile): `secondary` by default — `control.secondary` circle with hairline border and a `text.primary` arrow; it fills `bg.hover` while the tile is hovered. `primary` only for the one important next step: the Learner home "Continue learning" tile (play glyph) and the resume lesson on the course path.
@@ -1383,7 +1409,7 @@ reuse them instead of styling buttons locally.
 ### Inputs
 
 - **Text field / select:** label above the field (label type, `text.primary`), 52 px `bg.field` field, 1.5 px `line.strong` border, `rounded.md`, 16 px padding. Hover border `text.strong-secondary`. Focus border 2 px `accent.link`. Error border 2 px rose strong, error text below in caption rose strong with an alert glyph, linked by `aria-describedby`. Helper text in caption `text.secondary`. Disabled `bg.field-disabled`. Required fields are marked "(required)" in the label, not by an asterisk alone. Multi-line fields (feedback, Q&A, report reason, Markdown) use the same frame with `rows` and preserve line breaks.
-- **Search pill:** 52 px `bg.fill` pill, leading search icon, placeholder `text.secondary`; focus: `bg.field` background + 2 px `accent.link` border. With a clear action, Escape and the 36 px clear button empty it and keep focus. Search submits on Enter or the Search button where the API contract defines explicit submission (catalogue: 100-character limit enforced by the field, no visible counter; Administrator users and courses: `query`); tables never filter client-side what the API paginates.
+- **Search pill:** 52 px `bg.fill` pill, leading search icon, placeholder `text.secondary`; focus: `bg.field` background + 2 px `accent.link` border. With a clear action, Escape and the clear button (36 px visible circle, 44 px hit area) empty it and keep focus. Search submits on Enter or the Search button where the API contract defines explicit submission (catalogue: 100-character limit enforced by the field, no visible counter; Administrator users and courses: `query`); tables never filter client-side what the API paginates.
 - **Checkbox, radio, switch:** MUI controls: unchecked `line.strong` outline, checked `accent.link`, 44 px hit area; switch track unchecked `line.strong`, checked `accent.link`, thumb `surface` (light) or `mist-50` (dark).
 - **Quiz option row:** full-width `bg.field` row, `rounded.md`, min 64 px, 1.5 px `line.hairline` border; option letter in a 32 px `bg.fill` circle; selected: 2 px `accent.link` border, letter circle filled `accent.link` with a white (light) or `ink-900` (dark) letter, check glyph; keyboard via native radio/checkbox semantics. Option text is plain text in the UI face with line breaks preserved.
 - **File field (CT37.widget):** see [File upload and download](#file-upload-and-download).
@@ -1477,7 +1503,7 @@ bottom group for zoom in, zoom out and fit on canvas pages.
 ### Tabs and segmented filters
 
 Pill segmented control (`SegmentedControl`): `bg.fill` track with 4 px padding
-(44 px tall), 36 px items, active pill `bg.raised` with `text.primary` label and
+(44 px tall); each item's hit area is the full 44 px height and its visible pill 36 px, active pill `bg.raised` with `text.primary` label and
 the Control shadow; inactive `text.secondary`, hover `bg.hover`; optional count
 in `text.secondary` tabular figures. It scrolls horizontally below 600 px instead
 of wrapping. Used for status filters and in-page views. Page-level tabs (course
@@ -1523,7 +1549,7 @@ thresholds, not quiz policy: admission is decided by the server (strictly before
 
 - **Code block** (`CodeBlock`): `bg.code` panel (dark adds the `line.code` hairline), `rounded.sm`, 20 px padding, JetBrains Mono 15 px in `text.code`, horizontal scroll, focusable; a 40 px copy button whose tooltip and status message change to "Copied"; optional caption below in caption type. Monochrome: there is no syntax highlighting, because CT37.markdown renders fenced code with `CodeBlock` and no highlighting dependency. A highlighting palette would need a dependency decision first.
 - **Inline code:** `bg.fill` background, 4 px radius, `text.primary`.
-- **Markdown** (CT37.markdown, `CT37-MARKDOWN-2026-11-08-r1`, [`docs/setup.md`](docs/setup.md#ct37markdown--ct37-markdown-2026-11-08-r1--delegated_approved)) renders `lessons.content_markdown` and text materials: body-reading in `text.primary`, 70ch measure, headings from `h2` at section-title and title sizes, 1.5 em paragraph spacing, links `accent.link`, tables in the table style without toolbar, block quotes as an indented `bg.fill` panel at `rounded.sm` (no coloured left border). CommonMark with tables and fenced code rendered as React elements; raw HTML is shown as literal text, never interpreted; only `https`/`http` URLs, root-relative paths (not `//…`) and `#` fragments become links, checked after decoding, and every other target is plain text; images render as links, not inline. The renderer library is a separate dependency decision.
+- **Markdown** (CT37.markdown, `CT37-MARKDOWN-2026-11-08-r1`, [`docs/setup.md`](docs/setup.md#ct37markdown--ct37-markdown-2026-11-08-r1--delegated_approved)) renders `lessons.content_markdown`, text materials and assignment instructions (ADR010 §12: "stored verbatim, rendered under CT37.markdown"): body-reading in `text.primary`, 70ch measure, headings from `h2` at section-title and title sizes, 1.5 em paragraph spacing, links `accent.link`, tables in the table style without toolbar, block quotes as an indented `bg.fill` panel at `rounded.sm` (no coloured left border). CommonMark with tables and fenced code rendered as React elements; raw HTML is shown as literal text, never interpreted; only `https`/`http` URLs, root-relative paths (not `//…`) and `#` fragments become links, checked after decoding, and every other target is plain text; images render as links, not inline. The renderer library is a separate dependency decision.
 - **External video** (CT37.embed, `CT37-EMBED-2026-11-09-r1`, ADR006 §6): only the canonical `https://www.youtube-nocookie.com/embed/{videoId}` is accepted and revalidated by the frontend. Before activation, a 16:9 `bg.fill` placeholder at `rounded.lg` shows the video material title, the play glyph and a keyboard-accessible secondary button "Load external video (YouTube)"; no iframe, thumbnail, script or request exists before activation. Activation creates the iframe (title = material title, no autoplay). Where the viewport cannot give the provider's 200 × 200 px minimum, the placeholder offers "Open video on YouTube" (external glyph, new tab, `noopener noreferrer`) instead. An unsupported stored URL renders "This video can't be shown." in `text.secondary`. Loading or playing a video never marks completion.
 - **Plain-text content** (notification messages, Q&A posts, report reasons, assignment feedback, recommendation and practice reasons, quiz prompts and options): rendered as plain text with line breaks preserved; no Markdown, HTML or auto-linking.
 
@@ -1585,7 +1611,7 @@ remain.
 - **Do** consume semantic roles, so every component works in light and dark without a branch.
 - **Do** show skeletons shaped like the content while loading.
 - **Do** keep tables in one surface with a toolbar above and pagination below.
-- **Do** keep the Theme control reachable in every shell (top bar, drawer, landing header, auth panel), with exactly one placement per shell.
+- **Do** keep the Theme control reachable in every shell (top bar, drawer, landing header, auth panel, quiz Focus bar), with exactly one placement per shell.
 - **Do** keep all interface text in English, sentence case.
 
 ### Don't:
@@ -1625,7 +1651,7 @@ is not authorization; backend checks remain authoritative (ADR001 §§11–12).
 | Instructor | Teaching → `/teach` · Grading → `/teach/grading` · Learners → `/teach/learners` · Catalogue → `/courses` · bell → `/notifications` | Catalogue Live; the others Preview only |
 | Administrator | Overview → `/admin` · Users → `/admin/users` · Courses → `/admin/courses` · Reports → `/admin/reports` · Audit log → `/admin/audit` · Catalogue → `/courses` | Catalogue Live; the others Preview only |
 | Every signed-in role | Account menu: Profile → `/profile`, Sign out | Live |
-| Everyone, signed in or not | Theme control (System / Light / Dark): top-bar utility ≥ 900 px, drawer footer below; landing header; auth brand panel or header | Specified (r9) |
+| Everyone, signed in or not | Theme control (System / Light / Dark): top-bar utility ≥ 900 px, drawer footer below; landing header; auth brand panel or header; quiz and diagnostic Focus bar | Specified (r9, Focus bar r10) |
 
 These destinations are approved in CT16.routes (`CT16-ROUTES-2026-11-08-r1`). An
 item appears only when its destination is routed in production; never render a
@@ -1728,8 +1754,8 @@ unless noted.
 | Lesson | Learner | Study and mark complete / Mark as complete | `learning/pages/LessonPage.tsx`, `learning/components/LessonContent.tsx` | Approved (CT21 learner read, CT22, CT37, CT09, CT30, ADR011 §15, ADR013 §19) | Preview only | A |
 | Placement diagnostic | Learner | Establish initial mastery or skip / Start diagnostic | `mastery/components/PlacementPrompt.tsx` + quiz attempt | Approved (CT25, CT04) | Preview only | S |
 | Course assessments | Learner | Find quizzes and assignments / Open | `assessment/pages/CourseAssessmentsPage.tsx` | Approved (CT23 learner list, CT10.rest) | Preview only | A |
-| Quiz introduction, attempt | Learner | Answer within the time limit / Submit quiz | `assessment/pages/QuizAttemptPage.tsx`, `QuizTimer.tsx`, `QuestionRenderer.tsx` | Approved (CT04, CT23 learner list); G2 resolved by design | Preview only | S |
-| Quiz result | Learner | Understand score and next step | `assessment/pages/QuizResultPage.tsx` | Approved (CT04.results); G3 resolved by design | Preview only | A |
+| Quiz introduction, attempt | Learner | Answer within the time limit / Submit quiz | `assessment/pages/QuizAttemptPage.tsx`, `QuizTimer.tsx`, `QuestionRenderer.tsx` | Approved (CT04, CT23 learner list); G2 resolved with limitations | Preview only | S |
+| Quiz result | Learner | Understand score and next step | `assessment/pages/QuizResultPage.tsx` | Approved (CT04.results); G3 resolved with limitations (owner confirmation pending) | Preview only | A |
 | Attempt history | Learner | Review past attempts | `assessment/pages/AttemptHistoryPage.tsx` | Approved (CT04.results) | Preview only | A |
 | Assignment | Learner | Submit before the deadline; read grade and feedback | `assessment/pages/AssignmentDetailPage.tsx` | Approved (CT10, CT09, CT37.widget) | Preview only | A |
 | Mastery Map | Learner | Understand skill states and next step | `mastery/pages/MasteryMapPage.tsx` + mastery components | Approved (CT33.map, ADR011 §15) | Preview only | H |
@@ -1741,7 +1767,7 @@ unless noted.
 | Quiz editor / Assignment editor | Instructor | Build and publish assessments | `…/pages/QuizEditorPage.tsx`, `AssignmentEditorPage.tsx` | Approved (CT23, CT10.rest) | Preview only | S |
 | Lesson Q&A (S18c) | Instructor | Answer learner questions per Lesson | `…/pages/LessonQaPage.tsx` | Approved (CT30) | Preview only | A |
 | Skill graph editor | Instructor | Define skills, prerequisites, mappings; adaptive settings | `instructor/skill-graph-editor/pages/SkillGraphEditorPage.tsx` | Approved (CT05, CT06.enablement with N1/R1, CT18 B1) | Preview only | S |
-| Grading list / Grade submission | Instructor | Grade with feedback | `instructor/grading/pages/SubmissionListPage.tsx`, `GradeSubmissionPage.tsx` | Approved (CT10.grading/rest, CT09); G4 resolved by design | Preview only | S |
+| Grading list / Grade submission | Instructor | Grade with feedback | `instructor/grading/pages/SubmissionListPage.tsx`, `GradeSubmissionPage.tsx` | Approved (CT10.grading/rest, CT09); G4 resolved with limitations | Preview only | S |
 | Learner insights / Learner detail | Instructor | Inspect progress, results, mastery, recommendation history | `instructor/learner-insights/pages/LearnerInsightsPage.tsx`, `LearnerDetailPage.tsx` | Approved (CT33.insights/map/results, CT04.results owner read) | Preview only | A |
 | Platform overview | Administrator | Read per-course metrics | `admin/reporting-dashboard/pages/ReportingDashboardPage.tsx` | Approved (CT13) | Preview only | A |
 | Users | Administrator | Find users, change role, lock/unlock | `admin/user-management/pages/UserManagementPage.tsx` | Approved (CT12.user/rest, CT31) | Preview only | S |
@@ -1787,7 +1813,7 @@ The reset page loads no third-party resource.
 ADR014 §§6–7; supersedes the memory-only, reload-loses-session behavior of
 CT16-r1/CT16.minimum within ADR014 §11). *Delivery:* Live.
 
-- **Restore.** On every load the provider restores the session from the HttpOnly refresh cookie. While it runs, protected routes show the system state "Restoring your session…" (status line + block skeleton) instead of redirecting, the landing page waits with the same line, and the header shows no sign-in actions. A restored session continues on the page the person opened. A document opened at `/preview` never restores.
+- **Restore.** On every load the provider restores the session from the HttpOnly refresh cookie. While it runs, protected routes show the system state "Restoring your session…" (status line + block skeleton) instead of redirecting, the landing page waits with the same line, and the header shows no sign-in actions. A restored session continues on the page the person opened. A document opened at `/preview` does not restore on load; on `main` it can still adopt another tab's sign-in (a recorded defect, [S26](#s26-design-preview)).
 - **Renewal.** Silent: the access token is renewed shortly before it expires; the page, its data and its scroll position stay as they are. Transient network or server failures retry quietly until the token expires.
 - **Other tabs.** Signing in or out in one tab applies to every tab of the origin without reload: another tab's sign-in is adopted; another tab's sign-out signs this tab out.
 - **Sign out** (account menu): clears the session at once (offline too) and replaces to `/login` with no notice. The server revocation follows and is retried on a later load if it could not be confirmed; nothing about this is shown.
@@ -1820,7 +1846,7 @@ retry, stale responses ignored.
 ### F4 Continue learning
 
 *Contract:* Approved (CT22.progress, CT22.resume, CT21.authoring learner Lesson
-read). *Delivery:* Preview only (backend Unmerged, PR #248).
+read). *Delivery:* Preview only (backend operations implemented on `main` by PR #248; frontend not built).
 
 My courses, Learner home or course detail → course workspace (Path) → title-row
 primary: **Resume** when `resumeLessonId` is set (the last visited, still
@@ -1875,8 +1901,10 @@ Assessments, a lesson or a recommended practice → quiz intro (kind, question
 count, time limit, "The timer starts when you begin", previous
 attempts) → "Start quiz" (or "Resume attempt" when an active attempt exists; the
 timer is not reset) → attempt (Focus): navigate questions, answer, see the timer.
-The full answer set is saved when the learner moves to another question or opens
-the navigator, and always before submitting; a status line under the question
+The full answer set is saved one second after the learner's last answer change,
+when the learner moves to another question or opens the navigator, and always
+before submitting; saves are sequenced (one request in flight, the newest set
+sent next, no automatic retry of a failed save; ADR007 §9); a status line under the question
 shows "Saving…", "All answers saved" or "Answers not saved. Try again." → "Submit
 quiz" → confirmation "Submit quiz? You answered 8 of 10. Unanswered questions
 score zero." → save, then submit → Result.
@@ -1889,12 +1917,27 @@ score zero." → save, then submit → Result.
 States: start failure; an overdue attempt still being finalized (409 on start:
 "Your previous attempt is still being submitted. Try again in a moment.");
 connectivity loss during the attempt (inline rose alert; the timer keeps
-counting because expiry is fixed at start); leave guard on the exit button
-("Leave the quiz? The timer keeps running. Your saved answers are kept."); a
-hidden Quiz or Course (404) or left membership (403). The app uses a declarative
-`BrowserRouter`, so in-app navigation blockers are not available; browser Back
-and tab close are covered by the native `beforeunload` prompt, and returning to
-an active attempt resumes it.
+counting because expiry is fixed at start); a hidden Quiz or Course (404) or
+left membership (403).
+
+**Leaving an attempt.** The four ways out behave differently, and no design
+promise goes beyond what the router and browser provide:
+
+| Exit | What happens |
+| --- | --- |
+| Exit button (and the Focus bar's only other links) | The leave guard dialog: "Leave the quiz? The timer keeps running. Answers you haven't saved yet will stay on this device until you return or close the tab." with "Stay" (focused) and "Leave quiz". Leaving first attempts one save of unsaved answers and leaves whatever its outcome |
+| Browser Back or Forward | A same-document history change (`popstate`). CT16.shell approves a declarative `BrowserRouter`, which offers no navigation blocker, and `beforeunload` does not fire. The attempt view unmounts without a dialog. Unsaved answers are kept in the attempt feature's memory, keyed by attempt, for the life of the document (never in browser storage) |
+| Reload, tab close or leaving the site | The browser may show its native `beforeunload` confirmation while unsaved answers exist; browsers decide whether and how it appears. Unsaved answers are lost with the document |
+| Time running out elsewhere | The server finalizes the last committed save at `expiresAt` (ADR007 §10) |
+
+**Returning.** "Resume attempt" (intro or history) reads the attempt and shows the
+server's saved answers. If this document still holds unsaved answers for that
+attempt and they differ, a sky alert offers "You have answers from earlier in this
+session that weren't saved." with "Restore my answers" (puts them back on screen;
+they are saved by the normal cadence) and "Keep saved answers" (discards them).
+Nothing is restored or saved silently, and nothing is promised after the
+document closes (ADR011 §5). Blocking Back inside the app would need a data
+router, which CT16.shell does not approve (A15).
 
 ### F7 Understand results and mastery
 
@@ -1926,7 +1969,10 @@ recommendation, CT07-PRACTICE-RECOMMENDATION, E02). *Delivery:* Preview only.
 Assignment → instructions and deadline → file field ("PDF or ZIP file") →
 upload → "Submitted · 20 Nov, 14:05" with "Download report.pdf" and "Replace
 file" while the assignment is open and ungraded (confirmation) → after grading:
-grade, feedback and graded time; the learner also receives a notification (CT27).
+grade, feedback and graded time, read from the assignment itself (the
+authoritative record). A notification is normally created after the grade commits,
+but delivery is best effort, at most once (ADR012 §§8, 9.2, 19.5), so the
+assignment page, not the notification, is how the learner learns of a grade.
 When the server reports the assignment closed (`open` false; the deadline
 instant itself is already late), the field is replaced by "The deadline has
 passed. Submissions are closed." A graded submission cannot be replaced.
@@ -1939,7 +1985,9 @@ Lesson → "Questions" section → "Ask a question" → text area → "Post ques
 the question appears at the top (newest first). Members and the owning
 Instructor can reply to a question ("Reply"; one level only; replies oldest
 first). A reply notifies the question's author: "New reply to your question in
-"Lesson title"." Report: a post's overflow menu → "Report post", or the lesson's
+"Lesson title"." (created in the reply's own transaction, so a reply and its
+notification commit together, ADR012 §6.4; unlike the after-commit, best-effort
+grading, result, content and recommendation notifications). Report: a post's overflow menu → "Report post", or the lesson's
 "Report lesson" → dialog with a required reason → receipt "Thanks. An
 administrator will review this report." Notifications: the bell count → the
 Notifications page, where each message names its subject in words; rows carry no
@@ -1971,8 +2019,11 @@ Publication has no minimum-content rule; an empty published course is allowed.
 
 Grading → choose an owned course → its assignments with submitted and graded
 counts → an assignment's submissions → a submission → "Download" → grade (0–100,
-up to two decimals) + feedback (required) → "Save grade" → confirmation "The
-learner will see this grade and feedback and receive a notification." A graded
+up to two decimals) + feedback (required) → "Save grade" → confirmation "Save
+grade? The learner will see this grade and feedback on the assignment page." After
+the save succeeds, the status line reads "Grade saved." A notification is created
+after commit on a best-effort basis (ADR012 §§8, 9.2, 19.5) and is never promised
+in the UI. A graded
 submission can be regraded ("Update grade"), which replaces grade, feedback and
 time. If the learner replaced the file meanwhile, the save is refused (409) and
 the view reloads the submission. Learners → choose a course → learner → progress,
@@ -2261,7 +2312,7 @@ yet" / "No assignments published yet".
 
 ### S11 Quiz attempt
 
-**Contract:** Approved (CT04.start/submission/expiry/results, CT23 learner list, ADR011 §5). G2 resolved by design (D9-3). **Delivery:** Preview only. **Fidelity:** S (Focus). **Data:** `b3ListLearnerQuizzes` (intro lookup), `b3AttemptHistory` (intro), `b3StartAttempt`, `b3ReadAttempt`, `b3SaveAnswers`, `b3SubmitAttempt`.
+**Contract:** Approved (CT04.start/submission/expiry/results, CT23 learner list, ADR011 §5). G2 resolved with limitations (D9-3, D10-2). **Delivery:** Preview only. **Fidelity:** S (Focus). **Data:** `b3ListLearnerQuizzes` (intro lookup), `b3AttemptHistory` (intro), `b3StartAttempt`, `b3ReadAttempt`, `b3SaveAnswers`, `b3SubmitAttempt`.
 
 ```text
 ┌ ink frame bar ──────────────────────────────────────────────────────────────────┐
@@ -2277,8 +2328,13 @@ yet" / "No assignments published yet".
 └────────────────────────────────────────────────────────┘
 ```
 
-- **Intro** (`/courses/:courseId/quizzes/:quizId`): there is no learner read of a single Quiz, so the intro finds the Quiz's `B3QuizSummary` in the learner Quiz list (`b3ListLearnerQuizzes`, the largest page size of 100, pages requested in order until the Quiz is found or the pages end; the list holds only published Quizzes of the course in title order, ADR007 §7). It shows the title, kind tag, question count and time limit, "The timer starts when you begin", attempts from history (number, status, score), and "Start quiz" or "Resume attempt" (when an attempt is active). A Quiz that is not in the list (hidden, deleted or foreign) shows the concealed state "Quiz not available" / "It may have been hidden by the instructor." / "Back to assessments". A diagnostic Quiz found this way links to S9 instead of starting.
-- **Bar:** no primary navigation during an attempt; the exit button opens the leave guard. The timer counts down to `expiresAt`; "Submit quiz" is the on-chrome primary.
+- **Intro** (`/courses/:courseId/quizzes/:quizId`). There is no learner read of a single Quiz (G2). The intro uses, in order:
+  1. **Navigation context:** links from the assessments list, the recommended-practice entry, history and results pass the `B3QuizSummary` fields they already hold in the router's navigation state (non-secret, client-only, kept in this tab's history entry). With it, the intro renders at once.
+  2. **Authoritative access check:** `b3AttemptHistory` for this Quiz always loads; a 404 means the Quiz is not currently available to this Learner and shows "Quiz not available" / "It may have been hidden by the instructor." / "Back to assessments"; a 403 shows the course-membership message.
+  3. **List lookup** (only when no navigation context exists, for example a pasted URL): the learner Quiz list (`b3ListLearnerQuizzes`, page size 100) is scanned page by page, at most the page count reported by its first response, with a status "Loading quiz details…" and cancellation when the page is left. Offset pages can skip an item when Quizzes are published, hidden or renamed during the scan (ADR007 §7 orders by title), so **not finding the Quiz proves nothing**: the intro then shows the title-less state "Some quiz details couldn't be loaded. The time limit will appear when the quiz starts." with "Try again" and keeps "Start quiz" available, because the server decides admission.
+
+  With the details it shows the title, kind tag, question count and time limit, "The timer starts when you begin", attempts from history (number, status, score), and "Start quiz" or "Resume attempt" (when an attempt is active). A diagnostic Quiz links to S9 instead of starting. A guaranteed single lookup would need a learner single-Quiz read (a CT23 amendment); this design does not require it.
+- **Bar:** no primary navigation during an attempt; left to right: the exit button (opens the leave guard), the Theme button (D10-1), the quiz title, "Question 4 of 10", the timer pill and "Submit quiz" (on-chrome primary). The timer counts down to `expiresAt`. Below 600 px the title and question counter move into the navigator strip.
 - **Question kinds** (CT23): single choice (radios), multiple choice (checkboxes, "Select all that apply"), true/false (two radios labelled "True" and "False"). Predict-the-output questions are single or multiple choice whose prompt contains the program; prompts and options are plain text in the UI face with line breaks and indentation preserved. There is no code panel and no code execution.
 - **Saving:** per F6; the navigator's last line carries the save status.
 - **Navigator:** numbered 44 px circles: answered = `control.primary`, current = link-blue ring, not answered = outline; a text summary below. Below 900 px the navigator becomes a horizontally scrollable strip under the frame bar.
@@ -2286,10 +2342,10 @@ yet" / "No assignments published yet".
 
 ### S12 Quiz result and attempt history
 
-**Contract:** Approved (CT04.results; CT16.routes for the path and its Issue-owned query parameters). G3 resolved by design (D9-4). **Delivery:** Preview only. **Fidelity:** A. **Data:** `b3ReadAttemptResult`, `b3AttemptHistory`, `b6ReadAdaptiveGuidance`, `b3ListLearnerQuizzes` (title lookup as in S11).
+**Contract:** Approved (CT04.results; CT16.routes for the path and its Issue-owned query parameters). G3 resolved with limitations (D9-4; FE10 owner confirmation pending). **Delivery:** Preview only. **Fidelity:** A. **Data:** `b3ReadAttemptResult`, `b3AttemptHistory`, `b6ReadAdaptiveGuidance`, `b3ListLearnerQuizzes` (title lookup as in S11).
 
-- **Route identity.** The approved path `/courses/:courseId/attempts/:attemptId` does not carry the Quiz, but the result operation needs it. Every link to a result therefore adds the Quiz identity as a query parameter, `?quizId=<uuid>` (recommended name; CT16.routes leaves query parameters to the owning Issue, FE10, which confirms it). History rows, the post-submit navigation and the "View result" action after time runs out all add it. A result URL without a valid Quiz identity shows "We can't show this result from this link." with "Go to assessments"; a well-formed but wrong pair gets the API's concealed 404.
-- Header: page title (quiz title), stat tiles: Score ("80%"; up to two decimals, as returned), Correct ("8 of 10", counted from the returned answers), Attempt (number). Submitted date-time caption; an auto-submitted attempt shows "Submitted automatically when time ran out" when `submittedAt` equals `expiresAt`.
+- **Route identity.** The approved path `/courses/:courseId/attempts/:attemptId` does not carry the Quiz, but the result operation needs it. Every link to a result therefore adds the Quiz identity as a query parameter, `?quizId=<uuid>` (recommended by this file; CT16.routes leaves query parameters to the owning Issue, FE10 [#195], whose owner has not confirmed it as of 18 November 2026). History rows, the post-submit navigation and the "View result" action after time runs out all add it. A result URL without a valid Quiz identity shows "We can't show this result from this link." with "Go to assessments"; a well-formed but wrong pair gets the API's concealed 404.
+- Header: page title (the quiz title from navigation context or the S11 lookup; "Quiz result" when neither is available), stat tiles: Score ("80%"; up to two decimals, as returned), Correct ("8 of 10", counted from the returned answers), Attempt (number). Submitted date-time caption; an auto-submitted attempt shows "Submitted automatically when time ran out" when `submittedAt` equals `expiresAt`.
 - Question review: ordered list; each item shows the prompt, the learner's own selected options, and a Correct (mint) or Incorrect (rose) tag with glyph. Correct options are never shown (answer keys are withheld, ADR007 §11).
 - Next step: the course's current recommendation entry when visible; "Open Mastery Map" (secondary) with the mastery statement; "Back to course".
 - History (`…/quizzes/:quizId/history`): table Attempt, Started, Submitted, Status (Active, Being submitted, Submitted), Score, "View result" (submitted rows) or "Resume attempt" (active row); newest first.
@@ -2301,14 +2357,16 @@ yet" / "No assignments published yet".
 
 Detail layout: title, deadline pill (butter "Due *date*" when due within 48
 hours; neutral otherwise; "Closed" when `open` is false), instructions
-(plain text with line breaks), linked lesson when `lessonId` is set ("Related
+(Markdown through the shared renderer, CT37.markdown, ADR010 §12), linked lesson when `lessonId` is set ("Related
 lesson" link). Submission panel: the file field ("PDF or ZIP file") when nothing
 is submitted and the assignment is open; otherwise the current file row
 (original filename, "Submitted · *time*", "Download", and "Replace file" while
 open and ungraded). Grade panel after grading: stat "Grade 85 / 100" (from
 `gradePercentage`, up to two decimals), feedback as plain text with line breaks,
 "Graded · *time*". Manual grades never affect mastery; no mastery wording
-appears here.
+appears here. Feedback stays plain text (ADR010 §9). A Learner who has left the
+course gets the API's 403 here and sees "Rejoin the course to see this
+assignment." (records are kept, ADR010 §12).
 
 ### S14 Mastery Map
 
@@ -2394,9 +2452,14 @@ lessons." with a secondary "Create course". Pagination below.
 **Contract:** Approved (CT23.questions/composition/publication/bindings, CT10.rest). **Delivery:** Preview only. **Fidelity:** S. **Data:** `b3CreateQuestion`, `b3ListQuestions`, `b3ReadQuestion`, `b3ReplaceUnusedQuestion`, `b3DeleteUnusedQuestion`, `b3CreateQuiz`, `b3ListOwnedQuizzes`, `b3ReadOwnedQuiz`, `b3ReplaceUnusedHiddenQuiz`, `b3DeleteUnusedHiddenQuiz`, `b3SetQuizPublication`, `b5CreateAssignment`, `b5ListOwnedAssignments`, `b5ReadOwnedAssignment`, `b5ReplaceAssignment`, `b5SetAssignmentPublication`.
 
 - **Question bank** (Manage): columns Question (2 lines), Kind, Skill, Difficulty; paginated as returned (no server filters exist, so no filter controls). "New question".
-- **Question form:** kind (Single choice, Multiple choice, True/false); prompt (plain-text area, line breaks kept); options with "Correct" toggles (exactly one for single choice and true/false; at least one for multiple choice; True/False options fixed); skill (required); difficulty (Easy/Medium/Hard, required). No code-snippet field: predict-the-output programs go in the prompt text. A question used by any attempt cannot be edited or deleted: the form opens read-only with "This question has been answered in a quiz attempt, so it can't be changed. Create a new question instead." and "Create a new question" (prefilled copy, saved as a new question). Deleting is offered only when the question is in no quiz and no attempt; a refusal shows the server message.
-- **Quiz editor:** kind (Placement diagnostic, Practice, Test), title, time limit (minutes and seconds, stored as seconds), ordered question list with add, remove, move up/down; publication. A summary line under the list states the questions' difficulty mix: "All questions are Easy. Learners can be recommended this quiz as Easy practice." for a uniform practice quiz, or "Mixed difficulty. This quiz is never recommended as practice, but learners can still take it." (ADR013 §19.4). Editing is possible only while the quiz is hidden and has never been attempted; otherwise the editor is read-only with "This quiz has attempts, so its questions and settings are fixed. Create a new quiz to change them." Publishing needs at least one question (the server refuses an empty quiz). Delete only hidden, never-attempted quizzes.
-- **Assignment editor:** title, instructions, deadline (date-time with timezone label; any instant may be set, including a past one), optional related lesson, publication. Owner list rows show submitted and graded counts.
+- **Question form:** kind (Single choice, Multiple choice, True/false); prompt (plain-text area, line breaks kept); options with "Correct" toggles (exactly one for single choice and true/false; at least one for multiple choice; True/False options fixed); skill (required); difficulty (Easy/Medium/Hard, required). No code-snippet field: predict-the-output programs go in the prompt text.
+- **Question eligibility is not observable in advance.** `B3Question` carries no usage information, so the bank cannot know whether a question has been answered in an attempt (which forbids replacing or deleting it) or belongs to a quiz (which forbids deleting it) (ADR007 §4). The form therefore opens editable, and "Delete question" is offered for every question with a confirmation. The server's response decides:
+  - **409 on save:** the draft stays on screen, unchanged and unsaved; an alert shows the server's detail and "This question can't be changed, for example because learners have answered it. Your edits are still here." with "Save as a new question" (creates a new question from the draft by POST, leaving the original untouched) and "Discard my edits". Quizzes that should use the new question must be edited separately.
+  - **409 on delete:** "This question can't be deleted, for example because it is in a quiz or has been answered." with the server's detail; nothing changes.
+  - **404:** "This question is no longer available." with "Back to the question bank"; a draft in progress is offered as "Save as a new question".
+  - Network failure or 500: the outcome is unknown; the form re-reads the question before offering another save, keeping the draft.
+- **Quiz editor:** kind (Placement diagnostic, Practice, Test), title, time limit (minutes and seconds, stored as seconds), ordered question list with add, remove, move up/down; publication. A summary line under the list states the questions' difficulty mix: "All questions are Easy. Learners can be recommended this quiz as Easy practice." for a uniform practice quiz, or "Mixed difficulty. This quiz is never recommended as practice, but learners can still take it." (ADR013 §19.4). Editability is only partly observable: `published` is returned, attempts are not (ADR007 §5). A **published** quiz opens read-only with "Hide this quiz to edit it. Quizzes that learners have already started can't be edited, even when hidden." and the publication action; a **hidden** quiz opens editable, and the server decides. A 409 on save keeps the draft and shows the server's detail with "This quiz can't be changed, for example because learners have started it. Your edits are still here." and "Create a new quiz from these settings" (POST of the draft as a new hidden quiz) or "Discard my edits". "Delete quiz" is offered only for hidden quizzes; a 409 shows "This quiz can't be deleted because learners have started it." with the server's detail. Publishing an empty quiz is refused by the server (409) and shown with its message. Network failure or 500: re-read before another save, keeping the draft.
+- **Assignment editor:** title, instructions (Markdown text area with the same "Preview" tab as the lesson editor, rendered under CT37.markdown once the renderer dependency is approved), deadline (date-time with timezone label; any instant may be set, including a past one), optional related lesson, publication. Owner list rows show submitted and graded counts.
 
 ### S20 Skill graph editor
 
@@ -2404,15 +2467,28 @@ lessons." with a secondary "Create course". Pagination below.
 
 - **Graph tab:** the S14 canvas in edit mode. Aside forms: "Add skill" (name, optional description); selected skill → edit name and description, "Prerequisites" multi-select of other course skills (the accessible way to create edges; drag-to-connect is an optional shortcut). A cycle or self-edge is rejected with the server's message in a rose alert at the form, and the graph stays unchanged. "Delete skill" only when unreferenced; a refusal shows the server message.
 - **Lesson mapping tab:** table of published and hidden lessons × skill chips (map/unmap).
-- **Adaptive mode tab:** policy form: "Weak below" and "Mastered at or above" as fractions (numerator / denominator), "Minimum questions per skill" (positive integer); the helper explains "Learners are classified from their latest quiz evidence for each skill." The stored values are shown as returned; none is prefilled by the design. A switch "Adaptive mode" and "Save settings". The requirements are listed as static guidance, not computed checks: every published lesson mapped to at least one skill; every skill with at least the minimum number of questions; a valid, acyclic graph; at least one skill and one published lesson (ADR005 §7.2). A refusal to enable (409) shows the server's message. Thresholds can change only before any learner has a submitted attempt or mastery state in the course; otherwise the server's 409 message is shown. Concurrent edits: a 412 shows "These settings were changed elsewhere. Reload to see the current values." with "Reload"; the form never resubmits automatically.
+- **Adaptive mode tab:** policy form: "Weak below" and "Mastered at or above" as fractions (numerator / denominator), "Minimum questions per skill" (positive integer); the helper explains "Learners are classified from their latest quiz evidence for each skill." The stored values are shown as returned; none is prefilled by the design. A switch "Adaptive mode" and "Save settings". The requirements are listed as static guidance, not computed checks: every published lesson mapped to at least one skill; every skill with at least the minimum number of questions; a valid, acyclic graph; at least one skill and one published lesson (ADR005 §7.2). A refusal to enable (409) shows the server's message. Thresholds can change only before any learner has a submitted attempt or mastery state in the course; otherwise the server's 409 message is shown.
+- **Settings write lifecycle** (ADR005 §§13, 15, 16.1; setup, Batch 1 handoff). The form keeps a *write snapshot*: the body and strong `ETag` of one successful current `GET /adaptive-settings`, never combined with any other response. Every save is one `PUT` with `If-Match` set to that snapshot's tag. A successful `PUT` returns the canonical body but no validator, so the snapshot is consumed by every save attempt. States:
+
+  | State | Trigger | Form behavior |
+  | --- | --- | --- |
+  | **Ready to write** | A successful GET produced a fresh body + tag pair | Fields show that body; "Save settings" enabled |
+  | **Saving** | PUT sent | Fields and "Save settings" disabled; status "Saving settings…" |
+  | **Save rejected** | 400, 409, or 428 (missing tag) | Nothing changed on the server. The draft stays; the server's detail is shown at the form; a 428 also refreshes the snapshot with a GET. "Save settings" is enabled again only when a valid snapshot exists |
+  | **Conflict** | 412 (the snapshot's tag no longer matches) | Nothing changed. The draft stays; a GET loads the current settings, and the form shows "These settings were changed elsewhere." with the current values beside the draft, field by field, and "Use current values" / "Keep my changes". Saving again is a new deliberate action against the new snapshot; nothing is replayed automatically |
+  | **Saved; refreshing** | PUT 200 | Status "Settings saved." The returned body is shown read-only; "Save settings" stays disabled while a GET obtains a new snapshot (it may show another writer's newer state) |
+  | **Saved; refresh failed** | PUT 200, then the GET fails or is cancelled | The save is **not** reported as undone. Status "Settings saved, but the current values couldn't be loaded." with "Reload settings"; "Save settings" stays disabled until a GET succeeds |
+  | **Unknown outcome** | Network failure or 500 on PUT | "We couldn't confirm whether your settings were saved." The draft stays; the form performs a GET and shows the current values for review; the PUT is never resent automatically |
+
+  The shared transport does not yet expose response headers such as `ETag`; that capability is a recorded implementation dependency (A14).
 
 ### S21 Grading
 
-**Contract:** Approved (CT10.grading/rest, CT09.rest, CT01-LEARNER-NAMES; CT16.routes). G4 resolved by design (D9-4). **Delivery:** Preview only. **Fidelity:** S. **Data:** `listOwnedCourses`, `b5ListOwnedAssignments`, `b5ListSubmissions`, `b5DownloadSubmission`, `b5GradeSubmission`.
+**Contract:** Approved (CT10.grading/rest, CT09.rest, CT01-LEARNER-NAMES; CT16.routes). G4 resolved with limitations (D9-4, D10-2; FE17 owner confirmation pending). **Delivery:** Preview only. **Fidelity:** S. **Data:** `listOwnedCourses`, `b5ListOwnedAssignments`, `b5ListSubmissions`, `b5DownloadSubmission`, `b5GradeSubmission`.
 
-- **Route identity.** The grading operations are addressed by course and assignment, which the approved paths do not carry. The list keeps the selection as query parameters, `/teach/grading?courseId=<uuid>&assignmentId=<uuid>`, and every grade link is `/teach/grading/:submissionId?courseId=<uuid>&assignmentId=<uuid>` (recommended names; owned by FE17 under CT16.routes). There is no read of a single submission, so the grade page finds its row in `b5ListSubmissions` for that assignment (page size 100, pages in order until found) and uses that row's `submittedAt` string unchanged. A missing identity or an absent row shows "Submission not available" with "Back to grading".
+- **Route identity.** The grading operations are addressed by course and assignment, which the approved paths do not carry. The list keeps the selection as query parameters, `/teach/grading?courseId=<uuid>&assignmentId=<uuid>`, and every grade link is `/teach/grading/:submissionId?courseId=<uuid>&assignmentId=<uuid>` (recommended by this file; owned by FE17 [#202] under CT16.routes; not confirmed by its owner as of 18 November 2026). There is no read of a single submission. The grade page therefore takes its submission row from the router's navigation state when it is opened from the submissions table (the row as received, including the exact `submittedAt` string). Without that context (pasted URL, reload in a new tab), it scans `b5ListSubmissions` for that assignment (page size 100, at most the page count of the first response, status "Loading submission…", cancelled when the page is left). Submissions are ordered by `submittedAt`, which a replacement moves (ADR010 §12), so an offset scan can miss a row that exists; **not finding it proves nothing**: the page shows "We couldn't find this submission in the current list. The list may have changed, for example because the learner replaced the file." with "Try again" and "Back to submissions", and grading stays unavailable until a row is loaded. A missing course or assignment identity shows "We can't open this submission from this link." with "Back to grading". The owner check stays on the server (403/404 per CT03). A guaranteed lookup would need a single-submission read (a CT10 amendment); this design does not require it.
 - **List** (`/teach/grading`): course select (owned courses), then that course's assignments with Deadline, Submitted (`submissionCount`), Graded (`gradedCount`) and "To grade" (= submitted − graded) → an assignment's submissions table: Learner (display name or "Name unavailable"), File, Submitted, Status (Graded mint / To grade butter), Grade. Ordered as returned (by submission time); no client-side filter of a page.
-- **Grade page** (Detail): learner, assignment, file row with "Download", submitted time; grade field (0–100, up to two decimals); feedback text area (required, plain text); "Save grade" (primary) with the F12 confirmation; for a graded submission the fields are prefilled and the action reads "Update grade". The request carries the submission's `submittedAt` exactly as received; a 409 reloads the row and says "The learner replaced the file after you opened it. Review the new file before grading."
+- **Grade page** (Detail): learner, assignment, file row with "Download", submitted time; grade field (0–100, up to two decimals); feedback text area (required, plain text); "Save grade" (primary) with the F12 confirmation; for a graded submission the fields are prefilled and the action reads "Update grade". The request carries the submission's `submittedAt` exactly as received; a 409 says "The learner replaced the file after you opened it. Review the new file before grading." and reloads the submissions table, keeping the draft grade and feedback on screen for the reviewed row.
 
 ### S22 Learner insights
 
@@ -2424,7 +2500,7 @@ lessons." with a secondary "Create course". Pagination below.
 
 ### S23 Platform overview
 
-**Contract:** Approved (CT13.metrics/reads/rest). **Delivery:** Preview only (backend Unmerged, PR #249). **Fidelity:** A. **Data:** `b7ListCourseMetrics`, `b7ReadCourseMetrics`.
+**Contract:** Approved (CT13.metrics/reads/rest). **Delivery:** Preview only (Course-side metric reads implemented by PR #249; the two Administrator REST operations are not implemented). **Fidelity:** A. **Data:** `b7ListCourseMetrics`, `b7ReadCourseMetrics`.
 
 Title "Platform overview". One surface with the per-course table (all courses,
 hidden ones marked with a Hidden pill): Course, Joined learners, Active,
@@ -2460,8 +2536,8 @@ buttons, the Theme button and a white "Create account" small pill. Below 600 px
 "Create account" and "Catalogue" are hidden (the hero holds "Create account" and
 "Browse courses"), so the header keeps the lockup, "Sign in" and the Theme button
 and never scrolls at 320 px. Ink hero:
-headline "Learn programming at the pace of what you actually know." (40 px, 56 px
-from 900 px), one supporting sentence in `chrome-muted`, white "Browse courses"
+headline "Learn programming at the pace of what you actually know." (the `display`
+step: 56 px, 40 px below 600 px), one supporting sentence in `chrome-muted`, white "Browse courses"
 pill and a `chrome-raised` "Create account" pill; beside it from 1200 px (below
 it otherwise) a `bg.canvas` `rounded.xl` card holding the example Mastery Map
 from fixed synthetic data, titled "Example map" and marked "Illustration · not
@@ -2474,17 +2550,30 @@ take the dark canvas and surface roles.
 
 ### S26 Design preview
 
-**Contract:** No contract needed (CT14 isolation: no request, no session read, no storage write). **Delivery:** Live. **Fidelity:** H.
+**Contract:** No contract needed; the CT14 isolation rule applies (no request, no session read, no storage write). **Delivery:** Live, with one recorded isolation defect (below, A13). **Fidelity:** H.
 
 `/preview` is the living reference of this system, loaded as a separate chunk
-that production journeys never fetch. It never reads the session or calls the
-API, never writes browser storage, and it does not create membership, progress or
-authentication data (FE07).
+that production journeys never fetch. **Intended behavior** (CT14, FE07): it
+never reads the session or calls the API, never writes browser storage, and never
+creates membership, progress or authentication data.
+
+**Observed on `main` `298b1de` (implementation defect, A13).** `App.tsx` mounts
+`AuthProvider` with `restoreOnLoad={false}` for a document opened at `/preview`,
+so no request is sent on load. The provider's `BroadcastChannel` handler,
+however, still calls `restore()` when another same-origin tab broadcasts
+`signed-in`, which sends `POST /api/auth/refresh` from the preview document
+(reproduced by the independent review; confirmed here by reading
+`frontend/src/app/providers/AuthProvider.tsx`). The preview therefore is not
+fully network-free today. The fix belongs to the frontend (FE owner of
+`AuthProvider.tsx`) and is out of scope for this documentation change.
+**Acceptance requirement:** with `/preview` open, a sign-in or sign-out in another
+tab produces no request from the preview document and does not install a session
+there; the existing preview suite gains that case.
 
 - **Index** (`/preview` or `?screen=overview`): "CodeMastery design preview" with a directory of every screen (live routes, then Learner, Instructor, Administrator, Public and account), each with its spec number and a Live (mint), Preview (sky) or Proposed (dashed outline) pill, followed by the design reference: colour tokens in both schemes side by side (role, light value, dark value), semantic families and mastery tags in both schemes, type scale, actions and inputs, states and tags, alerts, stat trio, composition (course tile, course mark samples, Path Spine, Guidance Stack, code block) and tables and feedback.
 - **Screens** open by link: `/preview?screen=<id>` (with `item` and `tab` where a screen needs them). Each renders in the production shell of its role with that role's navigation, sample persona and account menu, so it looks as it would when deployed.
 - **No preview chrome (7 November 2026, Leader decision):** no screen shows a sample-data banner, a workspace switcher, a standalone "Preview index" or "Reset sample data" button, an extra preview-only scheme toggle, or a "Simulate time running out" control. The production Theme control in each shell is not preview chrome.
-- **Where index, reset and theme live:** on screens rendered in a role shell, the logo returns to the index, and the account menu holds "Preview index" and "Reset sample data", and the Theme control sits in its production placement. Theme changes in the preview are in memory only ([Preview behavior](#preview-behavior)). Screens rendered without a role shell — landing, sign-in sample states, session-ended notice, forgot password, reset password, expired reset link and the quiz attempt — have no account menu and move within the preview through their own links; all but the quiz attempt show their own Theme button. Reloading resets the in-memory sample state and theme override.
+- **Where index, reset and theme live:** on screens rendered in a role shell, the logo returns to the index, and the account menu holds "Preview index" and "Reset sample data", and the Theme control sits in its production placement. Theme changes in the preview are in memory only ([Preview behavior](#preview-behavior)). Screens rendered without a role shell — landing, sign-in sample states, session-ended notice, forgot password, reset password, expired reset link and the quiz attempt — have no account menu and move within the preview through their own links; all of them show their own Theme button. Reloading resets the in-memory sample state and theme override.
 - **Remaining sample-data cues:** the index subtitle states that the screens use sample data (Principle 5), and some screens keep a neutral note naming the contract they stand in for. Those notes must name the current records (for example CT22, CT33, ADR012) rather than "pending" contracts once the preview is updated.
 
 ## Domain Presentation Rules
@@ -2532,9 +2621,9 @@ keyboard, zoom and screen-reader verification of the built UI.
 | Structure | `header`, `nav` (labelled), `main#main-content`, `aside` (labelled) landmarks; one `h1`; heading levels without gaps; lists for Path Spine, Guidance Stack, Q&A threads and the quiz navigator. |
 | Focus | Visible 2 px ring with 2 px offset: `focus.ring` on canvas grounds (`brand-600` light, `focus-on-chrome` dark), `focus-on-chrome` on the frame; ≥ 3:1 against every adjacent ground in both schemes. Never removed. Route change focuses the `h1` (existing); async updates never steal focus; dialog focus is trapped and returned; the theme menu keeps focus on the chosen item. |
 | Keyboard | Every action reachable by Tab; menus, radio groups and segmented controls use arrow keys; Escape closes overlays; the graph supports Tab/Enter/Escape and has the List view equivalent. |
-| Targets | Minimum 44 × 44 px for all interactive elements (WCAG 2.5.8 needs 24 px; the system uses 44). |
+| Targets | **Project standard:** every interactive element has a hit area of at least 44 × 44 px. Its visible shape may be smaller (36 px segments and clear buttons, 40 px small buttons, 20 px glyphs); the hit area is then extended with padding or an invisible extension centred on the visible shape, never overlapping a neighbouring target and never extending under text it does not own. Where layout cannot fit 44 px (none is specified in this file), WCAG 2.2 SC 2.5.8 (AA) still requires at least 24 × 24 px or equivalent spacing. The 44 px figure follows SC 2.5.5 (AAA) and is a project rule, not the AA minimum. Keyboard focus rings follow the visible shape. |
 | Colour | Never the only cue (state words + glyphs + dashed/hatched patterns). Text ≥ 4.5:1, large text and UI graphics ≥ 3:1, per the computed pairs in [Contrast verification](#contrast-verification) for **both** schemes. Forced-colours and increased-contrast modes per [Fallbacks and special modes](#fallbacks-and-special-modes). |
-| Theme control | Button with `aria-haspopup="menu"` and a name that states the preference (and the effective scheme for System); menu of `menuitemradio` items in a labelled group with `aria-checked`; drawer `radiogroup` with arrow keys; one polite status message per change; the System caption names the effective scheme in text; reachable by keyboard in every shell except the Focus bar. |
+| Theme control | Button with `aria-haspopup="menu"` and a name that states the preference (and the effective scheme for System); menu of `menuitemradio` items in a labelled group with `aria-checked`; drawer `radiogroup` with arrow keys; one polite status message per change; the System caption names the effective scheme in text; reachable by keyboard in every shell, including the quiz Focus bar, where opening it never affects the timer or the answers. |
 | Forms | Visible labels, `autocomplete`, errors linked by `aria-describedby`, error summary on submit, no placeholder-only labels. |
 | Live regions | Loading and status messages `role="status"`; errors `role="alert"` only for blocking failures; the quiz timer announces only its two threshold changes, never every second; quiz save status is polite. |
 | Reflow and zoom | Usable at 320 px width and 200% zoom without horizontal page scroll (tables scroll inside their surface). |
@@ -2547,7 +2636,7 @@ VoiceOver (Safari) and NVDA (Firefox or Chrome) pass of sign-in, catalogue,
 course detail and My courses; 320 px and 200% zoom checks; each check in the light
 and the dark scheme and once with System following an operating-system change;
 the Theme control operated by keyboard and screen reader in the workspace top
-bar, the drawer, the landing header and the auth layout;
+bar, the drawer, the landing header, the auth layout and the quiz Focus bar;
 automated checks in the existing optional browser harness where it applies.
 Report what actually ran; never mark a criterion as passed without evidence.
 
@@ -2624,7 +2713,7 @@ Unknown server errors are replaced by the generic patterns above.
 - Stack stays React 19.3.0 + TypeScript + Vite + MUI 9.4.0 + Emotion + React Router 7.18.4 + React Flow (`@xyflow/react` 12.12.0) (`frontend/package.json`). No new runtime dependency is introduced by this design: no icon package, chart library, graph layout library, drag-and-drop library, state store or theming library. The colour schemes use MUI's built-in colour-scheme and CSS-variable theming; verify its exact API in MUI 9.4.0.
 - Preserve every Live behavior: strict decoders, the ADR014 session lifecycle (restore, renewal, single flight, Web Lock and BroadcastChannel coordination, server sign-out, pending sign-out marker), generation and cancellation checks, no automatic mutation replay, one-use `/profile` return, route heading focus, failed-submit focus, dialog focus lifecycle, Learner-only `/my-courses`, public anonymous catalogue (CT16, FE07, ADR014 §7).
 - Keep feature state in its owning feature (CT16-FINAL F1). Shared code stays presentational. Practice-recommendation UI stays in `features/learning` (ADR013 §19.5).
-- New repository files (assets, new shared components, a theme hook file, an external first-paint script) are structural changes that need explicit approval under `docs/repository-structure.md`. Prefer the existing files listed below (`theme.ts`, `App.tsx`, `AppHeader.tsx`, `SidebarNav.tsx`, `AuthLayout.tsx`, `LandingPage.tsx`, `index.html`, `PresentationIcon.tsx`). The Theme control is a presentational component exported from the existing `AppHeader.tsx` (like `AccountMenu` and `HeaderIconButton`) and reused by `SidebarNav.tsx`, `AuthLayout.tsx` and the landing header; the preference state lives above the router in `App.tsx`. A separate file for it would need structure approval.
+- New repository files (assets, new shared components, a theme hook file, an external first-paint script) are structural changes that need explicit approval under `docs/repository-structure.md`. Prefer the existing files listed below (`theme.ts`, `App.tsx`, `AppHeader.tsx`, `SidebarNav.tsx`, `AuthLayout.tsx`, `LandingPage.tsx`, `index.html`, `PresentationIcon.tsx`). The Theme control is a presentational component exported from the existing `AppHeader.tsx` (like `AccountMenu` and `HeaderIconButton`) and reused by `SidebarNav.tsx`, `AuthLayout.tsx`, the landing header and the quiz attempt's Focus bar (`QuizAttemptPage.tsx`); the preference state lives above the router in `App.tsx`. A separate file for it would need structure approval.
 
 ### Approved API consumed today
 
@@ -2639,9 +2728,12 @@ Unknown server errors are replaced by the generic patterns above.
 | `GET`, `PUT`, `DELETE /api/courses/{courseId}/membership` | Course detail membership actions |
 | `GET /api/me/courses` (`page`, `size`, `status`) | My courses, Learner home |
 
-The two recovery operations are implemented in the backend but not consumed by
-the frontend yet. Every other operation each screen lists under **Data** is
-`APPROVED_NOT_IMPLEMENTED` in OpenAPI: build against exactly those shapes, never
+Eight more operations are implemented in the backend but not consumed by the
+frontend yet: the two recovery operations (AU07) and the six CT22 progress,
+completion and resume operations (PR #248: `getCourseProgress`,
+`completeCourseLesson`, `listMyCourseProgress`, `getCourseResume`,
+`recordCourseVisit`, `getMyResume`). Every other operation each screen lists
+under **Data** is `APPROVED_NOT_IMPLEMENTED` in OpenAPI: build against exactly those shapes, never
 against invented endpoints, fixtures or mock services in production code.
 
 ### Theme mapping (`frontend/src/app/theme/theme.ts`)
@@ -2701,14 +2793,14 @@ now has approved contracts and needs implementation authorization per Issue.
 | Phase | Scope | Gate |
 | --- | --- | --- |
 | 0 Foundations | Theme tokens and overrides, fonts, icons, shell, auth layout, status views, page header, dialog, `/preview` | Done 6–7 November 2026 |
-| 0b Colour schemes | Role migration of all themed components, dark scheme, preference and first-paint script, Theme control in every shell (top bar, drawer, landing header, auth layout), preview override, design reference in both schemes | This revision's specification; implementation authorization; visual verification in both schemes |
+| 0b Colour schemes | Role migration of all themed components, dark scheme, preference and first-paint script, Theme control in every shell (top bar, drawer, landing header, auth layout, Focus bar), preview override, design reference in both schemes | This revision's specification; implementation authorization; visual verification in both schemes |
 | 1 Approved flows | Sign in, Create account, Catalogue, Course detail + membership, My courses, Profile, Not found, Access denied, session lifecycle | Done (6 November; ADR014 on 17 November 2026) |
-| 2 Learning journey | Course workspace Path, Lesson, progress, resume, Markdown, video, file download, Learner home Final additions | CT22 backend (PR #248 unmerged), CT21/CT09/CT37 implementation, Markdown dependency decision |
-| 3 Assessment | Assessments list, quiz intro, attempt, result, history, assignment | CT04/CT23/CT10/CT09 implementation; FE10 confirms the result query parameter (G3) |
+| 2 Learning journey | Course workspace Path, Lesson, progress, resume, Markdown, video, file download, Learner home Final additions | Frontend for the CT22 operations implemented in PR #248; CT21/CT09/CT37 implementation, Markdown dependency decision |
+| 3 Assessment | Assessments list, quiz intro, attempt, result, history, assignment | CT04/CT23/CT10/CT09 implementation; FE10 owner confirmation of the recommended result query parameter (G3) |
 | 4 Adaptive | Diagnostic, Mastery Map, guidance, warnings, recommended practice | CT08/CT25/CT33/CT07 implementation; operational-risk acceptance of ADR011 §5 before exposure |
-| 5 Interaction | Q&A, reports, notifications | CT11/CT30 implementation (PR #250 unmerged) |
-| 6 Instructor | Teaching, editors, skill graph, grading, insights | CT21/CT05/CT06/CT23/CT10/CT33 implementation; FE17 confirms the grading query parameters (G4) |
-| 7 Administrator | Overview, users, courses, reports, audit | CT12/CT13/CT31/CT32 implementation (PR #249 unmerged) |
+| 5 Interaction | Q&A, reports, notifications | CT11/CT30 REST implementation (persistence started in PR #250) |
+| 6 Instructor | Teaching, editors, skill graph, grading, insights | CT21/CT05/CT06/CT23/CT10/CT33 implementation; FE17 owner confirmation of the recommended grading query parameters (G4); shared-transport ETag metadata for S20 (A14) |
+| 7 Administrator | Overview, users, courses, reports, audit | CT12/CT31/CT32 implementation; CT13 REST operations (Course-side reads done in PR #249) |
 | 8 Recovery | Forgot and reset password pages | FE06 implementation; deployment binding and exposure gates (ADR006 §10.4) |
 
 ### Acceptance criteria per implemented screen
@@ -2719,7 +2811,7 @@ now has approved contracts and needs implementation authorization per Issue.
 4. Keyboard-only completion of the primary action; visible focus throughout; route focus on `h1`.
 5. Text labels on every state; contrast pairs from [Contrast verification](#contrast-verification) in both schemes; 44 px targets.
 6. Domain wording from the terminology table; no raw enum values on screen; server reasons verbatim.
-7. Renders correctly in light, dark and System (including a live operating-system change) without reload, flash or layout shift; the Theme control is reachable from the screen's shell (except the quiz Focus bar), for visitors and every role.
+7. Renders correctly in light, dark and System (including a live operating-system change) without reload, flash or layout shift; the Theme control is reachable from the screen's shell, including the quiz Focus bar, for visitors and every role.
 8. Existing behavior tests still pass; incidental assertions (copy, structure) updated deliberately and listed in the PR.
 9. `npm test` and `npm run build` (which includes `npm run typecheck`) run in `frontend/` with their actual results reported.
 
@@ -2844,7 +2936,7 @@ UI/UX choices, distinct from the mandatory contract corrections in the
 | D8-5 | Floating surfaces in dark add a hairline outline (documented exception to Flat-At-Rest) | Shadows are not perceivable on dark grounds |
 | D8-6 | Two-dimensional status vocabulary (contract × delivery); status-free screen headings | Separates approval from implementation, as governance requires; keeps anchors stable when statuses change |
 | D8-7 | Difficulty tags are neutral; no difficulty colour coding | Avoids collision with mastery colours |
-| D8-8 | Quiz answers are saved on moving between questions and before submit, with a visible save status | Uses the approved full-set save to narrow the unsaved-answer window; it is a presentation choice, not the Leader-reserved mitigation decision of ADR011 §5 |
+| D8-8 | *Refined by D10-3 (r10).* Quiz answers are saved on moving between questions and before submit, with a visible save status | Uses the approved full-set save to narrow the unsaved-answer window; it is a presentation choice, not the Leader-reserved mitigation decision of ADR011 §5 |
 | D8-9 | Tooltips and toasts invert in dark (`mist-100` with ink text) | Ink tooltips disappear on graphite |
 | D8-10 | Code blocks in dark are a darker well (`graphite-980`) with a hairline, monochrome | Calm long-session reading; no highlighting dependency exists |
 | D8-11 | Prerequisite warnings link skill names to the Mastery Map instead of a client-chosen review lesson | The client must not select adaptive targets; the system's own remedial recommendation is shown separately |
@@ -2860,13 +2952,24 @@ within this file's design authority. D8-1, D8-2 and D8-4–D8-14 remain in force
 
 | ID | Decision | Rationale |
 | --- | --- | --- |
-| D9-1 | Theme control for every visitor on every page: Theme button first in the workspace top bar (≥ 900 px), segmented control in the drawer footer (< 900 px), Theme button in the landing header and the auth brand panel or header; no Theme group in the account menu; none in the quiz Focus bar | Leader override of D8-3; one placement per shell avoids competing selectors; the Focus bar stays free of distraction while the scheme still applies |
+| D9-1 | Theme control for every visitor on every page: Theme button first in the workspace top bar (≥ 900 px), segmented control in the drawer footer (< 900 px), Theme button in the landing header and the auth brand panel or header; no Theme group in the account menu; *amended by D10-1 (r10):* also in the quiz and diagnostic Focus bar (r9 had none there) | Leader override of D8-3; one placement per shell avoids competing selectors |
 | D9-2 | The Learner home Continue tile reads the resumed course's public syllabus once to show lesson and course titles; "Your courses" rows stay without lesson titles | Resolves G1 for the tile with an approved public operation and no per-row requests (CT16.learner-home §§1–2) |
-| D9-3 | The quiz intro (and result title) locate the Quiz's summary in the learner Quiz list | Resolves G2 with the approved list (ADR007 §7) instead of an invented single read |
-| D9-4 | Result and grading URLs carry the missing identities as query parameters (`quizId`; `courseId` and `assignmentId`), names recommended here and confirmed by FE10 and FE17; the grade page finds its submission in the assignment's submission list | Resolves G3 and G4 within CT16.routes, which leaves query parameters to the owning Issue; no route or API change |
+| D9-3 | *Amended by D10-2 (r10).* The quiz intro (and result title) locate the Quiz's summary in the learner Quiz list | Resolves G2 with the approved list (ADR007 §7) instead of an invented single read |
+| D9-4 | Result and grading URLs carry the missing identities as query parameters (`quizId`; `courseId` and `assignmentId`), names recommended here and pending confirmation by the FE10 (#195) and FE17 (#202) owners; the grade page finds its submission in the assignment's submission list (*amended by D10-2*) | Resolves G3 and G4 within CT16.routes, which leaves query parameters to the owning Issue; no route or API change |
 | D9-5 | Instructor Lesson Q&A screen specified as S18c (lesson select + S8a threads) | The approved route had no screen specification |
 | D9-6 | Learner detail results open the owner attempt result in a side sheet | `b3ReadOwnedAttemptResult` was approved but unused by any screen |
 | D9-7 | Landing header below 600 px keeps the lockup, "Sign in" and the Theme button | Makes room for the Theme control at 320 px; the hero already offers "Browse courses" and "Create account" |
+
+### Design decisions of r10 (18 November 2026)
+
+| ID | Decision | Rationale |
+| --- | --- | --- |
+| D10-1 | Theme button in the quiz and diagnostic Focus bar, right of the exit button; below 600 px the title and question counter move to the navigator strip | Leader decision for r10: theme selection everywhere, including attempts; placement keeps it away from the timer and "Submit quiz" (F06) |
+| D10-2 | Single-item lookups prefer navigation context, use an authoritative read where one exists (attempt history for Quizzes), and treat a failed bounded list scan as "couldn't find", never as absence | Offset pagination over mutable orderings can skip existing items (F05; ADR007 §7, ADR010 §12) |
+| D10-3 | Answers are also saved one second after the last change; unsaved answers stay in the attempt feature's memory for the document's life; returning offers explicit restore | Browser Back is a same-document `popstate` that a declarative router cannot block (F03; CT16.shell) |
+| D10-4 | Question and quiz editors decide editability from the mutation response, preserve drafts and offer explicit "save as new" | Usage and attempt existence are not in the read DTOs (F01; ADR007 §§4–5) |
+| D10-5 | Adaptive settings form follows an explicit seven-state write lifecycle with a body-and-tag snapshot | ADR005 N1/R1 validator-free PUT and mandatory fresh GET (F04) |
+| D10-6 | Interactive targets: 44 px hit area as a project rule, independent of the visible size; 24 px AA floor stated | Removes the conflict between visible sizes and the target rule (F11) |
 
 ### Contract reconciliation record (r8)
 
@@ -2875,7 +2978,7 @@ effective record. All are mandatory corrections.
 
 | r7 section and claim | Effective record | Correction in r8 |
 | --- | --- | --- |
-| Implementation status / Handoff: "There is no API for progress, resume, lesson content, … audit"; screens "Contract Pending" | OpenAPI (96 `APPROVED_NOT_IMPLEMENTED` operations); ADR005–ADR013 | Two-dimensional status; every screen lists its approved operations; "Contract Pending" retired |
+| Implementation status / Handoff: "There is no API for progress, resume, lesson content, … audit"; screens "Contract Pending" | OpenAPI (96 `APPROVED_NOT_IMPLEMENTED` operations at r8; 90 at r10); ADR005–ADR013 | Two-dimensional status; every screen lists its approved operations; "Contract Pending" retired |
 | F2, Handoff: memory-only session, "Reload loses the session", 15-minute non-sliding expiry ends the session | ADR014 §§6–7, supersession register §11 | Restore on load ("Restoring your session…"), silent renewal, cross-tab sign-in and sign-out, server sign-out; session-ended notice kept |
 | F1, sitemap: recovery "Proposed (CT02 deferred)" | ADR006 §9 (CT02 r1), §10 (AU07), ADR014 §6 | Approved · Preview only; fragment capture; verbatim acknowledgements; reset signs out other sessions |
 | S6: Final reads "not approved"; Continue tile and next-lesson titles | CT22.progress/resume, CT22-RESUME-SCHEMA, CT33.rest | Reads named; titles omitted (G1); Up next from `me/recommendations` verbatim, in returned order |
@@ -2900,31 +3003,60 @@ effective record. All are mandatory corrections.
 | Domain rules: recommendation types for learners include Test-out | ADR011 §§7, 9, 14, 15 | Learner: Continue, Remedial; Instructor history: Continue, Test-out, Remedial; mandatory mastery statement |
 | (absent) practice difficulty | Leader decision E02; CT07-PRACTICE-RECOMMENDATION; CT23-PRACTICE-PROFILES | "Recommended practice" guidance entry |
 
-### Known gaps and completeness audit (r9)
+### Known gaps and completeness audit (r9, revised r10)
 
-r8 recorded G1–G5. r9 re-verified each against OpenAPI, the owning record and
-the frontend source on `65d14ca`, and audited every screen, flow, shared
-component and handoff entry for further omissions.
+Dispositions use: **RESOLVED** (the design is complete and contract-compliant),
+**RESOLVED_WITH_LIMITATIONS** (complete, with a stated limitation or a pending
+owner confirmation), **IMPLEMENTATION_DEPENDENCY** (the design is complete; code
+must change), **CONTRACT_CHANGE_REQUIRED** (only a contract amendment would remove
+the limitation) and **UNRESOLVED**. A design description never makes an
+implementation dependency resolved.
 
-| ID | Finding and evidence | Classification | r9 action | Disposition |
-| --- | --- | --- | --- | --- |
-| G1 | `CourseProgressSummary` and `LearnerResumePosition` carry `nextLessonId` / `lessonId` but no lesson title (OpenAPI; ADR006 §§3, 7.2); CT16.learner-home §1 forbids one request per row; `learningTypes.ts` has only preview view models | Genuine contract gap for row titles; incomplete design for the tile | Continue tile titles from one `getPublishedCourse` read of the resumed course (D9-2); rows show "Next lesson" without a title | **Tile resolved by design.** Row titles: **residual, optional** — showing them needs a CT22 amendment adding the next Lesson's title to `CourseProgressSummary` (Course owner, Leader). The screen is complete without it |
-| G2 | No learner `GET` of one Quiz; `b3ListLearnerQuizzes` returns `B3QuizSummary` (title, kind, time limit, question count) for published Quizzes, pages of up to 100 (ADR007 §7); `quizApi.ts` is an empty file | Incomplete design specification (contract sufficient) | Intro and result title use a list lookup (D9-3); "Quiz not available" state | **Resolved by design.** A single-Quiz read would be a CT23 amendment; not required |
-| G3 | Approved route `/courses/:courseId/attempts/:attemptId` (CT16.routes) lacks the `quizId` path segment that `b3ReadAttemptResult` requires | Route inconsistency resolvable without a contract change | `?quizId=` on every result link; invalid-link state (D9-4) | **Resolved by design.** FE10 confirms the parameter name (Issue-owned under CT16.routes); no technical-contract decision needed |
-| G4 | `/teach/grading/:submissionId` lacks the course and assignment that `b5ListSubmissions`, `b5DownloadSubmission` and `b5GradeSubmission` require; no single-submission read exists; `gradingApi.ts` is an empty file | Route inconsistency plus incomplete design specification | `?courseId=&assignmentId=` on the list and grade page; row lookup in the submission list; "Submission not available" state (D9-4) | **Resolved by design.** FE17 confirms the parameter names; no technical-contract decision needed |
-| G5 | CT11.read admits any authenticated account, while CT16.routes guards `/notifications` for Learners and Instructors; no notification creator targets Administrators | Documentation inconsistency without user impact | None | **Recorded** for review; Administrators get no bell |
-| A1 | Theme selection limited to signed-in visitors (D8-3); public pages, auth and landing had no control | Design defect against the Leader's requirement | D9-1 across Themes, Components, IA, S1, S2, S16, S25, S26, Accessibility, Handoff | **Resolved** |
-| A2 | No component tokens for the drawer's on-chrome segmented control or the Theme button | Missing component tokens | Frontmatter `theme-button`, `segmented-control-on-chrome` (+ selected); contrast computed | **Resolved** |
-| A3 | Landing header could not fit an extra control at 320 px | Responsive defect | D9-7 | **Resolved** |
-| A4 | Instructor Lesson Q&A route (`/teach/courses/:courseId/qa`) had no screen specification | Missing screen specification | S18c (D9-5) | **Resolved** |
-| A5 | Owner attempt-result read (`b3ReadOwnedAttemptResult`) was unused | Missing UI for an approved operation | S22 side sheet (D9-6) | **Resolved** |
-| A6 | Left memberships linked to a workspace they cannot access | Navigation defect | S5: Left rows open course detail | **Resolved** |
-| A7 | Course workspace had no state for a Learner without an Active or Completed membership | Missing state | S7 access state | **Resolved** |
-| A8 | The diagnostic attempt route was unstated | Missing route mapping | S9 names the approved attempt path with `placementQuizId` | **Resolved** |
-| A9 | Theme control behavior during the ADR014 restore was undefined | Missing state | S1, F2, Theme selector: the control renders during restore | **Resolved** |
-| A10 | Preview view models diverge from the contracts (`QuestionView.code`, `ReviewItemView.correctLabels`, `SkillChangeView`, the `skippable` adaptive marker) | Preview discrepancy | Recorded in [Known source discrepancies](#known-source-discrepancies-reported-not-resolved-here) | **Implementation dependency** (FE08–FE12 replace them with contract types) |
-| A11 | The Assessment and grading API clients are empty files | Unimplemented feature | Recorded in implementation gates | **Implementation dependency** |
-| A12 | Every screen's states, Data lists and traceability rows re-checked after the edits above | Consistency audit | Page inventory, traceability and delivery tables updated | **Resolved**; no further gap found |
+| ID | Finding and evidence | r9/r10 action | Disposition |
+| --- | --- | --- | --- |
+| G1 | `CourseProgressSummary` and `LearnerResumePosition` return lesson IDs without titles (OpenAPI; ADR006 §§3, 7.2); CT16.learner-home §1 forbids one request per row | Continue tile titles from one `getPublishedCourse` read of the resumed course (D9-2); rows show "Next lesson" without a title | Tile **RESOLVED**; row titles **CONTRACT_CHANGE_REQUIRED** (optional CT22 amendment; the screen is complete without them) |
+| G2 | No learner read of a single Quiz; `b3ListLearnerQuizzes` is offset-paginated by title (ADR007 §7) | Navigation context, attempt history as the access check, bounded list scan that never asserts absence (D10-2) | **RESOLVED_WITH_LIMITATIONS**: a pasted intro URL may lack the time limit until start; a guaranteed lookup would need a CT23 single read (not required) |
+| G3 | `/courses/:courseId/attempts/:attemptId` (CT16.routes) lacks the `quizId` that `b3ReadAttemptResult` needs | `?quizId=` on every result link; invalid-link state (D9-4) | **RESOLVED_WITH_LIMITATIONS**: the parameter name is a recommendation pending the FE10 owner (#195); no contract change needed |
+| G4 | `/teach/grading/:submissionId` lacks course and assignment; no single-submission read; submissions ordered by a mutable `submittedAt` (ADR010 §12) | Query parameters (D9-4); navigation context; bounded scan that never asserts absence (D10-2) | **RESOLVED_WITH_LIMITATIONS**: names pending the FE17 owner (#202); a pasted grade URL can fail to find a replaced submission until retried; a guaranteed lookup would need a CT10 single read (not required) |
+| G5 | CT11.read admits any account; CT16.routes guards `/notifications` for Learners and Instructors; no creator targets Administrators | None | **RESOLVED_WITH_LIMITATIONS** (recorded documentation inconsistency, no user impact) |
+| A1 | Theme selection limited to signed-in visitors (D8-3) | D9-1, D10-1 across every shell | **RESOLVED** (design); building it is in A11's implementation scope |
+| A2 | Missing tokens for the Theme button and on-chrome segmented control | Frontmatter tokens; contrast computed | **RESOLVED** |
+| A3 | Landing header could not fit the Theme button at 320 px | D9-7 | **RESOLVED** |
+| A4 | Instructor Lesson Q&A route had no screen specification | S18c | **RESOLVED** |
+| A5 | Owner attempt-result read unused | S22 side sheet | **RESOLVED** |
+| A6 | Left memberships linked to an inaccessible workspace | S5 | **RESOLVED** |
+| A7 | No workspace state for non-members | S7 access state | **RESOLVED** |
+| A8 | Diagnostic attempt route unstated | S9 | **RESOLVED** |
+| A9 | Theme control during the ADR014 restore undefined | S1, F2, Theme selector | **RESOLVED** |
+| A10 | Preview view models carry fields no contract returns (`QuestionView.code`, `ReviewItemView.correctLabels`, `SkillChangeView`, `skippable`) | Recorded discrepancy | **IMPLEMENTATION_DEPENDENCY** |
+| A11 | `quizApi.ts`, `assignmentApi.ts`, `gradingApi.ts` are empty; no frontend consumer exists for 98 operations (90 unimplemented + 8 backend-only) | Implementation gates | **IMPLEMENTATION_DEPENDENCY** |
+| A12 | Inventory, Data lists and traceability re-checked after r9 and r10 edits | Tables updated | **RESOLVED** |
+| A13 | `/preview` sends `POST /api/auth/refresh` when another tab signs in (`AuthProvider.tsx` BroadcastChannel handler ignores `restoreOnLoad`) | S26 separates intended from observed behavior; acceptance requirement stated | **IMPLEMENTATION_DEPENDENCY** (frontend fix outside this PR) |
+| A14 | The shared transport cannot expose `ETag` to S20 (setup, Batch 1 handoff) | S20 lifecycle states | **IMPLEMENTATION_DEPENDENCY** |
+| A15 | In-app blocking of browser Back during an attempt needs a data router; CT16.shell approves a declarative `BrowserRouter` | D10-3 retention and explicit restore instead | **RESOLVED_WITH_LIMITATIONS**; blocking itself would be **CONTRACT_CHANGE_REQUIRED** (CT16.shell) and is not required |
+| A16 | Question usage and quiz attempt existence are not in the owner read DTOs | D10-4 refusal-driven editing | **RESOLVED_WITH_LIMITATIONS**; proactive eligibility would be **CONTRACT_CHANGE_REQUIRED** (CT23) and is not required |
+
+### Independent review remediation (r10)
+
+The independent Codex review of PR #252 at `0030d6e` returned `CHANGES_REQUIRED`
+with thirteen findings. Each was verified against the sources named; none was
+rejected.
+
+| Finding | Verified evidence | Change in r10 |
+| --- | --- | --- |
+| F01 (P2) authoring eligibility | `B3Question` has no usage field; `B3QuizOwned` has `published` but no attempt information (OpenAPI; ADR007 §§4–5) | S19, D10-4, A16 |
+| F02 (P2) assignment instructions | ADR010 §12: instructions "rendered under CT37.markdown"; feedback plain text (§9) | Code and Markdown content, S13, S19 |
+| F03 (P2) Back protection | CT16.shell approves a declarative `BrowserRouter` (no blocker); Back is a same-document `popstate`, not `beforeunload` | F6, S11, D10-3, A15 |
+| F04 (P2) settings write lifecycle | ADR005 §15 (validator-free PUT, mandatory fresh GET pair), §16.1; setup Batch 1 handoff | S20, D10-5, A14 |
+| F05 (P2) lookup absence | ADR007 §7 title order and ADR010 §12 `submittedAt` order with offset pages | S11, S12, S21, D10-2, G2, G4 |
+| F06 (P2) Focus bar exception | Leader decision for r10: theme selection during attempts | Theme selector, S11, Accessibility, D9-1, D10-1, Handoff |
+| F07 (P2) notification guarantees | ADR012 §8 after-commit, at most once; §19.5 "No document may describe notifications as guaranteed"; §6.4 reply notification in the same transaction | F9, F10, F12 |
+| F08 (P2) review provenance | GitHub API: #246 approved by `tihh647-ui` at `4bb1dd2`; #233/#236 Copilot comments; others none | Contract batches verified, Implementation gates |
+| F09 (P2) preview isolation | `AuthProvider.tsx`: the `signed-in` broadcast calls `restore()` regardless of `restoreOnLoad` | S26, F2, Preview behavior, Implementation status, A13 |
+| F10 (P3) contrast values | Recomputed from the token hex values; five r8 values plus `brand-400` on `graphite-900` came from a superseded draft canvas | Contrast verification (dark) |
+| F11 (P3) target sizes | Visible 36/40 px controls versus the 44 px rule | Accessibility, Buttons, Inputs, Tabs, Theme selector, D10-6 |
+| F12 (P3) display breakpoint | Typography and `theme.ts` change `display` at 600 px; S25 said 900 px | S25 |
+| F13 (P3) owner confirmation | Issues #195 and #202 have no comments or confirmation | S12, S21, D9-4, G3, G4, delivery and gate tables |
 
 ### Open questions (do not block design)
 
@@ -2938,7 +3070,7 @@ component and handoff entry for further omissions.
 8. Source of a course's language for course marks: the course API has no language field, so logos appear only when a course's own title or description names one language. A recorded language would need an API and data contract.
 9. Resolved 7 November 2026: no visual sample-data label on preview screens; the index subtitle names the sample data.
 10. Lesson titles in the Learner home "Your courses" rows (G1 residual): optional CT22 amendment. The Continue tile is resolved by D9-2.
-11. Confirmation of the recommended query-parameter names by FE10 (`quizId`, G3) and FE17 (`courseId`, `assignmentId`, G4). G2 is resolved by D9-3.
+11. Confirmation of the recommended query-parameter names by the FE10 owner (#195: `quizId`, G3) and the FE17 owner (#202: `courseId`, `assignmentId`, G4); neither Issue records a confirmation as of 18 November 2026.
 12. Resolved 18 November 2026: the Leader overrode D8-3; every visitor gets the Theme control on every page (D9-1).
 13. Rendered verification of the dark scheme with the real logos, course marks and React Flow canvas once implemented; values may be tuned within the verified contrast limits.
 
@@ -2950,24 +3082,25 @@ the design.
 
 | Area | Remaining gates | Owner source |
 | --- | --- | --- |
-| Colour schemes | Implementation authorization; role migration of the 47 files that import the light `color` constants; the Theme control in four shells; first-paint script placement (structure, CSP compatibility); rendered verification | This file; `docs/repository-structure.md` |
+| Colour schemes | Implementation authorization; role migration of the 47 files that import the light `color` constants; the Theme control in five shells (workspace top bar and drawer, landing header, auth layout, Focus bar); first-paint script placement (structure, CSP compatibility); rendered verification | This file; `docs/repository-structure.md` |
 | Password recovery | FE06 implementation; deployment binding (SMTP, sender, trusted origin); exposure gates and reset-specific residual-risk acceptance | ADR006 §§9.4, 10.4 |
-| Progress, resume, lessons, files | CT22 backend merge (PR #248); CT21/CT09/CT37 implementation; runtime privileges; Markdown dependency decision; video rights per asset | ADR006, ADR010 |
+| Progress, resume, lessons, files | CT22 frontend (backend done in PR #248; runtime grants `CT17-P6-PRIVILEGES-2026-11-17-r4` review-gated); CT21/CT09/CT37 implementation; runtime privileges; Markdown dependency decision; video rights per asset | ADR006, ADR010 |
 | Assessments | CT04/CT23/CT10 implementation; quiz scheduler configuration values (CT38.quiz-expiry); empty `quizApi.ts` and `assignmentApi.ts` clients; FE10 query parameter (G3) | ADR007, ADR010 |
 | Mastery, guidance, diagnostic, practice | CT08 integrated execution; operational risks of ADR011 §5 `PENDING_LEADER_RISK_ACCEPTANCE` before exposure; module-owner and LD-11 joint review | ADR011, ADR013 §19 |
-| Q&A, notifications, reports | CT11/CT30 implementation (PR #250 unmerged); reminder configuration values; runtime grants | ADR012 |
+| Q&A, notifications, reports | CT11/CT30 REST implementation (persistence in PR #250); reminder configuration values; runtime grants | ADR012 |
 | Instructor authoring and grading | CT21/CT05/CT06/CT23/CT10 implementation; empty `gradingApi.ts` client; FE17 query parameters (G4) | ADR005, ADR006, ADR007, ADR010 |
-| Administration and audit | CT12/CT13/CT31/CT32 implementation (PR #249 unmerged); CT12.user lock must revoke sessions (ADR014 §6 binding) | ADR012, ADR014 |
-| All | Independent and CODEOWNER review of ADR005–ADR014 (merged without approving reviews), required CI, verification, deployment authorization | Each record's retained gates |
+| Administration and audit | CT12/CT31/CT32 implementation and CT13 REST (Course-side reads in PR #249); CT12.user lock must revoke sessions (ADR014 §6 binding) | ADR012, ADR014 |
+| All | Independent and CODEOWNER review of ADR005–ADR014 (only PR #246 has an approving review, from the Infrastructure CODEOWNER; the Auth, Frontend and Leader reviews ADR014 §12 lists, and the reviews of the other records, remain outstanding), required CI, verification, deployment authorization | Each record's retained gates |
 
 ### Known source discrepancies (reported, not resolved here)
 
 - `docs/decisions/README.md` still lists ADR012, ADR013 and ADR014 as "PR open … pending protected integration"; they were merged by #244, #245 and #246 (see [Contract batches verified](#contract-batches-verified)).
-- `README.md` says OpenAPI "specifies the eight implemented operations on six paths" and that lesson, assessment, Mastery Map, notification, Instructor and Administrator screens wait "until their API contracts are approved"; on `65d14ca` OpenAPI has 108 operations (12 implemented) and those contracts are approved.
+- `README.md` says OpenAPI "specifies the eight implemented operations on six paths" and that lesson, assessment, Mastery Map, notification, Instructor and Administrator screens wait "until their API contracts are approved"; on `298b1de` OpenAPI has 108 operations (18 implemented) and those contracts are approved.
 - `docs/data-model.md` says used Questions are immutable and "edits create replacement Questions"; CT23.questions (ADR007 §4) refuses a used-question PUT (409) and requires an explicit new Question. This file follows ADR007.
 - `frontend/src/app/theme/theme.ts` still names revision r1 in its header comment; its values match the light scheme of this revision.
 - Preview components predate the contracts in several places, for example: the Teaching home shows a "Needs attention" aside, the question form has a "Code snippet (optional)" field, the quiz result shows "Skills updated", the notifications preview shows per-type tints and source links, and the preview Learner home shows deadline and result entries. They are Preview only and must follow this file when implemented.
 - Preview view models in `features/assessment/types/assessmentTypes.ts` and `features/learning/types/learningTypes.ts` carry fields no contract returns (`QuestionView.code`, `ReviewItemView.correctLabels`, `SkillChangeView`, the `skippable` adaptive marker); implementation must replace them with the OpenAPI shapes (A10).
+- `frontend/src/app/providers/AuthProvider.tsx` adopts another tab's sign-in in a document opened at `/preview` (`POST /api/auth/refresh`), contrary to the preview isolation rule (A13, [S26](#s26-design-preview)).
 - The preview `QuizTimer` announces "1 minutes left." when one minute remains at the butter threshold; [Progress](#progress) says "1 minute left.".
 - Architecture US-02 says leaving removes a course from My courses; FE07 keeps Left memberships visible under the Left and All filters while the default Joined filter excludes them. The design follows FE07.
 - CT16.routes guards `/notifications` for Learners and Instructors, while CT11.read admits any account (G5).
@@ -3011,6 +3144,7 @@ Verified by unit tests, the browser harness (Chromium and WebKit) and E2E.
 | Baseline | 2026-11-05 | Inventory and constraints; all visual decisions pending (OpenAI Codex) |
 | DESIGN-2026-11-06-r1 | 2026-11-06 | Full redesign specification under Leader delegation: visual system, IA, flows, screens, handoff (Claude Code with Impeccable) |
 | r1 amendments | 2026-11-07 | Typography (Google Sans Flex, JetBrains Mono, Poppins wordmark), logo palette, Brand and logo section, traced canvas reach (Leader instruction for PR #209) |
+| DESIGN-2026-11-18-r10 | 2026-11-18 | **Final Design Candidate**, independent-review remediation (Claude Code, Leader instruction of 18 November 2026, "PR #252 Independent Review Findings Verification & Complete Remediation"; pending a new independent review; no browser verification). All thirteen findings of the Codex review at `0030d6e` verified and corrected (F01–F13): refusal-driven question and quiz editing (D10-4); assignment instructions under CT37.markdown; accurate attempt-exit behavior with in-memory retention and explicit restore (D10-3); seven-state adaptive-settings write lifecycle (D10-5); non-authoritative bounded lookups with navigation context (D10-2); Theme button in the quiz Focus bar (D10-1); best-effort grading notifications; corrected review provenance (#246 approved by `tihh647-ui`); preview isolation defect recorded (A13); dark contrast values recomputed; hit-area rule (D10-6); `display` breakpoint at 600 px in S25; owner confirmations marked pending. Baseline refreshed to `main` `298b1de` (18 of 108 operations implemented; CT22 backend done, CT13 and Interaction partial). Gap register converted to explicit dispositions; A13–A16 added. r9 entry unchanged. |
 | DESIGN-2026-11-18-r9 | 2026-11-18 | **Final Design Candidate** remediation (Claude Code, Leader instruction of 18 November 2026, "Final DESIGN.md Remediation, Completeness Audit & Dedicated Pull Request"; pending review and integration; no browser verification). Global theme selection: the Leader's override of D8-3 is implemented as D9-1 — the Theme control in the workspace top bar (≥ 900 px), the mobile drawer footer (< 900 px), the landing header and the auth layout, for visitors and every role; removed from the account menu; preview-local in `/preview`; visitor choices kept after sign-in; new `theme-button` and `segmented-control-on-chrome` tokens with computed contrast. Completeness audit: G1 resolved for the Continue tile (D9-2) with a residual optional CT22 amendment for row titles; G2 resolved by a learner-list lookup (D9-3); G3 and G4 resolved by Issue-owned query parameters and a submission-list lookup (D9-4); new S18c Instructor Lesson Q&A (D9-5), owner attempt-result sheet in S22 (D9-6), landing header below 600 px (D9-7), Left-membership and workspace access states, diagnostic attempt route, theme behavior during session restore; A1–A12 register; preview view-model discrepancy recorded. Same `main` baseline `65d14ca`. r8 entry unchanged. |
 | DESIGN-2026-11-18-r8 | 2026-11-18 | **Final Design Candidate** (Claude Code, Leader instruction of 18 November 2026; pending review and integration; no browser verification). Contract reconciliation against `main` `65d14ca`: every S1–S26 screen and F1–F14 flow re-specified against ADR005–ADR013 (Batches 1–8, PRs #228–#245, merge state verified) and ADR014 (PR #246); two-dimensional status vocabulary (contract authority × delivery); contract batch table; per-screen Data lists of approved operations; hybrid session lifecycle (F2); password recovery; CT22 progress and resume semantics; CT04 attempt lifecycle with save-before-submit and server finalization; answer keys withheld; CT25 placement; ADR011 visible recommendations, fixed reasons and the mandatory mastery statement; E02 recommended practice; CT09/CT10 files and assignments; CT11 notifications; CT30 Q&A and reports; CT21/CT23/CT05/CT06 authoring; CT33 insights; CT12/CT13/CT31/CT32 administration; reconciliation record, gaps G1–G5, traceability table, implementation gates and new source discrepancies. Three-theme system: light (values unchanged), dark (new raw palette, semantic role tokens, per-scheme shadows, dark component tokens, contrast verified), system (live OS following); theme selector in the account menu; persistence, first-paint, multi-tab, preview isolation, forced-colours and print rules. Design decisions D8-1–D8-14. Screen headings no longer carry statuses (anchor change for S1–S26). Earlier entries unchanged. |
 | DESIGN-2026-11-08-r7 | 2026-11-08 | Aligned with the delegated technical decisions recorded the same day in `docs/setup.md`, `docs/data-model.md` and `docs/repository-structure.md`, with no visual change (Claude Code, Leader instruction of 8 November 2026): approved route map in the Sitemap (`†` marks approved, unregistered paths) with the activation rule; navigation destinations, active items and Instructor/Administrator start pages (Workspaces, Primary navigation, Top bar, F1); S6 Final scope; S15 message-only rows and F10; Markdown policy (Code and Markdown content, S18, Handoff); S19 replacement-question wording; shared Mastery Map location (Handoff); open questions 2, 5 and 6 resolved; Proposed status wording; a delegated-decisions table; two preview discrepancies recorded. Screen statuses are unchanged and nothing here is implemented. |
