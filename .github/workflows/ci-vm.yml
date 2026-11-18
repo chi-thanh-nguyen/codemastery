@@ -75,7 +75,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Build the backend image from this revision
-        run: docker build -q -t codemastery-backend:privilege-test backend >/dev/null
+        shell: bash
+        # Quiet on success. A `-q` build used to print only "Dockerfile:10 ... exit
+        # code: 1" on failure, so the step keeps the plain build log and prints its
+        # last 80 lines when the build fails: a Maven Wrapper download error, a
+        # dependency resolution error and a compile error then read differently.
+        # The exit status is Docker's own. No build argument carries a secret.
+        run: |
+          log="$(mktemp)"; status=0
+          BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:privilege-test backend >"$log" 2>&1 || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "docker build of backend failed (exit $status); last 80 lines of the build log:" >&2
+            tail -n 80 "$log" >&2
+          fi
+          rm -f "$log"
+          exit "$status"
       - name: Exercise real Auth, catalogue and membership under the approved matrix
         shell: bash
         run: exec bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
