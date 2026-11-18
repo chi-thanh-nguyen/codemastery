@@ -3825,6 +3825,46 @@ repository signature, so it does not compile against the old code.
 All F01–F05 regressions (PostgreSQL, Vitest, Playwright) pass again on this tree.
 `firefox-desktop` was not run (host limitation).
 
+## CO16 Course-owned reporting handoff verification — 17 November 2026
+
+CO16 ([#179](https://github.com/chi-thanh-nguyen/codemastery/issues/179),
+[PR #249](https://github.com/chi-thanh-nguyen/codemastery/pull/249)) implements the
+Course part of `CT13-METRICS-2026-11-15-r1` and `CT13-READS-2026-11-15-r1`
+([ADR012 §§13.1–13.2](decisions/012-batch-07-contract-approvals.md#13-ct13-reporting)):
+both `EnrollmentService.readEnrollmentMetrics` methods and the `CourseEnrollmentMetrics`
+record. They are actorless, read-only and `Propagation.MANDATORY`, so they run only
+inside the caller's transaction; the approved caller, Admin's `PlatformMetricsService`
+(IN12), opens one REPEATABLE READ transaction after admitting an Administrator. IN12,
+the Assessment and Adaptive reads and `GET /api/admin/metrics/courses…` are not part of
+this change, so no REST operation, OpenAPI shape or runtime caller is added.
+
+| Figure (ADR012 §13.1) | Implementation |
+| --- | --- |
+| `activeEnrollments`, `completedEnrollments`, `leftEnrollments` | Counts of stored statuses per Course, hidden and published |
+| `joinedLearnerIds` | Learners with `active` or `completed` status, one set-based query per page; internal only |
+| `completedLearners` | Joined learners whose CT22.progress `isComplete` holds: R = the Course's currently published Lessons, R nonempty and every R member has a `completed = true` row of that Enrollment; hidden Lessons never count, a zero-Lesson Course completes nobody, left learners are excluded |
+| Ordering and paging | Every Course by `title COLLATE "C"`, then `id`; CT18 page/size bounds; one aggregate statement per page plus one learner-ID statement |
+
+B7-O11's Course part is covered by `EnrollmentIntegrationTest`
+(`enrollmentMetricsFollowTheExactCt22CompletionRuleForEveryPopulation`,
+`enrollmentMetricsPagesEveryCourseInTitleCollateCThenIdOrderWithExactTotals`,
+`enrollmentMetricsRequireTheCallerTransaction`) on real PostgreSQL, including a
+self-audit regression (17 November 2026) proving that a progress row for another
+Course's published Lesson on the same page never completes a Course (it fails if the
+`r.course_id = m.course_id` guard is removed), and by the
+`EnrollmentServiceTest` mapping, validation, snapshot-consistency and transaction-
+attribute cases. Executed locally on the PR #249 working tree after merging `main`
+`78e783d`: `cd backend && ./mvnw -Dtest=EnrollmentServiceTest -Dit.test=EnrollmentIntegrationTest verify`
+ran 19 unit and 61 PostgreSQL integration tests with 0 failures or errors; the full
+`./mvnw verify` result is recorded in the pull request. These are local developer runs,
+not independent QA or CI evidence.
+
+Runtime grants: the reads use SELECT on `courses`, `chapters`, `lessons`,
+`enrollments` and `lesson_progress`. The first four are already in the effective
+matrix; `lesson_progress` SELECT is added by CO08's `CT17-P6-PRIVILEGES-2026-11-17-r4`
+(PR #248). No runtime caller exists until IN12, which must not be deployed before that
+grant is effective.
+
 ## Comprehensive audit remediation (A01) and main integration — 17 November 2026
 
 A comprehensive independent Codex audit of `b18d3cf` found F01–F05 and N01 fixed, and N02

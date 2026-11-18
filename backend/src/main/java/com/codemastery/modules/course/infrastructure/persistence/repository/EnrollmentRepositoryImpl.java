@@ -17,6 +17,57 @@ public class EnrollmentRepositoryImpl implements EnrollmentRepository {
     private final JdbcTemplate jdbc;
     public EnrollmentRepositoryImpl(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+    // CT13.reads. "scope" selects the Courses; every figure is aggregated once per Course. R is the set of
+    // currently published Lessons of the Course; a joined learner completes it when R is nonempty and every
+    // R member has a completed=true progress row of that learner's Enrollment (mastery_skipped implies it).
+    private static final String METRICS = "WITH scope AS (%s), "
+            + "required AS (SELECT ch.course_id, l.id AS lesson_id FROM public.lessons l "
+            + "JOIN public.chapters ch ON ch.id = l.chapter_id JOIN scope s ON s.id = ch.course_id "
+            + "WHERE l.publication_status = 'published'), "
+            + "required_total AS (SELECT course_id, count(*) AS total FROM required GROUP BY course_id), "
+            + "memberships AS (SELECT e.id, e.course_id, e.status FROM public.enrollments e JOIN scope s ON s.id = e.course_id), "
+            + "completed_required AS (SELECT m.id, count(*) AS done FROM memberships m "
+            + "JOIN public.lesson_progress p ON p.enrollment_id = m.id AND p.completed "
+            + "JOIN required r ON r.lesson_id = p.lesson_id AND r.course_id = m.course_id "
+            + "WHERE m.status IN ('active','completed') GROUP BY m.id) "
+            + "SELECT s.id, s.title, s.publication_status, "
+            + "count(m.id) FILTER (WHERE m.status = 'active') AS active_count, "
+            + "count(m.id) FILTER (WHERE m.status = 'completed') AS completed_count, "
+            + "count(m.id) FILTER (WHERE m.status = 'left') AS left_count, "
+            + "count(m.id) FILTER (WHERE m.status IN ('active','completed') AND t.total > 0 AND c.done = t.total) AS completed_learners "
+            + "FROM scope s LEFT JOIN required_total t ON t.course_id = s.id "
+            + "LEFT JOIN memberships m ON m.course_id = s.id LEFT JOIN completed_required c ON c.id = m.id "
+            + "GROUP BY s.id, s.title, s.publication_status, t.total "
+            + "ORDER BY s.title COLLATE \"C\" ASC, s.id ASC";
+
+    @Override public Page<EnrollmentMetricsRow> enrollmentMetrics(Pageable page) {
+        Long total = jdbc.queryForObject("SELECT count(*) FROM public.courses", Long.class);
+        var rows = jdbc.query(METRICS.formatted("SELECT id, title, publication_status FROM public.courses "
+                + "ORDER BY title COLLATE \"C\" ASC, id ASC LIMIT ? OFFSET ?"), EnrollmentRepositoryImpl::metricsRow,
+                page.getPageSize(), page.getOffset());
+        return new PageImpl<>(rows, page, total == null ? 0 : total);
+    }
+    @Override public Optional<EnrollmentMetricsRow> enrollmentMetrics(UUID courseId) {
+        return jdbc.query(METRICS.formatted("SELECT id, title, publication_status FROM public.courses WHERE id = ?"),
+                EnrollmentRepositoryImpl::metricsRow, courseId).stream().findFirst();
+    }
+    @Override public java.util.Map<UUID, java.util.Set<UUID>> joinedLearnerIds(java.util.Collection<UUID> courseIds) {
+        if (courseIds.isEmpty()) return java.util.Map.of();
+        var ids = java.util.List.copyOf(new java.util.LinkedHashSet<>(courseIds));
+        var learners = new java.util.HashMap<UUID, java.util.Set<UUID>>();
+        jdbc.query("SELECT course_id, user_id FROM public.enrollments WHERE status IN ('active','completed') AND course_id IN ("
+                + String.join(",", java.util.Collections.nCopies(ids.size(), "?")) + ")",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> learners.computeIfAbsent(rs.getObject("course_id", UUID.class),
+                        course -> new java.util.HashSet<>()).add(rs.getObject("user_id", UUID.class)), ids.toArray());
+        var result = new java.util.HashMap<UUID, java.util.Set<UUID>>();
+        learners.forEach((course, users) -> result.put(course, java.util.Set.copyOf(users)));
+        return java.util.Map.copyOf(result);
+    }
+    private static EnrollmentMetricsRow metricsRow(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
+        return new EnrollmentMetricsRow(rs.getObject("id", UUID.class), rs.getString("title"), rs.getString("publication_status"),
+                rs.getLong("active_count"), rs.getLong("completed_count"), rs.getLong("left_count"), rs.getLong("completed_learners"));
+    }
+
     @Override public boolean lockPublishedCourse(UUID courseId) {
         return !jdbc.queryForList("SELECT id FROM public.courses WHERE id = ? AND publication_status = 'published' FOR UPDATE",
                 UUID.class, courseId).isEmpty();

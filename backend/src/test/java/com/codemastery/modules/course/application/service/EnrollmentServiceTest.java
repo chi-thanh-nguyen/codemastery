@@ -60,6 +60,54 @@ class EnrollmentServiceTest {
         learner(); when(repository.lockPublishedCourse(course)).thenReturn(true); when(repository.find(actor, course)).thenReturn(Optional.empty());
         assertEquals("none", service.leave(course).status()); verify(repository, never()).insert(any()); verify(repository, never()).updateStatus(any(),any());
     }
+    // CO16 / CT13.reads (ADR012 §13): actorless Course-owned enrolment and completion figures.
+    private static EnrollmentRepository.EnrollmentMetricsRow metricsRow(UUID id, String title, String visibility, long active, long completed, long left, long done) {
+        return new EnrollmentRepository.EnrollmentMetricsRow(id, title, visibility, active, completed, left, done);
+    }
+    @Test void enrollmentMetricsPageMapsCountsAndJoinedLearnersWithoutIdentityOrWrites() {
+        UUID hidden = UUID.randomUUID(), published = UUID.randomUUID(), a = UUID.randomUUID(), b = UUID.randomUUID(), c = UUID.randomUUID();
+        var pageable = org.springframework.data.domain.PageRequest.of(1, 2);
+        when(repository.enrollmentMetrics(pageable)).thenReturn(new org.springframework.data.domain.PageImpl<>(java.util.List.of(
+                metricsRow(hidden, "Alpha", "hidden", 1, 1, 4, 1), metricsRow(published, "Beta", "published", 0, 0, 2, 0)), pageable, 5));
+        when(repository.joinedLearnerIds(java.util.List.of(hidden, published))).thenReturn(java.util.Map.of(hidden, java.util.Set.of(a, b)));
+        var page = service.readEnrollmentMetrics(1, 2);
+        assertEquals(1, page.page()); assertEquals(2, page.size()); assertEquals(5, page.totalElements()); assertEquals(3, page.totalPages());
+        assertEquals(new EnrollmentService.CourseEnrollmentMetrics(hidden, "Alpha", "hidden", 1, 1, 4, 1, java.util.Set.of(a, b)), page.content().get(0));
+        assertEquals(new EnrollmentService.CourseEnrollmentMetrics(published, "Beta", "published", 0, 0, 2, 0, java.util.Set.of()), page.content().get(1));
+        assertThrows(UnsupportedOperationException.class, () -> page.content().get(0).joinedLearnerIds().add(c));
+        verify(repository).enrollmentMetrics(pageable); verify(repository).joinedLearnerIds(java.util.List.of(hidden, published));
+        verifyNoMoreInteractions(repository); verifyNoInteractions(identities, access);
+    }
+    @Test void enrollmentMetricsForOneCourseIsEmptyWhenMissingAndMapsWhenPresent() {
+        UUID a = UUID.randomUUID();
+        when(repository.enrollmentMetrics(course)).thenReturn(Optional.empty());
+        assertEquals(Optional.empty(), service.readEnrollmentMetrics(course));
+        verify(repository, never()).joinedLearnerIds(any());
+        when(repository.enrollmentMetrics(course)).thenReturn(Optional.of(metricsRow(course, "Alpha", "published", 1, 0, 3, 0)));
+        when(repository.joinedLearnerIds(java.util.List.of(course))).thenReturn(java.util.Map.of(course, java.util.Set.of(a)));
+        assertEquals(Optional.of(new EnrollmentService.CourseEnrollmentMetrics(course, "Alpha", "published", 1, 0, 3, 0, java.util.Set.of(a))),
+                service.readEnrollmentMetrics(course));
+        verifyNoInteractions(identities, access);
+    }
+    @ParameterizedTest @org.junit.jupiter.params.provider.CsvSource({"-1,20", "0,0", "0,101"})
+    void enrollmentMetricsRejectsInvalidPagingBeforeAnyRead(int page, int size) {
+        assertThrows(com.codemastery.common.exception.BusinessRuleException.class, () -> service.readEnrollmentMetrics(page, size));
+        verifyNoInteractions(repository, identities, access);
+    }
+    @Test void enrollmentMetricsRejectsANullCourseAndAnInconsistentSnapshot() {
+        assertThrows(IllegalArgumentException.class, () -> service.readEnrollmentMetrics((UUID) null));
+        when(repository.enrollmentMetrics(course)).thenReturn(Optional.of(metricsRow(course, "Alpha", "published", 2, 0, 0, 0)));
+        when(repository.joinedLearnerIds(java.util.List.of(course))).thenReturn(java.util.Map.of(course, java.util.Set.of(UUID.randomUUID())));
+        assertThrows(IllegalStateException.class, () -> service.readEnrollmentMetrics(course));
+    }
+    @Test void enrollmentMetricsReadsAreMandatoryReadOnlyParticipantsOfTheCallerTransaction() throws Exception {
+        for (var signature : java.util.List.of(new Class<?>[]{int.class, int.class}, new Class<?>[]{UUID.class})) {
+            var transactional = EnrollmentService.class.getMethod("readEnrollmentMetrics", signature)
+                    .getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+            assertTrue(transactional.readOnly());
+            assertEquals(org.springframework.transaction.annotation.Propagation.MANDATORY, transactional.propagation());
+        }
+    }
     @Test void membershipReadUsesApprovedVisibilityCheckBeforeLookingUpCurrentLearner() {
         learner(); doThrow(new ResourceNotFoundException("Unavailable")).when(access).requireEnrolmentEligibility(course);
         assertThrows(ResourceNotFoundException.class, () -> service.membership(course)); verifyNoInteractions(repository);
