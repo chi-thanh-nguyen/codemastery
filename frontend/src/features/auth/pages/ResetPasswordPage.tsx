@@ -38,10 +38,16 @@ export interface ResetPasswordPageProps {
 /** F1 step 5: new password with the live CT01 checklist; success creates no session. */
 export function ResetPasswordPage({ onSubmit, state, signInLink, requestNewLink, notice, successMessage, failure = 'network', passwordError }: ResetPasswordPageProps) {
     const [password, setPassword] = useState(''), [confirm, setConfirm] = useState(''), [visible, setVisible] = useState(false), [errors, setErrors] = useState<Record<string, string>>({});
+    /** Set when a later submit fails the local check: the F14 alert then describes an earlier attempt and is hidden. */
+    const [failureSuperseded, setFailureSuperseded] = useState(false);
     const passwordInput = useRef<HTMLInputElement>(null), confirmInput = useRef<HTMLInputElement>(null), alert = useRef<HTMLDivElement>(null), submit = useRef<HTMLButtonElement>(null);
     const pending = state === 'submitting', afterBlur = useBlurRevalidation();
-    /** F1: on blur, only fields already in error are re-validated; the confirmation is checked against the current password. */
+    /**
+     * F1: on blur, only fields already in error are re-validated; the confirmation is checked against the current
+     * password. It reads the fields' current values, because a pointer-caused blur is applied after the press ends.
+     */
     const revalidate = () => setErrors((current) => {
+        const password = passwordInput.current?.value ?? '', confirm = confirmInput.current?.value ?? '';
         const next = { ...current };
         if (current.password) { const problem = passwordProblem(password); if (problem) next.password = problem; else delete next.password; }
         if (current.confirm && password === confirm) delete next.confirm;
@@ -76,13 +82,14 @@ export function ResetPasswordPage({ onSubmit, state, signInLink, requestNewLink,
             if (problem) next.password = problem;
             if (password !== confirm) next.confirm = mismatch;
             setErrors(next);
+            setFailureSuperseded(!!(next.password || next.confirm));
             if (next.password) { passwordInput.current?.focus(); return; }
             if (next.confirm) { confirmInput.current?.focus(); return; }
             // "Try again" leaves with its alert: keep keyboard focus on the (busy) submit button instead.
             if (document.activeElement !== passwordInput.current && document.activeElement !== confirmInput.current) submit.current?.focus();
             onSubmit(password);
         }}>
-            {state === 'error' && <RecoveryFailureAlert failure={failure} alertRef={alert} />}
+            {state === 'error' && !failureSuperseded && <RecoveryFailureAlert failure={failure} alertRef={alert} />}
             {Object.keys(errors).length > 0 && <RecoveryErrorSummary />}
             <Box><TextField inputRef={passwordInput} name="password" label="New password" type={visible ? 'text' : 'password'} autoComplete="new-password" required fullWidth value={password} onChange={(event) => setPassword(event.target.value)} onBlur={() => afterBlur(revalidate)}
                 error={!!errors.password} helperText={errors.password ?? 'At least 15 Unicode characters, at most 72 UTF-8 bytes.'}
@@ -90,8 +97,8 @@ export function ResetPasswordPage({ onSubmit, state, signInLink, requestNewLink,
                 <PasswordChecklist password={password} id="reset-password-rules" /></Box>
             <TextField inputRef={confirmInput} name="confirmPassword" label="Confirm new password" type={visible ? 'text' : 'password'} autoComplete="new-password" required fullWidth value={confirm} onChange={(event) => setConfirm(event.target.value)} onBlur={() => afterBlur(revalidate)} error={!!errors.confirm} helperText={errors.confirm} />
             <Button ref={submit} type="submit" variant="contained" fullWidth {...pendingSubmitProps(pending)}>{pending ? 'Resetting…' : 'Reset password'}</Button>
-            <PendingStatus message={pending ? 'Resetting your password…' : undefined} />
         </Box>
+        <PendingStatus message={pending ? 'Resetting your password…' : undefined} />
     </AuthLayout>;
 }
 

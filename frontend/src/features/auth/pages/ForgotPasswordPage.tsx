@@ -46,37 +46,60 @@ export function pendingSubmitProps(pending: boolean) {
         onClick: (event: { preventDefault(): void }) => event.preventDefault(),
     } : {};
 }
+/** A press: focus moves only as the default action of one of these, so every pointer-caused blur happens during one. */
+const pressEvents = ['pointerdown', 'mousedown', 'touchstart'] as const;
+/** The end of a press (or its abandonment); the click that a release completes is dispatched in the same task. */
+const releaseEvents = ['pointerup', 'mouseup', 'touchend', 'pointercancel', 'touchcancel', 'dragend'] as const;
+/** Interruptions after which no click can follow: a press whose release never arrives applies its re-validation here. */
+const documentInterrupts = ['keydown', 'contextmenu', 'visibilitychange'] as const;
 /**
- * F1 blur re-validation that cannot swallow a click. A pointer press on another control blurs the field before
- * that press completes; applying the re-validation at once (an error or the summary disappearing) would move
- * "Reset password" or "Send reset link" out from under the pointer, so the click would be lost. A blur caused by
- * a pointer is therefore applied just after the press is released (after its click); a keyboard blur at once.
+ * F1 blur re-validation that cannot swallow a click or a tap. Re-validation can remove an error or the summary,
+ * which moves "Reset password" or "Send reset link"; if that happens while the press that caused the blur is still
+ * in progress, the release lands on whatever is now under the pointer and the click is lost. With a mouse, focus
+ * moves on `mousedown` before `pointerup`; with touch, browsers release the pointer first and move focus on the
+ * compatibility `mousedown` that follows. So no single event order is assumed: while any press is in progress
+ * (pointer, mouse or touch), re-validation is queued, and the layout changes only at the first task boundary after a
+ * release when no press remains, which is after that release's click. A keyboard blur applies at once. Keyboard
+ * input, a context menu, the page or window losing focus, or pointer cancellation applies the queue, so an
+ * interrupted press never postpones validation indefinitely. Queued work must read current values, not render-time ones.
  */
 export function useBlurRevalidation() {
-    const pressed = useRef(false);
+    const pressing = useRef(false), queue = useRef<Array<() => void>>([]), flushTimer = useRef<number | undefined>(undefined);
     useEffect(() => {
-        const down = () => { pressed.current = true; }, up = () => { pressed.current = false; };
-        document.addEventListener('pointerdown', down, true);
-        document.addEventListener('pointerup', up, true);
-        document.addEventListener('pointercancel', up, true);
+        const flush = () => {
+            flushTimer.current = undefined;
+            if (pressing.current) return; // a new press began first; its release flushes
+            const work = queue.current;
+            queue.current = [];
+            work.forEach((run) => run());
+        };
+        const press = () => { pressing.current = true; };
+        const release = () => {
+            pressing.current = false;
+            flushTimer.current ??= window.setTimeout(flush, 0); // a task boundary, not a delay: after this release's click
+        };
+        const interrupt = () => { pressing.current = false; window.clearTimeout(flushTimer.current); flush(); };
+        for (const type of pressEvents) document.addEventListener(type, press, true);
+        for (const type of releaseEvents) document.addEventListener(type, release, true);
+        for (const type of documentInterrupts) document.addEventListener(type, interrupt, true);
+        window.addEventListener('blur', interrupt);
         return () => {
-            document.removeEventListener('pointerdown', down, true);
-            document.removeEventListener('pointerup', up, true);
-            document.removeEventListener('pointercancel', up, true);
+            for (const type of pressEvents) document.removeEventListener(type, press, true);
+            for (const type of releaseEvents) document.removeEventListener(type, release, true);
+            for (const type of documentInterrupts) document.removeEventListener(type, interrupt, true);
+            window.removeEventListener('blur', interrupt);
+            window.clearTimeout(flushTimer.current);
+            queue.current = [];
         };
     }, []);
     return useCallback((revalidate: () => void) => {
-        if (!pressed.current) { revalidate(); return; }
-        const release = () => {
-            document.removeEventListener('pointerup', release, true);
-            document.removeEventListener('pointercancel', release, true);
-            window.setTimeout(revalidate, 0); // the click that this release completes is dispatched first
-        };
-        document.addEventListener('pointerup', release, true);
-        document.addEventListener('pointercancel', release, true);
+        if (pressing.current) queue.current.push(revalidate); else revalidate();
     }, []);
 }
-/** Polite, visually hidden announcement of a pending request; empty otherwise, so each request is announced once. */
+/**
+ * Polite, visually hidden announcement of a pending request; empty otherwise, so each request is announced once.
+ * Render it outside the `aria-busy` form: assistive technology may hold back updates inside a busy subtree.
+ */
 export function PendingStatus({ message }: { message?: string }) {
     return <span role="status" className="cm-visually-hidden">{message}</span>;
 }
@@ -109,6 +132,8 @@ export interface ForgotPasswordPageProps {
 /** F1 step 4: one email field; the acknowledgement is identical for every input (no account enumeration). */
 export function ForgotPasswordPage({ onSubmit, state, signInLink, notice, acknowledgement, failure = 'network', emailError }: ForgotPasswordPageProps) {
     const [email, setEmail] = useState(''), [error, setError] = useState<string | null>(null);
+    /** Set when a later submit fails the local check: the F14 alert then describes an earlier attempt and is hidden. */
+    const [failureSuperseded, setFailureSuperseded] = useState(false);
     const input = useRef<HTMLInputElement>(null), alert = useRef<HTMLDivElement>(null), sent = useRef<HTMLDivElement>(null), submit = useRef<HTMLButtonElement>(null);
     const pending = state === 'submitting', afterBlur = useBlurRevalidation();
     useEffect(() => { if (emailError) { setError(emailError); input.current?.focus(); } }, [emailError]);
@@ -120,26 +145,27 @@ export function ForgotPasswordPage({ onSubmit, state, signInLink, notice, acknow
         {state === 'sent' ? <Box sx={{ display: 'grid', gap: 3 }}>
             <Alert ref={sent} tabIndex={-1} severity="success" role="status">{acknowledgement ?? passwordResetRequestedMessage}</Alert>
             <Box>{signInLink}</Box>
-        </Box> : <Box component="form" aria-label="Forgot password" aria-busy={state === 'submitting'} noValidate onSubmit={(event) => {
+        </Box> : <><Box component="form" aria-label="Forgot password" aria-busy={state === 'submitting'} noValidate onSubmit={(event) => {
             event.preventDefault();
             if (pending) return;
             const problem = emailProblem(email);
             setError(problem);
+            setFailureSuperseded(!!problem);
             if (problem) { input.current?.focus(); return; }
             // "Try again" leaves with its alert: keep keyboard focus on the (busy) submit button instead.
             if (document.activeElement !== input.current) submit.current?.focus();
             onSubmit(email);
         }} sx={{ display: 'grid', gap: 2.5 }}>
-            {state === 'error' && <RecoveryFailureAlert failure={failure} alertRef={alert} />}
+            {state === 'error' && !failureSuperseded && <RecoveryFailureAlert failure={failure} alertRef={alert} />}
             {error && <RecoveryErrorSummary />}
             <TextField inputRef={input} name="email" label="Email address" type="email" autoComplete="email" required fullWidth value={email}
                 onChange={(event) => setEmail(event.target.value)} error={!!error} helperText={error}
-                // F1: a field already in error is re-validated when it loses focus.
-                onBlur={() => afterBlur(() => setError((current) => current && emailProblem(email)))} />
+                // F1: a field already in error is re-validated when it loses focus (reading the field's current value).
+                onBlur={() => afterBlur(() => setError((current) => current && emailProblem(input.current?.value ?? '')))} />
             <Button ref={submit} type="submit" variant="contained" fullWidth {...pendingSubmitProps(pending)}>{pending ? 'Sending…' : 'Send reset link'}</Button>
-            <PendingStatus message={pending ? 'Sending the reset link…' : undefined} />
             <Typography sx={{ color: 'text.secondary' }}>Remembered it? {signInLink}</Typography>
-        </Box>}
+        </Box>
+        <PendingStatus message={pending ? 'Sending the reset link…' : undefined} /></>}
     </AuthLayout>;
 }
 

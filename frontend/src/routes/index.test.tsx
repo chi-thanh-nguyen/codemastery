@@ -546,7 +546,7 @@ describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
         expect(host.querySelector('[role="status"]')?.textContent).toBe('Resetting your password…');
         await act(async () => release(problem(500, 'Internal Server Error', '/api/auth/password-resets')));
         expect(document.activeElement).toBe(host.querySelector('[role="alert"]'));
-        expect(host.querySelector('form [role="status"]')?.textContent).toBe('');
+        expect(host.querySelector('main span[role="status"]')?.textContent).toBe('');
         // "Try again" disappears with its alert; focus stays on the busy submit button rather than the page.
         respond((path) => path === '/api/auth/password-resets' ? new Promise<Response>((resolve) => { release = resolve; }) : undefined);
         const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((element) => element.textContent === 'Try again')!;
@@ -568,5 +568,94 @@ describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
         expect(calls('/api/auth/password-reset-requests')).toHaveLength(1);
         await act(async () => release(json({ message: requested }, 202)));
         expect(document.activeElement?.textContent).toBe(requested);
+    });
+    /**
+     * A tap as browsers deliver it: the pointer is released first, then, in a later task, the compatibility
+     * `mousedown` moves focus (blurring the corrected field), followed by `mouseup` and `click`. jsdom has no layout, so
+     * the hit test is modelled: once the summary has disappeared, the button has moved up and a tap on its lower half
+     * lands on `main` instead (as measured in Chrome and WebKit touch emulation).
+     */
+    async function tapLowerHalf(button: HTMLButtonElement, blurred: HTMLInputElement) {
+        const hit = () => summary() ? button : host.querySelector('main')!;
+        await act(async () => {
+            button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+            button.dispatchEvent(new Event('touchstart', { bubbles: true }));
+            button.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch' }));
+            button.dispatchEvent(new Event('touchend', { bubbles: true }));
+        });
+        await act(async () => { vi.advanceTimersByTime(0); }); // the task boundary before the compatibility mouse events
+        // React commits a blur's update before the next browser event, so `mouseup` is dispatched in a separate act().
+        await act(async () => { button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); blurred.blur(); });
+        await act(async () => {
+            const target = hit();
+            target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            if (target === button) button.click(); else target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+        await act(async () => { vi.advanceTimersByTime(0); });
+    }
+    it('submits on the first tap after a correction: a touch blur re-validates only after the tap (reset page)', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset(newPassword, 'different'); await submit();
+        expect(summary()).toBeTruthy();
+        await change('confirmPassword', newPassword);
+        await tapLowerHalf(host.querySelector<HTMLButtonElement>('button[type="submit"]')!, field('confirmPassword'));
+        expect(calls('/api/auth/password-resets')).toHaveLength(1);
+        expect(host.querySelector('h1')?.textContent).toBe('Password updated');
+    });
+    it('submits on the first tap after a correction on the request page', async () => {
+        respond((path) => path === '/api/auth/password-reset-requests' ? json({ message: requested }, 202) : undefined);
+        await mount('/forgot-password');
+        await change('email', 'missing-at'); await submit();
+        await change('email', 'learner@example.com');
+        await tapLowerHalf(host.querySelector<HTMLButtonElement>('button[type="submit"]')!, field('email'));
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(1);
+        expect(host.textContent).toContain(requested);
+    });
+    it('re-validates a blur from a tap that does not submit once the tap ends, with the current value', async () => {
+        respond(() => undefined);
+        await mount('/forgot-password');
+        await change('email', 'missing-at'); await submit();
+        await act(async () => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); field('email').blur(); });
+        expect(field('email').getAttribute('aria-invalid')).toBe('true'); // still pressed: nothing moves yet
+        await change('email', 'learner@example.com'); // the value read when the queue runs, not the one at blur time
+        await act(async () => { document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); vi.advanceTimersByTime(0); });
+        expect(field('email').getAttribute('aria-invalid')).toBe('false'); expect(summary()).toBeUndefined();
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(0);
+    });
+    it.each([
+        ['the window losing focus', () => window.dispatchEvent(new Event('blur'))],
+        ['keyboard input', () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))],
+        ['a context menu', () => document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }))],
+        ['a cancelled pointer', () => { document.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true })); vi.advanceTimersByTime(0); }],
+    ])('applies a re-validation held by a press whose release never arrives after %s', async (_case, interrupt) => {
+        respond(() => undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset(newPassword, 'different'); await submit();
+        await change('confirmPassword', newPassword);
+        await act(async () => { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); field('confirmPassword').blur(); });
+        expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('true');
+        await act(async () => { interrupt(); });
+        expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('false'); expect(summary()).toBeUndefined();
+    });
+    it('hides an earlier F14 failure when a later submit fails the local check, and shows the next failure', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? problem(500, 'Internal Server Error', path) : undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset(); await submit();
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('Something went wrong on our side.');
+        await change('password', 'short'); await submit();
+        expect(host.querySelector('[role="alert"]')).toBeNull(); expect(summary()).toBeTruthy();
+        expect(document.activeElement).toBe(field('password'));
+        await change('password', newPassword); await submit();
+        expect(calls('/api/auth/password-resets')).toHaveLength(2);
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('Something went wrong on our side.');
+    });
+    it('keeps the pending announcement outside the busy form', async () => {
+        respond((path) => path === '/api/auth/password-reset-requests' ? new Promise<Response>(() => undefined) : undefined);
+        await mount('/forgot-password'); await change('email', 'learner@example.com'); await submit();
+        expect(host.querySelector('form')?.getAttribute('aria-busy')).toBe('true');
+        expect(host.querySelector('form [role="status"]')).toBeNull();
+        expect(host.querySelector('[aria-busy="true"] [role="status"]')).toBeNull();
+        expect(host.querySelector('main span[role="status"]')?.textContent).toBe('Sending the reset link…');
     });
 });
