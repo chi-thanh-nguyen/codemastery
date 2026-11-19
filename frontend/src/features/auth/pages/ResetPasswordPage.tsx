@@ -5,13 +5,18 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { AuthLayout } from '../../../layouts/AuthLayout';
 import { PasswordChecklist } from '../components/RegisterForm';
 import { PasswordVisibility } from './LoginPage';
-import { RecoveryFailureAlert, recoveryFailureOf } from './ForgotPasswordPage';
+import { RecoveryFailureAlert, recoveryFailureOf, recoveryLinkSx } from './ForgotPasswordPage';
 import type { RecoveryFailure } from './ForgotPasswordPage';
 import { confirmPasswordReset } from '../api/authApi';
 import { passwordResetCompletedMessage } from '../types/authTypes';
 import { ApiError } from '../../../shared/types/apiTypes';
 
 const passwordRule = 'Use at least 15 Unicode characters and at most 72 UTF-8 bytes.';
+/** The page changes in place, so focus moves to its new title (made focusable the way route focus does). */
+function focusTitle() {
+    const heading = document.querySelector<HTMLElement>('main h1');
+    if (heading) { heading.tabIndex = -1; heading.focus(); }
+}
 
 export interface ResetPasswordPageProps {
     onSubmit: (password: string) => void;
@@ -23,7 +28,7 @@ export interface ResetPasswordPageProps {
     successMessage?: string;
     /** Which F14 failure the error state reports (default: network). */
     failure?: RecoveryFailure;
-    /** A password error returned by the request (the API's field error or the local CT01 check). */
+    /** A password error from the local CT01 check in the API client (the API itself returns no field errors). */
     passwordError?: string;
 }
 
@@ -34,8 +39,7 @@ export function ResetPasswordPage({ onSubmit, state, signInLink, requestNewLink,
     useEffect(() => { if (passwordError) { setErrors((current) => ({ ...current, password: passwordError })); passwordInput.current?.focus(); } }, [passwordError]);
     useEffect(() => {
         if (state === 'error') alert.current?.focus();
-        // The page changes in place, so move focus to its new title.
-        if (state === 'done' || state === 'expired') document.querySelector<HTMLElement>('main h1')?.focus();
+        if (state === 'done' || state === 'expired') focusTitle();
     }, [state]);
     if (state === 'expired') {
         return <AuthLayout title="This reset link is invalid or has expired." subtitle="Request a new link from the sign-in page." notice={notice}>
@@ -80,12 +84,16 @@ function capabilityFrom(hash: string): string | null {
     const token = new URLSearchParams(hash.replace(/^#/, '')).get('token');
     return token && capability.test(token) ? token : null;
 }
+const suppliesCapability = (hash: string) => new URLSearchParams(hash.replace(/^#/, '')).has('token');
 
 /**
  * `/reset-password#token=…` (CT16.routes, anonymous; ADR006 §9.3). The capability is read once into
  * component memory and the history entry is replaced with `/reset-password` before paint and before
  * any request, so it never stays in the address bar, the router location, the DOM, storage or logs.
- * A reload therefore has no capability and shows the invalid-link state.
+ * A reload therefore has no capability and shows the invalid-link state. A link opened later in the same tab
+ * (a same-document fragment navigation, which does not reload the page) replaces the held capability: any
+ * request for the previous one is abandoned and the form starts again, or the invalid-link state shows when
+ * the new capability is malformed. A fragment without `token` leaves the held capability unchanged.
  *
  * ADR006 §9.3 Referrer-Policy: React hoists the `no-referrer` meta into the document head on the first
  * commit, before any request. Browsers apply it to the rest of this document, also after the meta is
@@ -94,21 +102,35 @@ function capabilityFrom(hash: string): string | null {
  */
 export function ResetPasswordRoute() {
     const location = useLocation(), navigate = useNavigate();
-    const [token] = useState(() => capabilityFrom(location.hash));
+    const [token, setToken] = useState(() => capabilityFrom(location.hash));
     const [state, setState] = useState<ResetPasswordPageProps['state']>(token ? 'idle' : 'expired');
     const [successMessage, setSuccessMessage] = useState<string>(), [failure, setFailure] = useState<RecoveryFailure>('network');
     const [passwordError, setPasswordError] = useState<string>();
+    /** Increments when a later link replaces the capability; it remounts the page so no field value carries over. */
+    const [link, setLink] = useState(0);
     const work = useRef<AbortController | null>(null);
+    /** The fragment already consumed: the one read at mount, then each later one (StrictMode re-runs see no change). */
+    const consumed = useRef(location.hash);
     useLayoutEffect(() => {
+        if (location.hash !== consumed.current) {
+            consumed.current = location.hash;
+            if (suppliesCapability(location.hash)) {
+                const next = capabilityFrom(location.hash);
+                work.current?.abort(); work.current = null; // never apply an answer for the replaced capability
+                setToken(next); setState(next ? 'idle' : 'expired');
+                setSuccessMessage(undefined); setPasswordError(undefined); setFailure('network'); setLink((value) => value + 1);
+            }
+        }
         if (location.hash || location.search) navigate('/reset-password', { replace: true });
     }, [location.hash, location.search, navigate]);
+    useEffect(() => { if (link) focusTitle(); }, [link]);
     useEffect(() => () => work.current?.abort(), []);
-    return <><meta name="referrer" content="no-referrer" /><ResetPasswordPage state={state} successMessage={successMessage} failure={failure} passwordError={passwordError}
+    return <><meta name="referrer" content="no-referrer" /><ResetPasswordPage key={link} state={state} successMessage={successMessage} failure={failure} passwordError={passwordError}
         signInLink={<Button component={Link} to="/login" variant="contained" fullWidth>Sign in</Button>}
-        requestNewLink={<Box sx={{ display: 'grid', gap: 1.5 }}>
+        requestNewLink={<Box sx={{ display: 'grid', gap: 2 }}>
             <Button component={Link} to="/forgot-password" variant="contained" fullWidth>Request a new link</Button>
             <Typography variant="body2" sx={{ textAlign: 'center', color: 'text.secondary' }}>
-                <TextLink component={Link} to="/login" sx={{ fontWeight: 600 }}>Back to sign in</TextLink>
+                <TextLink component={Link} to="/login" sx={recoveryLinkSx}>Back to sign in</TextLink>
             </Typography>
         </Box>}
         onSubmit={async (password) => {
@@ -121,11 +143,13 @@ export function ResetPasswordRoute() {
                 setSuccessMessage(result.message); setState('done');
             } catch (error) {
                 if (controller.signal.aborted || error instanceof ApiError && error.kind === 'cancelled') return;
-                if (error instanceof ApiError && (error.kind === 'validation' || error.status === 400) && error.fields.password) {
-                    // A password-rule refusal keeps the capability (the server does not consume it).
+                if (error instanceof ApiError && error.kind === 'validation') {
+                    // The API client's CT01 check refused the password before any request; the capability is kept.
                     setPasswordError(passwordRule); setState('idle');
                 } else if (error instanceof ApiError && error.status === 400) {
-                    // CT02's generic 400: invalid, used, replaced or expired capability.
+                    // Every AU07 400 here is field-free. The page sends only a well-formed capability and a password
+                    // that passed the identical CT01 predicate, so a 400 is CT02's generic invalid, used, replaced or
+                    // expired capability, shown as the F1 invalid-link state.
                     setState('expired');
                 } else {
                     setFailure(recoveryFailureOf(error)); setState('error');

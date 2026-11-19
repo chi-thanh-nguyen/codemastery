@@ -285,9 +285,15 @@ it('shows Learner home empty and retryable error states', async () => {
 describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
     const token = `${'Q'.repeat(42)}w`, newPassword = '  a new exact password  ';
     const requested = 'If an account matches, a password reset link will be sent.', completed = 'Password reset. Sign in with your new password.';
-    const problem = (status: number, title: string, instance: string, errors?: unknown) => new Response(JSON.stringify({
-        type: 'about:blank', title, status, detail: 'Reset link is invalid or expired.', instance, ...(errors ? { errors } : {}),
+    /** AU07 problems are field-free (BusinessRuleException); only the detail differs, and the client never shows it. */
+    const problem = (status: number, title: string, instance: string, detail = 'The request could not be completed.') => new Response(JSON.stringify({
+        type: 'about:blank', title, status, detail, instance,
     }), { status, headers: { 'Content-Type': 'application/problem+json' } });
+    const tokenB = `${'R'.repeat(42)}A`;
+    /** A link opened in a tab already showing the page: a same-document fragment navigation (no reload). */
+    async function openInSameTab(path: string) {
+        await act(async () => { window.history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')); });
+    }
     /** Records where the page was when each request left, so capability erasure can be ordered against it. */
     let seen: { path: string; href: string; body?: string; referrerPolicy?: string | null }[];
     function respond(handler: (path: string) => Response | Promise<Response> | undefined) {
@@ -360,17 +366,69 @@ describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
             expect(host.querySelector('a[href="/forgot-password"]')?.textContent).toBe('Request a new link');
             expect(calls('/api/auth/password-resets')).toHaveLength(0); expect(host.innerHTML).not.toContain(token);
         });
-    it('treats the generic 400 as an invalid link but keeps a password-rule 400 on the form', async () => {
-        let answer = problem(400, 'Bad Request', '/api/auth/password-resets', [{ field: 'password', code: 'StrongPassword', message: 'private' }]);
-        respond((path) => path === '/api/auth/password-resets' ? answer : undefined);
+    it.each([
+        ['an invalid, used, replaced or expired capability', 'Reset link is invalid or expired.'],
+        ['any other field-free AU07 400', 'The request is invalid.'],
+    ])('shows the invalid-link state for the producer 400 for %s', async (_case, detail) => {
+        respond((path) => path === '/api/auth/password-resets' ? problem(400, 'Bad Request', path, detail) : undefined);
         await mount(`/reset-password#token=${token}`); await fillReset(); await submit();
-        expect(host.querySelector('h1')?.textContent).toBe('Reset password');
-        expect(host.textContent).toContain('Use at least 15 Unicode characters and at most 72 UTF-8 bytes.');
-        expect(document.activeElement).toBe(host.querySelector('input[name="password"]'));
-        answer = problem(400, 'Bad Request', '/api/auth/password-resets'); await submit();
         expect(host.querySelector('h1')?.textContent).toBe('This reset link is invalid or has expired.');
+        expect(host.textContent).not.toContain(detail);
         expect(document.activeElement).toBe(host.querySelector('main h1'));
-        expect(calls('/api/auth/password-resets')).toHaveLength(2);
+        expect(calls('/api/auth/password-resets')).toHaveLength(1);
+    });
+    it('replaces the capability when a new link opens in the same tab after a reset', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount(`/reset-password#token=${token}`); await fillReset(); await submit();
+        expect(host.querySelector('h1')?.textContent).toBe('Password updated');
+        await openInSameTab(`/reset-password#token=${tokenB}`);
+        expect(window.location.pathname + window.location.search + window.location.hash).toBe('/reset-password');
+        expect(host.querySelector('h1')?.textContent).toBe('Reset password'); expect(document.activeElement).toBe(host.querySelector('main h1'));
+        expect(host.querySelector<HTMLInputElement>('input[name="password"]')?.value).toBe('');
+        await fillReset(); await submit();
+        expect(calls('/api/auth/password-resets').map((entry) => JSON.parse(entry.body!).token)).toEqual([token, tokenB]);
+        expect(document.documentElement.innerHTML).not.toContain(tokenB); expect(JSON.stringify(window.history.state ?? {})).not.toContain(tokenB);
+        expect(seen.every((entry) => !entry.href.includes(token) && !entry.href.includes(tokenB))).toBe(true);
+    });
+    it('opens the form for a new link in a tab that showed the invalid-link state', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount('/reset-password');
+        expect(host.querySelector('h1')?.textContent).toBe('This reset link is invalid or has expired.');
+        await openInSameTab(`/reset-password#token=${tokenB}`);
+        expect(host.querySelector('h1')?.textContent).toBe('Reset password');
+        await fillReset(); await submit();
+        expect(calls('/api/auth/password-resets').map((entry) => JSON.parse(entry.body!).token)).toEqual([tokenB]);
+    });
+    it('abandons a pending reset for the replaced capability and clears the form', async () => {
+        let first: AbortSignal | undefined;
+        respond(() => undefined);
+        fetcher.mockImplementation((url: string, init?: RequestInit) => {
+            if (new URL(url).pathname === '/api/auth/password-resets') {
+                const body = JSON.parse(init!.body as string);
+                if (body.token === token) { first = init?.signal ?? undefined; return new Promise<Response>(() => undefined); }
+                seen.push({ path: '/api/auth/password-resets', href: window.location.href, body: init!.body as string });
+                return Promise.resolve(json({ message: completed }));
+            }
+            return Promise.resolve(json(page));
+        });
+        await mount(`/reset-password#token=${token}`); await fillReset(); await submit();
+        expect(first?.aborted).toBe(false);
+        await openInSameTab(`/reset-password#token=${tokenB}`);
+        expect(first?.aborted).toBe(true);
+        expect(host.querySelector('button[type="submit"]')?.hasAttribute('disabled')).toBe(false);
+        expect(host.querySelector<HTMLInputElement>('input[name="confirmPassword"]')?.value).toBe('');
+        await fillReset(); await submit();
+        expect(calls('/api/auth/password-resets').map((entry) => JSON.parse(entry.body!).token)).toEqual([tokenB]);
+        expect(host.querySelector('h1')?.textContent).toBe('Password updated');
+    });
+    it('drops the held capability for a malformed new link but keeps it for a fragment without a token', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount(`/reset-password#token=${token}`);
+        await openInSameTab('/reset-password#section');
+        expect(window.location.hash).toBe(''); expect(host.querySelector('h1')?.textContent).toBe('Reset password');
+        await openInSameTab('/reset-password#token=short');
+        expect(window.location.hash).toBe(''); expect(host.querySelector('h1')?.textContent).toBe('This reset link is invalid or has expired.');
+        expect(host.querySelector('form')).toBeNull(); expect(calls('/api/auth/password-resets')).toHaveLength(0);
     });
     it('checks the CT01 rule and confirmation locally before any request', async () => {
         respond(() => undefined);
