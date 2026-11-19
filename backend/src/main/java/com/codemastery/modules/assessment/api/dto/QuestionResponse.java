@@ -1,10 +1,10 @@
 package com.codemastery.modules.assessment.api.dto;
 
-import com.codemastery.modules.assessment.domain.model.Question;
-import java.util.Arrays;
+import com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionView;
 import java.util.List;
 import java.util.UUID;
 
+/** B3Question: the owner representation, answer key included. Never used by learner endpoints. */
 public record QuestionResponse(
         UUID id,
         UUID skillId,
@@ -14,15 +14,13 @@ public record QuestionResponse(
         List<String> options,
         List<Boolean> correctOptions
 ) {
-    public static QuestionResponse from(Question question) {
-        return new QuestionResponse(
-                question.id(),
-                question.skill_id(),
-                question.prompt(),
-                question.kind(),
-                question.difficulty(),
-                question.options() == null ? List.of() : Arrays.asList(question.options()),
-                question.correct_options() == null ? List.of() : Arrays.asList(question.correct_options())
-        );
+    public QuestionResponse {
+        options = List.copyOf(options);
+        correctOptions = List.copyOf(correctOptions);
+    }
+
+    public static QuestionResponse from(QuestionView view) {
+        return new QuestionResponse(view.id(), view.skillId(), view.prompt(), view.kind(), view.difficulty(),
+                view.options(), view.correctOptions());
     }
 }

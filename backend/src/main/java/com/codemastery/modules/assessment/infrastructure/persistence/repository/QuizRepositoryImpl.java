@@ -3,7 +3,6 @@ package com.codemastery.modules.assessment.infrastructure.persistence.repository
 import com.codemastery.modules.assessment.domain.model.Quiz;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
 import com.codemastery.modules.assessment.infrastructure.persistence.entity.QuizEntity;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
@@ -26,18 +25,6 @@ public class QuizRepositoryImpl implements QuizRepository {
     @Override
     public Optional<Quiz> findById(UUID id) {
         return jpaRepository.findById(id).map(QuizRepositoryImpl::toDomain);
-    }
-
-    @Override
-    public List<Quiz> findByCourseId(UUID courseId) {
-        return jpaRepository.findAllByCourseId(courseId).stream()
-                .map(QuizRepositoryImpl::toDomain)
-                .toList();
-    }
-
-    @Override
-    public boolean existsById(UUID id) {
-        return jpaRepository.existsById(id);
     }
 
     private static QuizEntity toEntity(Quiz quiz) {

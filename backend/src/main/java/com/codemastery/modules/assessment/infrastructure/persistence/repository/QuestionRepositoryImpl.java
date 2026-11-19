@@ -3,10 +3,13 @@ package com.codemastery.modules.assessment.infrastructure.persistence.repository
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.repository.QuestionRepository;
 import com.codemastery.modules.assessment.infrastructure.persistence.entity.QuestionEntity;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -14,50 +17,64 @@ public class QuestionRepositoryImpl implements QuestionRepository {
 
     private final QuestionJpaRepository jpaRepository;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     public QuestionRepositoryImpl(QuestionJpaRepository jpaRepository) {
         this.jpaRepository = jpaRepository;
     }
 
     @Override
     public Question save(Question question) {
-        QuestionEntity saved = jpaRepository.save(toEntity(question));
-        return toDomain(saved);
+        return toDomain(jpaRepository.save(toEntity(question)));
     }
 
     @Override
-    public Optional<Question> findById(UUID id) {
-        return jpaRepository.findById(id).map(QuestionRepositoryImpl::toDomain);
+    public Optional<Question> findInSkills(UUID id, Collection<UUID> skillIds) {
+        return skillIds.isEmpty() ? Optional.empty()
+                : jpaRepository.findInSkills(id, skillIds).map(QuestionRepositoryImpl::toDomain);
     }
 
     @Override
-    public List<Question> findBySkillId(UUID skillId) {
-        return jpaRepository.findAllBySkillId(skillId).stream()
+    public Optional<Question> findInSkillsForUpdate(UUID id, Collection<UUID> skillIds) {
+        if (skillIds.isEmpty()) {
+            return Optional.empty();
+        }
+        // Reload after acquiring the lock so no earlier managed state of this row is trusted.
+        return jpaRepository.lockInSkills(id, skillIds).map(locked -> {
+            entityManager.refresh(locked);
+            return toDomain(locked);
+        });
+    }
+
+    @Override
+    public long countInSkills(Collection<UUID> skillIds) {
+        return skillIds.isEmpty() ? 0 : jpaRepository.countInSkills(skillIds);
+    }
+
+    @Override
+    public List<Question> findPageInSkills(Collection<UUID> skillIds, int page, int size) {
+        if (skillIds.isEmpty()) {
+            return List.of();
+        }
+        return jpaRepository.findPageInSkills(skillIds, PageRequest.of(page, size)).stream()
                 .map(QuestionRepositoryImpl::toDomain)
                 .toList();
     }
 
     @Override
-    public List<Question> findBySkillIdAndDifficulty(UUID skillId, String difficulty) {
-        return jpaRepository.findAllBySkillIdAndDifficulty(skillId, difficulty).stream()
-                .map(QuestionRepositoryImpl::toDomain)
-                .toList();
+    public boolean isReferencedByQuizQuestion(UUID questionId) {
+        return jpaRepository.isReferencedByQuizQuestion(questionId);
     }
 
     @Override
-    public List<Question> findAllById(Collection<UUID> ids) {
-        return jpaRepository.findAllById(ids).stream()
-                .map(QuestionRepositoryImpl::toDomain)
-                .toList();
+    public boolean isReferencedByAttemptAnswer(UUID questionId) {
+        return jpaRepository.isReferencedByAttemptAnswer(questionId);
     }
 
     @Override
-    public boolean existsById(UUID id) {
-        return jpaRepository.existsById(id);
-    }
-
-    @Override
-    public long countBySkillId(UUID skillId) {
-        return jpaRepository.countAllBySkillId(skillId);
+    public void delete(UUID id) {
+        jpaRepository.deleteById(id);
     }
 
     private static QuestionEntity toEntity(Question question) {
@@ -67,8 +84,8 @@ public class QuestionRepositoryImpl implements QuestionRepository {
                 question.prompt(),
                 question.kind(),
                 question.difficulty(),
-                question.options(),
-                question.correct_options()
+                question.options() == null ? null : question.options().clone(),
+                question.correct_options() == null ? null : question.correct_options().clone()
         );
     }
 
@@ -79,18 +96,8 @@ public class QuestionRepositoryImpl implements QuestionRepository {
                 entity.getPrompt(),
                 entity.getKind(),
                 entity.getDifficulty(),
-                entity.getOptions(),
-                entity.getCorrectOptions()
+                entity.getOptions() == null ? null : entity.getOptions().clone(),
+                entity.getCorrectOptions() == null ? null : entity.getCorrectOptions().clone()
         );
-    }
-
-    @Override
-    public boolean isUsedInQuiz(UUID questionId) {
-        return jpaRepository.existsInQuizByQuestionId(questionId);
-    }
-
-    @Override
-    public void deleteById(UUID id) {
-        jpaRepository.deleteById(id);
     }
 }

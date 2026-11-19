@@ -3,7 +3,6 @@ package com.codemastery.modules.assessment.infrastructure.persistence.repository
 import com.codemastery.modules.assessment.domain.model.Attempt;
 import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
 import com.codemastery.modules.assessment.infrastructure.persistence.entity.AttemptEntity;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
@@ -28,20 +27,8 @@ public class AttemptRepositoryImpl implements AttemptRepository {
         return jpaRepository.findById(id).map(AttemptRepositoryImpl::toDomain);
     }
 
-    @Override
-    public List<Attempt> findByQuizId(UUID quizId) {
-        return jpaRepository.findAllByQuizId(quizId).stream()
-                .map(AttemptRepositoryImpl::toDomain)
-                .toList();
-    }
-
-    @Override
-    public boolean hasAnswersForQuestion(UUID questionId) {
-        return jpaRepository.existsAnswerByQuestionId(questionId);
-    }
-
     private static AttemptEntity toEntity(Attempt attempt) {
-        // Lưu ý: Constructor AttemptEntity của AS01 nhận quiz_id trước user_id
+        // The AS01 AttemptEntity constructor takes quiz_id before user_id (unlike the Attempt record).
         return new AttemptEntity(
                 attempt.id(),
                 attempt.quiz_id(),

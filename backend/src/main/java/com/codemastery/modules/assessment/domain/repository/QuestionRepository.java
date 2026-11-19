@@ -6,23 +6,32 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * Assessment-private question persistence (ADR007 §7). Question has no Course column, so every
+ * read is restricted to a caller-supplied CT40 skill set; an empty set matches nothing.
+ */
 public interface QuestionRepository {
 
+    /** Inserts a new question or fully replaces the definition stored at its ID. */
     Question save(Question question);
 
-    Optional<Question> findById(UUID id);
+    Optional<Question> findInSkills(UUID id, Collection<UUID> skillIds);
 
-    List<Question> findBySkillId(UUID skillId);
+    /**
+     * Locks the question row {@code FOR UPDATE} and returns its committed state. The lock conflicts
+     * with the key-share lock a new QuizQuestion or AttemptAnswer reference takes on the row, so a
+     * reference check made after it cannot be invalidated before commit.
+     */
+    Optional<Question> findInSkillsForUpdate(UUID id, Collection<UUID> skillIds);
 
-    List<Question> findBySkillIdAndDifficulty(UUID skillId, String difficulty);
+    long countInSkills(Collection<UUID> skillIds);
 
-    List<Question> findAllById(Collection<UUID> ids);
+    /** One page of the skill set's questions in UUID ascending order. */
+    List<Question> findPageInSkills(Collection<UUID> skillIds, int page, int size);
 
-    boolean existsById(UUID id);
+    boolean isReferencedByQuizQuestion(UUID questionId);
 
-    long countBySkillId(UUID skillId);
+    boolean isReferencedByAttemptAnswer(UUID questionId);
 
-    boolean isUsedInQuiz(UUID questionId);
-
-    void deleteById(UUID id);
+    void delete(UUID id);
 }
