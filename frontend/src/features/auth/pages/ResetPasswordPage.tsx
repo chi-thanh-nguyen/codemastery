@@ -86,6 +86,11 @@ function capabilityFrom(hash: string): string | null {
  * component memory and the history entry is replaced with `/reset-password` before paint and before
  * any request, so it never stays in the address bar, the router location, the DOM, storage or logs.
  * A reload therefore has no capability and shows the invalid-link state.
+ *
+ * ADR006 §9.3 Referrer-Policy: React hoists the `no-referrer` meta into the document head on the first
+ * commit, before any request. Browsers apply it to the rest of this document, also after the meta is
+ * removed; that only drops `Referer`. `fetch` requests (mode `cors`) still send the real `Origin`, so
+ * ADR014's trusted-Origin checks on refresh and logout are unaffected.
  */
 export function ResetPasswordRoute() {
     const location = useLocation(), navigate = useNavigate();
@@ -98,7 +103,7 @@ export function ResetPasswordRoute() {
         if (location.hash || location.search) navigate('/reset-password', { replace: true });
     }, [location.hash, location.search, navigate]);
     useEffect(() => () => work.current?.abort(), []);
-    return <ResetPasswordPage state={state} successMessage={successMessage} failure={failure} passwordError={passwordError}
+    return <><meta name="referrer" content="no-referrer" /><ResetPasswordPage state={state} successMessage={successMessage} failure={failure} passwordError={passwordError}
         signInLink={<Button component={Link} to="/login" variant="contained" fullWidth>Sign in</Button>}
         requestNewLink={<Box sx={{ display: 'grid', gap: 1.5 }}>
             <Button component={Link} to="/forgot-password" variant="contained" fullWidth>Request a new link</Button>
@@ -128,5 +133,5 @@ export function ResetPasswordRoute() {
             } finally {
                 if (work.current === controller) work.current = null;
             }
-        }} />;
+        }} /></>;
 }

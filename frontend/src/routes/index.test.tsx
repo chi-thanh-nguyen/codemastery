@@ -289,11 +289,12 @@ describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
         type: 'about:blank', title, status, detail: 'Reset link is invalid or expired.', instance, ...(errors ? { errors } : {}),
     }), { status, headers: { 'Content-Type': 'application/problem+json' } });
     /** Records where the page was when each request left, so capability erasure can be ordered against it. */
-    let seen: { path: string; href: string; body?: string }[];
+    let seen: { path: string; href: string; body?: string; referrerPolicy?: string | null }[];
     function respond(handler: (path: string) => Response | Promise<Response> | undefined) {
         seen = [];
         fetcher.mockImplementation((url: string, init?: RequestInit) => {
-            const path = new URL(url).pathname; seen.push({ path, href: window.location.href, body: init?.body as string | undefined });
+            const path = new URL(url).pathname;
+            seen.push({ path, href: window.location.href, body: init?.body as string | undefined, referrerPolicy: document.head.querySelector('meta[name="referrer"]')?.getAttribute('content') });
             const answer = handler(path);
             return answer ? Promise.resolve(answer) : Promise.resolve(json(page));
         });
@@ -335,10 +336,13 @@ describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
         await mount(`/reset-password#token=${token}`);
         expect(window.location.pathname).toBe('/reset-password'); expect(window.location.hash).toBe(''); expect(window.location.search).toBe('');
         expect(seen.every((entry) => !entry.href.includes(token))).toBe(true);
+        expect(document.head.querySelector('meta[name="referrer"]')?.getAttribute('content')).toBe('no-referrer');
         expect(host.querySelector('h1')?.textContent).toBe('Reset password');
         await fillReset(); await submit();
         const sent = calls('/api/auth/password-resets');
         expect(sent).toHaveLength(1); expect(JSON.parse(sent[0].body!)).toEqual({ token, password: newPassword }); expect(sent[0].href).not.toContain(token);
+        // ADR006 §9.3: every request from this page left under the no-referrer policy and without the capability in the URL.
+        expect(seen.every((entry) => entry.referrerPolicy === 'no-referrer' && !entry.href.includes(token))).toBe(true);
         expect(host.innerHTML).not.toContain(token); expect(document.documentElement.innerHTML).not.toContain(token);
         expect(localStorage.length + sessionStorage.length).toBe(0); expect(JSON.stringify(window.history.state ?? {})).not.toContain(token);
         expect(host.querySelector('[role="status"]')?.textContent).toBe(`${completed}Other signed-in sessions on your account have been signed out.`);
