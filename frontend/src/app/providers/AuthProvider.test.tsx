@@ -654,8 +654,8 @@ describe('CT02 password-reset REST client (FE06 part 1)', () => {
     const requested = passwordResetRequestedMessage, completed = passwordResetCompletedMessage;
     const requestPath = '/api/auth/password-reset-requests', resetPath = '/api/auth/password-resets';
     const token = `${'A'.repeat(42)}g`, exact = '  exact new password  ';
-    const problem = (status: number, title: string, instance: string, errors?: unknown) => json({
-        type: 'about:blank', title, status, detail: 'Reset link is invalid or expired.', instance, ...(errors ? { errors } : {}),
+    const problem = (status: number, title: string, instance: string) => json({
+        type: 'about:blank', title, status, detail: 'The request could not be completed.', instance,
     }, status, 'application/problem+json');
     const sent = (index = 0) => ({ url: fetcher.mock.calls[index][0] as string, init: fetcher.mock.calls[index][1] as RequestInit & { headers: Headers } });
     const thrown = (run: () => unknown) => { try { run(); } catch (error) { return error; } throw new Error('Expected a synchronous rejection.'); };
@@ -717,13 +717,19 @@ describe('CT02 password-reset REST client (FE06 part 1)', () => {
         fetcher.mockResolvedValueOnce(new Response('{"message":', { status: 202, headers: { 'Content-Type': 'application/json' } }));
         await expect(requestPasswordReset({ email: 'a@example.com' })).rejects.toMatchObject({ kind: 'protocol' });
     });
-    it('keeps the generic capability 400 field-free and exposes only a safe password field error', async () => {
-        fetcher.mockResolvedValueOnce(problem(400, 'Bad Request', resetPath));
-        const link = await confirmPasswordReset({ token, password: exact }).catch((error) => error);
-        expect(link).toMatchObject({ kind: 'http', status: 400, message: 'Please check the supplied information.' }); expect(link.fields).toEqual({});
-        expect(link.problem.detail).not.toContain('Reset link');
-        fetcher.mockResolvedValueOnce(problem(400, 'Bad Request', resetPath, [{ field: 'password', code: 'StrongPassword', message: 'private' }]));
-        await expect(confirmPasswordReset({ token, password: exact })).rejects.toMatchObject({ kind: 'http', status: 400, fields: { password: 'Please check this field.' } });
+    // AU07 answers every 400 of these operations with a field-free problem (BusinessRuleException): the capability
+    // failure carries the ADR006 §9.2 detail, a refused password or closed-syntax failure the safe default detail.
+    it.each([
+        ['an invalid, used, replaced or expired capability', resetPath, 'Reset link is invalid or expired.'],
+        ['a refused password or malformed confirmation', resetPath, 'The request is invalid.'],
+        ['a malformed reset request', requestPath, 'The request is invalid.'],
+    ])('maps the producer 400 for %s to a field-free error without server text', async (_case, path, detail) => {
+        fetcher.mockResolvedValueOnce(json({ type: 'about:blank', title: 'Bad Request', status: 400, detail, instance: path }, 400, 'application/problem+json'));
+        const call = path === resetPath ? confirmPasswordReset({ token, password: exact }) : requestPasswordReset({ email: 'a@example.com' });
+        const error = await call.catch((failure) => failure);
+        expect(error).toMatchObject({ kind: 'http', status: 400, message: 'Please check the supplied information.' });
+        expect(error.fields).toEqual({}); expect(error.problem).toMatchObject({ detail: 'Please check the supplied information.', errors: [] });
+        expect(fetcher).toHaveBeenCalledTimes(1);
     });
     it.each([[415, 'Unsupported Media Type'], [500, 'Internal Server Error']])('maps %i without retrying', async (status, title) => {
         fetcher.mockResolvedValueOnce(problem(status, title, requestPath));
