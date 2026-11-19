@@ -5,13 +5,16 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { AuthLayout } from '../../../layouts/AuthLayout';
 import { PasswordChecklist } from '../components/RegisterForm';
 import { PasswordVisibility } from './LoginPage';
-import { RecoveryFailureAlert, recoveryFailureOf, recoveryLinkSx } from './ForgotPasswordPage';
+import { PendingStatus, pendingSubmitProps, RecoveryErrorSummary, RecoveryFailureAlert, recoveryFailureOf, recoveryLinkSx, useBlurRevalidation } from './ForgotPasswordPage';
 import type { RecoveryFailure } from './ForgotPasswordPage';
 import { confirmPasswordReset } from '../api/authApi';
 import { passwordResetCompletedMessage } from '../types/authTypes';
 import { ApiError } from '../../../shared/types/apiTypes';
 
 const passwordRule = 'Use at least 15 Unicode characters and at most 72 UTF-8 bytes.';
+const mismatch = 'Passwords must match.';
+/** The unchanged CT01 predicate the API client applies (code points and UTF-8 bytes; never trimmed). */
+const passwordProblem = (value: string) => [...value].length < 15 || new TextEncoder().encode(value).length > 72 ? passwordRule : undefined;
 /** The page changes in place, so focus moves to its new title (made focusable the way route focus does). */
 function focusTitle() {
     const heading = document.querySelector<HTMLElement>('main h1');
@@ -35,7 +38,15 @@ export interface ResetPasswordPageProps {
 /** F1 step 5: new password with the live CT01 checklist; success creates no session. */
 export function ResetPasswordPage({ onSubmit, state, signInLink, requestNewLink, notice, successMessage, failure = 'network', passwordError }: ResetPasswordPageProps) {
     const [password, setPassword] = useState(''), [confirm, setConfirm] = useState(''), [visible, setVisible] = useState(false), [errors, setErrors] = useState<Record<string, string>>({});
-    const passwordInput = useRef<HTMLInputElement>(null), confirmInput = useRef<HTMLInputElement>(null), alert = useRef<HTMLDivElement>(null);
+    const passwordInput = useRef<HTMLInputElement>(null), confirmInput = useRef<HTMLInputElement>(null), alert = useRef<HTMLDivElement>(null), submit = useRef<HTMLButtonElement>(null);
+    const pending = state === 'submitting', afterBlur = useBlurRevalidation();
+    /** F1: on blur, only fields already in error are re-validated; the confirmation is checked against the current password. */
+    const revalidate = () => setErrors((current) => {
+        const next = { ...current };
+        if (current.password) { const problem = passwordProblem(password); if (problem) next.password = problem; else delete next.password; }
+        if (current.confirm && password === confirm) delete next.confirm;
+        return next;
+    });
     useEffect(() => { if (passwordError) { setErrors((current) => ({ ...current, password: passwordError })); passwordInput.current?.focus(); } }, [passwordError]);
     useEffect(() => {
         if (state === 'error') alert.current?.focus();
@@ -60,20 +71,26 @@ export function ResetPasswordPage({ onSubmit, state, signInLink, requestNewLink,
     return <AuthLayout title="Reset password" subtitle="Choose a password you don't use anywhere else." notice={notice}>
         <Box component="form" aria-label="Reset password" aria-busy={state === 'submitting'} noValidate sx={{ display: 'grid', gap: 2.5 }} onSubmit={(event) => {
             event.preventDefault();
-            if (state === 'submitting') return;
-            const next: Record<string, string> = {};
-            if ([...password].length < 15 || new TextEncoder().encode(password).length > 72) next.password = passwordRule;
-            if (password !== confirm) next.confirm = 'Passwords must match.';
+            if (pending) return;
+            const next: Record<string, string> = {}, problem = passwordProblem(password);
+            if (problem) next.password = problem;
+            if (password !== confirm) next.confirm = mismatch;
             setErrors(next);
-            if (next.password) passwordInput.current?.focus(); else if (next.confirm) confirmInput.current?.focus(); else onSubmit(password);
+            if (next.password) { passwordInput.current?.focus(); return; }
+            if (next.confirm) { confirmInput.current?.focus(); return; }
+            // "Try again" leaves with its alert: keep keyboard focus on the (busy) submit button instead.
+            if (document.activeElement !== passwordInput.current && document.activeElement !== confirmInput.current) submit.current?.focus();
+            onSubmit(password);
         }}>
             {state === 'error' && <RecoveryFailureAlert failure={failure} alertRef={alert} />}
-            <Box><TextField inputRef={passwordInput} name="password" label="New password" type={visible ? 'text' : 'password'} autoComplete="new-password" required fullWidth value={password} onChange={(event) => setPassword(event.target.value)}
+            {Object.keys(errors).length > 0 && <RecoveryErrorSummary />}
+            <Box><TextField inputRef={passwordInput} name="password" label="New password" type={visible ? 'text' : 'password'} autoComplete="new-password" required fullWidth value={password} onChange={(event) => setPassword(event.target.value)} onBlur={() => afterBlur(revalidate)}
                 error={!!errors.password} helperText={errors.password ?? 'At least 15 Unicode characters, at most 72 UTF-8 bytes.'}
                 slotProps={{ htmlInput: { 'aria-describedby': 'reset-password-helper-text reset-password-rules' }, input: { endAdornment: <PasswordVisibility visible={visible} onToggle={() => setVisible((value) => !value)} /> } }} id="reset-password" />
                 <PasswordChecklist password={password} id="reset-password-rules" /></Box>
-            <TextField inputRef={confirmInput} name="confirmPassword" label="Confirm new password" type={visible ? 'text' : 'password'} autoComplete="new-password" required fullWidth value={confirm} onChange={(event) => setConfirm(event.target.value)} error={!!errors.confirm} helperText={errors.confirm} />
-            <Button type="submit" variant="contained" fullWidth disabled={state === 'submitting'}>{state === 'submitting' ? 'Resetting…' : 'Reset password'}</Button>
+            <TextField inputRef={confirmInput} name="confirmPassword" label="Confirm new password" type={visible ? 'text' : 'password'} autoComplete="new-password" required fullWidth value={confirm} onChange={(event) => setConfirm(event.target.value)} onBlur={() => afterBlur(revalidate)} error={!!errors.confirm} helperText={errors.confirm} />
+            <Button ref={submit} type="submit" variant="contained" fullWidth {...pendingSubmitProps(pending)}>{pending ? 'Resetting…' : 'Reset password'}</Button>
+            <PendingStatus message={pending ? 'Resetting your password…' : undefined} />
         </Box>
     </AuthLayout>;
 }

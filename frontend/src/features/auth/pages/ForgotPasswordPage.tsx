@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode, Ref } from 'react';
-import { Alert, Box, Button, Link as TextLink, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, buttonClasses, Link as TextLink, TextField, Typography } from '@mui/material';
 import { Link } from 'react-router';
 import { AuthLayout } from '../../../layouts/AuthLayout';
 import { requestPasswordReset } from '../api/authApi';
@@ -15,13 +15,74 @@ const recoveryFailureText: Record<RecoveryFailure, string> = {
     network: "We couldn't reach CodeMastery. Check your connection and try again.",
     server: 'Something went wrong on our side. Try again in a moment.',
 };
+/**
+ * Invisible extension centred on a control (DESIGN.md › Accessibility › Targets): the hit area becomes at least
+ * 44 × 44 px while the visible shape is unchanged.
+ */
+const targetExtension = {
+    position: 'relative',
+    '&::before': { content: '""', position: 'absolute', top: '50%', left: '50%', width: 'max(100%, 44px)', height: 'max(100%, 44px)', transform: 'translate(-50%, -50%)' },
+} as const;
 /** Inline F14 alert inside a recovery form; "Try again" resubmits that form. */
 export function RecoveryFailureAlert({ failure, alertRef }: { failure: RecoveryFailure; alertRef?: Ref<HTMLDivElement> }) {
-    return <Alert ref={alertRef} tabIndex={-1} severity="error" action={<Button type="submit" color="inherit" size="small">Try again</Button>}>
+    return <Alert ref={alertRef} tabIndex={-1} severity="error" action={<Button type="submit" color="inherit" size="small" sx={targetExtension}>Try again</Button>}>
         {recoveryFailureText[failure]}
     </Alert>;
 }
+/**
+ * The F1 error summary shown on submit while any field is in error (DESIGN.md › Accessibility › Forms). It is
+ * not a live region: focus moves to the first invalid field, which announces its own linked error.
+ */
+export function RecoveryErrorSummary() {
+    return <Alert severity="error" role="none">Please check the supplied information.</Alert>;
+}
+/**
+ * Props for a recovery submit button. While a request is pending the button looks and acts disabled but stays
+ * focusable (`aria-disabled`), so keyboard focus is not dropped to the page; activation is ignored.
+ */
+export function pendingSubmitProps(pending: boolean) {
+    return pending ? {
+        'aria-disabled': true as const, className: buttonClasses.disabled,
+        onClick: (event: { preventDefault(): void }) => event.preventDefault(),
+    } : {};
+}
+/**
+ * F1 blur re-validation that cannot swallow a click. A pointer press on another control blurs the field before
+ * that press completes; applying the re-validation at once (an error or the summary disappearing) would move
+ * "Reset password" or "Send reset link" out from under the pointer, so the click would be lost. A blur caused by
+ * a pointer is therefore applied just after the press is released (after its click); a keyboard blur at once.
+ */
+export function useBlurRevalidation() {
+    const pressed = useRef(false);
+    useEffect(() => {
+        const down = () => { pressed.current = true; }, up = () => { pressed.current = false; };
+        document.addEventListener('pointerdown', down, true);
+        document.addEventListener('pointerup', up, true);
+        document.addEventListener('pointercancel', up, true);
+        return () => {
+            document.removeEventListener('pointerdown', down, true);
+            document.removeEventListener('pointerup', up, true);
+            document.removeEventListener('pointercancel', up, true);
+        };
+    }, []);
+    return useCallback((revalidate: () => void) => {
+        if (!pressed.current) { revalidate(); return; }
+        const release = () => {
+            document.removeEventListener('pointerup', release, true);
+            document.removeEventListener('pointercancel', release, true);
+            window.setTimeout(revalidate, 0); // the click that this release completes is dispatched first
+        };
+        document.addEventListener('pointerup', release, true);
+        document.addEventListener('pointercancel', release, true);
+    }, []);
+}
+/** Polite, visually hidden announcement of a pending request; empty otherwise, so each request is announced once. */
+export function PendingStatus({ message }: { message?: string }) {
+    return <span role="status" className="cm-visually-hidden">{message}</span>;
+}
 const invalidEmail = 'Enter a valid ASCII email address.';
+/** The CT01 canonical-email check the API client applies; nothing invalid is sent. */
+const emailProblem = (value: string) => { try { canonicalEmail(value); return null; } catch { return invalidEmail; } };
 /**
  * Text link of the recovery flow (DESIGN.md › Accessibility › Targets): the visible shape stays inline and
  * unchanged; an invisible 44 px tall extension centred on it makes the hit area at least 44 × 44 px
@@ -48,7 +109,8 @@ export interface ForgotPasswordPageProps {
 /** F1 step 4: one email field; the acknowledgement is identical for every input (no account enumeration). */
 export function ForgotPasswordPage({ onSubmit, state, signInLink, notice, acknowledgement, failure = 'network', emailError }: ForgotPasswordPageProps) {
     const [email, setEmail] = useState(''), [error, setError] = useState<string | null>(null);
-    const input = useRef<HTMLInputElement>(null), alert = useRef<HTMLDivElement>(null), sent = useRef<HTMLDivElement>(null);
+    const input = useRef<HTMLInputElement>(null), alert = useRef<HTMLDivElement>(null), sent = useRef<HTMLDivElement>(null), submit = useRef<HTMLButtonElement>(null);
+    const pending = state === 'submitting', afterBlur = useBlurRevalidation();
     useEffect(() => { if (emailError) { setError(emailError); input.current?.focus(); } }, [emailError]);
     useEffect(() => {
         if (state === 'error') alert.current?.focus();
@@ -60,16 +122,22 @@ export function ForgotPasswordPage({ onSubmit, state, signInLink, notice, acknow
             <Box>{signInLink}</Box>
         </Box> : <Box component="form" aria-label="Forgot password" aria-busy={state === 'submitting'} noValidate onSubmit={(event) => {
             event.preventDefault();
-            if (state === 'submitting') return;
-            // The same CT01 canonical-email rule the API client applies; nothing invalid is sent.
-            try { canonicalEmail(email); } catch { setError(invalidEmail); input.current?.focus(); return; }
-            setError(null);
+            if (pending) return;
+            const problem = emailProblem(email);
+            setError(problem);
+            if (problem) { input.current?.focus(); return; }
+            // "Try again" leaves with its alert: keep keyboard focus on the (busy) submit button instead.
+            if (document.activeElement !== input.current) submit.current?.focus();
             onSubmit(email);
         }} sx={{ display: 'grid', gap: 2.5 }}>
             {state === 'error' && <RecoveryFailureAlert failure={failure} alertRef={alert} />}
+            {error && <RecoveryErrorSummary />}
             <TextField inputRef={input} name="email" label="Email address" type="email" autoComplete="email" required fullWidth value={email}
-                onChange={(event) => setEmail(event.target.value)} error={!!error} helperText={error} />
-            <Button type="submit" variant="contained" fullWidth disabled={state === 'submitting'}>{state === 'submitting' ? 'Sending…' : 'Send reset link'}</Button>
+                onChange={(event) => setEmail(event.target.value)} error={!!error} helperText={error}
+                // F1: a field already in error is re-validated when it loses focus.
+                onBlur={() => afterBlur(() => setError((current) => current && emailProblem(email)))} />
+            <Button ref={submit} type="submit" variant="contained" fullWidth {...pendingSubmitProps(pending)}>{pending ? 'Sending…' : 'Send reset link'}</Button>
+            <PendingStatus message={pending ? 'Sending the reset link…' : undefined} />
             <Typography sx={{ color: 'text.secondary' }}>Remembered it? {signInLink}</Typography>
         </Box>}
     </AuthLayout>;
