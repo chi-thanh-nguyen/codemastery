@@ -95,6 +95,13 @@ public class SecurityConfig {
                                 "/api/me/course-progress", "/api/me/resume").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/lessons/{lessonId}/completion",
                                 "/api/courses/{courseId}/resume").hasRole("LEARNER")
+                        // CT23.questions/bindings (ADR007 §§4, 7): Instructor only; Course ownership is
+                        // CT03's decision in the handler. Administrator has no Instructor inheritance.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/questions",
+                                "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/questions").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),

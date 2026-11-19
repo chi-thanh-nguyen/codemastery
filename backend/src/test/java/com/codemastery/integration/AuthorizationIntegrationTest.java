@@ -798,6 +798,195 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
     }
 
+    /**
+     * CT23 question bank (ADR007 §§4, 7) through the production security chain, CT03 and CT18:
+     * Instructor-only routing, Course ownership, closed bodies and no-store on every outcome. The
+     * CT40 producer (AD07 #165) and Course guard (CO14 #177) are absent, so an admitted owner's valid
+     * request fails closed with a safe 500 and no effect until they are integrated.
+     */
+    @Nested
+    class QuestionBankEndpoints {
+
+        private final List<UUID> courses = new ArrayList<>();
+        private UUID owner;
+        private UUID course;
+        private UUID hiddenCourse;
+        private UUID skill;
+        private UUID question;
+
+        @BeforeEach
+        void fixtures() {
+            owner = insertUser("instructor", "active");
+            course = insertCourse(owner, "published");
+            hiddenCourse = insertCourse(owner, "hidden");
+            skill = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.skills (id, course_id, name) VALUES (?, ?, 'QA01 skill')", skill, course);
+            question = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.questions (id, skill_id, prompt, kind, difficulty, options, correct_options) "
+                    + "VALUES (?, ?, 'Stored prompt', 'single_choice', 'easy', ARRAY['A','B'], ARRAY[true,false])",
+                    question, skill);
+        }
+
+        @AfterEach
+        void removeFixtures() {
+            for (UUID id : courses) {
+                jdbc.update("DELETE FROM public.questions WHERE skill_id IN (SELECT id FROM public.skills WHERE course_id = ?)", id);
+                jdbc.update("DELETE FROM public.skills WHERE course_id = ?", id);
+                jdbc.update("DELETE FROM public.courses WHERE id = ?", id);
+            }
+            courses.clear();
+        }
+
+        private UUID insertCourse(UUID instructor, String status) {
+            UUID id = UUID.randomUUID();
+            courses.add(id);
+            jdbc.update("INSERT INTO public.courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
+                    + "VALUES (?, ?, 'QA01 question bank', 'CT23 fixture', ?, false)", id, instructor, status);
+            return id;
+        }
+
+        private String validBody() {
+            return "{\"skillId\":\"" + skill + "\",\"prompt\":\"Predict the output\",\"kind\":\"single_choice\","
+                    + "\"difficulty\":\"easy\",\"options\":[\"1\",\"2\"],\"correctOptions\":[true,false]}";
+        }
+
+        /** The five operations against one Course; bodies are valid unless the caller replaces them. */
+        private List<org.springframework.test.web.servlet.RequestBuilder> operations(UUID courseId, String bearer) {
+            List<org.springframework.test.web.servlet.RequestBuilder> requests = new ArrayList<>();
+            String base = "/api/courses/" + courseId + "/questions";
+            for (var builder : List.of(
+                    get(base),
+                    get(base + "/" + question),
+                    post(base).contentType(MediaType.APPLICATION_JSON).content(validBody()),
+                    request(HttpMethod.PUT, base + "/" + question).contentType(MediaType.APPLICATION_JSON).content(validBody()),
+                    request(HttpMethod.DELETE, base + "/" + question))) {
+                requests.add(bearer == null ? builder : builder.header("Authorization", "Bearer " + bearer));
+            }
+            return requests;
+        }
+
+        private String bank() {
+            return jdbc.queryForObject("SELECT string_agg(id::text || prompt || kind, ',' ORDER BY id) FROM public.questions "
+                    + "WHERE skill_id = ?", String.class, skill);
+        }
+
+        @Test
+        void unauthenticatedRequestsAre401WithNoStoreAndNoEffect() throws Exception {
+            String before = bank();
+            for (var request : operations(course, null)) {
+                mvc.perform(request)
+                        .andExpect(status().isUnauthorized())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+            }
+            assertEquals(before, bank());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"learner", "admin"})
+        void learnersAndAdministratorsAre403BeforeAnyHandler(String role) throws Exception {
+            String bearer = sessionToken(insertUser(role, "active"));
+            String before = bank();
+            for (var request : operations(course, bearer)) {
+                mvc.perform(request)
+                        .andExpect(status().isForbidden())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+            }
+            assertEquals(before, bank());
+        }
+
+        @Test
+        void nonOwningInstructorIs403OnAPublishedCourseAnd404OnHiddenOrMissingOnes() throws Exception {
+            String other = sessionToken(insertUser("instructor", "active"));
+            String before = bank();
+            for (var request : operations(course, other)) {
+                mvc.perform(request).andExpect(status().isForbidden())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            for (UUID unavailable : List.of(hiddenCourse, UUID.randomUUID())) {
+                for (var request : operations(unavailable, other)) {
+                    mvc.perform(request).andExpect(status().isNotFound())
+                            .andExpect(header().string("Cache-Control", "no-store"))
+                            .andExpect(jsonPath("$.detail").value("The requested resource is unavailable."));
+                }
+            }
+            // A malformed body never overtakes CT03: the non-owner still receives 403.
+            mvc.perform(post("/api/courses/{c}/questions", course).header("Authorization", "Bearer " + other)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"unknown\":true}"))
+                    .andExpect(status().isForbidden());
+            assertEquals(before, bank());
+        }
+
+        @Test
+        void malformedPathQueryAndMediaTypeAre400ForTheOwner() throws Exception {
+            String bearer = sessionToken(owner);
+            for (String uri : List.of("/api/courses/not-a-uuid/questions", "/api/courses/" + course + "/questions/1-1-1-1-1",
+                    "/api/courses/" + course + "/questions?skillId=" + skill, "/api/courses/" + course + "/questions?difficulty=easy",
+                    "/api/courses/" + course + "/questions?page=-1", "/api/courses/" + course + "/questions?size=101",
+                    "/api/courses/" + course + "/questions?page=2147483648", "/api/courses/" + course + "/questions/" + question + "?x=1")) {
+                mvc.perform(get(uri).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            mvc.perform(post("/api/courses/{c}/questions", course).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.TEXT_PLAIN).content(validBody()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(header().string("Cache-Control", "no-store"));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE skill_id = ?", Integer.class, skill));
+        }
+
+        @Test
+        void ownerBodiesOutsideTheClosedContractAre400WithNoEffect() throws Exception {
+            String bearer = sessionToken(owner);
+            String valid = validBody();
+            List<String> invalid = List.of(
+                    valid.replace("}", ",\"extra\":1}"),
+                    valid.replace("\"kind\"", "\"prompt\":\"dup\",\"kind\""),
+                    valid.replace("\"Predict the output\"", "123"),
+                    valid.replace("[true,false]", "[\"true\",\"false\"]"),
+                    valid.replace("[true,false]", "[1,0]"),
+                    valid.replace("[\"1\",\"2\"]", "[1,2]"),
+                    valid.replace("\"Predict the output\"", "null"),
+                    valid.replace(",\"difficulty\":\"easy\"", ""),
+                    valid.replace("\"single_choice\"", "\"essay\""),
+                    valid.replace("\"easy\"", "\"Easy\""),
+                    valid.replace("[true,false]", "[true,true]"),
+                    valid.replace("[true,false]", "[true]"),
+                    valid.replace("\"Predict the output\"", "\"   \""),
+                    valid.replace("\"single_choice\"", "\"true_false\""),
+                    valid + " {}",
+                    "{",
+                    "");
+            String before = bank();
+            for (String body : invalid) {
+                for (var request : List.of(post("/api/courses/{c}/questions", course),
+                        request(HttpMethod.PUT, "/api/courses/{c}/questions/{q}", course, question))) {
+                    mvc.perform(request.header("Authorization", "Bearer " + bearer)
+                                    .contentType(MediaType.APPLICATION_JSON).content(body))
+                            .andExpect(status().isBadRequest())
+                            .andExpect(header().string("Cache-Control", "no-store"))
+                            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+                }
+            }
+            assertEquals(before, bank());
+        }
+
+        @Test
+        void admittedOwnerRequestsFailClosedWhileCt40AndTheCourseGuardAreAbsent() throws Exception {
+            String before = bank();
+            for (var request : operations(course, sessionToken(owner))) {
+                String body = mvc.perform(request)
+                        .andExpect(status().isInternalServerError())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(jsonPath("$.detail").value("An unexpected error occurred."))
+                        .andReturn().getResponse().getContentAsString();
+                assertFalse(body.contains("CT40") || body.contains("Stored prompt") || body.contains("correctOptions"));
+            }
+            assertEquals(before, bank());
+        }
+    }
+
     /** Unconfigured delivery: the rest of the backend runs; recovery acknowledges but never issues. */
     @Nested
     @TestPropertySource(properties = {"codemastery.security.password-reset.smtp-host=",
