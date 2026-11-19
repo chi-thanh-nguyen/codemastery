@@ -92,3 +92,15 @@ export function decodeLoginResponse(value: unknown): LoginResponse {
     loginExpiresAt(response, Date.now());
     return response;
 }
+export interface PasswordResetRequestPayload {
+    email: string;
+}
+
+export interface PasswordResetConfirmPayload {
+    token: string;
+    password: string;
+}
+
+export interface PasswordResetResponse {
+    message: string;
+}
