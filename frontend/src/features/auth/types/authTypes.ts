@@ -32,14 +32,18 @@ export function canonicalEmail(value: string) {
     }
     return email;
 }
+/** The unchanged CT01 password predicate; the exact value is never trimmed or normalized. */
+function checkPassword(password: string) {
+    if ([...password].length < 15 || new TextEncoder().encode(password).length > 72) {
+        invalid('password', 'Use at least 15 Unicode characters and at most 72 UTF-8 bytes.');
+    }
+}
 export function registrationInput(payload: RegisterRequest): RegisterRequest {
     const email = canonicalEmail(payload.email), displayName = stripInput(payload.displayName);
     if (!displayName || [...displayName].length > 100 || control.test(displayName)) {
         return invalid('displayName', 'Use a nonblank display name of at most 100 characters without controls.');
     }
-    if ([...payload.password].length < 15 || new TextEncoder().encode(payload.password).length > 72) {
-        return invalid('password', 'Use at least 15 Unicode characters and at most 72 UTF-8 bytes.');
-    }
+    checkPassword(payload.password);
     return { email, displayName, password: payload.password };
 }
 export function loginInput(payload: LoginRequest): LoginRequest {
@@ -92,15 +96,24 @@ export function decodeLoginResponse(value: unknown): LoginResponse {
     loginExpiresAt(response, Date.now());
     return response;
 }
-export interface PasswordResetRequestPayload {
-    email: string;
+export interface PasswordResetRequestPayload { email: string }
+export interface PasswordResetConfirmPayload { token: string; password: string }
+export interface PasswordResetResponse { message: string }
+/** CT02-REST approved bodies (ADR006 §9.3, OpenAPI `const`); the UI shows them verbatim. */
+export const passwordResetRequestedMessage = 'If an account matches, a password reset link will be sent.';
+export const passwordResetCompletedMessage = 'Password reset. Sign in with your new password.';
+/** CT02 requests use the same CT01 canonical email as sign-in; invalid input never reaches transport. */
+export function passwordResetRequestInput(payload: PasswordResetRequestPayload): PasswordResetRequestPayload {
+    return { email: canonicalEmail(payload.email) };
 }
-
-export interface PasswordResetConfirmPayload {
-    token: string;
-    password: string;
+/** The capability is passed through unchanged (the server decides validity); the password is checked, never altered. */
+export function passwordResetConfirmInput(payload: PasswordResetConfirmPayload): PasswordResetConfirmPayload {
+    checkPassword(payload.password);
+    return { token: payload.token, password: payload.password };
 }
-
-export interface PasswordResetResponse {
-    message: string;
+function decodeResetMessage(value: unknown, message: string): PasswordResetResponse {
+    if (!isRecord(value) || !exactKeys(value, ['message']) || value.message !== message) throw protocolError();
+    return Object.freeze({ message });
 }
+export const decodePasswordResetRequested = (value: unknown) => decodeResetMessage(value, passwordResetRequestedMessage);
+export const decodePasswordResetCompleted = (value: unknown) => decodeResetMessage(value, passwordResetCompletedMessage);
