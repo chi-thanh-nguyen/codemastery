@@ -37,10 +37,11 @@ onward, are decision and execution records. They keep the wording of their date.
 
 Backend unit tests, Testcontainers PostgreSQL integration tests and frontend
 Vitest/jsdom tests exist for the implemented Auth, Course catalogue and
-membership, sample-data and shared REST slices, and run in CI. A local
-Playwright Test suite in `e2e/` runs the implemented learner flows against a
-disposable stack built from the checkout; it is not run in CI. A passing test
-establishes only what that test exercises. It is not acceptance of a verification Issue: QA01 #61, QA02 #62,
+membership, sample-data and shared REST slices, and run in CI. The Playwright
+Test suite in `e2e/` runs the implemented learner flows against a disposable
+stack built from the checkout, both locally and in the required `E2E` check of
+the `CI E2E` workflow. A passing test establishes only what that test exercises.
+It is not acceptance of a verification Issue: QA01 #61, QA02 #62,
 QA07 #63, QA13 #64, QA14 #65 and DP02 #66 remain open, and their independent
 verification is separate work.
 
