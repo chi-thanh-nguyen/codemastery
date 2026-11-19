@@ -715,14 +715,18 @@ test-count or coverage-percentage claim is made for them.
   `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
   `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
   their features and approved contracts.
-- **E2E.** The Playwright suite exists but has no CI job; it runs locally with
-  Docker. `e2e/tests/adaptive-flow.spec.ts` is empty until Adaptive, Assessment and
-  lesson-content contracts exist. Firefox has not yet completed a recorded run
-  (see the 6 November 2026 record).
-- **Real-browser and runtime integration.** No CI job drives a real browser
-  against a running backend and PostgreSQL. Local runs are recorded in the dated
-  sections below; QA07 and DP02 acceptance are open. Group B/C design-preview
-  screens have no backend to integrate with yet.
+- **E2E.** The Playwright suite runs locally with Docker and in the required `E2E`
+  check of the `CI E2E` workflow ([CI](#ci)), on all five projects against a disposable
+  stack. It covers only the existing learner cases; `e2e/tests/adaptive-flow.spec.ts`
+  is empty, and new cases wait for their features and the CT19/CT35 selections.
+  `firefox-desktop` first completed a recorded run in CI
+  ([SH07 first executions](#sh07-e2e-ci-first-executions--13-november-2026)); it
+  cannot launch on the recorded local macOS host.
+- **Real-browser and runtime integration.** Only the `CI E2E` job drives real
+  browsers in CI, against its disposable backend and PostgreSQL stack, and only for
+  the existing E2E cases. Local runs are recorded in the dated sections below; QA07
+  and DP02 acceptance are open. Group B/C design-preview screens have no backend to
+  integrate with yet.
 - **Deployment.** No test reaches the real VM or checks outside-network access
   (DP01 #71, DP03 #72). The private `/actuator/health` probe is verified only
   locally and in CI ([record](#dp01-private-health-probe-verification--1-november-2026)).
@@ -734,6 +738,7 @@ test-count or coverage-percentage claim is made for them.
   the r12 quiz-attempt, autosave and Instructor-management states are specified in
   `DESIGN.md` but not implemented, so no test covers them
   ([verification guidance](#design-r12-uiux-verification-guidance--specified-not_run)).
+  The theme system and its developer verification are assigned to FE34 #255.
   The preview suite does not cover the recorded A13 case (a sign-in in another tab
   makes the `/preview` document send `POST /api/auth/refresh`).
 
@@ -4312,6 +4317,18 @@ runner and fixture contracts, or the ADR014 `CT14-SESSION-2026-11-16-r1` obligat
 colour schemes, the quiz-attempt entry and answer-saving states, and the Instructor
 management workflows are specified, not implemented, so no evidence exists for them.
 Nothing in the table below has passed.
+
+**Theme verification handoff (19 November 2026).** FE34 #255 (assigned to `heizseung`,
+implementation authorized by the Project Leader on 19 November 2026, not implemented)
+owns the theme system and its developer verification: the first three rows of the table
+below, with unit and component tests for the preference, storage fallbacks, other tabs,
+operating-system changes, the Theme control and the preview override, and rendered
+Light, Dark and System checks of the implemented shells and Live screens. That evidence
+is implementation evidence only. QA07 #63 keeps independent Final acceptance and runs
+its theme checks only after FE34 delivers the schemes; until then they are coverage gaps.
+FE34 adds no E2E case outside the CT19 and CT35 selections, and it excludes the A13
+preview-isolation case and the A14 response-metadata capability, which have no owning
+Issue. Every row stays NOT_RUN until a check actually runs.
 
 | Area | What to verify once implemented | Layer |
 | --- | --- | --- |

@@ -582,9 +582,22 @@ script, live following of the operating-system setting and synchronization acros
 None of this exists on `main`: `theme.ts` defines the light scheme only, every page
 renders light whatever the operating-system setting, no Theme control is rendered, and
 nothing reads or writes a theme preference. The light values in `theme.ts` match r12's
-light scheme. No Issue checkpoint owns the shared colour-scheme work yet (recorded in
-EP07 #12); it also needs role migration of the themed components and structure approval
-for any new file, such as an external first-paint script.
+light scheme.
+
+**Theme implementation handoff (19 November 2026).** FE34 #255, a child of EP07 #12, owns
+the implementation of the shared colour-scheme work. It was created on 19 November 2026
+under the Project Leader's instruction and assigned to `heizseung`, whom the Leader
+authorized to implement it within the Issue's scope; it is not implemented yet. Its scope
+follows `DESIGN.md` r12: the two colour schemes and semantic roles in `theme.ts`; one preference state above the router in
+`App.tsx` (`codemastery.theme`, device-scoped, independent of the session); the first-paint
+script in the existing `index.html`; the Theme control in every shell; the move of the 47
+non-test files that import the light `color` constants to semantic roles (re-counted on
+`cdf1ef8`); and the preview's in-memory override. The theme changes it makes in files that
+other FE Issues list leave those Issues' feature ownership unchanged. A new repository
+file, such as an external first-paint script or a theme hook, still needs structure
+approval under [repository-structure.md](repository-structure.md). FE34 excludes the A13
+preview-isolation fix in `AuthProvider.tsx` and the A14 response-metadata (`ETag`)
+capability of the shared HTTP client; neither has an owning Issue.
 
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
 in `src/routes/index.tsx`, listed in
@@ -595,8 +608,10 @@ sent to their start page instead (`/home` for Learners, `/courses` for other
 roles; the logo links there too). Navigation shows Catalogue for everyone, plus
 Home (`/home`) and My courses for Learners; Profile and Sign out are in the
 account menu. `/home` lists the Learner's active courses from `GET /api/me/courses`
-only. After a session ends without signing out (15-minute expiry or a current-session
-401), the sign-in page says “Your session ended. Sign in again to continue.” once.
+only. After a session ends without signing out (a refused renewal or restore, a
+current-session 401 or a sign-out in another tab; see
+[ADR014 hybrid authentication session](#adr014-hybrid-authentication-session--16-november-2026)),
+the sign-in page says “Your session ended. Sign in again to continue.” once.
 After sign-in a Learner lands on `/home` and other roles on `/courses`; the one-use
 `/profile` return (CT16-PROFILE P1) still takes precedence and is consumed once. This
 changes only the Learner's fallback destination, at the Leader's instruction of
