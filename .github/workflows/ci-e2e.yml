@@ -2,9 +2,10 @@ name: CI E2E
 
 # SH07: executable E2E job under ADR008 CT34-CI-2026-11-09-r1 (§7), consuming
 # CT34-FIXTURES-2026-11-10-r2 (§4 as amended by §10). It runs the existing suite
-# on all five projects against a disposable stack owned by this run. It is not a
-# required check, and a green run is not CT19/CT35/CT20.F Final coverage
-# acceptance.
+# on all five projects against a disposable stack owned by this run. Its `E2E`
+# check is required by the `main-quality-gates` ruleset (as observed on
+# 19 November 2026), so an intermittent failure blocks merging. A green run is
+# not CT19/CT35/CT20.F Final coverage acceptance.
 
 on:
   pull_request:

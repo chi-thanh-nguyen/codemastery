@@ -6,6 +6,16 @@ FROM eclipse-temurin:25.0.5_8-jdk-noble@sha256:95e350ad1eb738f943e141640f7e3d797
 WORKDIR /build
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
+# The JDK image has no curl or wget, so the Maven Wrapper fetches the pinned Maven
+# distribution with one unretried Java request, and Maven Central answers HTTP 429
+# when it rate-limits (a CI build failed so on 19 November 2026; docs/testing.md).
+# Maven's own dependency downloads already retry 429 and 503. Only this bootstrap
+# is retried, at most three times with growing pauses; the build below runs once.
+RUN for pause in 5 15 30; do \
+        ./mvnw --version >/dev/null && exit 0; \
+        echo "Maven Wrapper bootstrap failed; retrying in ${pause} s" >&2; sleep "${pause}"; \
+    done; \
+    ./mvnw --version >/dev/null
 COPY src/ src/
 RUN ./mvnw package -DskipTests
 

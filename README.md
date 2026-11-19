@@ -226,8 +226,8 @@ review. Anthropic Claude Code also wrote the UI/UX specification ([DESIGN.md](DE
 revisions r1 on 6 November 2026 through r6 on 8 November 2026) and implemented the frontend redesign (and on 7 November its
 typography, logo-palette and navigation-indicator refinement and the frontend
 Alpine pin refresh), the design preview, the
-browser harness and the Playwright E2E suite, using the Impeccable design skill and
-Playwright CLI locally; the redesign's visual reference is credited in
+browser harness and the Playwright E2E suite (including its 19 November 2026 image-build and
+sign-in failure diagnostics), using the Impeccable design skill and Playwright CLI locally; the redesign's visual reference is credited in
 [setup](docs/setup.md#frontend-setup-and-validation).
 The team reviews this work through the normal pull-request process. This
 disclosure describes development assistance; CodeMastery's approved adaptive

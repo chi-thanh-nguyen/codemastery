@@ -162,16 +162,46 @@ export async function containerExit(container: string): Promise<string | null> {
     const summary = state.stdout.trim();
     return summary.startsWith('state=running ') ? null : `the container stopped (${summary})`;
 }
+/** `text` with every secret of six or more characters replaced by `[redacted]`. */
+function redact(text: string, secrets: readonly string[]) {
+    return secrets.filter((secret) => secret.length >= 6).reduce((out, secret) => out.split(secret).join('[redacted]'), text);
+}
 /** Container state and the last `lines` log lines, with `secrets` redacted. Never throws; collection failures are reported inline. */
 export async function containerDiagnostics(container: string, secrets: readonly string[], lines = 100) {
-    const redact = (text: string) => secrets.filter((secret) => secret.length >= 6).reduce((out, secret) => out.split(secret).join('[redacted]'), text);
     const state = await dockerQuery(['inspect', '--type', 'container', '--format', STATE_FORMAT, container]);
     const logs = await dockerQuery(['logs', '--tail', String(lines), container]);
     const report = [
         `--- ${container} state: ${state.ok ? state.stdout.trim() : `unavailable (${state.stderr.trim().slice(0, 500)})`}`,
         logs.ok ? `--- last ${lines} log lines of ${container}:\n${`${logs.stdout}${logs.stderr}`.trimEnd().slice(-20_000)}` : `--- logs unavailable: ${logs.stderr.trim().slice(0, 500)}`,
     ].join('\n');
-    return redact(report);
+    return redact(report, secrets);
+}
+/** Build output lines kept when a build fails: the failing step's own output and the builder's summary of it. */
+export const BUILD_FAILURE_LINES = 80;
+/**
+ * Builds `dir` as `tag` and returns the exact image ID the builder recorded in an ID file inside this run's
+ * temporary directory `work`; the containers run that ID, never the tag. The build is not `--quiet`, which
+ * discards a failing step's output and leaves only "exit code: 1"; BUILDKIT_PROGRESS=plain selects BuildKit's
+ * line output (the legacy builder ignores it and prints step output anyway, and no builder-specific flag is
+ * passed). On failure the error ends with the last build output lines, so a Maven Wrapper download error, a
+ * dependency resolution error and a compile error can be told apart. No run secret reaches the build; the
+ * report is still redacted.
+ */
+export async function buildImage(dir: string, tag: string, work: string, secrets: readonly string[] = []) {
+    const idFile = join(work, `image-${randomBytes(6).toString('hex')}.id`);
+    try {
+        await run('docker', ['build', '--iidfile', idFile, '--label', STACK_LABEL, '-t', tag, dir],
+            { env: dockerEnv({ BUILDKIT_PROGRESS: 'plain' }), maxBuffer: 64 * 1024 * 1024 });
+    } catch (error) {
+        const failure = error as { stdout?: unknown; stderr?: unknown; code?: unknown; signal?: unknown };
+        const lines = `${String(failure.stdout ?? '')}${String(failure.stderr ?? '')}`.trimEnd().split('\n');
+        const kept = Math.min(lines.length, BUILD_FAILURE_LINES);
+        throw new Error(redact(`docker build of ${dir} failed (${String(failure.code ?? failure.signal ?? 'no exit status')}); `
+            + `last ${kept} of ${lines.length} output lines:\n${lines.slice(-kept).join('\n').slice(-20_000)}`, secrets));
+    }
+    const id = readFileSync(idFile, 'utf8').trim();
+    if (!/^sha256:[0-9a-f]{64}$/.test(id)) throw new Error(`docker build of ${dir} recorded no valid image ID: ${JSON.stringify(id.slice(0, 100))}`);
+    return id;
 }
 /**
  * Waits for the backend health endpoint, failing at once if the container stops. On any failure the container's state and
@@ -321,15 +351,16 @@ export default async function globalSetup() {
             JWT_SECRET: randomBytes(32).toString('hex'),
             STORAGE_ACCESS_KEY: `e2e-${randomBytes(6).toString('hex')}`, STORAGE_SECRET_KEY: randomBytes(24).toString('hex'),
         };
-        // Containers run the exact image ID this run built (printed by --quiet); the tag is only a layer
+        // Containers run the exact image ID this run built (recorded by --iidfile); the tag is only a layer
         // cache. It is per checkout: runs of one checkout are serialized by the lifecycle lock, so the tag
         // never moves under a live run, while a concurrent run from another checkout uses its own tag.
         // (With a containerd image store, retagging a shared tag deletes the previously tagged image, so
         // a tag shared across checkouts could remove another run's exact image before it is started.)
+        const runSecrets = Object.values(secrets);
         const backendImage = process.env.E2E_BACKEND_IMAGE
-            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', cacheTag('backend'), join(repo, 'backend')]);
+            ?? await buildImage(join(repo, 'backend'), cacheTag('backend'), work, runSecrets);
         const postgresImage = process.env.E2E_POSTGRES_IMAGE
-            ?? await docker(['build', '--quiet', '--label', STACK_LABEL, '-t', cacheTag('postgres'), join(repo, 'infrastructure', 'postgres')]);
+            ?? await buildImage(join(repo, 'infrastructure', 'postgres'), cacheTag('postgres'), work, runSecrets);
 
         const network = runId;
         const networkIntent = intend({ kind: 'network', name: network });

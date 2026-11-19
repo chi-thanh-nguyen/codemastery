@@ -4,7 +4,7 @@
  * and can run in parallel against the same disposable database.
  */
 import { test as base, expect } from '@playwright/test';
-import type { APIRequestContext, Page, Request } from '@playwright/test';
+import type { APIRequestContext, Page, Request, Response } from '@playwright/test';
 import { randomBytes, randomUUID } from 'node:crypto';
 
 export interface Account { email: string; password: string; displayName: string }
@@ -45,16 +45,78 @@ const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const accountMenuName = (account: Account) => new RegExp(`^Account menu, ${account.displayName ? escape(account.displayName) : ''}`);
 
 /**
+ * Records this page's `/api/auth/*` traffic as method, path, outcome and milliseconds since the watch began, so a failed
+ * sign-in can say which step stalled: the load-time restore, the sign-in request or the navigation.
+ * Headers, cookies, bodies and query strings are never read.
+ */
+export function watchAuthTraffic(page: Page) {
+    const start = Date.now(), events: string[] = [];
+    const mark = (label: string) => { events.push(`+${Date.now() - start}ms ${label}`); };
+    const path = (request: Request) => new URL(request.url()).pathname;
+    const note = (request: Request, outcome: string) => {
+        if (path(request).startsWith('/api/auth/')) mark(`${request.method()} ${path(request)} ${outcome}`);
+    };
+    const sent = (request: Request) => note(request, 'sent');
+    const answered = (response: Response) => note(response.request(), String(response.status()));
+    const failed = (request: Request) => note(request, `failed (${request.failure()?.errorText ?? 'unknown'})`);
+    page.on('request', sent);
+    page.on('response', answered);
+    page.on('requestfailed', failed);
+    return {
+        events, mark,
+        stop() { page.off('request', sent); page.off('response', answered); page.off('requestfailed', failed); },
+    };
+}
+
+/** What a stalled sign-in left on screen: the path and the visible status and alert texts (never field values). */
+async function signInState(page: Page) {
+    const texts = async (role: 'status' | 'alert') => page.getByRole(role).allTextContents().catch((reason: unknown) => [`unavailable: ${String(reason)}`]);
+    return `page: ${new URL(page.url()).pathname}; status: ${JSON.stringify(await texts('status'))}; alert: ${JSON.stringify(await texts('alert'))}`;
+}
+
+/** The Web Lock under which the frontend runs every session cookie operation (AuthProvider `LOCK`). */
+const SESSION_LOCK = 'codemastery-auth-session';
+const RESTORE_PATHS = ['/api/auth/refresh', '/api/auth/logout'];
+
+/**
+ * Loads `path` and returns once the page's load-time session restore has finished: its request (a refresh, or
+ * the logout that retries an unconfirmed sign-out) was answered and the frontend released its session Web Lock.
+ * The lock is requested, not polled, so this needs no page timer and works with an installed clock.
+ * In WebKit, text entered into a form within a few milliseconds of that restore completing was observed to be
+ * discarded (about 1 in 100 sign-ins), so tests wait for it before typing into a freshly loaded page.
+ */
+export async function gotoAfterRestore(page: Page, path: string) {
+    const restore = page.waitForResponse((response) => RESTORE_PATHS.includes(new URL(response.url()).pathname));
+    await page.goto(path);
+    await restore;
+    await page.evaluate((lock) => navigator.locks?.request(lock, () => undefined), SESSION_LOCK);
+}
+
+/**
  * Signs in through the form. A Learner lands on Learner home; Instructors and Administrators keep the
  * catalogue (Leader instruction of 7 November 2026; the one-use /profile return is unchanged).
+ * On failure the error also carries the auth traffic and the page state (see watchAuthTraffic).
  */
 export async function signIn(page: Page, account: Account, start: 'home' | 'courses' = 'home') {
-    await page.goto('/login');
-    await page.locator('#login-email').fill(account.email);
-    await page.locator('#login-password').fill(account.password);
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await expect(page).toHaveURL(start === 'home' ? /\/home$/ : /\/courses$/);
-    await expect(page.getByRole('button', { name: accountMenuName(account) })).toBeVisible();
+    const traffic = watchAuthTraffic(page);
+    try {
+        await gotoAfterRestore(page, '/login');
+        traffic.mark('load-time restore finished');
+        await page.locator('#login-email').fill(account.email);
+        await page.locator('#login-password').fill(account.password);
+        traffic.mark('form submitted');
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        await expect(page).toHaveURL(start === 'home' ? /\/home$/ : /\/courses$/);
+        await expect(page.getByRole('button', { name: accountMenuName(account) })).toBeVisible();
+    } catch (error) {
+        if (error instanceof Error) {
+            error.message += `\n\nSign-in diagnostics (${await signInState(page)})\n`
+                + (traffic.events.length ? traffic.events.map((event) => `  ${event}`).join('\n') : '  no /api/auth/ traffic was observed');
+        }
+        throw error;
+    } finally {
+        traffic.stop();
+    }
 }
 
 export async function signOut(page: Page, account: Account) {

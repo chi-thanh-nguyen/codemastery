@@ -684,7 +684,10 @@ not required for these image builds.
 The build context is `backend/`. The builder uses
 `eclipse-temurin:25.0.5_8-jdk-noble` and the checked-in Maven Wrapper to run
 `./mvnw package -DskipTests`. Tests are not executed, but their sources are still
-compiled. The image does not consume a host-built `target/` directory; normal
+compiled. The wrapper first fetches the pinned Maven distribution in a layer of its
+own. That one download is retried at most three times, after 5, 15 and 30 s, because
+Maven Central can answer HTTP 429 when it rate-limits and the image has no `curl` or
+`wget`. Maven's dependency downloads have their own retry, and the build runs once. The image does not consume a host-built `target/` directory; normal
 CI continues to run `./mvnw verify` separately.
 
 The runtime uses `eclipse-temurin:25.0.5_8-jre-noble` and contains only the
