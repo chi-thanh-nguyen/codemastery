@@ -11,7 +11,8 @@ import type { AuthContextValue } from './AuthProvider';
 import { useAuth } from '../../features/auth/hooks/useAuth';
 import { LoginPage } from '../../features/auth/pages/LoginPage';
 import { RegisterPage } from '../../features/auth/pages/RegisterPage';
-import { registrationInput, canonicalEmail, decodeLoginResponse } from '../../features/auth/types/authTypes';
+import { registrationInput, canonicalEmail, decodeLoginResponse, passwordResetCompletedMessage, passwordResetRequestedMessage } from '../../features/auth/types/authTypes';
+import { confirmPasswordReset, requestPasswordReset } from '../../features/auth/api/authApi';
 import type { UserRole } from '../../features/auth/types/authTypes';
 import { request } from '../../shared/api/httpClient';
 import { appTheme } from '../theme/theme';
@@ -647,5 +648,113 @@ describe('ADR014 hybrid refresh-session lifecycle', () => {
         await settle();
         expect(fetcher.mock.calls.filter((call) => (call[1] as RequestInit).method === 'PUT')).toHaveLength(1);
         expect(auth.user).toBeNull();
+    });
+});
+describe('CT02 password-reset REST client (FE06 part 1)', () => {
+    const requested = passwordResetRequestedMessage, completed = passwordResetCompletedMessage;
+    const requestPath = '/api/auth/password-reset-requests', resetPath = '/api/auth/password-resets';
+    const token = `${'A'.repeat(42)}g`, exact = '  exact new password  ';
+    const problem = (status: number, title: string, instance: string, errors?: unknown) => json({
+        type: 'about:blank', title, status, detail: 'Reset link is invalid or expired.', instance, ...(errors ? { errors } : {}),
+    }, status, 'application/problem+json');
+    const sent = (index = 0) => ({ url: fetcher.mock.calls[index][0] as string, init: fetcher.mock.calls[index][1] as RequestInit & { headers: Headers } });
+    const thrown = (run: () => unknown) => { try { run(); } catch (error) { return error; } throw new Error('Expected a synchronous rejection.'); };
+    it('requests a reset with the canonical CT01 email and returns the approved acknowledgement', async () => {
+        fetcher.mockResolvedValueOnce(json({ message: requested }, 202));
+        const result = await requestPasswordReset({ email: ' \tLEARNER+Tag@EXAMPLE.COM\n' });
+        expect(result).toEqual({ message: requested }); expect(Object.isFrozen(result)).toBe(true);
+        const { url, init } = sent();
+        expect(url).toBe(`http://localhost:8080${requestPath}`);
+        expect(init).toMatchObject({ method: 'POST', credentials: 'omit', redirect: 'error' });
+        expect(JSON.parse(init.body as string)).toEqual({ email: 'learner+tag@example.com' });
+        expect(init.headers.get('Content-Type')).toBe('application/json'); expect(init.headers.has('Authorization')).toBe(false);
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+    it.each(['\u212a@example.com', 'a@example.com\u00a0', '\ufeffa@example.com', '\u00e9@example.com', 'not-an-email', '', '   '])('rejects reset-request email %# before transport', (email) => {
+        expect(thrown(() => requestPasswordReset({ email }))).toMatchObject({ kind: 'validation', fields: { email: 'Enter a valid ASCII email address.' } });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('confirms with the exact capability and untrimmed password in the POST body only', async () => {
+        fetcher.mockResolvedValueOnce(json({ message: completed }));
+        const result = await confirmPasswordReset({ token, password: exact });
+        expect(result).toEqual({ message: completed }); expect(Object.isFrozen(result)).toBe(true);
+        const { url, init } = sent();
+        expect(url).toBe(`http://localhost:8080${resetPath}`); expect(url).not.toContain(token);
+        expect(init).toMatchObject({ method: 'POST', credentials: 'omit', redirect: 'error' });
+        expect(JSON.parse(init.body as string)).toEqual({ token, password: exact });
+        expect(init.headers.has('Authorization')).toBe(false);
+        expect(localStorage.length + sessionStorage.length).toBe(0);
+    });
+    it.each([
+        ['a'.repeat(14), false], ['a'.repeat(15), true], ['😀'.repeat(14) + 'a'.repeat(16), true], ['😀'.repeat(14) + 'a'.repeat(17), false],
+    ])('applies the CT01 password predicate %# before transport', async (password, valid) => {
+        if (valid) {
+            fetcher.mockResolvedValueOnce(json({ message: completed }));
+            await confirmPasswordReset({ token, password }); expect(JSON.parse(sent().init.body as string).password).toBe(password);
+        } else {
+            expect(thrown(() => confirmPasswordReset({ token, password }))).toMatchObject({ kind: 'validation', fields: { password: 'Use at least 15 Unicode characters and at most 72 UTF-8 bytes.' } });
+            expect(fetcher).not.toHaveBeenCalled();
+        }
+    });
+    it.each([[{}], [null], [[]], ['text'], [{ message: 1 }], [{ message: 'Something else.' }], [{ message: requested, token: 'x' }], [{ message: completed }]])(
+        'rejects acknowledgement body %# as a protocol error', async (body) => {
+            fetcher.mockResolvedValueOnce(json(body, 202));
+            await expect(requestPasswordReset({ email: 'a@example.com' })).rejects.toMatchObject({ kind: 'protocol' });
+        });
+    it.each([[{}], [null], [{ message: 'Signed in.' }], [{ message: completed, accessToken: 'x' }], [{ message: requested }]])(
+        'rejects completion body %# as a protocol error', async (body) => {
+            fetcher.mockResolvedValueOnce(json(body));
+            await expect(confirmPasswordReset({ token, password: exact })).rejects.toMatchObject({ kind: 'protocol' });
+        });
+    it.each([
+        ['request', 200, 'application/json'], ['request', 202, 'text/plain'], ['confirm', 202, 'application/json'], ['confirm', 200, 'application/problem+json'],
+    ] as const)('rejects an unexpected %s success (%i %s)', async (operation, status, media) => {
+        fetcher.mockResolvedValueOnce(json({ message: operation === 'request' ? requested : completed }, status, media));
+        const call = operation === 'request' ? requestPasswordReset({ email: 'a@example.com' }) : confirmPasswordReset({ token, password: exact });
+        await expect(call).rejects.toMatchObject({ kind: 'protocol' });
+    });
+    it('rejects malformed success JSON', async () => {
+        fetcher.mockResolvedValueOnce(new Response('{"message":', { status: 202, headers: { 'Content-Type': 'application/json' } }));
+        await expect(requestPasswordReset({ email: 'a@example.com' })).rejects.toMatchObject({ kind: 'protocol' });
+    });
+    it('keeps the generic capability 400 field-free and exposes only a safe password field error', async () => {
+        fetcher.mockResolvedValueOnce(problem(400, 'Bad Request', resetPath));
+        const link = await confirmPasswordReset({ token, password: exact }).catch((error) => error);
+        expect(link).toMatchObject({ kind: 'http', status: 400, message: 'Please check the supplied information.' }); expect(link.fields).toEqual({});
+        expect(link.problem.detail).not.toContain('Reset link');
+        fetcher.mockResolvedValueOnce(problem(400, 'Bad Request', resetPath, [{ field: 'password', code: 'StrongPassword', message: 'private' }]));
+        await expect(confirmPasswordReset({ token, password: exact })).rejects.toMatchObject({ kind: 'http', status: 400, fields: { password: 'Please check this field.' } });
+    });
+    it.each([[415, 'Unsupported Media Type'], [500, 'Internal Server Error']])('maps %i without retrying', async (status, title) => {
+        fetcher.mockResolvedValueOnce(problem(status, title, requestPath));
+        await expect(requestPasswordReset({ email: 'a@example.com' })).rejects.toMatchObject({ kind: 'http', status });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+    it('maps a network failure without retrying', async () => {
+        fetcher.mockRejectedValueOnce(new Error('private'));
+        await expect(confirmPasswordReset({ token, password: exact })).rejects.toMatchObject({ kind: 'network' });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+    it('honours abort and isCurrent before transport and after the response', async () => {
+        const aborted = new AbortController(); aborted.abort();
+        await expect(requestPasswordReset({ email: 'a@example.com' }, aborted.signal)).rejects.toMatchObject({ kind: 'cancelled' });
+        await expect(confirmPasswordReset({ token, password: exact }, undefined, () => false)).rejects.toMatchObject({ kind: 'cancelled' });
+        expect(fetcher).not.toHaveBeenCalled();
+        const late = new AbortController(), first = deferred(); fetcher.mockReturnValueOnce(first.promise);
+        const pendingAbort = requestPasswordReset({ email: 'a@example.com' }, late.signal).catch((error) => error);
+        late.abort(); first.resolve(json({ message: requested }, 202));
+        expect(await pendingAbort).toMatchObject({ kind: 'cancelled' });
+        let current = true; const second = deferred(); fetcher.mockReturnValueOnce(second.promise);
+        const pendingStale = confirmPasswordReset({ token, password: exact }, undefined, () => current).catch((error) => error);
+        current = false; second.resolve(json({ message: completed }));
+        expect(await pendingStale).toMatchObject({ kind: 'cancelled' });
+    });
+    it('neither sends nor ends the current session', async () => {
+        await mount(); await signIn(); const generation = auth.generation;
+        fetcher.mockResolvedValueOnce(json({ message: completed }));
+        await act(async () => { await confirmPasswordReset({ token, password: exact }); });
+        const [url, init] = fetcher.mock.calls.at(-1)! as [string, RequestInit & { headers: Headers }];
+        expect(url).toBe(`http://localhost:8080${resetPath}`); expect(init.credentials).toBe('omit'); expect(init.headers.has('Authorization')).toBe(false);
+        expect(auth.isAuthenticated).toBe(true); expect(auth.generation).toBe(generation);
     });
 });
