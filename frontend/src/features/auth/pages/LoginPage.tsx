@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { ApiError, formFailure } from '../../../shared/types/apiTypes';
 import { loginInput } from '../types/authTypes';
 import { PresentationIcon } from '../../../shared/components/PresentationIcon';
+import { recoveryLinkSx } from './ForgotPasswordPage';
 
 export interface FormFailure { message: string; fields: Record<string, string> }
 
@@ -72,7 +73,7 @@ export function LoginPage({ notice }: { notice?: ReactNode } = {}) {
         if (input instanceof HTMLElement) input.focus(); else summary.current?.focus();
     }, [failure]);
     return <LoginView email={email} password={password} onEmailChange={setEmail} onPasswordChange={setPassword} loading={loading} failure={failure} formRef={form} summaryRef={summary} notice={notice}
-        recovery={<TextLink component={Link} to="/forgot-password" sx={{ fontWeight: 600 }}>Forgot password?</TextLink>}
+        recovery={<TextLink component={Link} to="/forgot-password" sx={recoveryLinkSx}>Forgot password?</TextLink>}
         registerLink={<TextLink component={Link} to="/register" sx={{ fontWeight: 600 }}>Create an account</TextLink>}
         browseLink={<TextLink component={Link} to="/courses" sx={{ fontWeight: 600 }}>Browse courses</TextLink>}
         onSubmit={async (event) => {

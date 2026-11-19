@@ -22,6 +22,15 @@ export function RecoveryFailureAlert({ failure, alertRef }: { failure: RecoveryF
     </Alert>;
 }
 const invalidEmail = 'Enter a valid ASCII email address.';
+/**
+ * Text link of the recovery flow (DESIGN.md › Accessibility › Targets): the visible shape stays inline and
+ * unchanged; an invisible 44 px tall extension centred on it makes the hit area at least 44 × 44 px
+ * (each link text is wider than 44 px). It extends only vertically, so it never covers text it does not own.
+ */
+export const recoveryLinkSx = {
+    fontWeight: 600, position: 'relative',
+    '&::before': { content: '""', position: 'absolute', left: 0, right: 0, top: '50%', height: 44, transform: 'translateY(-50%)' },
+} as const;
 
 export interface ForgotPasswordPageProps {
     onSubmit: (email: string) => void;
@@ -76,7 +85,7 @@ export function ForgotPasswordRoute() {
     return <ForgotPasswordPage state={state} acknowledgement={acknowledgement} failure={failure} emailError={emailError}
         signInLink={state === 'sent'
             ? <Button component={Link} to="/login" variant="outlined" fullWidth>Back to sign in</Button>
-            : <TextLink component={Link} to="/login" sx={{ fontWeight: 600 }}>Back to sign in</TextLink>}
+            : <TextLink component={Link} to="/login" sx={recoveryLinkSx}>Back to sign in</TextLink>}
         onSubmit={async (email) => {
             if (work.current) return; // one request at a time; no automatic replay
             const controller = new AbortController();
