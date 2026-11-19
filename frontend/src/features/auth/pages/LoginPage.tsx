@@ -29,7 +29,7 @@ export interface LoginViewProps {
     summaryRef?: RefObject<HTMLDivElement | null>;
     /** Optional notice above the form (for example "Your session ended"). */
     notice?: ReactNode;
-    /** Password recovery entry, rendered only when a recovery flow exists (CT02 pending). */
+    /** Password recovery entry (FE06 "Forgot password?"), rendered only where the recovery flow is routed. */
     recovery?: ReactNode;
     registerLink?: ReactNode;
     browseLink?: ReactNode;

@@ -282,3 +282,123 @@ it('shows Learner home empty and retryable error states', async () => {
     fail = false; await click('Try again');
     expect(host.textContent).toContain("You haven't joined a course yet"); expect(host.querySelector('a[href="/courses"]')?.textContent).toBeTruthy();
 });
+describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
+    const token = `${'Q'.repeat(42)}w`, newPassword = '  a new exact password  ';
+    const requested = 'If an account matches, a password reset link will be sent.', completed = 'Password reset. Sign in with your new password.';
+    const problem = (status: number, title: string, instance: string, errors?: unknown) => new Response(JSON.stringify({
+        type: 'about:blank', title, status, detail: 'Reset link is invalid or expired.', instance, ...(errors ? { errors } : {}),
+    }), { status, headers: { 'Content-Type': 'application/problem+json' } });
+    /** Records where the page was when each request left, so capability erasure can be ordered against it. */
+    let seen: { path: string; href: string; body?: string }[];
+    function respond(handler: (path: string) => Response | Promise<Response> | undefined) {
+        seen = [];
+        fetcher.mockImplementation((url: string, init?: RequestInit) => {
+            const path = new URL(url).pathname; seen.push({ path, href: window.location.href, body: init?.body as string | undefined });
+            const answer = handler(path);
+            return answer ? Promise.resolve(answer) : Promise.resolve(json(page));
+        });
+    }
+    const calls = (path: string) => seen.filter((entry) => entry.path === path);
+    async function submit() { await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); }
+    async function fillReset(password = newPassword, confirm = password) { await change('password', password); await change('confirmPassword', confirm); }
+    it('links Sign in to the request page and acknowledges with the API text verbatim', async () => {
+        respond((path) => path === '/api/auth/password-reset-requests' ? json({ message: requested }, 202) : undefined);
+        await mount('/login'); await click('Forgot password?');
+        expect(location.pathname).toBe('/forgot-password'); expect(host.querySelector('h1')?.textContent).toBe('Forgot password');
+        await change('email', ' Learner@Example.COM '); await submit();
+        expect(calls('/api/auth/password-reset-requests').map((entry) => JSON.parse(entry.body!))).toEqual([{ email: 'learner@example.com' }]);
+        expect(host.querySelector('[role="status"]')?.textContent).toBe(requested);
+        expect(document.activeElement?.textContent).toBe(requested);
+        expect(host.querySelector('a[href="/login"]')?.textContent).toBe('Back to sign in');
+    });
+    it.each(['K@example.com', 'a@example.com ', 'missing-at'])('refuses request email %# locally and focuses it', async (email) => {
+        respond(() => undefined);
+        await mount('/forgot-password'); await change('email', email); await submit();
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(0);
+        expect(host.textContent).toContain('Enter a valid ASCII email address.');
+        expect(document.activeElement).toBe(host.querySelector('input[name="email"]'));
+    });
+    it.each([
+        ['network', () => Promise.reject(new Error('private')), "We couldn't reach CodeMastery. Check your connection and try again."],
+        ['server', () => problem(500, 'Internal Server Error', '/api/auth/password-reset-requests'), 'Something went wrong on our side. Try again in a moment.'],
+    ] as const)('shows the F14 %s failure on the request page and retries only on demand', async (_kind, failure, text) => {
+        let fail = true;
+        respond((path) => path === '/api/auth/password-reset-requests' ? (fail ? failure() as Response : json({ message: requested }, 202)) : undefined);
+        await mount('/forgot-password'); await change('email', 'learner@example.com'); await submit();
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain(text); expect(host.textContent).not.toContain('private');
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(1);
+        fail = false; await click('Try again');
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(2); expect(host.querySelector('[role="status"]')?.textContent).toBe(requested);
+    });
+    it('erases the capability before paint and any request, keeps it out of the DOM and storage, and creates no session', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount(`/reset-password#token=${token}`);
+        expect(window.location.pathname).toBe('/reset-password'); expect(window.location.hash).toBe(''); expect(window.location.search).toBe('');
+        expect(seen.every((entry) => !entry.href.includes(token))).toBe(true);
+        expect(host.querySelector('h1')?.textContent).toBe('Reset password');
+        await fillReset(); await submit();
+        const sent = calls('/api/auth/password-resets');
+        expect(sent).toHaveLength(1); expect(JSON.parse(sent[0].body!)).toEqual({ token, password: newPassword }); expect(sent[0].href).not.toContain(token);
+        expect(host.innerHTML).not.toContain(token); expect(document.documentElement.innerHTML).not.toContain(token);
+        expect(localStorage.length + sessionStorage.length).toBe(0); expect(JSON.stringify(window.history.state ?? {})).not.toContain(token);
+        expect(host.querySelector('[role="status"]')?.textContent).toBe(`${completed}Other signed-in sessions on your account have been signed out.`);
+        expect(host.querySelector('a[href="/login"]')?.textContent).toBe('Sign in');
+        expect(auth.isAuthenticated).toBe(false); expect(calls('/api/auth/login')).toHaveLength(0);
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
+    });
+    it.each([['/reset-password', 'a reload without a capability'], ['/reset-password#token=short', 'a malformed capability'], [`/reset-password?token=${token}`, 'a capability in the query']])(
+        'shows the invalid-link state for %s (%s) without a request', async (path) => {
+            respond(() => undefined);
+            await mount(path);
+            expect(window.location.pathname + window.location.search + window.location.hash).toBe('/reset-password');
+            expect(host.querySelector('h1')?.textContent).toBe('This reset link is invalid or has expired.');
+            expect(host.textContent).toContain('Request a new link from the sign-in page.');
+            expect(host.querySelector('a[href="/forgot-password"]')?.textContent).toBe('Request a new link');
+            expect(calls('/api/auth/password-resets')).toHaveLength(0); expect(host.innerHTML).not.toContain(token);
+        });
+    it('treats the generic 400 as an invalid link but keeps a password-rule 400 on the form', async () => {
+        let answer = problem(400, 'Bad Request', '/api/auth/password-resets', [{ field: 'password', code: 'StrongPassword', message: 'private' }]);
+        respond((path) => path === '/api/auth/password-resets' ? answer : undefined);
+        await mount(`/reset-password#token=${token}`); await fillReset(); await submit();
+        expect(host.querySelector('h1')?.textContent).toBe('Reset password');
+        expect(host.textContent).toContain('Use at least 15 Unicode characters and at most 72 UTF-8 bytes.');
+        expect(document.activeElement).toBe(host.querySelector('input[name="password"]'));
+        answer = problem(400, 'Bad Request', '/api/auth/password-resets'); await submit();
+        expect(host.querySelector('h1')?.textContent).toBe('This reset link is invalid or has expired.');
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
+        expect(calls('/api/auth/password-resets')).toHaveLength(2);
+    });
+    it('checks the CT01 rule and confirmation locally before any request', async () => {
+        respond(() => undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset('a'.repeat(14)); await submit();
+        expect(document.activeElement).toBe(host.querySelector('input[name="password"]'));
+        await fillReset(newPassword, `${newPassword}x`); await submit();
+        expect(host.textContent).toContain('Passwords must match.'); expect(document.activeElement).toBe(host.querySelector('input[name="confirmPassword"]'));
+        expect(calls('/api/auth/password-resets')).toHaveLength(0);
+    });
+    it('reports F14 failures, sends one request at a time and never replays', async () => {
+        let release!: (value: Response) => void;
+        respond((path) => path === '/api/auth/password-resets' ? new Promise<Response>((resolve) => { release = resolve; }) : undefined);
+        await mount(`/reset-password#token=${token}`); await fillReset();
+        await submit(); await submit();
+        expect(calls('/api/auth/password-resets')).toHaveLength(1);
+        expect(host.querySelector('button[type="submit"]')?.hasAttribute('disabled')).toBe(true);
+        await act(async () => release(problem(500, 'Internal Server Error', '/api/auth/password-resets')));
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('Something went wrong on our side. Try again in a moment.');
+        expect(document.activeElement).toBe(host.querySelector('[role="alert"]'));
+        expect(calls('/api/auth/password-resets')).toHaveLength(1);
+    });
+    it('aborts an in-flight reset when the page is left', async () => {
+        let signal: AbortSignal | undefined;
+        respond(() => undefined);
+        fetcher.mockImplementation((url: string, init?: RequestInit) => {
+            if (new URL(url).pathname === '/api/auth/password-resets') { signal = init?.signal ?? undefined; return new Promise<Response>(() => undefined); }
+            return Promise.resolve(json(page));
+        });
+        await mount(`/reset-password#token=${token}`); await fillReset(); await submit();
+        expect(signal?.aborted).toBe(false);
+        await go('/login');
+        expect(signal?.aborted).toBe(true);
+    });
+});
