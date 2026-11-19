@@ -72,6 +72,7 @@ export function LoginPage({ notice }: { notice?: ReactNode } = {}) {
         if (input instanceof HTMLElement) input.focus(); else summary.current?.focus();
     }, [failure]);
     return <LoginView email={email} password={password} onEmailChange={setEmail} onPasswordChange={setPassword} loading={loading} failure={failure} formRef={form} summaryRef={summary} notice={notice}
+        recovery={<TextLink component={Link} to="/forgot-password" sx={{ fontWeight: 600 }}>Forgot password?</TextLink>}
         registerLink={<TextLink component={Link} to="/register" sx={{ fontWeight: 600 }}>Create an account</TextLink>}
         browseLink={<TextLink component={Link} to="/courses" sx={{ fontWeight: 600 }}>Browse courses</TextLink>}
         onSubmit={async (event) => {
