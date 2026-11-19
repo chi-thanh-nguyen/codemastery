@@ -37,10 +37,11 @@ onward, are decision and execution records. They keep the wording of their date.
 
 Backend unit tests, Testcontainers PostgreSQL integration tests and frontend
 Vitest/jsdom tests exist for the implemented Auth, Course catalogue and
-membership, sample-data and shared REST slices, and run in CI. A local
-Playwright Test suite in `e2e/` runs the implemented learner flows against a
-disposable stack built from the checkout; it is not run in CI. A passing test
-establishes only what that test exercises. It is not acceptance of a verification Issue: QA01 #61, QA02 #62,
+membership, sample-data and shared REST slices, and run in CI. The Playwright
+Test suite in `e2e/` runs the implemented learner flows against a disposable
+stack built from the checkout, both locally and in the required `E2E` check of
+the `CI E2E` workflow. A passing test establishes only what that test exercises.
+It is not acceptance of a verification Issue: QA01 #61, QA02 #62,
 QA07 #63, QA13 #64, QA14 #65 and DP02 #66 remain open, and their independent
 verification is separate work.
 
@@ -52,8 +53,8 @@ verification is separate work.
 | Backend integration | Maven Failsafe; `backend/src/test/java/com/codemastery/integration/`; PostgreSQL 17 Testcontainer through `AbstractIntegrationTest` | Yes (`Backend`) | Real Flyway schema, persistence, transactions and concurrency. Auth, Enrollment and sample-data suites dispatch through MockMvc with the configured Spring Security chain; the other suites do not (see [Integration-Test Lifecycle](#integration-test-lifecycle)) | A running server, real browser, network/CORS from a browser, deployment |
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
-| E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`lifecycle.test.mjs`, `run-inventory.test.mjs`, `stack-recovery.test.mjs`, `preview-control.test.mjs`, `local-stack.test.mjs`, `stack-down.test.mjs`); Python 3 (standard library only) and Node 22.18+ or 24; the coordinator tests use disposable fake checkouts and the real per-account registry, the recovery tests an injected fake Docker CLI, the other tests a stub `docker` on `PATH`, a stub Vite build entry point and a stub Vite preview module | No | CT34 r2: exclusive ownership taken and persisted before Playwright starts; same-checkout and path-alias conflicts refused without touching outputs; isolated checkouts concurrent; nonterminal, corrupt, widened-mode or earlier-device-identity records block reuse; a stale or exported hand-down is refused; unsafe output roots refused; birth-identity process classification (PID reuse never signalled); cooperative preview shutdown over the private channel with no PID fallback; no build or Docker removal while a writer lives; endpoint-bound Docker calls and daemon-confirmed absence (a lost daemon socket is never absence; recorded states are re-verified); interrupted-intent reconciliation; volume associations and unaccounted volumes; verified temporary-path removal; bounded idempotent retry; readiness marker and backend diagnostics | Real Docker, Vite, browsers or the E2E flows themselves ([real-Docker record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)) |
-| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` and by the `E2E` job of `CI E2E`, a required check ([interface](#browser-harness-and-e2e-suite)) | No | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data, CI; `tests/adaptive-flow.spec.ts` stays empty pending Adaptive contracts |
+| E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`lifecycle.test.mjs`, `run-inventory.test.mjs`, `stack-recovery.test.mjs`, `preview-control.test.mjs`, `local-stack.test.mjs`, `stack-down.test.mjs`); Python 3 (standard library only) and Node 22.18+ or 24; the coordinator tests use disposable fake checkouts and the real per-account registry, the recovery tests an injected fake Docker CLI, the other tests a stub `docker` on `PATH`, a stub Vite build entry point and a stub Vite preview module | Yes — the `E2E` check of `CI E2E` | CT34 r2: exclusive ownership taken and persisted before Playwright starts; same-checkout and path-alias conflicts refused without touching outputs; isolated checkouts concurrent; nonterminal, corrupt, widened-mode or earlier-device-identity records block reuse; a stale or exported hand-down is refused; unsafe output roots refused; birth-identity process classification (PID reuse never signalled); cooperative preview shutdown over the private channel with no PID fallback; no build or Docker removal while a writer lives; endpoint-bound Docker calls and daemon-confirmed absence (a lost daemon socket is never absence; recorded states are re-verified); interrupted-intent reconciliation; volume associations and unaccounted volumes; verified temporary-path removal; bounded idempotent retry; readiness marker and backend diagnostics | Real Docker, Vite, browsers or the E2E flows themselves ([real-Docker record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)) |
+| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` and by the `E2E` job of `CI E2E`, a required check ([interface](#browser-harness-and-e2e-suite)) | Yes — the `E2E` check of `CI E2E` | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data; `tests/adaptive-flow.spec.ts` is empty |
 | VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
 
@@ -715,14 +716,18 @@ test-count or coverage-percentage claim is made for them.
   `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
   `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
   their features and approved contracts.
-- **E2E.** The Playwright suite exists but has no CI job; it runs locally with
-  Docker. `e2e/tests/adaptive-flow.spec.ts` is empty until Adaptive, Assessment and
-  lesson-content contracts exist. Firefox has not yet completed a recorded run
-  (see the 6 November 2026 record).
-- **Real-browser and runtime integration.** No CI job drives a real browser
-  against a running backend and PostgreSQL. Local runs are recorded in the dated
-  sections below; QA07 and DP02 acceptance are open. Group B/C design-preview
-  screens have no backend to integrate with yet.
+- **E2E.** The Playwright suite runs locally with Docker and in the required `E2E`
+  check of the `CI E2E` workflow ([CI](#ci)), on all five projects against a disposable
+  stack. It covers only the existing learner cases; `e2e/tests/adaptive-flow.spec.ts`
+  is empty, and new cases wait for their features and the CT19/CT35 selections.
+  `firefox-desktop` first completed a recorded run in CI
+  ([SH07 first executions](#sh07-e2e-ci-first-executions--13-november-2026)); it
+  cannot launch on the recorded local macOS host.
+- **Real-browser and runtime integration.** Only the `CI E2E` job drives real
+  browsers in CI, against its disposable backend and PostgreSQL stack, and only for
+  the existing E2E cases. Local runs are recorded in the dated sections below; QA07
+  and DP02 acceptance are open. Group B/C design-preview screens have no backend to
+  integrate with yet.
 - **Deployment.** No test reaches the real VM or checks outside-network access
   (DP01 #71, DP03 #72). The private `/actuator/health` probe is verified only
   locally and in CI ([record](#dp01-private-health-probe-verification--1-november-2026)).
@@ -730,6 +735,13 @@ test-count or coverage-percentage claim is made for them.
   upload or delivery (CT09).
 - **Assistive technology.** No test establishes actual screen-reader output; no
   manual VoiceOver, NVDA or TalkBack session has been recorded.
+- **DESIGN r12 behavior.** Light, Dark and System rendering, the Theme control, and
+  the r12 quiz-attempt, autosave and Instructor-management states are specified in
+  `DESIGN.md` but not implemented, so no test covers them
+  ([verification guidance](#design-r12-uiux-verification-guidance--specified-not_run)).
+  The theme system and its developer verification are assigned to FE34 #255.
+  The preview suite does not cover the recorded A13 case (a sign-in in another tab
+  makes the `/preview` document send `POST /api/auth/refresh`).
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
@@ -4290,3 +4302,47 @@ checks in memory that the error contains no password, email, access token, cooki
 bearer or JWT-shaped text. Only booleans are asserted, so a failure cannot print a value.
 `request.failure()?.errorText` is a browser network error description, and auth URLs carry
 nothing secret (only the path is recorded).
+
+## DESIGN r12 UI/UX verification guidance — specified, NOT_RUN
+
+**Authority and scope.** `DESIGN-2026-11-19-r12` was merged into `main` by PR #252
+(`a7883e3`, 19 November 2026); the Project Leader's instruction of the same day,
+“CodeMastery — Post-DESIGN r12 Integration: GitHub Issue Alignment, Agent Governance &
+Documentation Synchronization”, asked for this guidance. It describes how future
+implementation of the r12 behavior should be verified. It adds no test, harness check or
+E2E case, executes nothing and records no result. It does not change the CT14 coverage,
+isolation and Profile/Auth UI contracts, the CT19 and CT35 E2E case selections, the CT34
+runner and fixture contracts, or the ADR014 `CT14-SESSION-2026-11-16-r1` obligations.
+
+**Current state.** `main` renders the light scheme only and has no Theme control. The r12
+colour schemes, the quiz-attempt entry and answer-saving states, and the Instructor
+management workflows are specified, not implemented, so no evidence exists for them.
+Nothing in the table below has passed.
+
+**Theme verification handoff (19 November 2026).** FE34 #255 (assigned to `heizseung`,
+implementation authorized by the Project Leader on 19 November 2026, not implemented)
+owns the theme system and its developer verification: the first three rows of the table
+below, with unit and component tests for the preference, storage fallbacks, other tabs,
+operating-system changes, the Theme control and the preview override, and rendered
+Light, Dark and System checks of the implemented shells and Live screens. That evidence
+is implementation evidence only. QA07 #63 keeps independent Final acceptance and runs
+its theme checks only after FE34 delivers the schemes; until then they are coverage gaps.
+FE34 adds no E2E case outside the CT19 and CT35 selections, and it excludes the A13
+preview-isolation case and the A14 response-metadata capability, which have no owning
+Issue. Every row stays NOT_RUN until a check actually runs.
+
+| Area | What to verify once implemented | Layer |
+| --- | --- | --- |
+| Light, Dark and System rendering | Each implemented screen renders through semantic roles in light, dark and System, including a live operating-system change, without reload, flash or layout shift; the `DESIGN.md` contrast pairs hold in both schemes; `forced-colors` and `prefers-contrast: more` rules apply; printing uses the light scheme | Vitest for preference resolution; optional browser harness or Playwright CLI for rendered checks; QA07 #63 for acceptance |
+| Theme persistence and operating-system preference | `codemastery.theme` accepts only `system`, `light` and `dark`; a missing or invalid value means System; blocked storage keeps the choice in memory; the choice survives reload, navigation, sign-in, sign-out and another account signing in; other tabs follow through the `storage` event; System follows `prefers-color-scheme` changes; the first-paint script prevents a flash | Vitest with controlled `localStorage` and `matchMedia`; browser checks for first paint and other tabs |
+| Theme control and Focus layouts | Exactly one control per shell (workspace top bar at ≥ 900 px, drawer footer below, landing header, auth layout, quiz and diagnostic Focus bar), for visitors and every role, including during the session restore; menu and radio-group keyboard behavior and the status announcement; in the Focus bar, opening the menu never pauses the timer, saves, submits or changes answers | Vitest and the browser harness |
+| Responsive layouts | Wireframe zones and order at 360, 768, 1024, 1280 and 1440 px; 320 px and 200% zoom without page-level horizontal scroll; the primary action visible at 1280 × 720 and 390 × 844 | Browser harness or Playwright CLI |
+| Accessibility and keyboard | Keyboard-only completion of each implemented flow; route focus on the `h1`; VoiceOver and NVDA on sign-in, catalogue, course detail and My courses; the Theme control by keyboard and screen reader in each shell; each check in both schemes and once with System following an operating-system change | Manual sessions recorded with their limits; QA07 |
+| Server-authoritative quiz lifecycle | Only the explicit start actions send `b3StartAttempt`; Resume, Back, Forward, reload and direct links read the attempt by its identity; each start and read outcome shows its F6 state; the timer counts to the returned `expiresAt`; no request after `expiresAt`; the result read's 409 before finalization | Vitest with controlled responses; real-backend checks only within the CT19/CT35 selections |
+| Autosave reconciliation | Every F6 save-state transition, including failed and unknown saves, Checking, Reconcile, "Save my answers" and "Use saved answers", submit gating after a confirmed final save, and late responses ignored by attempt, save sequence and session generation | Vitest with controlled responses and timers |
+| Instructor management workflows | Server-decided editability (a 409 keeps the draft; "Save as a new question"; no automatic replacement), editor recovery and unknown outcomes, URL replacement after creation, regrading with the exact `submittedAt`, and the adaptive-settings snapshot with `ETag`/`If-Match` and 412/428 recovery | Vitest; the settings cases keep their existing [CT14 B1-O18/O19](decisions/005-batch-01-contract-approvals.md#163-ct14-acceptance-oracles-and-direct-consumer-traceability) allocation |
+| Data, API and preview isolation | Production screens show only decoded data from approved operations and no fixture or sample data; `/preview` sends no request, reads no session and writes no storage, including when another tab signs in or out (the A13 case, currently a known defect) | Existing preview suite, extended for A13 by its owner |
+
+Report results per layer and only after the checks actually run. Unit results do not
+establish browser, assistive-technology, backend or deployment behavior, and a design
+preview is never integration evidence.
