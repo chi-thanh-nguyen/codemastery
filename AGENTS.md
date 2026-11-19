@@ -92,6 +92,14 @@ Interpretation examples, not new approval determinations:
 - ADR001 sections 1–10 establish approved modular-monolith/module-boundary obligations. Section 11 separately qualifies CT01 selections with pending authoritative integration and additional approval requirements; it does not inherit approval from the document's top-level status. Verify any subsequent scoped authorization separately.
 - ADR002's exact authorized slices and disposition inventory distinguish approved, proposed, deferred, and blocked entries. `CT01.core` approval does not itself approve `CT01.identity` or `CT01.remaining`; historical pending-merge/review wording must be checked against current evidence.
 
+### Final UI/UX Design — PRESENTATION AND INTERACTION
+
+Canonical source: root `DESIGN.md` (the revision merged on `main`).
+
+Use for the delegated UI/UX scope: visual identity, design tokens, colour schemes and theme behavior, typography, layouts, shared components, screens, user flows, interaction states, UX copy, accessibility behavior and design-level implementation handoffs.
+
+It ranks below the sources above and below OpenAPI for public behavior. Its authority, precedence and implementation-fidelity rules are defined once in [Final UI/UX Design Authority and Implementation Fidelity](#final-uiux-design-authority-and-implementation-fidelity).
+
 ### Current Build/Configuration — CURRENT STATE
 
 Use implemented repository files for exact dependency/plugin versions, scripts, environment-variable names, profiles, ports, service names, CI jobs, and test commands.
@@ -173,6 +181,8 @@ If a task depends on missing, ambiguous, inconsistent, or unsupported informatio
 Do not guess, infer, fabricate, or silently choose project-specific values.
 
 Block when undefined choices affect API behavior, schema, thresholds, JWT policy, CORS, ports, deployment URLs, storage policies, credentials, production dependencies, modules/layers/services, cross-module behavior, security, grading, integration, deployment, or another contributor's work.
+
+This includes a genuine conflict between `DESIGN.md` and a higher-authority source, and a design element that needs data, an operation, a route, a file or behavior that the approved contracts or the task's authorization do not provide (see [Final UI/UX Design Authority and Implementation Fidelity](#final-uiux-design-authority-and-implementation-fidelity)).
 
 Do not choose a framework default merely because one exists when the choice can affect externally relevant behavior.
 
@@ -365,6 +375,8 @@ This is stricter than the course minimum requirement, which only requires the in
 
 Maintain responsive behavior.
 
+Follow root `DESIGN.md` for presentation, interaction, theme behavior and user-facing copy, under [Final UI/UX Design Authority and Implementation Fidelity](#final-uiux-design-authority-and-implementation-fidelity).
+
 Never expose secrets in frontend source or `VITE_*` variables.
 
 Do not invent npm scripts; inspect `frontend/package.json` when it exists.
@@ -388,6 +400,90 @@ Preserve the course-required disclosure of AI use, AI-assisted development, and 
 Record only tools, services, purposes, and uses that are actually known.
 
 Do not fabricate, infer, or conceal disclosure details.
+
+## Final UI/UX Design Authority and Implementation Fidelity
+
+This section is the single statement of how `DESIGN.md` binds implementation. Other sections refer to it.
+
+### Design Authority and Current Baseline
+
+The current approved root `DESIGN.md` merged on `main` is the authoritative specification for its delegated UI/UX scope:
+
+- visual identity, semantic design tokens, typography and colour schemes;
+- layouts and responsive behavior;
+- shared components and screen specifications;
+- user journeys, UI flow behavior, and presentation and interaction states;
+- user-facing UX copy;
+- accessibility behavior;
+- theme behavior;
+- design-level implementation handoffs.
+
+As of 19 November 2026 the merged revision is `DESIGN-2026-11-19-r12` (PR #252, merge commit `a7883e3`). A later revision validly integrated into `main` under the change control recorded in `DESIGN.md` supersedes it only within its effective scope. Work from the revision on `main`, or from the revision a task explicitly names; not from a preview, a copy or older Issue text.
+
+`DESIGN.md` records its own status labels, decision IDs, gap and limitation registers, open questions and implementation gates. Apply them as recorded. An item it marks pending, proposed, deferred or awaiting owner confirmation remains unresolved.
+
+### Precedence
+
+`DESIGN.md` is subordinate, in this order, to:
+
+1. mandatory requirements;
+2. approved architecture and repository structure;
+3. effective, properly authorized ADRs and technical contracts;
+4. OpenAPI and approved module/API boundaries for public behavior.
+
+Within those limits, `DESIGN.md` selects presentation and interaction details that the higher-authority sources leave open, and those design decisions bind frontend implementation.
+
+`DESIGN.md` cannot create or change backend behavior, DTO fields, API operations, routes, persistence rules, security guarantees, authorization or role policies, dependencies, repository files or technical approvals. A design statement that would need one of them does not approve it.
+
+A genuine conflict between `DESIGN.md` and a higher-authority source follows the [Blocker Protocol](#blocker-protocol).
+
+Do not edit `DESIGN.md`, an ADR, OpenAPI or any other higher-authority source to make an implementation appear compliant. Changes to `DESIGN.md` require explicit authorization and follow its own change control.
+
+### Task-Scoped Design Inspection
+
+Before implementing or modifying frontend behavior or presentation, read:
+
+- the `DESIGN.md` screen specifications (S-numbers), flows (F-numbers) and shared component, theme, content and accessibility sections that the task touches;
+- the affected design decisions, gap and limitation records, and implementation gates;
+- the effective technical contracts and OpenAPI operations that the affected screens consume;
+- the current production source and integration state: routes, API clients, shared components and tests.
+
+Unrelated screens need not be read.
+
+### Theme Compliance
+
+- Follow the Light, Dark and System semantics of `DESIGN.md` wherever the work renders UI.
+- Use the approved semantic tokens and theme roles and the shared components. Do not introduce hard-coded light-only colours, light-only colour constants in themed components, screen-local colour-scheme branching or persistence policies, duplicated global theme logic, or a theming library or other dependency outside the [Dependency Policy](#dependency-policy).
+- Shared theme behavior (preference storage, first-paint application, following the operating-system preference and other tabs, the Theme control and its placements) is implemented once, by its authorized owner, and applied consistently across the public, Learner, Instructor, Administrator and Focus layouts. Screen work consumes it and does not re-implement it.
+- A new repository file that the theme needs, such as an external first-paint script or a theme hook, is a structural change that requires approval under `docs/repository-structure.md`.
+- Do not claim that theme behavior is implemented, verified or accepted because the design specifies it.
+
+### UI and Data Fidelity
+
+- Ground displayed data, selectors, eligibility, availability and actions in approved DTOs and operations, as decoded at runtime.
+- Never infer server-owned information from preview fixtures, sample data, view models, naming or convenient assumptions. When the contract does not return a value, omit it or use the fallback that `DESIGN.md` documents.
+- Respect server-authoritative decisions (for example admission, timers, finalization, editability, readiness and permissions), the documented failure-recovery and unknown-outcome rules, concurrency preconditions such as `ETag`/`If-Match`, the absence of automatic mutation replay, and session-generation and cancellation checks.
+
+### Preview Versus Production
+
+- `/preview` and other preview-only components are presentation with sample data. They are not production implementation, integration or acceptance evidence.
+- Never expose preview data, mock state, fixtures or sample behavior through production routes or clients. Reuse preview components only with decoded data from approved operations.
+- Register a production route or navigation item only under the established activation rule (`CT16-ROUTES-2026-11-08-r1`: consumed contracts approved, Issue authorized for implementation, screen delivered). Never link to an unimplemented production page.
+
+### Issue, Design and Contract Reconciliation
+
+- Implementation must satisfy, together, the applicable effective contracts, the current `DESIGN.md` specification, the authorized Issue scope and explicit owner decisions.
+- If an Issue describes outdated design behavior, identify the discrepancy and follow the current `DESIGN.md` and contracts. Do not implement obsolete behavior because an older Issue or a preview shows it.
+- If following the current design would need work outside the Issue's authorized scope or files, stop and ask.
+- A design revision or merge is not implementation authorization. It does not expand an Issue's scope or authority because `DESIGN.md` specifies a larger Final target.
+- An owner confirmation that `DESIGN.md` requests, such as a query-parameter name, counts only when the owner has recorded it.
+
+### Verification and Handoff
+
+- Verify implemented behavior in proportion to its scope: responsive layouts at the widths `DESIGN.md` documents, keyboard and accessibility states, and the Light, Dark and System variants where they apply. Use automated tests under [Testing and Validation](#testing-and-validation), and rendered browser checks where they add evidence.
+- Record actual evidence and its limitations.
+- Synchronize affected documentation and implementation handoffs within the authorized file scope.
+- Keep these states distinct in code, pull requests, Issues and documentation: **specified** (in `DESIGN.md`), **implemented** (on `main`), **preview-only**, **independently verified**, **approved** (by its authority) and **released** (deployed under deployment authorization).
 
 ## Testing and Validation
 
@@ -467,7 +563,7 @@ For every task:
 1. Read this file.
 2. Identify the exact requested scope.
 3. Inspect target files and only necessary dependencies/callers/consumers.
-4. Read relevant source-of-truth documents, including ADRs under the Source-of-Truth Map, and verify applicable approval scope, unresolved gates, and implementation consistency.
+4. Read relevant source-of-truth documents, including ADRs under the Source-of-Truth Map and, for frontend work, the relevant `DESIGN.md` sections, and verify applicable approval scope, unresolved gates, and implementation consistency.
 5. Check for missing context/conflicts.
 6. If blocked, stop before editing.
 7. Implement the smallest complete change.
@@ -528,6 +624,7 @@ A task is complete only when all applicable conditions are satisfied:
 - no secret or sensitive local file was introduced;
 - no unrelated changes are present;
 - no unapproved dependency/technology/architecture change was introduced;
+- frontend changes conform to the applicable `DESIGN.md` specification and approved contracts, and specified, preview-only or unverified behavior is not reported as implemented, verified, approved or released;
 - unresolved issues are explicitly reported.
 
 If any required condition cannot be satisfied because context is missing, ambiguous, or conflicting, the task is `BLOCKED` and the agent must ask the user for the missing information before proceeding.
