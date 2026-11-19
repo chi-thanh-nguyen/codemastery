@@ -730,6 +730,12 @@ test-count or coverage-percentage claim is made for them.
   upload or delivery (CT09).
 - **Assistive technology.** No test establishes actual screen-reader output; no
   manual VoiceOver, NVDA or TalkBack session has been recorded.
+- **DESIGN r12 behavior.** Light, Dark and System rendering, the Theme control, and
+  the r12 quiz-attempt, autosave and Instructor-management states are specified in
+  `DESIGN.md` but not implemented, so no test covers them
+  ([verification guidance](#design-r12-uiux-verification-guidance--specified-not_run)).
+  The preview suite does not cover the recorded A13 case (a sign-in in another tab
+  makes the `/preview` document send `POST /api/auth/refresh`).
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
@@ -4290,3 +4296,35 @@ checks in memory that the error contains no password, email, access token, cooki
 bearer or JWT-shaped text. Only booleans are asserted, so a failure cannot print a value.
 `request.failure()?.errorText` is a browser network error description, and auth URLs carry
 nothing secret (only the path is recorded).
+
+## DESIGN r12 UI/UX verification guidance — specified, NOT_RUN
+
+**Authority and scope.** `DESIGN-2026-11-19-r12` was merged into `main` by PR #252
+(`a7883e3`, 19 November 2026); the Project Leader's instruction of the same day,
+“CodeMastery — Post-DESIGN r12 Integration: GitHub Issue Alignment, Agent Governance &
+Documentation Synchronization”, asked for this guidance. It describes how future
+implementation of the r12 behavior should be verified. It adds no test, harness check or
+E2E case, executes nothing and records no result. It does not change the CT14 coverage,
+isolation and Profile/Auth UI contracts, the CT19 and CT35 E2E case selections, the CT34
+runner and fixture contracts, or the ADR014 `CT14-SESSION-2026-11-16-r1` obligations.
+
+**Current state.** `main` renders the light scheme only and has no Theme control. The r12
+colour schemes, the quiz-attempt entry and answer-saving states, and the Instructor
+management workflows are specified, not implemented, so no evidence exists for them.
+Nothing in the table below has passed.
+
+| Area | What to verify once implemented | Layer |
+| --- | --- | --- |
+| Light, Dark and System rendering | Each implemented screen renders through semantic roles in light, dark and System, including a live operating-system change, without reload, flash or layout shift; the `DESIGN.md` contrast pairs hold in both schemes; `forced-colors` and `prefers-contrast: more` rules apply; printing uses the light scheme | Vitest for preference resolution; optional browser harness or Playwright CLI for rendered checks; QA07 #63 for acceptance |
+| Theme persistence and operating-system preference | `codemastery.theme` accepts only `system`, `light` and `dark`; a missing or invalid value means System; blocked storage keeps the choice in memory; the choice survives reload, navigation, sign-in, sign-out and another account signing in; other tabs follow through the `storage` event; System follows `prefers-color-scheme` changes; the first-paint script prevents a flash | Vitest with controlled `localStorage` and `matchMedia`; browser checks for first paint and other tabs |
+| Theme control and Focus layouts | Exactly one control per shell (workspace top bar at ≥ 900 px, drawer footer below, landing header, auth layout, quiz and diagnostic Focus bar), for visitors and every role, including during the session restore; menu and radio-group keyboard behavior and the status announcement; in the Focus bar, opening the menu never pauses the timer, saves, submits or changes answers | Vitest and the browser harness |
+| Responsive layouts | Wireframe zones and order at 360, 768, 1024, 1280 and 1440 px; 320 px and 200% zoom without page-level horizontal scroll; the primary action visible at 1280 × 720 and 390 × 844 | Browser harness or Playwright CLI |
+| Accessibility and keyboard | Keyboard-only completion of each implemented flow; route focus on the `h1`; VoiceOver and NVDA on sign-in, catalogue, course detail and My courses; the Theme control by keyboard and screen reader in each shell; each check in both schemes and once with System following an operating-system change | Manual sessions recorded with their limits; QA07 |
+| Server-authoritative quiz lifecycle | Only the explicit start actions send `b3StartAttempt`; Resume, Back, Forward, reload and direct links read the attempt by its identity; each start and read outcome shows its F6 state; the timer counts to the returned `expiresAt`; no request after `expiresAt`; the result read's 409 before finalization | Vitest with controlled responses; real-backend checks only within the CT19/CT35 selections |
+| Autosave reconciliation | Every F6 save-state transition, including failed and unknown saves, Checking, Reconcile, "Save my answers" and "Use saved answers", submit gating after a confirmed final save, and late responses ignored by attempt, save sequence and session generation | Vitest with controlled responses and timers |
+| Instructor management workflows | Server-decided editability (a 409 keeps the draft; "Save as a new question"; no automatic replacement), editor recovery and unknown outcomes, URL replacement after creation, regrading with the exact `submittedAt`, and the adaptive-settings snapshot with `ETag`/`If-Match` and 412/428 recovery | Vitest; the settings cases keep their existing [CT14 B1-O18/O19](decisions/005-batch-01-contract-approvals.md#163-ct14-acceptance-oracles-and-direct-consumer-traceability) allocation |
+| Data, API and preview isolation | Production screens show only decoded data from approved operations and no fixture or sample data; `/preview` sends no request, reads no session and writes no storage, including when another tab signs in or out (the A13 case, currently a known defect) | Existing preview suite, extended for A13 by its owner |
+
+Report results per layer and only after the checks actually run. Unit results do not
+establish browser, assistive-technology, backend or deployment behavior, and a design
+preview is never integration evidence.

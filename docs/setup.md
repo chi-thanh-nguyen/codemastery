@@ -538,8 +538,9 @@ and a successful build do not establish frontend/backend integration in a real
 browser or deployment readiness.
 
 The MUI theme and `presentationTokens` live in `frontend/src/app/theme/theme.ts`
-and implement the root `DESIGN.md` specification (“The Lit Path”; first revision
-`DESIGN-2026-11-06-r1`, current revision `DESIGN-2026-11-08-r6`, tracked in Git from r6). An ink frame `#0A0B0F` holds the top bar
+and implement the light colour scheme of the root `DESIGN.md` specification (“The Lit Path”; first revision
+`DESIGN-2026-11-06-r1`, tracked in Git from r6; current merged revision `DESIGN-2026-11-19-r12`,
+PR #252, 19 November 2026). An ink frame `#0A0B0F` holds the top bar
 (80 px, 64 px below 600 px) and a `#F6F6F7` canvas that rises under the current
 navigation item; asides use `#EEEEF0`, tiles are white at a 24 px radius, buttons
 are pills and icon actions 44 px circles. Text is ink `#15171C`/`#50545C`; the logo
@@ -573,6 +574,18 @@ branding asset pack; TypeScript is a trademark of Microsoft Corporation). Both a
 used only to name the language a course teaches.
 `PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
 
+**Colour schemes — specified, not implemented.** `DESIGN.md` r12 specifies three theme
+preferences, System (the default), Light and Dark, with one Theme control in each shell
+(the workspace top bar or mobile drawer, the landing header, the auth layout, and the quiz
+and diagnostic Focus bar), a device-scoped `localStorage` preference, a first-paint
+script, live following of the operating-system setting and synchronization across tabs.
+None of this exists on `main`: `theme.ts` defines the light scheme only, every page
+renders light whatever the operating-system setting, no Theme control is rendered, and
+nothing reads or writes a theme preference. The light values in `theme.ts` match r12's
+light scheme. No Issue checkpoint owns the shared colour-scheme work yet (recorded in
+EP07 #12); it also needs role migration of the themed components and structure approval
+for any new file, such as an external first-paint script.
+
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
 in `src/routes/index.tsx`, listed in
 [Implemented capabilities on `main`](#implemented-capabilities-on-main). `/` is
@@ -592,9 +605,13 @@ preview from `src/app/preview/` in its own chunk: every designed screen for the
 Learner, Instructor and Administrator workspaces and the proposed public screens,
 with synthetic sample data. Since 7 November 2026 it shows no preview notice or
 switcher: screens open by link and the account menu keeps “Preview index” and
-“Reset sample data”. It never calls the API, reads the session or writes browser storage, and
-it adds no route: screens change through `?screen=` query parameters. Screens
-whose contracts are pending exist only there.
+“Reset sample data”. It is designed never to call the API, read the session or write browser
+storage, and it adds no route: screens change through `?screen=` query parameters. One
+recorded defect remains on `main` (`DESIGN.md` A13): when another tab of the same origin
+signs in, `AuthProvider`'s cross-tab handler runs a restore in the preview document,
+which sends `POST /api/auth/refresh`. Screens marked Preview only in `DESIGN.md` exist only
+there, with sample data; their contracts are approved, but they are not built for
+production routes or API integration.
 
 **Visual inspiration (6 November 2026 redesign):** [E-learning Platform – Learning
 Plan Dashboard — Nixtio](https://dribbble.com/shots/23956256). The redesign
@@ -605,7 +622,11 @@ Known AI assistance: Anthropic's Claude Code (Claude Opus 5.5) wrote the
 `DESIGN.md` revisions (r1 on 6 November 2026 through r6 on 8 November 2026) and implemented and verified the redesign and its 7 November
 2026 typography, logo-palette and navigation-indicator refinement, with the locally
 installed Impeccable skill for design review and Playwright CLI for browser
-inspection.
+inspection. Claude Code also wrote revisions r7 (8 November 2026) through r12
+(19 November 2026); r10–r12 respond to independent reviews of PR #252 by OpenAI
+Codex, as the `DESIGN.md` Document Control records. These revisions are specification
+only: the colour schemes, and the screen behavior they specify beyond the Live screens,
+are not implemented.
 
 **Earlier FE01 visual inspiration (historical):** [LMS Admin Dashboard UI/UX Design for EdTech SaaS Platforms —
 Rakibul Ism / Panze UX Design Studio](https://dribbble.com/shots/27183809-LMS-Admin-Dashboard-UI-UX-Design-for-EdTech-SaaS-Platforms).
