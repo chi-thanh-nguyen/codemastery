@@ -50,6 +50,9 @@ function optionIndexForKey(key: string, index: number) {
 export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'drawer' }) {
     const context = useContext(ThemePreferenceContext);
     const [open, setOpen] = useState(false);
+    // The tooltip is controlled so that opening the menu also hides a tooltip that hover or focus had
+    // already shown; it sits above the menu and would otherwise cover the menu's "Theme" caption.
+    const [tooltip, setTooltip] = useState(false);
     const [announcement, setAnnouncement] = useState('');
     const button = useRef<HTMLButtonElement>(null);
     const optionRefs = useRef<Array<HTMLElement | null>>([]);
@@ -103,12 +106,15 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
         if (returnFocus) button.current?.focus();
     };
     // MenuList owns arrow keys (with wrap), Home, End and type-ahead; Escape returns focus to the button.
+    // Tab and Shift+Tab also close the menu: focus goes back to the button before the key's default
+    // action runs, so the browser continues the tab sequence from the button. The menu is portalled to
+    // the end of the document, and a Tab from inside it would otherwise leave the page or wrap to its start.
     const onMenuKeyDown = (event: KeyboardEvent<HTMLElement>) => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
-        else if (event.key === 'Tab') close(false);
+        else if (event.key === 'Tab') close(true);
     };
     return <>
-        <Tooltip title="Theme" disableHoverListener={open} disableFocusListener={open}>
+        <Tooltip title="Theme" open={tooltip && !open} onOpen={() => setTooltip(true)} onClose={() => setTooltip(false)}>
             <IconButton ref={button} aria-label={themeButtonLabel(preference, systemScheme)} data-theme-control="button"
                 aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen((value) => !value)}
                 sx={{ flexShrink: 0, width: 44, height: 44, bgcolor: 'transparent', color: roles.chrome.muted,
@@ -118,7 +124,8 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
         </Tooltip>
         {status}
         {/* A non-modal popup: the rest of the page (and the Focus bar's attempt) stays exposed and unchanged. */}
-        <Popper open={open} anchorEl={button.current} placement="bottom-start" sx={{ zIndex: 'modal' }}
+        {/* role="presentation" replaces the Popper's default role="tooltip", which would wrap the menu. */}
+        <Popper open={open} anchorEl={button.current} placement="bottom-start" role="presentation" sx={{ zIndex: 'modal' }}
             modifiers={[{ name: 'offset', options: { offset: [0, 8] } }, { name: 'preventOverflow', options: { padding: 8 } }]}>
             <ClickAwayListener onClickAway={(event) => { if (!button.current?.contains(event.target as Node)) close(false); }}>
                 <Paper sx={{ width: 240, maxWidth: 'calc(100vw - 16px)', boxSizing: 'border-box', p: 1, bgcolor: roles.bg.raised, color: roles.text.primary,

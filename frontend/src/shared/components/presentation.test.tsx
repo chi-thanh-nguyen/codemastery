@@ -571,6 +571,28 @@ describe('Lit Path design-system primitives', () => {
         expect(document.activeElement).toBe(trigger);
         expect(trigger.getAttribute('aria-label')).toBe('Theme: Light');
     });
+    it('closes the Theme menu on Tab and returns focus to the button first, so the Tab continues from there, not from the end of the document', async () => {
+        await render(<><button type="button">Before</button><ThemeControl /><button type="button">After</button></>);
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+        await click(trigger);
+        expect(document.activeElement?.getAttribute('role')).toBe('menuitemradio');
+        // The menu is portalled to the end of <body>; the browser's default Tab starts from whatever is focused
+        // when the key's default action runs, so the handler must have put focus back on the button by then.
+        const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+        await act(async () => { document.activeElement!.dispatchEvent(tab); });
+        expect(tab.defaultPrevented).toBe(false);
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(document.activeElement).toBe(trigger);
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
+        expect(themeStatus()).toBe('');
+    });
+    it('does not expose the Theme menu inside a tooltip role (the Popper default)', async () => {
+        await render(<ThemeControl />);
+        await click(host.querySelector('button[aria-haspopup="menu"]'));
+        const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+        expect(menu).not.toBeNull();
+        expect(menu.closest('[role="tooltip"]')).toBeNull();
+    });
     it('closes the Theme menu on an outside click without changing the preference', async () => {
         await render(<><ThemeControl /><button type="button">Elsewhere</button></>);
         await click(host.querySelector('button[aria-haspopup="menu"]'));
