@@ -49,7 +49,7 @@ const roleVar = (path: string) => `var(--mui-palette-roles-${path.replace(/\./g,
 export const roles = {
     bg: {
         frame: roleVar('bg.frame'), canvas: roleVar('bg.canvas'), surface: roleVar('bg.surface'), fill: roleVar('bg.fill'),
-        raised: roleVar('bg.raised'), hover: roleVar('bg.hover'), rowHover: roleVar('bg.rowHover'), field: roleVar('bg.field'), fieldDisabled: roleVar('bg.fieldDisabled'),
+        raised: roleVar('bg.raised'), raisedHover: roleVar('bg.raisedHover'), hover: roleVar('bg.hover'), rowHover: roleVar('bg.rowHover'), field: roleVar('bg.field'), fieldDisabled: roleVar('bg.fieldDisabled'),
         selected: roleVar('bg.selected'), inverse: roleVar('bg.inverse'), code: roleVar('bg.code'), courseMark: roleVar('bg.courseMark'),
     },
     text: {
@@ -263,7 +263,7 @@ export const focusRing = { outline: `2px solid ${roles.focus.ring}`, outlineOffs
 export const focusRingOnChrome = { outline: `2px solid ${roles.focus.onChrome}`, outlineOffset: 2 } as const;
 
 interface SemanticPalette {
-    bg: Record<'frame' | 'canvas' | 'surface' | 'fill' | 'raised' | 'hover' | 'rowHover' | 'field' | 'fieldDisabled' | 'selected' | 'inverse' | 'code' | 'courseMark', string>;
+    bg: Record<'frame' | 'canvas' | 'surface' | 'fill' | 'raised' | 'raisedHover' | 'hover' | 'rowHover' | 'field' | 'fieldDisabled' | 'selected' | 'inverse' | 'code' | 'courseMark', string>;
     text: Record<'primary' | 'strongSecondary' | 'secondary' | 'tertiary' | 'disabled' | 'onChrome' | 'onChromeMuted' | 'inverse' | 'code' | 'onStrong', string>;
     line: Record<'hairline' | 'strong' | 'code' | 'floating', string>;
     accent: Record<'link' | 'linkHover' | 'linkOnTint' | 'path' | 'progress' | 'caret', string>;
@@ -339,6 +339,9 @@ const paletteFor = (scheme: ThemeScheme) => {
             fill: dark ? darkColor.graphite850 : color.fill150,
             raised: dark ? darkColor.graphite700 : color.surface,
             hover: dark ? darkColor.graphite750 : color.fill150,
+            // Hover and keyboard focus of items on a raised surface (menu items). In dark it is lighter than
+            // bg.raised, because bg.hover (graphite-750) is darker than graphite-700 and would barely show there.
+            raisedHover: dark ? darkColor.graphite600 : color.fill150,
             // Table and list rows hover on the canvas value in light (DESIGN.md › bg.hover).
             rowHover: dark ? darkColor.graphite750 : color.canvas100,
             field: dark ? darkColor.graphite850 : color.surface,
@@ -624,8 +627,14 @@ export const appTheme = createTheme({
         MuiSelect: { styleOverrides: { icon: { color: roles.text.strongSecondary, right: 14 } } },
         MuiMenu: { styleOverrides: { paper: { backgroundColor: roles.bg.raised, borderRadius: radius.lg, boxShadow: shadow.raised, marginTop: 8,
             '[data-color-scheme="dark"] &': { border: `1px solid ${roles.line.hairline}` } }, list: { padding: 8 } } },
+        // Menu item states (DESIGN.md › Dialogs, side sheets and menus): hover and keyboard focus use the neutral
+        // bg.raisedHover; only the selected (checked) item uses bg.selected, so a hovered item never looks selected.
+        // Selected + hover adds a hairline ring; keyboard focus adds the 2 px focus ring (MuiButtonBase).
         MuiMenuItem: { styleOverrides: { root: { minHeight: 44, borderRadius: radius.sm, fontSize: '0.9375rem', gap: 12,
-            '&.Mui-focusVisible, &:hover': { backgroundColor: roles.bg.selected }, '&.Mui-selected, &.Mui-selected:hover': { backgroundColor: roles.bg.selected, fontWeight: 600 } } } },
+            '&:hover, &.Mui-focusVisible': { backgroundColor: roles.bg.raisedHover },
+            '&.Mui-selected, &.Mui-selected.Mui-focusVisible': { backgroundColor: roles.bg.selected, fontWeight: 600 },
+            '&.Mui-selected:hover': { backgroundColor: roles.bg.selected, boxShadow: `inset 0 0 0 1px ${roles.line.strong}` },
+            '@media (hover: none)': { '&:hover': { backgroundColor: 'transparent' }, '&.Mui-selected:hover': { backgroundColor: roles.bg.selected, boxShadow: 'none' } } } } },
         MuiPopover: { styleOverrides: { paper: { backgroundColor: roles.bg.raised, borderRadius: radius.lg, boxShadow: shadow.raised,
             '[data-color-scheme="dark"] &': { border: `1px solid ${roles.line.hairline}` } } } },
         MuiTooltip: { defaultProps: { enterDelay: 400, enterNextDelay: 200 }, styleOverrides: {
