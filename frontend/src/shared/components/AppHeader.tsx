@@ -64,9 +64,10 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
     // so its state is reset whenever the menu opens or closes (D13-5). After a close, two separate suppressions
     // apply, one per source (AUD-02/F-01): `staleHover` while the pointer still rests on the button, until it
     // genuinely enters again; `restoredFocus` for the focus that closing returns to the button, until the button
-    // loses focus. Refs, not state: Tooltip calls onOpen from a timer started in an earlier render, so a stale
-    // closure must read the current menu state (`menuOpen`), not the value it captured.
-    const hovering = useRef(false), staleHover = useRef(false), restoredFocus = useRef(false), menuOpen = useRef(false);
+    // loses focus. Escape dismisses the tooltip until the same releases happen (`escaped`, N-01: hover when the pointer
+    // genuinely enters again, focus when it leaves the button), so no pending timer brings it back. Refs, not state:
+    // Tooltip calls onOpen from a timer started in an earlier render, so a stale closure must read the current values.
+    const hovering = useRef(false), staleHover = useRef(false), restoredFocus = useRef(false), menuOpen = useRef(false), escaped = useRef(false);
     const [announcement, setAnnouncement] = useState('');
     const button = useRef<HTMLButtonElement>(null);
     const optionRefs = useRef<Array<HTMLElement | null>>([]);
@@ -126,8 +127,18 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
     };
     // Shows the tooltip for a genuine hover (Tooltip's delayed onOpen) or keyboard focus, never over the open menu.
     const showTooltip = (event: { type: string }) => {
-        if (menuOpen.current || (event.type === 'focus' ? restoredFocus.current : staleHover.current)) return;
+        if (menuOpen.current || escaped.current || (event.type === 'focus' ? restoredFocus.current : staleHover.current)) return;
         setTooltip(true);
+    };
+    // Keyboard focus is handled once, at once, by the button's own onFocus. Tooltip's focus listener also starts its
+    // delayed open (400 ms, or 200 ms within its hysteresis) and Escape does not cancel that timer, so its focus-driven
+    // onOpen is ignored here (N-01). Its focus and blur listeners stay attached: blur still closes the tooltip through
+    // Tooltip's own close, which also restarts its hysteresis timer (`disableFocusListener` would remove both).
+    const onTooltipOpen = (event: { type: string }) => { if (event.type !== 'focus') showTooltip(event); };
+    // Tooltip closes itself on Escape (a document keydown listener while it is open); that dismissal persists (N-01).
+    const onTooltipClose = (event: { type: string; key?: string }) => {
+        if (event.type === 'keydown' && event.key === 'Escape') escaped.current = true;
+        setTooltip(false);
     };
     // MenuList owns arrow keys (with wrap), Home, End and type-ahead; Escape returns focus to the button.
     // Tab and Shift+Tab also close the menu: focus goes back to the button before the key's default
@@ -139,16 +150,16 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
     };
     return <>
         {/* While the menu is open the tooltip exits without its fade, so it never overlaps the menu's caption. */}
-        <Tooltip title="Theme" open={tooltip && !open} onOpen={showTooltip} onClose={() => setTooltip(false)}
+        <Tooltip title="Theme" open={tooltip && !open} onOpen={onTooltipOpen} onClose={onTooltipClose}
             slotProps={{ transition: open ? { timeout: 0 } : {} }}>
             <IconButton ref={button} aria-label={themeButtonLabel(preference, systemScheme)} data-theme-control="button"
                 aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => (open ? close(false) : openMenu())}
                 // Keyboard focus shows the tooltip at once (DESIGN.md › Tooltip, F-03); only hover keeps the 400 ms delay.
                 // Tooltip runs this handler before its own, which would open it only after that delay.
                 onFocus={(event) => { if (isKeyboardFocus(event.currentTarget)) showTooltip(event); }}
-                onMouseEnter={() => { hovering.current = true; staleHover.current = false; }}
+                onMouseEnter={() => { hovering.current = true; staleHover.current = false; escaped.current = false; }}
                 onMouseLeave={() => { hovering.current = false; staleHover.current = false; }}
-                onBlur={() => { restoredFocus.current = false; }}
+                onBlur={() => { restoredFocus.current = false; escaped.current = false; }}
                 sx={{ flexShrink: 0, width: 44, height: 44, bgcolor: 'transparent', color: roles.chrome.muted,
                     '&:hover': { bgcolor: roles.chrome.raised, color: roles.text.onChrome }, '&.Mui-focusVisible': focusRingOnChrome }}>
                 <PresentationIcon name={selected.icon} sx={{ fontSize: 20 }} />
