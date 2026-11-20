@@ -603,13 +603,24 @@ files only:
   `'sha256-gyoHhEeXJZ2cyULAqJ8wHhi0sXEzbmvDVoB9FkJ+UYc='` (recompute it whenever the
   script changes). No CSP is configured today.
 - The Theme control (`ThemeControl`, exported from `AppHeader.tsx`) renders once per
-  shell: the workspace top bar from 900 px (first utility), the mobile drawer footer below
-  900 px (on-chrome segmented control), the landing header, the split auth layout, and the
-  quiz and diagnostic Focus bar (`QuizAttemptPage.tsx`). It is never in the account menu.
+  shell: the workspace top bar from 900 px (after page utilities such as the notification
+  button and immediately before the account menu, or before Sign in for visitors), the
+  mobile drawer footer below 900 px (on-chrome segmented control), the landing header
+  (Catalogue → Theme → Sign in → Create account), the split auth layout, and the quiz and
+  diagnostic Focus bar (`QuizAttemptPage.tsx`). It is never in the account menu.
+  `AppHeader` takes page utilities (`utilities`, `DashboardLayout` `headerUtilities`)
+  before the Theme button and session actions (`actions`) after it.
   Escape closes its menu and returns focus to the button; Tab and Shift+Tab also close it
   and return focus to the button first, so the tab sequence continues from the button
   (the menu is rendered at the end of the document). The "Theme" tooltip is hidden while
-  the menu is open, and the menu's popup container carries no `tooltip` role.
+  the menu is open, is reset whenever the menu opens or closes, and stays hidden after a
+  close while the pointer still rests on the button or focus was returned to it, until
+  the pointer enters again or the button loses focus. The menu's popup container carries
+  no `tooltip` role. Menu items (all menus) hover and focus on `bg.raisedHover`; only the
+  selected item uses `bg.selected`.
+- Glyphs in buttons and in `StatusPill` (pills, mastery, recommendation and other tags)
+  use `currentColor`, the label's colour; guidance and attention glyphs keep their family
+  accent (`DESIGN.md` D13-1).
 - `/preview` follows the stored preference until a preview-local choice is made; that
   choice is held in memory for the document, never written to storage, never sent to
   other tabs and gone on reload or when the document leaves `/preview`.

@@ -4519,6 +4519,83 @@ and iPhone 14 emulation.
 Windows contrast theme. The A14 capability is verified only at the transport level; FE18's binding and the
 backend CORS change remain separate dependencies.
 
+## PR #261 FE34 UI refinement (DESIGN r13) verification — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery
+PR #261 — Final UI Refinement, Theme Interaction Fixes & Comprehensive Playwright
+Verification", for PR #261 (Refs #255): icon colour inheritance, Theme menu states, header
+order, the Theme tooltip lifecycle and `DESIGN.md` r13 (D13-1–D13-5). Developer evidence
+only; QA07 #63 and QA01 acceptance are not claimed. Same host and tools as the 21 November
+audit record above.
+
+**Findings fixed.**
+
+| ID | Severity | Finding and root cause | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| U-01 | P2 | Theme tooltip stuck after the menu closed (Leader report). R-01 controlled the tooltip, but MUI calls `onClose` only while it considers the tooltip open, and it was held closed while the menu was open, so the state stayed `true` and the tooltip reappeared after dismissal until the next hover | The state resets when the menu opens or closes; after a close it stays suppressed while the pointer still rests on the button or focus was returned to it, until the pointer enters again or the button loses focus | Harness lifecycle check (pointer and keyboard, three selections, repeated cycles, route change, normal and reduced motion); reproduced on the previous build with the CLI (`afterDismiss: 1`, `afterMoveAway: 1`), gone after |
+| U-02 | P2 | Theme menu: a hovered item looked selected (Leader report). The shared `MuiMenuItem` override used `bg.selected` for hover, focus-visible and selected | Hover and keyboard focus use the new `bg.raisedHover` role (light `fill-150`, dark `graphite-600`); selected keeps `bg.selected` + 600; selected + hover adds a 1 px inset `line.strong` ring; focus adds the 2 px ring | Harness check for System (light and dark OS), Light and Dark: every hovered item, selected + hover, keyboard focus; CLI before: hovered `rgb(227, 238, 255)` = selected, after: `rgb(238, 238, 240)` against `rgb(227, 238, 255)` (dark `rgb(54, 58, 67)` against `rgb(27, 46, 77)`) |
+| U-03 | P3 | StatusPill glyphs used the family strong colour, not the label colour (Published eye glyph green, label ink) | `currentColor` | Unit test for all eight tones, mastery and recommendation tags in both schemes (fails before); harness check on Teaching, Courses, course path and the design reference; rendered audit of 32 preview screens in both schemes found StatusPill as the only mismatch |
+| U-04 | P3 | Landing header order Catalogue → Sign in → Theme → Create account split the account actions | DOM order Catalogue → Theme → Sign in → Create account | Route test (fails before); harness; CLI at 11 widths |
+| U-05 | P3 | Workspace top bar put Theme before the notification button | `AppHeader` `utilities` (bell) → Theme → `actions` (account or sign-in actions); `DashboardLayout` `headerUtilities` | Layout test (fails before); harness; CLI at ≥ 900 px |
+| U-06 | P3 | After the menu opened, the tooltip faded out over the menu for about 290 ms | The tooltip's exit transition is 0 while the menu is open | Harness asserts no tooltip trace 50 ms after opening; CLI: 0 traces after 30 ms |
+
+Buttons needed no change: the rendered audit found no button whose glyph differed from its
+label, and sampling a primary button during its 120 ms hover transition showed the glyph
+equal to the label in every sample. No KPI component has a glyph (`StatTile` has none;
+S22/S23 exclude KPI cards), so the KPI exception has no target today. The Needs-attention
+glyphs keep their accents (harness asserts it).
+
+**Commands and results (final tree).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 643 tests in 16 files (641 + 2; the two edited tests also gained assertions) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed; WebKit 26.6: 67 passed, with the "no preference" first-paint row reported as not exercised (U-07) |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble`, as in the audit record | Firefox 155: 67 passed, 0 failed (run before U-07, which changes only a WebKit-specific row) |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed |
+
+U-07 (test). The WebKit harness first-paint row "no stored value, OS reports no preference"
+failed after the host switched macOS to Dark. Playwright's WebKit does not emulate
+`no-preference`: it reports the host appearance (`matchMedia('(prefers-color-scheme: dark)')`
+is `true` under that emulation, while Chromium reports `false`). The application correctly
+resolved System to dark. That row is now reported as not exercised when the engine reports a
+dark preference under `no-preference`, instead of failing; Chromium and Firefox still
+exercise it.
+
+**Playwright CLI (Chrome and WebKit desktop sessions; Pixel 7 and iPhone 14 emulation)**
+against a production build served by `vite preview`:
+
+- **Widths:** 320, 360, 390, 599, 600, 768, 899, 900, 1024, 1280 and 1440 px × `/`,
+  `/login`, `/courses`, a missing route, preview Learner home, Teaching, Platform overview
+  and Courses × Light and Dark, in both desktop engines (mobile emulation at 320–768 px).
+  Every combination had exactly one Theme control and no page overflow. The landing header
+  always put Theme before "Sign in". From 900 px the Learner header ended Notifications →
+  Theme → Account menu.
+- **Theme menu states**, in Chrome and WebKit: for System (light and dark OS), Light and Dark,
+  a hovered item never matched the selected fill. Selected + hover kept the fill and added the
+  ring, and keyboard focus showed the ring.
+- **Tooltip:** the Leader's sequence (hover, open, choose, outside click, move away) left no
+  tooltip, and no trace 30 ms after opening.
+- **Animation:**
+  - A primary button's 120 ms hover transition kept glyph = label in every sample.
+  - Tile hover lift (−2 px, 200 ms) caused no layout shift.
+  - The canvas reach moved 385 → 509 px in 240 ms.
+  - The drawer slide (225 ms) returned focus to the toggle.
+  - The open menu sat on top of the stacking order with no page overflow.
+  - Theme switches showed one colour per probe over 20 frames, with transitions suspended for
+    the switch and restored.
+  - With `prefers-reduced-motion: reduce`, transitions computed to 1e-5 s, the reach and
+    drawer were instant, and the Theme menu and tooltip worked unchanged.
+- **Screenshots** of the menu states and the Teaching screen were kept locally, not committed.
+
+**Limits.**
+
+- No screen-reader session.
+- The tooltip scenarios ran on the preview's Learner home, which uses the same `AppHeader` and
+  `ThemeControl` as the live `/home`; no real-backend session was used for this pass.
+- Skeleton shimmer and the Path Spine completion fill rely on the existing harness checks.
+- Touch-only tooltip behaviour was not examined.
+
 ## AS04 quiz grading unit verification — 20 November 2026
 
 Implementation of AS04 ([#32](https://github.com/chi-thanh-nguyen/codemastery/issues/32),
