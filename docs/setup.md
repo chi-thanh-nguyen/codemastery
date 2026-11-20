@@ -582,8 +582,12 @@ files only:
   `colorSchemes.dark`, `cssVariables` with the selector `[data-color-scheme="%s"]`). The
   semantic roles of r12 are emitted as CSS variables (`--mui-palette-roles-*`) and exported
   as `roles`; components read roles, never the raw `color` palette. The light values equal
-  the values on `main` before FE34. `@media print` re-declares the light variables, and
-  `prefers-contrast: more` and `forced-colors: active` follow r12's fallback table.
+  the values on `main` before FE34. `@media print` re-declares the light variables and sets
+  `color-scheme: light !important`, which overrides the inline `color-scheme` that the
+  first-paint script and the preference state set, so native controls and system colours
+  print light too. `prefers-contrast: more` and `forced-colors: active` follow r12's
+  fallback table; under forced colours, floating surfaces (menus, popovers, dialogs, the
+  drawer) also get a 1 px `CanvasText` outline, because their shadow edge is removed.
 - `App.tsx` holds the one preference state above the router and the session. It is stored
   only under `localStorage` key `codemastery.theme` (`system`, `light` or `dark`); a missing,
   empty, unknown or unreadable value means System and an invalid value is left until the
@@ -602,6 +606,10 @@ files only:
   shell: the workspace top bar from 900 px (first utility), the mobile drawer footer below
   900 px (on-chrome segmented control), the landing header, the split auth layout, and the
   quiz and diagnostic Focus bar (`QuizAttemptPage.tsx`). It is never in the account menu.
+  Escape closes its menu and returns focus to the button; Tab and Shift+Tab also close it
+  and return focus to the button first, so the tab sequence continues from the button
+  (the menu is rendered at the end of the document). The "Theme" tooltip is hidden while
+  the menu is open, and the menu's popup container carries no `tooltip` role.
 - `/preview` follows the stored preference until a preview-local choice is made; that
   choice is held in memory for the document, never written to storage, never sent to
   other tabs and gone on reload or when the document leaves `/preview`.
@@ -609,7 +617,8 @@ files only:
 While the ADR014 restore runs, `/` shows the landing header (lockup and Theme button, no
 sign-in actions) with "Restoring your session…" (`LandingRestoringView`), and protected
 routes show the same line inside the workspace frame, so every restore state keeps its
-Theme control. Developer evidence is recorded in
+Theme control. Below 900 px the workspace drawer also leaves out "Create account" until
+the restore has finished, as the header leaves out its sign-in actions (F2). Developer evidence is recorded in
 [testing.md](testing.md#fe34-theme-system-verification--20-november-2026); independent
 Light, Dark and System acceptance stays with QA07 #63.
 

@@ -4451,6 +4451,74 @@ Firefox could not be launched by the CLI either.
 only at the transport level; FE18's binding and the backend CORS change it needs are not
 part of this work.
 
+## PR #261 fresh-session audit remediation — 21 November 2026
+
+**Scope and authority.** A fresh Claude Code session audited the whole of PR #261 (FE34
+#255 and the FE03 #56 remediation) at `1b3f558` on `main` `307e8c2`, under the Project
+Leader's audit-and-remediation instruction of 21 November 2026. Developer evidence only: it
+is not an independent CODEOWNER review, and QA01 and QA07 #63 acceptance are not claimed.
+Host: macOS 27.2 arm64, Node 24.21.0, Docker 29.8.1, Playwright 1.63.0 from `e2e/`,
+Playwright CLI 0.1.23.
+
+**Findings fixed.**
+
+| ID | Severity | Finding | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| R-01 | P2 | Opening the Theme menu from a button whose "Theme" tooltip was already showing (keyboard focus always shows it; so does hover) left the tooltip open above the menu (z-index 1500 over 1300), covering the menu's "Theme" caption. `disableFocusListener`/`disableHoverListener` stop new openings but never close an open tooltip | The tooltip is controlled and closed while the menu is open | Harness check (hover and keyboard paths); real-backend CLI in Chrome and WebKit |
+| R-02 | P3 | The menu's `Popper` kept MUI's default `role="tooltip"`, so the accessibility tree read `tooltip > menu "Theme"` | `role="presentation"` on the popup container | Unit test (fails before); harness check; CLI accessibility snapshot |
+| R-03 | P3 | Tab or Shift+Tab from the open Theme menu closed it without restoring focus. The menu is portalled to the end of `<body>`, so focus left the page or wrapped to its first stop ("Skip to main content") | Tab and Shift+Tab close the menu and return focus to the button before the default action, so the sequence continues from the button | Unit test (fails before); harness check for both directions; CLI in Chrome and WebKit on `/courses`, `/login` and `/` |
+| R-04 | P3 | Printing with the Dark preference kept `color-scheme: dark`: the print rule re-declared the light variables, but the inline `color-scheme` set by the first-paint script and the preference state won, so native controls and system colours stayed dark | `color-scheme: light !important` in the print rule | Harness print check now asserts the computed `color-scheme`; CLI print emulation (Chrome, WebKit) |
+| R-05 | P3 | Below 900 px the workspace drawer showed "Create account" while the ADR014 restore ran, although F2 hides sign-in actions during the restore (pre-existing on `main`) | The drawer footer omits it while `restoring` | Route test (fails before); real-backend CLI with a held refresh (Chrome, WebKit) |
+| R-07 | P3 | In forced colours, floating surfaces (the Theme menu, the account menu, popovers, dialogs) had no edge: their outline is an inset box shadow, which forced colours removes, so a menu was not separated from the page (r12 Fallbacks: shadow-drawn boundaries need a real line) | A 1 px `CanvasText` outline on popover, dialog, drawer and popper papers under `forced-colors: active` | Chromium harness forced-colours check now asserts an edge on the Theme menu and the account menu; CLI on the previous build: outline `none`, border `none`, shadow `none` |
+| R-06 | Test | The harness `prefers-contrast` check used a runtime `emulateMedia({ contrast })`. In Playwright's Firefox, `matchMedia` changes but the stylesheets are not re-evaluated, so the check failed on Firefox although the application is correct | The check uses a context created with `contrast: 'more'` | Linux Firefox: the application's values are correct with the context option |
+
+**Commands and results** (final tree).
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check | `cd frontend && npm run typecheck` | Passed |
+| Unit and component tests | `cd frontend && npm test` | 641 tests in 16 files passed (638 before, plus three regression tests) |
+| Production build | `cd frontend && npm run build` | Passed (`main`'s existing >500 kB chunk warning) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit`, then `--engine chromium` again after R-07 | Chromium 153: 62 passed; after R-07: 62 passed, including the extended forced-colours check. WebKit 26.6: 61 passed (forced colours stays Chromium-only) |
+| Browser harness, Linux Firefox | The same harness with `--url` and `--engine firefox`, run in `mcr.microsoft.com/playwright:v1.63.0-noble` (arm64, Firefox 155 from the pinned 1.63.0 build) against the harness build served on the host; a loopback forwarder inside the container keeps the page origin `http://127.0.0.1` | Firefox 155: 61 passed, 0 failed (build before R-07, whose rule only applies under forced colours). Before R-06: 59 passed, 1 failed (the contrast check only) |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed. This run predates R-07, a CSS rule that applies only under `forced-colors: active` |
+
+`firefox-desktop` was left out of the local E2E run on purpose. On this host the pinned
+Firefox build (`firefox-1543`) exits at launch with `Could not find profile folder.`, with
+the Claude Code sandbox on and off and with another temporary directory, so the failure is
+environmental. CI runs `firefox-desktop` on Linux.
+
+**Real-backend checks.** An isolated Compose project (`-p fe34audit`: PostgreSQL, MinIO and
+the backend from this checkout), with the frontend built against `http://localhost:8080` and
+served by `vite preview` on `localhost:5173`. Playwright CLI sessions: Chrome, WebKit, Pixel 7
+and iPhone 14 emulation.
+
+- **A13**, two tabs: a sign-in, a sign-out and a second sign-in in the other tab, a
+  preview-local theme change, synthetic `focus`, `pageshow` and `visibilitychange`, then
+  leaving `/preview` by SPA navigation and changing the theme there. The preview document
+  sent no `/api/auth/*` request and showed no session; its only request was the public
+  catalogue `GET` after it left the preview. Same result in Chrome and WebKit.
+- **Theme change keeps state:** the registration form keeps its values and its `main`
+  element (no remount); there is one "Theme set to Dark." message, and Escape returns focus
+  to the button.
+- **Restore views** with a held refresh: on `/` the landing header shows only the Theme
+  button; on a protected route at 390 px the drawer has the Theme control and no "Create
+  account" (R-05).
+- **Widths:** 320, 360, 390, 599, 600, 768, 899, 900, 1024, 1280 and 1440 px on `/courses`,
+  `/login`, `/`, `/register`, a missing route and two preview screens, in Pixel 7 and
+  iPhone 14 emulation: exactly one Theme control and no page overflow everywhere. The drawer
+  segments are 91 × 44 px, the drawer stays open after a selection, arrows select, and
+  Escape returns focus to the menu toggle.
+- **Before and after:** R-03, R-04 and R-05 reproduced on a build of `1b3f558`, R-01 and
+  R-02 on the build with the first three fixes, and R-07 on the build before its fix.
+  R-01 to R-05 were gone on the next builds; R-07 is covered by the Chromium harness.
+- **Console:** no errors, apart from the browser's network log of the anonymous
+  `401 /api/auth/refresh`.
+
+**Limits.** No screen-reader session. Forced colours only through Chromium emulation, not a
+Windows contrast theme. The A14 capability is verified only at the transport level; FE18's binding and the
+backend CORS change remain separate dependencies.
+
 ## AS04 quiz grading unit verification — 20 November 2026
 
 Implementation of AS04 ([#32](https://github.com/chi-thanh-nguyen/codemastery/issues/32),
