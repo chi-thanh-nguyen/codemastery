@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import type { ReactNode } from 'react';
 import { Box, Pagination, Skeleton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel, Typography, useMediaQuery, useTheme } from '@mui/material';
-import { color, radius } from '../../app/theme/theme';
+import { radius, roles } from '../../app/theme/theme';
 
 export interface Column<T> {
     key: string;
@@ -42,13 +42,13 @@ export function DataTable<T>({ label, columns, rows, getRowId, loading = false, 
     const captionId = useId();
     const primary = columns.find((column) => column.primary) ?? columns[0];
     const showEmpty = !loading && rows.length === 0;
-    return <Box sx={{ bgcolor: color.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden', mb: 3 }}>
+    return <Box sx={{ bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden', mb: 3 }}>
         {loading && <Typography id={`${captionId}-status`} role="status" className="cm-visually-hidden">Loading {label.toLowerCase()}</Typography>}
         {showEmpty ? <Box sx={{ p: { xs: 2, sm: 3 } }}>{empty}</Box> : stacked
             ? <Box component="ul" aria-label={label} aria-busy={loading || undefined} sx={{ listStyle: 'none', m: 0, p: 0 }}>
-                {loading ? Array.from({ length: loadingRows }, (_, i) => <Box component="li" key={i} aria-hidden sx={{ p: 2, borderBottom: `1px solid ${color.line200}` }}><Skeleton height={22} width="70%" /><Skeleton height={16} sx={{ mt: 1 }} /></Box>)
+                {loading ? Array.from({ length: loadingRows }, (_, i) => <Box component="li" key={i} aria-hidden sx={{ p: 2, borderBottom: `1px solid ${roles.line.hairline}` }}><Skeleton height={22} width="70%" /><Skeleton height={16} sx={{ mt: 1 }} /></Box>)
                     : rows.map((row) => <Box component="li" key={getRowId(row)} aria-current={selectedId === getRowId(row) ? 'true' : undefined}
-                        sx={{ p: 2, borderBottom: `1px solid ${color.line200}`, '&:last-child': { borderBottom: 0 }, bgcolor: selectedId === getRowId(row) ? color.brand100 : undefined }}>
+                        sx={{ p: 2, borderBottom: `1px solid ${roles.line.hairline}`, '&:last-child': { borderBottom: 0 }, bgcolor: selectedId === getRowId(row) ? roles.bg.selected : undefined }}>
                         <Box sx={{ fontWeight: 600, fontSize: '1rem', mb: 1, overflowWrap: 'anywhere' }}>{primary.render(row)}</Box>
                         <Box component="dl" sx={{ m: 0, display: 'grid', gridTemplateColumns: 'minmax(96px, auto) minmax(0, 1fr)', columnGap: 2, rowGap: .75 }}>
                             {columns.filter((column) => column !== primary).map((column) => <Box key={column.key} sx={{ display: 'contents' }}>
@@ -63,7 +63,7 @@ export function DataTable<T>({ label, columns, rows, getRowId, loading = false, 
                 <Table aria-labelledby={captionId} aria-busy={loading || undefined} sx={{ minWidth: Math.max(560, columns.length * 140) }}>
                     <caption id={captionId} className="cm-visually-hidden">{label}</caption>
                     <TableHead><TableRow>
-                        {columns.map((column, index) => <TableCell key={column.key} align={column.align} sx={{ width: column.width, ...(index === 0 ? { ...stickyFirst, backgroundColor: color.surface } : {}) }}
+                        {columns.map((column, index) => <TableCell key={column.key} align={column.align} sx={{ width: column.width, ...(index === 0 ? { ...stickyFirst, backgroundColor: roles.bg.surface } : {}) }}
                             sortDirection={sort?.key === column.key ? sort.direction : false}>
                             {column.sortable && sort ? <TableSortLabel active={sort.key === column.key} direction={sort.key === column.key ? sort.direction : 'asc'} onClick={() => sort.onChange(column.key)}>{column.header}</TableSortLabel> : column.header}
                         </TableCell>)}
@@ -71,7 +71,7 @@ export function DataTable<T>({ label, columns, rows, getRowId, loading = false, 
                     </TableRow></TableHead>
                     <TableBody>
                         {loading ? Array.from({ length: loadingRows }, (_, i) => <TableRow key={i} aria-hidden>{columns.map((column) => <TableCell key={column.key}><Skeleton height={20} /></TableCell>)}{actions && <TableCell />}</TableRow>)
-                            : rows.map((row) => <TableRow key={getRowId(row)} hover selected={selectedId === getRowId(row)} sx={{ bgcolor: color.surface, '&:hover': { bgcolor: `${color.canvas100} !important` }, '&.Mui-selected': { bgcolor: `${color.brand100} !important` } }}>
+                            : rows.map((row) => <TableRow key={getRowId(row)} hover selected={selectedId === getRowId(row)} sx={{ bgcolor: roles.bg.surface, '&:hover': { bgcolor: `${roles.bg.canvas} !important` }, '&.Mui-selected': { bgcolor: `${roles.bg.selected} !important` } }}>
                                 {columns.map((column, index) => <TableCell key={column.key} align={column.align} sx={{ minHeight: 60, overflowWrap: 'anywhere', ...(index === 0 ? stickyFirst : {}) }}
                                     component={index === 0 ? 'th' : 'td'} scope={index === 0 ? 'row' : undefined}>{column.render(row)}</TableCell>)}
                                 {actions && <TableCell align="right" sx={{ whiteSpace: 'nowrap', py: 1 }}><Box sx={{ display: 'inline-flex', gap: .5 }}>{actions(row)}</Box></TableCell>}
@@ -79,7 +79,7 @@ export function DataTable<T>({ label, columns, rows, getRowId, loading = false, 
                     </TableBody>
                 </Table>
             </TableContainer>}
-        {footer && !showEmpty && <Box sx={{ borderTop: `1px solid ${color.line200}`, px: { xs: 2, sm: 3 }, py: 1.5 }}>{footer}</Box>}
+        {footer && !showEmpty && <Box sx={{ borderTop: `1px solid ${roles.line.hairline}`, px: { xs: 2, sm: 3 }, py: 1.5 }}>{footer}</Box>}
     </Box>;
 }
 // The sticky first cell inherits the row background so hover and selection stay continuous.

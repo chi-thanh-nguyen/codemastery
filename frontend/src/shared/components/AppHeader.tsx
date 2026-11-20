@@ -1,12 +1,13 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import type { MouseEvent, ReactNode } from 'react';
-import { Box, ButtonBase, Divider, IconButton, Menu, Tooltip, Typography, useMediaQuery, useTheme } from '@mui/material';
+import { useCallback, useContext, useId, useLayoutEffect, useRef, useState } from 'react';
+import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
+import { Box, ButtonBase, Divider, IconButton, Menu, MenuItem, Tooltip, Typography, useMediaQuery, useTheme } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
 import type { PresentationIconName } from './PresentationIcon';
 import { BrandWordmark } from './BrandLogo';
 import { isPlainClick } from './SidebarNav';
 import type { NavItem } from './SidebarNav';
-import { color, motion, presentationTokens, radius, focusRingOnChrome } from '../../app/theme/theme';
+import { focusRingOnChrome, motion, presentationTokens, radius, roles, ThemePreferenceContext } from '../../app/theme/theme';
+import type { ThemePreference } from '../../app/theme/theme';
 
 export interface AppHeaderProps {
     /** Retained for API compatibility; the wordmark names the product. */
@@ -21,6 +22,98 @@ export interface AppHeaderProps {
     search?: ReactNode;
     brandHref?: string;
     onBrandSelect?: () => void;
+}
+
+const themeOptions: { value: ThemePreference; label: string; icon: PresentationIconName }[] = [
+    { value: 'system', label: 'System', icon: 'device' },
+    { value: 'light', label: 'Light', icon: 'sun' },
+    { value: 'dark', label: 'Dark', icon: 'moon' },
+];
+
+function themeAnnouncement(preference: ThemePreference, systemScheme: 'light' | 'dark') {
+    const label = preference[0].toUpperCase() + preference.slice(1);
+    return `Theme set to ${label}${preference === 'system' ? ` (${systemScheme[0].toUpperCase()}${systemScheme.slice(1)}).` : '.'}`;
+}
+
+/** The shared on-chrome preference control used by each production shell. */
+export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'drawer' }) {
+    const preferenceContext = useContext(ThemePreferenceContext);
+    const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+    const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+    const menuId = useId();
+    if (!preferenceContext) return null;
+    const { preference, systemScheme, setPreference, announce } = preferenceContext;
+    const selected = themeOptions.find((option) => option.value === preference)!;
+    const choose = (next: ThemePreference) => {
+        setPreference(next);
+        announce(themeAnnouncement(next, systemScheme));
+    };
+    const handleRadioKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+        const offset = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+            : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+        if (!offset) return;
+        event.preventDefault();
+        const nextIndex = (index + offset + themeOptions.length) % themeOptions.length;
+        optionRefs.current[nextIndex]?.focus();
+        choose(themeOptions[nextIndex].value);
+    };
+    if (variant === 'drawer') {
+        return <Box>
+            <Typography component="div" sx={{ mb: 1, color: roles.chrome.muted, fontSize: '0.8125rem', fontWeight: 600 }}>Theme</Typography>
+            <Box role="radiogroup" aria-label="Theme" sx={{ display: 'flex', p: '4px', borderRadius: `${radius.pill}px`, bgcolor: roles.chrome.raised }}>
+                {themeOptions.map((option, index) => {
+                    const active = preference === option.value;
+                    return <ButtonBase key={option.value} ref={(element: HTMLButtonElement | null) => { optionRefs.current[index] = element; }}
+                        role="radio" aria-checked={active} tabIndex={active ? 0 : -1} onClick={() => choose(option.value)}
+                        onKeyDown={(event) => handleRadioKeyDown(event, index)}
+                        sx={{ position: 'relative', zIndex: 0, flex: 1, minWidth: 0, height: 44, gap: .5, borderRadius: `${radius.pill}px`,
+                            color: active ? roles.control.onChrome.text : roles.chrome.muted, fontSize: '0.8125rem', fontWeight: active ? 600 : 500,
+                            '&::before': { content: '""', position: 'absolute', zIndex: -1, inset: '4px 0', borderRadius: `${radius.pill}px`,
+                                bgcolor: active ? roles.control.onChrome.background : 'transparent' },
+                            '&:hover': { color: roles.text.onChrome, '&::before': { bgcolor: active ? roles.control.onChrome.background : roles.chrome.hover } },
+                            '&:focus-visible': focusRingOnChrome, '& svg': { fontSize: 16, flexShrink: 0 } }}>
+                        <PresentationIcon name={option.icon} />{option.label}
+                    </ButtonBase>;
+                })}
+            </Box>
+            {preference === 'system' && <Typography variant="caption" sx={{ display: 'block', mt: 1, color: roles.chrome.muted }}>
+                Matches your device ({systemScheme[0].toUpperCase() + systemScheme.slice(1)} now)
+            </Typography>}
+        </Box>;
+    }
+
+    return <>
+        <Tooltip title="Theme">
+            <IconButton aria-label={`Theme: ${selected.label}${preference === 'system' ? ` (currently ${systemScheme[0].toUpperCase()}${systemScheme.slice(1)})` : ''}`}
+                aria-haspopup="menu" aria-expanded={!!anchor} aria-controls={menuId} onClick={(event) => setAnchor(event.currentTarget)}
+                sx={{ width: 44, height: 44, bgcolor: 'transparent', color: roles.chrome.muted, '&:hover': { bgcolor: roles.chrome.raised, color: roles.text.onChrome },
+                    '&.Mui-focusVisible': focusRingOnChrome }}>
+                <PresentationIcon name={selected.icon} sx={{ fontSize: 20 }} />
+            </IconButton>
+        </Tooltip>
+        <Menu id={menuId} anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }} transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+            slotProps={{ paper: { sx: { width: 240 } }, list: { 'aria-label': 'Theme menu' } }}>
+            <Typography component="div" role="presentation" sx={{ px: 2, py: 1, color: roles.text.secondary, fontSize: '0.8125rem', fontWeight: 600 }}>Theme</Typography>
+            <Box role="group" aria-label="Theme">
+                {themeOptions.map((option) => {
+                    const active = preference === option.value;
+                    return <MenuItem key={option.value} role="menuitemradio" aria-checked={active} selected={active}
+                        onClick={(event) => { choose(option.value); event.currentTarget.focus(); }}
+                        sx={{ minHeight: 44, color: roles.text.primary, '&.Mui-selected': { fontWeight: 600 } }}>
+                        <PresentationIcon name={option.icon} sx={{ fontSize: 20, color: roles.text.secondary }} />
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                            <Typography component="span" sx={{ display: 'block', fontSize: '0.9375rem', fontWeight: 'inherit' }}>{option.label}</Typography>
+                            {option.value === 'system' && <Typography component="span" variant="caption" sx={{ display: 'block', color: roles.text.secondary }}>
+                                Matches your device ({systemScheme[0].toUpperCase() + systemScheme.slice(1)} now)
+                            </Typography>}
+                        </Box>
+                        {active && <PresentationIcon name="check" sx={{ fontSize: 20, ml: 'auto' }} />}
+                    </MenuItem>;
+                })}
+            </Box>
+        </Menu>
+    </>;
 }
 
 const REACH = presentationTokens.reachWidth, REACH_RISE = presentationTokens.reachHeight;
@@ -64,6 +157,7 @@ export const REACH_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xm
 export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId, onNavSelect, actions, search, brandHref, onBrandSelect }: AppHeaderProps) {
     const theme = useTheme();
     const wide = useMediaQuery(theme.breakpoints.up('lg'));
+    const desktop = useMediaQuery(theme.breakpoints.up('md'));
     const bar = useRef<HTMLDivElement>(null), header = useRef<HTMLElement>(null);
     const [reach, setReach] = useState<number | null>(null);
     const measure = useCallback(() => {
@@ -104,12 +198,12 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
     } : {};
     return <Box component="header" ref={header} data-canvas-reach={reach !== null ? '' : undefined} data-reach-for={reach !== null ? selectedNavId : undefined}
         data-reach-x={reach ?? undefined}
-        sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: 'common.white', [theme.breakpoints.up('md')]: cut }}>
+        sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: roles.bg.frame, color: 'common.white', [theme.breakpoints.up('md')]: cut }}>
         <Box ref={bar} sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 },
             height: { xs: presentationTokens.topBarHeightCompact, sm: presentationTokens.topBarHeight }, px: { xs: 1.5, sm: 2.5, md: 3 },
             maxWidth: 1600, mx: 'auto', '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>
             {onMenuToggle && <IconButton aria-label="Toggle navigation" aria-expanded={!!menuOpen} onClick={onMenuToggle}
-                sx={{ display: { md: 'none' }, color: 'common.white', '&:hover': { bgcolor: color.chromeRaised } }}><PresentationIcon name="menu" /></IconButton>}
+                sx={{ display: { md: 'none' }, color: 'common.white', '&:hover': { bgcolor: roles.chrome.raised } }}><PresentationIcon name="menu" /></IconButton>}
             <Box sx={{ flexShrink: 0, minWidth: 0, display: 'flex' }}>
                 {brandHref ? <ButtonBase component="a" href={brandHref} aria-label="CodeMastery home"
                     onClick={(event: MouseEvent) => { if (!onBrandSelect || !isPlainClick(event)) return; event.preventDefault(); onBrandSelect(); }}
@@ -124,7 +218,9 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
             </Box>}
             {navItems.length === 0 && <Box sx={{ flex: 1 }} />}
             {search && <Box sx={{ flex: '0 1 320px', minWidth: 0, display: { xs: 'none', md: 'block' } }}>{search}</Box>}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1 }, flexShrink: 0, ml: { xs: 'auto', md: 0 } }}>{actions}</Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1 }, flexShrink: 0, ml: { xs: 'auto', md: 0 } }}>
+                {desktop && <ThemeControl />}{actions}
+            </Box>
         </Box>
     </Box>;
 }
@@ -139,12 +235,12 @@ function TopNavItem({ item, current, iconOnly, onSelect }: { item: NavItem; curr
             onSelect(item.id);
         }}
         sx={{ position: 'relative', height: 44, px: iconOnly ? 1.25 : 2, gap: 1, borderRadius: `${radius.pill}px`, fontSize: '0.9375rem', fontWeight: current ? 600 : 500,
-            color: current ? 'common.white' : color.chromeMuted, whiteSpace: 'nowrap', transition: `background-color ${motion.fast}ms, color ${motion.fast}ms`,
-            '&:hover': { bgcolor: color.chromeRaised, color: 'common.white' }, '& svg': { fontSize: 20 } }}>
+            color: current ? 'common.white' : roles.chrome.muted, whiteSpace: 'nowrap', transition: `background-color ${motion.fast}ms, color ${motion.fast}ms`,
+            '&:hover': { bgcolor: roles.chrome.raised, color: 'common.white' }, '& svg': { fontSize: 20 } }}>
         {item.icon}
         <Box component="span" className={iconOnly ? 'cm-visually-hidden' : undefined}>{item.label}</Box>
         {item.badge !== undefined && item.badge !== '' && item.badge !== 0 && <Box component="span" sx={{ minWidth: 20, px: .625, borderRadius: `${radius.pill}px`,
-            bgcolor: color.brand600, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center' }}>{item.badge}</Box>}
+            bgcolor: roles.accent.link, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center' }}>{item.badge}</Box>}
     </ButtonBase>;
     return iconOnly ? <Tooltip title={item.label}>{content}</Tooltip> : content;
 }
@@ -163,11 +259,11 @@ export function AccountMenu({ displayName, role, renderItems }: AccountMenuProps
         <ButtonBase aria-haspopup="menu" aria-expanded={!!anchor} aria-label={`Account menu, ${displayName}, ${role}`}
             onClick={(event) => setAnchor(event.currentTarget)}
             sx={{ display: 'flex', alignItems: 'center', gap: 1.25, height: 52, pl: .75, pr: { xs: .75, md: 1.5 }, borderRadius: `${radius.pill}px`, color: 'common.white',
-                '&:hover': { bgcolor: color.chromeRaised } }}>
+                '&:hover': { bgcolor: roles.chrome.raised } }}>
             <Monogram name={displayName} initial={initial} tone="brand" />
             <Box sx={{ display: { xs: 'none', md: 'block' }, textAlign: 'left', minWidth: 0, maxWidth: 180 }}>
                 <Typography component="span" sx={{ display: 'block', fontSize: '0.9375rem', fontWeight: 600, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</Typography>
-                <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: color.chromeMuted, lineHeight: 1.3 }}>{role}</Typography>
+                <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: roles.chrome.muted, lineHeight: 1.3 }}>{role}</Typography>
             </Box>
             <PresentationIcon name="chevron-down" sx={{ fontSize: 18, display: { xs: 'none', md: 'block' } }} />
         </ButtonBase>
@@ -182,7 +278,7 @@ export function AccountMenu({ displayName, role, renderItems }: AccountMenuProps
 export function Monogram({ name, initial, size = 40, tone = 'chrome' }: { name: string; initial?: string; size?: number; tone?: 'chrome' | 'ink' | 'brand' }) {
     const letter = initial ?? Array.from(name.trim())[0]?.toUpperCase() ?? '?';
     return <Box component="span" aria-hidden data-monogram={tone} sx={{ width: size, height: size, borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0,
-        bgcolor: tone === 'brand' ? color.brand700 : tone === 'chrome' ? color.chromeRaised : color.ink950, color: 'common.white', fontSize: size * 0.42, fontWeight: 600 }}>{letter}</Box>;
+        bgcolor: tone === 'brand' ? roles.brand.identity : tone === 'chrome' ? roles.chrome.raised : roles.bg.frame, color: 'common.white', fontSize: size * 0.42, fontWeight: 600 }}>{letter}</Box>;
 }
 
 export function AccountMenuDivider() { return <Divider sx={{ my: .5 }} />; }
@@ -192,10 +288,10 @@ export function HeaderIconButton({ label, icon, badge, onClick, href, current = 
     const name = badge ? `${label}, ${badge} unread` : label;
     return <Tooltip title={label}>
         <IconButton aria-label={name} aria-current={current ? 'page' : undefined} onClick={onClick} {...(href ? { component: 'a', href } : {})}
-            sx={{ position: 'relative', color: 'common.white', bgcolor: current ? color.chromeRaised : undefined, '&:hover': { bgcolor: color.chromeRaised } }}>
+            sx={{ position: 'relative', color: 'common.white', bgcolor: current ? roles.chrome.raised : undefined, '&:hover': { bgcolor: roles.chrome.raised } }}>
             <PresentationIcon name={icon} />
             {!!badge && <Box component="span" aria-hidden sx={{ position: 'absolute', top: 0, right: -2, minWidth: 20, height: 20, px: .5, borderRadius: `${radius.pill}px`,
-                bgcolor: color.brand600, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center', border: `2px solid ${color.ink950}`, boxSizing: 'content-box' }}>{badge}</Box>}
+                bgcolor: roles.accent.link, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center', border: `2px solid ${roles.bg.frame}`, boxSizing: 'content-box' }}>{badge}</Box>}
         </IconButton>
     </Tooltip>;
 }

@@ -11,7 +11,7 @@ import { PresentationIcon } from '../../../../shared/components/PresentationIcon
 import { ConfirmDialog } from '../../../../shared/components/ConfirmDialog';
 import { MaterialForm } from '../components/MaterialForm';
 import type { LessonDraft, SkillOption } from '../types/courseManagementTypes';
-import { color, radius, shadow } from '../../../../app/theme/theme';
+import { radius, shadow, roles } from '../../../../app/theme/theme';
 
 const materialIcon = { text: 'text', file: 'file', external_video: 'video' } as const;
 const materialLabel = { text: 'Text', file: 'File', external_video: 'Video link' } as const;
@@ -48,7 +48,7 @@ export function LessonEditorPage({ courseTitle, initial, skills, onSave, onLeave
                 </Box>
                 {draft.materials.length === 0 ? <Typography sx={{ color: 'text.secondary' }}>No materials yet. Courses need at least two material types across their lessons.</Typography>
                     : <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 1 }}>
-                        {draft.materials.map((material) => <Box component="li" key={material.id} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: `${radius.md}px`, bgcolor: color.canvas100 }}>
+                        {draft.materials.map((material) => <Box component="li" key={material.id} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: `${radius.md}px`, bgcolor: roles.bg.canvas }}>
                             <PresentationIcon name={materialIcon[material.kind]} sx={{ fontSize: 20, color: 'text.secondary' }} />
                             <Box sx={{ flex: 1, minWidth: 0 }}><Typography sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{material.title}</Typography>
                                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>{materialLabel[material.kind]}{material.kind === 'file' ? ` · ${material.fileName}` : material.kind === 'external_video' ? ` · ${material.url}` : ''}</Typography></Box>
@@ -66,8 +66,8 @@ export function LessonEditorPage({ courseTitle, initial, skills, onSave, onLeave
                     <SegmentedControl label="Lesson visibility" value={draft.publication} onChange={(publication) => set({ publication })} options={[{ value: 'hidden', label: 'Hidden', icon: 'eye-off' }, { value: 'published', label: 'Published', icon: 'eye' }]} /></Box>
             </Tile>
             {Object.keys(errors).length > 0 && <Alert severity="error">Fix the highlighted fields, then save again.</Alert>}
-            <Box role="region" aria-label="Save lesson" sx={{ position: 'sticky', bottom: 16, zIndex: 5, bgcolor: color.surface, borderRadius: `${radius.pill}px`, boxShadow: shadow.raised, p: 1, pl: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Typography role="status" sx={{ flex: 1, color: dirty ? color.butter800 : 'text.secondary', fontWeight: 600 }}>{dirty ? 'Unsaved changes' : status ?? 'All changes saved'}</Typography>
+            <Box role="region" aria-label="Save lesson" sx={{ position: 'sticky', bottom: 16, zIndex: 5, bgcolor: roles.bg.surface, borderRadius: `${radius.pill}px`, boxShadow: shadow.raised, p: 1, pl: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Typography role="status" sx={{ flex: 1, color: dirty ? roles.tone.butter.strong : 'text.secondary', fontWeight: 600 }}>{dirty ? 'Unsaved changes' : status ?? 'All changes saved'}</Typography>
                 <Button type="submit" variant="contained" disabled={!dirty}>Save changes</Button>
             </Box>
         </Box>

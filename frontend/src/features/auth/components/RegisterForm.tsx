@@ -6,7 +6,7 @@ import { registrationInput } from '../types/authTypes';
 import { ApiError, formFailure } from '../../../shared/types/apiTypes';
 import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import { PasswordVisibility } from '../pages/LoginPage';
-import { color } from '../../../app/theme/theme';
+import { roles } from '../../../app/theme/theme';
 
 /** Live checklist mirroring the approved CT01 predicates (code points and UTF-8 bytes, no trimming). */
 export function PasswordChecklist({ password, id }: { password: string; id: string }) {
@@ -15,7 +15,7 @@ export function PasswordChecklist({ password, id }: { password: string; id: stri
         { label: 'At most 72 UTF-8 bytes', met: password.length > 0 && new TextEncoder().encode(password).length <= 72 },
     ];
     return <Box component="ul" id={id} aria-label="Password rules" sx={{ listStyle: 'none', m: 0, mt: 1, p: 0, display: 'grid', gap: .5 }}>
-        {checks.map((check) => <Box component="li" key={check.label} sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '0.8125rem', fontWeight: 500, color: check.met ? color.mint700 : 'text.secondary' }}>
+        {checks.map((check) => <Box component="li" key={check.label} sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '0.8125rem', fontWeight: 500, color: check.met ? roles.tone.mint.strong : 'text.secondary' }}>
             <PresentationIcon name={check.met ? 'check-circle' : 'dashed-circle'} sx={{ fontSize: 16 }} />
             {check.label}<span className="cm-visually-hidden">{check.met ? ', met' : ', not met yet'}</span>
         </Box>)}

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { Box, Typography } from '@mui/material';
 import { PresentationIcon } from '../../shared/components/PresentationIcon';
-import { color } from '../theme/theme';
+import { roles } from '../theme/theme';
 
 export type Workspace = 'reference' | 'public' | 'learner' | 'instructor' | 'admin';
 
@@ -33,8 +33,8 @@ export function ContractNote({ children }: { children: ReactNode }) {
     // In Google Sans Flex the "0" that defines 1ch is wider than an average glyph: 54ch measured
     // 68–77 characters per line on the preview notes (6 November 2026 typography change).
     return <Box role="note" sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mb: 3 }}>
-        <PresentationIcon name="info" sx={{ fontSize: 18, color: color.brand700, mt: .25, flexShrink: 0 }} />
-        <Typography variant="body2" sx={{ color: color.ink700, maxWidth: '54ch' }}>{children}</Typography>
+        <PresentationIcon name="info" sx={{ fontSize: 18, color: roles.accent.linkHover, mt: .25, flexShrink: 0 }} />
+        <Typography variant="body2" sx={{ color: roles.text.strongSecondary, maxWidth: '54ch' }}>{children}</Typography>
     </Box>;
 }
 

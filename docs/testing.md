@@ -737,13 +737,14 @@ test-count or coverage-percentage claim is made for them.
   upload or delivery (CT09).
 - **Assistive technology.** No test establishes actual screen-reader output; no
   manual VoiceOver, NVDA or TalkBack session has been recorded.
-- **DESIGN r12 behavior.** Light, Dark and System rendering, the Theme control, and
-  the r12 quiz-attempt, autosave and Instructor-management states are specified in
-  `DESIGN.md` but not implemented, so no test covers them
-  ([verification guidance](#design-r12-uiux-verification-guidance--specified-not_run)).
-  The theme system and its developer verification are assigned to FE34 #255.
-  The preview suite does not cover the recorded A13 case (a sign-in in another tab
-  makes the `/preview` document send `POST /api/auth/refresh`).
+- **DESIGN r12 behavior.** The FE34 working branch adds focused tests for the Theme
+  menu and drawer radio behavior, preview-local preference isolation, and preference
+  synchronization; those tests do not establish rendered Light/Dark/System fidelity
+  across the documented responsive widths or independent acceptance. The r12
+  quiz-attempt, autosave and Instructor-management states remain specified but are not
+  implemented by this theme work. The preview suite does not cover the recorded A13
+  case (a sign-in in another tab makes the `/preview` document send
+  `POST /api/auth/refresh`).
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.

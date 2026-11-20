@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Box, Button, Skeleton, Typography } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
 import type { PresentationIconName } from './PresentationIcon';
-import { color, radius } from '../../app/theme/theme';
+import { radius, roles } from '../../app/theme/theme';
 
 type Heading = 'h2' | 'h3' | 'h4';
 
@@ -26,7 +26,7 @@ export function LoadingView({ message = 'Loading...', variant = 'block', count =
             </Box>)}
         </Box>}
         {variant === 'rows' && <Box aria-hidden sx={{ bgcolor: 'background.paper', borderRadius: `${radius.lg}px`, p: 2 }}>
-            {Array.from({ length: count }, (_, i) => <Box key={i} sx={{ display: 'flex', gap: 2, alignItems: 'center', py: 1.75, borderBottom: i < count - 1 ? `1px solid ${color.line200}` : 0 }}>
+            {Array.from({ length: count }, (_, i) => <Box key={i} sx={{ display: 'flex', gap: 2, alignItems: 'center', py: 1.75, borderBottom: i < count - 1 ? `1px solid ${roles.line.hairline}` : 0 }}>
                 <Skeleton height={20} sx={{ flex: 2 }} /><Skeleton height={20} sx={{ flex: 1 }} /><Skeleton height={20} sx={{ flex: 1 }} />
             </Box>)}
         </Box>}
@@ -39,9 +39,9 @@ export function LoadingView({ message = 'Loading...', variant = 'block', count =
 export interface EmptyViewProps { title?: string; message?: string; action?: ReactNode; icon?: PresentationIconName; headingLevel?: Heading; compact?: boolean }
 /** Dashed "not yet" slot that teaches the next step (DESIGN.md › Feedback › Empty state). */
 export function EmptyView({ title = 'Nothing here yet', message = 'Items will appear here when they are available.', action, icon = 'layers', headingLevel = 'h2', compact = false }: EmptyViewProps) {
-    return <Box sx={{ border: `1.5px dashed ${color.ink400}`, borderRadius: `${radius.lg}px`, p: compact ? 2.5 : { xs: 3, sm: 5 }, display: 'flex', flexDirection: 'column',
+    return <Box sx={{ border: `1.5px dashed ${roles.line.strong}`, borderRadius: `${radius.lg}px`, p: compact ? 2.5 : { xs: 3, sm: 5 }, display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center', textAlign: 'center', minHeight: compact ? 0 : 200 }}>
-        <PresentationIcon name={icon} sx={{ fontSize: 24, color: color.ink600, mb: 1.5 }} />
+        <PresentationIcon name={icon} sx={{ fontSize: 24, color: roles.text.secondary, mb: 1.5 }} />
         <Typography component={headingLevel} variant="h4">{title}</Typography>
         <Typography sx={{ mt: .75, color: 'text.secondary', maxWidth: '48ch' }}>{message}</Typography>
         {action && <Box sx={{ mt: 2.5, display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center' }}>{action}</Box>}
@@ -51,8 +51,8 @@ export function EmptyView({ title = 'Nothing here yet', message = 'Items will ap
 export interface ErrorViewProps { title?: string; message?: string; onRetry?: () => void; retryLabel?: string; headingLevel?: Heading; action?: ReactNode }
 /** Names the problem and the recovery; never shows server diagnostics. */
 export function ErrorView({ title = 'Something went wrong', message = 'Something went wrong on our side. Try again in a moment.', onRetry, retryLabel = 'Try again', headingLevel = 'h2', action }: ErrorViewProps) {
-    return <Box sx={{ bgcolor: color.rose100, borderRadius: `${radius.lg}px`, p: { xs: 3, sm: 4 }, display: 'flex', gap: 2, alignItems: 'flex-start', mb: 3 }}>
-        <PresentationIcon name="alert-circle" sx={{ fontSize: 24, color: color.rose700, flexShrink: 0, mt: .25 }} />
+    return <Box sx={{ bgcolor: roles.tone.rose.tint, borderRadius: `${radius.lg}px`, p: { xs: 3, sm: 4 }, display: 'flex', gap: 2, alignItems: 'flex-start', mb: 3 }}>
+        <PresentationIcon name="alert-circle" sx={{ fontSize: 24, color: roles.tone.rose.strong, flexShrink: 0, mt: .25 }} />
         <Box sx={{ minWidth: 0 }}>
             <Typography component={headingLevel} variant="h4">{title}</Typography>
             <Typography sx={{ mt: .5, overflowWrap: 'anywhere' }}>{message}</Typography>
@@ -69,7 +69,7 @@ export interface SystemStateViewProps { title: string; message: string; icon: Pr
 /** Full-page system state inside the shell (not found, access denied, unavailable). The h1 receives route focus. */
 export function SystemStateView({ title, message, icon, actions }: SystemStateViewProps) {
     return <Box sx={{ maxWidth: 640, mx: 'auto', py: { xs: 6, md: 10 }, px: 3, textAlign: 'center' }}>
-        <Box aria-hidden sx={{ width: 64, height: 64, mx: 'auto', mb: 3, borderRadius: '50%', bgcolor: color.surface, display: 'grid', placeItems: 'center', color: color.ink700 }}>
+        <Box aria-hidden sx={{ width: 64, height: 64, mx: 'auto', mb: 3, borderRadius: '50%', bgcolor: roles.bg.surface, display: 'grid', placeItems: 'center', color: roles.text.strongSecondary }}>
             <PresentationIcon name={icon} sx={{ fontSize: 28 }} />
         </Box>
         <Typography variant="h1" sx={{ textWrap: 'balance' }}>{title}</Typography>

@@ -3,14 +3,14 @@ import { Box, Button, Typography } from '@mui/material';
 import { DataTable } from '../../../../shared/components/DataTable';
 import { MasteryLegend, masteryMeta, masteryOrder } from '../../../../shared/components/StatusPill';
 import type { SkillDistributionRow } from '../types/reportingTypes';
-import { color, radius } from '../../../../app/theme/theme';
+import { radius, roles } from '../../../../app/theme/theme';
 
-const hatch = `repeating-linear-gradient(135deg, ${color.dataUnknown} 0 4px, #9EA2AA 4px 8px)`;
+const hatch = `repeating-linear-gradient(135deg, ${roles.data.unknown} 0 4px, ${roles.bg.surface} 4px 8px)`;
 
 /** 100% stacked bars of the four states per skill, with hatched Unknown, legend and table equivalent (US-17). */
 export function MasteryDistributionChart({ rows, title = 'Mastery distribution by skill', definition }: { rows: SkillDistributionRow[]; title?: string; definition: string }) {
     const [table, setTable] = useState(false);
-    return <Box component="section" aria-labelledby="mastery-distribution" sx={{ bgcolor: color.surface, borderRadius: `${radius.lg}px`, p: { xs: 2.5, sm: 3 } }}>
+    return <Box component="section" aria-labelledby="mastery-distribution" sx={{ bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, p: { xs: 2.5, sm: 3 } }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap', mb: 2 }}>
             <Box><Typography id="mastery-distribution" variant="h4" component="h2">{title}</Typography><Typography variant="body2" sx={{ color: 'text.secondary', mt: .5, maxWidth: '56ch' }}>{definition}</Typography></Box>
             <Button variant="text" size="small" aria-pressed={table} onClick={() => setTable((value) => !value)}>{table ? 'Show as chart' : 'Show as table'}</Button>

@@ -6,12 +6,13 @@ import { PageHeader } from '../../../shared/components/PageHeader';
 import type { Crumb } from '../../../shared/components/PageHeader';
 import { ConfirmDialog } from '../../../shared/components/ConfirmDialog';
 import { PresentationIcon } from '../../../shared/components/PresentationIcon';
+import { ThemeControl } from '../../../shared/components/AppHeader';
 import { FactList, Tile } from '../../../shared/components/Tile';
 import { QuestionRenderer } from '../components/QuestionRenderer';
 import { QuizTimer, formatClock } from '../components/QuizTimer';
 import { quizKindLabel } from '../types/assessmentTypes';
 import type { QuestionView, QuizSummaryView } from '../types/assessmentTypes';
-import { color, control, focusRingOnChrome, radius } from '../../../app/theme/theme';
+import { control, focusRingOnChrome, radius, roles } from '../../../app/theme/theme';
 
 export interface QuizIntroViewProps { quiz: QuizSummaryView; onStart: () => void; starting?: boolean; error?: string; back?: Crumb; note?: ReactNode; title?: string; children?: ReactNode }
 /** Before the timer starts: kind, length, time limit and attempt number (US-05). */
@@ -69,26 +70,27 @@ export function QuizAttemptPage({ quizTitle, questions, answers, currentIndex, o
                 const done = (answers[item.id] ?? []).length > 0, current = index === currentIndex;
                 return <Box component="li" key={item.id} sx={{ flexShrink: 0 }}>
                     <ButtonBase onClick={() => onNavigate(index)} aria-current={current ? 'step' : undefined} aria-label={`Question ${index + 1}, ${done ? 'answered' : 'not answered'}`}
-                        sx={{ width: 44, height: 44, borderRadius: '50%', fontWeight: 600, fontSize: '0.9375rem', bgcolor: done ? control.primary : color.surface, color: done ? color.surface : color.ink900,
-                            border: done ? 0 : `1.5px solid ${color.ink400}`, boxShadow: current ? `0 0 0 3px ${color.canvas100}, 0 0 0 5px ${color.brand600}` : 'none' }}>{index + 1}</ButtonBase>
+                        sx={{ width: 44, height: 44, borderRadius: '50%', fontWeight: 600, fontSize: '0.9375rem', bgcolor: done ? control.primary : roles.bg.surface, color: done ? roles.control.primary.text : roles.text.primary,
+                            border: done ? 0 : `1.5px solid ${roles.line.strong}`, boxShadow: current ? `0 0 0 3px ${roles.bg.canvas}, 0 0 0 5px ${roles.accent.progress}` : 'none' }}>{index + 1}</ButtonBase>
                 </Box>;
             })}
         </Box>
         <Typography variant="body2" sx={{ mt: 1.5, color: 'text.secondary' }} role="status">{answered} of {questions.length} answered</Typography>
     </Box>;
-    return <Box sx={{ minHeight: '100dvh', bgcolor: color.ink950, display: 'flex', flexDirection: 'column' }}>
+    return <Box sx={{ minHeight: '100dvh', bgcolor: roles.bg.frame, display: 'flex', flexDirection: 'column' }}>
         {banner}
-        <Box component="header" sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: color.ink950, color: color.surface, '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>
+        <Box component="header" sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: roles.bg.frame, color: roles.text.onChrome, '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, minHeight: { xs: 64, sm: 72 }, px: { xs: 1.5, sm: 3 }, flexWrap: 'wrap', py: { xs: 1, sm: 0 } }}>
-                <IconButton aria-label="Leave quiz" onClick={() => setDialog('leave')} disabled={locked} sx={{ color: color.surface, '&:hover': { bgcolor: color.chromeRaised } }}><PresentationIcon name="close" /></IconButton>
+                <IconButton aria-label="Leave quiz" onClick={() => setDialog('leave')} disabled={locked} sx={{ color: roles.text.onChrome, '&:hover': { bgcolor: roles.chrome.raised } }}><PresentationIcon name="close" /></IconButton>
+                <ThemeControl />
                 <Typography component="p" sx={{ fontWeight: 600, fontSize: '1rem', minWidth: 0, flex: { xs: '1 1 auto', md: '0 1 auto' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quizTitle}</Typography>
-                <Typography component="p" className="cm-tabular" sx={{ color: color.chromeMuted, flex: 1, textAlign: 'center', display: { xs: 'none', md: 'block' } }}>Question {currentIndex + 1} of {questions.length}</Typography>
+                <Typography component="p" className="cm-tabular" sx={{ color: roles.chrome.muted, flex: 1, textAlign: 'center', display: { xs: 'none', md: 'block' } }}>Question {currentIndex + 1} of {questions.length}</Typography>
                 <QuizTimer remainingSeconds={remainingSeconds} totalSeconds={totalSeconds} />
                 <Button variant="contained" color="onChrome" size="small" onClick={() => setDialog('submit')} disabled={locked}>Submit quiz</Button>
             </Box>
-            <Box sx={{ display: { md: 'none' }, px: 1.5, pb: 1.5, bgcolor: color.canvas100, borderRadius: `${radius.lg}px ${radius.lg}px 0 0`, pt: 1.5, color: color.ink900 }}>{navigator}</Box>
+            <Box sx={{ display: { md: 'none' }, px: 1.5, pb: 1.5, bgcolor: roles.bg.canvas, borderRadius: `${radius.lg}px ${radius.lg}px 0 0`, pt: 1.5, color: roles.text.primary }}>{navigator}</Box>
         </Box>
-        <Box component="main" id="main-content" tabIndex={-1} sx={{ flex: 1, bgcolor: color.canvas100, mx: { md: 1 }, mb: { md: 1 }, borderRadius: { md: `${radius.xl}px` }, display: 'grid',
+        <Box component="main" id="main-content" tabIndex={-1} sx={{ flex: 1, bgcolor: roles.bg.canvas, mx: { md: 1 }, mb: { md: 1 }, borderRadius: { md: `${radius.xl}px` }, display: 'grid',
             gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'minmax(0, 1fr) 300px' } }}>
             <Box sx={{ px: { xs: 2, sm: 4, lg: 6 }, py: { xs: 3, md: 6 }, maxWidth: 820, width: '100%', mx: 'auto', boxSizing: 'border-box' }}>
                 <Typography variant="h1" className="cm-visually-hidden">{quizTitle}</Typography>
@@ -103,7 +105,7 @@ export function QuizAttemptPage({ quizTitle, questions, answers, currentIndex, o
                         : <Button variant="contained" onClick={() => setDialog('submit')} disabled={locked}>Review and submit</Button>}
                 </Box>
             </Box>
-            <Box component="aside" aria-label="Question navigator" sx={{ display: { xs: 'none', md: 'block' }, bgcolor: color.fill150, px: 3, py: 6, borderRadius: { md: `0 ${radius.xl}px ${radius.xl}px 0` } }}>
+            <Box component="aside" aria-label="Question navigator" sx={{ display: { xs: 'none', md: 'block' }, bgcolor: roles.bg.fill, px: 3, py: 6, borderRadius: { md: `0 ${radius.xl}px ${radius.xl}px 0` } }}>
                 <Typography component="h2" variant="h4" sx={{ mb: 2 }}>Questions</Typography>{navigator}
                 <Typography variant="caption" sx={{ display: 'block', mt: 3, color: 'text.secondary' }}>Filled circles are answered. You can change answers until you submit.</Typography>
             </Box>

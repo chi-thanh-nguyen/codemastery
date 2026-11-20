@@ -3,7 +3,7 @@ import { MasteryStateChip } from './MasteryStateChip';
 import { masteryMeta, StatusPill } from '../../../shared/components/StatusPill';
 import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import type { SkillView } from '../types/masteryTypes';
-import { color, radius } from '../../../app/theme/theme';
+import { radius, roles } from '../../../app/theme/theme';
 
 export interface SkillDetailPanelProps {
     skill: SkillView | null;
@@ -17,13 +17,13 @@ const progressTone = { 'Not started': 'dashed', Completed: 'mint', Mastered: 'mi
 
 /** Selected skill: state and meaning, latest score, prerequisites, related lessons (US-07). */
 export function SkillDetailPanel({ skill, skillsById, onOpenLesson, onSelectSkill, headingLevel = 'h2' }: SkillDetailPanelProps) {
-    if (!skill) return <Box sx={{ border: `1.5px dashed ${color.ink400}`, borderRadius: `${radius.lg}px`, p: 3 }}>
+    if (!skill) return <Box sx={{ border: `1.5px dashed ${roles.line.strong}`, borderRadius: `${radius.lg}px`, p: 3 }}>
         <Typography component={headingLevel} variant="h4">Selected skill</Typography>
         <Typography sx={{ mt: .5, color: 'text.secondary' }}>Select a skill to see related lessons and your latest score.</Typography>
     </Box>;
     const prerequisites = skill.prerequisiteIds.map((id) => skillsById.get(id)).filter((value): value is SkillView => !!value);
     const dependents = [...skillsById.values()].filter((candidate) => candidate.prerequisiteIds.includes(skill.id));
-    return <Box component="section" aria-labelledby={`skill-${skill.id}-title`} sx={{ bgcolor: color.surface, borderRadius: `${radius.lg}px`, p: 3 }}>
+    return <Box component="section" aria-labelledby={`skill-${skill.id}-title`} sx={{ bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, p: 3 }}>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>Selected skill</Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', mt: .5 }}>
             <Typography component={headingLevel} variant="h3" id={`skill-${skill.id}-title`} sx={{ overflowWrap: 'anywhere' }}>{skill.name}</Typography>
@@ -39,7 +39,7 @@ export function SkillDetailPanel({ skill, skillsById, onOpenLesson, onSelectSkil
                 {skill.relatedLessons.length === 0 ? 'No published lessons are mapped to this skill yet.'
                     : <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 1 }}>
                         {skill.relatedLessons.map((lesson) => <Box component="li" key={lesson.id} sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'space-between' }}>
-                            {onOpenLesson ? <ButtonBase onClick={() => onOpenLesson(lesson.id)} sx={{ fontWeight: 600, color: color.brand600, textAlign: 'left', minHeight: 36, borderRadius: `${radius.xs}px`, '&:hover': { textDecoration: 'underline' } }}>{lesson.title}</ButtonBase>
+                            {onOpenLesson ? <ButtonBase onClick={() => onOpenLesson(lesson.id)} sx={{ fontWeight: 600, color: roles.accent.link, textAlign: 'left', minHeight: 36, borderRadius: `${radius.xs}px`, '&:hover': { textDecoration: 'underline' } }}>{lesson.title}</ButtonBase>
                                 : <Typography sx={{ fontWeight: 600 }}>{lesson.title}</Typography>}
                             <StatusPill size="tag" tone={progressTone[lesson.progress]} icon={lesson.progress === 'Not started' ? 'dashed-circle' : lesson.progress === 'Mastered' ? 'skip' : 'check-circle'}>{lesson.progress}</StatusPill>
                         </Box>)}
@@ -53,7 +53,7 @@ function SkillLinks({ skills, onSelect }: { skills: SkillView[]; onSelect: (id: 
     return <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
         {skills.map((item) => <Box component="li" key={item.id}>
             <ButtonBase onClick={() => onSelect(item.id)} aria-label={`${item.name}, ${masteryMeta[item.state].label}. Select skill`}
-                sx={{ gap: .75, px: 1.25, height: 32, borderRadius: `${radius.pill}px`, bgcolor: color.fill150, fontWeight: 600, fontSize: '0.9375rem', '&:hover': { bgcolor: color.line200 } }}>
+                sx={{ gap: .75, px: 1.25, height: 32, borderRadius: `${radius.pill}px`, bgcolor: roles.bg.fill, fontWeight: 600, fontSize: '0.9375rem', '&:hover': { bgcolor: roles.line.hairline } }}>
                 <PresentationIcon name={masteryMeta[item.state].icon} sx={{ fontSize: 16 }} />{item.name}
             </ButtonBase>
         </Box>)}

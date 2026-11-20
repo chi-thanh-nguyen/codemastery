@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Box, Drawer, List, ListItem, ListItemButton, Typography, useMediaQuery, useTheme } from '@mui/material';
-import { color, presentationTokens, radius, focusRingOnChrome } from '../../app/theme/theme';
+import { presentationTokens, radius, focusRingOnChrome, roles } from '../../app/theme/theme';
 import { BrandWordmark } from './BrandLogo';
 
 export interface NavItem { id: string; label: string; badge?: string | number; icon?: ReactNode; group?: string; href?: string }
@@ -45,25 +45,25 @@ export function SidebarNav({ items, selectedId, onSelect, mobileOpen, onMobileCl
                     const heading = item.group && item.group !== lastGroup ? item.group : undefined;
                     lastGroup = item.group;
                     return <ListItem key={item.id} disablePadding sx={{ display: 'block', mb: .5 }}>
-                        {heading && <Typography component="div" sx={{ px: 1.5, mt: 2, mb: 1, color: color.chromeMuted, fontSize: '0.8125rem', fontWeight: 600 }}>{heading}</Typography>}
+                        {heading && <Typography component="div" sx={{ px: 1.5, mt: 2, mb: 1, color: roles.chrome.muted, fontSize: '0.8125rem', fontWeight: 600 }}>{heading}</Typography>}
                         <ListItemButton {...(item.href ? { component: 'a', href: item.href } : {})} selected={current} aria-current={current ? 'page' : undefined}
                             onClick={(event) => { if (item.href && !isPlainClick(event)) return; if (item.href) event.preventDefault(); onSelect(item.id); onMobileClose(); }}
-                            sx={{ minHeight: 52, px: 1.5, gap: 1.5, borderRadius: `${radius.md}px`, color: current ? 'common.white' : color.chromeMuted,
-                                '&:hover': { bgcolor: color.chromeRaised, color: 'common.white' },
-                                '&.Mui-selected, &.Mui-selected:hover': { bgcolor: color.chromeRaised, color: 'common.white' },
-                                '&.Mui-focusVisible': { bgcolor: color.chromeRaised, ...focusRingOnChrome, outlineOffset: -2 } }}>
-                            <Box component="span" aria-hidden sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: current ? color.brand600 : 'transparent', flexShrink: 0 }} />
+                            sx={{ minHeight: 52, px: 1.5, gap: 1.5, borderRadius: `${radius.md}px`, color: current ? 'common.white' : roles.chrome.muted,
+                                '&:hover': { bgcolor: roles.chrome.raised, color: 'common.white' },
+                                '&.Mui-selected, &.Mui-selected:hover': { bgcolor: roles.chrome.raised, color: 'common.white' },
+                                '&.Mui-focusVisible': { bgcolor: roles.chrome.raised, ...focusRingOnChrome, outlineOffset: -2 } }}>
+                            <Box component="span" aria-hidden sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: current ? roles.accent.link : 'transparent', flexShrink: 0 }} />
                             {item.icon && <Box component="span" sx={{ display: 'grid', '& svg': { fontSize: 20 } }}>{item.icon}</Box>}
                             <Box component="span" sx={{ flex: 1, fontSize: '1rem', fontWeight: current ? 600 : 500 }}>{item.label}</Box>
                             {item.badge !== undefined && item.badge !== '' && <Box component="span" sx={{ minWidth: 22, px: .75, py: .25, textAlign: 'center',
-                                borderRadius: `${radius.pill}px`, bgcolor: color.brand600, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: 1.2 }}>
+                                borderRadius: `${radius.pill}px`, bgcolor: roles.accent.link, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: 1.2 }}>
                                 {item.badge}
                             </Box>}
                         </ListItemButton>
                     </ListItem>;
                 })}
             </List>
-            {footer && <Box sx={{ mt: 'auto', px: 2, pb: 3, pt: 2, borderTop: `1px solid ${color.chromeRaised}`, '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>{footer}</Box>}
+            {footer && <Box sx={{ mt: 'auto', px: 2, pb: 3, pt: 2, borderTop: `1px solid ${roles.chrome.raised}`, '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>{footer}</Box>}
         </Box>
     </Drawer>;
 }

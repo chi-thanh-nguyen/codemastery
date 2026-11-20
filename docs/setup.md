@@ -538,7 +538,7 @@ and a successful build do not establish frontend/backend integration in a real
 browser or deployment readiness.
 
 The MUI theme and `presentationTokens` live in `frontend/src/app/theme/theme.ts`
-and implement the light colour scheme of the root `DESIGN.md` specification (“The Lit Path”; first revision
+and implement the Light and Dark schemes of the root `DESIGN.md` specification (“The Lit Path”; first revision
 `DESIGN-2026-11-06-r1`, tracked in Git from r6; current merged revision `DESIGN-2026-11-19-r12`,
 PR #252, 19 November 2026). An ink frame `#0A0B0F` holds the top bar
 (80 px, 64 px below 600 px) and a `#F6F6F7` canvas that rises under the current
@@ -574,30 +574,32 @@ branding asset pack; TypeScript is a trademark of Microsoft Corporation). Both a
 used only to name the language a course teaches.
 `PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
 
-**Colour schemes — specified, not implemented.** `DESIGN.md` r12 specifies three theme
-preferences, System (the default), Light and Dark, with one Theme control in each shell
-(the workspace top bar or mobile drawer, the landing header, the auth layout, and the quiz
-and diagnostic Focus bar), a device-scoped `localStorage` preference, a first-paint
-script, live following of the operating-system setting and synchronization across tabs.
-None of this exists on `main`: `theme.ts` defines the light scheme only, every page
-renders light whatever the operating-system setting, no Theme control is rendered, and
-nothing reads or writes a theme preference. The light values in `theme.ts` match r12's
-light scheme.
+**Colour schemes — implemented on the FE34 working branch; not yet on `main`.**
+`DESIGN.md` r12 specifies System (the default), Light and Dark preferences. On this
+branch, `theme.ts` defines both schemes and semantic roles; `App.tsx` owns the
+device-scoped `codemastery.theme` preference above the router, follows system changes
+and other-tab storage events, and applies the scheme before first paint through the
+existing `index.html` initializer. The shared Theme control is used in the workspace
+top bar/mobile drawer, landing header, auth layout and quiz Focus bar. The preview
+supports a local in-memory override, follows the global preference until overridden,
+and restores the global scheme on exit. Existing colour consumers in the authorized
+scope use semantic roles, including the reporting-chart unknown-state hatch.
 
-**Theme implementation handoff (19 November 2026).** FE34 #255, a child of EP07 #12, owns
-the implementation of the shared colour-scheme work. It was created on 19 November 2026
-under the Project Leader's instruction and assigned to `heizseung`, whom the Leader
-authorized to implement it within the Issue's scope; it is not implemented yet. Its scope
-follows `DESIGN.md` r12: the two colour schemes and semantic roles in `theme.ts`; one preference state above the router in
-`App.tsx` (`codemastery.theme`, device-scoped, independent of the session); the first-paint
-script in the existing `index.html`; the Theme control in every shell; the move of the 47
-non-test files that import the light `color` constants to semantic roles (re-counted on
-`cdf1ef8`); and the preview's in-memory override. The theme changes it makes in files that
-other FE Issues list leave those Issues' feature ownership unchanged. A new repository
-file, such as an external first-paint script or a theme hook, still needs structure
-approval under [repository-structure.md](repository-structure.md). FE34 excludes the A13
-preview-isolation fix in `AuthProvider.tsx` and the A14 response-metadata (`ETag`)
-capability of the shared HTTP client; neither has an owning Issue.
+**Theme implementation handoff (19 November 2026).** FE34 #255, a child of EP07 #12,
+owns the implementation of the shared colour-scheme work. It was created on 19 November
+2026 under the Project Leader's instruction and assigned to `heizseung`, whom the Leader
+authorized to implement it within the Issue's scope. This branch contains the
+implementation; it is not evidence of merge, independent acceptance or release. The
+scope follows `DESIGN.md` r12: two colour schemes and semantic roles in `theme.ts`;
+global preference state in `App.tsx`; first-paint initialization in the existing
+`index.html`; controls in the authorized shells; semantic-role migration of the
+inventoried existing consumers; and the preview's in-memory override. The theme changes
+it makes in files that other FE Issues list leave those Issues' feature ownership
+unchanged. A new repository file, such as an external first-paint script or a theme hook,
+still needs structure approval under [repository-structure.md](repository-structure.md).
+FE34 excludes the A13 preview-isolation fix in `AuthProvider.tsx` and the A14
+response-metadata (`ETag`) capability of the shared HTTP client; neither has an owning
+Issue.
 
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
 in `src/routes/index.tsx`, listed in

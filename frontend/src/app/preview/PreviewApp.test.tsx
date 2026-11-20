@@ -31,7 +31,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
     await act(async () => root.unmount()); host.remove();
-    window.history.replaceState(null, '', '/'); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear(); sessionStorage.clear();
+    window.history.replaceState(null, '', '/'); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear();
 });
 
 /** Mount the real App at /preview and wait for the lazily loaded preview chunk. */
@@ -42,6 +42,14 @@ async function mount(search = '') {
         await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     }
     expect(host.querySelector('[data-preview-screen]')).not.toBeNull();
+}
+async function mountGlobalShell(path = '/login') {
+    window.history.replaceState(null, '', path);
+    await act(async () => root.render(<App />));
+    for (let attempt = 0; attempt < 50 && !host.querySelector('button[aria-label^="Theme:"]'); attempt++) {
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    }
+    expect(host.querySelector('button[aria-label^="Theme:"]')).not.toBeNull();
 }
 const h1 = () => host.querySelector('main h1')?.textContent;
 const buttons = (text: string, scope: ParentNode = host) => [...scope.querySelectorAll<HTMLElement>('button, a, [role="menuitem"]')].filter((node) => node.textContent?.trim() === text);
@@ -64,13 +72,88 @@ async function waitUntil(done: () => boolean, what: string, timeoutMs = 3000) {
 async function settle(ms: number) { await act(async () => { vi.advanceTimersByTime(ms); }); }
 
 describe('isolated design preview', () => {
+    it('persists an explicit global preference and keeps it active when storage writes fail', async () => {
+        await mountGlobalShell();
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Theme: System (currently Light)"]')!;
+        await act(async () => trigger.click());
+        const dark = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.trim().startsWith('Dark'))!;
+        await act(async () => dark.click());
+        expect(localStorage.getItem('codemastery.theme')).toBe('dark');
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        expect(host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')?.getAttribute('aria-label')).toBe('Theme: Dark');
+
+        const originalSetItem = Storage.prototype.setItem;
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+            if (key === 'codemastery.theme') throw new DOMException('Storage is unavailable.', 'QuotaExceededError');
+            return originalSetItem.call(this, key, value);
+        });
+        const light = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.trim().startsWith('Light'))!;
+        await act(async () => light.click());
+        expect(host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')?.getAttribute('aria-label')).toBe('Theme: Light');
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        expect(localStorage.getItem('codemastery.theme')).toBe('dark');
+    });
+
+    it('follows global theme changes until locally overridden without writing the preference', async () => {
+        localStorage.setItem('codemastery.theme', 'light');
+        const writePreference = vi.spyOn(Storage.prototype, 'setItem');
+        await mount();
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'dark' })));
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+
+        const navToggle = host.querySelector<HTMLButtonElement>('button[aria-label="Toggle navigation"]')!;
+        await act(async () => navToggle.click());
+        const light = [...document.querySelectorAll<HTMLElement>('[role="radio"]')].find((item) => item.textContent?.includes('Light'))!;
+        await act(async () => light.click());
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        expect(document.querySelector('.MuiDrawer-modal')).not.toBeNull();
+        expect(localStorage.getItem('codemastery.theme')).toBe('light');
+        expect(writePreference).not.toHaveBeenCalled();
+
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'dark' })));
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        expect(fetcher).not.toHaveBeenCalled();
+        await act(async () => root.unmount());
+        root = createRoot(host);
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+    });
+
+    it('tracks operating-system theme changes while System is selected without storing the derived scheme', async () => {
+        let matches = false;
+        const listeners = new Set<(event: MediaQueryListEvent) => void>();
+        const mediaQuery = {
+            get matches() { return matches; },
+            media: '(prefers-color-scheme: dark)',
+            onchange: null,
+            addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+            removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+            addListener: (listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+            removeListener: (listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+            dispatchEvent: () => true,
+        };
+        const staticQuery = (media: string) => ({
+            matches: false, media, onchange: null, addEventListener: () => undefined, removeEventListener: () => undefined,
+            addListener: () => undefined, removeListener: () => undefined, dispatchEvent: () => true,
+        });
+        vi.stubGlobal('matchMedia', (media: string) => media === '(prefers-color-scheme: dark)' ? mediaQuery : staticQuery(media));
+        await mount();
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        await act(async () => {
+            matches = true;
+            listeners.forEach((listener) => listener({ matches, media: mediaQuery.media } as MediaQueryListEvent));
+        });
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        expect(localStorage.getItem('codemastery.theme')).toBeNull();
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
     it('lists every workspace on the index and never calls the network or writes storage', async () => {
         await mount();
         expect(h1()).toBe('CodeMastery design preview');
         // Status pills: Live mint, Preview sky, Proposed dashed (lilac stays reserved for adaptive guidance).
         const pill = (text: string) => [...host.querySelectorAll<HTMLElement>('span')].find((node) => node.textContent === text && node.querySelector('span') !== null)!;
-        expect(getComputedStyle(pill('Proposed')).borderStyle).toBe('dashed');
-        expect(getComputedStyle(pill('Proposed')).backgroundColor).toBe('rgb(255, 255, 255)');
+        expect(pill('Proposed').dataset.tone).toBe('dashed');
         for (const group of ['Live screens', 'Learner', 'Instructor', 'Administrator', 'Public and account']) expect(host.textContent).toContain(group);
         for (const spec of ['S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S17', 'S18', 'S21', 'S22', 'S23', 'S24', 'S25', 'S26']) expect(host.textContent).toContain(spec);
         expect(fetcher).not.toHaveBeenCalled(); expect(localStorage.length + sessionStorage.length).toBe(0);

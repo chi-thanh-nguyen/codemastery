@@ -11,7 +11,7 @@ import type { GuidanceEntryData } from '../../../shared/components/GuidanceStack
 import { CourseOutline, LessonProgressPill, MarkerTag } from '../components/CourseOutline';
 import { LessonContent, MaterialList } from '../components/LessonContent';
 import type { LessonBlock, LessonMaterialView, LessonProgressState, OutlineChapterView, SkillTagView, LessonAdaptiveMarker } from '../types/learningTypes';
-import { color, control, presentationTokens, radius, shadow } from '../../../app/theme/theme';
+import { control, presentationTokens, radius, shadow, roles } from '../../../app/theme/theme';
 
 export interface PrerequisiteWarningView { skillName: string; reviewLessonTitle?: string; onReview?: () => void }
 export interface LessonPageProps {
@@ -66,7 +66,7 @@ export function LessonPage({ courseTitle, chapterTitle, lesson, chapters, onOpen
                     meta={<><Typography variant="body2" sx={{ color: 'text.secondary' }}>{courseTitle} · {chapterTitle} · Lesson {lesson.position}</Typography>
                         <LessonProgressPill progress={lesson.progress} />{lesson.markers?.map((marker) => <MarkerTag key={marker} marker={marker} />)}</>}
                     actions={!wide && <Button variant="outlined" onClick={() => setOutlineOpen(true)} startIcon={<PresentationIcon name="list" />}>Course outline</Button>} />
-                {remedialReason && <Alert severity="info" icon={<PresentationIcon name="route" />} sx={{ mb: 3, bgcolor: color.lilac100, '& .MuiAlert-icon': { color: color.lilac700 } }}>
+                {remedialReason && <Alert severity="info" icon={<PresentationIcon name="route" />} sx={{ mb: 3, bgcolor: roles.tone.lilac.tint, '& .MuiAlert-icon': { color: roles.tone.lilac.strong } }}>
                     <strong>Recommended review.</strong> {remedialReason}
                 </Alert>}
                 {prerequisiteWarning && <Alert severity="warning" sx={{ mb: 3 }} action={prerequisiteWarning.onReview && prerequisiteWarning.reviewLessonTitle
@@ -75,21 +75,21 @@ export function LessonPage({ courseTitle, chapterTitle, lesson, chapters, onOpen
                 </Alert>}
                 <LessonContent blocks={lesson.blocks} />
                 {lesson.video && <Box component="figure" sx={{ m: 0, my: 4 }}>
-                    <Box sx={{ aspectRatio: '16 / 9', bgcolor: color.ink950, borderRadius: `${radius.md}px`, display: 'grid', placeItems: 'center', color: color.surface, textAlign: 'center', p: 3 }}>
+                    <Box sx={{ aspectRatio: '16 / 9', bgcolor: roles.bg.frame, borderRadius: `${radius.md}px`, display: 'grid', placeItems: 'center', color: roles.text.onChrome, textAlign: 'center', p: 3 }}>
                         <Box><PresentationIcon name="video" sx={{ fontSize: 32, mb: 1 }} /><Typography>External video embed</Typography>
-                            <Typography variant="caption" sx={{ color: color.chromeMuted }}>Videos play from the instructor's external link. CodeMastery doesn't host video.</Typography></Box>
+                            <Typography variant="caption" sx={{ color: roles.chrome.muted }}>Videos play from the instructor's external link. CodeMastery doesn't host video.</Typography></Box>
                     </Box>
                     <Typography component="figcaption" variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
-                        {lesson.video.title} · <Box component="a" href={lesson.video.url} target="_blank" rel="noreferrer noopener" sx={{ color: color.brand600 }}>Open video in a new tab</Box>
+                        {lesson.video.title} · <Box component="a" href={lesson.video.url} target="_blank" rel="noreferrer noopener" sx={{ color: roles.accent.link }}>Open video in a new tab</Box>
                     </Typography>
                 </Box>}
                 {discussion && <Box sx={{ mt: 6 }}>{discussion}</Box>}
-                <Box role="region" aria-label="Lesson actions" sx={{ position: 'sticky', bottom: { xs: 8, sm: 16 }, zIndex: 5, mt: 6, maxWidth: 720, bgcolor: color.surface, borderRadius: `${radius.pill}px`,
+                <Box role="region" aria-label="Lesson actions" sx={{ position: 'sticky', bottom: { xs: 8, sm: 16 }, zIndex: 5, mt: 6, maxWidth: 720, bgcolor: roles.bg.surface, borderRadius: `${radius.pill}px`,
             boxShadow: shadow.raised, p: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
             <IconButton aria-label="Previous lesson" onClick={onPrevious} disabled={!onPrevious} sx={control.secondary}><PresentationIcon name="arrow-left" /></IconButton>
             <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-                {completion === 'error' && <Typography role="alert" variant="body2" sx={{ color: color.rose700, display: { xs: 'none', sm: 'block' } }}>Couldn't save. Try again.</Typography>}
-                {done ? <Typography role="status" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}><PresentationIcon name="check-circle" sx={{ color: color.mint700 }} />{lesson.progress === 'completed' ? 'Lesson completed' : 'Counted as complete'}</Typography>
+                {completion === 'error' && <Typography role="alert" variant="body2" sx={{ color: roles.tone.rose.strong, display: { xs: 'none', sm: 'block' } }}>Couldn't save. Try again.</Typography>}
+                {done ? <Typography role="status" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}><PresentationIcon name="check-circle" sx={{ color: roles.tone.mint.strong }} />{lesson.progress === 'completed' ? 'Lesson completed' : 'Counted as complete'}</Typography>
                     : <Button variant="contained" onClick={onMarkComplete} disabled={completion === 'saving'} aria-busy={completion === 'saving' || undefined}>{completion === 'saving' ? 'Saving…' : completion === 'error' ? 'Try again' : 'Mark as complete'}</Button>}
             </Box>
             {onNext ? <Button variant={done ? 'contained' : 'outlined'} onClick={onNext} endIcon={<PresentationIcon name="arrow-right" />} sx={{ display: { xs: 'none', sm: 'inline-flex' } }}>Next lesson</Button> : null}
@@ -98,7 +98,7 @@ export function LessonPage({ courseTitle, chapterTitle, lesson, chapters, onOpen
             </Box>
         </Box>
         <Drawer anchor="left" open={outlineOpen && !wide} onClose={() => setOutlineOpen(false)}
-            slotProps={{ paper: { sx: { bgcolor: color.canvas100, color: color.ink900, width: 'min(340px, calc(100vw - 48px))', p: 2.5, borderRadius: '0 24px 24px 0' } } }}>
+            slotProps={{ paper: { sx: { bgcolor: roles.bg.canvas, color: roles.text.primary, width: 'min(340px, calc(100vw - 48px))', p: 2.5, borderRadius: '0 24px 24px 0' } } }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h4" component="p">Course outline</Typography>
                 <IconButton aria-label="Close course outline" onClick={() => setOutlineOpen(false)}><PresentationIcon name="close" /></IconButton>

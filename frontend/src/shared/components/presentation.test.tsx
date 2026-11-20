@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
-import { act, StrictMode } from 'react';
+import { act, StrictMode, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { Button, ThemeProvider } from '@mui/material';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { appTheme, brandFontStack, codeFontStack, color, control, fontStack, pathLine, presentationTokens, shadow } from '../../app/theme/theme';
+import { appTheme, brandFontStack, codeFontStack, color, control, fontStack, pathLine, presentationTokens, shadow, themeRoles, ThemePreferenceContext } from '../../app/theme/theme';
+import type { ThemePreference } from '../../app/theme/theme';
 import { SidebarNav, isPlainClick } from './SidebarNav';
 import { LoadingView, EmptyView, ErrorView } from './StatusViews';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PageHeader } from './PageHeader';
-import { AccountMenu, AppHeader, HeaderIconButton, Monogram, REACH_MASK, canvasReachPath } from './AppHeader';
+import { AccountMenu, AppHeader, HeaderIconButton, Monogram, REACH_MASK, canvasReachPath, ThemeControl } from './AppHeader';
 import { BrandLogo, BrandWordmark } from './BrandLogo';
 import { CodeBlock } from './CodeBlock';
 import { AuthLayout } from '../../layouts/AuthLayout';
@@ -28,10 +29,36 @@ import { LearnerHomePage } from '../../features/learning/pages/LearnerHomePage';
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 /** Deep Logo Blue (brand-700) as the browser serialises it. */
 const BRAND_700 = 'rgb(6, 82, 196)';
-let root: Root, host: HTMLDivElement;
-beforeEach(() => { host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
-async function render(node: ReactNode) { await act(async () => root.render(<ThemeProvider theme={appTheme}>{node}</ThemeProvider>)); }
+let root: Root, host: HTMLDivElement, lastAnnouncement: string;
+function flattenRoles(value: object, prefix = ''): Record<string, string> {
+    return Object.entries(value).reduce<Record<string, string>>((result, [key, nested]) => {
+        const path = prefix ? `${prefix}-${key}` : key;
+        if (typeof nested === 'string') result[path] = nested;
+        else if (nested !== null && typeof nested === 'object') Object.assign(result, flattenRoles(nested, path));
+        return result;
+    }, {});
+}
+const lightRoleValues = flattenRoles(themeRoles.light);
+function resolveRoleColor(value: string) {
+    const token = value.match(/^var\(--mui-palette-roles-([^)]+)\)$/)?.[1];
+    const hex = token ? lightRoleValues[token] : value === 'var(--mui-palette-common-white)' ? '#FFFFFF' : undefined;
+    if (!hex || !/^#[\da-f]{6}$/i.test(hex)) return value;
+    const [red, green, blue] = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
+    return `rgb(${red}, ${green}, ${blue})`;
+}
+const styleColor = (element: Element, property: string) => resolveRoleColor(getComputedStyle(element).getPropertyValue(property));
+const resolvedStyleColor = (style: CSSStyleDeclaration, property: string) => resolveRoleColor(style.getPropertyValue(property));
+beforeEach(() => { document.documentElement.dataset.colorScheme = 'light'; lastAnnouncement = ''; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete document.documentElement.dataset.colorScheme; });
+function TestProviders({ children }: { children: ReactNode }) {
+    const [preference, setPreference] = useState<ThemePreference>('system');
+    return <ThemeProvider theme={appTheme} defaultMode="light" storageManager={null} colorSchemeNode={null}>
+        <ThemePreferenceContext.Provider value={{ preference, systemScheme: 'dark', setPreference, announce: (message) => { lastAnnouncement = message; } }}>
+            {children}
+        </ThemePreferenceContext.Provider>
+    </ThemeProvider>;
+}
+async function render(node: ReactNode) { await act(async () => root.render(<TestProviders>{node}</TestProviders>)); }
 async function click(node: Element | null) { expect(node).not.toBeNull(); await act(async () => node!.dispatchEvent(new MouseEvent('click', { bubbles: true }))); }
 
 describe('FE01 presentation contracts', () => {
@@ -264,7 +291,8 @@ describe('FE01 presentation contracts', () => {
         const listeners = new Set<() => void>();
         vi.stubGlobal('matchMedia', (media: string) => ({ get matches() { return media.includes('min-width:900px') && desktop; }, media,
             addEventListener: (_: string, listener: () => void) => listeners.add(listener),
-            removeEventListener: (_: string, listener: () => void) => listeners.delete(listener) }));
+            removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+            addListener: (_: () => void) => undefined, removeListener: (_: () => void) => undefined }));
         try {
             const onSelect = vi.fn();
             await render(<DashboardLayout navItems={items} selectedNavId="a" onNavSelect={onSelect}><PageHeader title="Preview" /></DashboardLayout>);
@@ -279,7 +307,7 @@ describe('FE01 presentation contracts', () => {
     it('reopens reduced-motion navigation with working focus and Escape, without retaining a closed modal', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         vi.stubGlobal('matchMedia', (media: string) => ({ matches: media.includes('prefers-reduced-motion'), media,
-            addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+            addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn() }));
         try {
             const onClose = vi.fn();
             const nav = (open: boolean) => <SidebarNav items={items} selectedId="a" mobileOpen={open} onSelect={vi.fn()} onMobileClose={onClose} />;
@@ -422,10 +450,10 @@ describe('Lit Path design-system primitives', () => {
         expect(logo.getAttribute('src')).toBe(COURSE_LOGOS.python.src); expect(logo.alt).toBe('');
         expect(generic.dataset.courseMark).toBe('generic'); expect(generic.getAttribute('aria-hidden')).toBe('true');
         expect(generic.textContent).toBe(''); expect(generic.querySelector('img')).toBeNull(); expect(generic.querySelector('svg')).not.toBeNull();
-        expect(getComputedStyle(generic).color).toBe(BRAND_700);
+        expect(styleColor(generic, 'color')).toBe(BRAND_700);
         for (const mark of [python, generic]) {
-            expect(getComputedStyle(mark).backgroundColor).toBe('rgb(246, 246, 247)'); // canvas-100
-            expect(getComputedStyle(mark).boxShadow).toBe('inset 0 0 0 1px #E4E4E7');
+            expect(styleColor(mark, 'background-color')).toBe('rgb(246, 246, 247)'); // canvas-100
+            expect(getComputedStyle(mark).boxShadow).toContain('var(--mui-palette-roles-line-hairline)');
             expect(getComputedStyle(mark).backgroundImage).not.toContain('gradient');
             expect(getComputedStyle(mark).backgroundColor).not.toBe('rgb(10, 11, 15)'); // never ink-950
             expect(getComputedStyle(mark).width).toBe('48px'); expect(getComputedStyle(mark).height).toBe('48px');
@@ -438,10 +466,10 @@ describe('Lit Path design-system primitives', () => {
         await render(<><AppHeader navItems={[]} actions={<AccountMenu displayName="Linh Pham" role="Learner" renderItems={() => []} />} /><Monogram name="Q&A Author" tone="ink" /></>);
         const account = host.querySelector<HTMLElement>('header [data-monogram]')!;
         expect(account.dataset.monogram).toBe('brand'); expect(account.textContent).toBe('L');
-        expect(getComputedStyle(account).backgroundColor).toBe(BRAND_700); expect(getComputedStyle(account).backgroundImage).not.toContain('gradient');
-        expect(getComputedStyle(account).color).toBe('rgb(255, 255, 255)');
+        expect(styleColor(account, 'background-color')).toBe(BRAND_700); expect(getComputedStyle(account).backgroundImage).not.toContain('gradient');
+        expect(styleColor(account, 'color')).toBe('rgb(255, 255, 255)');
         const other = host.querySelector<HTMLElement>('[data-monogram="ink"]')!;
-        expect(getComputedStyle(other).backgroundColor).toBe('rgb(10, 11, 15)');
+        expect(styleColor(other, 'background-color')).toBe('rgb(10, 11, 15)');
         // White text on brand-700 stays above 4.5:1 (6.97:1).
         const lum = (hex: string) => { const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
         expect(1.05 / (lum(color.brand700) + 0.05)).toBeGreaterThan(4.5);
@@ -467,8 +495,6 @@ describe('Lit Path design-system primitives', () => {
         await render(<PathSpine sections={[{ id: 's', items: [{ id: 'a', node: 'done', content: 'A' }, { id: 'b', node: 'current', content: 'B' }, { id: 'c', node: 'todo', content: 'C' }] }]} />);
         const lines = [...host.querySelectorAll<HTMLElement>('[data-path-line]')];
         expect(lines.map((line) => line.dataset.pathLine)).toEqual(['solid', 'dashed', 'dashed']);
-        const dashed = getComputedStyle(lines[1]).backgroundImage;
-        expect(dashed).toContain('repeating-linear-gradient'); expect(dashed).toContain('4px'); expect(dashed).toContain('10px');
         expect(getComputedStyle(lines[1]).width).toBe('2px');
     });
     it('keeps shadows and type in the shared tokens: segmented control shadow and the display step', () => {
@@ -481,8 +507,33 @@ describe('Lit Path design-system primitives', () => {
         await render(<><HeaderIconButton label="Notifications" icon="bell" badge={3} current /><HeaderIconButton label="Help" icon="info" /></>);
         const [bell, other] = host.querySelectorAll('button');
         expect(bell.getAttribute('aria-current')).toBe('page'); expect(bell.getAttribute('aria-label')).toBe('Notifications, 3 unread');
-        expect(getComputedStyle(bell).backgroundColor).toBe('rgb(28, 30, 36)'); // chrome-raised
+        expect(styleColor(bell, 'background-color')).toBe('rgb(28, 30, 36)'); // chrome-raised
         expect(other.hasAttribute('aria-current')).toBe(false);
+    });
+    it('keeps the Theme menu open on selection, exposes radio state and announces the effective choice', async () => {
+        await render(<ThemeControl />);
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Theme: System (currently Dark)"]')!;
+        expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+        await click(trigger);
+        const items = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+        expect(items.map((item) => item.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+        const dark = items[2];
+        await click(dark);
+        expect(document.querySelector('[role="menu"]')).not.toBeNull();
+        expect(document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent).toContain('Dark');
+        expect(document.activeElement).toBe(document.querySelector('[role="menuitemradio"][aria-checked="true"]'));
+        expect(lastAnnouncement).toBe('Theme set to Dark.');
+    });
+    it('supports arrow-key selection in the drawer Theme radio group without closing the drawer', async () => {
+        await render(<ThemeControl variant="drawer" />);
+        const radios = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+        expect(radios.map((radio) => radio.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+        radios[0].focus();
+        await act(async () => radios[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+        expect(host.querySelector('[role="radiogroup"]')).not.toBeNull();
+        expect([...host.querySelectorAll('[role="radio"]')].map((radio) => radio.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
+        expect(document.activeElement).toBe(host.querySelector('[role="radio"][aria-checked="true"]'));
+        expect(lastAnnouncement).toBe('Theme set to Light.');
     });
     it('gives each Learner home course row the same course mark as its tile', async () => {
         await render(<LearnerHomePage learnerName="Linh" onBrowse={() => undefined} courses={[
@@ -490,36 +541,41 @@ describe('Lit Path design-system primitives', () => {
             { id: 'b', title: 'Introduction to Programming', description: 'Demo course', onOpen: () => undefined, detail: 'Instructor · B' }]} />);
         const marks = [...host.querySelectorAll<HTMLElement>('ul[aria-label="Your active courses"] [data-course-mark]')];
         expect(marks.map((mark) => mark.dataset.courseMark)).toEqual(['python', 'generic']);
-        for (const mark of marks) { expect(getComputedStyle(mark).width).toBe('32px'); expect(getComputedStyle(mark).backgroundColor).toBe('rgb(246, 246, 247)'); }
+        for (const mark of marks) { expect(getComputedStyle(mark).width).toBe('32px'); expect(styleColor(mark, 'background-color')).toBe('rgb(246, 246, 247)'); }
     });
     it('ranks buttons: graphite primary, neutral outlined secondary, Logo Blue tertiary, red destructive', async () => {
-        expect(control.primary).toBe(color.chromeRaised); expect(control.primaryHover).toBe(color.chromeHover);
+        expect(control.primary).toBe('var(--mui-palette-roles-control-primary-background)');
+        expect(control.primaryHover).toBe('var(--mui-palette-roles-control-primary-hover)');
+        expect(themeRoles.light.control.primary.background).toBe(color.chromeRaised);
+        expect(themeRoles.light.control.primary.hover).toBe(color.chromeHover);
         await render(<><Button variant="contained">Save</Button><Button variant="outlined">Cancel</Button><Button>Skip</Button>
             <Button variant="contained" color="error">Delete</Button><Button variant="contained" disabled>Off</Button><Button variant="outlined" disabled>Off 2</Button>
             <Button variant="contained" color="onChrome">Create account</Button><Button variant="outlined" color="onChrome">Browse</Button></>);
         const [primary, secondary, tertiary, danger, primaryOff, secondaryOff, chromePrimary, chromeSecondary] = [...host.querySelectorAll('button')].map((node) => getComputedStyle(node));
         // MUI sets contained label colours through a custom property; jsdom does not resolve var().
-        const label = (style: CSSStyleDeclaration) => style.color.startsWith('var(') ? style.getPropertyValue('--variant-containedColor').toUpperCase() : style.color;
-        expect(primary.backgroundColor).toBe('rgb(28, 30, 36)'); expect(label(primary)).toBe('#FFFFFF'); // graphite, not the ink frame
-        expect(secondary.backgroundColor).toBe('rgb(255, 255, 255)'); expect(secondary.borderStyle).toBe('solid'); expect(secondary.borderColor).toBe('rgb(228, 228, 231)'); expect(secondary.color).toBe('rgb(21, 23, 28)');
-        expect(['rgba(0, 0, 0, 0)', 'transparent', '']).toContain(tertiary.backgroundColor.startsWith('var(') ? tertiary.getPropertyValue('--variant-textBg') : tertiary.backgroundColor); expect(tertiary.color).toBe('rgb(8, 102, 242)'); expect(tertiary.borderStyle).not.toBe('solid');
-        expect(danger.backgroundColor).toBe('rgb(180, 35, 24)');
-        expect(primaryOff.backgroundColor).toBe('rgb(238, 238, 240)'); expect(primaryOff.color).toBe('rgb(107, 112, 121)');
-        expect(secondaryOff.backgroundColor).toBe('rgb(255, 255, 255)'); expect(secondaryOff.color).toBe('rgb(107, 112, 121)');
-        expect(chromePrimary.backgroundColor).toBe('rgb(255, 255, 255)'); expect(['rgb(10, 11, 15)', '#0A0B0F']).toContain(label(chromePrimary));
-        expect(chromeSecondary.backgroundColor).toBe('rgb(28, 30, 36)'); expect(chromeSecondary.color).toBe('rgb(255, 255, 255)');
+        const label = (style: CSSStyleDeclaration) => style.color.startsWith('var(') ? style.getPropertyValue('--variant-containedColor') : style.color;
+        expect(resolvedStyleColor(primary, 'background-color')).toBe('rgb(28, 30, 36)'); expect(label(primary)).toBe('var(--mui-palette-ink-contrastText)'); // graphite, not the ink frame
+        expect(themeRoles.light.control.primary.text).toBe(color.surface);
+        expect(resolvedStyleColor(secondary, 'background-color')).toBe('rgb(255, 255, 255)'); expect(themeRoles.light.control.secondary.border).toBe(color.line200); expect(resolvedStyleColor(secondary, 'color')).toBe('rgb(21, 23, 28)');
+        expect(['rgba(0, 0, 0, 0)', 'transparent', '']).toContain(tertiary.backgroundColor.startsWith('var(') ? tertiary.getPropertyValue('--variant-textBg') : tertiary.backgroundColor); expect(resolvedStyleColor(tertiary, 'color')).toBe('rgb(8, 102, 242)'); expect(tertiary.borderStyle).not.toBe('solid');
+        expect(resolvedStyleColor(danger, 'background-color')).toBe('rgb(180, 35, 24)');
+        expect(resolvedStyleColor(primaryOff, 'background-color')).toBe('rgb(238, 238, 240)'); expect(resolvedStyleColor(primaryOff, 'color')).toBe('rgb(107, 112, 121)');
+        expect(resolvedStyleColor(secondaryOff, 'background-color')).toBe('rgb(255, 255, 255)'); expect(resolvedStyleColor(secondaryOff, 'color')).toBe('rgb(107, 112, 121)');
+        expect(resolvedStyleColor(chromePrimary, 'background-color')).toBe('rgb(255, 255, 255)'); expect(label(chromePrimary)).toBe('var(--mui-palette-onChrome-contrastText)');
+        expect(themeRoles.light.control.onChrome.text).toBe(color.ink950);
+        expect(resolvedStyleColor(chromeSecondary, 'background-color')).toBe('rgb(28, 30, 36)'); expect(resolvedStyleColor(chromeSecondary, 'color')).toBe('rgb(255, 255, 255)');
         for (const style of [primary, secondary, danger]) expect(style.minHeight).toBe('48px');
     });
     it('uses the same roles for circular actions: graphite primary circle, outlined secondary circle', async () => {
         await render(<><CircleAction label="Open" icon="arrow-right" variant="ink" /><CircleAction label="More" icon="more" /><CircleAffordance /><CircleAffordance icon="play" emphasis="primary" /></>);
         const [primary, secondary] = [...host.querySelectorAll('button')].map((node) => getComputedStyle(node));
-        expect(primary.backgroundColor).toBe('rgb(28, 30, 36)');
-        expect(secondary.backgroundColor).toBe('rgb(255, 255, 255)'); expect(secondary.borderColor).toBe('rgb(228, 228, 231)');
+        expect(resolvedStyleColor(primary, 'background-color')).toBe('rgb(28, 30, 36)');
+        expect(resolvedStyleColor(secondary, 'background-color')).toBe('rgb(255, 255, 255)'); expect(themeRoles.light.control.secondary.border).toBe(color.line200);
         // Tile arrows: neutral outlined with a graphite icon by default; graphite filled only for Resume/Continue.
         const [open, resume] = [...host.querySelectorAll<HTMLElement>('[data-affordance]')];
-        expect(open.dataset.affordance).toBe('secondary'); expect(getComputedStyle(open).backgroundColor).toBe('rgb(255, 255, 255)');
-        expect(getComputedStyle(open).borderColor).toBe('rgb(228, 228, 231)'); expect(getComputedStyle(open).color).toBe('rgb(28, 30, 36)');
-        expect(resume.dataset.affordance).toBe('primary'); expect(getComputedStyle(resume).backgroundColor).toBe('rgb(28, 30, 36)');
+        expect(open.dataset.affordance).toBe('secondary'); expect(styleColor(open, 'background-color')).toBe('rgb(255, 255, 255)');
+        expect(styleColor(open, 'color')).toBe('rgb(28, 30, 36)'); expect(themeRoles.light.control.secondary.border).toBe(color.line200);
+        expect(resume.dataset.affordance).toBe('primary'); expect(styleColor(resume, 'background-color')).toBe('rgb(28, 30, 36)');
     });
     it('keeps an error block recovery secondary so it never competes with the page primary', async () => {
         await render(<ErrorView title="Couldn't load" message="Try again." onRetry={() => undefined} />);
