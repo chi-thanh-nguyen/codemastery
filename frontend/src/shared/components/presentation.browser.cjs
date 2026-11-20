@@ -207,7 +207,7 @@ async function main() {
         if (dist) fs.rmSync(dist, { recursive: true, force: true });
         if (report) fs.writeFileSync(path.join(out, 'browser-report.json'), JSON.stringify(report, null, 2));
     }
-    for (const result of report.engines) console.log(`${result.engine} ${result.version ?? ''}: ${result.passed.length} passed, ${result.failed.length} failed${result.launchError ? ` (launch: ${result.launchError})` : ''}`);
+    for (const result of report.engines) console.log(`${result.engine} ${result.version ?? ''}: ${result.passed.length} passed, ${result.failed.length} failed, ${result.notExercised?.length ?? 0} scenario(s) not exercised${result.launchError ? ` (launch: ${result.launchError})` : ''}`);
     console.log(`Evidence: ${out}`);
     if (failed > 0 || report.engines.some((r) => r.launchError)) process.exitCode = 1;
 }
@@ -221,7 +221,7 @@ const FRAME = 'rgb(10, 11, 15)';
  * special modes (print, increased contrast, forced colours). Screenshots of each shell in both schemes
  * are written next to the report.
  */
-async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }) {
+async function themeChecks({ engine, check, notExercised, newPage, ready, overflow, url, dir }) {
     const scheme = (page) => page.evaluate(() => document.documentElement.dataset.colorScheme);
     const mainBg = (page) => page.evaluate(() => getComputedStyle(document.querySelector('main')).backgroundColor);
     const themeButton = (page) => page.locator('button[aria-label^="Theme:"]:visible');
@@ -234,8 +234,9 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
 
     // First paint: the stored preference and the OS setting resolve before the application bundle runs.
     {
-        const failures = [];
-        for (const [stored, os, expected] of [['light', 'dark', 'light'], ['dark', 'light', 'dark'], ['system', 'dark', 'dark'], ['system', 'light', 'light'], [null, 'dark', 'dark'], ['sepia', 'dark', 'dark'], [null, 'no-preference', 'light']]) {
+        const failures = [], rows = [['light', 'dark', 'light'], ['dark', 'light', 'dark'], ['system', 'dark', 'dark'], ['system', 'light', 'light'], [null, 'dark', 'dark'], ['sepia', 'dark', 'dark'], [null, 'no-preference', 'light']];
+        let exercised = 0;
+        for (const [stored, os, expected] of rows) {
             const { context, page } = await newPage({ colorScheme: os });
             await context.addInitScript(() => {
                 // The root element may not exist yet when init scripts run, so observe the document.
@@ -244,12 +245,17 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
                     .observe(document, { attributes: true, subtree: true, attributeFilter: ['data-color-scheme'] });
             });
             await page.goto(url('/courses')); await ready(page);
-            // Playwright's WebKit does not emulate "no preference": it reports the host appearance instead, so on a
-            // host in dark mode this row cannot be exercised there. It is reported, not counted as a pass or a failure.
+            // Playwright's WebKit does not emulate "no preference": it reports the host appearance instead (verified on
+            // WebKit 26.6 with a macOS host in Dark), so on such a host this row cannot be exercised there. That known
+            // limitation is recorded as not exercised, never as a pass. Any other engine reporting dark here is an
+            // unexpected emulation failure (of the browser, not of the application) and fails the check.
             if (os === 'no-preference' && await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)) {
-                console.log(`NOTE [${engine}] first paint: "no-preference" is not emulated on this host (prefers-color-scheme: dark reported); row ${stored ?? 'missing'}+os:${os} not exercised`);
+                const row = `${stored ?? 'missing'}+os:${os}`;
+                if (engine === 'webkit') notExercised(`first paint row ${row}`, 'browser emulation limitation: WebKit reports the host appearance (prefers-color-scheme: dark) instead of "no-preference"');
+                else failures.push(`${row}: emulation failure, not an application result: ${engine} reported prefers-color-scheme: dark under "no-preference"`);
                 await context.close(); continue;
             }
+            exercised++;
             await page.evaluate((value) => { if (value === null) localStorage.removeItem('codemastery.theme'); else localStorage.setItem('codemastery.theme', value); }, stored);
             let release; const gate = new Promise((done) => { release = done; });
             await page.route(/\/assets\/index-[^/]+\.js$/, async (route) => { await gate; await route.continue(); });
@@ -271,7 +277,8 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
             if (stored === 'sepia' && await page.evaluate(() => localStorage.getItem('codemastery.theme')) !== 'sepia') failures.push('invalid value was rewritten without a choice');
             await context.close();
         }
-        await check('first paint: the stored preference (System by default, invalid → System) and the OS setting set data-color-scheme and color-scheme before the bundle, on the frame colour, and the scheme never flips', async () => assert.deepEqual(failures, []));
+        // The name states how many rows ran, so a row recorded as not exercised is never read as covered by this pass.
+        await check(`first paint (${exercised} of ${rows.length} rows exercised): the stored preference (System by default, invalid → System) and the OS setting set data-color-scheme and color-scheme before the bundle, on the frame colour, and the scheme never flips`, async () => assert.deepEqual(failures, []));
     }
 
     // Live operating-system changes, Light/Dark ignoring them, announcements and keyboard use.
@@ -477,6 +484,23 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
             assert.equal(await button.evaluate((node) => node === document.activeElement), true); assert.equal(await tips(), 0, 'Escape left a tooltip');
             await page.keyboard.press('Tab'); await settle(); assert.equal(await tips(), 0);
             await page.keyboard.press('Shift+Tab'); await settle(); assert.equal(await tips(), 1, 'returning by keyboard shows it again');
+            // AUD-02/F-01 and F-03: the pointer rests on the button through a close by Escape and then moves over the
+            // glyph (stale hover: nothing); Tab away and Shift+Tab back without moving it: keyboard focus shows the
+            // tooltip at once (no 400 ms hover delay), even though the pointer still rests on the button.
+            const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+            await away(); await page.mouse.move(centre.x, centre.y); await settle();
+            await button.click(); await menu.waitFor(); await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' });
+            for (const [dx, dy] of [[-6, 5], [6, -5], [0, 0]]) await page.mouse.move(centre.x + dx, centre.y + dy, { steps: 3 });
+            await settle(); assert.equal(await tips(), 0, 'stale hover after Escape reopened the tooltip');
+            await page.keyboard.press('Tab'); await settle(); await page.keyboard.press('Shift+Tab');
+            await page.waitForFunction(() => [...document.querySelectorAll('.MuiTooltip-popper')].some((node) => node.textContent === 'Theme' && node.getClientRects().length), null, { timeout: 250 })
+                .catch(() => { throw new Error('keyboard refocus under a resting pointer did not show the tooltip within 250 ms (AUD-02/F-01, F-03)'); });
+            assert.equal(await button.evaluate((node) => node === document.activeElement), true);
+            // Cold keyboard focus (no tooltip shown in the last second) also shows it without the hover delay.
+            await page.keyboard.press('Tab'); await away(); await page.waitForTimeout(1000); await page.keyboard.press('Shift+Tab');
+            await page.waitForFunction(() => [...document.querySelectorAll('.MuiTooltip-popper')].some((node) => node.textContent === 'Theme' && node.getClientRects().length), null, { timeout: 250 })
+                .catch(() => { throw new Error('cold keyboard focus did not show the tooltip within 250 ms (F-03)'); });
+            await page.keyboard.press('Tab'); await settle();
             // Repeated cycles, then a route change: nothing stays behind.
             for (let round = 0; round < 4; round++) { await button.click(); await menu.waitFor(); await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' }); }
             await away(); await page.getByRole('link', { name: 'My courses' }).first().click(); await ready(page); await settle();
@@ -682,7 +706,9 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
 }
 
 async function runEngine(playwright, engine, baseUrl) {
-    const result = { engine, version: null, passed: [], failed: [], screens: [] };
+    // notExercised: scenarios that did not run (for example a verified browser-emulation limitation). They are neither
+    // passes nor failures and are listed separately in the summary and the JSON report.
+    const result = { engine, version: null, passed: [], failed: [], notExercised: [], screens: [] };
     const dir = path.join(out, engine); fs.mkdirSync(dir, { recursive: true });
     let browser;
     try { browser = await playwright[engine].launch({ headless: true }); }
@@ -693,6 +719,7 @@ async function runEngine(playwright, engine, baseUrl) {
         try { await fn(); result.passed.push(name); console.log(`PASS [${engine}] ${name}`); }
         catch (error) { result.failed.push({ name, error: String(error.message || error).slice(0, 1500) }); console.log(`FAIL [${engine}] ${name}\n  ${String(error.message || error).split('\n')[0]}`); }
     };
+    const notExercised = (scenario, reason) => { result.notExercised.push({ scenario, reason }); console.log(`NOT EXERCISED [${engine}] ${scenario}: ${reason}`); };
     const errors = [], unexpectedConsole = [];
     async function newPage(options = {}) {
         const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US', timezoneId: 'UTC', ...options });
@@ -914,7 +941,7 @@ async function runEngine(playwright, engine, baseUrl) {
         }
 
         // ── FE34 colour schemes and the Theme control (DESIGN r12 › Themes) ──
-        await themeChecks({ engine, check, newPage, ready, overflow, url, dir });
+        await themeChecks({ engine, check, notExercised, newPage, ready, overflow, url, dir });
 
         // ── Keyboard: skip link, focus visibility, focus order ──────────────
         {
