@@ -113,10 +113,49 @@ describe('isolated design preview', () => {
 
         await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'dark' })));
         expect(document.documentElement.dataset.colorScheme).toBe('light');
+        expect(host.textContent).not.toContain('Theme set to'); // another tab's change is not announced here
+
+        // "Reset sample data" keeps the preview-local scheme.
+        await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+        const drawerReset = [...document.querySelectorAll<HTMLElement>('button, a, [role="menuitem"]')].find((node) => node.textContent?.trim() === 'Reset sample data');
+        if (!drawerReset) {
+            await act(async () => host.querySelector<HTMLElement>('button[aria-label^="Account menu"]')!.click());
+            await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((node) => node.textContent?.trim() === 'Reset sample data')!.click());
+        } else await act(async () => drawerReset.click());
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
         expect(fetcher).not.toHaveBeenCalled();
+        expect(writePreference).not.toHaveBeenCalled();
+        expect(sessionStorage.length).toBe(0);
+
+        // Leaving /preview in the same document drops the override: the shared preference (dark, from the other tab) applies.
+        await act(async () => { window.history.pushState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); });
+        expect(host.querySelector('[data-preview-screen]')).toBeNull();
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        expect(host.querySelector('button[aria-label^="Theme:"]')?.getAttribute('aria-label')).toBe('Theme: Dark');
+
+        // A reload discards any preview selection and starts from the stored preference.
+        writePreference.mockRestore();
         await act(async () => root.unmount());
         root = createRoot(host);
-        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        await mount();
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Toggle navigation"]')!.click());
+        expect(document.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Light');
+    });
+
+    it('follows other tabs in production shells: a new value applies, a cleared or invalid value means System', async () => {
+        await mountGlobalShell();
+        const label = () => host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')?.getAttribute('aria-label');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'dark' })));
+        expect(label()).toBe('Theme: Dark'); expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated.key', newValue: 'x' })));
+        expect(label()).toBe('Theme: Dark');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'sepia' })));
+        expect(label()).toBe('Theme: System (currently Light)'); expect(document.documentElement.dataset.colorScheme).toBe('light');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'light' })));
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: null, newValue: null })));
+        expect(label()).toBe('Theme: System (currently Light)');
+        expect(host.textContent).not.toContain('Theme set to'); // only a choice in this tab is announced
     });
 
     it('tracks operating-system theme changes while System is selected without storing the derived scheme', async () => {

@@ -11,11 +11,14 @@ import codeVietnamese from './jetbrains-mono-vietnamese-wght.woff2';
 import brandLatin from './poppins-latin-800.woff2';
 
 /**
- * "The Lit Path" design tokens — DESIGN.md revision DESIGN-2026-11-19-r12.
- * Values are normative in the DESIGN.md frontmatter; this file is their single
+ * "The Lit Path" design tokens — DESIGN.md revision DESIGN-2026-11-19-r12 (FE34: light and dark
+ * colour schemes). Values are normative in the DESIGN.md frontmatter; this file is their single
  * frontend source. Visual reference studied (not copied): "E-learning Platform —
  * Learning Plan Dashboard" by Bogdan Nikitin for Nixtio (Dribbble shot 23956256).
  * No logo, artwork, avatar, copy or screen composition from it is reused.
+ *
+ * `color` and `darkColor` are the raw palettes, read only inside this file (and by tests). Themed
+ * components consume `roles` (CSS variables of the active scheme), never raw values (Role-Not-Value Rule).
  */
 export const color = {
     ink950: '#0A0B0F', ink900: '#15171C', ink700: '#3A3E46', ink600: '#50545C', ink500: '#6B7079', ink400: '#80858E',
@@ -46,15 +49,15 @@ const roleVar = (path: string) => `var(--mui-palette-roles-${path.replace(/\./g,
 export const roles = {
     bg: {
         frame: roleVar('bg.frame'), canvas: roleVar('bg.canvas'), surface: roleVar('bg.surface'), fill: roleVar('bg.fill'),
-        raised: roleVar('bg.raised'), hover: roleVar('bg.hover'), field: roleVar('bg.field'), fieldDisabled: roleVar('bg.fieldDisabled'),
-        selected: roleVar('bg.selected'), inverse: roleVar('bg.inverse'), code: roleVar('bg.code'),
+        raised: roleVar('bg.raised'), hover: roleVar('bg.hover'), rowHover: roleVar('bg.rowHover'), field: roleVar('bg.field'), fieldDisabled: roleVar('bg.fieldDisabled'),
+        selected: roleVar('bg.selected'), inverse: roleVar('bg.inverse'), code: roleVar('bg.code'), courseMark: roleVar('bg.courseMark'),
     },
     text: {
         primary: roleVar('text.primary'), strongSecondary: roleVar('text.strongSecondary'), secondary: roleVar('text.secondary'),
         tertiary: roleVar('text.tertiary'), disabled: roleVar('text.disabled'), onChrome: roleVar('text.onChrome'),
-        onChromeMuted: roleVar('text.onChromeMuted'), inverse: roleVar('text.inverse'), code: roleVar('text.code'),
+        onChromeMuted: roleVar('text.onChromeMuted'), inverse: roleVar('text.inverse'), code: roleVar('text.code'), onStrong: roleVar('text.onStrong'),
     },
-    line: { hairline: roleVar('line.hairline'), strong: roleVar('line.strong'), code: roleVar('line.code') },
+    line: { hairline: roleVar('line.hairline'), strong: roleVar('line.strong'), code: roleVar('line.code'), floating: roleVar('line.floating') },
     accent: {
         link: roleVar('accent.link'), linkHover: roleVar('accent.linkHover'), linkOnTint: roleVar('accent.linkOnTint'),
         path: roleVar('accent.path'), progress: roleVar('accent.progress'), caret: roleVar('accent.caret'),
@@ -79,19 +82,34 @@ export const roles = {
         mastered: roleVar('data.mastered'), learning: roleVar('data.learning'), weak: roleVar('data.weak'), unknown: roleVar('data.unknown'),
     },
     chrome: { raised: roleVar('chrome.raised'), hover: roleVar('chrome.hover'), muted: roleVar('chrome.muted') },
-    brand: { identity: roleVar('brand.identity'), courseMark: roleVar('brand.courseMark') },
+    brand: { identity: roleVar('brand.identity'), courseMark: roleVar('brand.courseMark'), badge: roleVar('brand.badge') },
     selection: { background: roleVar('selection.background'), text: roleVar('selection.text') },
     skeleton: { base: roleVar('skeleton.base'), highlight: roleVar('skeleton.highlight') },
     scrim: roleVar('scrim'),
 } as const;
 
+/**
+ * Theme preference (DESIGN.md › Themes). The preference is what the person chose; the effective
+ * scheme is what renders. One preference state lives above the router (`App.tsx`) and feeds every
+ * Theme control through this context. It is a device setting: never sent to the backend and
+ * independent of the session.
+ */
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ThemeScheme = 'light' | 'dark';
+/** The only browser-storage key this feature uses (DESIGN.md › Persistence and precedence). */
+export const THEME_STORAGE_KEY = 'codemastery.theme';
 export interface ThemePreferenceContextValue {
+    /** The preference the Theme controls in this subtree show and change. */
     preference: ThemePreference;
+    /** What `prefers-color-scheme` reports now (`light` when it cannot be queried). */
     systemScheme: ThemeScheme;
     setPreference: (preference: ThemePreference) => void;
-    announce: (message: string) => void;
+    /**
+     * The `/preview` document's memory-only override (S26). `null` follows the stored preference.
+     * Only the preview sets it; it never writes storage and is gone on reload.
+     */
+    previewPreference: ThemePreference | null;
+    setPreviewPreference: (preference: ThemePreference | null) => void;
 }
 
 export const ThemePreferenceContext = createContext<ThemePreferenceContextValue | null>(null);
@@ -102,12 +120,57 @@ export function useThemePreference() {
     return context;
 }
 
-export const isThemePreference = (value: string | null): value is ThemePreference =>
+export const isThemePreference = (value: unknown): value is ThemePreference =>
     value === 'system' || value === 'light' || value === 'dark';
 
 export const resolveThemeScheme = (preference: ThemePreference, systemScheme: ThemeScheme): ThemeScheme =>
     preference === 'system' ? systemScheme : preference;
 
+/** Missing, empty, unknown or unreadable values mean System; an invalid value is left in place. */
+export function readStoredThemePreference(): ThemePreference {
+    try {
+        const value = globalThis.localStorage?.getItem(THEME_STORAGE_KEY);
+        return isThemePreference(value) ? value : 'system';
+    } catch {
+        return 'system';
+    }
+}
+
+/** Writes the choice; storage that throws keeps the choice in memory only, with no error shown. */
+export function writeStoredThemePreference(preference: ThemePreference) {
+    try {
+        globalThis.localStorage?.setItem(THEME_STORAGE_KEY, preference);
+    } catch {
+        // Private modes, blocked storage or a full quota: the in-memory choice stays active.
+    }
+}
+
+const SYSTEM_DARK_QUERY = '(prefers-color-scheme: dark)';
+/** `matchMedia` or `prefers-color-scheme` unsupported → light. */
+export function systemDarkQuery(): MediaQueryList | undefined {
+    try {
+        return typeof globalThis.matchMedia === 'function' ? globalThis.matchMedia(SYSTEM_DARK_QUERY) : undefined;
+    } catch {
+        return undefined;
+    }
+}
+export const readSystemScheme = (): ThemeScheme => (systemDarkQuery()?.matches ? 'dark' : 'light');
+
+const themeLabel = (value: ThemePreference | ThemeScheme) => `${value[0].toUpperCase()}${value.slice(1)}`;
+/** Accessible name of the Theme button: "Theme: System (currently Dark)", "Theme: Light", "Theme: Dark". */
+export const themeButtonLabel = (preference: ThemePreference, systemScheme: ThemeScheme) =>
+    `Theme: ${themeLabel(preference)}${preference === 'system' ? ` (currently ${themeLabel(systemScheme)})` : ''}`;
+/** The single polite announcement after a change: "Theme set to Dark." / "Theme set to System (Dark)." */
+export const themeAnnouncement = (preference: ThemePreference, systemScheme: ThemeScheme) =>
+    `Theme set to ${themeLabel(preference)}${preference === 'system' ? ` (${themeLabel(systemScheme)})` : ''}.`;
+/** The System item's caption: "Matches your device (Dark now)". */
+export const themeSystemCaption = (systemScheme: ThemeScheme) => `Matches your device (${themeLabel(systemScheme)} now)`;
+
+/**
+ * Applies the effective scheme to the root element, the same attribute and `color-scheme` the
+ * first-paint script in `index.html` sets. Colour transitions are suspended for the switch so
+ * nothing animates or fades (DESIGN.md › Rendering, reloads and other tabs).
+ */
 export function applyThemeScheme(scheme: ThemeScheme) {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
@@ -200,9 +263,9 @@ export const focusRing = { outline: `2px solid ${roles.focus.ring}`, outlineOffs
 export const focusRingOnChrome = { outline: `2px solid ${roles.focus.onChrome}`, outlineOffset: 2 } as const;
 
 interface SemanticPalette {
-    bg: Record<'frame' | 'canvas' | 'surface' | 'fill' | 'raised' | 'hover' | 'field' | 'fieldDisabled' | 'selected' | 'inverse' | 'code', string>;
-    text: Record<'primary' | 'strongSecondary' | 'secondary' | 'tertiary' | 'disabled' | 'onChrome' | 'onChromeMuted' | 'inverse' | 'code', string>;
-    line: Record<'hairline' | 'strong' | 'code', string>;
+    bg: Record<'frame' | 'canvas' | 'surface' | 'fill' | 'raised' | 'hover' | 'rowHover' | 'field' | 'fieldDisabled' | 'selected' | 'inverse' | 'code' | 'courseMark', string>;
+    text: Record<'primary' | 'strongSecondary' | 'secondary' | 'tertiary' | 'disabled' | 'onChrome' | 'onChromeMuted' | 'inverse' | 'code' | 'onStrong', string>;
+    line: Record<'hairline' | 'strong' | 'code' | 'floating', string>;
     accent: Record<'link' | 'linkHover' | 'linkOnTint' | 'path' | 'progress' | 'caret', string>;
     focus: Record<'ring' | 'onChrome', string>;
     control: {
@@ -215,7 +278,7 @@ interface SemanticPalette {
     tone: Record<Tone, Record<'tint' | 'soft' | 'strong' | 'text', string>>;
     data: Record<'mastered' | 'learning' | 'weak' | 'unknown', string>;
     chrome: Record<'raised' | 'hover' | 'muted', string>;
-    brand: Record<'identity' | 'courseMark', string>;
+    brand: Record<'identity' | 'courseMark' | 'badge', string>;
     selection: Record<'background' | 'text', string>;
     scrim: string;
     shadow: Record<'hover' | 'raised' | 'control' | 'overlay', string>;
@@ -254,11 +317,12 @@ const paletteFor = (scheme: ThemeScheme) => {
     const dark = scheme === 'dark';
     const tone = dark ? {
         neutral: { tint: darkColor.graphite850, soft: darkColor.graphite800, strong: darkColor.mist200, text: darkColor.mist50 },
-        sky: { tint: darkColor.sky900, soft: darkColor.sky950, strong: darkColor.brand300, text: darkColor.mist50 },
-        mint: { tint: darkColor.mint900, soft: darkColor.mint950, strong: darkColor.mint300, text: darkColor.mist50 },
-        butter: { tint: darkColor.butter900, soft: darkColor.butter950, strong: darkColor.butter300, text: darkColor.mist50 },
-        lilac: { tint: darkColor.lilac900, soft: darkColor.lilac950, strong: darkColor.lilac300, text: darkColor.mist50 },
-        rose: { tint: darkColor.rose900, soft: darkColor.rose950, strong: darkColor.rose300, text: darkColor.mist50 },
+        // `text` is the family's coloured text (light: the strong text step); on dark grounds that is the strong colour.
+        sky: { tint: darkColor.sky900, soft: darkColor.sky950, strong: darkColor.brand300, text: darkColor.brand300 },
+        mint: { tint: darkColor.mint900, soft: darkColor.mint950, strong: darkColor.mint300, text: darkColor.mint300 },
+        butter: { tint: darkColor.butter900, soft: darkColor.butter950, strong: darkColor.butter300, text: darkColor.butter300 },
+        lilac: { tint: darkColor.lilac900, soft: darkColor.lilac950, strong: darkColor.lilac300, text: darkColor.lilac300 },
+        rose: { tint: darkColor.rose900, soft: darkColor.rose950, strong: darkColor.rose300, text: darkColor.rose300 },
     } : {
         neutral: { tint: color.fill150, soft: color.surface, strong: color.ink700, text: color.ink900 },
         sky: { tint: color.sky100, soft: color.sky50, strong: color.brand600, text: color.brand700 },
@@ -275,11 +339,15 @@ const paletteFor = (scheme: ThemeScheme) => {
             fill: dark ? darkColor.graphite850 : color.fill150,
             raised: dark ? darkColor.graphite700 : color.surface,
             hover: dark ? darkColor.graphite750 : color.fill150,
-            field: dark ? darkColor.graphite800 : color.surface,
-            fieldDisabled: dark ? darkColor.graphite850 : color.fill150,
+            // Table and list rows hover on the canvas value in light (DESIGN.md › bg.hover).
+            rowHover: dark ? darkColor.graphite750 : color.canvas100,
+            field: dark ? darkColor.graphite850 : color.surface,
+            fieldDisabled: dark ? darkColor.graphite900 : color.fill150,
             selected: dark ? darkColor.brand900 : color.brand100,
             inverse: dark ? darkColor.mist100 : color.ink950,
             code: dark ? darkColor.graphite980 : color.ink950,
+            // Course-mark container: today's canvas value in light, bg.fill in dark (Dark-scheme surface rules).
+            courseMark: dark ? darkColor.graphite850 : color.canvas100,
         },
         text: {
             primary: dark ? darkColor.mist50 : color.ink900,
@@ -289,13 +357,17 @@ const paletteFor = (scheme: ThemeScheme) => {
             disabled: dark ? darkColor.mist500 : color.ink500,
             onChrome: color.surface,
             onChromeMuted: color.chromeMuted,
-            inverse: dark ? darkColor.graphite900 : color.surface,
+            inverse: dark ? color.ink900 : color.surface,
             code: dark ? darkColor.mist100 : color.fill150,
+            // Glyphs and letters on a strong family or accent fill (check in a completed node, selected option letter).
+            onStrong: dark ? color.ink900 : color.surface,
         },
         line: {
             hairline: dark ? darkColor.graphite600 : color.line200,
             strong: dark ? darkColor.graphite400 : color.ink400,
             code: dark ? darkColor.graphite600 : 'transparent',
+            // Hairline outline of floating surfaces: the documented dark exception to Flat-At-Rest; none in light.
+            floating: dark ? darkColor.graphite600 : 'transparent',
         },
         accent: {
             link: dark ? darkColor.brand300 : color.brand600,
@@ -309,8 +381,8 @@ const paletteFor = (scheme: ThemeScheme) => {
         control: {
             primary: {
                 background: dark ? darkColor.mist50 : color.chromeRaised,
-                hover: dark ? darkColor.mist100 : color.chromeHover,
-                text: dark ? darkColor.graphite900 : color.surface,
+                hover: dark ? color.surface : color.chromeHover,
+                text: dark ? color.ink900 : color.surface,
             },
             secondary: {
                 background: dark ? darkColor.graphite800 : color.surface,
@@ -335,7 +407,8 @@ const paletteFor = (scheme: ThemeScheme) => {
             mastered: color.dataMastered, learning: color.dataLearning, weak: color.dataWeak, unknown: color.dataUnknown,
         },
         chrome: { raised: color.chromeRaised, hover: color.chromeHover, muted: color.chromeMuted },
-        brand: { identity: color.brand700, courseMark: dark ? darkColor.brand300 : color.brand700 },
+        // Identity blue and the notification count sit on the frame, so they are shared by both schemes.
+        brand: { identity: color.brand700, courseMark: dark ? darkColor.brand300 : color.brand700, badge: color.brand600 },
         selection: {
             background: dark ? darkColor.brand800 : color.brand100,
             text: dark ? darkColor.mist50 : color.ink900,
@@ -354,26 +427,27 @@ const paletteFor = (scheme: ThemeScheme) => {
         },
         skeleton: dark ? { base: darkColor.graphite850, highlight: darkColor.graphite750 } : { base: color.fill150, highlight: color.canvas100 },
     };
-    const family = (name: Exclude<Tone, 'neutral'>) => tone[name];
+    // MUI palette families (r12 Theme mapping): `main` = strong, `light` = tint, `dark` = strong text.
+    // Labels on a strong fill stay white in light (unchanged) and take ink-900 on the lighter dark-scheme fills.
+    const family = (name: Exclude<Tone, 'neutral'>) => ({
+        main: tone[name].strong, light: tone[name].tint, dark: tone[name].text, contrastText: roles.text.onStrong,
+    });
     return {
         mode: scheme,
         primary: {
-            main: roles.accent.link, dark: roles.accent.linkHover,
-            light: dark ? darkColor.brand200 : color.brand400, contrastText: dark ? darkColor.graphite900 : color.surface,
+            main: roles.accent.link, dark: roles.accent.linkHover, light: color.brand400, contrastText: roles.text.onStrong,
         },
         ink: {
             main: roles.control.primary.background, dark: roles.control.primary.hover,
             light: dark ? darkColor.mist50 : color.ink700, contrastText: roles.control.primary.text,
         },
         onChrome: { main: color.surface, dark: color.fill150, light: color.surface, contrastText: color.ink950 },
-        secondary: { main: family('lilac').strong, light: family('lilac').tint, dark: family('lilac').strong, contrastText: family('lilac').text },
-        success: { main: family('mint').strong, light: family('mint').tint, dark: family('mint').strong, contrastText: family('mint').text },
-        warning: { main: family('butter').strong, light: family('butter').tint, dark: family('butter').strong, contrastText: family('butter').text },
-        error: {
-            main: dark ? darkColor.rose300 : color.rose700, light: family('rose').tint,
-            dark: family('rose').strong, contrastText: family('rose').text,
-        },
-        info: { main: family('sky').strong, light: family('sky').tint, dark: family('sky').strong, contrastText: family('sky').text },
+        secondary: family('lilac'),
+        success: family('mint'),
+        warning: family('butter'),
+        // Dark `error.main` is rose-300 for text; the destructive fill (rose-500) comes from control.danger.
+        error: family('rose'),
+        info: family('sky'),
         background: { default: roles.bg.canvas, paper: roles.bg.surface },
         text: { primary: roles.text.primary, secondary: roles.text.secondary, disabled: roles.text.disabled },
         divider: roles.line.hairline,
@@ -389,6 +463,13 @@ export const themeRoles = {
     light: paletteFor('light').roles,
     dark: paletteFor('dark').roles,
 };
+
+/** The light scheme's CSS variables as MUI emits them for `:root, [data-color-scheme="light"]`. */
+function lightSchemeVariables(theme: unknown): Record<string, string> {
+    const sheets = (theme as { generateStyleSheets?: () => Array<Record<string, Record<string, string>>> }).generateStyleSheets?.() ?? [];
+    const light = sheets.find((sheet) => Object.keys(sheet).some((selector) => selector.includes('[data-color-scheme="light"]')));
+    return light ? Object.values(light)[0] : {};
+}
 
 export const appTheme = createTheme({
     cssVariables: { colorSchemeSelector: '[data-color-scheme="%s"]' },
@@ -428,10 +509,10 @@ export const appTheme = createTheme({
     },
     components: {
         // An array: emotion keeps only the last value of a repeated '@font-face' key, so each face is its own entry.
-        MuiCssBaseline: { styleOverrides: () => [...fontFaces.map((face) => ({ '@font-face': face })), {
-            // The page scrollbar sits on the ink frame; keep it in the frame's palette where the platform shows one.
-            html: { WebkitTextSizeAdjust: '100%', colorScheme: 'light', scrollbarColor: `${roles.text.secondary} ${roles.bg.frame}` },
-            ':root[data-color-scheme="dark"]': { colorScheme: 'dark', scrollbarColor: `${roles.text.secondary} ${roles.bg.frame}` },
+        MuiCssBaseline: { styleOverrides: (theme) => [...fontFaces.map((face) => ({ '@font-face': face })), {
+            // The page scrollbar sits on the ink frame; it keeps the frame palette in both schemes.
+            html: { WebkitTextSizeAdjust: '100%', colorScheme: 'light', scrollbarColor: `${color.ink600} ${color.ink950}` },
+            ':root[data-color-scheme="dark"]': { colorScheme: 'dark' },
             body: { margin: 0, backgroundColor: roles.bg.frame, color: roles.text.primary, caretColor: roles.accent.caret },
             '::selection': { backgroundColor: roles.selection.background, color: roles.selection.text },
             ':where(:focus-visible)': focusRing,
@@ -444,15 +525,22 @@ export const appTheme = createTheme({
             '.cm-tabular': { fontVariantNumeric: 'tabular-nums lining-nums' },
             '.cm-visually-hidden': { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 },
             '@keyframes cm-shimmer': { from: { backgroundPosition: '100% 0' }, to: { backgroundPosition: '-100% 0' } },
+            // Hairlines take line.strong and tertiary text takes text.secondary, in both schemes (Fallbacks and special modes).
             '@media (prefers-contrast: more)': {
-                ':root': { '--mui-palette-roles-line-hairline': color.ink400, '--mui-palette-roles-text-tertiary': color.ink600 },
-                ':root[data-color-scheme="dark"]': { '--mui-palette-roles-line-hairline': darkColor.graphite400, '--mui-palette-roles-text-tertiary': darkColor.mist200 },
+                ':root[data-color-scheme="light"]': { '--mui-palette-roles-line-hairline': color.ink400, '--mui-palette-divider': color.ink400, '--mui-palette-roles-text-tertiary': color.ink600 },
+                ':root[data-color-scheme="dark"]': { '--mui-palette-roles-line-hairline': darkColor.graphite400, '--mui-palette-divider': darkColor.graphite400, '--mui-palette-roles-text-tertiary': darkColor.mist200 },
             },
+            // System colours stay in charge: tint-drawn boundaries get a real border, focus uses Highlight, glyphs currentColor.
             '@media (forced-colors: active)': {
-                ':where(:focus-visible)': { outlineColor: 'Highlight' },
-                '.MuiAlert-root, .MuiChip-root, [data-tone], [data-mastery-state]': { border: '1px solid CanvasText' },
+                ':where(:focus-visible), .Mui-focusVisible': { outlineColor: 'Highlight !important' },
+                '.MuiAlert-root, .MuiChip-root, .MuiTooltip-tooltip, [data-tone]': { border: '1px solid CanvasText' },
+                '[role="radio"][aria-checked="true"]::before': { border: '2px solid Highlight' },
+                svg: { color: 'currentColor' },
             },
-            '@media print': { html: { colorScheme: 'light' } },
+            // Printed output always uses the light scheme: the light variables win over the dark selector.
+            '@media print': {
+                ':root[data-color-scheme]': { ...lightSchemeVariables(theme), colorScheme: 'light' },
+            },
             '@media (prefers-reduced-motion: reduce)': {
                 '*, *::before, *::after': {
                     animationDuration: '0.01ms !important', animationIterationCount: '1 !important',
@@ -575,7 +663,8 @@ export const appTheme = createTheme({
                         { props: { severity: 'success' }, style: { backgroundColor: tones.mint.tint, '& .MuiAlert-icon': { color: tones.mint.strong } } },
                         { props: { severity: 'warning' }, style: { backgroundColor: tones.butter.tint, '& .MuiAlert-icon': { color: tones.butter.strong } } },
                         { props: { severity: 'error' }, style: { backgroundColor: tones.rose.tint, '& .MuiAlert-icon': { color: tones.rose.strong } } },
-                        { props: { severity: 'info' }, style: { backgroundColor: tones.sky.tint, '& .MuiAlert-icon': { color: tones.sky.strong } } },
+                        // Information glyphs use the sky text step (brand-700 in light, brand-300 in dark), as before.
+                        { props: { severity: 'info' }, style: { backgroundColor: tones.sky.tint, '& .MuiAlert-icon': { color: tones.sky.text } } },
                     ] },
                 icon: { padding: '2px 0', marginRight: 12, opacity: 1 },
                 message: { padding: '2px 0', overflowWrap: 'anywhere' },

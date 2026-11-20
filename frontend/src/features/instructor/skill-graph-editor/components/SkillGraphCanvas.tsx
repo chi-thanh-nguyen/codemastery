@@ -30,7 +30,7 @@ function SkillBox({ data }: NodeProps<Node<Data>>) {
         <Handle type="target" position={Position.Left} isConnectable={false} style={{ opacity: 0 }} />
         <ButtonBase onClick={() => onSelect(skill.id)} aria-pressed={selected} className="nodrag"
             aria-label={`${skill.name}, ${skill.prerequisiteIds.length} prerequisites, ${skill.questionCount} questions`}
-            sx={{ width: W, height: H, borderRadius: `${radius.lg}px`, bgcolor: roles.bg.surface, px: 2, justifyContent: 'flex-start', textAlign: 'left',
+            sx={{ width: W, height: H, borderRadius: `${radius.lg}px`, bgcolor: roles.bg.raised, px: 2, justifyContent: 'flex-start', textAlign: 'left',
                 boxShadow: selected ? `0 0 0 2px ${roles.accent.progress}, ${shadow.raised}` : `inset 0 0 0 1px ${roles.line.hairline}`, '&.Mui-focusVisible': { outline: `2px solid ${roles.focus.ring}`, outlineOffset: 3 } }}>
             <Box sx={{ minWidth: 0 }}>
                 <Typography component="span" sx={{ display: 'block', fontWeight: 600, fontSize: '0.9375rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{skill.name}</Typography>

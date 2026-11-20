@@ -16,7 +16,7 @@ export const notificationMeta: Record<NotificationKind, { label: string; icon: P
 export function NotificationItem({ notification, onOpen }: { notification: NotificationView; onOpen: (id: string) => void }) {
     const meta = notificationMeta[notification.kind];
     return <ButtonBase component="a" href="#" onClick={(event) => { event.preventDefault(); onOpen(notification.id); }}
-        sx={{ width: '100%', display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', gap: 2, px: { xs: 2, sm: 3 }, py: 2, '&:hover': { bgcolor: roles.bg.canvas } }}>
+        sx={{ width: '100%', display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left', gap: 2, px: { xs: 2, sm: 3 }, py: 2, '&:hover': { bgcolor: roles.bg.rowHover } }}>
         <Box aria-hidden sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: tones[meta.tone].tint, color: tones[meta.tone].strong, display: 'grid', placeItems: 'center', flexShrink: 0, '& svg': { fontSize: 20 } }}>
             <PresentationIcon name={meta.icon} />
         </Box>

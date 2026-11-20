@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { Box, ListItemIcon, MenuItem, Snackbar } from '@mui/material';
@@ -16,7 +16,7 @@ import { PublicPreview } from './PublicPreview';
 import * as fx from './fixtures';
 import { PreviewContext, previewHref, usePreviewNav } from './previewKit';
 import type { Workspace } from './previewKit';
-import { applyThemeScheme, resolveThemeScheme, ThemePreferenceContext, useThemePreference } from '../theme/theme';
+import { ThemePreferenceContext, useThemePreference } from '../theme/theme';
 import type { ThemePreference } from '../theme/theme';
 
 interface ScreenDef { id: string; workspace: Workspace; title: string; spec: string; status: 'Live' | 'Preview' | 'Proposed'; note: string; bare?: boolean; nav?: string }
@@ -82,22 +82,16 @@ const PERSONA: Record<Workspace, { name: string; role: string }> = { reference: 
 
 /** Isolated design preview at the approved `/preview` route. It never reads AuthProvider or calls the API. */
 export default function PreviewApp() {
+    // S26: the preview follows the stored preference (and other tabs) until a preview-local choice is made;
+    // that choice lives in memory for this document only, never writes storage and is gone on reload.
     const globalTheme = useThemePreference();
-    const globalScheme = resolveThemeScheme(globalTheme.preference, globalTheme.systemScheme);
-    const globalSchemeRef = useRef(globalScheme);
-    const [previewPreference, setPreviewPreference] = useState<ThemePreference | null>(null);
-    const preference = previewPreference ?? globalTheme.preference;
-    const effectiveScheme = resolveThemeScheme(preference, globalTheme.systemScheme);
-    const setLocalPreference = useCallback((next: ThemePreference) => setPreviewPreference(next), []);
+    const { setPreviewPreference } = globalTheme;
+    useEffect(() => () => setPreviewPreference(null), [setPreviewPreference]);
     const previewTheme = useMemo(() => ({
-        preference,
-        systemScheme: globalTheme.systemScheme,
-        setPreference: setLocalPreference,
-        announce: globalTheme.announce,
-    }), [preference, globalTheme.systemScheme, setLocalPreference, globalTheme.announce]);
-    useLayoutEffect(() => { globalSchemeRef.current = globalScheme; }, [globalScheme]);
-    useLayoutEffect(() => { applyThemeScheme(effectiveScheme); }, [effectiveScheme]);
-    useLayoutEffect(() => () => applyThemeScheme(globalSchemeRef.current), []);
+        ...globalTheme,
+        preference: globalTheme.previewPreference ?? globalTheme.preference,
+        setPreference: (next: ThemePreference) => setPreviewPreference(next),
+    }), [globalTheme, setPreviewPreference]);
     const { screen, item, tab, go } = usePreviewNav();
     const navigate = useNavigate(), location = useLocation();
     const [learner, setLearner] = useState(initialLearnerState), [instructor, setInstructor] = useState(initialInstructorState), [admin, setAdmin] = useState(initialAdminState);

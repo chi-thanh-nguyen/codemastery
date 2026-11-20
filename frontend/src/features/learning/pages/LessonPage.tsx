@@ -84,8 +84,8 @@ export function LessonPage({ courseTitle, chapterTitle, lesson, chapters, onOpen
                     </Typography>
                 </Box>}
                 {discussion && <Box sx={{ mt: 6 }}>{discussion}</Box>}
-                <Box role="region" aria-label="Lesson actions" sx={{ position: 'sticky', bottom: { xs: 8, sm: 16 }, zIndex: 5, mt: 6, maxWidth: 720, bgcolor: roles.bg.surface, borderRadius: `${radius.pill}px`,
-            boxShadow: shadow.raised, p: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box role="region" aria-label="Lesson actions" sx={{ position: 'sticky', bottom: { xs: 8, sm: 16 }, zIndex: 5, mt: 6, maxWidth: 720, bgcolor: roles.bg.raised, borderRadius: `${radius.pill}px`,
+            boxShadow: `${shadow.raised}, inset 0 0 0 1px ${roles.line.floating}`, p: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
             <IconButton aria-label="Previous lesson" onClick={onPrevious} disabled={!onPrevious} sx={control.secondary}><PresentationIcon name="arrow-left" /></IconButton>
             <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
                 {completion === 'error' && <Typography role="alert" variant="body2" sx={{ color: roles.tone.rose.strong, display: { xs: 'none', sm: 'block' } }}>Couldn't save. Try again.</Typography>}

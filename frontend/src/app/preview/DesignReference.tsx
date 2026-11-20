@@ -22,21 +22,16 @@ export interface DirectoryGroup { title: string; description: string; entries: D
 
 // Lilac is reserved for adaptive guidance; a proposal is "not yet", so it takes the dashed outline.
 const statusTone = { Live: 'mint', Preview: 'sky', Proposed: 'dashed' } as const;
-const swatches: { name: string; light: string; dark: string; role: string }[] = [
-    { name: 'Frame', light: themeRoles.light.bg.frame, dark: themeRoles.dark.bg.frame, role: 'Page frame' },
-    { name: 'Canvas', light: themeRoles.light.bg.canvas, dark: themeRoles.dark.bg.canvas, role: 'Working ground' },
-    { name: 'Surface', light: themeRoles.light.bg.surface, dark: themeRoles.dark.bg.surface, role: 'Tiles, tables, forms' },
-    { name: 'Panel fill', light: themeRoles.light.bg.fill, dark: themeRoles.dark.bg.fill, role: 'Aside, secondary controls' },
-    { name: 'Selected surface', light: themeRoles.light.bg.selected, dark: themeRoles.dark.bg.selected, role: 'Selected rows and controls' },
-    { name: 'Primary text', light: themeRoles.light.text.primary, dark: themeRoles.dark.text.primary, role: 'Main reading text' },
-    { name: 'Secondary text', light: themeRoles.light.text.secondary, dark: themeRoles.dark.text.secondary, role: 'Descriptions and metadata' },
-    { name: 'On-chrome text', light: themeRoles.light.text.onChrome, dark: themeRoles.dark.text.onChrome, role: 'Text on the frame' },
-    { name: 'Strong line', light: themeRoles.light.line.strong, dark: themeRoles.dark.line.strong, role: 'Input borders, dashed "not yet"' },
-    { name: 'Link', light: themeRoles.light.accent.link, dark: themeRoles.dark.accent.link, role: 'Links and progress' },
-    { name: 'Link hover', light: themeRoles.light.accent.linkHover, dark: themeRoles.dark.accent.linkHover, role: 'Hovered links' },
-    { name: 'Path', light: themeRoles.light.accent.path, dark: themeRoles.dark.accent.path, role: 'Course path' },
-    { name: 'Focus ring', light: themeRoles.light.focus.ring, dark: themeRoles.dark.focus.ring, role: 'Keyboard focus' },
-];
+/** Every semantic colour role (DESIGN.md › Semantic role tokens) with its light and dark value, read from the theme. */
+function roleLeaves(light: object, dark: object, prefix = ''): { name: string; light: string; dark: string }[] {
+    return Object.entries(light).flatMap(([key, value]) => {
+        const path = prefix ? `${prefix}.${key}` : key, other = (dark as Record<string, unknown>)[key];
+        if (typeof value === 'string') return [{ name: path, light: value, dark: String(other) }];
+        return value && typeof value === 'object' ? roleLeaves(value, other as object, path) : [];
+    });
+}
+// Families and data fills have their own sections below; shadows are not colour tokens.
+const swatches = roleLeaves(themeRoles.light, themeRoles.dark).filter((entry) => !/^(tone|data|shadow)\./.test(entry.name));
 const families = ['sky', 'mint', 'butter', 'lilac', 'rose'] as const;
 const familyPurpose = {
     sky: 'Learning and information', mint: 'Mastered, completed, success', butter: 'Weak, prerequisite gap, deadline',
@@ -62,7 +57,7 @@ export function DesignReference({ groups }: { groups: DirectoryGroup[] }) {
                     <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
                         {group.entries.map((entry) => <Box component="li" key={entry.id} sx={{ borderTop: `1px solid ${roles.line.hairline}` }}>
                             <Box component="a" href={entry.href ?? '#'} onClick={(event) => { if (entry.onOpen) { event.preventDefault(); entry.onOpen(); } }}
-                                sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 3, py: 1.5, color: 'inherit', textDecoration: 'none', minHeight: 56, '&:hover': { bgcolor: roles.bg.canvas } }}>
+                                sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 3, py: 1.5, color: 'inherit', textDecoration: 'none', minHeight: 56, '&:hover': { bgcolor: roles.bg.rowHover } }}>
                                 <Typography component="span" className="cm-tabular" sx={{ width: 34, color: 'text.secondary', fontWeight: 600, fontSize: '0.8125rem' }}>{entry.spec}</Typography>
                                 <Box sx={{ flex: 1, minWidth: 0 }}><Typography component="span" sx={{ display: 'block', fontWeight: 600 }}>{entry.title}</Typography>
                                     <Typography component="span" variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>{entry.note}</Typography></Box>
@@ -75,9 +70,9 @@ export function DesignReference({ groups }: { groups: DirectoryGroup[] }) {
             </Box>
         </Section>
         <Section title="Colour" id="ref-colour">
-            <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>Each swatch shows its exact token value in both schemes, independent of the current preference.</Typography>
+            <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>Each semantic role with its exact value in the light and dark schemes, side by side and independent of the current theme.</Typography>
             <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(4, minmax(0,1fr))' } }}>
-                {swatches.map((swatch) => <PairedSwatch key={swatch.name} {...swatch} />)}
+                {swatches.map((swatch) => <PairedSwatch key={swatch.name} {...swatch} role="Semantic role" />)}
             </Box>
             <Typography variant="h4" component="h3" sx={{ mt: 4, mb: 2 }}>Semantic families</Typography>
             <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(3, minmax(0,1fr))', lg: 'repeat(5, minmax(0,1fr))' } }}>
@@ -89,6 +84,15 @@ export function DesignReference({ groups }: { groups: DirectoryGroup[] }) {
             <Typography variant="h4" component="h3" sx={{ mt: 4, mb: 2 }}>Mastery and reporting data</Typography>
             <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(4, minmax(0,1fr))' } }}>
                 {dataColors.map((entry) => <PairedSwatch key={entry.name} {...entry} role={`${entry.name} mastery state`} />)}
+            </Box>
+            <Typography variant="h4" component="h3" sx={{ mt: 4, mb: 2 }}>Mastery and guidance tags in both schemes</Typography>
+            {/* Each half re-declares one scheme's variables, so the tags render in both schemes at once. */}
+            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: 'minmax(0,1fr)', md: 'repeat(2, minmax(0,1fr))' } }}>
+                {(['light', 'dark'] as const).map((scheme) => <Box key={scheme} data-color-scheme={scheme} sx={{ bgcolor: roles.bg.surface, color: roles.text.primary, borderRadius: `${radius.lg}px`, p: 2.5, display: 'grid', gap: 1.5 }}>
+                    <Typography variant="caption" sx={{ color: roles.text.secondary }}>{scheme === 'light' ? 'Light' : 'Dark'}</Typography>
+                    <MasteryLegend />
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}><RecommendationTag type="continue" /><RecommendationTag type="remedial" /></Box>
+                </Box>)}
             </Box>
         </Section>
         <Section title="Type" id="ref-type">

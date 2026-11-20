@@ -32,7 +32,7 @@ export interface MasteryGraphProps {
 type SkillNodeData = { skill: GraphSkill; selected: boolean; recommended: boolean; updated: boolean; hideStates: boolean; onSelect: (id: string) => void; prerequisiteCount: number };
 
 const stateTone: Record<MasteryState, { bg: string; fg: string; dashed?: boolean }> = {
-    unknown: { bg: roles.bg.surface, fg: roles.text.secondary, dashed: true },
+    unknown: { bg: roles.bg.raised, fg: roles.text.secondary, dashed: true },
     learning: { bg: tones.sky.tint, fg: roles.accent.link },
     mastered: { bg: tones.mint.tint, fg: roles.tone.mint.strong },
     weak: { bg: tones.butter.tint, fg: roles.tone.butter.strong },
@@ -46,7 +46,7 @@ const SkillNode = memo(function SkillNode({ data }: NodeProps<Node<SkillNodeData
     return <>
         <Handle type="target" position={Position.Left} isConnectable={false} style={{ opacity: 0, left: 0 }} />
         <ButtonBase onClick={() => onSelect(skill.id)} aria-pressed={selected} aria-label={name} className="nodrag"
-            sx={{ position: 'relative', width: NODE_WIDTH, height: NODE_HEIGHT, borderRadius: `${radius.lg}px`, bgcolor: roles.bg.surface, justifyContent: 'flex-start', gap: 1.5, px: 1.5, textAlign: 'left',
+            sx={{ position: 'relative', width: NODE_WIDTH, height: NODE_HEIGHT, borderRadius: `${radius.lg}px`, bgcolor: roles.bg.raised, justifyContent: 'flex-start', gap: 1.5, px: 1.5, textAlign: 'left',
                 boxShadow: selected ? `0 0 0 2px ${roles.accent.progress}, ${shadow.raised}` : updated ? `0 0 0 2px ${skill.state === 'mastered' ? roles.tone.mint.strong : roles.tone.butter.strong}` : `inset 0 0 0 1px ${roles.line.hairline}`,
                 transition: 'box-shadow 200ms', '&:hover': { boxShadow: selected ? `0 0 0 2px ${roles.accent.progress}, ${shadow.raised}` : shadow.hover },
                 '&.Mui-focusVisible': { outline: `2px solid ${roles.focus.ring}`, outlineOffset: 3 } }}>
@@ -59,7 +59,7 @@ const SkillNode = memo(function SkillNode({ data }: NodeProps<Node<SkillNodeData
                 </Typography>
             </Box>
             {recommended && <Box aria-hidden sx={{ position: 'absolute', top: -10, right: -10, width: 28, height: 28, borderRadius: '50%', bgcolor: roles.tone.lilac.tint, color: roles.tone.lilac.strong,
-                border: `3px solid ${roles.bg.surface}`, display: 'grid', placeItems: 'center', '& svg': { fontSize: 14 } }}><PresentationIcon name="route" /></Box>}
+                border: `3px solid ${roles.bg.raised}`, display: 'grid', placeItems: 'center', '& svg': { fontSize: 14 } }}><PresentationIcon name="route" /></Box>}
         </ButtonBase>
         <Handle type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0, right: 0 }} />
     </>;

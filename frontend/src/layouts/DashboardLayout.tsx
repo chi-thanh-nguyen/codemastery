@@ -65,7 +65,7 @@ export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerAc
     }, [desktop, mobileOpen]);
     return <Box sx={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', bgcolor: roles.bg.frame }}>
         <Box component="a" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}
-            sx={{ position: 'absolute', left: 16, top: -80, zIndex: 'tooltip', px: 2.5, py: 1.5, borderRadius: `${radius.pill}px`, bgcolor: 'common.white', color: roles.text.primary,
+            sx={{ position: 'absolute', left: 16, top: -80, zIndex: 'tooltip', px: 2.5, py: 1.5, borderRadius: `${radius.pill}px`, bgcolor: roles.control.onChrome.background, color: roles.control.onChrome.text,
                 fontWeight: 600, textDecoration: 'none', '&:focus': { top: 12 } }}>
             Skip to main content
         </Box>

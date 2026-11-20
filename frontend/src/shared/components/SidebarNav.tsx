@@ -52,11 +52,11 @@ export function SidebarNav({ items, selectedId, onSelect, mobileOpen, onMobileCl
                                 '&:hover': { bgcolor: roles.chrome.raised, color: 'common.white' },
                                 '&.Mui-selected, &.Mui-selected:hover': { bgcolor: roles.chrome.raised, color: 'common.white' },
                                 '&.Mui-focusVisible': { bgcolor: roles.chrome.raised, ...focusRingOnChrome, outlineOffset: -2 } }}>
-                            <Box component="span" aria-hidden sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: current ? roles.accent.link : 'transparent', flexShrink: 0 }} />
+                            <Box component="span" aria-hidden sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: current ? roles.brand.badge : 'transparent', flexShrink: 0 }} />
                             {item.icon && <Box component="span" sx={{ display: 'grid', '& svg': { fontSize: 20 } }}>{item.icon}</Box>}
                             <Box component="span" sx={{ flex: 1, fontSize: '1rem', fontWeight: current ? 600 : 500 }}>{item.label}</Box>
                             {item.badge !== undefined && item.badge !== '' && <Box component="span" sx={{ minWidth: 22, px: .75, py: .25, textAlign: 'center',
-                                borderRadius: `${radius.pill}px`, bgcolor: roles.accent.link, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: 1.2 }}>
+                                borderRadius: `${radius.pill}px`, bgcolor: roles.brand.badge, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: 1.2 }}>
                                 {item.badge}
                             </Box>}
                         </ListItemButton>

@@ -56,9 +56,9 @@ function SpineDot({ node, top }: { node: SpineNode; top: number }) {
     const size = node === 'static' ? 10 : node === 'todo' ? 14 : 20;
     const common = { position: 'absolute', left: '50%', top, width: size, height: size, borderRadius: '50%', transform: 'translate(-50%, -50%)', boxSizing: 'border-box',
         display: 'grid', placeItems: 'center', transition: `background-color ${motion.signature}ms ${motion.easeIn}, box-shadow ${motion.signature}ms` } as const;
-    if (node === 'done') return <Box sx={{ ...common, bgcolor: roles.tone.mint.strong, color: roles.text.onChrome }}><PresentationIcon name="check" sx={{ fontSize: 14, strokeWidth: 2.5 }} /></Box>;
-    if (node === 'current') return <Box sx={{ ...common, bgcolor: roles.accent.link, boxShadow: `0 0 0 4px ${roles.accent.progress}` }} />;
+    if (node === 'done') return <Box sx={{ ...common, bgcolor: roles.tone.mint.strong, color: roles.text.onStrong }}><PresentationIcon name="check" sx={{ fontSize: 14, strokeWidth: 2.5 }} /></Box>;
+    if (node === 'current') return <Box sx={{ ...common, bgcolor: roles.accent.link, boxShadow: `0 0 0 4px ${roles.bg.selected}` }} />;
     if (node === 'recommended') return <Box sx={{ ...common, bgcolor: roles.bg.surface, border: `4px solid ${roles.tone.lilac.strong}` }} />;
-    if (node === 'static') return <Box sx={{ ...common, bgcolor: roles.data.unknown }} />;
+    if (node === 'static') return <Box sx={{ ...common, bgcolor: roles.line.strong }} />;
     return <Box sx={{ ...common, bgcolor: roles.bg.surface, border: `2px solid ${roles.line.strong}` }} />;
 }

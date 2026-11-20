@@ -48,7 +48,7 @@ export function CourseOutline({ chapters, view, onOpenLesson, lessonHref = (id) 
                     return <Box component="li" key={lesson.id} sx={{ borderBottom: compact ? 0 : `1px solid ${roles.line.hairline}`, '&:last-child': { borderBottom: 0 } }}>
                         <ButtonBase component="a" href={lessonHref(lesson.id)} aria-current={current ? 'page' : undefined} onClick={(event) => { event.preventDefault(); onOpenLesson(lesson.id); }}
                             sx={{ width: '100%', justifyContent: 'flex-start', gap: 1.5, px: compact ? 1.25 : 2, py: compact ? 1 : 1.5, minHeight: 44, textAlign: 'left', borderRadius: compact ? `${radius.sm}px` : 0,
-                                bgcolor: current ? roles.bg.selected : 'transparent', '&:hover': { bgcolor: current ? roles.bg.selected : compact ? roles.bg.fill : roles.bg.canvas } }}>
+                                bgcolor: current ? roles.bg.selected : 'transparent', '&:hover': { bgcolor: current ? roles.bg.selected : compact ? roles.bg.fill : roles.bg.rowHover } }}>
                             <OutlineDot progress={lesson.progress} current={current || !!lesson.isResume} />
                             <Typography component="span" className="cm-tabular" sx={{ color: 'text.secondary', fontSize: '0.8125rem', fontWeight: 600, minWidth: 20 }}>{lesson.position}</Typography>
                             <Typography component="span" sx={{ flex: 1, minWidth: 0, fontWeight: current ? 600 : 500, fontSize: compact ? '0.9375rem' : '1rem', overflowWrap: 'anywhere' }}>{lesson.title}</Typography>
@@ -72,7 +72,7 @@ export function CourseOutline({ chapters, view, onOpenLesson, lessonHref = (id) 
 function OutlineDot({ progress, current }: { progress: LessonProgressState; current: boolean }) {
     const done = progress !== 'not-started';
     return <Box aria-hidden sx={{ width: 12, height: 12, borderRadius: '50%', flexShrink: 0, bgcolor: done ? roles.tone.mint.strong : current ? roles.accent.link : roles.bg.surface,
-        border: done || current ? 0 : `2px solid ${roles.line.strong}`, boxShadow: current && !done ? `0 0 0 3px ${roles.accent.progress}` : 'none', boxSizing: 'border-box' }} />;
+        border: done || current ? 0 : `2px solid ${roles.line.strong}`, boxShadow: current && !done ? `0 0 0 3px ${roles.bg.selected}` : 'none', boxSizing: 'border-box' }} />;
 }
 
 function LessonTile({ lesson, href, onOpen }: { lesson: OutlineLessonView; href: string; onOpen: () => void }) {

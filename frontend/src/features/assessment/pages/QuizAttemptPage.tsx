@@ -83,12 +83,19 @@ export function QuizAttemptPage({ quizTitle, questions, answers, currentIndex, o
             <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, minHeight: { xs: 64, sm: 72 }, px: { xs: 1.5, sm: 3 }, flexWrap: 'wrap', py: { xs: 1, sm: 0 } }}>
                 <IconButton aria-label="Leave quiz" onClick={() => setDialog('leave')} disabled={locked} sx={{ color: roles.text.onChrome, '&:hover': { bgcolor: roles.chrome.raised } }}><PresentationIcon name="close" /></IconButton>
                 <ThemeControl />
-                <Typography component="p" sx={{ fontWeight: 600, fontSize: '1rem', minWidth: 0, flex: { xs: '1 1 auto', md: '0 1 auto' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quizTitle}</Typography>
+                {/* Below 600 px the bar keeps exit, Theme, timer and Submit; title and counter move into the navigator strip (D10-1). */}
+                <Typography component="p" sx={{ display: { xs: 'none', sm: 'block' }, fontWeight: 600, fontSize: '1rem', minWidth: 0, flex: { sm: '1 1 auto', md: '0 1 auto' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quizTitle}</Typography>
                 <Typography component="p" className="cm-tabular" sx={{ color: roles.chrome.muted, flex: 1, textAlign: 'center', display: { xs: 'none', md: 'block' } }}>Question {currentIndex + 1} of {questions.length}</Typography>
-                <QuizTimer remainingSeconds={remainingSeconds} totalSeconds={totalSeconds} />
+                <Box sx={{ display: 'contents', '& > *': { ml: { xs: 'auto', sm: 0 } } }}><QuizTimer remainingSeconds={remainingSeconds} totalSeconds={totalSeconds} /></Box>
                 <Button variant="contained" color="onChrome" size="small" onClick={() => setDialog('submit')} disabled={locked}>Submit quiz</Button>
             </Box>
-            <Box sx={{ display: { md: 'none' }, px: 1.5, pb: 1.5, bgcolor: roles.bg.canvas, borderRadius: `${radius.lg}px ${radius.lg}px 0 0`, pt: 1.5, color: roles.text.primary }}>{navigator}</Box>
+            <Box sx={{ display: { md: 'none' }, px: 1.5, pb: 1.5, bgcolor: roles.bg.canvas, borderRadius: `${radius.lg}px ${radius.lg}px 0 0`, pt: 1.5, color: roles.text.primary }}>
+                <Box sx={{ display: { xs: 'flex', sm: 'none' }, alignItems: 'baseline', gap: 1, px: .5, pb: 1, minWidth: 0 }}>
+                    <Typography component="p" sx={{ fontWeight: 600, fontSize: '1rem', minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quizTitle}</Typography>
+                    <Typography component="p" variant="body2" className="cm-tabular" sx={{ color: 'text.secondary', flexShrink: 0 }}>Question {currentIndex + 1} of {questions.length}</Typography>
+                </Box>
+                {navigator}
+            </Box>
         </Box>
         <Box component="main" id="main-content" tabIndex={-1} sx={{ flex: 1, bgcolor: roles.bg.canvas, mx: { md: 1 }, mb: { md: 1 }, borderRadius: { md: `${radius.xl}px` }, display: 'grid',
             gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'minmax(0, 1fr) 300px' } }}>

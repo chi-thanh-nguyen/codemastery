@@ -33,7 +33,7 @@ export function ContractNote({ children }: { children: ReactNode }) {
     // In Google Sans Flex the "0" that defines 1ch is wider than an average glyph: 54ch measured
     // 68–77 characters per line on the preview notes (6 November 2026 typography change).
     return <Box role="note" sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mb: 3 }}>
-        <PresentationIcon name="info" sx={{ fontSize: 18, color: roles.accent.linkHover, mt: .25, flexShrink: 0 }} />
+        <PresentationIcon name="info" sx={{ fontSize: 18, color: roles.accent.linkOnTint, mt: .25, flexShrink: 0 }} />
         <Typography variant="body2" sx={{ color: roles.text.strongSecondary, maxWidth: '54ch' }}>{children}</Typography>
     </Box>;
 }

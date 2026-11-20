@@ -7,7 +7,7 @@ import { codeFontStack, radius, roles } from '../../app/theme/theme';
 export function CodeBlock({ code, caption }: { code: string; caption?: string }) {
     const [copied, setCopied] = useState(false);
     return <Box component="figure" sx={{ m: 0, my: 3 }}>
-        <Box sx={{ position: 'relative', bgcolor: roles.bg.code, borderRadius: `${radius.sm}px`, color: roles.text.code }}>
+        <Box sx={{ position: 'relative', bgcolor: roles.bg.code, borderRadius: `${radius.sm}px`, color: roles.text.code, boxShadow: `inset 0 0 0 1px ${roles.line.code}` }}>
             <Box component="pre" tabIndex={0} aria-label={caption ? `Code: ${caption}` : 'Code sample'} sx={{ m: 0, p: 2.5, pr: 7, overflowX: 'auto', fontFamily: codeFontStack, fontSize: '0.9375rem', lineHeight: 1.6,
                 '&:focus-visible': { outline: `2px solid ${roles.focus.onChrome}`, outlineOffset: 2 } }}><code>{code}</code></Box>
             <Tooltip title={copied ? 'Copied' : 'Copy code'}>

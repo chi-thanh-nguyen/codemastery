@@ -27,7 +27,7 @@ const onChrome = { '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible
  */
 export function LandingPage({ exampleMap }: LandingPageProps) {
     return <Box sx={{ bgcolor: roles.bg.frame, minHeight: '100dvh', ...onChrome }}>
-        <Box component="a" href="#main-content" sx={{ position: 'absolute', left: 16, top: -64, zIndex: 10, px: 2, py: 1.25, borderRadius: `${radius.sm}px`, bgcolor: roles.bg.surface, color: roles.text.primary, fontWeight: 600,
+        <Box component="a" href="#main-content" sx={{ position: 'absolute', left: 16, top: -64, zIndex: 10, px: 2, py: 1.25, borderRadius: `${radius.sm}px`, bgcolor: roles.control.onChrome.background, color: roles.control.onChrome.text, fontWeight: 600,
             '&:focus': { top: 12 } }}>Skip to main content</Box>
         <Box component="header" sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, px: { xs: 2, sm: 4 }, height: { xs: 64, sm: 80 }, maxWidth: 1440, mx: 'auto' }}>
             <BrandWordmark size={presentationTokens.brandMark} />

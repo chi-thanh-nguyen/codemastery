@@ -1,9 +1,12 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { BrowserRouter } from 'react-router';
 import { ThemeProvider, CssBaseline, Box } from '@mui/material';
 import { AuthProvider } from './providers/AuthProvider';
 import { AppRouter } from '../routes/index';
-import { appTheme, applyThemeScheme, isThemePreference, resolveThemeScheme, roles, ThemePreferenceContext } from './theme/theme';
+import {
+    appTheme, applyThemeScheme, isThemePreference, readStoredThemePreference, readSystemScheme, resolveThemeScheme, roles,
+    systemDarkQuery, THEME_STORAGE_KEY, ThemePreferenceContext, writeStoredThemePreference,
+} from './theme/theme';
 import type { ThemePreference, ThemeScheme } from './theme/theme';
 import { LoadingView } from '../shared/components/StatusViews';
 
@@ -17,76 +20,52 @@ function PreviewFallback() {
 
 /** The isolated design preview sends no request (CT14), so a document opened there restores no session. */
 const openedAtPreview = () => /^\/preview(\/|$)/.test(globalThis.location?.pathname ?? '');
-const THEME_STORAGE_KEY = 'codemastery.theme';
-const systemScheme = (): ThemeScheme => {
-    try {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    } catch {
-        return 'light';
-    }
-};
-const storedPreference = (): ThemePreference => {
-    try {
-        const value = window.localStorage.getItem(THEME_STORAGE_KEY);
-        return isThemePreference(value) ? value : 'system';
-    } catch {
-        return 'system';
-    }
-};
 
-export default function App() {
-    const [preference, setPreferenceState] = useState(storedPreference);
-    const [deviceScheme, setDeviceScheme] = useState(systemScheme);
-    const [announcement, setAnnouncement] = useState('');
+/**
+ * The device-scoped theme preference (FE34, DESIGN.md › Themes). It lives above the router and the
+ * session, so signing in or out, a session ending elsewhere or another account never changes it, and
+ * it involves no request. `index.html` applied the same effective scheme before the first paint.
+ */
+function useThemePreferenceState() {
+    const [preference, setStoredPreference] = useState<ThemePreference>(readStoredThemePreference);
+    const [systemScheme, setSystemScheme] = useState<ThemeScheme>(readSystemScheme);
+    // The /preview document's memory-only override; null follows the stored preference.
+    const [previewPreference, setPreviewPreference] = useState<ThemePreference | null>(null);
     const setPreference = useCallback((next: ThemePreference) => {
-        applyThemeScheme(resolveThemeScheme(next, deviceScheme));
-        setPreferenceState(next);
-        try {
-            window.localStorage.setItem(THEME_STORAGE_KEY, next);
-        } catch {
-            // The selection remains active in memory when browser storage is unavailable.
-        }
-    }, [deviceScheme]);
-    const announce = useCallback((message: string) => setAnnouncement(message), []);
-    const themeContext = useMemo(() => ({ preference, systemScheme: deviceScheme, setPreference, announce }),
-        [preference, deviceScheme, setPreference, announce]);
-
+        setStoredPreference(next);
+        writeStoredThemePreference(next);
+    }, []);
+    const effectiveScheme = resolveThemeScheme(previewPreference ?? preference, systemScheme);
+    // Before paint, so a selection applies immediately without navigation, reload or remount.
+    useLayoutEffect(() => { applyThemeScheme(effectiveScheme); }, [effectiveScheme]);
     useEffect(() => {
-        applyThemeScheme(resolveThemeScheme(preference, deviceScheme));
-    }, [preference, deviceScheme]);
-
-    useEffect(() => {
-        let query: MediaQueryList | undefined;
-        try {
-            query = window.matchMedia('(prefers-color-scheme: dark)');
-        } catch {
-            query = undefined;
-        }
-        const onSystemChange = (event: MediaQueryListEvent) => setDeviceScheme(event.matches ? 'dark' : 'light');
+        // System follows the operating system live; Light and Dark simply ignore the value.
+        const query = systemDarkQuery();
+        const onSystemChange = (event: MediaQueryListEvent) => setSystemScheme(event.matches ? 'dark' : 'light');
         if (query?.addEventListener) query.addEventListener('change', onSystemChange);
         else query?.addListener?.(onSystemChange);
+        // Another tab's choice applies here; a cleared or invalid value means System.
         const onStorage = (event: StorageEvent) => {
             if (event.key !== THEME_STORAGE_KEY && event.key !== null) return;
-            setPreferenceState(isThemePreference(event.newValue) ? event.newValue : 'system');
+            setStoredPreference(isThemePreference(event.newValue) ? event.newValue : 'system');
         };
-        const onBeforePrint = () => applyThemeScheme('light');
-        const onAfterPrint = () => applyThemeScheme(resolveThemeScheme(preference, deviceScheme));
         window.addEventListener('storage', onStorage);
-        window.addEventListener('beforeprint', onBeforePrint);
-        window.addEventListener('afterprint', onAfterPrint);
         return () => {
             if (query?.removeEventListener) query.removeEventListener('change', onSystemChange);
             else query?.removeListener?.(onSystemChange);
             window.removeEventListener('storage', onStorage);
-            window.removeEventListener('beforeprint', onBeforePrint);
-            window.removeEventListener('afterprint', onAfterPrint);
         };
-    }, [preference, deviceScheme]);
+    }, []);
+    return useMemo(() => ({ preference, systemScheme, setPreference, previewPreference, setPreviewPreference }),
+        [preference, systemScheme, setPreference, previewPreference]);
+}
 
-    return <ThemePreferenceContext.Provider value={themeContext}>
+export default function App() {
+    const theme = useThemePreferenceState();
+    return <ThemePreferenceContext.Provider value={theme}>
+        {/* MUI's built-in colour schemes; the preference above owns the root `data-color-scheme` and storage. */}
         <ThemeProvider theme={appTheme} defaultMode="light" storageManager={null} colorSchemeNode={null}>
             <CssBaseline />
-            <Box role="status" aria-live="polite" aria-atomic="true" className="cm-visually-hidden">{announcement}</Box>
             <BrowserRouter><AuthProvider refreshSessions restoreOnLoad={!openedAtPreview()}>
                 <AppRouter preview={<Suspense fallback={<PreviewFallback />}><PreviewApp /></Suspense>} />
             </AuthProvider></BrowserRouter>

@@ -76,7 +76,7 @@ export function CourseMark({ title, description, size = 48 }: CourseMarkProps) {
     // One neutral container for every course: canvas ground, inset hairline, rounded.md at the 48 px
     // tile size (scaled with the mark so smaller marks keep the same squircle).
     const container = { position: 'relative', width: size, height: size, flexShrink: 0, overflow: 'hidden',
-        borderRadius: `${Math.round((radius.md * size) / 48)}px`, bgcolor: roles.bg.canvas, boxShadow: `inset 0 0 0 1px ${roles.line.hairline}` } as const;
+        borderRadius: `${Math.round((radius.md * size) / 48)}px`, bgcolor: roles.bg.courseMark, boxShadow: `inset 0 0 0 1px ${roles.line.hairline}` } as const;
     if (!logo) {
         // No letters: one Deep Logo Blue code glyph, the same for every such course.
         return <Box aria-hidden data-course-mark="generic" sx={{ ...container, display: 'grid', placeItems: 'center', color: roles.brand.courseMark }}>

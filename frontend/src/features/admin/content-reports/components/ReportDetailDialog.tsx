@@ -6,13 +6,13 @@ import { FactList } from '../../../../shared/components/Tile';
 import { ConfirmDialog } from '../../../../shared/components/ConfirmDialog';
 import { reportStatus } from './ReportTable';
 import type { ReportRow } from '../types/contentReportTypes';
-import { radius, roles } from '../../../../app/theme/theme';
+import { radius, roles, shadow } from '../../../../app/theme/theme';
 
 /** Side sheet with the reported content and the two decisions: hide (resolves) or dismiss (US-16). */
 export function ReportDetailDialog({ report, onClose, onHide, onDismiss }: { report: ReportRow | null; onClose: () => void; onHide: (id: string) => void; onDismiss: (id: string) => void }) {
     const full = useMediaQuery(useTheme().breakpoints.down('md'));
     const [confirm, setConfirm] = useState<'hide' | 'dismiss' | null>(null);
-    return <Drawer anchor="right" open={!!report} onClose={onClose} slotProps={{ paper: { 'aria-labelledby': 'report-sheet-title', sx: { width: full ? '100%' : 480, bgcolor: roles.bg.surface, color: roles.text.primary, borderRadius: full ? 0 : `${radius.lg}px 0 0 ${radius.lg}px`, p: 3 } } as object }}>
+    return <Drawer anchor="right" open={!!report} onClose={onClose} slotProps={{ paper: { 'aria-labelledby': 'report-sheet-title', sx: { width: full ? '100%' : 480, bgcolor: roles.bg.raised, color: roles.text.primary, boxShadow: `${shadow.overlay}, inset 0 0 0 1px ${roles.line.floating}`, borderRadius: full ? 0 : `${radius.lg}px 0 0 ${radius.lg}px`, p: 3 } } as object }}>
         {report && <Box sx={{ display: 'grid', gap: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
                 <Box><Typography variant="caption" sx={{ color: 'text.secondary' }}>Report on a {report.targetType.toLowerCase()}</Typography><Typography id="report-sheet-title" variant="h3" component="h2">{report.targetLabel}</Typography></Box>

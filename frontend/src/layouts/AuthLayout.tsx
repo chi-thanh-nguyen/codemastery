@@ -33,7 +33,8 @@ export function AuthLayout({ title = 'CodeMastery', subtitle = 'Mastery-based pr
                     borderRadius: `${radius.sm}px`, '&:focus-visible': { outline: `2px solid ${roles.focus.onChrome}`, outlineOffset: 4 } }}>
                     <BrandWordmark size={40} textSize="1.5rem" />
                 </Box>
-                <ThemeControl />
+                {/* The 44 px button overhangs the 40 px lockup row by 2 px each side, so the panel layout does not move. */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: .5, my: '-2px' }}><ThemeControl /></Box>
             </Box>
             <Box sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', flex: 1, justifyContent: 'center', gap: 5, maxWidth: 440 }}>
                 <Typography component="p" sx={{ fontSize: '2.5rem', fontWeight: 600, lineHeight: 1.1, letterSpacing: '-0.025em', textWrap: 'balance' }}>
@@ -62,7 +63,7 @@ function BrandPath() {
     return <Box component="svg" aria-hidden viewBox="0 0 320 120" sx={{ width: '100%', maxWidth: 320, height: 'auto', display: 'block' }}>
         <path d="M24 92 H120 Q148 92 160 64 Q172 36 200 36 H296" fill="none" stroke={roles.accent.path} strokeWidth="2" strokeDasharray={pathLine.dasharray} strokeLinecap="round" />
         <circle cx="24" cy="92" r="12" fill={roles.tone.mint.strong} />
-        <path d="m18 92 4.5 4.5L31 88" fill="none" stroke={roles.text.onChrome} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="m18 92 4.5 4.5L31 88" fill="none" stroke={roles.text.onStrong} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
         <circle cx="160" cy="64" r="14" fill={roles.accent.link} />
         <circle cx="160" cy="64" r="20" fill="none" stroke={roles.accent.progress} strokeOpacity=".35" strokeWidth="4" />
         <circle cx="296" cy="36" r="11" fill="none" stroke={roles.chrome.muted} strokeWidth="2" />

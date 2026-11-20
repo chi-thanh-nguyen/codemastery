@@ -73,7 +73,7 @@ export function LearnerHomePage({ learnerName, subtitle = 'Pick up where you lef
                 : courses.length === 0 ? <EmptyView icon="catalogue" headingLevel="h3" title="You haven't joined a course yet" message="Browse the catalogue to find one." /> :
                 <Box component="ul" aria-label="Your active courses" sx={{ listStyle: 'none', m: 0, p: 0, bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
                     {courses.map((course) => <Box component="li" key={course.id} sx={{ position: 'relative', p: { xs: 2.5, sm: 3 }, borderBottom: `1px solid ${roles.line.hairline}`, '&:last-child': { borderBottom: 0 },
-                        display: 'grid', columnGap: 2, rowGap: 1.5, alignItems: 'center', '&:hover': { bgcolor: roles.bg.canvas },
+                        display: 'grid', columnGap: 2, rowGap: 1.5, alignItems: 'center', '&:hover': { bgcolor: roles.bg.rowHover },
                         gridTemplateColumns: { xs: '32px minmax(0, 1fr)', md: course.progress ? '32px minmax(0, 1.2fr) minmax(0, 1fr) auto' : '32px minmax(0, 1.2fr) minmax(0, 1fr)' },
                         // Below 900 px the secondary cells sit under the title, aligned with it.
                         '& > :nth-child(n+3)': { gridColumn: { xs: '2', md: 'auto' } } }}>
@@ -86,8 +86,8 @@ export function LearnerHomePage({ learnerName, subtitle = 'Pick up where you lef
                     </Box>)}
                 </Box>}
             <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', columnGap: 3, rowGap: 1 }}>
-                {moreCourses && <Box component="a" href={moreCourses.href} onClick={(event) => { if (!isPlainClick(event)) return; event.preventDefault(); moreCourses.onOpen(); }} sx={{ color: roles.accent.linkHover, fontWeight: 600 }}>{moreCourses.label}</Box>}
-                <Box component="a" href="/courses" onClick={(event) => { if (!isPlainClick(event)) return; event.preventDefault(); onBrowse(); }} sx={{ color: roles.accent.linkHover, fontWeight: 600 }}>Browse the catalogue</Box>
+                {moreCourses && <Box component="a" href={moreCourses.href} onClick={(event) => { if (!isPlainClick(event)) return; event.preventDefault(); moreCourses.onOpen(); }} sx={{ color: roles.accent.linkOnTint, fontWeight: 600 }}>{moreCourses.label}</Box>}
+                <Box component="a" href="/courses" onClick={(event) => { if (!isPlainClick(event)) return; event.preventDefault(); onBrowse(); }} sx={{ color: roles.accent.linkOnTint, fontWeight: 600 }}>Browse the catalogue</Box>
             </Box>
         </Box>
     </Page>;

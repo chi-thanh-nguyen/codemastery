@@ -13,7 +13,7 @@ export function LessonQaPage({ lessons, selectedId, onSelect, discussion }: Less
             <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
                 {lessons.map((lesson) => <Box component="li" key={lesson.id}>
                     <ButtonBase onClick={() => onSelect(lesson.id)} aria-current={lesson.id === selectedId ? 'page' : undefined}
-                        sx={{ width: '100%', justifyContent: 'space-between', gap: 1, textAlign: 'left', px: 1.5, py: 1.25, minHeight: 48, borderRadius: `${radius.md}px`, bgcolor: lesson.id === selectedId ? roles.bg.selected : 'transparent', '&:hover': { bgcolor: lesson.id === selectedId ? roles.bg.selected : roles.bg.canvas } }}>
+                        sx={{ width: '100%', justifyContent: 'space-between', gap: 1, textAlign: 'left', px: 1.5, py: 1.25, minHeight: 48, borderRadius: `${radius.md}px`, bgcolor: lesson.id === selectedId ? roles.bg.selected : 'transparent', '&:hover': { bgcolor: lesson.id === selectedId ? roles.bg.selected : roles.bg.rowHover } }}>
                         <Typography sx={{ fontWeight: lesson.id === selectedId ? 600 : 500, minWidth: 0 }}>{lesson.title}</Typography>
                         {lesson.open > 0 ? <StatusPill size="tag" tone="sky">{lesson.open} open</StatusPill> : <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>{lesson.total} total</Typography>}
                     </ButtonBase>

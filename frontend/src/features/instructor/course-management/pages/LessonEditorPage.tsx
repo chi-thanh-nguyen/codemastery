@@ -66,7 +66,7 @@ export function LessonEditorPage({ courseTitle, initial, skills, onSave, onLeave
                     <SegmentedControl label="Lesson visibility" value={draft.publication} onChange={(publication) => set({ publication })} options={[{ value: 'hidden', label: 'Hidden', icon: 'eye-off' }, { value: 'published', label: 'Published', icon: 'eye' }]} /></Box>
             </Tile>
             {Object.keys(errors).length > 0 && <Alert severity="error">Fix the highlighted fields, then save again.</Alert>}
-            <Box role="region" aria-label="Save lesson" sx={{ position: 'sticky', bottom: 16, zIndex: 5, bgcolor: roles.bg.surface, borderRadius: `${radius.pill}px`, boxShadow: shadow.raised, p: 1, pl: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box role="region" aria-label="Save lesson" sx={{ position: 'sticky', bottom: 16, zIndex: 5, bgcolor: roles.bg.raised, borderRadius: `${radius.pill}px`, boxShadow: `${shadow.raised}, inset 0 0 0 1px ${roles.line.floating}`, p: 1, pl: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Typography role="status" sx={{ flex: 1, color: dirty ? roles.tone.butter.strong : 'text.secondary', fontWeight: 600 }}>{dirty ? 'Unsaved changes' : status ?? 'All changes saved'}</Typography>
                 <Button type="submit" variant="contained" disabled={!dirty}>Save changes</Button>
             </Box>

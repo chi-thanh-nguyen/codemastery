@@ -15,7 +15,7 @@ export function LessonContent({ blocks }: { blocks: LessonBlock[] }) {
             if (block.kind === 'list') return <Box key={index} component="ul" sx={{ pl: 3, mb: 2.5, '& li': { mb: 1 } }}>{block.items.map((item) => <Typography key={item} component="li" variant="reading">{item}</Typography>)}</Box>;
             if (block.kind === 'code') return <CodeBlock key={index} code={block.code} caption={block.caption} />;
             if (block.kind === 'note') return <Box key={index} sx={{ bgcolor: roles.tone.sky.tint, borderRadius: `${radius.md}px`, p: 2, mb: 2.5, display: 'flex', gap: 1.5 }}>
-                <PresentationIcon name="info" sx={{ color: roles.accent.linkHover, fontSize: 20, mt: .25 }} /><Typography variant="reading" component="p" sx={{ m: '0 !important' }}>{block.text}</Typography>
+                <PresentationIcon name="info" sx={{ color: roles.accent.linkOnTint, fontSize: 20, mt: .25 }} /><Typography variant="reading" component="p" sx={{ m: '0 !important' }}>{block.text}</Typography>
             </Box>;
             return <Typography key={index} component="p" variant="reading">{block.text}</Typography>;
         })}
@@ -29,7 +29,7 @@ export function MaterialList({ materials, onDownload }: { materials: LessonMater
         {materials.map((material) => <Box component="li" key={material.id}>
             <ButtonBase component="a" href={material.kind === 'external_video' ? material.url : '#'} target={material.kind === 'external_video' ? '_blank' : undefined} rel="noreferrer noopener"
                 onClick={(event) => { if (material.kind === 'file') { event.preventDefault(); onDownload?.(material.id); } }}
-                sx={{ width: '100%', justifyContent: 'flex-start', gap: 1.5, p: 1.5, borderRadius: `${radius.md}px`, bgcolor: roles.bg.surface, textAlign: 'left', '&:hover': { bgcolor: roles.bg.canvas } }}>
+                sx={{ width: '100%', justifyContent: 'flex-start', gap: 1.5, p: 1.5, borderRadius: `${radius.md}px`, bgcolor: roles.bg.surface, textAlign: 'left', '&:hover': { bgcolor: roles.bg.rowHover } }}>
                 <Box aria-hidden sx={{ width: 40, height: 40, borderRadius: `${radius.sm}px`, bgcolor: roles.bg.fill, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
                     <PresentationIcon name={material.kind === 'file' ? 'file' : 'video'} sx={{ fontSize: 20 }} />
                 </Box>

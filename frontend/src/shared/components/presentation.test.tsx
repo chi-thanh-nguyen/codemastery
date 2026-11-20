@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { Button, ThemeProvider } from '@mui/material';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { appTheme, brandFontStack, codeFontStack, color, control, fontStack, pathLine, presentationTokens, shadow, themeRoles, ThemePreferenceContext } from '../../app/theme/theme';
+import { appTheme, applyThemeScheme, brandFontStack, codeFontStack, color, control, fontStack, isThemePreference, pathLine, presentationTokens, readStoredThemePreference, readSystemScheme, resolveThemeScheme, shadow, themeAnnouncement, themeButtonLabel, themeRoles, ThemePreferenceContext, writeStoredThemePreference } from '../../app/theme/theme';
 import type { ThemePreference } from '../../app/theme/theme';
 import { SidebarNav, isPlainClick } from './SidebarNav';
 import { LoadingView, EmptyView, ErrorView } from './StatusViews';
@@ -29,7 +29,7 @@ import { LearnerHomePage } from '../../features/learning/pages/LearnerHomePage';
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 /** Deep Logo Blue (brand-700) as the browser serialises it. */
 const BRAND_700 = 'rgb(6, 82, 196)';
-let root: Root, host: HTMLDivElement, lastAnnouncement: string;
+let root: Root, host: HTMLDivElement;
 function flattenRoles(value: object, prefix = ''): Record<string, string> {
     return Object.entries(value).reduce<Record<string, string>>((result, [key, nested]) => {
         const path = prefix ? `${prefix}-${key}` : key;
@@ -48,17 +48,20 @@ function resolveRoleColor(value: string) {
 }
 const styleColor = (element: Element, property: string) => resolveRoleColor(getComputedStyle(element).getPropertyValue(property));
 const resolvedStyleColor = (style: CSSStyleDeclaration, property: string) => resolveRoleColor(style.getPropertyValue(property));
-beforeEach(() => { document.documentElement.dataset.colorScheme = 'light'; lastAnnouncement = ''; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
+beforeEach(() => { document.documentElement.dataset.colorScheme = 'light'; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete document.documentElement.dataset.colorScheme; });
 function TestProviders({ children }: { children: ReactNode }) {
     const [preference, setPreference] = useState<ThemePreference>('system');
     return <ThemeProvider theme={appTheme} defaultMode="light" storageManager={null} colorSchemeNode={null}>
-        <ThemePreferenceContext.Provider value={{ preference, systemScheme: 'dark', setPreference, announce: (message) => { lastAnnouncement = message; } }}>
+        <ThemePreferenceContext.Provider value={{ preference, systemScheme: 'dark', setPreference, previewPreference: null, setPreviewPreference: () => undefined }}>
             {children}
         </ThemePreferenceContext.Provider>
     </ThemeProvider>;
 }
 async function render(node: ReactNode) { await act(async () => root.render(<TestProviders>{node}</TestProviders>)); }
+/** The Theme control's own polite status message (one per control, outside any modal's hidden siblings). */
+const themeStatus = (scope: ParentNode = document) => [...scope.querySelectorAll('[role="status"]')].map((node) => node.textContent).filter(Boolean).join('|');
+const key = async (target: Element, keyName: string) => act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { key: keyName, bubbles: true, cancelable: true })); });
 async function click(node: Element | null) { expect(node).not.toBeNull(); await act(async () => node!.dispatchEvent(new MouseEvent('click', { bubbles: true }))); }
 
 describe('FE01 presentation contracts', () => {
@@ -522,7 +525,110 @@ describe('Lit Path design-system primitives', () => {
         expect(document.querySelector('[role="menu"]')).not.toBeNull();
         expect(document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent).toContain('Dark');
         expect(document.activeElement).toBe(document.querySelector('[role="menuitemradio"][aria-checked="true"]'));
-        expect(lastAnnouncement).toBe('Theme set to Dark.');
+        expect(themeStatus()).toBe('Theme set to Dark.');
+        expect(host.querySelector('button[aria-label^="Theme:"]')?.getAttribute('aria-label')).toBe('Theme: Dark');
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    });
+    it('names the Theme menu like r12: caption, labelled group, System caption, check and no modal', async () => {
+        await render(<ThemeControl />);
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
+        expect(trigger.getAttribute('aria-controls')).toBeNull();
+        await click(trigger);
+        const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+        expect(trigger.getAttribute('aria-controls')).toBe(menu.id);
+        expect(menu.getAttribute('aria-label')).toBe('Theme');
+        const group = menu.querySelector('[role="group"]')!;
+        expect(group.getAttribute('aria-label')).toBe('Theme');
+        expect([...group.querySelectorAll('[role="menuitemradio"]')].map((item) => item.textContent)).toEqual(['SystemMatches your device (Dark now)', 'Light', 'Dark']);
+        // The chosen item gets focus on opening; the page behind is not hidden from assistive technology.
+        expect(document.activeElement?.textContent).toContain('System');
+        expect(host.closest('[aria-hidden="true"]')).toBeNull();
+        expect(document.querySelector('.MuiBackdrop-root, .MuiModal-root')).toBeNull();
+        for (const item of group.querySelectorAll<HTMLElement>('[role="menuitemradio"]')) expect(getComputedStyle(item).minHeight).toBe('44px');
+        expect(getComputedStyle(trigger).width).toBe('44px'); expect(getComputedStyle(trigger).height).toBe('44px');
+    });
+    it('moves through the Theme menu with arrows, Home and End, selects with Enter and returns focus on Escape', async () => {
+        await render(<ThemeControl />);
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+        await click(trigger);
+        const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+        const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+        await key(document.activeElement!, 'ArrowUp'); // wraps from System to Dark
+        expect(document.activeElement).toBe(items()[2]);
+        await key(document.activeElement!, 'ArrowDown'); // wraps back to System
+        expect(document.activeElement).toBe(items()[0]);
+        await key(document.activeElement!, 'End'); expect(document.activeElement).toBe(items()[2]);
+        await key(document.activeElement!, 'Home'); expect(document.activeElement).toBe(items()[0]);
+        await key(document.activeElement!, 'ArrowDown');
+        await key(document.activeElement!, 'Enter');
+        expect(items()[1].getAttribute('aria-checked')).toBe('true');
+        expect(document.querySelector('[role="menu"]')).toBe(menu); // still open, focus on the chosen item
+        expect(document.activeElement).toBe(items()[1]);
+        expect(themeStatus()).toBe('Theme set to Light.');
+        await key(document.activeElement!, 'Escape');
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(document.activeElement).toBe(trigger);
+        expect(trigger.getAttribute('aria-label')).toBe('Theme: Light');
+    });
+    it('closes the Theme menu on an outside click without changing the preference', async () => {
+        await render(<><ThemeControl /><button type="button">Elsewhere</button></>);
+        await click(host.querySelector('button[aria-haspopup="menu"]'));
+        expect(document.querySelector('[role="menu"]')).not.toBeNull();
+        await act(async () => {
+            const outside = [...host.querySelectorAll('button')].find((node) => node.textContent === 'Elsewhere')!;
+            outside.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); outside.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); outside.click();
+        });
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(host.querySelector('button[aria-haspopup="menu"]')?.getAttribute('aria-label')).toBe('Theme: System (currently Dark)');
+        expect(themeStatus()).toBe('');
+    });
+    it('resolves the preference exactly as r12 specifies, with safe storage and media fallbacks', () => {
+        expect(['system', 'light', 'dark'].every(isThemePreference)).toBe(true);
+        for (const value of ['', 'Dark', 'sepia', null, undefined]) expect(isThemePreference(value)).toBe(false);
+        expect(resolveThemeScheme('system', 'dark')).toBe('dark'); expect(resolveThemeScheme('system', 'light')).toBe('light');
+        expect(resolveThemeScheme('light', 'dark')).toBe('light'); expect(resolveThemeScheme('dark', 'light')).toBe('dark');
+        expect(themeButtonLabel('system', 'dark')).toBe('Theme: System (currently Dark)'); expect(themeButtonLabel('light', 'dark')).toBe('Theme: Light');
+        expect(themeAnnouncement('system', 'dark')).toBe('Theme set to System (Dark).'); expect(themeAnnouncement('dark', 'light')).toBe('Theme set to Dark.');
+        try {
+            localStorage.removeItem('codemastery.theme'); expect(readStoredThemePreference()).toBe('system');
+            localStorage.setItem('codemastery.theme', ''); expect(readStoredThemePreference()).toBe('system');
+            localStorage.setItem('codemastery.theme', 'dark'); expect(readStoredThemePreference()).toBe('dark');
+            const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('Blocked.', 'SecurityError'); });
+            expect(readStoredThemePreference()).toBe('system'); getItem.mockRestore();
+            const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full.', 'QuotaExceededError'); });
+            expect(() => writeStoredThemePreference('light')).not.toThrow(); setItem.mockRestore();
+            expect(localStorage.getItem('codemastery.theme')).toBe('dark');
+            // matchMedia unsupported or throwing: System resolves to light.
+            vi.stubGlobal('matchMedia', undefined); expect(readSystemScheme()).toBe('light');
+            vi.stubGlobal('matchMedia', () => { throw new Error('unsupported'); }); expect(readSystemScheme()).toBe('light');
+            vi.stubGlobal('matchMedia', (media: string) => ({ matches: media === '(prefers-color-scheme: dark)' })); expect(readSystemScheme()).toBe('dark');
+        } finally { vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); }
+    });
+    it('switches the root scheme instantly: colour transitions are suspended for the switch only', async () => {
+        vi.useFakeTimers({ toFake: ['requestAnimationFrame'] });
+        try {
+            applyThemeScheme('dark');
+            const root = document.documentElement;
+            expect(root.dataset.colorScheme).toBe('dark'); expect(root.style.colorScheme).toBe('dark');
+            expect(root.classList.contains('cm-theme-transition')).toBe(true);
+            vi.advanceTimersToNextFrame(); vi.advanceTimersToNextFrame();
+            expect(root.classList.contains('cm-theme-transition')).toBe(false);
+            applyThemeScheme('dark'); // unchanged scheme: no suspension
+            expect(root.classList.contains('cm-theme-transition')).toBe(false);
+        } finally { vi.useRealTimers(); }
+    });
+    it('keeps the light scheme values of main and the r12 dark values for the core roles', () => {
+        const { light, dark } = themeRoles;
+        expect([light.bg.frame, light.bg.canvas, light.bg.surface, light.bg.fill, light.text.primary, light.text.secondary, light.line.hairline, light.line.strong, light.accent.link, light.focus.ring])
+            .toEqual([color.ink950, color.canvas100, color.surface, color.fill150, color.ink900, color.ink600, color.line200, color.ink400, color.brand600, color.brand600]);
+        expect([dark.bg.frame, dark.bg.canvas, dark.bg.surface, dark.bg.fill, dark.bg.raised, dark.bg.field, dark.bg.fieldDisabled, dark.text.primary, dark.text.secondary, dark.line.hairline, dark.line.strong, dark.accent.link, dark.focus.ring])
+            .toEqual(['#0A0B0F', '#15171C', '#23262D', '#1D2025', '#2C3038', '#1D2025', '#15171C', '#ECEDEF', '#B4B8C0', '#363A43', '#7B818B', '#6AA8FF', '#7DB7FF']);
+        expect([dark.control.primary.background, dark.control.primary.hover, dark.control.primary.text, dark.control.danger.background]).toEqual(['#ECEDEF', '#FFFFFF', '#15171C', '#D23A2E']);
+        // Shared by both schemes: the frame, identity blue and the notification count.
+        expect([dark.bg.frame, dark.brand.identity, dark.brand.badge]).toEqual([light.bg.frame, light.brand.identity, light.brand.badge]);
+        expect(appTheme.colorSchemes.light?.palette.secondary.contrastText).toBe('#FFFFFF');
+        expect(appTheme.colorSchemes.dark?.palette.primary.light).toBe('#3B9CFA');
     });
     it('supports arrow-key selection in the drawer Theme radio group without closing the drawer', async () => {
         await render(<ThemeControl variant="drawer" />);
@@ -533,7 +639,61 @@ describe('Lit Path design-system primitives', () => {
         expect(host.querySelector('[role="radiogroup"]')).not.toBeNull();
         expect([...host.querySelectorAll('[role="radio"]')].map((radio) => radio.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
         expect(document.activeElement).toBe(host.querySelector('[role="radio"][aria-checked="true"]'));
-        expect(lastAnnouncement).toBe('Theme set to Light.');
+        expect(themeStatus()).toBe('Theme set to Light.');
+        await key(document.activeElement!, 'ArrowLeft');
+        await key(document.activeElement!, 'ArrowLeft'); // wraps from System to Dark
+        expect(document.activeElement).toBe(host.querySelector('[role="radio"][aria-checked="true"]'));
+        expect(document.activeElement?.textContent).toBe('Dark');
+        expect(themeStatus()).toBe('Theme set to Dark.');
+        const group = host.querySelector<HTMLElement>('[role="radiogroup"]')!;
+        expect(document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent).toBe('Theme');
+        expect(getComputedStyle(group).height).toBe('44px');
+        for (const radio of host.querySelectorAll<HTMLElement>('[role="radio"]')) expect(getComputedStyle(radio).height).toBe('44px');
+        expect(host.textContent).not.toContain('Matches your device');
+    });
+    it('shows the System caption under the drawer control and keeps one roving tab stop', async () => {
+        await render(<ThemeControl variant="drawer" />);
+        expect(host.textContent).toContain('Matches your device (Dark now)');
+        expect([...host.querySelectorAll('[role="radio"]')].map((radio) => radio.getAttribute('tabindex'))).toEqual(['0', '-1', '-1']);
+    });
+    it('places one Theme control per shell: top bar from 900 px, drawer footer below, never in the account menu', async () => {
+        let desktop = true;
+        const listeners = new Set<() => void>();
+        vi.stubGlobal('matchMedia', (media: string) => ({ get matches() { return media.includes('min-width:900px') && desktop; }, media,
+            addEventListener: (_: string, listener: () => void) => listeners.add(listener), removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+            addListener: () => undefined, removeListener: () => undefined }));
+        try {
+            const layout = <DashboardLayout navItems={[{ id: 'a', label: 'Alpha' }, { id: 'b', label: 'Beta' }]} selectedNavId="a" onNavSelect={vi.fn()} drawerFooter={<Button>Create account</Button>}
+                headerActions={<AccountMenu displayName="Linh Pham" role="Learner" renderItems={() => []} />}><PageHeader title="Preview" /></DashboardLayout>;
+            await render(layout);
+            const utilities = host.querySelector('header')!.querySelector('button[aria-haspopup="menu"][aria-label^="Theme:"]')!;
+            expect(document.querySelectorAll('[aria-label^="Theme:"]')).toHaveLength(1);
+            // First utility: before the account button.
+            const account = host.querySelector('button[aria-label^="Account menu"]')!;
+            expect(utilities.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            await click(account);
+            expect(document.querySelector('[role="menu"]')?.textContent ?? '').not.toContain('Theme');
+            await act(async () => { (document.activeElement as HTMLElement | null)?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+            desktop = false;
+            await act(async () => listeners.forEach((listener) => listener()));
+            expect(host.querySelector('header [aria-label^="Theme:"]')).toBeNull();
+            await click(host.querySelector('button[aria-label="Toggle navigation"]'));
+            const drawerGroups = document.querySelectorAll('[role="radiogroup"]');
+            expect(drawerGroups).toHaveLength(1);
+            const create = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Create account')!;
+            expect(drawerGroups[0].compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            await click(document.querySelectorAll<HTMLElement>('[role="radio"]')[2]);
+            expect(document.querySelector('[role="radiogroup"]')).not.toBeNull(); // the drawer stays open
+        } finally { vi.unstubAllGlobals(); }
+    });
+    it('gives the auth layout one Theme button opposite the lockup', async () => {
+        await render(<AuthLayout title="Sign in"><p>Form</p></AuthLayout>);
+        const themeButtons = host.querySelectorAll('button[aria-label^="Theme:"]');
+        expect(themeButtons).toHaveLength(1);
+        const home = host.querySelector('[aria-label="CodeMastery home"]')!;
+        expect(home.parentElement!.contains(themeButtons[0])).toBe(true);
+        expect(home.compareDocumentPosition(themeButtons[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(getComputedStyle(home.parentElement!).justifyContent).toBe('space-between');
     });
     it('gives each Learner home course row the same course mark as its tile', async () => {
         await render(<LearnerHomePage learnerName="Linh" onBrowse={() => undefined} courses={[

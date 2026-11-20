@@ -4,12 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0A0B0F" />
+    <!-- FE34 first paint (DESIGN.md › Rendering): the root colour is keyed to data-color-scheme. Both schemes
+         share the frame colour (bg.frame #0A0B0F), so neither scheme can flash the other before the bundle runs. -->
     <style>
-      html { background-color: #F6F6F7; color-scheme: light; }
-      html[data-color-scheme="light"] { background-color: #F6F6F7; color-scheme: light; }
+      html { background-color: #0A0B0F; color-scheme: light; }
+      html[data-color-scheme="light"] { background-color: #0A0B0F; color-scheme: light; }
       html[data-color-scheme="dark"] { background-color: #0A0B0F; color-scheme: dark; }
     </style>
-    <!-- Keep this synchronous initializer small and static so a future CSP can allow-list its hash. -->
+    <!-- Synchronous, before the application bundle; reads only codemastery.theme and prefers-color-scheme.
+         Keep it static so a future Content Security Policy can allow-list its SHA-256 hash (docs/setup.md). -->
     <script>
       (() => {
         let preference = 'system';

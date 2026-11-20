@@ -27,7 +27,7 @@ export function Tile({ children, component = 'div', interactive = false, padding
             transition: `transform ${motion.standard}ms ${motion.easeIn}, box-shadow ${motion.standard}ms ${motion.easeIn}`,
             // The whole tile is the link: hovering it also fills a secondary arrow circle, like a hovered secondary button.
             '@media (hover: hover) and (pointer: fine)': { '&:hover': { transform: 'translateY(-2px)', boxShadow: shadow.hover, '& [data-affordance="secondary"]': { bgcolor: roles.bg.fill } } },
-            '&:focus-within:has(a[data-tile-link]:focus-visible)': { boxShadow: `0 0 0 2px ${roles.accent.progress}` },
+            '&:focus-within:has(a[data-tile-link]:focus-visible)': { boxShadow: `0 0 0 2px ${roles.focus.ring}` },
         } : {}),
     }, ...(Array.isArray(sx) ? sx : [sx])]}>{children}</Box>;
 }
@@ -110,7 +110,7 @@ export interface StatTileProps { value: ReactNode; label: string; tone?: 'sky' |
 /** Real counts only. Dashed means "not yet" (Remaining, Unknown). */
 export function StatTile({ value, label, tone = 'white' }: StatTileProps) {
     const bg = tone === 'dashed' || tone === 'white' ? roles.bg.surface : tone === 'neutral' ? roles.bg.fill : tones[tone].tint;
-    return <Box component="li" sx={{ flex: '1 1 0', minWidth: 112, bgcolor: bg, borderRadius: `${radius.lg}px`, p: { xs: 2, sm: 2.5 }, textAlign: 'center',
+    return <Box component="li" data-tone={tone} sx={{ flex: '1 1 0', minWidth: 112, bgcolor: bg, borderRadius: `${radius.lg}px`, p: { xs: 2, sm: 2.5 }, textAlign: 'center',
         border: tone === 'dashed' ? `1.5px dashed ${roles.line.strong}` : 0, boxSizing: 'border-box', listStyle: 'none' }}>
         <Typography component="span" variant="stat" sx={{ display: 'block' }}>{value}</Typography>
         <Typography component="span" sx={{ display: 'block', mt: 1, color: 'text.secondary', fontWeight: 500 }}>{label}</Typography>

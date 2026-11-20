@@ -5,7 +5,8 @@ import { MasteryLegend, masteryMeta, masteryOrder } from '../../../../shared/com
 import type { SkillDistributionRow } from '../types/reportingTypes';
 import { radius, roles } from '../../../../app/theme/theme';
 
-const hatch = `repeating-linear-gradient(135deg, ${roles.data.unknown} 0 4px, ${roles.bg.surface} 4px 8px)`;
+// The hatch's light stripe is data-unknown mixed toward the surface (light: #9EA2AA as before), so it follows the scheme.
+const hatch = `repeating-linear-gradient(135deg, ${roles.data.unknown} 0 4px, color-mix(in srgb, ${roles.data.unknown} 76%, ${roles.bg.surface}) 4px 8px)`;
 
 /** 100% stacked bars of the four states per skill, with hatched Unknown, legend and table equivalent (US-17). */
 export function MasteryDistributionChart({ rows, title = 'Mastery distribution by skill', definition }: { rows: SkillDistributionRow[]; title?: string; definition: string }) {

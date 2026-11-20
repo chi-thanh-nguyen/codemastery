@@ -71,7 +71,7 @@ export function DataTable<T>({ label, columns, rows, getRowId, loading = false, 
                     </TableRow></TableHead>
                     <TableBody>
                         {loading ? Array.from({ length: loadingRows }, (_, i) => <TableRow key={i} aria-hidden>{columns.map((column) => <TableCell key={column.key}><Skeleton height={20} /></TableCell>)}{actions && <TableCell />}</TableRow>)
-                            : rows.map((row) => <TableRow key={getRowId(row)} hover selected={selectedId === getRowId(row)} sx={{ bgcolor: roles.bg.surface, '&:hover': { bgcolor: `${roles.bg.canvas} !important` }, '&.Mui-selected': { bgcolor: `${roles.bg.selected} !important` } }}>
+                            : rows.map((row) => <TableRow key={getRowId(row)} hover selected={selectedId === getRowId(row)} sx={{ bgcolor: roles.bg.surface, '&:hover': { bgcolor: `${roles.bg.rowHover} !important` }, '&.Mui-selected': { bgcolor: `${roles.bg.selected} !important` } }}>
                                 {columns.map((column, index) => <TableCell key={column.key} align={column.align} sx={{ minHeight: 60, overflowWrap: 'anywhere', ...(index === 0 ? stickyFirst : {}) }}
                                     component={index === 0 ? 'th' : 'td'} scope={index === 0 ? 'row' : undefined}>{column.render(row)}</TableCell>)}
                                 {actions && <TableCell align="right" sx={{ whiteSpace: 'nowrap', py: 1 }}><Box sx={{ display: 'inline-flex', gap: .5 }}>{actions(row)}</Box></TableCell>}

@@ -1,12 +1,12 @@
 import { useCallback, useContext, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
-import { Box, ButtonBase, Divider, IconButton, Menu, MenuItem, Tooltip, Typography, useMediaQuery, useTheme } from '@mui/material';
+import { Box, ButtonBase, ClickAwayListener, Divider, IconButton, Menu, MenuItem, MenuList, Paper, Popper, Tooltip, Typography, useMediaQuery, useTheme } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
 import type { PresentationIconName } from './PresentationIcon';
 import { BrandWordmark } from './BrandLogo';
 import { isPlainClick } from './SidebarNav';
 import type { NavItem } from './SidebarNav';
-import { focusRingOnChrome, motion, presentationTokens, radius, roles, ThemePreferenceContext } from '../../app/theme/theme';
+import { focusRingOnChrome, motion, presentationTokens, radius, roles, shadow, ThemePreferenceContext, themeAnnouncement, themeButtonLabel, themeSystemCaption } from '../../app/theme/theme';
 import type { ThemePreference } from '../../app/theme/theme';
 
 export interface AppHeaderProps {
@@ -30,89 +30,122 @@ const themeOptions: { value: ThemePreference; label: string; icon: PresentationI
     { value: 'dark', label: 'Dark', icon: 'moon' },
 ];
 
-function themeAnnouncement(preference: ThemePreference, systemScheme: 'light' | 'dark') {
-    const label = preference[0].toUpperCase() + preference.slice(1);
-    return `Theme set to ${label}${preference === 'system' ? ` (${systemScheme[0].toUpperCase()}${systemScheme.slice(1)}).` : '.'}`;
+/** Arrow keys (with wrap), Home and End over the three options; returns the target index or null. */
+function optionIndexForKey(key: string, index: number) {
+    const last = themeOptions.length - 1;
+    if (key === 'ArrowDown' || key === 'ArrowRight') return index === last ? 0 : index + 1;
+    if (key === 'ArrowUp' || key === 'ArrowLeft') return index === 0 ? last : index - 1;
+    if (key === 'Home') return 0;
+    if (key === 'End') return last;
+    return null;
 }
 
-/** The shared on-chrome preference control used by each production shell. */
+/**
+ * The Theme control (DESIGN.md › Theme selector, D9-1/D10-1): one presentational control reused by
+ * every shell. `button` is the 44 px on-frame button with its menu (top bar, landing header, auth
+ * layout, Focus bar); `drawer` is the on-chrome segmented control of the mobile drawer footer. Both
+ * read and change the one preference above the router, never the session, and each announces its
+ * own change once through a polite status message that stays outside any modal's hidden siblings.
+ */
 export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'drawer' }) {
-    const preferenceContext = useContext(ThemePreferenceContext);
-    const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-    const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+    const context = useContext(ThemePreferenceContext);
+    const [open, setOpen] = useState(false);
+    const [announcement, setAnnouncement] = useState('');
+    const button = useRef<HTMLButtonElement>(null);
+    const optionRefs = useRef<Array<HTMLElement | null>>([]);
     const menuId = useId();
-    if (!preferenceContext) return null;
-    const { preference, systemScheme, setPreference, announce } = preferenceContext;
-    const selected = themeOptions.find((option) => option.value === preference)!;
+    const checkedIndex = Math.max(0, themeOptions.findIndex((option) => option.value === context?.preference));
+    if (!context) return null;
+    const { preference, systemScheme, setPreference } = context;
+    const selected = themeOptions[checkedIndex];
     const choose = (next: ThemePreference) => {
+        if (next !== preference) setAnnouncement(themeAnnouncement(next, systemScheme));
         setPreference(next);
-        announce(themeAnnouncement(next, systemScheme));
     };
-    const handleRadioKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-        const offset = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
-            : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
-        if (!offset) return;
-        event.preventDefault();
-        const nextIndex = (index + offset + themeOptions.length) % themeOptions.length;
-        optionRefs.current[nextIndex]?.focus();
-        choose(themeOptions[nextIndex].value);
-    };
+    const status = <Box component="span" role="status" aria-live="polite" aria-atomic="true" className="cm-visually-hidden">{announcement}</Box>;
+    const caption = themeSystemCaption(systemScheme);
+
     if (variant === 'drawer') {
-        return <Box>
-            <Typography component="div" sx={{ mb: 1, color: roles.chrome.muted, fontSize: '0.8125rem', fontWeight: 600 }}>Theme</Typography>
-            <Box role="radiogroup" aria-label="Theme" sx={{ display: 'flex', p: '4px', borderRadius: `${radius.pill}px`, bgcolor: roles.chrome.raised }}>
+        const onRadioKeyDown = (event: KeyboardEvent<HTMLElement>, index: number) => {
+            const next = optionIndexForKey(event.key, index);
+            if (next === null) return;
+            event.preventDefault();
+            optionRefs.current[next]?.focus();
+            choose(themeOptions[next].value);
+        };
+        return <Box data-theme-control="drawer">
+            <Typography id={`${menuId}-label`} component="div" sx={{ mb: 1, color: roles.chrome.muted, fontSize: '0.8125rem', fontWeight: 600 }}>Theme</Typography>
+            {/* 44 px chrome-raised track; each segment's hit area is the full track height and a third of its width. */}
+            <Box role="radiogroup" aria-labelledby={`${menuId}-label`} sx={{ display: 'flex', height: 44, borderRadius: `${radius.pill}px`, bgcolor: roles.chrome.raised }}>
                 {themeOptions.map((option, index) => {
-                    const active = preference === option.value;
+                    const active = index === checkedIndex;
                     return <ButtonBase key={option.value} ref={(element: HTMLButtonElement | null) => { optionRefs.current[index] = element; }}
                         role="radio" aria-checked={active} tabIndex={active ? 0 : -1} onClick={() => choose(option.value)}
-                        onKeyDown={(event) => handleRadioKeyDown(event, index)}
-                        sx={{ position: 'relative', zIndex: 0, flex: 1, minWidth: 0, height: 44, gap: .5, borderRadius: `${radius.pill}px`,
+                        onKeyDown={(event) => onRadioKeyDown(event, index)}
+                        sx={{ position: 'relative', zIndex: 0, flex: '1 1 0', minWidth: 0, height: 44, gap: .5, borderRadius: `${radius.pill}px`,
                             color: active ? roles.control.onChrome.text : roles.chrome.muted, fontSize: '0.8125rem', fontWeight: active ? 600 : 500,
-                            '&::before': { content: '""', position: 'absolute', zIndex: -1, inset: '4px 0', borderRadius: `${radius.pill}px`,
+                            // The visible pill is 36 px tall, inset by the 4 px track padding.
+                            '&::before': { content: '""', position: 'absolute', zIndex: -1, inset: 4, borderRadius: `${radius.pill}px`,
                                 bgcolor: active ? roles.control.onChrome.background : 'transparent' },
-                            '&:hover': { color: roles.text.onChrome, '&::before': { bgcolor: active ? roles.control.onChrome.background : roles.chrome.hover } },
-                            '&:focus-visible': focusRingOnChrome, '& svg': { fontSize: 16, flexShrink: 0 } }}>
+                            '&:hover': active ? {} : { color: roles.text.onChrome, '&::before': { bgcolor: roles.chrome.hover } },
+                            '&.Mui-focusVisible, &:focus-visible': { ...focusRingOnChrome, outlineOffset: -2 }, '& svg': { fontSize: 16, flexShrink: 0 } }}>
                         <PresentationIcon name={option.icon} />{option.label}
                     </ButtonBase>;
                 })}
             </Box>
-            {preference === 'system' && <Typography variant="caption" sx={{ display: 'block', mt: 1, color: roles.chrome.muted }}>
-                Matches your device ({systemScheme[0].toUpperCase() + systemScheme.slice(1)} now)
-            </Typography>}
+            {preference === 'system' && <Typography variant="caption" sx={{ display: 'block', mt: 1, color: roles.chrome.muted }}>{caption}</Typography>}
+            {status}
         </Box>;
     }
 
+    const close = (returnFocus: boolean) => {
+        setOpen(false);
+        if (returnFocus) button.current?.focus();
+    };
+    // MenuList owns arrow keys (with wrap), Home, End and type-ahead; Escape returns focus to the button.
+    const onMenuKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
+        else if (event.key === 'Tab') close(false);
+    };
     return <>
-        <Tooltip title="Theme">
-            <IconButton aria-label={`Theme: ${selected.label}${preference === 'system' ? ` (currently ${systemScheme[0].toUpperCase()}${systemScheme.slice(1)})` : ''}`}
-                aria-haspopup="menu" aria-expanded={!!anchor} aria-controls={menuId} onClick={(event) => setAnchor(event.currentTarget)}
-                sx={{ width: 44, height: 44, bgcolor: 'transparent', color: roles.chrome.muted, '&:hover': { bgcolor: roles.chrome.raised, color: roles.text.onChrome },
-                    '&.Mui-focusVisible': focusRingOnChrome }}>
+        <Tooltip title="Theme" disableHoverListener={open} disableFocusListener={open}>
+            <IconButton ref={button} aria-label={themeButtonLabel(preference, systemScheme)} data-theme-control="button"
+                aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen((value) => !value)}
+                sx={{ flexShrink: 0, width: 44, height: 44, bgcolor: 'transparent', color: roles.chrome.muted,
+                    '&:hover': { bgcolor: roles.chrome.raised, color: roles.text.onChrome }, '&.Mui-focusVisible': focusRingOnChrome }}>
                 <PresentationIcon name={selected.icon} sx={{ fontSize: 20 }} />
             </IconButton>
         </Tooltip>
-        <Menu id={menuId} anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }} transformOrigin={{ vertical: 'top', horizontal: 'left' }}
-            slotProps={{ paper: { sx: { width: 240 } }, list: { 'aria-label': 'Theme menu' } }}>
-            <Typography component="div" role="presentation" sx={{ px: 2, py: 1, color: roles.text.secondary, fontSize: '0.8125rem', fontWeight: 600 }}>Theme</Typography>
-            <Box role="group" aria-label="Theme">
-                {themeOptions.map((option) => {
-                    const active = preference === option.value;
-                    return <MenuItem key={option.value} role="menuitemradio" aria-checked={active} selected={active}
-                        onClick={(event) => { choose(option.value); event.currentTarget.focus(); }}
-                        sx={{ minHeight: 44, color: roles.text.primary, '&.Mui-selected': { fontWeight: 600 } }}>
-                        <PresentationIcon name={option.icon} sx={{ fontSize: 20, color: roles.text.secondary }} />
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Typography component="span" sx={{ display: 'block', fontSize: '0.9375rem', fontWeight: 'inherit' }}>{option.label}</Typography>
-                            {option.value === 'system' && <Typography component="span" variant="caption" sx={{ display: 'block', color: roles.text.secondary }}>
-                                Matches your device ({systemScheme[0].toUpperCase() + systemScheme.slice(1)} now)
-                            </Typography>}
+        {status}
+        {/* A non-modal popup: the rest of the page (and the Focus bar's attempt) stays exposed and unchanged. */}
+        <Popper open={open} anchorEl={button.current} placement="bottom-start" sx={{ zIndex: 'modal' }}
+            modifiers={[{ name: 'offset', options: { offset: [0, 8] } }, { name: 'preventOverflow', options: { padding: 8 } }]}>
+            <ClickAwayListener onClickAway={(event) => { if (!button.current?.contains(event.target as Node)) close(false); }}>
+                <Paper sx={{ width: 240, maxWidth: 'calc(100vw - 16px)', boxSizing: 'border-box', p: 1, bgcolor: roles.bg.raised, color: roles.text.primary,
+                    borderRadius: `${radius.lg}px`, boxShadow: `${shadow.raised}, inset 0 0 0 1px ${roles.line.floating}` }}>
+                    {/* Opens with focus on the chosen item; the menu stays open after a selection. */}
+                    <MenuList id={menuId} component="div" aria-label="Theme" autoFocusItem={open} onKeyDown={onMenuKeyDown} sx={{ p: 0 }}>
+                        <Typography aria-hidden component="div" sx={{ px: 1.5, pt: .5, pb: 1, color: roles.text.secondary, fontSize: '0.8125rem', fontWeight: 600 }}>Theme</Typography>
+                        <Box role="group" aria-label="Theme">
+                            {themeOptions.map((option, index) => {
+                                const active = index === checkedIndex;
+                                return <MenuItem key={option.value} component="div" role="menuitemradio" aria-checked={active} selected={active}
+                                    onClick={(event) => { choose(option.value); event.currentTarget.focus(); }}
+                                    sx={{ minHeight: 44, color: roles.text.primary }}>
+                                    <PresentationIcon name={option.icon} sx={{ fontSize: 20, color: roles.text.secondary, flexShrink: 0 }} />
+                                    <Box component="span" sx={{ flex: 1, minWidth: 0 }}>
+                                        <Box component="span" sx={{ display: 'block', fontSize: '0.9375rem', fontWeight: 'inherit' }}>{option.label}</Box>
+                                        {option.value === 'system' && <Box component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, lineHeight: 1.4,
+                                            color: roles.text.secondary, whiteSpace: 'normal' }}>{caption}</Box>}
+                                    </Box>
+                                    {active && <PresentationIcon name="check" sx={{ fontSize: 20, flexShrink: 0 }} />}
+                                </MenuItem>;
+                            })}
                         </Box>
-                        {active && <PresentationIcon name="check" sx={{ fontSize: 20, ml: 'auto' }} />}
-                    </MenuItem>;
-                })}
-            </Box>
-        </Menu>
+                    </MenuList>
+                </Paper>
+            </ClickAwayListener>
+        </Popper>
     </>;
 }
 
@@ -240,7 +273,7 @@ function TopNavItem({ item, current, iconOnly, onSelect }: { item: NavItem; curr
         {item.icon}
         <Box component="span" className={iconOnly ? 'cm-visually-hidden' : undefined}>{item.label}</Box>
         {item.badge !== undefined && item.badge !== '' && item.badge !== 0 && <Box component="span" sx={{ minWidth: 20, px: .625, borderRadius: `${radius.pill}px`,
-            bgcolor: roles.accent.link, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center' }}>{item.badge}</Box>}
+            bgcolor: roles.brand.badge, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center' }}>{item.badge}</Box>}
     </ButtonBase>;
     return iconOnly ? <Tooltip title={item.label}>{content}</Tooltip> : content;
 }
@@ -291,7 +324,7 @@ export function HeaderIconButton({ label, icon, badge, onClick, href, current = 
             sx={{ position: 'relative', color: 'common.white', bgcolor: current ? roles.chrome.raised : undefined, '&:hover': { bgcolor: roles.chrome.raised } }}>
             <PresentationIcon name={icon} />
             {!!badge && <Box component="span" aria-hidden sx={{ position: 'absolute', top: 0, right: -2, minWidth: 20, height: 20, px: .5, borderRadius: `${radius.pill}px`,
-                bgcolor: roles.accent.link, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center', border: `2px solid ${roles.bg.frame}`, boxSizing: 'content-box' }}>{badge}</Box>}
+                bgcolor: roles.brand.badge, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center', border: `2px solid ${roles.bg.frame}`, boxSizing: 'content-box' }}>{badge}</Box>}
         </IconButton>
     </Tooltip>;
 }

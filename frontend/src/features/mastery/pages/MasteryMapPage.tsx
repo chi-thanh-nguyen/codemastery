@@ -67,7 +67,7 @@ export function MasteryMapPage({ courseTitle, skills, view, onViewChange, select
                 <Box sx={{ mt: 2.5, display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center', justifyContent: 'space-between' }}>
                     <MasteryLegend dense={embedded} />
                     <Typography variant="caption" sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box component="svg" aria-hidden viewBox="0 0 40 10" sx={{ width: 40, height: 10 }}><path d="M2 5h30" stroke={roles.line.strong} strokeWidth="2" strokeDasharray={pathLine.dasharray} /><path d="m30 1 6 4-6 4Z" fill={roles.data.unknown} /></Box>
+                        <Box component="svg" aria-hidden viewBox="0 0 40 10" sx={{ width: 40, height: 10 }}><path d="M2 5h30" stroke={roles.line.strong} strokeWidth="2" strokeDasharray={pathLine.dasharray} /><path d="m30 1 6 4-6 4Z" fill={roles.line.strong} /></Box>
                         Arrow: from a prerequisite to the skill that builds on it
                     </Typography>
                 </Box>
