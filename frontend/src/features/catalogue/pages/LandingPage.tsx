@@ -21,6 +21,26 @@ const steps: { icon: PresentationIconName; title: string; body: string }[] = [
 
 const onChrome = { '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': { outline: `2px solid ${roles.focus.onChrome}`, outlineOffset: 2 } };
 
+const headerSx = { display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, px: { xs: 2, sm: 4 }, height: { xs: 64, sm: 80 }, maxWidth: 1440, mx: 'auto' } as const;
+
+/**
+ * The landing page while the ADR014 restore runs (S25, F2): the same ink header with the lockup and
+ * the Theme button, no sign-in actions, and the "Restoring your session…" line. The page waits
+ * instead of showing public actions that a restored session would replace a moment later.
+ */
+export function LandingRestoringView() {
+    return <Box sx={{ bgcolor: roles.bg.frame, minHeight: '100dvh', ...onChrome }}>
+        <Box component="header" sx={headerSx}>
+            <BrandWordmark size={presentationTokens.brandMark} />
+            <Box sx={{ flex: 1 }} />
+            <ThemeControl />
+        </Box>
+        <Box component="main" id="main-content" tabIndex={-1} sx={{ px: { xs: 2, sm: 4 }, pt: { xs: 6, md: 10 }, maxWidth: 1440, mx: 'auto' }}>
+            <Typography role="status" sx={{ color: roles.chrome.muted }}>Restoring your session…</Typography>
+        </Box>
+    </Box>;
+}
+
 /**
  * S25 Public landing page at `/` for visitors without a session. Public navigation:
  * Catalogue, Sign in and Create account. No testimonials, statistics or logos.
@@ -29,7 +49,7 @@ export function LandingPage({ exampleMap }: LandingPageProps) {
     return <Box sx={{ bgcolor: roles.bg.frame, minHeight: '100dvh', ...onChrome }}>
         <Box component="a" href="#main-content" sx={{ position: 'absolute', left: 16, top: -64, zIndex: 10, px: 2, py: 1.25, borderRadius: `${radius.sm}px`, bgcolor: roles.control.onChrome.background, color: roles.control.onChrome.text, fontWeight: 600,
             '&:focus': { top: 12 } }}>Skip to main content</Box>
-        <Box component="header" sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 }, px: { xs: 2, sm: 4 }, height: { xs: 64, sm: 80 }, maxWidth: 1440, mx: 'auto' }}>
+        <Box component="header" sx={headerSx}>
             <BrandWordmark size={presentationTokens.brandMark} />
             <Box sx={{ flex: 1 }} />
             <Box component="nav" aria-label="Main navigation" sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1.5 } }}>

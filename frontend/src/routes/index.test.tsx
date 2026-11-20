@@ -309,6 +309,41 @@ describe('FE34 theme preference across routes and the session', () => {
         expect(location.pathname).toBe('/login');
         expect(document.documentElement.dataset.colorScheme).toBe('dark');
     });
+    it.each([['desktop', true], ['mobile', false]])('keeps one Theme control on the landing page while the restore runs (%s), then exactly one after it', async (_name, desktop) => {
+        if (desktop) vi.stubGlobal('matchMedia', desktopMedia);
+        vi.stubGlobal('ResizeObserver', class { observe() { /* test double */ } unobserve() { /* test double */ } disconnect() { /* test double */ } });
+        localStorage.setItem('codemastery.theme', 'dark');
+        let resolve!: (response: Response) => void;
+        fetcher.mockImplementationOnce(() => new Promise<Response>((done) => { resolve = done; }));
+        window.history.replaceState(null, '', '/');
+        await act(async () => root.render(<App />));
+        expect([...host.querySelectorAll('[role="status"]')].map((node) => node.textContent)).toContain('Restoring your session…');
+        expect(host.querySelectorAll('button[aria-label^="Theme:"]')).toHaveLength(1);
+        expect(themeButton()?.getAttribute('aria-label')).toBe('Theme: Dark');
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        expect(host.textContent).not.toContain('Sign in'); expect(host.textContent).not.toContain('Create account');
+        await chooseTheme('Light'); // usable during the restore, without touching the session
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        await act(async () => resolve(unauthorized()));
+        expect(location.pathname).toBe('/');
+        expect(host.querySelector('h1')?.textContent).toBe('Learn programming at the pace of what you actually know.');
+        expect(host.querySelectorAll('button[aria-label^="Theme:"]')).toHaveLength(1);
+        expect(themeButton()?.getAttribute('aria-label')).toBe('Theme: Light');
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+    it('sends a restored session from the landing restore view to its start page with the theme unchanged', async () => {
+        vi.stubGlobal('matchMedia', desktopMedia);
+        localStorage.setItem('codemastery.theme', 'dark');
+        let resolve!: (response: Response) => void;
+        fetcher.mockImplementationOnce(() => new Promise<Response>((done) => { resolve = done; }));
+        window.history.replaceState(null, '', '/');
+        await act(async () => root.render(<App />));
+        expect(host.textContent).toContain('Restoring your session…');
+        await act(async () => resolve(json(loginResponse('Person A', 'Instructor'))));
+        expect(location.pathname).toBe('/courses');
+        expect(host.querySelectorAll('button[aria-label^="Theme:"]')).toHaveLength(1);
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+    });
     it('keeps a visitor\'s choice through sign-in, another account and sign-out without any request', async () => {
         vi.stubGlobal('matchMedia', desktopMedia);
         fetcher.mockResolvedValueOnce(unauthorized());
