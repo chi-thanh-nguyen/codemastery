@@ -160,7 +160,8 @@ tests. Surefire uses its standard `Test*`, `*Test`, `*Tests`, and `*TestCase`
 naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
 Current unit suites are under `modules/auth/`, `modules/course/` (including
-`application/service/`), `modules/adaptive/mastery/` and the shared `support/`
+`application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest` and
+`QuestionBankServiceTest`), `modules/adaptive/mastery/` and the shared `support/`
 package. The other module test files are empty scaffolds. The integration base
 class is compiled but is not initialized by this unit-test lifecycle, so
 `./mvnw test` needs no Docker.
@@ -4346,3 +4347,59 @@ Issue. Every row stays NOT_RUN until a check actually runs.
 Report results per layer and only after the checks actually run. Unit results do not
 establish browser, assistive-technology, backend or deployment behavior, and a design
 preview is never integration evidence.
+
+## AS05 question bank remediation (PR #259) — 20 November 2026
+
+AS05 ([#156](https://github.com/chi-thanh-nguyen/codemastery/issues/156),
+[PR #259](https://github.com/chi-thanh-nguyen/codemastery/pull/259)) implements the CT23.questions
+and CT23.bindings question-bank slice of ADR007 §§4 and 7: the five Instructor operations
+`b3CreateQuestion`, `b3ListQuestions`, `b3ReadQuestion`, `b3ReplaceUnusedQuestion` and
+`b3DeleteUnusedQuestion`, the `QuestionBankService` callables with nested `QuestionInput` and
+`QuestionView` records, and the Assessment question, quiz and attempt repositories. The change
+corrects findings F1–F14 of the independent review of `ee177bd`. The Project Leader authorized
+the bounded `SecurityConfig` change and the test placement below on 20 November 2026.
+
+**Upstream gate.** Two approved producers are not implemented on `main` or on any branch:
+`SkillGraphService.requireSkillInCourse` and `readSkillIds` (ADR005 §3.2, AD07
+[#165](https://github.com/chi-thanh-nguyen/codemastery/issues/165)) and
+`CourseManagementService.withCourseConfigurationWrite` (ADR005 §§5 and 13.3, CO14
+[#177](https://github.com/chi-thanh-nguyen/codemastery/issues/177)). `QuestionBankService` calls
+them through three protected methods that mirror those signatures and currently fail closed.
+After CT03 admission and input validation, an owner's request returns B3Failure (500) and has no
+effect. No substitute scope lookup or lock is used. Integrating the producers replaces each method
+body with one delegation and requires real-PostgreSQL tests of the integrated operations.
+
+**Placement.** `modules/assessment/QuestionBankServiceTest.java` is a bounded placement
+exception: ADR008's CT14 table records a dedicated question-bank unit suite as a gap, and the
+Leader's 20 November authorization covers it for this PR. Recording it in
+`repository-structure.md` needs a separate governance change. The integration cases extend the
+approved `integration/AuthorizationIntegrationTest.java` (real endpoint authorization, no denied
+effects) and `integration/repository/AssessmentPersistenceIntegrationTest.java`.
+
+| Obligation | Covered by |
+| --- | --- |
+| Closed body: unknown, duplicate, missing or null members, wrong scalar or element types, trailing tokens, non-canonical UUIDs and non-JSON media types are 400 | `QuestionBankServiceTest$ClosedRequestBody`, `$Controller`; `AuthorizationIntegrationTest$QuestionBankEndpoints.ownerBodiesOutsideTheClosedContractAre400WithNoEffect` |
+| V004 validity: kinds, difficulties, `True`/`False` labels, key counts, nonblank text without trimming, no NUL | `QuestionBankServiceTest$Validation` |
+| CT03 admission before validation, scope and writes; Learner and Administrator 403; non-owner 403 or 404; unauthenticated 401 | `$Admission`, `$Controller`; `QuestionBankEndpoints` (production security chain) |
+| PUT frozen only by an AttemptAnswer reference; DELETE refused by either reference | `$Replace`, `$Delete`; adapter references in `AssessmentPersistenceIntegrationTest.questionAdapterReplacesDeletesAndReportsQuizAndAttemptReferencesSeparately` |
+| Course-wide list: PostgreSQL UUID order, filtering before count and paging, empty pages past the end, no int overflow, one REPEATABLE READ snapshot | `$Reads`, `$UpstreamProducersAbsent`; `questionAdapterScopesPagesInPostgresUuidOrderAndCountsBeforePaging` |
+| Lifecycle row lock conflicts with new QuizQuestion and AttemptAnswer references (native `FOR UPDATE`; `FOR NO KEY UPDATE` does not conflict) | `lifecycleRowLockBlocksNewQuizAndAttemptReferencesUntilItsTransactionEnds` |
+| Quiz and attempt adapters round-trip V004 rows without swapping references | `quizAndAttemptAdaptersRoundTripV004RowsWithoutSwappingReferences` |
+| `Cache-Control: no-store` on success and on 400, 401, 403, 404, 409 and 500 | `$Controller`; `QuestionBankEndpoints` |
+| Fail-closed behavior while the producers are absent | `$UpstreamProducersAbsent`; `QuestionBankEndpoints.admittedOwnerRequestsFailClosedWhileCt40AndTheCourseGuardAreAbsent` |
+
+The unit cases that cover integrated behavior emulate the approved producer signatures in a test
+subclass. They are not evidence of CT40 or Course-guard integration.
+
+Executed locally on 20 November 2026 (macOS host):
+
+- `cd backend && ./mvnw test -Dtest=QuestionBankServiceTest`: 79 tests, 0 failures.
+- `cd backend && ./mvnw test`: 792 tests, 0 failures, BUILD SUCCESS.
+- The integration suites did not run locally. The Docker Desktop engine returned
+  `InternalServerErrorException (Status 500)` and Testcontainers found no valid Docker
+  environment. Their results come only from the PR's CI `Backend` job (`./mvnw verify`).
+
+Still open: integrated CT40 and Course-guard operations and their concurrency oracles
+(B3-O01 and the ADR005 §13.3 cases), the CT17 runtime-privilege matrix entries for `questions`
+(the deployed runtime role currently has no privileges on it), CODEOWNER review, independent
+QA and the remaining AS05 Issue scope.

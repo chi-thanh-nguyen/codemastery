@@ -3493,7 +3493,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor Course owner; validate same-Course skill under original Instructor guard. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor Course owner; validate same-Course skill under original Instructor guard. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories; until the CT40 SkillGraphService producer (AD07 #165) and the Course configuration guard (CO14 #177) are integrated, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3560,7 +3560,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner only; answer keys permitted. UUID ascending; coherent scope/count/page. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner only; answer keys permitted. UUID ascending; coherent scope/count/page. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories; until the CT40 SkillGraphService producer (AD07 #165) and the Course configuration guard (CO14 #177) are integrated, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3638,7 +3638,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; scoped Question, includes key. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; scoped Question, includes key. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories; until the CT40 SkillGraphService producer (AD07 #165) and the Course configuration guard (CO14 #177) are integrated, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3704,7 +3704,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; full replacement only if no AttemptAnswer references. Used definition 409; POST new replacement explicitly. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; full replacement only if no AttemptAnswer references. Used definition 409; POST new replacement explicitly. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories; until the CT40 SkillGraphService producer (AD07 #165) and the Course configuration guard (CO14 #177) are integrated, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3783,7 +3783,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; no QuizQuestion/AttemptAnswer reference. Returns deleted definition after commit. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; no QuizQuestion/AttemptAnswer reference. Returns deleted definition after commit. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories; until the CT40 SkillGraphService producer (AD07 #165) and the Course configuration guard (CO14 #177) are integrated, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
         "security": [
           {
             "bearerAuth": []
