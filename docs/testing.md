@@ -364,7 +364,17 @@ and absence of API requests; Learner home and My courses tile membership actions
 and the Mastery Map's 220 × 72 nodes, initial viewport and keyboard operation. It writes
 screenshots, accessibility snapshots and `browser-report.json` to `--out`
 (default: a new directory under the OS temporary directory), and exits non-zero
-on any failed check or browser that cannot launch. Positional FE01 arguments
+on any failed check or browser that cannot launch. A scenario that cannot run in an
+engine because of a verified browser-emulation limitation is reported as
+`NOT EXERCISED [engine] <scenario>: <reason>`, listed under `notExercised` in the
+report and counted separately in the summary (`N passed, N failed, N scenario(s) not
+exercised`); it is never counted as a pass, and the check that contains it names how
+many of its rows ran. Today that is only the first-paint row "no stored value, OS
+reports no preference" in WebKit, which reports the host appearance instead of
+`no-preference` (a host in Dark mode reports dark). The same mismatch in any other
+engine fails the check as an emulation failure. Chromium and Firefox report `light`
+under `no-preference`, so that row tests "not dark resolves System to light", not a
+state in which neither scheme matches. Positional FE01 arguments
 (`<playwright-module> <evidence-dir> <url> [engine]`) are still accepted.
 
 **E2E suite** (from `e2e/`):
@@ -4595,6 +4605,99 @@ against a production build served by `vite preview`:
   `ThemeControl` as the live `/home`; no real-backend session was used for this pass.
 - Skeleton shimmer and the Path Spine completion fill rely on the existing harness checks.
 - Touch-only tooltip behaviour was not examined.
+
+## PR #261 independent review remediation — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery PR #261 —
+Complete Remediation of Independent Codex & Claude Code Review Findings", on PR #261 (Refs #255, #56),
+based on `6cc501b`. Developer evidence only: no independent review approval, QA07 #63 or QA01
+acceptance is claimed, and no screen-reader session was run.
+
+**Findings and dispositions.**
+
+| ID | Priority | Root cause | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| AUD-01 | P2 | `App.tsx` decided "opened at the preview" with `^/preview(/\|$)`, while React Router matches the `/preview` route case-insensitively, with trailing slashes, after decoding each path segment. `/PREVIEW`, `/Preview`, `/pre%76iew`, `/%70review` rendered the isolated preview but restored the session (one `POST /api/auth/refresh` each). The pattern also isolated `/preview/<anything>`, which renders "Page not found", so that document never restored | `isPreviewPath` in `routes/index.tsx` asks `matchRoutes` with the same `PREVIEW_PATH` the route uses; the decision is still taken once per document | 18 App-level tests in `PreviewApp.test.tsx` (the refresh endpoint answers with a valid session): 9 accepted aliases send no request through other tabs' sign-in, sign-out and sign-in, focus, page show, visibility, a theme change and SPA navigation, and store nothing but the theme; 9 controls (`/`, `/courses`, `/previewish`, `/preview-x`, `/preview/extra`, `/pre%76iewish` and three malformed encodings) restore once. The 5 case or encoding aliases and `/preview/extra` fail on `6cc501b`. Real backend: see below |
+| AUD-02 / F-01 | P3 | One `suppressTooltip` flag served both stale hover and restored focus, and `onBlur` kept it while the pointer rested on the button, so a later genuine keyboard focus stayed suppressed | Separate `staleHover` (released when the pointer genuinely enters) and `restoredFocus` (released on blur); `showTooltip` checks the source of the event; the menu state is a ref, so a hover timer started before the menu opened cannot show the tooltip over it | Vitest "Theme tooltip lifecycle" (5 tests, fake timers); harness tooltip check extended; Playwright CLI and library runs below |
+| F-03 | P3 | MUI's `enterDelay` (400 ms) also applies to focus, so keyboard focus showed the tooltip after about 410–425 ms (200 ms within hysteresis) | `onFocus` shows it at once when the button matches `:focus-visible`; hover keeps the 400 ms delay; the global Tooltip delays are unchanged | Vitest (immediate on Tab, not before 400 ms on hover); harness (≤ 250 ms on refocus and cold focus); CLI 0 ms in Chrome and WebKit |
+| F-02 | P3 | `DESIGN.md` D13-5 listed "a selection" as a menu dismissal, contradicting "Behavior everywhere" (the menu stays open after a choice) | D13-5 rewritten (dismissal by outside click, second press, Escape, Tab or Shift+Tab; a choice keeps the menu open and the tooltip hidden; per-source release; immediate keyboard focus); D13-5 decision row and the r13 revision entry record the amendment | Documentation review |
+| F-04 | P3 | Tooltip lifecycle and menu-item fills were covered only by the optional harness, which CI does not run | CI-run Vitest tests: "Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)" and "Menu item states (D13-4)" in `presentation.test.tsx` | The tooltip tests fail on `6cc501b`'s `AppHeader.tsx` (3 of 5); the menu-state test fails on the pre-`c2e4eaf` theme (hovered = selected) |
+| F-05 | P4 | The WebKit "no preference" first-paint row printed a note but its check still counted as a pass, and the skip applied to any engine | `notExercised` record in the harness result and `browser-report.json`, a separate count in the summary, the check name states how many rows ran; only WebKit's verified limitation is recorded as not exercised, the same mismatch elsewhere fails as an emulation failure | Harness output below |
+
+**What the CI tests prove and what stays harness-only.** The Vitest tooltip tests drive the real
+`ThemeControl` with real `mouseover`/`mouseout`, focus and `keydown` events and MUI's own timers (fake
+timers). jsdom's `:focus-visible` heuristic recognises a Tab only from a target other than the element
+losing focus, so the tests dispatch the Tab key from the document before moving focus. The menu-state
+test reads the computed styles at rest and, because jsdom never matches `:hover`, resolves the hover and
+keyboard-focus states from the rendered style sheet's cascade (specificity, then order; media blocks
+such as `hover: none` are not applied). Rendered colours, the paint of the focus ring, real pointer
+heuristics, touch, motion and Firefox remain covered by the optional browser harness and the
+Playwright runs below.
+
+**Commands and results (final tree).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 668 tests in 16 files (643 + 25 new) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed, 0 failed, 0 not exercised; WebKit 26.6: 67 passed, 0 failed, 1 not exercised (first paint "no stored value, OS no preference"; host in Dark) |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed. `firefox-desktop` was not run on macOS, where the pinned Firefox does not launch |
+
+**Real backend (review-only disposable stack).** Images built from this checkout
+(`backend/`, `infrastructure/postgres/`), a private Docker network, random credentials, free
+loopback ports and a production build with `VITE_API_BASE_URL` on that backend; a synthetic Learner
+registered through the API. After a real sign-in (refresh cookie `cm_refresh` set), each alias was
+opened in a new tab of the same browser:
+
+- `/preview`, `/PREVIEW`, `/pre%76iew`, `/%70review`, `/preview/`, `/Preview/`: preview rendered,
+  0 refresh requests, no session, nothing stored. This held after the first tab signed out and in
+  again, after focus, page-show and visibility events, after choosing Dark (memory only) and after
+  SPA navigation to `/courses`. Results were the same in Chrome 157 and WebKit 27.2 (Playwright
+  CLI) and in Linux Firefox 155 (Playwright in the pinned image).
+- Controls `/courses`, `/preview/extra`, `/previewish`: one refresh request and the signed-in
+  Learner shown.
+- `/preview%` does not reach the application: the Vite preview server rejects the malformed URL.
+  The unit tests cover the application's handling of malformed encodings.
+- On a build of `6cc501b` served at the same origin, `/PREVIEW` and `/pre%76iew` each sent one
+  refresh request, and `/preview/extra` sent none and restored no session.
+
+**Tooltip (Playwright CLI, Chrome 157 and WebKit 27.2, normal and reduced motion; library runs on
+Chromium 153, WebKit 26.6 and Linux Firefox 155).**
+
+- Hover is not shown at 250 ms and is shown at 650 ms.
+- Opening the menu hides it. After Escape with the pointer resting on the button, focus is on the
+  button and there is no tooltip, also while the pointer moves over the glyph.
+- Tab away and Shift+Tab back with the pointer still resting shows it at once (0 ms; Firefox
+  96 ms with polling). Cold keyboard focus also shows it at once (0 ms).
+- Choosing with the keyboard keeps the menu open. Tab and Shift+Tab close it and continue the tab
+  sequence.
+- Outside click, 11 rapid presses, choosing System, Light and Dark each closed by a second press,
+  and a route change: no stranded or duplicate tooltip.
+- The adversarial cases A1–A10, L1, L2 and M1 of the earlier review all pass in the three engines;
+  A4 and A6 failed before the fix.
+
+**Regression smoke (fixed build).**
+
+- Theme menu in Light and Dark, Chrome and WebKit: a hovered item never takes the selected fill;
+  selected + hover keeps it and adds the ring; keyboard focus shows the ring; `aria-checked`
+  follows the choice.
+- The landing header reads Catalogue → Theme → Sign in → Create account.
+- Teaching pills draw their glyph in the label colour, and the three Needs-attention glyphs keep
+  their accents.
+- No page overflow. The 390 px drawer control switches the theme and stores it on the device.
+- The header, responsive and menu matrices of the earlier review were repeated on Chromium and
+  WebKit: the 11-width header matrix passed 1,280 of 1,280 checks per engine; the menu and glyph checks passed except the pre-existing Select case listed under Limits.
+
+**Limits.**
+
+- No screen-reader session.
+- The Playwright CLI is not available in the Linux image, so Firefox was driven by Playwright
+  scripts there.
+- The pre-existing MUI Select behaviour remains: ArrowDown on the last, already-selected option
+  moves nothing, so no focus ring appears there; ArrowUp shows it.
+- Other tooltips (icon-only navigation, header icon buttons, view rail, pills, code copy) keep
+  MUI's delay on keyboard focus. The instruction limits F-03 to the Theme tooltip and leaves the
+  global delays unchanged.
 
 ## AS04 quiz grading unit verification — 20 November 2026
 

@@ -612,10 +612,14 @@ files only:
   before the Theme button and session actions (`actions`) after it.
   Escape closes its menu and returns focus to the button; Tab and Shift+Tab also close it
   and return focus to the button first, so the tab sequence continues from the button
-  (the menu is rendered at the end of the document). The "Theme" tooltip is hidden while
-  the menu is open, is reset whenever the menu opens or closes, and stays hidden after a
-  close while the pointer still rests on the button or focus was returned to it, until
-  the pointer enters again or the button loses focus. The menu's popup container carries
+  (the menu is rendered at the end of the document). The "Theme" tooltip appears after
+  400 ms on hover and at once on keyboard focus (`:focus-visible`); it is hidden while the
+  menu is open, including after a choice (the menu stays open), and is reset whenever the
+  menu opens or closes. After a close it is suppressed per source: for the pointer still
+  resting on the button until the pointer enters again, and for the focus returned to the
+  button until focus leaves it, so a later Tab back to the button shows it at once. The
+  menu state is read from a ref, so a hover timer started before the menu opened cannot
+  show it over the menu. The menu's popup container carries
   no `tooltip` role. Menu items (all menus) hover and focus on `bg.raisedHover`; only the
   selected item uses `bg.selected`.
 - Glyphs in buttons and in `StatusPill` (pills, mastery, recommendation and other tags)
@@ -644,6 +648,14 @@ Light, Dark and System acceptance stays with QA07 #63.
   for the sign-in page); the document then follows the normal ADR014 lifecycle. Before the
   fix, a sign-in in another tab, or a theme change after leaving `/preview` in the same
   document, sent `POST /api/auth/refresh` from it.
+- *AUD-01 preview URL aliases, fixed (21 November 2026).* "Opened at `/preview`" is decided
+  with React Router's own `matchRoutes` against the same `PREVIEW_PATH` the route uses
+  (`isPreviewPath` in `routes/index.tsx`), so it accepts exactly what renders the preview:
+  any letter case (`/PREVIEW`), trailing slashes and percent-encoded characters
+  (`/pre%76iew`). A malformed encoding is kept as typed by the router and renders "Page not
+  found", so it restores normally, as does `/preview/<anything>`. The earlier pattern
+  `^/preview(/|$)` missed the aliases (they restored a session) and treated
+  `/preview/<anything>` as the preview although it shows "Page not found".
 - *A14 shared-transport capability, implemented in `shared/api/httpClient.ts`.* The explicit
   no-content mode of `CT16-B1-NO-CONTENT-2026-11-09-r1` (`responseMode: 'no-content'`,
   `expectedStatus: 204`, no decoder, `Promise<void>`), a `GET`-only
