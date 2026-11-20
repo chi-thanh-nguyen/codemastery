@@ -160,8 +160,9 @@ tests. Surefire uses its standard `Test*`, `*Test`, `*Tests`, and `*TestCase`
 naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
 Current unit suites are under `modules/auth/`, `modules/course/` (including
-`application/service/`), `modules/adaptive/mastery/` and the shared `support/`
-package. The other module test files are empty scaffolds. The integration base
+`application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest`
+and `QuizGradingServiceTest`), `modules/adaptive/mastery/` and the shared
+`support/` package. The other module test files are empty scaffolds. The integration base
 class is compiled but is not initialized by this unit-test lifecycle, so
 `./mvnw test` needs no Docker.
 
@@ -710,7 +711,8 @@ and the earlier steps remain the gate.
 The following are not covered by any executable test in the repository. No
 test-count or coverage-percentage claim is made for them.
 
-- **Empty scaffolds.** Assessment, Interaction and Admin unit tests; Adaptive
+- **Empty scaffolds.** Assessment `AttemptServiceTest` and `SubmissionServiceTest`;
+  Interaction and Admin unit tests; Adaptive
   decision, evaluation, listener, settings, mastery-update, placement and skill-graph
   tests; `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
   `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
@@ -4346,3 +4348,52 @@ Issue. Every row stays NOT_RUN until a check actually runs.
 Report results per layer and only after the checks actually run. Unit results do not
 establish browser, assistive-technology, backend or deployment behavior, and a design
 preview is never integration evidence.
+
+## AS04 quiz grading unit verification — 20 November 2026
+
+Implementation of AS04 ([#32](https://github.com/chi-thanh-nguyen/codemastery/issues/32),
+[PR #258](https://github.com/chi-thanh-nguyen/codemastery/pull/258)) in the existing
+`QuizGradingService.java`, through the module-local typed binding of
+`CT04-SUBMISSION-2026-11-09-r1` ([ADR007 §9](decisions/007-batch-03-contract-approvals.md#9-ct04submission-and-saved-answers)):
+`grade(List<GradingItem>)` returns a `Grade` holding the percentage and one
+`GradedItem` per input item, in input order. The calculation is the data-model §11
+rule: equal-weight exact selection-mask match, zero for incorrect, partial,
+extra-option and all-false (unanswered) selections, and a 0–100 percentage rounded
+`HALF_UP` to two decimals. Empty, null, duplicate and mismatched inputs are outside
+AS04 and remain unspecified; no test asserts a behavior for them.
+
+`modules/assessment/QuizGradingServiceTest.java` has 12 deterministic unit tests. Its
+fixtures are AS01 `Question` and `AttemptAnswer` records checked against the data-model
+§11 invariants (one option label per answer-key entry, at least two entries, `True`/`False`
+labels for `true_false`, answer-key cardinality per kind, matching selected-mask length
+and at most one selection for single-answer kinds) and then converted into
+`GradingItem`s.
+
+| Obligation | Covered by |
+| --- | --- |
+| All correct → `100.00`; all incorrect → `0.00` | `grade_allCorrectAnswers_returns100Point00`, `grade_allIncorrectAnswers_returns0Point00` |
+| Multiple-choice exact versus partial and extra selections | `grade_multiChoicePartialOrExtraOptions_receiveZeroCredit` |
+| All-false (unanswered) mask scores zero | `grade_unansweredMask_receivesZeroCredit` |
+| B3-O08 grading values: 1 of 3 → `33.33`, 2 of 3 → `66.67` | `grade_oneCorrectOutOfThree_roundsHalfUpTo33Point33`, `grade_twoCorrectOutOfThree_roundsHalfUpTo66Point67` |
+| `HALF_UP` rather than `HALF_EVEN` (1 of 32 = 3.125 → `3.13`) | `grade_exactHalfThousandth_roundsHalfUp` |
+| Per-item correctness in input order, keyed by question ID | `grade_itemsInNonCanonicalOrder_returnCorrectnessInInputOrderByQuestionId`, `grade_everyApprovedQuestionKind_returnsPerItemCorrectness` (all three V004 kinds) |
+| Determinism; the input list is not changed | `grade_sameItems_isDeterministicAndLeavesInputUnchanged` |
+| Nested records copy defensively (ADR007 §9) | `gradingItem_copiesMasks_soLaterSourceChangesDoNotAffectGrading`, `grade_copiesGradedItems_andReturnsAnUnmodifiableList` |
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #258
+working tree after merging `main` `e72d9fd`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest=QuizGradingServiceTest` | 12 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 725, Failsafe 240, 0 failures, errors or skips |
+
+A temporary local mutation check, reverted before commit, confirmed that the suite
+fails when `HALF_UP` is replaced by `HALF_EVEN` or when either defensive copy is
+removed.
+
+These are local developer runs, not independent QA, CI or deployment evidence. They
+do not cover AttemptService orchestration, persistence of `is_correct` or the score,
+the B3-O08 rollback case, auto-submission, REST results, the quiz-submitted event or
+any Adaptive mastery update. Those belong to AS08 and the Adaptive and QA Issues and
+remain unverified.
