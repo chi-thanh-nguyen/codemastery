@@ -331,6 +331,16 @@ describe('FE34 theme preference across routes and the session', () => {
         expect(themeButton()?.getAttribute('aria-label')).toBe('Theme: Light');
         expect(fetcher).toHaveBeenCalledTimes(1);
     });
+    it('orders the landing header Catalogue → Theme → Sign in → Create account in the DOM, so tab and reading order follow (D13-2)', async () => {
+        vi.stubGlobal('matchMedia', desktopMedia);
+        vi.stubGlobal('ResizeObserver', class { observe() { /* test double */ } unobserve() { /* test double */ } disconnect() { /* test double */ } });
+        fetcher.mockResolvedValueOnce(unauthorized());
+        window.history.replaceState(null, '', '/');
+        await act(async () => root.render(<App />));
+        const nav = host.querySelector('header nav[aria-label="Main navigation"]')!;
+        expect([...nav.querySelectorAll('a, button')].map((node) => node.getAttribute('aria-label')?.startsWith('Theme:') ? 'Theme' : node.textContent))
+            .toEqual(['Catalogue', 'Theme', 'Sign in', 'Create account']);
+    });
     it('keeps "Create account" out of the mobile drawer while the restore runs, with the drawer Theme control still there (F2)', async () => {
         vi.stubGlobal('ResizeObserver', class { observe() { /* test double */ } unobserve() { /* test double */ } disconnect() { /* test double */ } });
         let resolve!: (response: Response) => void;

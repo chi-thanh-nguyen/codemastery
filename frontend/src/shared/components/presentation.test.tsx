@@ -334,6 +334,21 @@ describe('Lit Path design-system primitives', () => {
         expect(host.textContent).toContain('Completed'); expect(host.textContent).toContain('Test-out');
         expect(host.querySelectorAll('svg')).toHaveLength(2);
     });
+    it('draws every StatusPill glyph in its label colour (currentColor), in each tone and both schemes', async () => {
+        const tonesUnderTest = ['neutral', 'mint', 'butter', 'rose', 'sky', 'lilac', 'dashed', 'ink'] as const;
+        for (const scheme of ['light', 'dark'] as const) {
+            document.documentElement.dataset.colorScheme = scheme;
+            await render(<>{tonesUnderTest.map((tone) => <StatusPill key={tone} tone={tone} icon="eye">{tone}</StatusPill>)}
+                <MasteryLegend dense /><RecommendationTag type="remedial" /><StatusPill tone="mint" icon="eye" size="tag">Published</StatusPill></>);
+            const pills = [...host.querySelectorAll<HTMLElement>('[data-tone]')];
+            expect(pills.length).toBe(tonesUnderTest.length + 4 + 1 + 1);
+            for (const pill of pills) {
+                const glyph = pill.querySelector('svg')!, label = pill.querySelector<HTMLElement>(':scope > span')!;
+                expect(getComputedStyle(glyph).color, `${scheme} ${pill.textContent}`).toBe(getComputedStyle(pill).color);
+                expect(styleColor(label, 'color')).toBe(styleColor(pill, 'color'));
+            }
+        }
+    });
     it('exposes exactly the four approved mastery states with their meanings and no numbers', async () => {
         await render(<><MasteryLegend /><MasteryTag state="weak" /></>);
         expect([...host.querySelectorAll('[aria-label="Mastery states"] li')].map((li) => li.textContent)).toEqual([
@@ -686,13 +701,18 @@ describe('Lit Path design-system primitives', () => {
             addListener: () => undefined, removeListener: () => undefined }));
         try {
             const layout = <DashboardLayout navItems={[{ id: 'a', label: 'Alpha' }, { id: 'b', label: 'Beta' }]} selectedNavId="a" onNavSelect={vi.fn()} drawerFooter={<Button>Create account</Button>}
+                headerUtilities={<HeaderIconButton label="Notifications" icon="bell" />}
                 headerActions={<AccountMenu displayName="Linh Pham" role="Learner" renderItems={() => []} />}><PageHeader title="Preview" /></DashboardLayout>;
             await render(layout);
             const utilities = host.querySelector('header')!.querySelector('button[aria-haspopup="menu"][aria-label^="Theme:"]')!;
             expect(document.querySelectorAll('[aria-label^="Theme:"]')).toHaveLength(1);
-            // First utility: before the account button.
+            // Brand → navigation → utilities → Theme → account menu (D13-3): Theme sits right before the account button.
             const account = host.querySelector('button[aria-label^="Account menu"]')!;
             expect(utilities.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            const order = [...host.querySelector('header')!.querySelectorAll<HTMLElement>('nav a, nav button, [data-nav-item], button[aria-label]')]
+                .filter((node, index, all) => all.indexOf(node) === index && !node.closest('[aria-hidden="true"]'))
+                .map((node) => node.getAttribute('aria-label')?.replace(/^(Theme|Account menu).*/, '$1') ?? node.textContent);
+            expect(order.slice(order.indexOf('Alpha'))).toEqual(['Alpha', 'Beta', 'Notifications', 'Theme', 'Account menu']);
             await click(account);
             expect(document.querySelector('[role="menu"]')?.textContent ?? '').not.toContain('Theme');
             await act(async () => { (document.activeElement as HTMLElement | null)?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });

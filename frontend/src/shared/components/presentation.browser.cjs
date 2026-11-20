@@ -244,6 +244,12 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
                     .observe(document, { attributes: true, subtree: true, attributeFilter: ['data-color-scheme'] });
             });
             await page.goto(url('/courses')); await ready(page);
+            // Playwright's WebKit does not emulate "no preference": it reports the host appearance instead, so on a
+            // host in dark mode this row cannot be exercised there. It is reported, not counted as a pass or a failure.
+            if (os === 'no-preference' && await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)) {
+                console.log(`NOTE [${engine}] first paint: "no-preference" is not emulated on this host (prefers-color-scheme: dark reported); row ${stored ?? 'missing'}+os:${os} not exercised`);
+                await context.close(); continue;
+            }
             await page.evaluate((value) => { if (value === null) localStorage.removeItem('codemastery.theme'); else localStorage.setItem('codemastery.theme', value); }, stored);
             let release; const gate = new Promise((done) => { release = done; });
             await page.route(/\/assets\/index-[^/]+\.js$/, async (route) => { await gate; await route.continue(); });
@@ -345,6 +351,138 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
             await other.close();
         });
         await context.close();
+    }
+
+    // r13 (D13-1 – D13-5): icon colours, menu item states, header order and the Theme tooltip lifecycle.
+    {
+        const SELECTED = { light: 'rgb(227, 238, 255)', dark: 'rgb(27, 46, 77)' }, ITEM_HOVER = { light: 'rgb(238, 238, 240)', dark: 'rgb(54, 58, 67)' };
+        await check('Theme menu: the selected item stays distinct from a hovered item, selected + hover and keyboard focus are distinguishable, in both schemes (D13-4)', async () => {
+            for (const [preference, os, rendered] of [['system', 'light', 'light'], ['system', 'dark', 'dark'], ['light', 'dark', 'light'], ['dark', 'light', 'dark']]) {
+                const { context, page } = await newPage({ colorScheme: os });
+                await context.addInitScript((value) => { try { localStorage.setItem('codemastery.theme', value); } catch { /* blocked */ } }, preference);
+                await page.goto(url('/courses')); await ready(page);
+                const where = `${preference}/${rendered}`;
+                await themeButton(page).first().click();
+                const items = page.getByRole('menuitemradio'); await items.first().waitFor();
+                const selected = ['system', 'light', 'dark'].indexOf(preference);
+                const state = (index) => items.nth(index).evaluate((node) => { const s = getComputedStyle(node); return { bg: s.backgroundColor, ring: s.boxShadow.includes('inset'), outline: s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) >= 2, weight: s.fontWeight, checked: node.getAttribute('aria-checked') }; });
+                await page.mouse.move(1, 1); await page.waitForTimeout(250);
+                const rest = await state(selected);
+                assert.deepEqual([rest.bg, rest.ring, rest.weight, rest.checked], [SELECTED[rendered], false, '600', 'true'], `${where} selected at rest`);
+                for (let index = 0; index < 3; index++) {
+                    await items.nth(index).hover(); await page.waitForTimeout(250);
+                    const hovered = await state(index), still = await state(selected);
+                    if (index === selected) {
+                        assert.equal(hovered.bg, SELECTED[rendered], `${where} selected + hover keeps the selected fill`);
+                        assert.equal(hovered.ring, true, `${where} selected + hover adds a ring`);
+                    } else {
+                        assert.equal(hovered.bg, ITEM_HOVER[rendered], `${where} hover of item ${index}`);
+                        assert.notEqual(hovered.bg, still.bg, `${where} hovered item ${index} looks like the selected one`);
+                        assert.equal(still.bg, SELECTED[rendered], `${where} selected item while ${index} is hovered`);
+                        assert.equal(hovered.checked, 'false');
+                    }
+                }
+                await page.mouse.move(1, 1); await page.waitForTimeout(150);
+                // Keyboard focus: a 2 px ring on the focused item, whether it is selected or not.
+                await page.keyboard.press('ArrowDown'); await page.waitForTimeout(150);
+                const focusedIndex = (selected + 1) % 3, focused = await state(focusedIndex);
+                assert.equal(focused.outline, true, `${where} keyboard focus ring`);
+                assert.equal(focused.bg, ITEM_HOVER[rendered], `${where} keyboard focus fill`);
+                await page.keyboard.press('ArrowUp'); await page.waitForTimeout(150);
+                assert.equal((await state(selected)).outline, true, `${where} keyboard focus ring on the selected item`);
+                await page.keyboard.press('Escape');
+                await context.close();
+            }
+        });
+        await check('the drawer Theme control keeps the selected segment distinct from a hovered one (D13-4)', async () => {
+            for (const stored of ['light', 'dark']) {
+                const { context, page } = await newPage({ viewport: { width: 390, height: 844 } });
+                await context.addInitScript((value) => { try { localStorage.setItem('codemastery.theme', value); } catch { /* blocked */ } }, stored);
+                await page.goto(url('/courses')); await ready(page);
+                await page.getByRole('button', { name: 'Toggle navigation' }).click();
+                const group = page.getByRole('radiogroup', { name: 'Theme' }); await group.waitFor();
+                const pill = (name) => group.getByRole('radio', { name }).evaluate((node) => [getComputedStyle(node, '::before').backgroundColor, getComputedStyle(node).color]);
+                const selectedName = stored === 'light' ? 'Light' : 'Dark', otherName = 'System';
+                await group.getByRole('radio', { name: otherName }).hover(); await page.waitForTimeout(250);
+                const [selectedPill, hoveredPill] = [await pill(selectedName), await pill(otherName)];
+                assert.notEqual(selectedPill[0], hoveredPill[0], `${stored}: hovered segment looks selected`);
+                assert.deepEqual(selectedPill, ['rgb(255, 255, 255)', 'rgb(10, 11, 15)']);
+                await context.close();
+            }
+        });
+        await check('StatusPill glyphs take their label colour; Needs-attention glyphs keep their semantic accents (D13-1)', async () => {
+            for (const stored of ['light', 'dark']) {
+                const { context, page } = await newPage();
+                await context.addInitScript((value) => { try { localStorage.setItem('codemastery.theme', value); } catch { /* blocked */ } }, stored);
+                for (const screen of ['teaching', 'admin-courses', 'course', 'overview']) {
+                    await page.goto(url(`/preview?screen=${screen}`)); await ready(page);
+                    const pills = await page.evaluate(() => [...document.querySelectorAll('span[data-tone]')].filter((node) => node.querySelector('svg'))
+                        .map((node) => [node.textContent, getComputedStyle(node).color, getComputedStyle(node.querySelector('svg')).color, getComputedStyle(node.querySelector(':scope > span')).color]));
+                    assert(pills.length > 0, `${screen}: no pills`);
+                    for (const [text, pillColor, glyph, label] of pills) assert(glyph === label && label === pillColor, `${stored}/${screen} ${text}: glyph ${glyph}, label ${label}`);
+                    if (screen === 'teaching') {
+                        const published = pills.find(([text]) => text === 'Published');
+                        assert(published, 'Published pill');
+                        const attention = await page.evaluate(() => [...document.querySelectorAll('aside[aria-label="Needs attention"] li')].filter((node) => node.querySelector('svg'))
+                            .map((node) => [getComputedStyle(node.querySelector('svg')).color, getComputedStyle(node).color]));
+                        assert.equal(attention.length, 3);
+                        for (const [glyph, text] of attention) assert.notEqual(glyph, text, `${stored}: an attention glyph lost its accent`);
+                    }
+                }
+                await context.close();
+            }
+        });
+        await check('header order: landing Catalogue → Theme → Sign in → Create account; workspace utilities → Theme → account menu (D13-2, D13-3)', async () => {
+            const { context, page } = await newPage();
+            await page.goto(url('/')); await ready(page);
+            const landing = await page.locator('header nav :is(a, button):visible').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')?.startsWith('Theme:') ? 'Theme' : node.textContent.trim()));
+            assert.deepEqual(landing, ['Catalogue', 'Theme', 'Sign in', 'Create account']);
+            await page.goto(url('/preview?screen=learner-home')); await ready(page);
+            const right = await page.locator('header :is(button, a[aria-label]):visible').evaluateAll((nodes) => nodes.map((node) => (node.getAttribute('aria-label') ?? node.textContent).replace(/^(Theme|Account menu|Notifications).*/, '$1')));
+            assert.deepEqual(right.slice(-3), ['Notifications', 'Theme', 'Account menu']);
+            await context.close();
+        });
+        for (const reducedMotion of ['no-preference', 'reduce']) await check(`the Theme tooltip closes with the menu and never stays behind after dismissal, by pointer and keyboard (${reducedMotion} motion) (D13-5)`, async () => {
+            const { context, page } = await newPage({ reducedMotion });
+            await page.goto(url('/preview?screen=learner-home')); await ready(page);
+            const button = themeButton(page).first(), menu = page.getByRole('menu', { name: 'Theme' });
+            const tips = () => page.evaluate(() => [...document.querySelectorAll('.MuiTooltip-popper')].filter((node) => node.textContent === 'Theme' && node.getClientRects().length && Number(getComputedStyle(node.firstElementChild ?? node).opacity) > 0.5).length);
+            // Any trace of the tooltip (a fading one too) while the menu is open would overlap the menu.
+            const traces = () => page.evaluate(() => [...document.querySelectorAll('.MuiTooltip-popper')].filter((node) => node.textContent === 'Theme' && node.getClientRects().length && Number(getComputedStyle(node.firstElementChild ?? node).opacity) > 0.05).length);
+            const settle = () => page.waitForTimeout(700);
+            const box = await button.boundingBox(), away = async () => { await page.mouse.move(box.x - 300, box.y + 400); await settle(); };
+            for (const label of ['System', 'Light', 'Dark']) {
+                await away(); await button.hover(); await settle(); assert.equal(await tips(), 1, `${label}: hover shows the tooltip`);
+                await button.click(); await menu.waitFor(); await page.waitForTimeout(50); assert.equal(await traces(), 0, `${label}: the tooltip fades over the open menu`);
+                await settle(); assert.equal(await tips(), 0, `${label}: hidden while the menu is open`);
+                await page.getByRole('menuitemradio', { name: new RegExp(`^${label}`) }).click();
+                await page.mouse.click(box.x - 300, box.y + 400); await menu.waitFor({ state: 'hidden' }); await settle();
+                assert.equal(await tips(), 0, `${label}: stranded after an outside click`);
+                await away(); assert.equal(await tips(), 0);
+                await button.hover(); await settle(); assert.equal(await tips(), 1, `${label}: a new hover shows it again`);
+            }
+            // Opened and closed without a selection, the pointer staying on the button: no stale reopening.
+            await button.click(); await menu.waitFor(); await button.click(); await menu.waitFor({ state: 'hidden' }); await settle();
+            assert.equal(await tips(), 0, 'stale hover after closing with the button');
+            await away(); await button.hover(); await settle(); assert.equal(await tips(), 1);
+            // The pointer leaves while the menu is open; Escape restores focus without a tooltip.
+            await button.click(); await menu.waitFor(); await away(); await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' }); await settle();
+            assert.equal(await button.evaluate((node) => node === document.activeElement), true);
+            assert.equal(await tips(), 0, 'synthetic focus restoration reopened the tooltip');
+            // Keyboard: Tab onto the button shows it; Enter opens; arrows and Enter select; Escape returns focus without it.
+            await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab'); await settle();
+            assert.equal(await button.evaluate((node) => node === document.activeElement), true); assert.equal(await tips(), 1, 'keyboard focus shows the tooltip');
+            await page.keyboard.press('Enter'); await menu.waitFor(); await settle(); assert.equal(await tips(), 0);
+            await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter'); await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' }); await settle();
+            assert.equal(await button.evaluate((node) => node === document.activeElement), true); assert.equal(await tips(), 0, 'Escape left a tooltip');
+            await page.keyboard.press('Tab'); await settle(); assert.equal(await tips(), 0);
+            await page.keyboard.press('Shift+Tab'); await settle(); assert.equal(await tips(), 1, 'returning by keyboard shows it again');
+            // Repeated cycles, then a route change: nothing stays behind.
+            for (let round = 0; round < 4; round++) { await button.click(); await menu.waitFor(); await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' }); }
+            await away(); await page.getByRole('link', { name: 'My courses' }).first().click(); await ready(page); await settle();
+            assert.equal(await tips(), 0, 'a tooltip survived the route change');
+            await context.close();
+        });
     }
 
     // One control per rendered shell at the r12 widths, both schemes, with screenshots.
