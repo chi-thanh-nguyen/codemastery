@@ -898,7 +898,8 @@ describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
         await tabTo(other('After')); await pointerLeaves(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
         await pointerEnters(trigger()); await advance(400); expect(tooltipShown()).toBe(true);
     });
-    it('never leaves the tooltip behind after choosing System, Light or Dark and dismissing by outside click, Tab, Shift+Tab or a second press', async () => {
+    // One test per choice keeps each well inside the per-test timeout on a loaded CI runner.
+    for (const label of ['System', 'Light', 'Dark']) it(`never leaves the tooltip behind after choosing ${label} and dismissing by outside click, Tab, Shift+Tab or a second press`, async () => {
         await render(page);
         const dismissals: Array<[string, () => Promise<void>]> = [
             ['outside click', async () => press(other('Before'))],
@@ -906,7 +907,7 @@ describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
             ['Shift+Tab', async () => act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })); })],
             ['second press', async () => press(trigger())],
         ];
-        for (const label of ['System', 'Light', 'Dark']) {
+        {
             for (const [how, dismiss] of dismissals) {
                 await pointerEnters(trigger()); await advance(400);
                 await press(trigger()); await advance(1); // MUI's ClickAwayListener arms itself on a 0 ms timer
@@ -922,7 +923,7 @@ describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
                 await pointerLeaves(trigger()); await tabTo(other('After')); await advance(1000);
             }
         }
-        expect(trigger().getAttribute('aria-label')).toBe('Theme: Dark');
+        expect(trigger().getAttribute('aria-label')).toBe(label === 'System' ? 'Theme: System (currently Dark)' : `Theme: ${label}`);
     });
     it('stays consistent through rapid open and close cycles', async () => {
         await render(page);

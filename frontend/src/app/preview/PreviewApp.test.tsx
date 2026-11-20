@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -20,6 +20,11 @@ async function typeInto(input: HTMLInputElement, value: string) {
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 class DOMMatrixStub { m22 = 1; constructor(transform?: string) { const scale = transform?.match(/scale\(([\d.]+)\)/)?.[1]; this.m22 = scale ? Number(scale) : 1; } }
+
+// The preview is a lazily loaded chunk. Its first import (transforming and evaluating every preview screen and the
+// graph library) is a one-off cost of the test environment, paid here under the hook timeout rather than inside the
+// 5 s timeout of whichever test mounts the preview first; App's lazy import then resolves at once.
+beforeAll(async () => { await import('./PreviewApp'); }, 30_000);
 
 beforeEach(() => {
     vi.stubGlobal('ResizeObserver', ResizeObserverStub);
@@ -99,7 +104,9 @@ describe('isolated design preview', () => {
     it('follows global theme changes until locally overridden without writing the preference', async () => {
         localStorage.setItem('codemastery.theme', 'light');
         const writePreference = vi.spyOn(Storage.prototype, 'setItem');
-        await mount();
+        // A workspace screen, not the index: the index renders the whole design reference (about 1,900 nodes), and
+        // re-rendering it on every scheme change made this test the slowest of the suite (it timed out once on CI).
+        await mount('?screen=learner-home');
         expect(document.documentElement.dataset.colorScheme).toBe('light');
         await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'dark' })));
         expect(document.documentElement.dataset.colorScheme).toBe('dark');
@@ -139,7 +146,7 @@ describe('isolated design preview', () => {
         writePreference.mockRestore();
         await act(async () => root.unmount());
         root = createRoot(host);
-        await mount();
+        await mount('?screen=learner-home');
         expect(document.documentElement.dataset.colorScheme).toBe('light');
         await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Toggle navigation"]')!.click());
         expect(document.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Light');
