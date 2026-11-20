@@ -606,13 +606,34 @@ files only:
   choice is held in memory for the document, never written to storage, never sent to
   other tabs and gone on reload or when the document leaves `/preview`.
 
-Known limits: the bare "Restoring your session…" state at `/` (rendered by
-`routes/index.tsx` outside any shell) shows no Theme control, although it renders in the
-effective scheme; the workspace restore state shows the control. FE34 does not include
-the A13 preview-isolation fix in `AuthProvider.tsx` or the A14 response-metadata
-(`ETag`) capability of the shared HTTP client; neither has an owning Issue. Developer
-evidence is recorded in [testing.md](testing.md#fe34-theme-system-verification--20-november-2026);
-independent Light, Dark and System acceptance stays with QA07 #63.
+While the ADR014 restore runs, `/` shows the landing header (lockup and Theme button, no
+sign-in actions) with "Restoring your session…" (`LandingRestoringView`), and protected
+routes show the same line inside the workspace frame, so every restore state keeps its
+Theme control. Developer evidence is recorded in
+[testing.md](testing.md#fe34-theme-system-verification--20-november-2026); independent
+Light, Dark and System acceptance stays with QA07 #63.
+
+**FE03 remediation on PR #261 (20 November 2026, Leader authorization).**
+
+- *A13 preview isolation, fixed.* `AuthProvider` reads `restoreOnLoad` once at mount, and
+  `App.tsx` decides once per document whether it was opened at `/preview`. A document opened
+  there never restores by itself: not on load, not when another tab signs in, not after a
+  failed sign-in and not on focus, page show or wake-up. A sign-out broadcast changes
+  nothing there unless the document has a session or a pending sign-in to end. The isolation
+  ends only when the person signs in explicitly in that document (after leaving the preview
+  for the sign-in page); the document then follows the normal ADR014 lifecycle. Before the
+  fix, a sign-in in another tab, or a theme change after leaving `/preview` in the same
+  document, sent `POST /api/auth/refresh` from it.
+- *A14 shared-transport capability, implemented in `shared/api/httpClient.ts`.* The explicit
+  no-content mode of `CT16-B1-NO-CONTENT-2026-11-09-r1` (`responseMode: 'no-content'`,
+  `expectedStatus: 204`, no decoder, `Promise<void>`), a `GET`-only
+  `responseMode: 'json-with-metadata'` that returns `{ body, etag }` with the `ETag` read only
+  after the status, media type, decoding and current-generation checks, and safe 412/428
+  titles and local messages. Existing JSON callers and the ADR014 sign-out 204 are unchanged.
+  Still required before FE18 acceptance: FE18's own client, hook and UI binding, and the
+  backend CORS change that allows `If-Match` and exposes `ETag` for approved origins
+  (`SecurityConfig` allows only `Authorization` and `Content-Type` today); neither is part
+  of this change.
 
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
 in `src/routes/index.tsx`, listed in
@@ -636,10 +657,9 @@ Learner, Instructor and Administrator workspaces and the proposed public screens
 with synthetic sample data. Since 7 November 2026 it shows no preview notice or
 switcher: screens open by link and the account menu keeps “Preview index” and
 “Reset sample data”. It is designed never to call the API, read the session or write browser
-storage, and it adds no route: screens change through `?screen=` query parameters. One
-recorded defect remains on `main` (`DESIGN.md` A13): when another tab of the same origin
-signs in, `AuthProvider`'s cross-tab handler runs a restore in the preview document,
-which sends `POST /api/auth/refresh`. Screens marked Preview only in `DESIGN.md` exist only
+storage, and it adds no route: screens change through `?screen=` query parameters. A
+document opened at `/preview` also stays out of other tabs' sign-ins and sign-outs (the
+`DESIGN.md` A13 defect, fixed by PR #261). Screens marked Preview only in `DESIGN.md` exist only
 there, with sample data; their contracts are approved, but they are not built for
 production routes or API integration.
 

@@ -748,8 +748,8 @@ test-count or coverage-percentage claim is made for them.
   ([record](#fe34-theme-system-verification--20-november-2026)). They are developer
   evidence: no screen-reader output, Firefox run, real backend or QA07 #63 acceptance is
   recorded for them. The r12 quiz-attempt, autosave and Instructor-management states remain
-  specified, not implemented. The preview suite does not cover the recorded A13 case (a
-  sign-in in another tab makes the `/preview` document send `POST /api/auth/refresh`).
+  specified, not implemented. The A13 preview-isolation case is covered by the provider,
+  preview and harness checks of the FE34 record.
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
@@ -4337,9 +4337,9 @@ operating-system changes, the Theme control and the preview override, and render
 Light, Dark and System checks of the implemented shells and Live screens. That evidence
 is implementation evidence only. QA07 #63 keeps independent Final acceptance and runs
 its theme checks only after FE34 delivers the schemes; until then they are coverage gaps.
-FE34 adds no E2E case outside the CT19 and CT35 selections, and it excludes the A13
-preview-isolation case and the A14 response-metadata capability, which have no owning
-Issue. Every row stays NOT_RUN until a check actually runs.
+FE34 adds no E2E case outside the CT19 and CT35 selections. It excluded the A13
+preview-isolation case and the A14 response-metadata capability; both were later
+remediated on PR #261 under the Leader's FE03 authorization of 20 November 2026. Every row stays NOT_RUN until a check actually runs.
 
 | Area | What to verify once implemented | Layer |
 | --- | --- | --- |
@@ -4351,7 +4351,7 @@ Issue. Every row stays NOT_RUN until a check actually runs.
 | Server-authoritative quiz lifecycle | Only the explicit start actions send `b3StartAttempt`; Resume, Back, Forward, reload and direct links read the attempt by its identity; each start and read outcome shows its F6 state; the timer counts to the returned `expiresAt`; no request after `expiresAt`; the result read's 409 before finalization | Vitest with controlled responses; real-backend checks only within the CT19/CT35 selections |
 | Autosave reconciliation | Every F6 save-state transition, including failed and unknown saves, Checking, Reconcile, "Save my answers" and "Use saved answers", submit gating after a confirmed final save, and late responses ignored by attempt, save sequence and session generation | Vitest with controlled responses and timers |
 | Instructor management workflows | Server-decided editability (a 409 keeps the draft; "Save as a new question"; no automatic replacement), editor recovery and unknown outcomes, URL replacement after creation, regrading with the exact `submittedAt`, and the adaptive-settings snapshot with `ETag`/`If-Match` and 412/428 recovery | Vitest; the settings cases keep their existing [CT14 B1-O18/O19](decisions/005-batch-01-contract-approvals.md#163-ct14-acceptance-oracles-and-direct-consumer-traceability) allocation |
-| Data, API and preview isolation | Production screens show only decoded data from approved operations and no fixture or sample data; `/preview` sends no request, reads no session and writes no storage, including when another tab signs in or out (the A13 case, currently a known defect) | Existing preview suite, extended for A13 by its owner |
+| Data, API and preview isolation | Production screens show only decoded data from approved operations and no fixture or sample data; `/preview` sends no request, reads no session and writes no storage, including when another tab signs in or out (the A13 case, fixed and covered by PR #261) | Existing preview suite, `AuthProvider.test.tsx` and the browser harness |
 
 Report results per layer and only after the checks actually run. Unit results do not
 establish browser, assistive-technology, backend or deployment behavior, and a design
@@ -4403,6 +4403,53 @@ panel).
 open menu, or Windows high-contrast session was recorded; forced colours were checked only
 through Chromium emulation. Contrast was computed from rendered colours on the sampled
 screens, not across every state. The `e2e/` suites were not run locally for this change.
+
+## FE03 remediation and FE34 completion verification — 20 November 2026
+
+**Scope and authority.** The Project Leader's FE03/FE34 remediation instruction of
+20 November 2026 on PR #261 (Refs #56, #255): the A13 preview-isolation fix, the landing
+restore view, the A14 frontend transport capability and the D9-7 E2E assertion. Developer
+evidence only; QA01 and QA07 acceptance are not claimed. Same host as the FE34 record.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Unit and component tests | `cd frontend && npm test` | 638 tests in 16 files passed |
+| Type check and build | `cd frontend && npm run build` | Passed |
+| Browser harness | `npm run test:browser -- --engine all --playwright ../e2e/node_modules/@playwright/test` | Chromium 153: 60 passed. WebKit 26.6: 59 passed. Firefox did not launch (environmental) |
+| E2E on the disposable stack | `cd e2e && npm ci && npm test` | 87 passed, 6 skipped by design, 22 failed: every failure is `firefox-desktop` at browser launch. The two CI failures of run 44763711438 (`chromium-mobile` and `webkit-mobile`, landing navigation) pass |
+| E2E lifecycle | `cd e2e && node --test fixtures/*.test.mjs` | 155 passed |
+
+**A13 reproduction.** On the previous PR head (`5346144`), the new `AuthProvider.test.tsx`
+and `PreviewApp.test.tsx` A13 cases failed (seven cases). Against a real local Compose
+stack (an isolated project with its own volumes, removed afterwards) and a build of that
+head served on `localhost:5173`, a Playwright CLI run with two tabs recorded two
+`POST /api/auth/refresh` requests from the `/preview` tab while the other tab signed out
+and in twice. With the fix, the same run recorded none in Chromium and in WebKit. A third,
+normal tab still adopted the session. A Playwright trace of the fixed run was kept locally.
+
+**Real-backend browser checks (Playwright CLI 0.1.23, Chromium and WebKit; Pixel 7 and
+iPhone 14 emulation).**
+
+- Registration and sign-in: the refresh cookie is `HttpOnly` and `SameSite=Strict`, and no
+  token is written to storage.
+- Landing restore view with a held refresh: one Theme control and no sign-in actions.
+- Theme kept through sign-in, reload of `/profile` and sign-out.
+- A sign-out in another tab: this tab goes to Sign in and shows the session-ended notice once.
+- A refused refresh: Sign in, with no notice.
+- A network failure on sign-in: a safe message and exactly one request.
+- Theme menu by keyboard, with its status message.
+- No page overflow and the correct control count on `/home`, `/courses`, `/my-courses` and
+  `/profile` at 320–1440 px in both schemes.
+- The mobile landing header (D9-7) and the drawer control.
+- Printing in light, `prefers-contrast: more`, forced colours on tinted states, and a live
+  OS change under System.
+- No console errors.
+
+Firefox could not be launched by the CLI either.
+
+**Limits.** No screen-reader session and no Firefox run. The A14 capability is verified
+only at the transport level; FE18's binding and the backend CORS change it needs are not
+part of this work.
 
 ## AS04 quiz grading unit verification — 20 November 2026
 
