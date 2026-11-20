@@ -1,24 +1,30 @@
 package com.codemastery.modules.assessment.infrastructure.persistence.repository;
 
+import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.model.Quiz;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
+import com.codemastery.modules.assessment.infrastructure.persistence.entity.QuestionEntity;
 import com.codemastery.modules.assessment.infrastructure.persistence.entity.QuizEntity;
 import com.codemastery.modules.assessment.infrastructure.persistence.entity.QuizQuestionEntity;
 import jakarta.persistence.EntityManager;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Repository;
 
-@Component
+/**
+ * V004 quiz persistence. Callers own the transaction: writes run inside the Course configuration
+ * write unit, and list reads inside one read-only REPEATABLE READ snapshot.
+ */
+@Repository
 public class QuizRepositoryImpl implements QuizRepository {
-
-    private static final Comparator<Quiz> TITLE_C_THEN_UUID =
-            Comparator.comparing(Quiz::title).thenComparing(q -> q.id().toString());
 
     private final QuizJpaRepository jpaRepository;
     private final EntityManager entityManager;
@@ -29,118 +35,114 @@ public class QuizRepositoryImpl implements QuizRepository {
     }
 
     @Override
-    @Transactional
-    public Quiz save(Quiz quiz, List<UUID> orderedQuestionIds) {
-        Objects.requireNonNull(quiz, "quiz");
-        Objects.requireNonNull(orderedQuestionIds, "orderedQuestionIds");
+    public Quiz save(Quiz quiz) {
+        return toDomain(jpaRepository.saveAndFlush(toEntity(quiz)));
+    }
 
-        QuizEntity entity = new QuizEntity(
-                quiz.id(),
-                quiz.course_id(),
-                quiz.title(),
-                quiz.kind(),
-                quiz.time_limit_seconds(),
-                quiz.publication_status()
-        );
-        QuizEntity saved = jpaRepository.saveAndFlush(entity);
-
-        jpaRepository.deleteMembershipsByQuizId(saved.getId());
-        entityManager.flush();
-
-        List<QuizQuestionEntity> rows = new ArrayList<>(orderedQuestionIds.size());
-        for (int i = 0; i < orderedQuestionIds.size(); i++) {
-            rows.add(new QuizQuestionEntity(
-                    UUID.randomUUID(),
-                    saved.getId(),
-                    orderedQuestionIds.get(i),
-                    i + 1
-            ));
-        }
-        for (QuizQuestionEntity row : rows) {
-            entityManager.persist(row);
+    @Override
+    public void replaceMembership(UUID quizId, List<UUID> orderedQuestionIds) {
+        Objects.requireNonNull(quizId, "quizId");
+        List<UUID> ids = List.copyOf(orderedQuestionIds);
+        // Delete before insert: the pair key is not deferrable, and positions restart at 1.
+        jpaRepository.deleteMembership(quizId);
+        for (int index = 0; index < ids.size(); index++) {
+            entityManager.persist(new QuizQuestionEntity(UUID.randomUUID(), quizId, ids.get(index), index + 1));
         }
         entityManager.flush();
-
-        return toDomain(saved);
     }
 
     @Override
-    @Transactional
-    public Quiz updatePublicationStatus(UUID quizId, String publicationStatus) {
-        QuizEntity entity = jpaRepository.findById(quizId)
-                .orElseThrow(() -> new IllegalArgumentException("Quiz not found: " + quizId));
-        entity.setPublicationStatus(publicationStatus);
-        QuizEntity saved = jpaRepository.saveAndFlush(entity);
-        return toDomain(saved);
-    }
-
-    @Override
-    public Optional<Quiz> findByIdAndCourseId(UUID quizId, UUID courseId) {
-        if (quizId == null || courseId == null) {
-            return Optional.empty();
-        }
-        return jpaRepository.findByIdAndCourseId(quizId, courseId).map(QuizRepositoryImpl::toDomain);
-    }
-
-    @Override
-    public List<Quiz> findByCourseId(UUID courseId) {
-        if (courseId == null) {
-            return List.of();
-        }
-        return jpaRepository.findByCourseId(courseId).stream()
-                .map(QuizRepositoryImpl::toDomain)
-                .sorted(TITLE_C_THEN_UUID)
-                .toList();
-    }
-
-    @Override
-    public List<Quiz> findPublishedByCourseId(UUID courseId) {
-        if (courseId == null) {
-            return List.of();
-        }
-        return jpaRepository.findPublishedByCourseId(courseId).stream()
-                .map(QuizRepositoryImpl::toDomain)
-                .sorted(TITLE_C_THEN_UUID)
-                .toList();
-    }
-
-    @Override
-    public List<QuizQuestionMembership> findMembershipsByQuizId(UUID quizId) {
-        if (quizId == null) {
-            return List.of();
-        }
-        return jpaRepository.findMembershipsByQuizId(quizId).stream()
-                .map(row -> new QuizQuestionMembership(
-                        row.getId(),
-                        row.getQuizId(),
-                        row.getQuestionId(),
-                        row.getPosition()
-                ))
-                .toList();
-    }
-
-    @Override
-    public boolean hasAttempts(UUID quizId) {
-        return quizId != null && jpaRepository.existsAttemptByQuizId(quizId);
-    }
-
-    @Override
-    @Transactional
-    public void deleteById(UUID quizId) {
-        jpaRepository.deleteMembershipsByQuizId(quizId);
-        entityManager.flush();
+    public void delete(UUID quizId) {
+        Objects.requireNonNull(quizId, "quizId");
+        jpaRepository.deleteMembership(quizId);
         jpaRepository.deleteById(quizId);
         entityManager.flush();
     }
 
+    @Override
+    public Optional<Quiz> findInCourse(UUID quizId, UUID courseId) {
+        return jpaRepository.findInCourse(quizId, courseId).map(QuizRepositoryImpl::toDomain);
+    }
+
+    @Override
+    public Optional<Quiz> findInCourseForUpdate(UUID quizId, UUID courseId) {
+        return jpaRepository.lockInCourse(quizId, courseId).map(entity -> {
+            // Never trust state loaded before the lock was granted (ADR005 §13.3).
+            entityManager.refresh(entity);
+            return toDomain(entity);
+        });
+    }
+
+    @Override
+    public boolean hasAttempts(UUID quizId) {
+        return jpaRepository.hasAttempts(quizId);
+    }
+
+    @Override
+    public long countInCourse(UUID courseId, boolean publishedOnly) {
+        return publishedOnly ? jpaRepository.countPublishedInCourse(courseId) : jpaRepository.countInCourse(courseId);
+    }
+
+    @Override
+    public List<Quiz> findPageInCourse(UUID courseId, boolean publishedOnly, int page, int size) {
+        long offset = (long) page * size;
+        List<QuizEntity> rows = publishedOnly
+                ? jpaRepository.findPublishedPageInCourse(courseId, size, offset)
+                : jpaRepository.findPageInCourse(courseId, size, offset);
+        return rows.stream().map(QuizRepositoryImpl::toDomain).toList();
+    }
+
+    @Override
+    public Map<UUID, Integer> countMembers(Collection<UUID> quizIds) {
+        if (quizIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, Integer> counts = new HashMap<>();
+        for (Object[] row : jpaRepository.countMembers(Set.copyOf(quizIds))) {
+            counts.put((UUID) row[0], Math.toIntExact((Long) row[1]));
+        }
+        return Map.copyOf(counts);
+    }
+
+    @Override
+    public Map<UUID, List<Member>> findMembers(Collection<UUID> quizIds) {
+        if (quizIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, List<Member>> members = new LinkedHashMap<>();
+        for (Object[] row : jpaRepository.findMembers(Set.copyOf(quizIds))) {
+            members.computeIfAbsent((UUID) row[0], ignored -> new ArrayList<>())
+                    .add(new Member((Integer) row[1], toDomain((QuestionEntity) row[2])));
+        }
+        Map<UUID, List<Member>> result = new LinkedHashMap<>();
+        members.forEach((quizId, rows) -> result.put(quizId, List.copyOf(rows)));
+        return result;
+    }
+
+    @Override
+    public List<Question> findQuestionsInSkills(Collection<UUID> questionIds, Collection<UUID> skillIds) {
+        if (questionIds.isEmpty() || skillIds.isEmpty()) {
+            return List.of();
+        }
+        return jpaRepository.findQuestionsInSkills(Set.copyOf(questionIds), Set.copyOf(skillIds)).stream()
+                .map(QuizRepositoryImpl::toDomain)
+                .toList();
+    }
+
+    private static QuizEntity toEntity(Quiz quiz) {
+        return new QuizEntity(quiz.id(), quiz.course_id(), quiz.title(), quiz.kind(), quiz.time_limit_seconds(),
+                quiz.publication_status());
+    }
+
     private static Quiz toDomain(QuizEntity entity) {
-        return new Quiz(
-                entity.getId(),
-                entity.getCourseId(),
-                entity.getTitle(),
-                entity.getKind(),
-                entity.getTimeLimitSeconds(),
-                entity.getPublicationStatus()
-        );
+        return new Quiz(entity.getId(), entity.getCourseId(), entity.getTitle(), entity.getKind(),
+                entity.getTimeLimitSeconds(), entity.getPublicationStatus());
+    }
+
+    private static Question toDomain(QuestionEntity entity) {
+        return new Question(entity.getId(), entity.getSkillId(), entity.getPrompt(), entity.getKind(),
+                entity.getDifficulty(),
+                entity.getOptions() == null ? null : entity.getOptions().clone(),
+                entity.getCorrectOptions() == null ? null : entity.getCorrectOptions().clone());
     }
 }
