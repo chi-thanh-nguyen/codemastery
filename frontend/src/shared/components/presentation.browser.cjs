@@ -402,6 +402,59 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
         await context.close();
     }
 
+    // FE34 + FE03: the landing restore state keeps one Theme control (controlled refresh timing).
+    for (const width of [390, 768, 1280]) {
+        const { context, page, api } = await newPage({ viewport: { width, height: 844 } });
+        await context.addInitScript(() => { try { localStorage.setItem('codemastery.theme', 'dark'); } catch { /* blocked */ } });
+        api.state.hold = /^\/auth\/refresh$/;
+        await check(`the landing page shows one Theme control while the session restore runs and one after it (${width} px)`, async () => {
+            await page.goto(url('/'));
+            await page.getByText('Restoring your session…').waitFor();
+            assert.equal(await themeButton(page).count(), 1);
+            assert.equal(await page.getByRole('link', { name: 'Sign in' }).count(), 0);
+            assert.equal(await scheme(page), 'dark');
+            const restoringHeader = await page.locator('header').first().boundingBox();
+            await page.screenshot({ path: path.join(dir, `fe34-landing-restoring-${width}.png`) });
+            await choose(page, 'Light'); assert.equal(await scheme(page), 'light');
+            api.state.hold = null; api.state.release?.();
+            await page.getByRole('heading', { level: 1, name: 'Learn programming at the pace of what you actually know.' }).waitFor();
+            assert.equal(await themeButton(page).count(), 1);
+            const landingHeader = await page.locator('header').first().boundingBox();
+            assert.equal(Math.round(restoringHeader.height), Math.round(landingHeader.height), 'the header keeps its height');
+            assert.deepEqual(api.state.requests.filter((entry) => entry.includes('/api/auth/')), ['POST /api/auth/refresh']);
+            const { scroll, client } = await overflow(page); assert(scroll <= client, `overflow ${scroll} > ${client}`);
+        });
+        await context.close();
+    }
+
+    // A13 (DESIGN S26, ADR014 §7): two real tabs; the preview tab sends nothing when the other signs in or out.
+    {
+        const { context, page: preview } = await newPage();
+        const previewRequests = [];
+        preview.on('request', (request) => { if (new URL(request.url()).pathname.startsWith('/api/')) previewRequests.push(`${request.method()} ${new URL(request.url()).pathname}`); });
+        await preview.goto(url('/preview?screen=learner-home')); await ready(preview);
+        await check('A13: with /preview open, a sign-in and a sign-out in another real tab send no request from the preview and install no session there', async () => {
+            const live = await context.newPage(); await live.goto(url('/login')); await ready(live);
+            await live.locator('#login-email').fill('learner@example.test'); await live.locator('#login-password').fill('correct-password-123');
+            await live.getByRole('button', { name: 'Sign in', exact: true }).click();
+            await live.waitForURL(/\/home$/);
+            await preview.waitForTimeout(500);
+            await live.getByRole('button', { name: /^Account menu/ }).click();
+            await live.getByRole('menuitem', { name: 'Sign out' }).click();
+            await live.waitForURL(/\/login$/);
+            await live.goto(url('/login')); await ready(live);
+            await live.locator('#login-email').fill('learner@example.test'); await live.locator('#login-password').fill('correct-password-123');
+            await live.getByRole('button', { name: 'Sign in', exact: true }).click();
+            await live.waitForURL(/\/home$/);
+            await preview.waitForTimeout(500);
+            assert.deepEqual(previewRequests, []);
+            assert.equal(new URL(preview.url()).pathname, '/preview');
+            assert.equal(await preview.getByText('Restoring your session…').count(), 0);
+            await live.close();
+        });
+        await context.close();
+    }
+
     // Special modes.
     {
         const { context, page } = await newPage();
