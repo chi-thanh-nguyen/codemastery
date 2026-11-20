@@ -282,3 +282,380 @@ it('shows Learner home empty and retryable error states', async () => {
     fail = false; await click('Try again');
     expect(host.textContent).toContain("You haven't joined a course yet"); expect(host.querySelector('a[href="/courses"]')?.textContent).toBeTruthy();
 });
+describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
+    const token = `${'Q'.repeat(42)}w`, newPassword = '  a new exact password  ';
+    const requested = 'If an account matches, a password reset link will be sent.', completed = 'Password reset. Sign in with your new password.';
+    /** AU07 problems are field-free (BusinessRuleException); only the detail differs, and the client never shows it. */
+    const problem = (status: number, title: string, instance: string, detail = 'The request could not be completed.') => new Response(JSON.stringify({
+        type: 'about:blank', title, status, detail, instance,
+    }), { status, headers: { 'Content-Type': 'application/problem+json' } });
+    const tokenB = `${'R'.repeat(42)}A`;
+    /** A link opened in a tab already showing the page: a same-document fragment navigation (no reload). */
+    async function openInSameTab(path: string) {
+        await act(async () => { window.history.pushState(null, '', path); window.dispatchEvent(new PopStateEvent('popstate')); });
+    }
+    /** Records where the page was when each request left, so capability erasure can be ordered against it. */
+    let seen: { path: string; href: string; body?: string; referrerPolicy?: string | null }[];
+    function respond(handler: (path: string) => Response | Promise<Response> | undefined) {
+        seen = [];
+        fetcher.mockImplementation((url: string, init?: RequestInit) => {
+            const path = new URL(url).pathname;
+            seen.push({ path, href: window.location.href, body: init?.body as string | undefined, referrerPolicy: document.head.querySelector('meta[name="referrer"]')?.getAttribute('content') });
+            const answer = handler(path);
+            return answer ? Promise.resolve(answer) : Promise.resolve(json(page));
+        });
+    }
+    const calls = (path: string) => seen.filter((entry) => entry.path === path);
+    async function submit() { await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); }
+    async function fillReset(password = newPassword, confirm = password) { await change('password', password); await change('confirmPassword', confirm); }
+    it('links Sign in to the request page and acknowledges with the API text verbatim', async () => {
+        respond((path) => path === '/api/auth/password-reset-requests' ? json({ message: requested }, 202) : undefined);
+        await mount('/login'); await click('Forgot password?');
+        expect(location.pathname).toBe('/forgot-password'); expect(host.querySelector('h1')?.textContent).toBe('Forgot password');
+        await change('email', ' Learner@Example.COM '); await submit();
+        expect(calls('/api/auth/password-reset-requests').map((entry) => JSON.parse(entry.body!))).toEqual([{ email: 'learner@example.com' }]);
+        expect(host.querySelector('[role="status"]')?.textContent).toBe(requested);
+        expect(document.activeElement?.textContent).toBe(requested);
+        expect(host.querySelector('a[href="/login"]')?.textContent).toBe('Back to sign in');
+    });
+    it.each(['K@example.com', 'a@example.com ', 'missing-at'])('refuses request email %# locally and focuses it', async (email) => {
+        respond(() => undefined);
+        await mount('/forgot-password'); await change('email', email); await submit();
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(0);
+        expect(host.textContent).toContain('Enter a valid ASCII email address.');
+        expect(document.activeElement).toBe(host.querySelector('input[name="email"]'));
+    });
+    it.each([
+        ['network', () => Promise.reject(new Error('private')), "We couldn't reach CodeMastery. Check your connection and try again."],
+        ['server', () => problem(500, 'Internal Server Error', '/api/auth/password-reset-requests'), 'Something went wrong on our side. Try again in a moment.'],
+    ] as const)('shows the F14 %s failure on the request page and retries only on demand', async (_kind, failure, text) => {
+        let fail = true;
+        respond((path) => path === '/api/auth/password-reset-requests' ? (fail ? failure() as Response : json({ message: requested }, 202)) : undefined);
+        await mount('/forgot-password'); await change('email', 'learner@example.com'); await submit();
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain(text); expect(host.textContent).not.toContain('private');
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(1);
+        fail = false; await click('Try again');
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(2); expect(host.querySelector('[role="status"]')?.textContent).toBe(requested);
+    });
+    it('erases the capability before paint and any request, keeps it out of the DOM and storage, and creates no session', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount(`/reset-password#token=${token}`);
+        expect(window.location.pathname).toBe('/reset-password'); expect(window.location.hash).toBe(''); expect(window.location.search).toBe('');
+        expect(seen.every((entry) => !entry.href.includes(token))).toBe(true);
+        expect(document.head.querySelector('meta[name="referrer"]')?.getAttribute('content')).toBe('no-referrer');
+        expect(host.querySelector('h1')?.textContent).toBe('Reset password');
+        await fillReset(); await submit();
+        const sent = calls('/api/auth/password-resets');
+        expect(sent).toHaveLength(1); expect(JSON.parse(sent[0].body!)).toEqual({ token, password: newPassword }); expect(sent[0].href).not.toContain(token);
+        // ADR006 §9.3: every request from this page left under the no-referrer policy and without the capability in the URL.
+        expect(seen.every((entry) => entry.referrerPolicy === 'no-referrer' && !entry.href.includes(token))).toBe(true);
+        expect(host.innerHTML).not.toContain(token); expect(document.documentElement.innerHTML).not.toContain(token);
+        expect(localStorage.length + sessionStorage.length).toBe(0); expect(JSON.stringify(window.history.state ?? {})).not.toContain(token);
+        expect(host.querySelector('[role="status"]')?.textContent).toBe(`${completed}Other signed-in sessions on your account have been signed out.`);
+        expect(host.querySelector('a[href="/login"]')?.textContent).toBe('Sign in');
+        expect(auth.isAuthenticated).toBe(false); expect(calls('/api/auth/login')).toHaveLength(0);
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
+    });
+    it.each([['/reset-password', 'a reload without a capability'], ['/reset-password#token=short', 'a malformed capability'], [`/reset-password?token=${token}`, 'a capability in the query']])(
+        'shows the invalid-link state for %s (%s) without a request', async (path) => {
+            respond(() => undefined);
+            await mount(path);
+            expect(window.location.pathname + window.location.search + window.location.hash).toBe('/reset-password');
+            expect(host.querySelector('h1')?.textContent).toBe('This reset link is invalid or has expired.');
+            expect(host.textContent).toContain('Request a new link from the sign-in page.');
+            expect(host.querySelector('a[href="/forgot-password"]')?.textContent).toBe('Request a new link');
+            expect(calls('/api/auth/password-resets')).toHaveLength(0); expect(host.innerHTML).not.toContain(token);
+        });
+    it.each([
+        ['an invalid, used, replaced or expired capability', 'Reset link is invalid or expired.'],
+        ['any other field-free AU07 400', 'The request is invalid.'],
+    ])('shows the invalid-link state for the producer 400 for %s', async (_case, detail) => {
+        respond((path) => path === '/api/auth/password-resets' ? problem(400, 'Bad Request', path, detail) : undefined);
+        await mount(`/reset-password#token=${token}`); await fillReset(); await submit();
+        expect(host.querySelector('h1')?.textContent).toBe('This reset link is invalid or has expired.');
+        expect(host.textContent).not.toContain(detail);
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
+        expect(calls('/api/auth/password-resets')).toHaveLength(1);
+    });
+    it('replaces the capability when a new link opens in the same tab after a reset', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount(`/reset-password#token=${token}`); await fillReset(); await submit();
+        expect(host.querySelector('h1')?.textContent).toBe('Password updated');
+        await openInSameTab(`/reset-password#token=${tokenB}`);
+        expect(window.location.pathname + window.location.search + window.location.hash).toBe('/reset-password');
+        expect(host.querySelector('h1')?.textContent).toBe('Reset password'); expect(document.activeElement).toBe(host.querySelector('main h1'));
+        expect(host.querySelector<HTMLInputElement>('input[name="password"]')?.value).toBe('');
+        await fillReset(); await submit();
+        expect(calls('/api/auth/password-resets').map((entry) => JSON.parse(entry.body!).token)).toEqual([token, tokenB]);
+        expect(document.documentElement.innerHTML).not.toContain(tokenB); expect(JSON.stringify(window.history.state ?? {})).not.toContain(tokenB);
+        expect(seen.every((entry) => !entry.href.includes(token) && !entry.href.includes(tokenB))).toBe(true);
+    });
+    it('opens the form for a new link in a tab that showed the invalid-link state', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount('/reset-password');
+        expect(host.querySelector('h1')?.textContent).toBe('This reset link is invalid or has expired.');
+        await openInSameTab(`/reset-password#token=${tokenB}`);
+        expect(host.querySelector('h1')?.textContent).toBe('Reset password');
+        await fillReset(); await submit();
+        expect(calls('/api/auth/password-resets').map((entry) => JSON.parse(entry.body!).token)).toEqual([tokenB]);
+    });
+    it('abandons a pending reset for the replaced capability and clears the form', async () => {
+        let first: AbortSignal | undefined;
+        respond(() => undefined);
+        fetcher.mockImplementation((url: string, init?: RequestInit) => {
+            if (new URL(url).pathname === '/api/auth/password-resets') {
+                const body = JSON.parse(init!.body as string);
+                if (body.token === token) { first = init?.signal ?? undefined; return new Promise<Response>(() => undefined); }
+                seen.push({ path: '/api/auth/password-resets', href: window.location.href, body: init!.body as string });
+                return Promise.resolve(json({ message: completed }));
+            }
+            return Promise.resolve(json(page));
+        });
+        await mount(`/reset-password#token=${token}`); await fillReset(); await submit();
+        expect(first?.aborted).toBe(false);
+        await openInSameTab(`/reset-password#token=${tokenB}`);
+        expect(first?.aborted).toBe(true);
+        expect(host.querySelector('button[type="submit"]')?.hasAttribute('aria-disabled')).toBe(false);
+        expect(host.querySelector<HTMLInputElement>('input[name="confirmPassword"]')?.value).toBe('');
+        await fillReset(); await submit();
+        expect(calls('/api/auth/password-resets').map((entry) => JSON.parse(entry.body!).token)).toEqual([tokenB]);
+        expect(host.querySelector('h1')?.textContent).toBe('Password updated');
+    });
+    it('drops the held capability for a malformed new link but keeps it for a fragment without a token', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount(`/reset-password#token=${token}`);
+        await openInSameTab('/reset-password#section');
+        expect(window.location.hash).toBe(''); expect(host.querySelector('h1')?.textContent).toBe('Reset password');
+        await openInSameTab('/reset-password#token=short');
+        expect(window.location.hash).toBe(''); expect(host.querySelector('h1')?.textContent).toBe('This reset link is invalid or has expired.');
+        expect(host.querySelector('form')).toBeNull(); expect(calls('/api/auth/password-resets')).toHaveLength(0);
+    });
+    it('checks the CT01 rule and confirmation locally before any request', async () => {
+        respond(() => undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset('a'.repeat(14)); await submit();
+        expect(document.activeElement).toBe(host.querySelector('input[name="password"]'));
+        await fillReset(newPassword, `${newPassword}x`); await submit();
+        expect(host.textContent).toContain('Passwords must match.'); expect(document.activeElement).toBe(host.querySelector('input[name="confirmPassword"]'));
+        expect(calls('/api/auth/password-resets')).toHaveLength(0);
+    });
+    it('reports F14 failures, sends one request at a time and never replays', async () => {
+        let release!: (value: Response) => void;
+        respond((path) => path === '/api/auth/password-resets' ? new Promise<Response>((resolve) => { release = resolve; }) : undefined);
+        await mount(`/reset-password#token=${token}`); await fillReset();
+        await submit(); await submit();
+        expect(calls('/api/auth/password-resets')).toHaveLength(1);
+        const busy = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+        expect(busy.getAttribute('aria-disabled')).toBe('true'); expect(busy.disabled).toBe(false);
+        await act(async () => busy.click());
+        expect(calls('/api/auth/password-resets')).toHaveLength(1);
+        await act(async () => release(problem(500, 'Internal Server Error', '/api/auth/password-resets')));
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('Something went wrong on our side. Try again in a moment.');
+        expect(document.activeElement).toBe(host.querySelector('[role="alert"]'));
+        expect(calls('/api/auth/password-resets')).toHaveLength(1);
+    });
+    it('aborts an in-flight reset when the page is left', async () => {
+        let signal: AbortSignal | undefined;
+        respond(() => undefined);
+        fetcher.mockImplementation((url: string, init?: RequestInit) => {
+            if (new URL(url).pathname === '/api/auth/password-resets') { signal = init?.signal ?? undefined; return new Promise<Response>(() => undefined); }
+            return Promise.resolve(json(page));
+        });
+        await mount(`/reset-password#token=${token}`); await fillReset(); await submit();
+        expect(signal?.aborted).toBe(false);
+        await go('/login');
+        expect(signal?.aborted).toBe(true);
+    });
+    const field = (name: string) => host.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
+    /** Focus then leave a field, as a keyboard or pointer user does (React's onBlur listens to focusout). */
+    async function leave(name: string) { await act(async () => { field(name).focus(); field(name).blur(); }); }
+    const summary = () => [...host.querySelectorAll('.MuiAlert-root')].find((element) => element.textContent === 'Please check the supplied information.');
+    it('re-validates the request email on blur only once it is in error, with a non-live summary', async () => {
+        respond(() => undefined);
+        await mount('/forgot-password');
+        await change('email', 'missing-at'); await leave('email');
+        expect(field('email').getAttribute('aria-invalid')).toBe('false'); expect(summary()).toBeUndefined();
+        await submit();
+        expect(field('email').getAttribute('aria-invalid')).toBe('true'); expect(document.activeElement).toBe(field('email'));
+        expect(summary()?.getAttribute('role')).toBe('none'); expect(host.querySelector('[role="alert"]')).toBeNull();
+        await change('email', 'still wrong@'); await leave('email');
+        expect(field('email').getAttribute('aria-invalid')).toBe('true'); expect(host.textContent).toContain('Enter a valid ASCII email address.');
+        await change('email', 'learner@example.com'); await leave('email');
+        expect(field('email').getAttribute('aria-invalid')).toBe('false'); expect(host.textContent).not.toContain('Enter a valid ASCII email address.');
+        expect(summary()).toBeUndefined(); expect(calls('/api/auth/password-reset-requests')).toHaveLength(0);
+    });
+    it('re-validates reset fields on blur, checking the confirmation against the current password', async () => {
+        respond(() => undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset('short', 'different'); await submit();
+        expect(document.activeElement).toBe(field('password')); expect(summary()).toBeTruthy();
+        expect(field('password').getAttribute('aria-invalid')).toBe('true'); expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('true');
+        await change('password', 'still short'); await leave('password');
+        expect(field('password').getAttribute('aria-invalid')).toBe('true'); // still too short
+        expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('true'); // still different
+        await change('password', newPassword); await leave('password');
+        expect(field('password').getAttribute('aria-invalid')).toBe('false');
+        expect(host.textContent).toContain('At least 15 Unicode characters, at most 72 UTF-8 bytes.');
+        expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('true'); expect(summary()).toBeTruthy();
+        await change('confirmPassword', newPassword); await leave('confirmPassword');
+        expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('false'); expect(host.textContent).not.toContain('Passwords must match.');
+        expect(summary()).toBeUndefined(); expect(calls('/api/auth/password-resets')).toHaveLength(0);
+    });
+    it('clears a confirmation error when the password is changed to match it, and never adds one on blur', async () => {
+        respond(() => undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset(newPassword, `${newPassword}x`); await submit();
+        expect(document.activeElement).toBe(field('confirmPassword'));
+        await change('password', `${newPassword}x`); await leave('password');
+        expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('false'); expect(summary()).toBeUndefined();
+        await change('confirmPassword', 'no longer equal at all'); await leave('confirmPassword'); await leave('password');
+        expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('false');
+    });
+    it('applies a pointer-caused blur re-validation only after the press, so the submit click is not lost', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset(newPassword, 'different'); await submit();
+        expect(document.activeElement).toBe(field('confirmPassword')); expect(summary()).toBeTruthy();
+        await change('confirmPassword', newPassword);
+        const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+        // Pressing "Reset password" blurs the corrected field first; the layout must not change before the click.
+        await act(async () => { button.dispatchEvent(new Event('pointerdown', { bubbles: true })); field('confirmPassword').blur(); });
+        expect(summary()).toBeTruthy(); expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('true');
+        await act(async () => { button.dispatchEvent(new Event('pointerup', { bubbles: true })); button.click(); });
+        await act(async () => { vi.advanceTimersByTime(0); });
+        expect(calls('/api/auth/password-resets')).toHaveLength(1); expect(host.querySelector('h1')?.textContent).toBe('Password updated');
+    });
+    it('applies a pointer-caused blur re-validation after a press elsewhere is released', async () => {
+        respond(() => undefined);
+        await mount('/forgot-password');
+        await change('email', 'missing-at'); await submit();
+        await change('email', 'learner@example.com');
+        await act(async () => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); field('email').blur(); });
+        expect(field('email').getAttribute('aria-invalid')).toBe('true');
+        await act(async () => { document.body.dispatchEvent(new Event('pointerup', { bubbles: true })); vi.advanceTimersByTime(0); });
+        expect(field('email').getAttribute('aria-invalid')).toBe('false'); expect(summary()).toBeUndefined();
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(0);
+    });
+    it('keeps focus on the busy submit button, announces the request once and moves focus with the outcome', async () => {
+        let release!: (value: Response) => void;
+        respond((path) => path === '/api/auth/password-resets' ? new Promise<Response>((resolve) => { release = resolve; }) : undefined);
+        await mount(`/reset-password#token=${token}`); await fillReset();
+        const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+        await act(async () => { button.focus(); button.click(); });
+        expect(document.activeElement).toBe(button); expect(button.textContent).toBe('Resetting…');
+        expect(host.querySelector('[role="status"]')?.textContent).toBe('Resetting your password…');
+        await act(async () => release(problem(500, 'Internal Server Error', '/api/auth/password-resets')));
+        expect(document.activeElement).toBe(host.querySelector('[role="alert"]'));
+        expect(host.querySelector('main span[role="status"]')?.textContent).toBe('');
+        // "Try again" disappears with its alert; focus stays on the busy submit button rather than the page.
+        respond((path) => path === '/api/auth/password-resets' ? new Promise<Response>((resolve) => { release = resolve; }) : undefined);
+        const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((element) => element.textContent === 'Try again')!;
+        await act(async () => { retry.focus(); retry.click(); });
+        expect(host.querySelector('[role="alert"]')).toBeNull();
+        expect(document.activeElement).toBe(host.querySelector('button[type="submit"]')); expect(document.activeElement).not.toBe(document.body);
+        await act(async () => release(json({ message: completed })));
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
+    });
+    it('keeps focus and announces the pending request on the request page, then focuses the acknowledgement', async () => {
+        let release!: (value: Response) => void;
+        respond((path) => path === '/api/auth/password-reset-requests' ? new Promise<Response>((resolve) => { release = resolve; }) : undefined);
+        await mount('/forgot-password'); await change('email', 'learner@example.com');
+        const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+        await act(async () => { button.focus(); button.click(); });
+        expect(document.activeElement).toBe(button); expect(button.getAttribute('aria-disabled')).toBe('true');
+        expect(host.querySelector('[role="status"]')?.textContent).toBe('Sending the reset link…');
+        await act(async () => { button.click(); });
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(1);
+        await act(async () => release(json({ message: requested }, 202)));
+        expect(document.activeElement?.textContent).toBe(requested);
+    });
+    /**
+     * A tap as browsers deliver it: the pointer is released first, then, in a later task, the compatibility
+     * `mousedown` moves focus (blurring the corrected field), followed by `mouseup` and `click`. jsdom has no layout, so
+     * the hit test is modelled: once the summary has disappeared, the button has moved up and a tap on its lower half
+     * lands on `main` instead (as measured in Chrome and WebKit touch emulation).
+     */
+    async function tapLowerHalf(button: HTMLButtonElement, blurred: HTMLInputElement) {
+        const hit = () => summary() ? button : host.querySelector('main')!;
+        await act(async () => {
+            button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+            button.dispatchEvent(new Event('touchstart', { bubbles: true }));
+            button.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch' }));
+            button.dispatchEvent(new Event('touchend', { bubbles: true }));
+        });
+        await act(async () => { vi.advanceTimersByTime(0); }); // the task boundary before the compatibility mouse events
+        // React commits a blur's update before the next browser event, so `mouseup` is dispatched in a separate act().
+        await act(async () => { button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); blurred.blur(); });
+        await act(async () => {
+            const target = hit();
+            target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            if (target === button) button.click(); else target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        });
+        await act(async () => { vi.advanceTimersByTime(0); });
+    }
+    it('submits on the first tap after a correction: a touch blur re-validates only after the tap (reset page)', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? json({ message: completed }) : undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset(newPassword, 'different'); await submit();
+        expect(summary()).toBeTruthy();
+        await change('confirmPassword', newPassword);
+        await tapLowerHalf(host.querySelector<HTMLButtonElement>('button[type="submit"]')!, field('confirmPassword'));
+        expect(calls('/api/auth/password-resets')).toHaveLength(1);
+        expect(host.querySelector('h1')?.textContent).toBe('Password updated');
+    });
+    it('submits on the first tap after a correction on the request page', async () => {
+        respond((path) => path === '/api/auth/password-reset-requests' ? json({ message: requested }, 202) : undefined);
+        await mount('/forgot-password');
+        await change('email', 'missing-at'); await submit();
+        await change('email', 'learner@example.com');
+        await tapLowerHalf(host.querySelector<HTMLButtonElement>('button[type="submit"]')!, field('email'));
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(1);
+        expect(host.textContent).toContain(requested);
+    });
+    it('re-validates a blur from a tap that does not submit once the tap ends, with the current value', async () => {
+        respond(() => undefined);
+        await mount('/forgot-password');
+        await change('email', 'missing-at'); await submit();
+        await act(async () => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); field('email').blur(); });
+        expect(field('email').getAttribute('aria-invalid')).toBe('true'); // still pressed: nothing moves yet
+        await change('email', 'learner@example.com'); // the value read when the queue runs, not the one at blur time
+        await act(async () => { document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); vi.advanceTimersByTime(0); });
+        expect(field('email').getAttribute('aria-invalid')).toBe('false'); expect(summary()).toBeUndefined();
+        expect(calls('/api/auth/password-reset-requests')).toHaveLength(0);
+    });
+    it.each([
+        ['the window losing focus', () => window.dispatchEvent(new Event('blur'))],
+        ['keyboard input', () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))],
+        ['a context menu', () => document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }))],
+        ['a cancelled pointer', () => { document.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true })); vi.advanceTimersByTime(0); }],
+    ])('applies a re-validation held by a press whose release never arrives after %s', async (_case, interrupt) => {
+        respond(() => undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset(newPassword, 'different'); await submit();
+        await change('confirmPassword', newPassword);
+        await act(async () => { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); field('confirmPassword').blur(); });
+        expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('true');
+        await act(async () => { interrupt(); });
+        expect(field('confirmPassword').getAttribute('aria-invalid')).toBe('false'); expect(summary()).toBeUndefined();
+    });
+    it('hides an earlier F14 failure when a later submit fails the local check, and shows the next failure', async () => {
+        respond((path) => path === '/api/auth/password-resets' ? problem(500, 'Internal Server Error', path) : undefined);
+        await mount(`/reset-password#token=${token}`);
+        await fillReset(); await submit();
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('Something went wrong on our side.');
+        await change('password', 'short'); await submit();
+        expect(host.querySelector('[role="alert"]')).toBeNull(); expect(summary()).toBeTruthy();
+        expect(document.activeElement).toBe(field('password'));
+        await change('password', newPassword); await submit();
+        expect(calls('/api/auth/password-resets')).toHaveLength(2);
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('Something went wrong on our side.');
+    });
+    it('keeps the pending announcement outside the busy form', async () => {
+        respond((path) => path === '/api/auth/password-reset-requests' ? new Promise<Response>(() => undefined) : undefined);
+        await mount('/forgot-password'); await change('email', 'learner@example.com'); await submit();
+        expect(host.querySelector('form')?.getAttribute('aria-busy')).toBe('true');
+        expect(host.querySelector('form [role="status"]')).toBeNull();
+        expect(host.querySelector('[aria-busy="true"] [role="status"]')).toBeNull();
+        expect(host.querySelector('main span[role="status"]')?.textContent).toBe('Sending the reset link…');
+    });
+});
