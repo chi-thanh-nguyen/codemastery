@@ -827,10 +827,18 @@ describe('Lit Path design-system primitives', () => {
 });
 
 /**
- * Theme tooltip lifecycle (DESIGN.md D13-5; AUD-02/F-01, F-03). Real pointer, focus and keyboard events on the real
- * ThemeControl, with fake timers for MUI's 400 ms hover delay instead of waits. jsdom reports every focused element as
- * `:focus-visible`, so the focus that closing returns to the button counts as keyboard focus here, which is the harder
- * case for the suppression.
+ * Theme tooltip lifecycle (DESIGN.md D13-5 and › Tooltip; AUD-02/F-01, F-03, N-01–N-03). Real pointer, focus and keyboard
+ * events on the real ThemeControl, with fake timers for MUI's 400 ms hover delay instead of waits.
+ *
+ * jsdom's `:focus-visible` is not the browser's: it recognises a Tab only when the key is dispatched from an element other
+ * than the one losing focus (see `tabTo`), and the focus that closing the menu returns to the button is *not*
+ * `:focus-visible` in jsdom, while Chrome and WebKit report it as keyboard focus. A test that relies on jsdom here never
+ * exercises the restored-focus suppression (N-02), so the tests that need the browser's state simulate it explicitly
+ * (`restoredFocusIsKeyboardFocus`) and assert that the simulation took effect.
+ *
+ * MUI keeps its tooltip hysteresis ("a tooltip closed less than 800 ms ago, so open the next one after 200 ms") in module
+ * state that outlives a test, and a suppressed open sets it without arming its reset. Every test therefore starts from a
+ * settled state (`start`), so the 400 ms assertions do not depend on which test ran before (N-03).
  */
 describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
     beforeEach(() => { vi.useFakeTimers(); });
@@ -857,9 +865,34 @@ describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
     });
     const page = <><button type="button">Before</button><ThemeControl /><button type="button">After</button></>;
     const other = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === label)!;
+    /**
+     * Renders the page and settles MUI's module-level tooltip hysteresis under this test's fake clock: a hover that opens
+     * the tooltip (after 200 or 400 ms, whichever state an earlier test left), a leave that closes it and arms the 800 ms
+     * reset, then enough time for that reset to run. Afterwards the next hover waits the full 400 ms again (N-03).
+     */
+    const start = async () => {
+        await render(page);
+        await pointerEnters(trigger()); await advance(500);
+        expect(tooltipShown(), 'hysteresis settling: the hover opened the tooltip').toBe(true);
+        await pointerLeaves(trigger()); await advance(1000);
+        expect(tooltipShown(), 'hysteresis settling: the leave closed the tooltip').toBe(false);
+    };
+    /**
+     * Simulates the browser's `:focus-visible` for the focus that closing the menu returns to the button (Chrome and
+     * WebKit report it after a keyboard close; jsdom does not). From the call on, the Theme button counts as keyboard
+     * focused whenever it has focus. Returns the restore function.
+     */
+    const restoredFocusIsKeyboardFocus = () => {
+        const matches = Element.prototype.matches;
+        const spy = vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+            if (selector === ':focus-visible' && this === trigger() && document.activeElement === this) return true;
+            return matches.call(this, selector);
+        });
+        return () => spy.mockRestore();
+    };
 
     it('keeps the 400 ms delay for a pointer hover and shows at once on keyboard focus (F-03)', async () => {
-        await render(page);
+        await start();
         await pointerEnters(trigger()); await advance(399);
         expect(tooltipShown()).toBe(false);
         await advance(1); expect(tooltipShown()).toBe(true);
@@ -871,19 +904,25 @@ describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
         await tabTo(other('After')); await advance(1000); expect(tooltipShown()).toBe(false);
     });
     it('hides the tooltip as soon as the menu opens, and a hover timer still pending then cannot reopen it', async () => {
-        await render(page);
+        await start();
+        // The hover timer starts, and the menu opens before it fires: it fires over the open menu.
         await pointerEnters(trigger()); await advance(150);
         await press(trigger()); expect(menus()).toBe(1);
         await advance(1000); expect(tooltipShown()).toBe(false);
         await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        // Closing the menu (outside click) with the pointer still resting on the button: the timer that fired over the
+        // menu left nothing behind (N-02: the menu-open guard and the reset on close together keep this tooltip closed).
+        await press(other('After')); await advance(1); expect(menus()).toBe(0);
+        expect(tooltipShown(), 'a hover timer that fired over the open menu showed the tooltip after the close').toBe(false);
+        await advance(1000); expect(tooltipShown()).toBe(false);
         // A keyboard user opens it from a visible tooltip: hidden at once, with the menu caption uncovered.
-        await press(other('After')); await pointerLeaves(trigger()); await advance(1000);
+        await pointerLeaves(trigger()); await advance(1000);
         await tabTo(other('Before')); await tabTo(trigger()); expect(tooltipShown()).toBe(true);
         await key(trigger(), 'Enter'); await act(async () => trigger().click()); // Enter activates the button
         expect(menus()).toBe(1); expect(tooltipShown()).toBe(false);
     });
     it('AUD-02/F-01: after Escape with the pointer resting on the button, neither the stale hover nor the restored focus shows it, but a genuine keyboard refocus does', async () => {
-        await render(page);
+        await start();
         await pointerEnters(trigger()); await advance(400); expect(tooltipShown()).toBe(true);
         await press(trigger()); expect(menus()).toBe(1);
         await key(document.activeElement!, 'Escape');
@@ -898,9 +937,61 @@ describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
         await tabTo(other('After')); await pointerLeaves(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
         await pointerEnters(trigger()); await advance(400); expect(tooltipShown()).toBe(true);
     });
+    it('N-02: the focus that closing the menu returns to the button never shows the tooltip, even as browser keyboard focus', async () => {
+        await start();
+        const restore = restoredFocusIsKeyboardFocus();
+        try {
+            for (const close of ['Escape', 'Tab', 'Shift+Tab']) {
+                await press(trigger()); await advance(1); expect(menus()).toBe(1);
+                await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: close === 'Escape' ? 'Escape' : 'Tab', shiftKey: close === 'Shift+Tab', bubbles: true, cancelable: true })); });
+                expect(menus(), close).toBe(0); expect(document.activeElement, `${close}: focus restored`).toBe(trigger());
+                // The simulation is in effect: the restored focus is keyboard focus, as in Chrome and WebKit.
+                expect(trigger().matches(':focus-visible'), `${close}: simulated focus-visible`).toBe(true);
+                expect(tooltipShown(), `${close}: restored focus showed the tooltip at once`).toBe(false);
+                await advance(1000); expect(tooltipShown(), `${close}: restored focus showed the tooltip later`).toBe(false);
+                // Moving on releases the suppression: genuine keyboard focus that returns shows it at once.
+                await tabTo(other('After')); await advance(1000); expect(tooltipShown()).toBe(false);
+                await tabTo(trigger(), true); expect(tooltipShown(), `${close}: genuine keyboard refocus`).toBe(true);
+                await tabTo(other('After')); await advance(1000);
+            }
+        } finally { restore(); }
+    });
+    it('N-01: Escape dismisses the keyboard-focus tooltip for good; MUI\'s pending focus timer cannot reopen it', async () => {
+        await start();
+        await tabTo(other('Before')); await tabTo(trigger());
+        expect(tooltipShown(), 'keyboard focus shows it at once').toBe(true);
+        await advance(100);
+        await key(trigger(), 'Escape'); await advance(1);
+        expect(tooltipShown(), 'Escape hid it').toBe(false);
+        expect(document.activeElement).toBe(trigger());
+        // Beyond MUI's 400 ms focus delay (and its 200 ms hysteresis delay): still dismissed, focus unchanged.
+        await advance(400); expect(tooltipShown(), 'reopened at 400 ms after focus').toBe(false);
+        await advance(1000); expect(tooltipShown(), 'reopened later').toBe(false);
+        expect(document.activeElement).toBe(trigger());
+        // Leaving and returning by keyboard shows it at once again.
+        await tabTo(other('After')); await advance(1000);
+        await tabTo(trigger(), true); expect(tooltipShown()).toBe(true);
+    });
+    it('N-01: after Escape the dismissal holds while the pointer rests on the button; a genuine new hover or focus shows it again', async () => {
+        await start();
+        // Shown by hover, then by keyboard focus with the pointer still on the button.
+        await pointerEnters(trigger()); await advance(400); expect(tooltipShown()).toBe(true);
+        await tabTo(other('Before')); await advance(1000);
+        await tabTo(trigger()); expect(tooltipShown()).toBe(true);
+        await key(trigger(), 'Escape'); await advance(1); expect(tooltipShown()).toBe(false);
+        // The pointer moves over the glyph inside the button: no reopening after the hover delay.
+        await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown(), 'pointer movement inside reopened it').toBe(false);
+        // A genuine new hover (leave, enter) shows it after the delay.
+        await pointerLeaves(trigger()); await advance(1000);
+        await pointerEnters(trigger()); await advance(400); expect(tooltipShown(), 'new hover').toBe(true);
+        // Escape on a hover tooltip (no keyboard focus involved), then focus leaves and returns: shown at once.
+        await key(trigger(), 'Escape'); await advance(1); expect(tooltipShown()).toBe(false);
+        await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        await tabTo(other('After')); await tabTo(trigger(), true); expect(tooltipShown(), 'genuine keyboard refocus').toBe(true);
+    });
     // One test per choice keeps each well inside the per-test timeout on a loaded CI runner.
     for (const label of ['System', 'Light', 'Dark']) it(`never leaves the tooltip behind after choosing ${label} and dismissing by outside click, Tab, Shift+Tab or a second press`, async () => {
-        await render(page);
+        await start();
         const dismissals: Array<[string, () => Promise<void>]> = [
             ['outside click', async () => press(other('Before'))],
             ['Tab', async () => key(document.activeElement!, 'Tab')],
@@ -926,7 +1017,7 @@ describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
         expect(trigger().getAttribute('aria-label')).toBe(label === 'System' ? 'Theme: System (currently Dark)' : `Theme: ${label}`);
     });
     it('stays consistent through rapid open and close cycles', async () => {
-        await render(page);
+        await start();
         await pointerEnters(trigger());
         for (let round = 0; round < 11; round++) await press(trigger());
         await advance(1000);
