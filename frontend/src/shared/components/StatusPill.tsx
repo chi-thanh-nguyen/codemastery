@@ -22,13 +22,13 @@ export interface StatusPillProps {
 export function StatusPill({ tone = 'neutral', icon, children, size = 'pill', title, sx }: StatusPillProps) {
     const tag = size === 'tag';
     const background = tone === 'dashed' ? roles.bg.surface : tone === 'ink' ? roles.bg.inverse : tones[tone].tint;
-    const glyph = tone === 'dashed' ? roles.text.secondary : tone === 'ink' ? roles.text.inverse : tones[tone].strong;
     const pill = <Box component="span" data-tone={tone} sx={[{
         display: 'inline-flex', alignItems: 'center', gap: tag ? .625 : .75, height: tag ? 28 : 36, px: tag ? 1.25 : 1.75, maxWidth: '100%',
         borderRadius: tag ? `${radius.xs}px` : `${radius.pill}px`, bgcolor: background, color: tone === 'ink' ? roles.text.inverse : roles.text.primary,
         border: tone === 'dashed' ? `1.5px dashed ${roles.line.strong}` : 0, boxSizing: 'border-box',
         fontSize: tag ? '0.8125rem' : '0.9375rem', fontWeight: 600, lineHeight: 1.2, whiteSpace: 'nowrap', verticalAlign: 'middle', flexShrink: 0,
-        '& svg': { fontSize: tag ? 16 : 18, color: glyph, flexShrink: 0 },
+        // The glyph takes the label's own colour (currentColor), so icon and text always match (DESIGN.md › Status pills).
+        '& svg': { fontSize: tag ? 16 : 18, color: 'currentColor', flexShrink: 0 },
     }, ...(Array.isArray(sx) ? sx : [sx])]}>
         {icon && <PresentationIcon name={icon} />}
         <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{children}</Box>
