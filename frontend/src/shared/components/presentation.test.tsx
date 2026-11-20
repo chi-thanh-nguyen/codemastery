@@ -825,3 +825,183 @@ describe('Lit Path design-system primitives', () => {
         expect(host.querySelector('aside[aria-label="Up next"]')?.textContent).toBe('Aside content');
     });
 });
+
+/**
+ * Theme tooltip lifecycle (DESIGN.md D13-5; AUD-02/F-01, F-03). Real pointer, focus and keyboard events on the real
+ * ThemeControl, with fake timers for MUI's 400 ms hover delay instead of waits. jsdom reports every focused element as
+ * `:focus-visible`, so the focus that closing returns to the button counts as keyboard focus here, which is the harder
+ * case for the suppression.
+ */
+describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+    const advance = (ms: number) => act(async () => { vi.advanceTimersByTime(ms); });
+    const trigger = () => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"][aria-label^="Theme:"]')!;
+    /** A visible "Theme" tooltip: mounted and not fading out (MUI's Grow sets opacity 0 on exit). */
+    const tooltipShown = () => [...document.querySelectorAll<HTMLElement>('.MuiTooltip-popper')]
+        .some((popper) => popper.textContent === 'Theme' && (popper.firstElementChild as HTMLElement | null)?.style.opacity !== '0');
+    const menus = () => document.querySelectorAll('[role="menu"][aria-label="Theme"]').length;
+    // The pointer enters the button from outside (React derives onMouseEnter from this), moves over its glyph, or leaves.
+    const pointerEnters = (node: Element) => act(async () => { node.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })); });
+    const pointerMovesInside = (node: Element) => act(async () => { node.querySelector('svg')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: node })); });
+    const pointerLeaves = (node: Element) => act(async () => { node.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })); });
+    const press = (node: Element) => act(async () => { node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); (node as HTMLElement).click(); });
+    /**
+     * A genuine Tab (or Shift+Tab) to `node`: a Tab key press, then the focus move. The key is dispatched from the document
+     * because jsdom's `:focus-visible` heuristic, which evaluates lazily, recognises a Tab only from a target other than
+     * the element losing focus; the browser itself reports this focus as keyboard focus (the Playwright harness checks it).
+     */
+    const tabTo = (node: HTMLElement, shiftKey = false) => act(async () => {
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true }));
+        node.focus();
+    });
+    const page = <><button type="button">Before</button><ThemeControl /><button type="button">After</button></>;
+    const other = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === label)!;
+
+    it('keeps the 400 ms delay for a pointer hover and shows at once on keyboard focus (F-03)', async () => {
+        await render(page);
+        await pointerEnters(trigger()); await advance(399);
+        expect(tooltipShown()).toBe(false);
+        await advance(1); expect(tooltipShown()).toBe(true);
+        await pointerLeaves(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        // Keyboard focus: no timer is advanced.
+        await tabTo(other('Before')); await tabTo(trigger());
+        expect(trigger().matches(':focus-visible')).toBe(true);
+        expect(tooltipShown()).toBe(true);
+        await tabTo(other('After')); await advance(1000); expect(tooltipShown()).toBe(false);
+    });
+    it('hides the tooltip as soon as the menu opens, and a hover timer still pending then cannot reopen it', async () => {
+        await render(page);
+        await pointerEnters(trigger()); await advance(150);
+        await press(trigger()); expect(menus()).toBe(1);
+        await advance(1000); expect(tooltipShown()).toBe(false);
+        await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        // A keyboard user opens it from a visible tooltip: hidden at once, with the menu caption uncovered.
+        await press(other('After')); await pointerLeaves(trigger()); await advance(1000);
+        await tabTo(other('Before')); await tabTo(trigger()); expect(tooltipShown()).toBe(true);
+        await key(trigger(), 'Enter'); await act(async () => trigger().click()); // Enter activates the button
+        expect(menus()).toBe(1); expect(tooltipShown()).toBe(false);
+    });
+    it('AUD-02/F-01: after Escape with the pointer resting on the button, neither the stale hover nor the restored focus shows it, but a genuine keyboard refocus does', async () => {
+        await render(page);
+        await pointerEnters(trigger()); await advance(400); expect(tooltipShown()).toBe(true);
+        await press(trigger()); expect(menus()).toBe(1);
+        await key(document.activeElement!, 'Escape');
+        expect(menus()).toBe(0); expect(document.activeElement).toBe(trigger());
+        await advance(1000); expect(tooltipShown()).toBe(false);
+        // The pointer still rests on the button and moves over its glyph: no stale reopening.
+        await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        // Tab away and Shift+Tab back without moving the pointer: genuine keyboard focus shows it at once.
+        await tabTo(other('After')); await tabTo(trigger(), true);
+        expect(tooltipShown()).toBe(true);
+        // Leaving and entering again with the pointer also works.
+        await tabTo(other('After')); await pointerLeaves(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        await pointerEnters(trigger()); await advance(400); expect(tooltipShown()).toBe(true);
+    });
+    it('never leaves the tooltip behind after choosing System, Light or Dark and dismissing by outside click, Tab, Shift+Tab or a second press', async () => {
+        await render(page);
+        const dismissals: Array<[string, () => Promise<void>]> = [
+            ['outside click', async () => press(other('Before'))],
+            ['Tab', async () => key(document.activeElement!, 'Tab')],
+            ['Shift+Tab', async () => act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })); })],
+            ['second press', async () => press(trigger())],
+        ];
+        for (const label of ['System', 'Light', 'Dark']) {
+            for (const [how, dismiss] of dismissals) {
+                await pointerEnters(trigger()); await advance(400);
+                await press(trigger()); await advance(1); // MUI's ClickAwayListener arms itself on a 0 ms timer
+                await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.startsWith(label))!.click());
+                // The menu stays open after a choice, with focus on it; the label change re-renders the button.
+                expect(menus(), `${label}: open after the choice`).toBe(1);
+                expect(document.activeElement?.getAttribute('aria-checked')).toBe('true');
+                await dismiss(); await advance(1000);
+                expect(menus(), `${label}/${how}`).toBe(0);
+                expect(tooltipShown(), `${label}/${how}: stranded tooltip`).toBe(false);
+                // Tab and Shift+Tab return focus to the button first (the browser's default action then moves on from there).
+                if (how === 'Tab' || how === 'Shift+Tab') expect(document.activeElement, `${label}/${how}: focus`).toBe(trigger());
+                await pointerLeaves(trigger()); await tabTo(other('After')); await advance(1000);
+            }
+        }
+        expect(trigger().getAttribute('aria-label')).toBe('Theme: Dark');
+    });
+    it('stays consistent through rapid open and close cycles', async () => {
+        await render(page);
+        await pointerEnters(trigger());
+        for (let round = 0; round < 11; round++) await press(trigger());
+        await advance(1000);
+        expect(menus()).toBe(1); expect(trigger().getAttribute('aria-expanded')).toBe('true'); expect(tooltipShown()).toBe(false);
+        expect(document.querySelectorAll('.MuiTooltip-popper').length).toBeLessThanOrEqual(1);
+        await key(document.activeElement!, 'Escape'); await advance(1000);
+        expect(menus()).toBe(0); expect(tooltipShown()).toBe(false);
+    });
+});
+
+/** CSS specificity as one comparable number (ids, then classes/attributes/pseudo-classes, then types). */
+function specificity(selector: string) {
+    const plain = selector.replace(/::[\w-]+/g, '');
+    const ids = (plain.match(/#[\w-]+/g) ?? []).length;
+    const classes = (plain.match(/\.[\w-]+|\[[^\]]*\]|:[\w-]+/g) ?? []).length;
+    const types = (plain.replace(/#[\w-]+|\.[\w-]+|\[[^\]]*\]|:[\w-]+(\([^)]*\))?/g, ' ').match(/[a-z][\w-]*/gi) ?? []).length;
+    return ids * 10000 + classes * 100 + types;
+}
+/**
+ * jsdom never matches `:hover`. This resolves `property` for `element` as if the pointer were over it: the cascade over
+ * the rendered top-level style rules (specificity, then source order) with `:hover` counted as matching. Media blocks
+ * (`hover: none`, forced colours, print) are not applied, as in jsdom's own getComputedStyle. With `keyboardFocus`, MUI's
+ * `.Mui-focusVisible` state class also counts as present (jsdom's `:focus-visible` heuristic does not carry over to
+ * arrow-key moves inside a menu, which browsers do), so this is the keyboard-focused-and-hovered state.
+ */
+function hoveredValue(element: Element, property: string, keyboardFocus = false) {
+    let best: [number, number, string] | null = null, order = 0;
+    for (const sheet of [...document.styleSheets]) for (const rule of [...sheet.cssRules]) {
+        order++;
+        if (!(rule instanceof CSSStyleRule)) continue;
+        const value = rule.style.getPropertyValue(property);
+        if (!value) continue;
+        for (const selector of rule.selectorText.split(',')) {
+            let matches = false;
+            const state = keyboardFocus ? selector.replace(/:hover/g, '').replace(/\.Mui-focusVisible/g, '') : selector.replace(/:hover/g, '');
+            try { matches = element.matches(state); } catch { /* a selector jsdom cannot parse */ }
+            if (matches && (!best || specificity(selector) > best[0] || (specificity(selector) === best[0] && order >= best[1]))) best = [specificity(selector), order, value];
+        }
+    }
+    return best?.[2] ?? '';
+}
+
+describe('Menu item states (D13-4) as rendered by the shared MuiMenuItem override', () => {
+    const HOVER = 'rgb(238, 238, 240)', SELECTED = 'rgb(227, 238, 255)'; // light bg.raised-hover (fill-150) and bg.selected (brand-100)
+    it('the cascade helper agrees with getComputedStyle for elements at rest (no hover rule involved)', async () => {
+        await render(<ThemeControl />);
+        await click(host.querySelector('button[aria-haspopup="menu"]'));
+        for (const item of document.querySelectorAll('[role="menuitemradio"]')) {
+            expect(resolveRoleColor(getComputedStyle(item).minHeight)).toBe('44px');
+            expect(hoveredValue(item, 'min-height')).toBe('44px');
+        }
+    });
+    it('a hovered item never takes the selected fill; selected + hover keeps it and adds the ring; keyboard focus adds the 2 px ring on the item\'s own fill', async () => {
+        await render(<ThemeControl />);
+        await click(host.querySelector('button[aria-haspopup="menu"]'));
+        const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+        const [system, light] = items(); // System is selected (the test provider's preference)
+        expect(system.getAttribute('aria-checked')).toBe('true');
+        // At rest: only the selected item is filled.
+        expect(styleColor(system, 'background-color')).toBe(SELECTED);
+        expect(getComputedStyle(system).fontWeight).toBe('600');
+        expect(styleColor(light, 'background-color')).not.toBe(SELECTED);
+        // Hover: the unselected item takes bg.raised-hover, never bg.selected; the selected one keeps its fill and gains the ring.
+        expect(resolveRoleColor(hoveredValue(light, 'background-color'))).toBe(HOVER);
+        expect(resolveRoleColor(hoveredValue(system, 'background-color'))).toBe(SELECTED);
+        expect(hoveredValue(system, 'box-shadow')).toMatch(/^inset 0 0 0 1px var\(--mui-palette-roles-line-strong\)$/);
+        expect(hoveredValue(light, 'box-shadow')).not.toMatch(/inset/);
+        // Keyboard focus on the selected item (the menu opens with focus on it): bg.selected with the 2 px focus ring.
+        expect(document.activeElement).toBe(system);
+        expect(resolveRoleColor(hoveredValue(system, 'background-color', true))).toBe(SELECTED);
+        expect(hoveredValue(system, 'outline', true)).toMatch(/^2px solid/);
+        // An unselected item in the keyboard-focus state: bg.raised-hover (not bg.selected) and the same ring.
+        expect(resolveRoleColor(hoveredValue(light, 'background-color', true))).toBe(HOVER);
+        expect(hoveredValue(light, 'outline', true)).toMatch(/^2px solid/);
+        // The arrow keys still move focus among the items.
+        await key(document.activeElement!, 'ArrowDown');
+        expect(document.activeElement).toBe(light);
+    });
+});
