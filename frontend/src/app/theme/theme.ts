@@ -534,12 +534,16 @@ export const appTheme = createTheme({
             '@media (forced-colors: active)': {
                 ':where(:focus-visible), .Mui-focusVisible': { outlineColor: 'Highlight !important' },
                 '.MuiAlert-root, .MuiChip-root, .MuiTooltip-tooltip, [data-tone]': { border: '1px solid CanvasText' },
+                // Floating surfaces (menus, popovers, dialogs, the Theme menu) draw their edge with a shadow, which
+                // forced colours removes; an outline gives them a real edge without changing their layout.
+                '.MuiPopover-paper, .MuiDialog-paper, .MuiDrawer-paper, .MuiPopper-root > .MuiPaper-root': { outline: '1px solid CanvasText' },
                 '[role="radio"][aria-checked="true"]::before': { border: '2px solid Highlight' },
                 svg: { color: 'currentColor' },
             },
-            // Printed output always uses the light scheme: the light variables win over the dark selector.
+            // Printed output always uses the light scheme: the light variables win over the dark selector, and
+            // `!important` lets color-scheme beat the inline value the first-paint script and applyThemeScheme set.
             '@media print': {
-                ':root[data-color-scheme]': { ...lightSchemeVariables(theme), colorScheme: 'light' },
+                ':root[data-color-scheme]': { ...lightSchemeVariables(theme), colorScheme: 'light !important' },
             },
             '@media (prefers-reduced-motion: reduce)': {
                 '*, *::before, *::after': {
