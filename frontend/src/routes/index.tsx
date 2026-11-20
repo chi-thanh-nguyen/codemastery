@@ -5,6 +5,8 @@ import { Alert, Box, Button, ListItemIcon, MenuItem } from '@mui/material';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
 import { ProfilePage } from '../features/auth/pages/ProfilePage';
+import { ForgotPasswordRoute } from '../features/auth/pages/ForgotPasswordPage';
+import { ResetPasswordRoute } from '../features/auth/pages/ResetPasswordPage';
 import { ProtectedRoute } from './guards/ProtectedRoute';
 import { useAuth } from '../features/auth/hooks/useAuth';
 import { DashboardLayout, Page } from '../layouts/DashboardLayout';
@@ -132,6 +134,9 @@ export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; previ
         <Route path="/preview" element={preview ?? <Navigate to="/courses" replace />} />
         <Route path="/login" element={<SignIn />} />
         <Route path="/register" element={<RegisterPage />} />
+        {/* FE06 recovery (CT16.routes, anonymous; CT02). Delivery stays inactive until a deployment binds SMTP. */}
+        <Route path="/forgot-password" element={<ForgotPasswordRoute />} />
+        <Route path="/reset-password" element={<ResetPasswordRoute />} />
         <Route path="/courses" element={catalogue ?? <Workspace />}>
             {!catalogue && <Route index element={<Catalogue />} />}
         </Route>
