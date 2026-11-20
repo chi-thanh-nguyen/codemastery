@@ -160,8 +160,9 @@ tests. Surefire uses its standard `Test*`, `*Test`, `*Tests`, and `*TestCase`
 naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
 Current unit suites are under `modules/auth/`, `modules/course/` (including
-`application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest`
-and `QuizGradingServiceTest`), `modules/adaptive/mastery/` and the shared
+`application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest`,
+`QuizGradingServiceTest` and the AS06 quiz authoring cases in `AttemptServiceTest`),
+`modules/adaptive/mastery/` and the shared
 `support/` package. The other module test files are empty scaffolds. The integration base
 class is compiled but is not initialized by this unit-test lifecycle, so
 `./mvnw test` needs no Docker.
@@ -711,7 +712,8 @@ and the earlier steps remain the gate.
 The following are not covered by any executable test in the repository. No
 test-count or coverage-percentage claim is made for them.
 
-- **Empty scaffolds.** Assessment `AttemptServiceTest` and `SubmissionServiceTest`;
+- **Empty scaffolds.** Assessment `SubmissionServiceTest` (`AttemptServiceTest` holds
+  only the AS06 quiz authoring cases; its attempt cases wait for AS08);
   Interaction and Admin unit tests; Adaptive
   decision, evaluation, listener, settings, mastery-update, placement and skill-graph
   tests; `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
@@ -4397,3 +4399,52 @@ do not cover AttemptService orchestration, persistence of `is_correct` or the sc
 the B3-O08 rollback case, auto-submission, REST results, the quiz-submitted event or
 any Adaptive mastery update. Those belong to AS08 and the Adaptive and QA Issues and
 remain unverified.
+
+## AS06 quiz composition and publication verification — 21 November 2026
+
+PR #260 (Refs #157) implements the CT23.composition, CT23.publication and quiz
+CT23.bindings slices of [ADR007 §§5–7](decisions/007-batch-03-contract-approvals.md#5-ct23composition).
+Every write runs inside ADR005's Course configuration guard and resolves question scope
+through the CT40 `readSkillIds` projection. Neither producer exists yet (CO14 #177,
+AD07 #165), so both protected delegation points fail closed with a safe 500 and no
+effect. Owner and learner reads do not depend on them and run against real rows.
+
+Test placement follows [ADR008 §5](decisions/008-batch-04-contract-approvals.md#5-ct14coverage):
+unit cases in `modules/assessment/AttemptServiceTest.java` (placement confirmed by the
+Project Leader on 21 November 2026 for this remediation) and real endpoint cases in
+`integration/AuthorizationIntegrationTest.java`. No new test file is added.
+
+| Obligation | Covered by |
+| --- | --- |
+| B3-O03 exact captured order, positions 1..N, empty hidden draft, duplicate/null/foreign IDs, no selection beyond the explicit list | `AttemptServiceTest$Composition`, `$ApprovedBoundaries` |
+| Hidden and never-attempted edit/delete only; published or attempted quiz 409; delete returns the definition | `AttemptServiceTest$Composition` |
+| Publication: empty draft 409, same-Course revalidation on (re)publish, invalid stored member 500, idempotent hide that cancels nothing | `AttemptServiceTest$Publication` |
+| `PublicationWrite` `publicationStatus` mapped to the `published` boolean; closed `B3QuizWrite` body | `AttemptServiceTest$Publication`, `$ApprovedBoundaries`, `AuthorizationIntegrationTest$QuizEndpoints` |
+| B3-O01 precedence: 401, role 403 (Learner-only list, Instructor-only authoring, no Administrator inheritance), CT03 403/404 before body 400, no-store on every outcome, no key leakage | `AuthorizationIntegrationTest$QuizEndpoints` |
+| Reads: title `COLLATE "C"` then UUID, filtering before count and paging, learner metadata only for ACTIVE/COMPLETED members of a published Course | `AuthorizationIntegrationTest$QuizEndpoints` (PostgreSQL), `AttemptServiceTest$Reads` |
+| Writes fail closed with no effect while the guard and CT40 are absent | `AttemptServiceTest$ApprovedBoundaries`, `AuthorizationIntegrationTest$QuizEndpoints` |
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #260
+remediation working tree, based on `main` `307e8c2`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='AttemptServiceTest,QuizGradingServiceTest,AssessmentRepresentationsTest'` | 56 tests (41 AS06), 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AuthorizationIntegrationTest$QuizEndpoints'` | 8 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 766, Failsafe 248, 0 failures, errors or skips |
+
+A temporary local PostgreSQL test, not committed, exercised the write paths with
+test-only stand-ins for the guard (a Course-row `FOR UPDATE` in a READ COMMITTED
+transaction) and for the CT40 projection: ordered create and reversed replacement,
+publish/hide/delete, the empty-draft 409, the attempted-quiz 409, rollback of every
+change after an injected failure, an edit waiting on the Course root and then seeing
+the committed publication (409), and the quiz-row lock blocking a new attempt
+reference until commit. It used a 500 ms observation window, which the committed
+suites do not. It is evidence for the repositories only, not for the real guard or
+CT40 producer.
+
+Open gates: committed real-PostgreSQL coverage of the write paths and B3-O04 races has
+no approved placement (ADR008 §5 records it as a gap); integration with CO14 #177 and
+AD07 #165; attempt start under the same Course root (AS08); CT17 runtime grants on the
+Assessment tables for the deployed runtime role; independent review, CI and delivery.
+These are local developer runs, not independent QA, CI or deployment evidence.
