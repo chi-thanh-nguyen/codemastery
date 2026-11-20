@@ -132,8 +132,8 @@ export default function PreviewApp() {
                     : <DashboardLayout navItems={NAV[workspace].map(({ screen: target, live, ...entry }) => ({ ...entry, href: live ?? previewHref(target) }))} selectedNavId={def.nav}
                         onNavSelect={(id) => { const entry = NAV[workspace].find((candidate) => candidate.id === id); if (entry?.live) navigate(entry.live); else go(entry?.screen ?? 'overview'); }}
                         brandHref={previewHref('overview')} onBrandSelect={toIndex}
+                        headerUtilities={workspace === 'learner' ? <NotificationBell unread={unread} href={previewHref('notifications')} onClick={() => go('notifications')} current={def.id === 'notifications'} /> : undefined}
                         headerActions={<>
-                            {workspace === 'learner' && <NotificationBell unread={unread} href={previewHref('notifications')} onClick={() => go('notifications')} current={def.id === 'notifications'} />}
                             <AccountMenu displayName={persona.name} role={persona.role} renderItems={(close) => [
                                 <MenuItem key="index" onClick={() => { close(); toIndex(); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="layers" sx={{ fontSize: 20 }} /></ListItemIcon>Preview index</MenuItem>,
                                 <MenuItem key="reset" onClick={() => { close(); reset(); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="refresh" sx={{ fontSize: 20 }} /></ListItemIcon>Reset sample data</MenuItem>,

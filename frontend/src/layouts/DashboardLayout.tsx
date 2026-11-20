@@ -13,6 +13,9 @@ export interface DashboardLayoutProps {
     navItems: NavItem[];
     selectedNavId?: string;
     onNavSelect: (id: string) => void;
+    /** Page utilities placed left of the Theme button (for example the notification bell). */
+    headerUtilities?: ReactNode;
+    /** Session actions right of the Theme button: the account menu, or Sign in and Create account. */
     headerActions?: ReactNode;
     headerSearch?: ReactNode;
     /** Account and utility content repeated at the bottom of the mobile drawer. */
@@ -38,7 +41,7 @@ export function canvasOutlinePath(width: number, height: number, rise: number, t
 }
 
 /** Ink frame + sticky top bar + rounded canvas (DESIGN.md › Layout › Shell). */
-export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerActions, headerSearch, drawerFooter, banner, brandHref, onBrandSelect, children }: DashboardLayoutProps) {
+export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerUtilities, headerActions, headerSearch, drawerFooter, banner, brandHref, onBrandSelect, children }: DashboardLayoutProps) {
     const [mobileOpen, setMobileOpen] = useState(false);
     const theme = useTheme();
     const desktop = useMediaQuery(theme.breakpoints.up('md')), inset = useMediaQuery(theme.breakpoints.up('sm'));
@@ -69,7 +72,7 @@ export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerAc
                 fontWeight: 600, textDecoration: 'none', '&:focus': { top: 12 } }}>
             Skip to main content
         </Box>
-        <AppHeader navItems={navItems} selectedNavId={selectedNavId} onNavSelect={onNavSelect} actions={headerActions} search={headerSearch}
+        <AppHeader navItems={navItems} selectedNavId={selectedNavId} onNavSelect={onNavSelect} utilities={headerUtilities} actions={headerActions} search={headerSearch}
             brandHref={brandHref} onBrandSelect={onBrandSelect} onMenuToggle={() => setMobileOpen((open) => !open)} menuOpen={mobileOpen && !desktop} />
         <SidebarNav items={navItems} selectedId={selectedNavId} onSelect={onNavSelect}
             footer={<Box sx={{ display: 'grid', gap: 2 }}><ThemeControl variant="drawer" />{drawerFooter}</Box>}

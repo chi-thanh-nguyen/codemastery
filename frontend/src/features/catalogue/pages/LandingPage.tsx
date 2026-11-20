@@ -54,8 +54,10 @@ export function LandingPage({ exampleMap }: LandingPageProps) {
             <Box sx={{ flex: 1 }} />
             <Box component="nav" aria-label="Main navigation" sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1.5 } }}>
                 <Button component={Link} to="/courses" variant="text" color="inherit" sx={{ display: { xs: 'none', sm: 'inline-flex' }, color: roles.text.onChrome, px: { xs: 1.25, sm: 2 } }}>Catalogue</Button>
-                <Button component={Link} to="/login" variant="text" color="inherit" sx={{ color: roles.text.onChrome, px: { xs: 1.25, sm: 2 } }}>Sign in</Button>
+                {/* Catalogue → Theme → Sign in → Create account: the utility sits between navigation and the two
+                    adjacent account actions, in DOM, tab and reading order (DESIGN.md › S25, D13-2). */}
                 <ThemeControl />
+                <Button component={Link} to="/login" variant="text" color="inherit" sx={{ color: roles.text.onChrome, px: { xs: 1.25, sm: 2 } }}>Sign in</Button>
                 <Button component={Link} to="/register" variant="contained" color="onChrome" size="small" sx={{ display: { xs: 'none', sm: 'inline-flex' } }}>Create account</Button>
             </Box>
         </Box>

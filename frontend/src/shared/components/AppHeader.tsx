@@ -17,7 +17,9 @@ export interface AppHeaderProps {
     navItems?: NavItem[];
     selectedNavId?: string;
     onNavSelect?: (id: string) => void;
-    /** Utilities on the right (notifications, account menu, sign-in actions). */
+    /** Page utilities left of the Theme button (for example the notification bell). */
+    utilities?: ReactNode;
+    /** Session actions right of the Theme button: the account menu, or Sign in and Create account. */
     actions?: ReactNode;
     search?: ReactNode;
     brandHref?: string;
@@ -53,6 +55,11 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
     // The tooltip is controlled so that opening the menu also hides a tooltip that hover or focus had
     // already shown; it sits above the menu and would otherwise cover the menu's "Theme" caption.
     const [tooltip, setTooltip] = useState(false);
+    // MUI calls onClose only while it considers the tooltip open, and it is held closed while the menu is open,
+    // so its state is reset whenever the menu opens or closes. After a close, the tooltip stays suppressed while
+    // the pointer is still over the button (stale hover) or focus was restored to it, until a genuine new hover
+    // (pointer enters) or the button loses focus.
+    const hovering = useRef(false), suppressTooltip = useRef(false);
     const [announcement, setAnnouncement] = useState('');
     const button = useRef<HTMLButtonElement>(null);
     const optionRefs = useRef<Array<HTMLElement | null>>([]);
@@ -101,8 +108,11 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
         </Box>;
     }
 
+    const openMenu = () => { setTooltip(false); setOpen(true); };
     const close = (returnFocus: boolean) => {
         setOpen(false);
+        setTooltip(false);
+        suppressTooltip.current = returnFocus || hovering.current;
         if (returnFocus) button.current?.focus();
     };
     // MenuList owns arrow keys (with wrap), Home, End and type-ahead; Escape returns focus to the button.
@@ -114,9 +124,14 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
         else if (event.key === 'Tab') close(true);
     };
     return <>
-        <Tooltip title="Theme" open={tooltip && !open} onOpen={() => setTooltip(true)} onClose={() => setTooltip(false)}>
+        {/* While the menu is open the tooltip exits without its fade, so it never overlaps the menu's caption. */}
+        <Tooltip title="Theme" open={tooltip && !open} onOpen={() => { if (!open && !suppressTooltip.current) setTooltip(true); }} onClose={() => setTooltip(false)}
+            slotProps={{ transition: open ? { timeout: 0 } : {} }}>
             <IconButton ref={button} aria-label={themeButtonLabel(preference, systemScheme)} data-theme-control="button"
-                aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => setOpen((value) => !value)}
+                aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => (open ? close(false) : openMenu())}
+                onMouseEnter={() => { hovering.current = true; suppressTooltip.current = false; }}
+                onMouseLeave={() => { hovering.current = false; suppressTooltip.current = false; }}
+                onBlur={() => { if (!hovering.current) suppressTooltip.current = false; }}
                 sx={{ flexShrink: 0, width: 44, height: 44, bgcolor: 'transparent', color: roles.chrome.muted,
                     '&:hover': { bgcolor: roles.chrome.raised, color: roles.text.onChrome }, '&.Mui-focusVisible': focusRingOnChrome }}>
                 <PresentationIcon name={selected.icon} sx={{ fontSize: 20 }} />
@@ -194,7 +209,7 @@ const REACH_PATH = canvasReachPath(REACH, REACH_RISE);
 export const REACH_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${REACH}" height="${REACH_RISE + 1}" viewBox="0 0 ${REACH} ${REACH_RISE + 1}"><path d="${REACH_PATH}"/></svg>`)}")`;
 
 /** Ink top bar with the "canvas reach" under the active destination (DESIGN.md › Top bar). */
-export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId, onNavSelect, actions, search, brandHref, onBrandSelect }: AppHeaderProps) {
+export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId, onNavSelect, utilities, actions, search, brandHref, onBrandSelect }: AppHeaderProps) {
     const theme = useTheme();
     const wide = useMediaQuery(theme.breakpoints.up('lg'));
     const desktop = useMediaQuery(theme.breakpoints.up('md'));
@@ -259,7 +274,9 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
             {navItems.length === 0 && <Box sx={{ flex: 1 }} />}
             {search && <Box sx={{ flex: '0 1 320px', minWidth: 0, display: { xs: 'none', md: 'block' } }}>{search}</Box>}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1 }, flexShrink: 0, ml: { xs: 'auto', md: 0 } }}>
-                {desktop && <ThemeControl />}{actions}
+                {/* Brand → navigation → [utilities] → Theme → session actions (DESIGN.md › Top bar, D13-3): the Theme
+                    button sits right before the account menu, or before Sign in and Create account for visitors. */}
+                {utilities}{desktop && <ThemeControl />}{actions}
             </Box>
         </Box>
     </Box>;
