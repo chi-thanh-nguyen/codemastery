@@ -95,7 +95,8 @@ function Workspace() {
     const brand = auth.isAuthenticated ? startFor(auth.user?.role) : '/';
     return <DashboardLayout navItems={navItems} selectedNavId={currentSection(location.pathname)} onNavSelect={(path) => navigate(path)}
         headerActions={<SessionNavigation />} brandHref={brand} onBrandSelect={() => navigate(brand)}
-        drawerFooter={auth.isAuthenticated ? undefined : <Button component={Link} to="/register" variant="contained" color="onChrome" fullWidth>Create account</Button>}>
+        // Like the header, the drawer shows no sign-in action while the restore runs (F2).
+        drawerFooter={auth.isAuthenticated || auth.restoring ? undefined : <Button component={Link} to="/register" variant="contained" color="onChrome" fullWidth>Create account</Button>}>
         <Outlet />
     </DashboardLayout>;
 }
