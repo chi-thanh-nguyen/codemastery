@@ -95,6 +95,16 @@ public class SecurityConfig {
                                 "/api/me/course-progress", "/api/me/resume").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/lessons/{lessonId}/completion",
                                 "/api/courses/{courseId}/resume").hasRole("LEARNER")
+                        // CT23.composition/publication/bindings (ADR007 §§5–7): the quiz list is self Learner
+                        // only; authoring and owner reads are Instructor only, with Course ownership decided by
+                        // CT03 in the handler. Administrator has no Instructor inheritance.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/quizzes").hasRole("LEARNER")
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/owned-quizzes",
+                                "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/quizzes").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/quizzes/{quizId}",
+                                "/api/courses/{courseId}/quizzes/{quizId}/publication").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),
