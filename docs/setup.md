@@ -574,32 +574,45 @@ branding asset pack; TypeScript is a trademark of Microsoft Corporation). Both a
 used only to name the language a course teaches.
 `PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
 
-**Colour schemes — implemented on the FE34 working branch; not yet on `main`.**
-`DESIGN.md` r12 specifies System (the default), Light and Dark preferences. On this
-branch, `theme.ts` defines both schemes and semantic roles; `App.tsx` owns the
-device-scoped `codemastery.theme` preference above the router, follows system changes
-and other-tab storage events, and applies the scheme before first paint through the
-existing `index.html` initializer. The shared Theme control is used in the workspace
-top bar/mobile drawer, landing header, auth layout and quiz Focus bar. The preview
-supports a local in-memory override, follows the global preference until overridden,
-and restores the global scheme on exit. Existing colour consumers in the authorized
-scope use semantic roles, including the reporting-chart unknown-state hatch.
+**Colour schemes (FE34 #255, PR #261).** `DESIGN.md` r12 specifies three theme
+preferences, System (the default), Light and Dark. FE34 implements them in the existing
+files only:
 
-**Theme implementation handoff (19 November 2026).** FE34 #255, a child of EP07 #12,
-owns the implementation of the shared colour-scheme work. It was created on 19 November
-2026 under the Project Leader's instruction and assigned to `heizseung`, whom the Leader
-authorized to implement it within the Issue's scope. This branch contains the
-implementation; it is not evidence of merge, independent acceptance or release. The
-scope follows `DESIGN.md` r12: two colour schemes and semantic roles in `theme.ts`;
-global preference state in `App.tsx`; first-paint initialization in the existing
-`index.html`; controls in the authorized shells; semantic-role migration of the
-inventoried existing consumers; and the preview's in-memory override. The theme changes
-it makes in files that other FE Issues list leave those Issues' feature ownership
-unchanged. A new repository file, such as an external first-paint script or a theme hook,
-still needs structure approval under [repository-structure.md](repository-structure.md).
-FE34 excludes the A13 preview-isolation fix in `AuthProvider.tsx` and the A14
-response-metadata (`ETag`) capability of the shared HTTP client; neither has an owning
-Issue.
+- `theme.ts` defines one MUI theme with two colour schemes (`colorSchemes.light`,
+  `colorSchemes.dark`, `cssVariables` with the selector `[data-color-scheme="%s"]`). The
+  semantic roles of r12 are emitted as CSS variables (`--mui-palette-roles-*`) and exported
+  as `roles`; components read roles, never the raw `color` palette. The light values equal
+  the values on `main` before FE34. `@media print` re-declares the light variables, and
+  `prefers-contrast: more` and `forced-colors: active` follow r12's fallback table.
+- `App.tsx` holds the one preference state above the router and the session. It is stored
+  only under `localStorage` key `codemastery.theme` (`system`, `light` or `dark`); a missing,
+  empty, unknown or unreadable value means System and an invalid value is left until the
+  next choice; storage that throws keeps the choice in memory. System follows the
+  `prefers-color-scheme` change event; other tabs follow the `storage` event. No request,
+  profile field or backend state is involved, and sign-in, sign-out or another account
+  never changes it.
+- `index.html` sets `data-color-scheme` and `color-scheme` on the root before the
+  application bundle runs, from the stored preference and
+  `matchMedia('(prefers-color-scheme: dark)')`; the root colour is the frame `#0A0B0F` in
+  both schemes and `theme-color` stays `#0A0B0F`. The inline script is static so that a
+  future Content Security Policy can allow-list it: its SHA-256 source is
+  `'sha256-gyoHhEeXJZ2cyULAqJ8wHhi0sXEzbmvDVoB9FkJ+UYc='` (recompute it whenever the
+  script changes). No CSP is configured today.
+- The Theme control (`ThemeControl`, exported from `AppHeader.tsx`) renders once per
+  shell: the workspace top bar from 900 px (first utility), the mobile drawer footer below
+  900 px (on-chrome segmented control), the landing header, the split auth layout, and the
+  quiz and diagnostic Focus bar (`QuizAttemptPage.tsx`). It is never in the account menu.
+- `/preview` follows the stored preference until a preview-local choice is made; that
+  choice is held in memory for the document, never written to storage, never sent to
+  other tabs and gone on reload or when the document leaves `/preview`.
+
+Known limits: the bare "Restoring your session…" state at `/` (rendered by
+`routes/index.tsx` outside any shell) shows no Theme control, although it renders in the
+effective scheme; the workspace restore state shows the control. FE34 does not include
+the A13 preview-isolation fix in `AuthProvider.tsx` or the A14 response-metadata
+(`ETag`) capability of the shared HTTP client; neither has an owning Issue. Developer
+evidence is recorded in [testing.md](testing.md#fe34-theme-system-verification--20-november-2026);
+independent Light, Dark and System acceptance stays with QA07 #63.
 
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
 in `src/routes/index.tsx`, listed in

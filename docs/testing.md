@@ -349,7 +349,13 @@ code and wordmark text rendered without fallback glyphs (Chromium font inspectio
 and the logo's colour regions distinct on the ink frame at 16–40 px; the active-tab
 reach centred, symmetric and following clicks, child routes and history; production routes never loading the preview chunk; the
 preview sending no API request and writing no storage; computed text contrast on
-twelve screens; skip link, route focus and visible focus on every catalogue tab
+fourteen sampled screens in the light and the dark scheme; the FE34 theme checks (first
+paint before the bundle for each stored value and operating-system setting, a live
+operating-system change, Light and Dark ignoring it, another tab following, the Theme
+menu by keyboard with its status message, exactly one 44 px control per shell at 320–1440 px
+in both schemes, the Focus bar below 600 px, preview-local isolation, dark surfaces, light
+printing, `prefers-contrast: more` and, in Chromium, forced colours, with screenshots of
+each shell in both schemes); skip link, route focus and visible focus on every catalogue tab
 stop; drawer and dialog focus behavior including the full-screen sheet below
 600 px; form labels, required markers and error focus; `pagehide` input blur;
 catalogue submit-only search and error states; the 1.2 s skeleton shimmer and its
@@ -737,14 +743,13 @@ test-count or coverage-percentage claim is made for them.
   upload or delivery (CT09).
 - **Assistive technology.** No test establishes actual screen-reader output; no
   manual VoiceOver, NVDA or TalkBack session has been recorded.
-- **DESIGN r12 behavior.** The FE34 working branch adds focused tests for the Theme
-  menu and drawer radio behavior, preview-local preference isolation, and preference
-  synchronization; those tests do not establish rendered Light/Dark/System fidelity
-  across the documented responsive widths or independent acceptance. The r12
-  quiz-attempt, autosave and Instructor-management states remain specified but are not
-  implemented by this theme work. The preview suite does not cover the recorded A13
-  case (a sign-in in another tab makes the `/preview` document send
-  `POST /api/auth/refresh`).
+- **DESIGN r12 behavior.** FE34 (#255, PR #261) adds unit, component and browser-harness
+  checks for the Light, Dark and System schemes and the Theme control
+  ([record](#fe34-theme-system-verification--20-november-2026)). They are developer
+  evidence: no screen-reader output, Firefox run, real backend or QA07 #63 acceptance is
+  recorded for them. The r12 quiz-attempt, autosave and Instructor-management states remain
+  specified, not implemented. The preview suite does not cover the recorded A13 case (a
+  sign-in in another tab makes the `/preview` document send `POST /api/auth/refresh`).
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
@@ -4317,13 +4322,15 @@ E2E case, executes nothing and records no result. It does not change the CT14 co
 isolation and Profile/Auth UI contracts, the CT19 and CT35 E2E case selections, the CT34
 runner and fixture contracts, or the ADR014 `CT14-SESSION-2026-11-16-r1` obligations.
 
-**Current state.** `main` renders the light scheme only and has no Theme control. The r12
-colour schemes, the quiz-attempt entry and answer-saving states, and the Instructor
-management workflows are specified, not implemented, so no evidence exists for them.
-Nothing in the table below has passed.
+**Current state.** The colour schemes and the Theme control are implemented by FE34
+(#255, PR #261); their developer evidence is the
+[FE34 record](#fe34-theme-system-verification--20-november-2026), which covers the theme
+parts of the first three rows below. The quiz-attempt entry and answer-saving states and
+the Instructor management workflows are specified, not implemented, so no evidence exists
+for them. Rows without a recorded run stay NOT_RUN.
 
 **Theme verification handoff (19 November 2026).** FE34 #255 (assigned to `heizseung`,
-implementation authorized by the Project Leader on 19 November 2026, not implemented)
+implementation authorized by the Project Leader on 19 November 2026; implemented in PR #261)
 owns the theme system and its developer verification: the first three rows of the table
 below, with unit and component tests for the preference, storage fallbacks, other tabs,
 operating-system changes, the Theme control and the preview override, and rendered
@@ -4349,6 +4356,53 @@ Issue. Every row stays NOT_RUN until a check actually runs.
 Report results per layer and only after the checks actually run. Unit results do not
 establish browser, assistive-technology, backend or deployment behavior, and a design
 preview is never integration evidence.
+
+## FE34 theme system verification — 20 November 2026
+
+**Scope and authority.** Developer verification of FE34 #255 (Leader authorization of
+19 November 2026, recorded in the Issue) on PR #261, branch
+`255-fe34-implement-global-lightdarksystem-theme-system`, based on `main` `307e8c2`. It is
+implementation evidence only; independent Final UI acceptance stays with QA07 #63. Run on
+macOS 27.2 arm64 with Node 24 and the Playwright 1.63.0 installed in `e2e/`.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Unit and component tests | `cd frontend && npm test` | 598 tests in 16 files passed |
+| Type check and build | `cd frontend && npm run build` | Passed (the existing chunk-size warning for the main bundle is unchanged in kind) |
+| Browser harness | `cd frontend && npm run test:browser -- --engine all --playwright ../e2e/node_modules/@playwright/test` | Chromium 153: 56 passed, 0 failed. WebKit 26.6: 55 passed, 0 failed (the forced-colours check is Chromium-only). Firefox did not launch on this host (environmental, as in earlier records); the command therefore exits non-zero |
+
+**What the automated tests cover.** `presentation.test.tsx`: preference resolution,
+invalid and empty values, storage that throws on read or write, `matchMedia` missing or
+throwing, the button's accessible name, `aria-haspopup`, `aria-expanded` and
+`aria-controls`, the menu caption, labelled group and `menuitemradio` items with
+`aria-checked`, focus on the chosen item, arrows with wrap, Home, End, Enter, Escape
+returning focus, an outside click, the drawer `radiogroup` with roving tab stop and
+arrow keys, the System caption, one status message per change, 44 px targets, one control
+per workspace shell at ≥ 900 px and < 900 px with none in the account menu, the auth
+layout placement, the light values of `main` and the r12 dark values, and the suspended
+transitions of a switch. `routes/index.test.tsx`: the control and the stored scheme during
+the ADR014 restore; a visitor's choice kept through sign-in, sign-out and another account
+signing in, with no request carrying theme data and no other storage key; invalid and
+blocked storage at startup. `PreviewApp.test.tsx`: storage writes that fail, other tabs
+(new, cleared and invalid values), operating-system changes, and the preview-local
+override (memory only, not reaching other tabs, kept by "Reset sample data", dropped when
+leaving `/preview` and on reload) with no request. `assessment.test.tsx`: in the Focus bar
+the control sits right of the exit button and opening or using it does not change the
+timer or answers, open a dialog, or call navigation, answer, submit or exit handlers.
+
+**Light-scheme fidelity.** A one-off Playwright comparison (not part of the repository)
+rendered the six live routes and all 28 preview screens at 1280 and 390 px from builds of
+`main` `307e8c2` and of this branch, light operating-system setting, with the new control
+hidden. Every difference was confined to the intended changes: header utility positions
+moved by the new Theme slot, the D9-7 landing header and D10-1 Focus bar layouts below
+600 px, and the dual-scheme design reference. It also found and fixed two light
+deviations of the reused commit (the info alert glyph and a 2 px shift of the auth brand
+panel).
+
+**Limits.** No screen-reader session, Firefox run, real backend, 200% browser zoom of the
+open menu, or Windows high-contrast session was recorded; forced colours were checked only
+through Chromium emulation. Contrast was computed from rendered colours on the sampled
+screens, not across every state. The `e2e/` suites were not run locally for this change.
 
 ## AS04 quiz grading unit verification — 20 November 2026
 
