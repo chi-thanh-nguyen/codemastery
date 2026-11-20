@@ -456,6 +456,14 @@ components:
     typography: "{typography.body-sm}"
     rounded: "{rounded.sm}"
     height: "44px"
+  theme-menu-item-hover:
+    backgroundColor: "{colors.fill-150}"
+  theme-menu-item-hover-dark:
+    backgroundColor: "{colors.graphite-600}"
+  theme-menu-item-selected:
+    backgroundColor: "{colors.brand-100}"
+  theme-menu-item-selected-dark:
+    backgroundColor: "{colors.brand-900}"
 ---
 
 # CodeMastery — UI/UX Design Specification
@@ -473,10 +481,10 @@ contract that supplies it and designs only what that contract returns.
 
 | Item | Value |
 | --- | --- |
-| Revision | `DESIGN-2026-11-19-r12` — **Final Design Candidate**, pending the normal review and integration process. r12 remediates the five findings (R11-01–R11-05) of the third independent Codex review of PR #252 at `f5dacb3`: attempt entry and resume semantics, data sources for the Instructor selectors and lesson mapping, the Instructor assessment-management workflow, the Mastery Map recommendation marker and the role-change copy, plus five related defects found by its completeness audit. r11 remediated the four findings (N01–N04) of the second independent Codex review of PR #252 at `2fe402c`: the answer-saving state machine, the adaptive-settings snapshot recovery, partial Quiz navigation context and the Focus-bar wireframe. r10: r10 remediates the thirteen findings (F01–F13) of the independent Codex review of PR #252 at `0030d6e`, puts a Theme control in the quiz Focus bar at the Leader's instruction, and refreshes the implementation baseline to `main` `298b1de`. r9 remediated r8: the Theme control is available to every visitor on every page (D9-1 supersedes D8-3), and a completeness audit resolves or dispositions gaps G1–G4 and twelve further omissions. r8 reconciled every screen and flow with the effective technical contracts of Batches 1–8 (ADR005–ADR013) and ADR014 and added the three-theme system (light, dark, system). Earlier revisions are listed in the [revision history](#revision-history). |
+| Revision | `DESIGN-2026-11-21-r13` — r13 records the FE34 UI refinements the Leader approved on 21 November 2026 for PR #261 (D13-1–D13-5): icons inside buttons and status pills take the label colour, the Theme menu keeps its selected item distinct from a hovered one, the landing and workspace headers group the Theme utility between navigation and the account actions, and the Theme tooltip follows a defined lifecycle. Everything else is unchanged from r12. r12 (`DESIGN-2026-11-19-r12`, **Final Design Candidate**) remediates the five findings (R11-01–R11-05) of the third independent Codex review of PR #252 at `f5dacb3`: attempt entry and resume semantics, data sources for the Instructor selectors and lesson mapping, the Instructor assessment-management workflow, the Mastery Map recommendation marker and the role-change copy, plus five related defects found by its completeness audit. r11 remediated the four findings (N01–N04) of the second independent Codex review of PR #252 at `2fe402c`: the answer-saving state machine, the adaptive-settings snapshot recovery, partial Quiz navigation context and the Focus-bar wireframe. r10: r10 remediates the thirteen findings (F01–F13) of the independent Codex review of PR #252 at `0030d6e`, puts a Theme control in the quiz Focus bar at the Leader's instruction, and refreshes the implementation baseline to `main` `298b1de`. r9 remediated r8: the Theme control is available to every visitor on every page (D9-1 supersedes D8-3), and a completeness audit resolves or dispositions gaps G1–G4 and twelve further omissions. r8 reconciled every screen and flow with the effective technical contracts of Batches 1–8 (ADR005–ADR013) and ADR014 and added the three-theme system (light, dark, system). Earlier revisions are listed in the [revision history](#revision-history). |
 | Repository state audited | r12: `origin/main` re-fetched on 19 November 2026, unchanged at `298b1de`; OpenAPI operations `b3StartAttempt`, `b3ReadAttempt`, `b3AttemptHistory`, `getOwnedSkillGraph`, `getOwnedCourse`, `deleteCourseSkill`, `b3ListOwnedQuizzes`, `b5ListOwnedAssignments` and schemas `B3Attempt`, `B3AttemptRead`, `B3AttemptResult`, `B3Question`, `B3QuizOwned`, `B5OwnedAssignment`, `SkillGraph`, `LessonSkillMapping`, `OwnedCourse`, `B6CurrentRecommendation`, `B6MasterySkill` re-read; ADR007 §§5–11, ADR010 §12, ADR011 §§5, 11 (CT25.binding), ADR012 §10.1, ADR014 §§6–7 and CT16.routes (`docs/setup.md`) re-read; Issues FE10 (#195), FE15 (#200) and FE16 (#201) checked for owner confirmations (none). r11: `origin/main` re-fetched on 19 November 2026, unchanged at `298b1de`; OpenAPI schemas `B3QuizSummary`, `B3AttemptSummary`, `B3AttemptResult`, `B3Attempt` and `B8RecommendedPractice`, ADR005 §§13, 15, 16.1, ADR007 §§9–11 and ADR011 §5 re-read. r10: `origin/main` at `298b1dea262727d0d7213bdd739875b3a6acee98` (18 November 2026), which adds PRs #248 (CT22 progress and resume, backend), #249 (CT13 Course-side metric reads) and #250 (Interaction discussion and report persistence); OpenAPI now marks 18 of its 108 operations implemented; no frontend file and no `DESIGN.md` change; review history of PRs #228–#246 read with the GitHub API; `frontend/src/app/providers/AuthProvider.tsx` re-read for preview isolation; ADR005 §15, ADR007 §§4–11, ADR010 §§9–13, ADR012 §§8–9 and §19.5, and CT16.shell (`docs/setup.md`) re-read for the findings. r9: `origin/main` re-fetched on 18 November 2026, unchanged at `65d14ca`; `DESIGN.md` on `main` still equals r7, so r8 applies without conflict. r9 additionally inspected the frontend API clients and view-model types (`features/assessment/api/quizApi.ts`, `assignmentApi.ts` and `features/instructor/grading/api/gradingApi.ts` are empty files; `assessmentTypes.ts` and `learningTypes.ts` hold preview view models) and ADR007 §7 (learner Quiz list semantics). r8: `origin/main` at `65d14ca54b1d9c517b0cc72f954ffe89d6a49377` (18 November 2026, Asia/Ho_Chi_Minh), fetched the same day; read from source: decision records ADR001–ADR014 and their index, OpenAPI (108 operations), `docs/setup.md`, `docs/data-model.md`, `docs/adaptive-learning.md`, `docs/testing.md`, `docs/deployment.md`, `docs/requirements.md`, `docs/architecture.md`, `docs/repository-structure.md`, `CONTRIBUTING.md`, and the frontend (`frontend/src/**`, `frontend/index.html`, `frontend/package.json`). The source of this revision is r7 at `5a83a00cd20d263ef0feee4be5618882aeaf3d09`, unchanged on `main` since 8 November 2026. Open PRs #248 (CT22 progress and resume, backend), #249 (CT13 metrics reads, backend) and #250 (Interaction repositories, backend) were not merged on that commit and are treated as unmerged. No browser check was run for r8. Earlier audits are recorded in the revision history. |
-| Design authority | The Leader's instruction of 6 November 2026 delegated UI/UX and frontend-presentation decisions in this file (visual direction, design tokens, component specifications, layouts, interaction patterns and UX copy). The Leader's instruction of 18 November 2026, "CodeMastery — Final DESIGN.md Reconstruction, Full Contract Reconciliation & Three-Theme Design System", renewed that delegation for r8 and expressly authorized revising existing UI/UX decisions for consistency, accessibility, design quality or conformity with effective contracts. A further instruction of 18 November 2026, "CodeMastery — Final DESIGN.md Remediation, Completeness Audit & Dedicated Pull Request", explicitly overrode D8-3 (theme selection must be available to all users throughout the website) and authorized r9. The instruction of 19 November 2026 "CodeMastery — PR #252 | Second Independent Review Remediation (N01–N04)" authorized r11, and the instruction of 19 November 2026 "CodeMastery — PR #252 | Final Design Completeness Remediation (R11-01–R11-05)" authorized r12. The instruction of 18 November 2026 "CodeMastery — PR #252 Independent Review Findings Verification & Complete Remediation" authorized r10 and decided that the Theme control must also be available during quiz and diagnostic attempts. None of these delegations approves API contracts, route paths, role or permission rules, dependencies, new repository files, business rules, storage policies, security policy or implementation start. The session user is identified only by the local Git identity. |
-| Prepared by | r12 and r11 (19 November 2026), r10, r9 and r8 by Claude Code (Anthropic, Claude Opus 5.5) under the instructions named above; r10–r12 respond to independent reviews by Codex, which has not reviewed r12. r1–r7 by Claude Code with the installed Impeccable design skill; the 5 November 2026 baseline with OpenAI Codex. No reviewer approval, browser verification or acceptance is claimed for r8–r12. |
+| Design authority | The Leader's instruction of 6 November 2026 delegated UI/UX and frontend-presentation decisions in this file (visual direction, design tokens, component specifications, layouts, interaction patterns and UX copy). The Leader's instruction of 18 November 2026, "CodeMastery — Final DESIGN.md Reconstruction, Full Contract Reconciliation & Three-Theme Design System", renewed that delegation for r8 and expressly authorized revising existing UI/UX decisions for consistency, accessibility, design quality or conformity with effective contracts. A further instruction of 18 November 2026, "CodeMastery — Final DESIGN.md Remediation, Completeness Audit & Dedicated Pull Request", explicitly overrode D8-3 (theme selection must be available to all users throughout the website) and authorized r9. The instruction of 19 November 2026 "CodeMastery — PR #252 | Second Independent Review Remediation (N01–N04)" authorized r11, and the instruction of 19 November 2026 "CodeMastery — PR #252 | Final Design Completeness Remediation (R11-01–R11-05)" authorized r12. The instruction of 21 November 2026 "CodeMastery PR #261 — Final UI Refinement, Theme Interaction Fixes & Comprehensive Playwright Verification" authorized r13 (D13-1–D13-5) within PR #261. The instruction of 18 November 2026 "CodeMastery — PR #252 Independent Review Findings Verification & Complete Remediation" authorized r10 and decided that the Theme control must also be available during quiz and diagnostic attempts. None of these delegations approves API contracts, route paths, role or permission rules, dependencies, new repository files, business rules, storage policies, security policy or implementation start. The session user is identified only by the local Git identity. |
+| Prepared by | r13 (21 November 2026) by Claude Code (Anthropic, Claude Opus 5.5) together with its implementation on PR #261; its rendered checks are developer evidence, not acceptance. r12 and r11 (19 November 2026), r10, r9 and r8 by Claude Code (Anthropic, Claude Opus 5.5) under the instructions named above; r10–r12 respond to independent reviews by Codex, which has not reviewed r12. r1–r7 by Claude Code with the installed Impeccable design skill; the 5 November 2026 baseline with OpenAI Codex. No reviewer approval, browser verification or acceptance is claimed for r8–r12. |
 | Version control | Tracked in Git at the repository root from r6; earlier revisions were a local file excluded from Git. |
 | Visual reference | "E-learning Platform — Learning Plan Dashboard" by Bogdan Nikitin for Nixtio, published on Dribbble (shot 23956256). Its visual language was studied. No logo, artwork, illustration, avatar, copy or screen composition from it is reused (see [Reference Analysis](#reference-analysis)). The reference has no dark scheme; the dark scheme of r8 is derived from CodeMastery's own tokens. |
 | Governs | Root `CLAUDE.md` § Impeccable: this file is the authoritative UI/UX specification. It is subordinate to mandatory requirements, approved architecture, repository structure, ADRs and API contracts. If those conflict with this file, they win and the Blocker Protocol applies. |
@@ -788,8 +796,9 @@ merges with the frame at the canvas edge.
 | `bg.fill` | `fill-150` | `graphite-850` | Aside panel, search pill, neutral pills, segmented track, View Rail track, inline code, course-mark container (dark) |
 | `bg.raised` | `surface` | `graphite-700` | Menus, popovers, dialogs, side sheets, the selected segment, Mastery Map nodes (dark) |
 | `bg.hover` | `fill-150` (controls), `canvas-100` (table rows) | `graphite-750` | Hover of secondary controls, icon buttons and table rows |
+| `bg.raised-hover` (r13) | `fill-150` | `graphite-600` | Hover and keyboard focus of items on a raised surface (menu items). Dark uses a lighter value than `bg.raised` because `graphite-750` is darker than `graphite-700` and would barely show (D13-4) |
 | `bg.field` / `bg.field-disabled` | `surface` / `fill-150` | `graphite-850` / `graphite-900` | Text fields, selects, quiz option rows |
-| `bg.selected` | `brand-100` | `brand-900` | Selected table row, focused and selected menu item, drag-over drop zone |
+| `bg.selected` | `brand-100` | `brand-900` | Selected table row, selected (checked) menu item, drag-over drop zone. Never used for hover or focus alone (D13-4) |
 | `bg.inverse` / `text.inverse` | `ink-950` / `surface` | `mist-100` / `ink-900` | Tooltips, toasts, the `ink` status-pill variant |
 | `bg.code` / `text.code` / `line.code` | `ink-950` / `fill-150` / none | `graphite-980` / `mist-100` / `graphite-600` | Code blocks |
 | `text.primary` | `ink-900` | `mist-50` | All primary text |
@@ -818,7 +827,8 @@ merges with the frame at the canvas edge.
 ### Semantic families
 
 Each family has a strong colour (glyphs and small text), a tint (container) and
-a soft inner layer. Text on a tint is `text.primary`; secondary text on a tint is
+a soft inner layer. Glyphs inside status pills and tags are the exception: they take
+the label's colour (D13-1, [Status pills and tags](#status-pills-and-tags)). Text on a tint is `text.primary`; secondary text on a tint is
 `text.strong-secondary`. In the dark scheme the tint is a deep, low-chroma
 container and the soft layer is darker than the tint, so inner panels recede
 the same way they do in light.
@@ -836,11 +846,11 @@ the same way they do in light.
 
 | Meaning | Tag (light) | Tag (dark) | Glyph | Data fill light / dark |
 | --- | --- | --- | --- | --- |
-| Unknown | `surface`, dashed `ink-400` | `graphite-800`, dashed `graphite-400` | dashed circle in `text.strong-secondary` | `data-unknown` / `data-unknown-dark` + diagonal hatch |
-| Learning | `sky-100` | `sky-900` | half circle in sky strong | `data-learning` / `data-learning-dark` |
-| Mastered | `mint-100` | `mint-900` | check circle in mint strong | `data-mastered` / `data-mastered-dark` |
-| Weak | `butter-100` | `butter-900` | alert triangle in butter strong | `data-weak` / `data-weak-dark` |
-| Recommendation (Continue, Remedial), recommended practice | `lilac-100` | `lilac-900` | route glyph (practice: quiz glyph) in lilac strong | — |
+| Unknown | `surface`, dashed `ink-400` | `graphite-800`, dashed `graphite-400` | dashed circle, in the label colour (r13; r12: `text.strong-secondary`) | `data-unknown` / `data-unknown-dark` + diagonal hatch |
+| Learning | `sky-100` | `sky-900` | half circle, in the label colour (r13; r12: sky strong) | `data-learning` / `data-learning-dark` |
+| Mastered | `mint-100` | `mint-900` | check circle, in the label colour (r13; r12: mint strong) | `data-mastered` / `data-mastered-dark` |
+| Weak | `butter-100` | `butter-900` | alert triangle, in the label colour (r13; r12: butter strong) | `data-weak` / `data-weak-dark` |
+| Recommendation (Continue, Remedial), recommended practice | `lilac-100` | `lilac-900` | route glyph (practice: quiz glyph), in the label colour (r13; r12: lilac strong) | — |
 | Difficulty (Easy, Medium, Hard) | neutral tag (`bg.fill`) | neutral tag | none | — |
 
 Difficulty is never colour-coded: green/yellow/red difficulty colours would
@@ -978,9 +988,9 @@ for the Focus bar at the Leader's instruction of the same day).
 
 | Shell | Width | Placement | Form |
 | --- | --- | --- | --- |
-| Workspace frame: public catalogue and course detail, Learner, Instructor and Administrator workspaces, Profile, Page not found, Access denied, Restoring your session | ≥ 900 px | Top-bar utilities, first item: left of "Sign in" and "Create account" for visitors, left of the bell and the account button when signed in | Theme button + menu |
+| Workspace frame: public catalogue and course detail, Learner, Instructor and Administrator workspaces, Profile, Page not found, Access denied, Restoring your session | ≥ 900 px | Top-bar utilities, after the page utilities (the notification button) and immediately before the session actions: left of "Sign in" and "Create account" for visitors, left of the account button when signed in (D13-3) | Theme button + menu |
 | Workspace frame | < 900 px | Mobile drawer footer, for every role and for visitors (above "Create account" when that is present) | On-chrome segmented control |
-| Landing header (S25) | All widths | Header utilities, between "Sign in" and "Create account"; below 600 px the header's "Catalogue" text button is hidden because the hero's "Browse courses" leads to the same page | Theme button + menu |
+| Landing header (S25) | All widths | Header utilities in the order "Catalogue" → Theme → "Sign in" → "Create account" (D13-2); below 600 px the header's "Catalogue" text button and "Create account" are hidden because the hero leads to the same pages, leaving Theme → "Sign in" | Theme button + menu |
 | Split auth layout: sign in, create account, forgot and reset password (S2) | ≥ 900 px | Top row of the ink brand panel, right-aligned opposite the lockup | Theme button + menu |
 | Split auth layout | < 900 px | Right end of the 120 px ink header that replaces the brand panel | Theme button + menu |
 | Design preview (S26) | Per rendered shell | The same placements as the shell being previewed, preview-local ([Preview behavior](#preview-behavior)) | As the shell |
@@ -1005,7 +1015,26 @@ the drawer below 900 px) serves every role.
   caption line naming the effective scheme: "Matches your device (Dark now)" or
   "(Light now)". The items are `role="menuitemradio"` in a `role="group"`
   labelled "Theme", with `aria-checked`; arrow keys move between items, Enter or
-  Space selects, Escape closes the menu and returns focus to the button.
+  Space selects, Escape closes the menu and returns focus to the button. Tab and
+  Shift+Tab also close it and return focus to the button first, so the tab
+  sequence continues from the button; the popup container carries no `tooltip`
+  role.
+- **Theme menu item states (D13-4).** Unselected at rest: no fill. Unselected
+  hover: `bg.raised-hover`. Selected (checked): `bg.selected`, 600 weight and the
+  check glyph. Selected + hover: `bg.selected` with a 1 px inset `line.strong`
+  ring. Keyboard focus: the 2 px `focus.ring` outline on top of the item's own
+  fill (`bg.raised-hover`, or `bg.selected` when selected). Disabled items (none
+  today) follow the MUI disabled rule. A hovered item never uses `bg.selected`, so
+  the selection stays recognizable while another item is hovered, in both
+  schemes. The drawer segmented control already separates them (white selected
+  pill, `chrome-hover` for a hovered segment).
+- **Theme tooltip lifecycle (D13-5).** The "Theme" tooltip appears on a genuine
+  hover (after 400 ms) or keyboard focus, closes as soon as the menu opens, stays
+  closed while it is open, and is never left behind after the menu is dismissed
+  (outside click, a second press of the button, Escape, Tab or a selection). It
+  does not reopen from a stale hover (the pointer still resting on the button when
+  the menu closes) or from the focus that closing returns to the button; it shows
+  again on the next pointer entry or keyboard focus.
 - **Drawer control.** In the mobile drawer footer, a caption label "Theme"
   (`chrome-muted`) above a full-width on-chrome segmented control
   (`segmented-control-on-chrome`): `chrome-raised` track, 44 px tall, three
@@ -1364,12 +1393,12 @@ value below is a semantic role; the light and dark values come from
 
 ### Top bar and navigation
 
-- **Structure:** brand lockup left (`BrandWordmark`: 40 px mark and 25 px Poppins ExtraBold wordmark from 600 px, 36/22.5 px below, 32/20 px below 390 px; see [Brand and logo](#brand-and-logo)), linking to the visitor's start page (`/` anonymous, `/home` for a Learner; `/teach` for an Instructor and `/admin` for an Administrator once those screens are routed, `/courses` until then); primary navigation centred at ≥ 900 px; utilities right, in this order: the Theme button ([Theme selector](#theme-selector)), then the notification button for roles whose notification screen is routed, and the account button (or "Sign in" and "Create account" for visitors). The top bar is identical in both schemes.
+- **Structure:** brand lockup left (`BrandWordmark`: 40 px mark and 25 px Poppins ExtraBold wordmark from 600 px, 36/22.5 px below, 32/20 px below 390 px; see [Brand and logo](#brand-and-logo)), linking to the visitor's start page (`/` anonymous, `/home` for a Learner; `/teach` for an Instructor and `/admin` for an Administrator once those screens are routed, `/courses` until then); primary navigation centred at ≥ 900 px; utilities right, in this order (D13-3): the notification button for roles whose notification screen is routed, then the Theme button ([Theme selector](#theme-selector)), then the account button (or "Sign in" and "Create account" for visitors). The structure reads brand → primary navigation → page utilities → Theme → account; r9–r12 put the Theme button first. The top bar is identical in both schemes.
 - **Nav item:** 44 px tall pill, 16 px horizontal padding, 20 px icon + label. Default `chrome-muted`; hover `chrome-raised` pill background, white text; active white label, 600 weight, canvas reach below, `aria-current="page"`. Focus: 2 px `focus-on-chrome` ring, 2 px offset.
 - **Links:** items are real links. A plain click routes in-app; Cmd/Ctrl/Shift/Alt-clicks (new tab or window) and items without a handler follow the native link.
 - **Parent highlighting:** the item stays active for its child routes (for example `/courses/:courseId` keeps "Catalogue" active; the Learner course-workspace paths keep "My courses" active; `/teach/courses/…` keeps "Teaching" active).
 - **Account button:** 52 px pill: monogram avatar (40 px circle, solid `brand-700`, white initial), display name (label, white) and role (caption, `chrome-muted`) at ≥ 900 px, chevron; hover `chrome-raised`. Its accessible name is "Account menu, *name*, *role*".
-- **Account menu:** `bg.raised` menu (Raised shadow; dark adds the hairline outline). Items in order: "Profile", divider, "Sign out". The preview's menu holds "Preview index" and "Reset sample data" instead. The Theme control is not repeated here; it is the first top-bar utility. No email, no avatar image, no account status.
+- **Account menu:** `bg.raised` menu (Raised shadow; dark adds the hairline outline). Items in order: "Profile", divider, "Sign out". The preview's menu holds "Preview index" and "Reset sample data" instead. The Theme control is not repeated here; it sits immediately left of the account button. No email, no avatar image, no account status.
 - **Notification button:** 44 px icon button on the frame with the bell glyph and a 20 px `brand-600` count badge ringed in ink, showing the unread count from `GET /api/me/notifications/unread-count`; its accessible name includes the count ("Notifications, 3 unread"; "Notifications" when zero, with no badge). On the Notifications page it is current: `chrome-raised` circle and `aria-current="page"`. Shown for Learners and Instructors once `/notifications` is routed (CT16.routes); the count reloads on route change and when the page opens, with no polling (setup, Batch 7 notification client). A count read failure hides the badge silently; the button still works.
 - **Anonymous utilities:** the Theme button, "Sign in" text button (white) and "Create account" on-chrome white small pill (40 px); below 900 px the Theme control and "Create account" move to the drawer footer. While a reload restores the session (ADR014), the sign-in actions render nothing, so they never flash; the Theme button stays.
 - **Mobile drawer (< 900 px):** 304 px ink drawer from the left (at most viewport − 48 px), 64 px header with the 36 px lockup, a list of 52 px `rounded.md` rows (6 px dot, 20 px icon, label), active row `chrome-raised` with a Logo Blue dot and 600 weight, and a footer above a `chrome-raised` hairline that always holds the Theme segmented control (followed by the full-width "Create account" pill for visitors). It keeps the existing `SidebarNav` behaviors: focus moves into the drawer, Escape and scrim close it, focus returns to the menu button, and crossing to ≥ 900 px closes it and restores focus.
@@ -1399,6 +1428,7 @@ reuse them instead of styling buttons locally.
 | **Tertiary** | `variant="text"` | No fill or border, `accent.link` label (12 px padding) | `accent.link-hover` + underline | Low-emphasis inline actions ("Skip and start from the beginning", "View result", alert actions); on tinted grounds it may take `text.primary` (`color="inherit"`) |
 | **Destructive** | `variant="contained" color="error"` | `control.danger` pill, white label | `control.danger` hover | Only to confirm destroying, hiding or locking (inside its confirmation dialog); the trigger is secondary ("Leave course") or a menu item |
 
+- **Icons (D13-1):** a glyph inside any button (primary, secondary, tertiary, destructive, on-chrome, icon-only and circular) is drawn in `currentColor`, so it always matches the button's label or foreground in every state (rest, hover, pressed, selected, focus, disabled, busy) and both schemes. A button never gives its glyph a colour of its own.
 - **Shared states:** 48 px (40 px visible for `size="small"`, with its hit area extended to 44 px), label type, pill radius; pressed scale 0.98; focus 2 px `focus.ring` with 2 px offset (on the frame `focus-on-chrome`); disabled primary and destructive `control.disabled`, disabled secondary keeps its surface and border with `text.disabled`, disabled tertiary has no fill; busy submits keep their width and announce progress (`aria-busy` or a status line).
 - **On the ink frame** (`color="onChrome"`): primary is a white pill with an ink label (hover `fill-150`); secondary is a graphite pill with a white label (hover `chrome-hover`). Used by the top-bar and landing "Create account", the landing hero and the quiz "Submit quiz". Identical in both schemes because the frame is.
 - **Circular actions** (`CircleAction`, 44 px, 20 px icon, accessible name and tooltip): `ink` = primary circle (`control.primary`), `fill` = secondary outlined circle, `plain` = no surface. Overflow "More actions" buttons and the lesson bar's previous/next circles use the secondary surface.
@@ -1429,7 +1459,7 @@ ADR010 §13).
 
 ### Status pills and tags
 
-- **Status pill** (`StatusPill`, `status-pill`): 36 px pill, label type, optional 18 px leading glyph in the family's strong colour. Variants: neutral (`bg.fill`), mint, butter, rose, sky, lilac, dashed (`bg.surface` with dashed `line.strong`, for "not yet" states such as "Not started") and ink (`bg.inverse` / `text.inverse`). The same component in the 28 px `tag` size (`rounded.xs`, caption 600, 16 px glyph) carries compact domain tags and account roles. Used for lesson progress, membership, publication, submission, report and account status.
+- **Status pill** (`StatusPill`, `status-pill`): 36 px pill, label type, optional 18 px leading glyph in `currentColor`, the same colour as the label (D13-1; r12 used the family's strong colour). For example the mint "Published" pill draws its eye glyph in the label's `text.primary`. Variants: neutral (`bg.fill`), mint, butter, rose, sky, lilac, dashed (`bg.surface` with dashed `line.strong`, for "not yet" states such as "Not started") and ink (`bg.inverse` / `text.inverse`). The same component in the 28 px `tag` size (`rounded.xs`, caption 600, 16 px glyph) carries compact domain tags and account roles. Used for lesson progress, membership, publication, submission, report and account status.
 - **Mastery tag:** 28 px, `rounded.xs`, caption 600. Glyph + exact state word: Unknown (dashed), Learning (sky), Mastered (mint), Weak (butter) — values in [Mastery, adaptive and data colours](#mastery-adaptive-and-data-colours).
 - **Recommendation tag:** 28 px lilac tag with route glyph: "Continue" or "Remedial" (current learner guidance); "Test-out" appears only in the Instructor recommendation history, where `skip` rows are listed (ADR011 §§7, 14).
 - **Difficulty tag:** 28 px neutral tag: "Easy", "Medium", "Hard".
@@ -1513,7 +1543,7 @@ they map to the approved CT16 routes.
 ### Feedback
 
 - **Inline alert:** `rounded.md`, family tint, 20 px glyph in the family strong colour, title (label) and body in `text.primary`, optional actions on the right. No coloured left border. Used for page-level and form-level messages.
-- **Tooltip:** `bg.inverse` with `text.inverse` caption, `rounded.sm`, 8 × 12 px padding, max 280 px, appears after 400 ms on hover and immediately on keyboard focus, dismissible with Escape. Tooltips repeat names; they never hold the only copy of information.
+- **Tooltip:** `bg.inverse` with `text.inverse` caption, `rounded.sm`, 8 × 12 px padding, max 280 px, appears after 400 ms on hover and immediately on keyboard focus, dismissible with Escape. Tooltips repeat names; they never hold the only copy of information. A tooltip on a control that opens a popup closes when the popup opens and is not left behind when it closes (D13-5).
 - **Toast:** `bg.inverse` pill at bottom centre, `text.inverse` body text, optional text action (`focus-on-chrome` in light, `brand-700` in dark), 6 s, pausable on hover/focus, announced politely. Only for background confirmations that do not belong next to a control.
 - **Confirmation dialog:** see Dialogs. Destructive confirmations focus Cancel first (existing behavior).
 - **Loading:** a visible `role="status"` line naming what is loading ("Loading your courses…"), followed by `skeleton` blocks shaped like the content with a 1.2 s shimmer (static with reduced motion). No spinner accompanies content loading; busy submit buttons keep their own inline indicator.
@@ -1525,7 +1555,7 @@ they map to the approved CT16 routes.
 
 - **Dialog:** `bg.raised`, `rounded.xl`, 32 px padding, max 560 px, Overlay shadow, scrim. Title (item title), body, actions right-aligned (secondary then primary). Focus is trapped and returns to the trigger. Full-screen sheet below 600 px.
 - **Side sheet:** right-anchored 480 px `bg.raised` panel for record detail in Manage pages (report detail, user detail); full-screen below 900 px.
-- **Menu:** `bg.raised`, `rounded.lg`, Raised shadow, 44 px items, `bg.selected` for the focused item; `menuitemradio` items (Theme menu) show a trailing check when checked.
+- **Menu:** `bg.raised`, `rounded.lg`, Raised shadow, 44 px items. Item states (D13-4): hover and keyboard focus `bg.raised-hover` (focus adds the 2 px `focus.ring`); the selected item `bg.selected` with 600 weight; selected + hover adds a 1 px inset `line.strong` ring. `menuitemradio` items (Theme menu) show a trailing check when checked. Under forced colours, menus, popovers, dialogs and the drawer get a 1 px `CanvasText` outline because their shadow edge disappears.
 
 ### Progress
 
@@ -1578,6 +1608,8 @@ are snapshots (ADR012 §13.1).
 - Icons: original outline SVGs in the existing `PresentationIcon` component, 24 px grid, 1.75 px stroke, round caps and joins, `currentColor` (so they follow both schemes). Sizes 16, 20, 24. No icon font or package is added.
 - Implemented glyph set: home, book, catalogue, grid, my-courses, path, map, graph, quiz, assignment, file, text, video, bell, user, users, shield, flag, audit, chart, message, reply, send, code, layers, sliders, search, filter, plus, minus, edit, trash, eye, eye-off, upload, download, external, copy, refresh, more, menu, close, sign-out, lock (account lock only), unlock, play, arrow, arrow-right, arrow-left, chevron-down/up/right/left, move-up, move-down, clock, calendar, check, check-circle, half-circle, dashed-circle, alert-triangle, alert, alert-circle, info, route (recommendation), skip (test-out), star, zoom-in, zoom-out, fit, list, grip, spark, flame. `star`, `spark` and `flame` are defined but unused.
 - **Added in r8 (not built):** `sun`, `moon` and `device` (a monitor outline) for the Theme control, drawn to the same rules.
+- **Glyph colour (D13-1):** a glyph that belongs to a control or a label (buttons, icon buttons, status pills and tags) inherits that control's foreground through `currentColor`. Standalone semantic glyphs keep their family accent: the header glyph of guidance and attention entries (for example "Ungraded submissions", "Unanswered question" and "Adaptive mode not ready" in the Teaching home's "Needs attention" panel), inline-alert glyphs, Path Spine nodes, the lesson-tile corner badge, charts, the Mastery Map, course marks and illustrations.
+- **KPI glyphs:** stat tiles (`StatTile`) carry no glyph today, and S22/S23 forbid KPI cards. If a genuine KPI or stat glyph is introduced, it keeps its semantic accent (not the text colour) with at least 3:1 contrast against its actual background in both schemes.
 - Imagery: no stock photos, no 3D avatars, no illustrations of people. The brand graphic is the logo's node-and-link geometry, redrawn as crisp vector shapes from tokens (auth brand panel, landing example map). Course marks are the official language logos or the generic code glyph (see [Tiles](#tiles)); they are the only third-party artwork in the UI.
 
 ### Motion
@@ -2179,8 +2211,10 @@ Covered by [Layout](#layout), the [Top bar](#top-bar-and-navigation) and
 [Themes](#themes). Skip link "Skip to main content" is the first focusable
 element and targets `main#main-content` (existing id). The `main` landmark holds
 the page; the top bar is a `header` with a `nav` labelled "Main navigation"; the
-account menu is a separate button. The Theme button is the first utility (≥ 900
-px) and the drawer footer's first item (< 900 px), for visitors and every role.
+account menu is a separate button. The Theme button sits immediately before the
+account button, or before "Sign in" for visitors, after any page utility such as the
+notification button (≥ 900 px, D13-3), and is the drawer footer's first item
+(< 900 px), for visitors and every role.
 While the session restores (F2), protected pages show the "Restoring your
 session…" system state inside the shell; the sign-in actions stay hidden and the
 Theme control stays available.
@@ -2673,11 +2707,13 @@ headline KPI cards, deltas or trends.
 
 A signed-in visitor is sent to their start page instead (after the session
 restore completes; during it the page shows "Restoring your session…"). Its own
-ink header (no canvas reach): lockup, then "Catalogue" and "Sign in" text
-buttons, the Theme button and a white "Create account" small pill. Below 600 px
-"Create account" and "Catalogue" are hidden (the hero holds "Create account" and
-"Browse courses"), so the header keeps the lockup, "Sign in" and the Theme button
-and never scrolls at 320 px. Ink hero:
+ink header (no canvas reach): lockup, then the "Catalogue" text button, the
+Theme button, the "Sign in" text button and a white "Create account" small pill,
+in that DOM, tab and reading order, so the two account actions stay adjacent and
+"Create account" stays rightmost (D13-2). Below 600 px "Create account" and
+"Catalogue" are hidden (the hero holds "Create account" and "Browse courses"), so
+the header keeps the lockup, the Theme button and "Sign in" and never scrolls at
+320 px. Ink hero:
 headline "Learn programming at the pace of what you actually know." (the `display`
 step: 56 px, 40 px below 600 px), one supporting sentence in `chrome-muted`, white "Browse courses"
 pill and a `chrome-raised` "Create account" pill; beside it from 1200 px (below
@@ -2891,6 +2927,7 @@ against invented endpoints, fixtures or mock services in production code.
 | `tones` | Per scheme: `{ tint, soft, strong, text }` for neutral, sky, mint, butter, lilac, rose, from [Semantic families](#semantic-families). Dark neutral: `tint graphite-850`, `soft graphite-800`, `strong mist-200`, `text mist-50` |
 | `palette.background`, `text`, `divider`, `action` | light: `default canvas-100`, `paper surface`, `text ink-900/ink-600/ink-500`, `divider line-200`, `action.hover fill-150`, `selected brand-100`; dark: `default graphite-900`, `paper graphite-800`, `text mist-50/mist-200/mist-500`, `divider graphite-600`, `action.hover graphite-750`, `selected brand-900`, `disabledBackground graphite-850` |
 | Raised surfaces | MUI `Paper` for menus, popovers and dialogs uses `bg.raised` (`graphite-700` in dark) with the dark hairline outline; the light scheme keeps white with no outline |
+| Menu item states (r13) | `MuiMenuItem`: hover and `.Mui-focusVisible` `bg.raisedHover` (CSS variable `--mui-palette-roles-bg-raisedHover`); `.Mui-selected` `bg.selected` with 600 weight; `.Mui-selected:hover` adds `inset 0 0 0 1px line.strong`; `@media (hover: none)` drops the hover fill (D13-4) |
 | `shadow`, `scrim` | Per-scheme values from [Shadow vocabulary](#shadow-vocabulary) |
 | Global CSS (`MuiCssBaseline`) | `body` `bg.frame` in both schemes; `color-scheme` set from the effective scheme; `::selection` and `caret-color` per scheme; page scrollbar keeps the frame palette; `@media (forced-colors: active)` and `(prefers-contrast: more)` rules per [Fallbacks](#fallbacks-and-special-modes); existing reduced-motion rules kept |
 | Existing tokens | `radius`, `pathLine`, `motion`, `presentationTokens`, typography, `focusRing` (per scheme), `focusRingOnChrome` unchanged |
@@ -2905,7 +2942,7 @@ against invented endpoints, fixtures or mock services in production code.
 | Existing file | Responsibility |
 | --- | --- |
 | `layouts/DashboardLayout.tsx` | Frame, canvas, optional aside slot, skip link; keeps responsive focus recovery |
-| `shared/components/AppHeader.tsx` | Ink top bar: logo, inline primary nav with canvas reach, utilities (Theme button first), account menu, notification button; exports the Theme button and menu |
+| `shared/components/AppHeader.tsx` | Ink top bar: logo, inline primary nav with canvas reach, page utilities (notification button), the Theme button, then the session actions (account menu, or Sign in and Create account) (D13-3); exports the Theme button and menu |
 | `shared/components/SidebarNav.tsx` | Mobile navigation drawer (< 900 px); keeps current-item, close and focus behavior; footer Theme segmented control |
 | `layouts/AuthLayout.tsx` | Split auth layout; keeps AutoFill focus release; Theme button in the brand panel or compact header |
 | `features/catalogue/pages/LandingPage.tsx` | Landing header with the Theme button; header items hidden below 600 px as S25 states |
@@ -3096,7 +3133,7 @@ within this file's design authority. D8-1, D8-2 and D8-4–D8-14 remain in force
 
 | ID | Decision | Rationale |
 | --- | --- | --- |
-| D9-1 | Theme control for every visitor on every page: Theme button first in the workspace top bar (≥ 900 px), segmented control in the drawer footer (< 900 px), Theme button in the landing header and the auth brand panel or header; no Theme group in the account menu; *amended by D10-1 (r10):* also in the quiz and diagnostic Focus bar (r9 had none there) | Leader override of D8-3; one placement per shell avoids competing selectors |
+| D9-1 | Theme control for every visitor on every page (*position in the workspace top bar and the landing header refined by D13-3 and D13-2, r13*): Theme button first in the workspace top bar (≥ 900 px), segmented control in the drawer footer (< 900 px), Theme button in the landing header and the auth brand panel or header; no Theme group in the account menu; *amended by D10-1 (r10):* also in the quiz and diagnostic Focus bar (r9 had none there) | Leader override of D8-3; one placement per shell avoids competing selectors |
 | D9-2 | The Learner home Continue tile reads the resumed course's public syllabus once to show lesson and course titles; "Your courses" rows stay without lesson titles | Resolves G1 for the tile with an approved public operation and no per-row requests (CT16.learner-home §§1–2) |
 | D9-3 | *Amended by D10-2 (r10).* The quiz intro (and result title) locate the Quiz's summary in the learner Quiz list | Resolves G2 with the approved list (ADR007 §7) instead of an invented single read |
 | D9-4 | Result and grading URLs carry the missing identities as query parameters (`quizId`; `courseId` and `assignmentId`), names recommended here and pending confirmation by the FE10 (#195) and FE17 (#202) owners; the grade page finds its submission in the assignment's submission list (*amended by D10-2; extended by D12-1 with `attemptId` and by D12-2 with `view`*) | Resolves G3 and G4 within CT16.routes, which leaves query parameters to the owning Issue; no route or API change |
@@ -3132,6 +3169,18 @@ within this file's design authority. D8-1, D8-2 and D8-4–D8-14 remain in force
 | D12-3 | One course context per editor shell (`getOwnedCourse`) and one skill graph per course (`getOwnedSkillGraph`) supply the lesson and skill selectors and the mapping inventory; mutations re-read them | `B3Question.skillId`, `B5OwnedAssignment.lessonId` and `LessonSkillMapping` carry identifiers only; both reads are unpaginated owner reads (R11-02) |
 | D12-4 | No recommendation marker on Mastery Map nodes; the target Lesson is tagged "Recommended" in related-lesson lists | `B6CurrentRecommendation` names a Lesson, which can relate to several skills or none (ADR011 §15) (R11-04) |
 | D12-5 | Role-change copy separates server permissions (next request) from the browser's menus (after a reload or a new sign-in) | CT12.user re-checks the role per request; the browser's identity changes at sign-in or restore (ADR012 §10.1; ADR014 §§6–7) (R11-05) |
+
+### Design decisions of r13 (21 November 2026)
+
+Leader-approved refinements for FE34 on PR #261 (instruction of 21 November 2026). **Delivery:** implemented on PR #261 (unmerged); not on `main` until the PR merges.
+
+| ID | Decision | Rationale |
+| --- | --- | --- |
+| D13-1 | Glyphs inside buttons and status pills or tags inherit their label's colour through `currentColor`; standalone semantic glyphs (guidance and attention entries, alerts, Path Spine, charts, the Mastery Map, course marks) keep their family accents; KPI glyphs, if any are added, keep semantic accents at 3:1 or more | One foreground per control keeps icon and text visibly together in every state and scheme; the semantic glyphs carry meaning on their own |
+| D13-2 | The landing header order is Catalogue → Theme → Sign in → Create account (DOM, tab and reading order); below 600 px Theme → Sign in | Navigation, then the presentation utility, then the two related account actions kept together, with the primary call to action rightmost |
+| D13-3 | The workspace top bar reads brand → primary navigation → page utilities (notification button) → Theme → account button, or → Theme → Sign in → Create account for visitors; below 900 px the Theme control stays in the drawer footer | The Theme utility sits next to the account actions it groups with, and never separates navigation-like page utilities from it |
+| D13-4 | Menu items: hover and keyboard focus use `bg.raised-hover`; only the selected item uses `bg.selected`; selected + hover adds a hairline ring; keyboard focus adds the focus ring | r12 used `bg.selected` for hover, focus and selection, so a hovered item looked selected (Leader-reported defect) |
+| D13-5 | The Theme tooltip appears on genuine hover or keyboard focus, closes when the menu opens, and is never stranded or re-opened by a stale hover or by focus restored on close | A controlled tooltip kept its open state while the menu held it closed, and it reappeared stuck after dismissal (Leader-reported defect) |
 
 ### Contract reconciliation record (r8)
 
@@ -3358,6 +3407,7 @@ Verified by unit tests, the browser harness (Chromium and WebKit) and E2E.
 | Baseline | 2026-11-05 | Inventory and constraints; all visual decisions pending (OpenAI Codex) |
 | DESIGN-2026-11-06-r1 | 2026-11-06 | Full redesign specification under Leader delegation: visual system, IA, flows, screens, handoff (Claude Code with Impeccable) |
 | r1 amendments | 2026-11-07 | Typography (Google Sans Flex, JetBrains Mono, Poppins wordmark), logo palette, Brand and logo section, traced canvas reach (Leader instruction for PR #209) |
+| DESIGN-2026-11-21-r13 | 2026-11-21 | FE34 UI refinements approved by the Leader on 21 November 2026 for PR #261 (Claude Code, together with their implementation): D13-1 glyph colour inheritance for buttons and status pills, with semantic glyph and KPI exceptions; D13-2 landing header order; D13-3 workspace header grouping (Theme immediately before the account actions); D13-4 menu item states and the new `bg.raised-hover` role; D13-5 Theme tooltip lifecycle. Also records the Theme menu's Tab behaviour, its popup role, and the forced-colours outline of floating surfaces implemented on PR #261. Rendered evidence is developer evidence on PR #261 (Chromium, WebKit and Linux Firefox), not acceptance. The Implementation status table keeps its r12 date and baseline. |
 | DESIGN-2026-11-19-r12 | 2026-11-19 | **Final Design Candidate**, third independent-review remediation (Claude Code, Leader instruction of 19 November 2026, "Final Design Completeness Remediation (R11-01–R11-05)"; pending a new independent review; no browser verification). R11-01: F6 attempt entry and resume — starts only from explicit start actions, every reopening reads the attempt by its `attemptId`, read outcomes and cross-tab, expiry, Back/Forward and reload cases; S9, S11 and S12 aligned; G6 (D12-1). R11-02: S18 course context and shared skill graph feeding the question skill selector, assignment lesson selector and S20 Lesson inventory (D12-3). R11-03: S19 Assessments page with Questions, Quizzes and Assignments views, creation through `new`, publication, deletion and editor recovery; F11; G7 (D12-2). R11-04: Mastery Map node recommendation badge removed; target Lesson tagged in related lessons (D12-4). R11-05: role-change, lock and unlock copy (D12-5). Audit fixes X1–X5. Baseline unchanged (`main` `298b1de`). r11 entry unchanged. |
 | DESIGN-2026-11-19-r11 | 2026-11-19 | **Final Design Candidate**, second independent-review remediation (Claude Code, Leader instruction of 19 November 2026; pending a new independent review; no browser verification). N01: F6 answer saving rewritten as an explicit state machine with a suspended Checking/Reconcile path, a submit gate and consistent Exit, Back, Resume and expiry rules (D11-1). N02: S20 snapshot policy and complete write-state table; 400/409 retain the unchanged snapshot, every other failure re-reads (D11-2). N03: S11 complete-summary versus hint precedence with document-scoped navigation state, lookup whenever a display field is missing, independent access check and journey table; S12 starts no lookup; S21 navigation state limited to the current document (D11-3). N04: Focus-bar Theme button in the S11 wireframe. D10-2, D10-3 and D10-5 annotated as refined; G2 and A12 updated; N register added. Baseline unchanged (`main` `298b1de`). r10 entry unchanged. |
 | DESIGN-2026-11-18-r10 | 2026-11-18 | **Final Design Candidate**, independent-review remediation (Claude Code, Leader instruction of 18 November 2026, "PR #252 Independent Review Findings Verification & Complete Remediation"; pending a new independent review; no browser verification). All thirteen findings of the Codex review at `0030d6e` verified and corrected (F01–F13): refusal-driven question and quiz editing (D10-4); assignment instructions under CT37.markdown; accurate attempt-exit behavior with in-memory retention and explicit restore (D10-3); seven-state adaptive-settings write lifecycle (D10-5); non-authoritative bounded lookups with navigation context (D10-2); Theme button in the quiz Focus bar (D10-1); best-effort grading notifications; corrected review provenance (#246 approved by `tihh647-ui`); preview isolation defect recorded (A13); dark contrast values recomputed; hit-area rule (D10-6); `display` breakpoint at 600 px in S25; owner confirmations marked pending. Baseline refreshed to `main` `298b1de` (18 of 108 operations implemented; CT22 backend done, CT13 and Interaction partial). Gap register converted to explicit dispositions; A13–A16 added. r9 entry unchanged. |
