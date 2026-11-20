@@ -302,6 +302,37 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
             const ring = await button.evaluate((node) => { const s = getComputedStyle(node); return [s.outlineStyle, parseFloat(s.outlineWidth)]; });
             assert(ring[0] !== 'none' && ring[1] >= 2, `focus ring ${ring}`);
         });
+        await check('Tab and Shift+Tab from the open Theme menu close it and continue the tab sequence from the Theme button, not from the document start', async () => {
+            const button = themeButton(page).first();
+            // The neighbours of the Theme button in the real tab sequence (it is the first top-bar utility).
+            const neighbours = await button.evaluate((node) => {
+                const order = [...document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+                    .filter((element) => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden');
+                const at = order.indexOf(node), name = (element) => element?.getAttribute('aria-label') ?? element?.textContent?.trim() ?? null;
+                return [name(order[at - 1]), name(order[at + 1])];
+            });
+            const focusedName = () => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.trim() ?? null);
+            for (const [keys, expected] of [['Tab', neighbours[1]], ['Shift+Tab', neighbours[0]]]) {
+                await button.focus(); await page.keyboard.press('Enter');
+                const menu = page.getByRole('menu', { name: 'Theme' }); await menu.waitFor();
+                await page.keyboard.press(keys); await menu.waitFor({ state: 'hidden' });
+                assert.equal(await button.getAttribute('aria-expanded'), 'false');
+                assert.equal(await focusedName(), expected, `${keys} from the menu`);
+            }
+        });
+        await check('the "Theme" tooltip never covers the open Theme menu (hover or keyboard focus first), and the menu is not inside a tooltip role', async () => {
+            const button = themeButton(page).first();
+            const visibleTips = () => page.evaluate(() => [...document.querySelectorAll('.MuiTooltip-popper')]
+                .filter((node) => node.textContent === 'Theme' && node.getClientRects().length && Number(getComputedStyle(node.firstElementChild ?? node).opacity) > 0).length);
+            for (const open of [async () => { await button.hover(); await page.waitForTimeout(600); await button.click(); },
+                async () => { await page.mouse.move(1, 1); await button.focus(); await page.waitForTimeout(600); await page.keyboard.press('Enter'); }]) {
+                await open();
+                const menu = page.getByRole('menu', { name: 'Theme' }); await menu.waitFor(); await page.waitForTimeout(400);
+                assert.equal(await visibleTips(), 0, 'tooltip shown over the open menu');
+                assert.equal(await menu.evaluate((node) => !!node.closest('[role="tooltip"]')), false);
+                await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' });
+            }
+        });
         await check('a choice in one tab applies in another open tab through the storage event', async () => {
             const other = await context.newPage(); await other.goto(url('/login')); await ready(other);
             assert.equal(await scheme(other), 'dark');
@@ -467,17 +498,24 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
             await page.emulateMedia({ media: 'print' });
             assert.equal(await mainBg(page), CANVAS.light);
             assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('main h1')).color), 'rgb(21, 23, 28)');
+            // Native controls and system colours print light too: the print rule beats the inline color-scheme.
+            assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme), 'light');
             await page.emulateMedia({ media: 'screen' });
             assert.equal(await mainBg(page), CANVAS.dark);
+            assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme), 'dark');
         });
         await check('prefers-contrast: more strengthens hairlines and tertiary text in both schemes', async () => {
-            await page.emulateMedia({ contrast: 'more' });
-            const dark = await page.evaluate(() => [getComputedStyle(document.documentElement).getPropertyValue('--mui-palette-roles-line-hairline').trim(), getComputedStyle(document.documentElement).getPropertyValue('--mui-palette-roles-text-tertiary').trim()]);
-            assert.deepEqual(dark.map((value) => value.toUpperCase()), ['#7B818B', '#B4B8C0']);
-            await choose(page, 'Light');
-            const light = await page.evaluate(() => [getComputedStyle(document.documentElement).getPropertyValue('--mui-palette-roles-line-hairline').trim(), getComputedStyle(document.documentElement).getPropertyValue('--mui-palette-roles-text-tertiary').trim()]);
-            assert.deepEqual(light.map((value) => value.toUpperCase()), ['#80858E', '#50545C']);
-            await page.emulateMedia({ contrast: 'no-preference' });
+            // A context created with the preference: Playwright's Firefox updates matchMedia after a runtime
+            // emulateMedia({ contrast }) but does not re-evaluate the stylesheets, so that path is engine-dependent.
+            const { context: contrastContext, page: contrastPage } = await newPage({ contrast: 'more' });
+            await contrastContext.addInitScript(() => { try { localStorage.setItem('codemastery.theme', 'dark'); } catch { /* blocked */ } });
+            await contrastPage.goto(url('/preview?screen=learner-home')); await ready(contrastPage);
+            const roleValues = () => contrastPage.evaluate(() => ['--mui-palette-roles-line-hairline', '--mui-palette-roles-text-tertiary']
+                .map((name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim().toUpperCase()));
+            assert.deepEqual(await roleValues(), ['#7B818B', '#B4B8C0']);
+            await choose(contrastPage, 'Light');
+            assert.deepEqual(await roleValues(), ['#80858E', '#50545C']);
+            await contrastContext.close();
         });
         if (engine === 'chromium') await check('forced colours: tinted states get a real border and keyboard focus keeps a visible outline (Chromium emulation)', async () => {
             await page.emulateMedia({ forcedColors: 'active' });
@@ -486,6 +524,18 @@ async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }
             const button = themeButton(page).first(); await button.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
             const ring = await page.evaluate(() => { const s = getComputedStyle(document.activeElement); return [s.outlineStyle, parseFloat(s.outlineWidth)]; });
             assert(ring[0] !== 'none' && ring[1] >= 2, JSON.stringify(ring));
+            // Floating surfaces draw their edge with a shadow, which forced colours removes: they need a real line.
+            const edge = (locator) => locator.evaluate((node) => { const s = getComputedStyle(node.closest('.MuiPaper-root')); return [s.outlineStyle, parseFloat(s.outlineWidth), s.borderStyle]; });
+            await button.focus(); await page.keyboard.press('Enter');
+            const themeMenu = page.getByRole('menu', { name: 'Theme' }); await themeMenu.waitFor();
+            const themeEdge = await edge(themeMenu);
+            assert(themeEdge[0] !== 'none' && themeEdge[1] >= 1 || themeEdge[2] !== 'none', `Theme menu edge ${themeEdge}`);
+            await page.keyboard.press('Escape'); await themeMenu.waitFor({ state: 'hidden' });
+            await page.getByRole('button', { name: /^Account menu/ }).click();
+            const accountMenu = page.getByRole('menu').first(); await accountMenu.waitFor();
+            const accountEdge = await edge(accountMenu);
+            assert(accountEdge[0] !== 'none' && accountEdge[1] >= 1 || accountEdge[2] !== 'none', `account menu edge ${accountEdge}`);
+            await page.keyboard.press('Escape'); await accountMenu.waitFor({ state: 'hidden' });
             await page.screenshot({ path: path.join(dir, 'fe34-forced-colors.png') });
             await page.emulateMedia({ forcedColors: 'none' });
         });
