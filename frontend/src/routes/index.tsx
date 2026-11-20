@@ -1,6 +1,6 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
+import { Link, matchRoutes, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { Alert, Box, Button, ListItemIcon, MenuItem } from '@mui/material';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
@@ -128,12 +128,21 @@ function NotFound() {
     return <Page><SystemStateView icon="search" title="Page not found" message="Check the address, or continue from the catalogue."
         actions={<Button component={Link} to="/courses" variant="contained">Browse courses</Button>} /></Page>;
 }
+/** The isolated design preview's route (CT14, CT16). */
+export const PREVIEW_PATH = '/preview';
+/**
+ * Whether `<AppRouter>` renders the design preview at `pathname`. It asks React Router itself, with the same
+ * route path, so it accepts exactly what the route does: any letter case, trailing slashes and percent-encoded
+ * characters (the router decodes each segment and keeps a malformed one as typed, which then matches nothing).
+ */
+export const isPreviewPath = (pathname: string) => matchRoutes([{ path: PREVIEW_PATH }], pathname) !== null;
+
 /** Public catalogue routes share the current Auth/Profile workspace. */
 export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; preview?: ReactNode }) {
     const auth = useAuth();
     return <SessionEndProvider><Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/preview" element={preview ?? <Navigate to="/courses" replace />} />
+        <Route path={PREVIEW_PATH} element={preview ?? <Navigate to="/courses" replace />} />
         <Route path="/login" element={<SignIn />} />
         <Route path="/register" element={<RegisterPage />} />
         {/* FE06 recovery (CT16.routes, anonymous; CT02). Delivery stays inactive until a deployment binds SMTP. */}

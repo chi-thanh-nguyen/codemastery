@@ -436,3 +436,73 @@ describe('isolated design preview', () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 });
+
+/**
+ * AUD-01: the bootstrap isolation decision must follow the router's own matching. React Router 7 matches
+ * `/preview` case-insensitively, with trailing slashes, after decoding each path segment, so every URL that
+ * renders the preview must also start without restoring. The refresh endpoint answers with a valid session
+ * here, so a missing isolation would install "Restored Person" instead of failing silently.
+ */
+describe('AUD-01: preview isolation follows the router for every URL that renders the preview', () => {
+    let tabs: { onmessage: ((event: MessageEvent) => void) | null }[];
+    const refreshCalls = () => fetcher.mock.calls.filter(([url]) => new URL(String(url), 'http://localhost').pathname === '/api/auth/refresh').length;
+    beforeEach(() => {
+        tabs = [];
+        vi.stubGlobal('BroadcastChannel', class { onmessage: ((event: MessageEvent) => void) | null = null; constructor() { tabs.push(this); } postMessage() { /* test double */ } close() { /* test double */ } });
+        fetcher.mockImplementation((url: string) => {
+            const path = new URL(url, 'http://localhost').pathname;
+            if (path === '/api/auth/refresh') return Promise.resolve(json(loginResponse('Restored Person')));
+            if (path === '/api/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
+            if (path === '/api/me/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
+            return Promise.resolve(json({ type: 'about:blank', title: 'Not Found', status: 404 }, 404));
+        });
+    });
+    async function open(path: string) {
+        window.history.replaceState(null, '', path);
+        await act(async () => root.render(<App />));
+        await waitUntil(() => !!host.querySelector('[data-preview-screen], header, main'), `a shell at ${path}`);
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    }
+
+    for (const path of ['/preview', '/PREVIEW', '/Preview', '/pre%76iew', '/%70review', '/PRE%56IEW', '/preview/', '/preview//', '/preview?screen=learner-home']) {
+        it(`${path}: renders the preview, sends no refresh and installs no session, through tabs, wake-ups, theme changes and navigation`, async () => {
+            await open(path);
+            expect(host.querySelector('[data-preview-screen]'), 'the preview renders').not.toBeNull();
+            expect(refreshCalls()).toBe(0);
+            // Another tab signs in, out and in again; this document wakes up.
+            for (const type of ['signed-in', 'signed-out', 'signed-in']) {
+                for (const tab of tabs) await act(async () => tab.onmessage?.({ data: { type } } as MessageEvent));
+            }
+            await act(async () => {
+                window.dispatchEvent(new Event('focus')); window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+                document.dispatchEvent(new Event('visibilitychange'));
+                await new Promise((resolve) => setTimeout(resolve, 30));
+            });
+            expect(fetcher).not.toHaveBeenCalled();
+            // A theme change, then leaving the preview in the same document: still no restore.
+            await act(async () => { window.history.pushState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); });
+            await waitUntil(() => !!host.querySelector('button[aria-label^="Theme:"]'), 'the landing page');
+            await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')!.click());
+            await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.startsWith('Dark'))!.click());
+            await act(async () => { window.history.pushState(null, '', '/courses'); window.dispatchEvent(new PopStateEvent('popstate')); await new Promise((resolve) => setTimeout(resolve, 30)); });
+            expect(refreshCalls()).toBe(0);
+            expect(host.textContent).not.toContain('Restored Person');
+            expect(host.querySelector('button[aria-label^="Account menu"]')).toBeNull();
+            expect(sessionStorage.length).toBe(0);
+            expect(Object.keys(localStorage)).toEqual(['codemastery.theme']);
+        });
+    }
+
+    // Controls: these do not render the preview, so they restore once as usual. Malformed encodings are not
+    // decoded by the router either (it keeps the raw path), and must neither throw nor count as the preview.
+    for (const path of ['/', '/courses', '/previewish', '/preview-x', '/preview/extra', '/pre%76iewish', '/preview%', '/pre%7view', '/%E0%A4%A']) {
+        it(`${path}: does not render the preview and restores the session once`, async () => {
+            vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+            await open(path);
+            expect(host.querySelector('[data-preview-screen]')).toBeNull();
+            await waitUntil(() => refreshCalls() === 1, 'one restore request');
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+            expect(refreshCalls()).toBe(1);
+        });
+    }
+});

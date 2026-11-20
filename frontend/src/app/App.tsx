@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useSt
 import { BrowserRouter } from 'react-router';
 import { ThemeProvider, CssBaseline, Box } from '@mui/material';
 import { AuthProvider } from './providers/AuthProvider';
-import { AppRouter } from '../routes/index';
+import { AppRouter, isPreviewPath } from '../routes/index';
 import {
     appTheme, applyThemeScheme, isThemePreference, readStoredThemePreference, readSystemScheme, resolveThemeScheme, roles,
     systemDarkQuery, THEME_STORAGE_KEY, ThemePreferenceContext, writeStoredThemePreference,
@@ -18,8 +18,12 @@ function PreviewFallback() {
     return <Box sx={{ minHeight: '100dvh', bgcolor: roles.bg.canvas, p: 5 }}><LoadingView message="Loading design preview" variant="tiles" /></Box>;
 }
 
-/** The isolated design preview sends no request (CT14), so a document opened there restores no session. */
-const openedAtPreview = () => /^\/preview(\/|$)/.test(globalThis.location?.pathname ?? '');
+/**
+ * The isolated design preview sends no request (CT14), so a document opened there restores no session. The
+ * decision uses the router's own match (AUD-01): `/PREVIEW` or `/pre%76iew` render the preview too, and a
+ * separate pattern that missed them let those documents restore a session.
+ */
+const openedAtPreview = () => isPreviewPath(globalThis.location?.pathname ?? '/');
 
 /**
  * The device-scoped theme preference (FE34, DESIGN.md › Themes). It lives above the router and the
