@@ -4618,11 +4618,30 @@ acceptance is claimed, and no screen-reader session was run.
 | ID | Priority | Root cause | Fix | Regression evidence |
 | --- | --- | --- | --- | --- |
 | AUD-01 | P2 | `App.tsx` decided "opened at the preview" with `^/preview(/\|$)`, while React Router matches the `/preview` route case-insensitively, with trailing slashes, after decoding each path segment. `/PREVIEW`, `/Preview`, `/pre%76iew`, `/%70review` rendered the isolated preview but restored the session (one `POST /api/auth/refresh` each). The pattern also isolated `/preview/<anything>`, which renders "Page not found", so that document never restored | `isPreviewPath` in `routes/index.tsx` asks `matchRoutes` with the same `PREVIEW_PATH` the route uses; the decision is still taken once per document | 18 App-level tests in `PreviewApp.test.tsx` (the refresh endpoint answers with a valid session): 9 accepted aliases send no request through other tabs' sign-in, sign-out and sign-in, focus, page show, visibility, a theme change and SPA navigation, and store nothing but the theme; 9 controls (`/`, `/courses`, `/previewish`, `/preview-x`, `/preview/extra`, `/pre%76iewish` and three malformed encodings) restore once. The 5 case or encoding aliases and `/preview/extra` fail on `6cc501b`. Real backend: see below |
-| AUD-02 / F-01 | P3 | One `suppressTooltip` flag served both stale hover and restored focus, and `onBlur` kept it while the pointer rested on the button, so a later genuine keyboard focus stayed suppressed | Separate `staleHover` (released when the pointer genuinely enters) and `restoredFocus` (released on blur); `showTooltip` checks the source of the event; the menu state is a ref, so a hover timer started before the menu opened cannot show the tooltip over it | Vitest "Theme tooltip lifecycle" (5 tests, fake timers); harness tooltip check extended; Playwright CLI and library runs below |
+| AUD-02 / F-01 | P3 | One `suppressTooltip` flag served both stale hover and restored focus, and `onBlur` kept it while the pointer rested on the button, so a later genuine keyboard focus stayed suppressed | Separate `staleHover` (released when the pointer genuinely enters) and `restoredFocus` (released on blur); `showTooltip` checks the source of the event; the menu state is a ref, so a hover timer started before the menu opened cannot show the tooltip over it | Vitest "Theme tooltip lifecycle" (7 tests, fake timers); harness tooltip check extended; Playwright CLI and library runs below |
 | F-03 | P3 | MUI's `enterDelay` (400 ms) also applies to focus, so keyboard focus showed the tooltip after about 410–425 ms (200 ms within hysteresis) | `onFocus` shows it at once when the button matches `:focus-visible`; hover keeps the 400 ms delay; the global Tooltip delays are unchanged | Vitest (immediate on Tab, not before 400 ms on hover); harness (≤ 250 ms on refocus and cold focus); CLI 0 ms in Chrome and WebKit |
 | F-02 | P3 | `DESIGN.md` D13-5 listed "a selection" as a menu dismissal, contradicting "Behavior everywhere" (the menu stays open after a choice) | D13-5 rewritten (dismissal by outside click, second press, Escape, Tab or Shift+Tab; a choice keeps the menu open and the tooltip hidden; per-source release; immediate keyboard focus); D13-5 decision row and the r13 revision entry record the amendment | Documentation review |
-| F-04 | P3 | Tooltip lifecycle and menu-item fills were covered only by the optional harness, which CI does not run | CI-run Vitest tests: "Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)" and "Menu item states (D13-4)" in `presentation.test.tsx` | The tooltip tests fail on `6cc501b`'s `AppHeader.tsx` (3 of 5); the menu-state test fails on the pre-`c2e4eaf` theme (hovered = selected) |
+| F-04 | P3 | Tooltip lifecycle and menu-item fills were covered only by the optional harness, which CI does not run | CI-run Vitest tests: "Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)" and "Menu item states (D13-4)" in `presentation.test.tsx` | The tooltip tests fail on `6cc501b`'s `AppHeader.tsx` (3 of the 5 scenarios); the menu-state test fails on the pre-`c2e4eaf` theme (hovered = selected) |
 | F-05 | P4 | The WebKit "no preference" first-paint row printed a note but its check still counted as a pass, and the skip applied to any engine | `notExercised` record in the harness result and `browser-report.json`, a separate count in the summary, the check name states how many rows ran; only WebKit's verified limitation is recorded as not exercised, the same mismatch elsewhere fails as an emulation failure | Harness output below |
+
+**Found during remediation: a CI timeout (fixed).** The first `CI Frontend` attempt on `a737a82` failed:
+`isolated design preview › follows global theme changes until locally overridden without writing the
+preference` timed out at 5000 ms (667 of 668 passed). The Project Leader re-ran the job and the second
+attempt passed. That failure was not dismissed:
+
+- **Evidence.** The test already took 3009 ms in CI on `6cc501b`, and 2719 ms in the passing attempt.
+  The failing attempt ran on a slower runner (54.7 s for the suite, against 30.5 s).
+- **Reproduction.** Run locally with three busy processes per CPU, the same test timed out (5146 and
+  5055 ms). So did one of the new tooltip tests (its 12 cycles took 5183 ms).
+- **Root cause.** The test opened the preview index, which renders the whole design reference
+  (about 1,900 nodes, against 140 for a workspace screen). It then re-rendered it on every scheme
+  change and mounted it twice.
+- **Fix.** The test now uses `?screen=learner-home`; its assertions and the timeout are unchanged.
+  The preview chunk is imported once in a `beforeAll`. The tooltip test is split into one test per
+  choice.
+- **Result.** Under the same stress the full suite passed 670 of 670 twice (before: 2–3 timeouts,
+  and once a cascade through the rest of the file). It also passed twice under one busy process per
+  CPU, and once unloaded.
 
 **What the CI tests prove and what stays harness-only.** The Vitest tooltip tests drive the real
 `ThemeControl` with real `mouseover`/`mouseout`, focus and `keydown` events and MUI's own timers (fake
@@ -4638,7 +4657,7 @@ Playwright runs below.
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 668 tests in 16 files (643 + 25 new) |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 670 tests in 16 files (643 + 27 new) |
 | Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed, 0 failed, 0 not exercised; WebKit 26.6: 67 passed, 0 failed, 1 not exercised (first paint "no stored value, OS no preference"; host in Dark) |
 | Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
 | E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed. `firefox-desktop` was not run on macOS, where the pinned Firefox does not launch |
