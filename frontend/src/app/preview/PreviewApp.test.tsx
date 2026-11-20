@@ -26,6 +26,8 @@ beforeEach(() => {
     vi.stubGlobal('DOMMatrixReadOnly', DOMMatrixStub);
     fetcher = vi.fn(() => Promise.reject(new Error('The preview must not call the network.')));
     vi.stubGlobal('fetch', fetcher);
+    // A configured API base, so a stray request reaches fetch (and fails these tests) instead of a configuration error.
+    vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
     localStorage.clear(); sessionStorage.clear();
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -185,6 +187,31 @@ describe('isolated design preview', () => {
         expect(document.documentElement.dataset.colorScheme).toBe('dark');
         expect(localStorage.getItem('codemastery.theme')).toBeNull();
         expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('A13: with /preview open, another tab signing in or out sends no request and installs no session', async () => {
+        const tabs: { onmessage: ((event: MessageEvent) => void) | null }[] = [];
+        vi.stubGlobal('BroadcastChannel', class { onmessage: ((event: MessageEvent) => void) | null = null; constructor() { tabs.push(this); } postMessage() { /* test double */ } close() { /* test double */ } });
+        await mount();
+        for (const type of ['signed-in', 'signed-out', 'signed-in', 'signed-in']) {
+            for (const tab of tabs) await act(async () => tab.onmessage?.({ data: { type } } as MessageEvent));
+        }
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(host.querySelector('[data-preview-screen]')).not.toBeNull();
+        expect(location.pathname).toBe('/preview');
+        expect(localStorage.length + sessionStorage.length).toBe(0);
+    });
+    it('A13: leaving /preview in the same document and changing the theme still restores nothing', async () => {
+        await mount();
+        await act(async () => { window.history.pushState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); });
+        const theme = host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')!;
+        await act(async () => theme.click());
+        await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.startsWith('Dark'))!.click());
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(host.textContent).not.toContain('Restoring your session');
     });
 
     it('lists every workspace on the index and never calls the network or writes storage', async () => {

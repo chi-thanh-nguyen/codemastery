@@ -62,11 +62,14 @@ function useThemePreferenceState() {
 
 export default function App() {
     const theme = useThemePreferenceState();
+    // Decided once per document: App re-renders (for example on a theme change) after in-app
+    // navigation must not turn a document opened at /preview into one that restores (A13).
+    const [isolatedPreview] = useState(openedAtPreview);
     return <ThemePreferenceContext.Provider value={theme}>
         {/* MUI's built-in colour schemes; the preference above owns the root `data-color-scheme` and storage. */}
         <ThemeProvider theme={appTheme} defaultMode="light" storageManager={null} colorSchemeNode={null}>
             <CssBaseline />
-            <BrowserRouter><AuthProvider refreshSessions restoreOnLoad={!openedAtPreview()}>
+            <BrowserRouter><AuthProvider refreshSessions restoreOnLoad={!isolatedPreview}>
                 <AppRouter preview={<Suspense fallback={<PreviewFallback />}><PreviewApp /></Suspense>} />
             </AuthProvider></BrowserRouter>
         </ThemeProvider>
