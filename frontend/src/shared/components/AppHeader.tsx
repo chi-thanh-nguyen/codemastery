@@ -42,6 +42,11 @@ function optionIndexForKey(key: string, index: number) {
     return null;
 }
 
+/** Whether focus on `element` is keyboard focus, by the browser's own `:focus-visible` heuristic. */
+function isKeyboardFocus(element: Element) {
+    try { return element.matches(':focus-visible'); } catch { return false; }
+}
+
 /**
  * The Theme control (DESIGN.md › Theme selector, D9-1/D10-1): one presentational control reused by
  * every shell. `button` is the 44 px on-frame button with its menu (top bar, landing header, auth
@@ -56,10 +61,12 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
     // already shown; it sits above the menu and would otherwise cover the menu's "Theme" caption.
     const [tooltip, setTooltip] = useState(false);
     // MUI calls onClose only while it considers the tooltip open, and it is held closed while the menu is open,
-    // so its state is reset whenever the menu opens or closes. After a close, the tooltip stays suppressed while
-    // the pointer is still over the button (stale hover) or focus was restored to it, until a genuine new hover
-    // (pointer enters) or the button loses focus.
-    const hovering = useRef(false), suppressTooltip = useRef(false);
+    // so its state is reset whenever the menu opens or closes (D13-5). After a close, two separate suppressions
+    // apply, one per source (AUD-02/F-01): `staleHover` while the pointer still rests on the button, until it
+    // genuinely enters again; `restoredFocus` for the focus that closing returns to the button, until the button
+    // loses focus. Refs, not state: Tooltip calls onOpen from a timer started in an earlier render, so a stale
+    // closure must read the current menu state (`menuOpen`), not the value it captured.
+    const hovering = useRef(false), staleHover = useRef(false), restoredFocus = useRef(false), menuOpen = useRef(false);
     const [announcement, setAnnouncement] = useState('');
     const button = useRef<HTMLButtonElement>(null);
     const optionRefs = useRef<Array<HTMLElement | null>>([]);
@@ -108,12 +115,19 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
         </Box>;
     }
 
-    const openMenu = () => { setTooltip(false); setOpen(true); };
+    const openMenu = () => { menuOpen.current = true; setTooltip(false); setOpen(true); };
     const close = (returnFocus: boolean) => {
+        menuOpen.current = false;
         setOpen(false);
         setTooltip(false);
-        suppressTooltip.current = returnFocus || hovering.current;
+        staleHover.current = hovering.current;
+        restoredFocus.current = returnFocus;
         if (returnFocus) button.current?.focus();
+    };
+    // Shows the tooltip for a genuine hover (Tooltip's delayed onOpen) or keyboard focus, never over the open menu.
+    const showTooltip = (event: { type: string }) => {
+        if (menuOpen.current || (event.type === 'focus' ? restoredFocus.current : staleHover.current)) return;
+        setTooltip(true);
     };
     // MenuList owns arrow keys (with wrap), Home, End and type-ahead; Escape returns focus to the button.
     // Tab and Shift+Tab also close the menu: focus goes back to the button before the key's default
@@ -125,13 +139,16 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
     };
     return <>
         {/* While the menu is open the tooltip exits without its fade, so it never overlaps the menu's caption. */}
-        <Tooltip title="Theme" open={tooltip && !open} onOpen={() => { if (!open && !suppressTooltip.current) setTooltip(true); }} onClose={() => setTooltip(false)}
+        <Tooltip title="Theme" open={tooltip && !open} onOpen={showTooltip} onClose={() => setTooltip(false)}
             slotProps={{ transition: open ? { timeout: 0 } : {} }}>
             <IconButton ref={button} aria-label={themeButtonLabel(preference, systemScheme)} data-theme-control="button"
                 aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => (open ? close(false) : openMenu())}
-                onMouseEnter={() => { hovering.current = true; suppressTooltip.current = false; }}
-                onMouseLeave={() => { hovering.current = false; suppressTooltip.current = false; }}
-                onBlur={() => { if (!hovering.current) suppressTooltip.current = false; }}
+                // Keyboard focus shows the tooltip at once (DESIGN.md › Tooltip, F-03); only hover keeps the 400 ms delay.
+                // Tooltip runs this handler before its own, which would open it only after that delay.
+                onFocus={(event) => { if (isKeyboardFocus(event.currentTarget)) showTooltip(event); }}
+                onMouseEnter={() => { hovering.current = true; staleHover.current = false; }}
+                onMouseLeave={() => { hovering.current = false; staleHover.current = false; }}
+                onBlur={() => { restoredFocus.current = false; }}
                 sx={{ flexShrink: 0, width: 44, height: 44, bgcolor: 'transparent', color: roles.chrome.muted,
                     '&:hover': { bgcolor: roles.chrome.raised, color: roles.text.onChrome }, '&.Mui-focusVisible': focusRingOnChrome }}>
                 <PresentationIcon name={selected.icon} sx={{ fontSize: 20 }} />
