@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Optional real-browser presentation harness for the "Lit Path" UI (DESIGN-2026-11-06-r1).
+// Optional real-browser presentation harness for the "Lit Path" UI (DESIGN-2026-11-06-r1; FE34 colour
+// schemes and the Theme control per DESIGN-2026-11-19-r12).
 //
 // What it covers: every /preview screen (S5–S26 sample data), the live Group A pages with
 // CONTROLLED API responses (page.route test doubles, never a backend), layout at ten widths
@@ -209,6 +210,234 @@ async function main() {
     for (const result of report.engines) console.log(`${result.engine} ${result.version ?? ''}: ${result.passed.length} passed, ${result.failed.length} failed${result.launchError ? ` (launch: ${result.launchError})` : ''}`);
     console.log(`Evidence: ${out}`);
     if (failed > 0 || report.engines.some((r) => r.launchError)) process.exitCode = 1;
+}
+
+// ── FE34 colour schemes (DESIGN-2026-11-19-r12 › Themes) ─────────────────────
+const CANVAS = { light: 'rgb(246, 246, 247)', dark: 'rgb(21, 23, 28)' };
+const FRAME = 'rgb(10, 11, 15)';
+/**
+ * Rendered Light/Dark/System checks: first paint before the bundle, live operating-system changes,
+ * other tabs, one Theme control per shell at the r12 widths, keyboard use, preview isolation and the
+ * special modes (print, increased contrast, forced colours). Screenshots of each shell in both schemes
+ * are written next to the report.
+ */
+async function themeChecks({ engine, check, newPage, ready, overflow, url, dir }) {
+    const scheme = (page) => page.evaluate(() => document.documentElement.dataset.colorScheme);
+    const mainBg = (page) => page.evaluate(() => getComputedStyle(document.querySelector('main')).backgroundColor);
+    const themeButton = (page) => page.locator('button[aria-label^="Theme:"]:visible');
+    const waitScheme = (page, value) => page.waitForFunction((v) => document.documentElement.dataset.colorScheme === v, value, { timeout: 5000 });
+    async function choose(page, label) {
+        await themeButton(page).first().click();
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${label}`) }).click();
+        await page.keyboard.press('Escape');
+    }
+
+    // First paint: the stored preference and the OS setting resolve before the application bundle runs.
+    {
+        const failures = [];
+        for (const [stored, os, expected] of [['light', 'dark', 'light'], ['dark', 'light', 'dark'], ['system', 'dark', 'dark'], ['system', 'light', 'light'], [null, 'dark', 'dark'], ['sepia', 'dark', 'dark'], [null, 'no-preference', 'light']]) {
+            const { context, page } = await newPage({ colorScheme: os });
+            await context.addInitScript(() => {
+                // The root element may not exist yet when init scripts run, so observe the document.
+                window.__fe34Schemes = [];
+                new MutationObserver((records) => { for (const record of records) if (record.target === document.documentElement) window.__fe34Schemes.push(document.documentElement.getAttribute('data-color-scheme')); })
+                    .observe(document, { attributes: true, subtree: true, attributeFilter: ['data-color-scheme'] });
+            });
+            await page.goto(url('/courses')); await ready(page);
+            await page.evaluate((value) => { if (value === null) localStorage.removeItem('codemastery.theme'); else localStorage.setItem('codemastery.theme', value); }, stored);
+            let release; const gate = new Promise((done) => { release = done; });
+            await page.route(/\/assets\/index-[^/]+\.js$/, async (route) => { await gate; await route.continue(); });
+            await page.evaluate(() => { window.__fe34Previous = true; });
+            const navigation = page.goto(url('/courses'));
+            // Wait for the new document (not the one being replaced) to reach the first-paint state.
+            await page.waitForFunction(() => !window.__fe34Previous && document.documentElement.hasAttribute('data-color-scheme'));
+            const before = await page.evaluate(() => ({ scheme: document.documentElement.dataset.colorScheme, colorScheme: getComputedStyle(document.documentElement).colorScheme,
+                root: getComputedStyle(document.documentElement).backgroundColor, app: document.getElementById('root')?.childElementCount ?? 0 }));
+            release(); await navigation; await ready(page);
+            const after = await page.evaluate(() => ({ scheme: document.documentElement.dataset.colorScheme, flips: window.__fe34Schemes }));
+            const canvas = await mainBg(page);
+            const label = `${stored ?? 'missing'}+os:${os}`;
+            if (before.app !== 0) failures.push(`${label}: bundle ran before the check`);
+            if (before.scheme !== expected || before.colorScheme !== expected) failures.push(`${label}: before bundle ${JSON.stringify(before)}`);
+            if (before.root !== FRAME) failures.push(`${label}: root ${before.root}`);
+            if (after.scheme !== expected || after.flips.join() !== expected) failures.push(`${label}: after ${JSON.stringify(after)}`);
+            if (canvas !== CANVAS[expected]) failures.push(`${label}: canvas ${canvas}`);
+            if (stored === 'sepia' && await page.evaluate(() => localStorage.getItem('codemastery.theme')) !== 'sepia') failures.push('invalid value was rewritten without a choice');
+            await context.close();
+        }
+        await check('first paint: the stored preference (System by default, invalid → System) and the OS setting set data-color-scheme and color-scheme before the bundle, on the frame colour, and the scheme never flips', async () => assert.deepEqual(failures, []));
+    }
+
+    // Live operating-system changes, Light/Dark ignoring them, announcements and keyboard use.
+    {
+        const { context, page } = await newPage({ colorScheme: 'light' });
+        await page.goto(url('/courses')); await ready(page);
+        await check('System follows a live operating-system change without reload; Light and Dark ignore it', async () => {
+            assert.equal(await scheme(page), 'light');
+            assert.equal(await themeButton(page).getAttribute('aria-label'), 'Theme: System (currently Light)');
+            const marker = await page.evaluate(() => { window.__fe34Document = Math.random(); return window.__fe34Document; });
+            await page.emulateMedia({ colorScheme: 'dark' }); await waitScheme(page, 'dark');
+            assert.equal(await themeButton(page).getAttribute('aria-label'), 'Theme: System (currently Dark)');
+            assert.equal(await mainBg(page), CANVAS.dark);
+            await choose(page, 'Light'); assert.equal(await scheme(page), 'light');
+            await page.emulateMedia({ colorScheme: 'light' }); await page.emulateMedia({ colorScheme: 'dark' }); await page.waitForTimeout(100);
+            assert.equal(await scheme(page), 'light');
+            assert.equal(await page.evaluate(() => localStorage.getItem('codemastery.theme')), 'light');
+            assert.equal(await page.evaluate(() => window.__fe34Document), marker, 'the document was reloaded');
+        });
+        await check('the Theme button and menu work by keyboard: Enter opens on the chosen item, arrows move, Enter selects and stays open, Escape returns focus; one polite status message', async () => {
+            const button = themeButton(page).first();
+            await button.focus(); await page.keyboard.press('Enter');
+            const menu = page.getByRole('menu', { name: 'Theme' }); await menu.waitFor();
+            assert.equal(await button.getAttribute('aria-expanded'), 'true');
+            assert.deepEqual(await page.evaluate(() => [document.activeElement?.getAttribute('role'), document.activeElement?.getAttribute('aria-checked'), document.activeElement?.textContent]), ['menuitemradio', 'true', 'Light']);
+            await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
+            assert.equal(await scheme(page), 'dark'); assert(await menu.isVisible(), 'menu stays open');
+            assert.deepEqual(await page.evaluate(() => [document.activeElement?.getAttribute('aria-checked'), document.activeElement?.textContent]), ['true', 'Dark']);
+            const raised = await menu.evaluate((node) => { const paper = node.closest('.MuiPaper-root'); const s = getComputedStyle(paper); return [s.backgroundColor, s.boxShadow.includes('inset')]; });
+            assert.deepEqual(raised, ['rgb(44, 48, 56)', true]); // bg.raised (graphite-700) with the dark hairline outline
+            assert.equal(await page.locator('[role="status"]', { hasText: 'Theme set to' }).allTextContents().then((texts) => texts.join('|')), 'Theme set to Dark.');
+            await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' });
+            assert.equal(await button.evaluate((node) => node === document.activeElement), true);
+            const ring = await button.evaluate((node) => { const s = getComputedStyle(node); return [s.outlineStyle, parseFloat(s.outlineWidth)]; });
+            assert(ring[0] !== 'none' && ring[1] >= 2, `focus ring ${ring}`);
+        });
+        await check('a choice in one tab applies in another open tab through the storage event', async () => {
+            const other = await context.newPage(); await other.goto(url('/login')); await ready(other);
+            assert.equal(await scheme(other), 'dark');
+            await choose(page, 'Light'); await waitScheme(other, 'light');
+            assert.equal(await other.locator('button[aria-label^="Theme:"]').getAttribute('aria-label'), 'Theme: Light');
+            // System resolves per tab: this tab's emulated OS is dark, the other tab's is light.
+            await choose(page, 'System'); assert.equal(await scheme(page), 'dark');
+            await other.waitForFunction(() => document.querySelector('button[aria-label^="Theme:"]')?.getAttribute('aria-label') === 'Theme: System (currently Light)', null, { timeout: 5000 });
+            assert.equal(await scheme(other), 'light');
+            await other.close();
+        });
+        await context.close();
+    }
+
+    // One control per rendered shell at the r12 widths, both schemes, with screenshots.
+    {
+        const failures = [];
+        const shells = [['workspace', '/courses', true], ['landing', '/', false], ['auth', '/login', false], ['focus-bar', '/preview?screen=quiz-attempt', false], ['preview-learner', '/preview?screen=learner-home', true], ['diagnostic', '/preview?screen=quiz-attempt&item=diagnostic', false]];
+        for (const stored of ['light', 'dark']) {
+            const { context, page } = await newPage();
+            await context.addInitScript((value) => { try { localStorage.setItem('codemastery.theme', value); } catch { /* blocked */ } }, stored);
+            for (const width of [320, 360, 768, 1024, 1280, 1440]) {
+                await page.setViewportSize({ width, height: 900 });
+                for (const [name, route, workspace] of shells) {
+                    await page.goto(url(route)); await ready(page); await page.waitForTimeout(100);
+                    const where = `${name}@${width}/${stored}`;
+                    if (await scheme(page) !== stored) failures.push(`${where}: scheme ${await scheme(page)}`);
+                    const visible = await themeButton(page).count();
+                    const expected = workspace && width < 900 ? 0 : 1;
+                    if (visible !== expected) failures.push(`${where}: ${visible} visible Theme buttons, expected ${expected}`);
+                    if (workspace && width < 900) {
+                        await page.getByRole('button', { name: 'Toggle navigation' }).click();
+                        const groups = page.getByRole('radiogroup', { name: 'Theme' }); await groups.first().waitFor();
+                        if (await groups.count() !== 1) failures.push(`${where}: drawer radiogroups ${await groups.count()}`);
+                        if (await themeButton(page).count() !== 0) failures.push(`${where}: a Theme button shows with the drawer`);
+                        const height = await groups.first().evaluate((node) => node.getBoundingClientRect().height);
+                        if (Math.round(height) !== 44) failures.push(`${where}: drawer track ${height}px`);
+                        if ([360, 768].includes(width)) { await page.waitForTimeout(400); await page.screenshot({ path: path.join(dir, `fe34-${name}-drawer-${stored}-${width}.png`) }); }
+                        await page.keyboard.press('Escape'); await page.getByRole('dialog').waitFor({ state: 'hidden' });
+                    } else {
+                        const box = await themeButton(page).first().boundingBox();
+                        if (!box || Math.round(box.width) < 44 || Math.round(box.height) < 44) failures.push(`${where}: hit area ${JSON.stringify(box)}`);
+                    }
+                    const { scroll, client } = await overflow(page);
+                    if (scroll > client) failures.push(`${where}: page overflow ${scroll} > ${client}`);
+                    if ([360, 1280].includes(width)) await page.screenshot({ path: path.join(dir, `fe34-${name}-${stored}-${width}.png`) });
+                }
+            }
+            await context.close();
+        }
+        await check('exactly one 44 px Theme control per rendered shell (top bar ≥ 900 px, 44 px drawer track below, landing, auth, quiz and diagnostic Focus bar) at 320–1440 px in both schemes, without page overflow', async () => assert.deepEqual(failures, []));
+    }
+
+    // Focus bar below 600 px: exit, Theme, timer and Submit stay; title and counter move to the navigator strip.
+    {
+        const { context, page } = await newPage({ viewport: { width: 390, height: 844 } });
+        await page.goto(url('/preview?screen=quiz-attempt')); await ready(page);
+        await check('below 600 px the Focus bar keeps exit, Theme, timer and Submit, and the title and counter move into the navigator strip (D10-1)', async () => {
+            const bar = page.locator('header').first();
+            assert(await bar.getByRole('button', { name: 'Leave quiz' }).isVisible());
+            assert(await bar.getByRole('button', { name: /^Theme: / }).isVisible());
+            assert(await bar.getByRole('button', { name: 'Submit quiz' }).isVisible());
+            const strip = await bar.evaluate((node) => { const visible = (el) => el && el.getBoundingClientRect().height > 0 && getComputedStyle(el).display !== 'none';
+                const texts = [...node.querySelectorAll('p')].filter(visible).map((p) => p.textContent); return texts; });
+            assert(strip.some((text) => /^Question \d+ of \d+$/.test(text)), JSON.stringify(strip));
+            const timerBefore = await bar.evaluate((node) => node.textContent.match(/\d+:\d{2}/)?.[0]);
+            const answeredBefore = await page.locator('main input:checked').count();
+            await choose(page, 'Dark');
+            assert.equal(await scheme(page), 'dark');
+            assert.equal(await page.getByRole('dialog').count(), 0); // no leave or submit confirmation
+            assert(timerBefore, 'timer visible');
+            assert.equal(await page.locator('main input:checked').count(), answeredBefore);
+            assert.equal(await bar.getByRole('button', { name: /^Theme: / }).evaluate((node) => node === document.activeElement), true);
+        });
+        await context.close();
+    }
+
+    // Preview isolation: the preview-local choice is memory-only and does not reach other tabs.
+    {
+        const { context, page } = await newPage();
+        await page.goto(url('/courses')); await ready(page);
+        await page.evaluate(() => localStorage.setItem('codemastery.theme', 'light'));
+        await page.goto(url('/preview?screen=learner-home')); await ready(page);
+        await check('/preview loads the stored scheme; its choice is memory-only, reaches no other tab, survives Reset sample data and is gone on reload', async () => {
+            const other = await context.newPage(); await other.goto(url('/courses')); await ready(other);
+            assert.equal(await scheme(page), 'light');
+            await choose(page, 'Dark'); assert.equal(await scheme(page), 'dark');
+            assert.equal(await page.evaluate(() => localStorage.getItem('codemastery.theme')), 'light');
+            await other.waitForTimeout(200); assert.equal(await scheme(other), 'light');
+            await page.getByRole('button', { name: /^Account menu/ }).click();
+            await page.getByRole('menuitem', { name: 'Reset sample data' }).click();
+            assert.equal(await scheme(page), 'dark');
+            await page.reload(); await ready(page);
+            assert.equal(await scheme(page), 'light');
+            assert.equal(await page.evaluate(() => sessionStorage.length), 0);
+            await other.close();
+        });
+        await context.close();
+    }
+
+    // Special modes.
+    {
+        const { context, page } = await newPage();
+        await context.addInitScript(() => { try { localStorage.setItem('codemastery.theme', 'dark'); } catch { /* blocked */ } });
+        await page.goto(url('/preview?screen=learner-home')); await ready(page);
+        await check('dark surfaces: frame ink, lifted canvas, brighter tiles, mist text; printing always uses the light scheme', async () => {
+            const surfaces = await page.evaluate(() => ({ body: getComputedStyle(document.body).backgroundColor, main: getComputedStyle(document.querySelector('main')).backgroundColor,
+                text: getComputedStyle(document.querySelector('main h1')).color, header: getComputedStyle(document.querySelector('header')).backgroundColor }));
+            assert.deepEqual(surfaces, { body: FRAME, main: CANVAS.dark, text: 'rgb(236, 237, 239)', header: FRAME });
+            await page.emulateMedia({ media: 'print' });
+            assert.equal(await mainBg(page), CANVAS.light);
+            assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('main h1')).color), 'rgb(21, 23, 28)');
+            await page.emulateMedia({ media: 'screen' });
+            assert.equal(await mainBg(page), CANVAS.dark);
+        });
+        await check('prefers-contrast: more strengthens hairlines and tertiary text in both schemes', async () => {
+            await page.emulateMedia({ contrast: 'more' });
+            const dark = await page.evaluate(() => [getComputedStyle(document.documentElement).getPropertyValue('--mui-palette-roles-line-hairline').trim(), getComputedStyle(document.documentElement).getPropertyValue('--mui-palette-roles-text-tertiary').trim()]);
+            assert.deepEqual(dark.map((value) => value.toUpperCase()), ['#7B818B', '#B4B8C0']);
+            await choose(page, 'Light');
+            const light = await page.evaluate(() => [getComputedStyle(document.documentElement).getPropertyValue('--mui-palette-roles-line-hairline').trim(), getComputedStyle(document.documentElement).getPropertyValue('--mui-palette-roles-text-tertiary').trim()]);
+            assert.deepEqual(light.map((value) => value.toUpperCase()), ['#80858E', '#50545C']);
+            await page.emulateMedia({ contrast: 'no-preference' });
+        });
+        if (engine === 'chromium') await check('forced colours: tinted states get a real border and keyboard focus keeps a visible outline (Chromium emulation)', async () => {
+            await page.emulateMedia({ forcedColors: 'active' });
+            const borders = await page.evaluate(() => [...document.querySelectorAll('[data-tone]')].slice(0, 5).map((node) => getComputedStyle(node).borderStyle));
+            assert(borders.length > 0 && borders.every((style) => style !== 'none'), JSON.stringify(borders));
+            const button = themeButton(page).first(); await button.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
+            const ring = await page.evaluate(() => { const s = getComputedStyle(document.activeElement); return [s.outlineStyle, parseFloat(s.outlineWidth)]; });
+            assert(ring[0] !== 'none' && ring[1] >= 2, JSON.stringify(ring));
+            await page.screenshot({ path: path.join(dir, 'fe34-forced-colors.png') });
+            await page.emulateMedia({ forcedColors: 'none' });
+        });
+        await context.close();
+    }
 }
 
 async function runEngine(playwright, engine, baseUrl) {
@@ -427,8 +656,9 @@ async function runEngine(playwright, engine, baseUrl) {
         }
 
         // ── Contrast ─────────────────────────────────────────────────────────
-        {
+        for (const scheme of ['light', 'dark']) {
             const { context, page } = await newPage();
+            await context.addInitScript((value) => { try { localStorage.setItem('codemastery.theme', value); } catch { /* storage blocked */ } }, scheme);
             const failures = [];
             for (const [route, width] of [['/', 1280], ['/', 390], ['/courses', 1280], [`/courses/${primaryId}`, 1280], ['/login', 1280], ['/register', 390], ['/preview?screen=learner-home', 1280], ['/preview?screen=mastery', 1280], ['/preview?screen=assessments', 1280], ['/preview?screen=quiz-result', 1280], ['/preview?screen=admin-overview', 1280], ['/preview?screen=admin-users', 390], ['/preview?screen=notifications', 1280], ['/preview?screen=course', 390]]) {
                 await page.setViewportSize({ width, height: 900 });
@@ -438,9 +668,12 @@ async function runEngine(playwright, engine, baseUrl) {
                     if (ratio < need) failures.push(`${route}@${width} "${row.text}" ${ratio.toFixed(2)} < ${need}`);
                 }
             }
-            await check('visible text meets 4.5:1 (3:1 large) against its effective background on twelve sampled screens', async () => assert.deepEqual([...new Set(failures)].slice(0, 25), []));
+            await check(`visible text meets 4.5:1 (3:1 large) against its effective background on fourteen sampled screens (${scheme} scheme)`, async () => assert.deepEqual([...new Set(failures)].slice(0, 25), []));
             await context.close();
         }
+
+        // ── FE34 colour schemes and the Theme control (DESIGN r12 › Themes) ──
+        await themeChecks({ engine, check, newPage, ready, overflow, url, dir });
 
         // ── Keyboard: skip link, focus visibility, focus order ──────────────
         {
@@ -478,12 +711,16 @@ async function runEngine(playwright, engine, baseUrl) {
         {
             const { context, page } = await newPage({ viewport: { width: 390, height: 844 } });
             await page.goto(url('/courses')); await ready(page);
-            await check('the landing header keeps Catalogue and Sign in reachable at 390 px', async () => {
-                await page.goto(url('/')); await ready(page);
-                const nav = page.getByRole('navigation', { name: 'Main navigation' });
-                assert(await nav.getByRole('link', { name: 'Catalogue' }).isVisible()); assert(await nav.getByRole('link', { name: 'Sign in' }).isVisible());
-                assert(await page.getByRole('main').getByRole('link', { name: 'Create account' }).isVisible());
-                await page.goto(url('/courses')); await ready(page);
+            await check('the landing header keeps the lockup, Sign in and the Theme button at 390 px; Browse courses reaches the catalogue (D9-7)', async () => {
+                try {
+                    await page.goto(url('/')); await ready(page);
+                    const nav = page.getByRole('navigation', { name: 'Main navigation' });
+                    assert(await nav.getByRole('link', { name: 'Sign in' }).isVisible());
+                    assert(await nav.getByRole('button', { name: /^Theme: / }).isVisible());
+                    assert(!(await nav.getByRole('link', { name: 'Catalogue' }).isVisible()), 'Catalogue is hidden below 600 px');
+                    assert(await page.getByRole('main').getByRole('link', { name: 'Browse courses' }).isVisible());
+                    assert(await page.getByRole('main').getByRole('link', { name: 'Create account' }).isVisible());
+                } finally { await page.goto(url('/courses')); await ready(page); }
             });
             await check('mobile drawer opens, marks the current item, closes on Escape and returns focus', async () => {
                 const toggle = page.getByRole('button', { name: 'Toggle navigation' });
