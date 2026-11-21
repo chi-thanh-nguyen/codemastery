@@ -66,7 +66,7 @@ verification is separate work.
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119; CO03/CO14, PR #262; CO06 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations; CO03.content owner rows, scoped reads, appends, reorders and materials, and CO14 adaptive-field storage ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
-| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)) |
+| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)). CO06 additions: Instructor authoring over HTTP, Course and Lesson publication reconciliation, the CT12.course Administrator handoff as a Course-root participant, and authoring, Administrator and Learner races on the Course root ([record](#co06-instructor-authoring-and-administrator-course-handoff-verification--22-november-2026)) |
 | `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
 | `SharedRestInfrastructureIntegrationTest` | SH01, PR #78 | Spring MVC ProblemDetail, validation and paging with test-only routes; it does not start PostgreSQL or the security chain |
 
@@ -5151,12 +5151,13 @@ are in `CourseManagementService`; Chapter/Lesson operations and the Learner Less
 `withCourseConfigurationWrite`, so owner admission precedes the lock, input validation and
 every effect; Course creation admits the active Instructor first and inserts a hidden Course
 with adaptive mode disabled and null settings. Bodies are strict JSON (unknown, missing or
-duplicate fields are 400 after CT03 admission). A real Lesson publication change reconciles
-joined completion in the same unit (`EnrollmentRepository.reconcileCompletion`, ADR006 §3).
-Administrator list and hide lock the Course root first in a compatible READ COMMITTED unit
-and re-read after it; they do not use the Instructor guard. `SecurityConfig` admits the
-eleven CT21 operations to `INSTRUCTOR` and the Learner Lesson read to `LEARNER`; material,
-file and learner-monitoring routes keep default-deny.
+duplicate fields are 400 after CT03 admission). A real Course or Lesson publication change,
+and an Administrator hide, reconciles joined completion in the same unit
+(`EnrollmentRepository.reconcileCompletion`, ADR006 §§3, 5). Administrator list and hide lock
+the Course root first in a compatible READ COMMITTED unit, record it like the guard and re-read
+after it; they do not use the Instructor guard. `SecurityConfig` admits the thirteen CT21
+Instructor operations to `INSTRUCTOR` and the Learner Lesson read to `LEARNER`; material, file
+and learner-monitoring routes keep default-deny.
 
 | Obligation | Covered by |
 | --- | --- |
@@ -5185,4 +5186,52 @@ races between authoring, completion and settings) are covered for the shared gua
 `AdaptiveLearningFlowIntegrationTest` but not re-run per authoring operation. The VM runtime
 matrix (`CT17-P6-PRIVILEGES-2026-11-17-r4`) still grants `courses` only SELECT and UPDATE (id)
 and no `chapters`/`lessons` writes, so deployed authoring needs a separately approved CT17
-revision. OpenAPI already carries the approved operations and is unchanged.
+revision. The B2-O04/B2-O09 sentence above and the original "OpenAPI is unchanged" statement
+are superseded by the remediation record below.
+
+### CO06 independent audit and remediation — 22 November 2026
+
+An AI-assisted audit (Claude Code, under the Project Leader's instruction for PR #265, with
+the contributor-approved commit attribution recorded in the PR) checked the PR against
+ADR006 §§3, 5 and 8, ADR005 §§5 and 13.3, ADR012 §§10.2, 10.3, 12 and 15, CT03 and OpenAPI.
+It is not a GitHub, CODEOWNER or QA review. Confirmed findings and their fixes:
+
+| ID | Severity | Finding | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| R1 | P2 | A real Course publication change (Instructor or Administrator hide) did not reconcile joined completion, although ADR006 §5 ("Course/Lesson publication/set changes … must reconcile"), the `setOwnedCoursePublication` OpenAPI description ("completion reconciliation") and ADR012 §10.2 ("exactly the effects of CT21's hidden publication change") require it. A rejoined Learner whose content was already complete stayed `active` across hide/republish | `setOwnedCoursePublication` and `hideCourseAsAdministrator` call `EnrollmentRepository.reconcileCompletion` on a real change only; idempotent repeats write nothing | `EnrollmentIntegrationTest.coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite`, `administratorHandoffListsAndHidesWithCt21EffectsIdempotentlyAndConceals` (fail on the original code: `active` instead of `completed`) |
+| R2 | P3 | The Administrator hides locked the Course root but did not record it, unlike the ADR005 guard: a second same-Course hide in one unit failed (500), a `REQUIRES_NEW` unit behind a suspended holder on the same thread would wait for its own lock, and a savepoint rollback that released the root could still commit later work | A private `participateInRoot` records the root (transaction marker, thread record, pre-commit recheck) after the ADR005 §13.3 compatibility check; the caller's JPA state is not cleared because the hides read through direct statements | `administratorHidesJoinACompatibleOuterUnitHoldTheRootUntilItCompletesAndShareItsOutcome` (fails on the original code), `aRequiresNewHideBehindASuspendedHolderFailsFastAndASavepointReleasedRootCannotCommit`, `administratorHideRejectsIncompatibleUnitsBeforeAnyEffect` |
+| R3 | P3 | NUL in authoring text, Markdown or the Administrator title query reached the PostgreSQL driver and returned 500 instead of a 400 for malformed input (CT18; same rule as the catalogue `q`) | `requiredText`, `optionalText`, `markdown` and `listCoursesForAdministration` reject NUL with 400 before any write or query | `CourseServiceTest.authoringTextIsTrimmedNonblankAndMarkdownIsVerbatim`, `administratorListRejectsAnUnknownPublicationStatus`; HTTP cases in `authoringRestKeepsNullableFieldsExplicitConcealsForeignChildrenAndRefusesInvalidInput`; the list case fails on the original code with `DataIntegrityViolationException` |
+| R4 | P3 | OpenAPI still marked the fourteen operations `APPROVED_NOT_IMPLEMENTED`, and the ten JSON-body operations did not declare their 415; this record said OpenAPI was unchanged and counted eleven Instructor operations | OpenAPI synchronized as CO08 did (implementation note, specific 2xx descriptions, `Batch2UnsupportedMedia` 415, CT17 deployment gate); no path, schema, field or status family changed. This record corrected | Documentation review; frontend and E2E suites read the file as JSON in CI |
+
+Verification gaps closed (real PostgreSQL, Spring transactions and, where a route exists, MVC
+and security; barriers on `pg_stat_activity` lock waits, never sleeps):
+
+| Obligation | Covered by |
+| --- | --- |
+| CT12.course list: Administrator only, hidden and published, case-insensitive title, status filter, `COLLATE "C"`/id order; Learner and Instructor 403 before any lookup | `administratorHandoffListsAndHidesWithCt21EffectsIdempotentlyAndConceals` |
+| CT12.course hide (Course side of B7-O09): CT21 effects, no cascade, idempotent `changed=false`, CT22 reconciliation for Lesson and Course, Learner concealment, missing 404, owner may republish | the same test |
+| Administrator admission before the root; re-read after waiting for a held root | `administratorHideAdmitsBeforeLockingAndRereadsStateAfterWaitingForTheRoot` |
+| Root lifetime, outer joining, rollback with the outer unit; read-only, REPEATABLE READ, prior write and another Course's root rejected before any effect | `administratorHidesJoinACompatibleOuterUnit…`, `administratorHideRejectsIncompatibleUnitsBeforeAnyEffect` (4 cases) |
+| Learner completion versus Administrator Lesson hide; completion versus Instructor Lesson publication (B2-O04 with the real authoring writer) | `learnerCompletionWaitsBehindAnAdministratorLessonHideAndRereadsTheReconciledState`, `learnerCompletionWaitsBehindAnInstructorLessonPublicationAndCountsTheNewRequiredSet` |
+| Instructor publication versus Administrator hide in both orders; the waiter re-reads and the last commit wins | `instructorPublicationAndAdministratorHideSerializeOnTheRootAndTheLastCommitWins` |
+| B2-O07/B2-O08 remainder: explicit nullable fields, Learner materials published-only in UUID order with no object key or filename, owner sees hidden materials, foreign child 404 with nothing moved, 415 (no-store) before admission, malformed path/query/body 400, append overflow 409 with no write, locked Instructor 401 | `authoringRestKeepsNullableFieldsExplicitConcealsForeignChildrenAndRefusesInvalidInput` |
+| B2-O09 Course part: publication never rewrites stored adaptive fields | `coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite` |
+
+Course publication is not a CT26 trigger and publishes nothing (ADR012 §9.1); no event code was added.
+
+Executed locally (macOS, OpenJDK 25.0.4.1, Docker 29.8.1) in an isolated worktree of
+`feat/course-content-authoring` at `274d196` plus these changes, `main` `b506500`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -q test -Dtest='EnrollmentIntegrationTest,CourseRepositoryIntegrationTest,CourseServiceTest'` (before the changes) | 76 + 11 + 68 tests, 0 failures |
+| The R1–R3 regression tests above against the original `CourseManagementService` | 3 of 3 failed as described |
+| `cd backend && ./mvnw -B -q test -Dtest='EnrollmentIntegrationTest'` | 89 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B -q test -Dtest='CourseServiceTest'` | 68 tests, 0 failures |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 746, Failsafe 310 (297 before, plus 13 new), 0 failures, errors or skips |
+
+These are local developer runs, not independent review, QA or CI evidence. Still not covered
+here: the IN20 Administrator REST route, `published` 400, audit rows and the full B7-O09
+barrier set (IN20/QA06, `InteractionAdminIntegrationTest`); materials (CO09/CT09); the CT26
+event (CO12); B2-O09 readiness (Adaptive); runtime grants for the new Course writes (CT17-P6);
+deployed and browser verification.
