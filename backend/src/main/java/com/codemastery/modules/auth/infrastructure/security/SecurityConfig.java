@@ -95,6 +95,21 @@ public class SecurityConfig {
                                 "/api/me/course-progress", "/api/me/resume").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/lessons/{lessonId}/completion",
                                 "/api/courses/{courseId}/resume").hasRole("LEARNER")
+                        // CT21.authoring (ADR006 §5): self Instructor; the Learner Lesson read is self Learner.
+                        // Material, file and learner-monitoring routes under the same prefix stay denied.
+                        .requestMatchers(HttpMethod.GET, "/api/instructor/courses", "/api/instructor/courses/{courseId}",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/instructor/courses",
+                                "/api/instructor/courses/{courseId}/chapters",
+                                "/api/instructor/courses/{courseId}/chapters/{chapterId}/lessons").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/instructor/courses/{courseId}",
+                                "/api/instructor/courses/{courseId}/publication",
+                                "/api/instructor/courses/{courseId}/chapters/order",
+                                "/api/instructor/courses/{courseId}/chapters/{chapterId}",
+                                "/api/instructor/courses/{courseId}/chapters/{chapterId}/lessons/order",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/publication").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/lessons/{lessonId}").hasRole("LEARNER")
                         // CT23.questions/bindings (ADR007 §§4, 7): Instructor only; Course ownership is
                         // CT03's decision in the handler. Administrator has no Instructor inheritance.
                         .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/questions",
