@@ -86,6 +86,13 @@ public interface CourseRepository {
     /** Facts about the caller's current database transaction, read in one statement. */
     TransactionFacts currentTransactionFacts();
 
+    /**
+     * Records, transaction-locally in PostgreSQL, that this transaction holds the Course root.
+     * The marker is undone by exactly what releases the row lock: commit, rollback, or a
+     * rollback to a savepoint taken before the lock.
+     */
+    void markCourseRootHeld(UUID courseId);
+
     /** True when the bound persistence context would execute DML if it were flushed now. */
     boolean hasPendingPersistenceChanges();
 
@@ -102,7 +109,8 @@ public interface CourseRepository {
 
     /**
      * {@code isolation} is PostgreSQL's transaction_isolation text; {@code writeIdentityAssigned}
-     * is true once the transaction has written or row-locked anything.
+     * is true once the transaction has written or row-locked anything; {@code heldCourseRoot} is
+     * the Course recorded by {@link #markCourseRootHeld}, or null when none is currently held.
      */
-    record TransactionFacts(String isolation, boolean readOnly, boolean writeIdentityAssigned) {}
+    record TransactionFacts(String isolation, boolean readOnly, boolean writeIdentityAssigned, UUID heldCourseRoot) {}
 }

@@ -17,6 +17,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.Types;
 import java.util.Map;
@@ -174,6 +175,7 @@ public class CourseRepositoryImpl implements CourseRepository {
         Objects.requireNonNull(courseId, "courseId");
         requireOneRow(jdbc.update("UPDATE public.courses SET title = ?, description = ?, prerequisite_description = ? "
                 + "WHERE id = ?", title, description, prerequisiteDescription, courseId));
+        detachManaged(entityManager, CourseEntity.class, courseId);
     }
 
     @Override
@@ -182,6 +184,7 @@ public class CourseRepositoryImpl implements CourseRepository {
         Objects.requireNonNull(publicationStatus, "publicationStatus");
         requireOneRow(jdbc.update("UPDATE public.courses SET publication_status = ? WHERE id = ?",
                 publicationStatus.getStatus(), courseId));
+        detachManaged(entityManager, CourseEntity.class, courseId);
     }
 
     // ADR005 Course-root guard and stored adaptive configuration (CO14).
@@ -226,13 +229,31 @@ public class CourseRepositoryImpl implements CourseRepository {
         return rows == 1;
     }
 
+    /** Transaction-local PostgreSQL setting; reverts with commit, rollback and savepoint rollback. */
+    private static final String HELD_ROOT_SETTING = "codemastery.course_root";
+
     @Override
     public TransactionFacts currentTransactionFacts() {
         return jdbc.queryForObject("SELECT current_setting('transaction_isolation') AS isolation, "
                         + "current_setting('transaction_read_only') = 'on' AS read_only, "
-                        + "pg_current_xact_id_if_assigned() IS NOT NULL AS assigned",
+                        + "pg_current_xact_id_if_assigned() IS NOT NULL AS assigned, "
+                        + "NULLIF(current_setting(?, true), '') AS held_root",
                 (row, index) -> new TransactionFacts(row.getString("isolation"), row.getBoolean("read_only"),
-                        row.getBoolean("assigned")));
+                        row.getBoolean("assigned"), heldRoot(row.getString("held_root"))), HELD_ROOT_SETTING);
+    }
+
+    @Override
+    public void markCourseRootHeld(UUID courseId) {
+        Objects.requireNonNull(courseId, "courseId");
+        jdbc.queryForObject("SELECT set_config(?, ?, true)", String.class, HELD_ROOT_SETTING, courseId.toString());
+    }
+
+    private static UUID heldRoot(String value) {
+        try {
+            return value == null ? null : UUID.fromString(value);
+        } catch (IllegalArgumentException invalid) {
+            throw new IllegalStateException("Invalid held Course root marker");
+        }
     }
 
     @Override
@@ -253,9 +274,21 @@ public class CourseRepositoryImpl implements CourseRepository {
     @Override
     public void detachManagedCourse(UUID courseId) {
         Objects.requireNonNull(courseId, "courseId");
+        detachManaged(entityManager, CourseEntity.class, courseId);
+    }
+
+    /**
+     * Detaches the managed copy of a row that a direct statement just changed, so a later JPA read
+     * in the same transaction reloads it instead of returning stale state. Course entities expose
+     * no mutators, so no pending change is discarded. Outside a transaction nothing stays managed.
+     */
+    static void detachManaged(EntityManager entityManager, Class<?> type, Object id) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            return;
+        }
         SessionImplementor session = entityManager.unwrap(SessionImplementor.class);
-        EntityPersister persister = session.getFactory().getMappingMetamodel().getEntityDescriptor(CourseEntity.class);
-        Object managed = session.getPersistenceContextInternal().getEntity(session.generateEntityKey(courseId, persister));
+        EntityPersister persister = session.getFactory().getMappingMetamodel().getEntityDescriptor(type);
+        Object managed = session.getPersistenceContextInternal().getEntity(session.generateEntityKey(id, persister));
         if (managed != null) {
             session.detach(managed);
         }

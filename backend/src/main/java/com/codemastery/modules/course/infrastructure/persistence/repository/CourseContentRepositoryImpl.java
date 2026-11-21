@@ -5,7 +5,11 @@ import com.codemastery.modules.course.domain.model.LearningMaterial;
 import com.codemastery.modules.course.domain.model.Lesson;
 import com.codemastery.modules.course.domain.model.PublishStatus;
 import com.codemastery.modules.course.domain.repository.CourseContentRepository;
+import com.codemastery.modules.course.infrastructure.persistence.entity.ChapterEntity;
+import com.codemastery.modules.course.infrastructure.persistence.entity.LearningMaterialEntity;
+import com.codemastery.modules.course.infrastructure.persistence.entity.LessonEntity;
 import com.codemastery.modules.course.infrastructure.persistence.mapper.CourseContentMapper;
+import jakarta.persistence.EntityManager;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -28,16 +32,19 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
     private final LessonJpaRepository lessonJpaRepository;
     private final CourseContentMapper courseContentMapper;
     private final JdbcTemplate jdbc;
+    private final EntityManager entityManager;
 
     public CourseContentRepositoryImpl(
             ChapterJpaRepository chapterJpaRepository,
             LessonJpaRepository lessonJpaRepository,
             CourseContentMapper courseContentMapper,
-            JdbcTemplate jdbc) {
+            JdbcTemplate jdbc,
+            EntityManager entityManager) {
         this.chapterJpaRepository = chapterJpaRepository;
         this.lessonJpaRepository = lessonJpaRepository;
         this.courseContentMapper = courseContentMapper;
         this.jdbc = jdbc;
+        this.entityManager = entityManager;
     }
 
     @Override
@@ -149,6 +156,7 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         Objects.requireNonNull(chapterId, "chapterId");
         requireOneRow(jdbc.update("UPDATE public.chapters SET title = ? WHERE id = ? AND course_id = ?",
                 title, chapterId, courseId));
+        CourseRepositoryImpl.detachManaged(entityManager, ChapterEntity.class, chapterId);
     }
 
     @Override
@@ -157,6 +165,7 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         Objects.requireNonNull(lessonId, "lessonId");
         requireOneRow(jdbc.update("UPDATE public.lessons SET title = ?, content_markdown = ? WHERE id = ? AND chapter_id = ?",
                 title, contentMarkdown, lessonId, chapterId));
+        CourseRepositoryImpl.detachManaged(entityManager, LessonEntity.class, lessonId);
     }
 
     @Override
@@ -166,6 +175,7 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         Objects.requireNonNull(publicationStatus, "publicationStatus");
         requireOneRow(jdbc.update("UPDATE public.lessons SET publication_status = ? WHERE id = ? AND chapter_id = ?",
                 publicationStatus.getStatus(), lessonId, chapterId));
+        CourseRepositoryImpl.detachManaged(entityManager, LessonEntity.class, lessonId);
     }
 
     @Override
@@ -174,6 +184,7 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         reorder("public.uq_chapters_course_position",
                 jdbc.queryForList("SELECT id FROM public.chapters WHERE course_id = ?", UUID.class, courseId),
                 orderedChapterIds, "UPDATE public.chapters SET position = ? WHERE id = ? AND course_id = ?", courseId);
+        orderedChapterIds.forEach(id -> CourseRepositoryImpl.detachManaged(entityManager, ChapterEntity.class, id));
     }
 
     @Override
@@ -182,6 +193,7 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         reorder("public.uq_lessons_chapter_position",
                 jdbc.queryForList("SELECT id FROM public.lessons WHERE chapter_id = ?", UUID.class, chapterId),
                 orderedLessonIds, "UPDATE public.lessons SET position = ? WHERE id = ? AND chapter_id = ?", chapterId);
+        orderedLessonIds.forEach(id -> CourseRepositoryImpl.detachManaged(entityManager, LessonEntity.class, id));
     }
 
     @Override
@@ -206,6 +218,7 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
                         + "original_filename = ?, external_video_url = ? WHERE id = ? AND lesson_id = ? AND material_type = ?",
                 material.title(), material.textContent(), material.objectKey(), material.originalFileName(),
                 material.externalVideoUrl(), material.id(), material.lessonId(), material.materialType().getType()));
+        CourseRepositoryImpl.detachManaged(entityManager, LearningMaterialEntity.class, material.id());
     }
 
     @Override
@@ -215,6 +228,7 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         Objects.requireNonNull(publicationStatus, "publicationStatus");
         requireOneRow(jdbc.update("UPDATE public.learning_materials SET publication_status = ? WHERE id = ? AND lesson_id = ?",
                 publicationStatus.getStatus(), materialId, lessonId));
+        CourseRepositoryImpl.detachManaged(entityManager, LearningMaterialEntity.class, materialId);
     }
 
     /**

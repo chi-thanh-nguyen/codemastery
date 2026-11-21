@@ -278,6 +278,51 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         assertFalse(rootLockedElsewhere(COURSE));
     }
 
+    @Test void aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker() {
+        AtomicInteger reentered = new AtomicInteger();
+        assertThrows(UnexpectedRollbackException.class, () -> as(OWNER, Role.INSTRUCTOR,
+                () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false).execute(status -> {
+                    // A caller-managed savepoint opened before the guard; Spring NESTED is not enabled.
+                    jdbc.execute("SAVEPOINT before_guard");
+                    service.withCourseConfigurationWrite(COURSE, () -> null);
+                    jdbc.execute("ROLLBACK TO SAVEPOINT before_guard");
+                    assertFalse(rootLockedElsewhere(COURSE), "PostgreSQL released the root with the savepoint");
+                    jdbc.update("UPDATE public.courses SET title = 'Written without the root' WHERE id = ?", SECOND);
+                    assertThrows(IllegalStateException.class,
+                            () -> service.withCourseConfigurationWrite(COURSE, reentered::incrementAndGet));
+                    assertThrows(IllegalStateException.class, () -> service.writeAdaptiveConfiguration(COURSE,
+                            new AdaptiveConfiguration(COURSE, false, null), false, Map.of("a", 1)));
+                    return null;
+                })));
+        assertEquals(0, reentered.get());
+        assertEquals("Beta", titleElsewhere(SECOND), "the doomed outer unit committed nothing");
+        assertNull(jdbc.queryForObject("SELECT adaptive_settings::text FROM public.courses WHERE id = ?", String.class, COURSE));
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    @Test void aRequiresNewGuardBehindASuspendedHolderOnTheSameThreadFailsInsteadOfWaitingForItself() throws Exception {
+        TransactionTemplate independent = new TransactionTemplate(transactions);
+        independent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        AtomicInteger inner = new AtomicInteger();
+        Future<List<Object>> outcome = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> {
+            Object first;
+            try {
+                service.withCourseConfigurationWrite(COURSE, () -> independent.execute(
+                        status -> service.withCourseConfigurationWrite(COURSE, inner::incrementAndGet)));
+                first = "no failure";
+            } catch (RuntimeException failure) {
+                first = failure;
+            }
+            // The thread's root record is released with the transaction, so the same thread can retry.
+            return List.of(first, service.withCourseConfigurationWrite(COURSE, () -> "retried"));
+        }));
+        List<Object> results = outcome.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        assertInstanceOf(IllegalStateException.class, results.get(0));
+        assertEquals("retried", results.get(1));
+        assertEquals(0, inner.get());
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
     @Test void rollbackOnlyCompletionNeverReturnsTheCallbackValue() {
         TransactionTemplate participant = new TransactionTemplate(transactions);
         assertThrows(UnexpectedRollbackException.class, () -> as(OWNER, Role.INSTRUCTOR,

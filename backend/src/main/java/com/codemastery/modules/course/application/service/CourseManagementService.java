@@ -13,6 +13,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -29,7 +31,11 @@ import java.util.function.Supplier;
  * the same semantics as external calls. A compatible outer transaction is joined only when
  * its actual isolation is READ COMMITTED, it is not read-only, and it has neither written
  * nor locked rows nor queued persistence changes before the root; a nested call for another
- * Course is rejected. Contract violations are internal errors (500). Any failure rolls the
+ * Course is rejected. The held root is recorded transaction-locally in PostgreSQL, so a
+ * savepoint rollback that releases the row lock also releases the marker, and a REQUIRES_NEW
+ * entry behind a suspended holder on the same thread fails instead of waiting for itself.
+ * Entities loaded before entry are detached after the lock: re-read them inside the callback.
+ * Contract violations are internal errors (500). Any failure rolls the
  * whole unit back; an outer caller must still commit before reporting success. There is no
  * REQUIRES_NEW, retry, sleep, SKIP LOCKED or timeout selection here.
  *
@@ -41,6 +47,8 @@ public class CourseManagementService {
 
     private static final String READ_COMMITTED = "read committed";
     private static final String LOCK_NOT_AVAILABLE = "55P03";
+    /** Roots taken by transactions on this thread, including suspended ones, until they complete. */
+    private static final ThreadLocal<List<UUID>> THREAD_ROOTS = new ThreadLocal<>();
 
     private final CourseRepository courses;
     private final CourseAccessService access;
@@ -110,13 +118,14 @@ public class CourseManagementService {
             throw new IllegalArgumentException("Enabled adaptive mode requires stored settings");
         }
         Map<String, Object> settings = adaptiveSettings == null ? null : Course.immutableJsonObject(adaptiveSettings);
-        if (!TransactionSynchronizationManager.isActualTransactionActive()
-                || !TransactionSynchronizationManager.isSynchronizationActive()
-                || !courseId.equals(heldCourseRoot())) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Course configuration writes require the held guard of the same Course");
         }
+        // Checked inside the participating unit, so a missing or released guard dooms the caller's transaction.
         writeUnit.executeWithoutResult(status -> {
-            requireCompatibleWriteUnit(courseId);
+            if (requireCompatibleWriteUnit(courseId) == null) {
+                throw new IllegalStateException("Course configuration writes require the held guard of the same Course");
+            }
             access.requireCourseOwnership(courseId);
             acquire(courseId, false);
             if (!courses.replaceAdaptiveConfiguration(courseId, expected.adaptiveEnabled(),
@@ -146,13 +155,18 @@ public class CourseManagementService {
         // READ COMMITTED: this fresh statement observes ownership/existence committed before the lock.
         access.requireCourseOwnership(courseId);
         if (held == null) {
-            TransactionSynchronizationManager.registerSynchronization(new HeldCourseRoot(courseId));
+            claimThreadRoot(courseId);
+            courses.markCourseRootHeld(courseId);
             courses.discardCleanPersistenceState();
         }
         return work.get();
     }
 
-    /** Returns the Course root already held by this transaction, or null on first entry. */
+    /**
+     * Returns the Course root this physical transaction currently holds, or null on first entry.
+     * The marker lives in PostgreSQL, so a savepoint rollback that released the row lock also
+     * clears it; re-entry is then a first entry and fails on the transaction's earlier writes.
+     */
     private UUID requireCompatibleWriteUnit(UUID courseId) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || !TransactionSynchronizationManager.isSynchronizationActive()
@@ -163,12 +177,17 @@ public class CourseManagementService {
         if (facts == null || facts.readOnly() || !READ_COMMITTED.equals(facts.isolation())) {
             throw new IllegalStateException("Course configuration writes require a READ COMMITTED read-write transaction");
         }
-        UUID held = heldCourseRoot();
+        UUID held = facts.heldCourseRoot();
         if (held != null) {
             if (!held.equals(courseId)) {
                 throw new IllegalStateException("A Course configuration write cannot nest another Course");
             }
             return held;
+        }
+        if (THREAD_ROOTS.get() != null) {
+            // A suspended (REQUIRES_NEW) or savepoint-released holder on this thread: waiting would
+            // deadlock on our own lock or continue under a released guard, so fail instead.
+            throw new IllegalStateException("This thread's transaction no longer holds, or cannot take, the Course root");
         }
         if (facts.writeIdentityAssigned() || courses.hasPendingPersistenceChanges()) {
             throw new IllegalStateException("Writes or row locks precede the Course root lock");
@@ -205,13 +224,15 @@ public class CourseManagementService {
         return false;
     }
 
-    private static UUID heldCourseRoot() {
-        for (TransactionSynchronization synchronization : TransactionSynchronizationManager.getSynchronizations()) {
-            if (synchronization instanceof HeldCourseRoot root) {
-                return root.courseId;
-            }
+    /** Records the root for this thread until the acquiring physical transaction completes. */
+    private static void claimThreadRoot(UUID courseId) {
+        TransactionSynchronizationManager.registerSynchronization(new ThreadRootRelease(courseId));
+        List<UUID> roots = THREAD_ROOTS.get();
+        if (roots == null) {
+            roots = new ArrayList<>(1);
+            THREAD_ROOTS.set(roots);
         }
-        return null;
+        roots.add(courseId);
     }
 
     private static void requireId(UUID id) {
@@ -246,12 +267,23 @@ public class CourseManagementService {
         }
     }
 
-    /** Marks the transaction that holds a Course root; discarded with the transaction itself. */
-    private static final class HeldCourseRoot implements TransactionSynchronization {
+    /** Removes this transaction's root from the thread record when the transaction completes. */
+    private static final class ThreadRootRelease implements TransactionSynchronization {
         private final UUID courseId;
 
-        private HeldCourseRoot(UUID courseId) {
+        private ThreadRootRelease(UUID courseId) {
             this.courseId = courseId;
+        }
+
+        @Override
+        public void afterCompletion(int status) {
+            List<UUID> roots = THREAD_ROOTS.get();
+            if (roots != null) {
+                roots.remove(courseId);
+                if (roots.isEmpty()) {
+                    THREAD_ROOTS.remove();
+                }
+            }
         }
     }
 

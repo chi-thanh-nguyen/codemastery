@@ -390,6 +390,7 @@ class CourseRepositoryImplTest {
                 () -> repository.lockCourseRootNoWait(null),
                 () -> repository.findAdaptiveConfiguration(null),
                 () -> repository.replaceAdaptiveConfiguration(null, false, null, false, null),
+                () -> repository.markCourseRootHeld(null),
                 () -> repository.detachManagedCourse(null));
         for (var call : calls) {
             assertThrows(NullPointerException.class, call);

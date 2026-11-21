@@ -506,6 +506,12 @@ class CourseRepositoryIntegrationTest extends AbstractIntegrationTest {
         assertEquals(List.of(sameHigh, alphaLower), second.map(Course::id).getContent());
         assertEquals(3, second.getTotalPages());
 
+        assertEquals("Same", courseRepository.findPublishedById(sameHigh).orElseThrow().title());
+        courseRepository.updateMetadata(sameHigh, "Renamed", "Second", "Needs basics");
+        assertEquals("Renamed", courseRepository.findPublishedById(sameHigh).orElseThrow().title(),
+                "a managed Course read earlier in the transaction must not hide the direct write");
+        courseRepository.updatePublicationStatus(sameHigh, PublishStatus.HIDDEN);
+        assertEquals(Optional.empty(), courseRepository.findPublishedById(sameHigh));
         courseRepository.updateMetadata(beta, "Beta", "Edited", "Variables");
         courseRepository.updatePublicationStatus(beta, PublishStatus.PUBLISHED);
         assertEquals(new Course(beta, owner, "Beta", "Edited", "Variables", PublishStatus.PUBLISHED, false, null),
@@ -577,7 +583,11 @@ class CourseRepositoryIntegrationTest extends AbstractIntegrationTest {
         assertEquals(List.of(new Chapter(c, course, "Chapter 9", 1), new Chapter(a, course, "Chapter 5", 2),
                 new Chapter(b, course, "Chapter 7", 3)), courseContentRepository.findChaptersByCourseId(course));
         courseContentRepository.reorderChapters(course, List.of(a, b, c));
-        assertEquals(List.of(a, b, c), courseContentRepository.findChaptersByCourseId(course).stream().map(Chapter::id).toList());
+        // The first read left managed entities behind; a later read must still see the new positions.
+        assertEquals(List.of(new Chapter(a, course, "Chapter 5", 1), new Chapter(b, course, "Chapter 7", 2),
+                new Chapter(c, course, "Chapter 9", 3)), courseContentRepository.findChaptersByCourseId(course));
+        courseContentRepository.updateChapterTitle(course, a, "Renamed after a managed read");
+        assertEquals("Renamed after a managed read", courseContentRepository.findChaptersByCourseId(course).getFirst().title());
         // Uniqueness is immediate again once the reorder returns.
         assertConstraintViolation(() -> jdbcTemplate.update("UPDATE public.chapters SET position = 2 WHERE id = ?", a));
 
@@ -588,8 +598,16 @@ class CourseRepositoryIntegrationTest extends AbstractIntegrationTest {
         assertEquals(List.of(1, 2, 3), courseContentRepository.findChaptersByCourseId(course).stream().map(Chapter::position).toList());
 
         UUID first = lesson(a, 1, "published");
-        UUID second = lesson(a, 2, "hidden");
+        UUID second = lesson(a, 2, "published");
+        assertEquals(List.of(1, 2), courseContentRepository.findPublishedLessonsByCourseId(course).stream().map(Lesson::position).toList());
         courseContentRepository.reorderLessons(a, List.of(second, first));
+        assertEquals(List.of(new Lesson(second, a, "Lesson 2", "# Lesson 2\n\n    indented", 1, PublishStatus.PUBLISHED),
+                new Lesson(first, a, "Lesson 1", "# Lesson 1\n\n    indented", 2, PublishStatus.PUBLISHED)),
+                courseContentRepository.findPublishedLessonsByCourseId(course));
+        courseContentRepository.updateLesson(a, first, "Edited", null);
+        courseContentRepository.updateLessonPublicationStatus(a, second, PublishStatus.HIDDEN);
+        assertEquals(List.of(new Lesson(first, a, "Edited", null, 2, PublishStatus.PUBLISHED)),
+                courseContentRepository.findPublishedLessonsByCourseId(course));
         assertEquals(List.of(second, first), courseContentRepository.findLessonsByCourseId(course).stream().map(Lesson::id).toList());
         assertThrows(InvalidDataAccessApiUsageException.class, () -> courseContentRepository.reorderLessons(a, List.of(first)));
     }
@@ -663,6 +681,14 @@ class CourseRepositoryIntegrationTest extends AbstractIntegrationTest {
         assertTrue(courseRepository.lockCourseRootNoWait(course));
         assertFalse(courseRepository.lockCourseRoot(UUID.randomUUID()));
         assertFalse(courseRepository.lockCourseRootNoWait(UUID.randomUUID()));
+        assertNull(courseRepository.currentTransactionFacts().heldCourseRoot());
+        jdbcTemplate.execute("SAVEPOINT before_marker");
+        courseRepository.markCourseRootHeld(course);
+        assertEquals(course, courseRepository.currentTransactionFacts().heldCourseRoot());
+        jdbcTemplate.execute("ROLLBACK TO SAVEPOINT before_marker");
+        assertNull(courseRepository.currentTransactionFacts().heldCourseRoot(), "a savepoint rollback clears the marker");
+        courseRepository.markCourseRootHeld(course);
+        assertEquals(course, courseRepository.currentTransactionFacts().heldCourseRoot());
 
         CourseRepository.StoredAdaptiveConfiguration stored = courseRepository.findAdaptiveConfiguration(course).orElseThrow();
         Map<String, Object> expected = new java.util.LinkedHashMap<>();

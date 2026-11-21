@@ -35,6 +35,8 @@ class CourseContentRepositoryImplTest {
     private LessonJpaRepository lessons;
     @Mock
     private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Mock
+    private jakarta.persistence.EntityManager entityManager;
 
     private CourseContentRepositoryImpl repository;
 
@@ -46,7 +48,7 @@ class CourseContentRepositoryImplTest {
 
     @BeforeEach
     void setUp() {
-        repository = new CourseContentRepositoryImpl(chapters, lessons, new CourseContentMapper(), jdbc);
+        repository = new CourseContentRepositoryImpl(chapters, lessons, new CourseContentMapper(), jdbc, entityManager);
     }
 
     @Test
@@ -123,7 +125,7 @@ class CourseContentRepositoryImplTest {
         for (var call : calls) {
             org.junit.jupiter.api.Assertions.assertThrows(NullPointerException.class, call);
         }
-        verifyNoInteractions(jdbc, chapters, lessons);
+        verifyNoInteractions(jdbc, chapters, lessons, entityManager);
     }
 
     @Test
