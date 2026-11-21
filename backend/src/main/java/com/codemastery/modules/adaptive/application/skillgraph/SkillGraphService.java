@@ -11,6 +11,9 @@ import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.application.service.CourseManagementService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -19,26 +22,42 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
+/**
+ * CT05/CT40 skill graph use cases (ADR005 §§3.2, 4, 5, 8.1). Every mutation runs inside
+ * Course's {@code withCourseConfigurationWrite} guard, which admits the owning Instructor,
+ * locks the Course row and supplies the READ COMMITTED transaction; invariant inputs are read
+ * only after that lock. The owner graph read uses one read-only REPEATABLE READ snapshot, so
+ * its ownership check, skills, prerequisites and mappings come from the same committed state.
+ */
 @Service
 public class SkillGraphService {
 
     private final SkillRepository skills;
     private final CourseAccessService access;
     private final CourseManagementService courseConfiguration;
+    private final TransactionTemplate snapshotRead;
 
     public SkillGraphService(
             SkillRepository skills,
             CourseAccessService access,
-            CourseManagementService courseConfiguration) {
+            CourseManagementService courseConfiguration,
+            PlatformTransactionManager transactionManager) {
         this.skills = Objects.requireNonNull(skills);
         this.access = Objects.requireNonNull(access);
         this.courseConfiguration = Objects.requireNonNull(courseConfiguration);
+        this.snapshotRead = new TransactionTemplate(Objects.requireNonNull(transactionManager));
+        snapshotRead.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        snapshotRead.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        snapshotRead.setReadOnly(true);
     }
 
+    /** ADR005 §§4.1, 5: owner display read from one coherent snapshot; conveys no permission. */
     public GraphSnapshot readGraph(UUID courseId) {
         requireId(courseId);
-        access.requireCourseOwnership(courseId);
-        return snapshot(load(courseId));
+        return snapshotRead.execute(status -> {
+            access.requireCourseOwnership(courseId);
+            return snapshot(load(courseId));
+        });
     }
 
     public void requireSkillInCourse(UUID courseId, UUID skillId) {
@@ -219,17 +238,32 @@ public class SkillGraphService {
     }
 
     private static String requireNonBlank(String value, String label) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(label + " must not be blank");
+        if (value == null || !storableText(value)) {
+            throw invalidText(label + " must be storable nonblank text");
         }
         return value;
     }
 
     private static String optionalNonBlank(String value, String label) {
-        if (value != null && value.isBlank()) {
-            throw new IllegalArgumentException(label + " must be null or nonblank");
+        if (value != null && !storableText(value)) {
+            throw invalidText(label + " must be null or storable nonblank text");
         }
         return value;
+    }
+
+    /**
+     * Client text is invalid input (400), never a 500 from the V003 {@code ck_skills_text}
+     * CHECK or PostgreSQL's NUL restriction. A value needs one character that is whitespace
+     * under none of ECMAScript {@code \s} (the OpenAPI {@code \S} pattern), Java and
+     * PostgreSQL's {@code [:space:]}, and it must not contain NUL, which {@code text} cannot store.
+     */
+    private static boolean storableText(String value) {
+        return value.indexOf('\0') < 0 && value.codePoints().anyMatch(point -> !Character.isWhitespace(point)
+                && !Character.isSpaceChar(point) && point != 0x0085 && point != 0xFEFF);
+    }
+
+    private static BusinessRuleException invalidText(String diagnostic) {
+        return new BusinessRuleException(HttpStatus.BAD_REQUEST, diagnostic);
     }
 
     private static void requireId(UUID id) {

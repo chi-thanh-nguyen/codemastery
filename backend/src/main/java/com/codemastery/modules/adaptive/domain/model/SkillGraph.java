@@ -1,6 +1,10 @@
 package com.codemastery.modules.adaptive.domain.model;
 
+import java.util.ArrayDeque;
 import java.util.Comparator;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -162,28 +166,39 @@ public final class SkillGraph {
         return targets;
     }
 
-    /** Deterministic depth-first search over full reachability; no fixed traversal depth. */
+    /**
+     * Deterministic depth-first search over full reachability with a visited set; no fixed
+     * traversal depth. The traversal keeps its own stack, so an arbitrarily long dependency
+     * path cannot exhaust the thread stack (ADR005 §4.1, B1-O02).
+     */
     private static void requireAcyclic(Map<UUID, Set<UUID>> dependencies) {
-        Set<UUID> visiting = new LinkedHashSet<>();
-        Set<UUID> finished = new LinkedHashSet<>();
-        for (UUID skillId : dependencies.keySet()) {
-            visit(skillId, dependencies, visiting, finished);
+        Set<UUID> visiting = new HashSet<>();
+        Set<UUID> finished = new HashSet<>();
+        Deque<Map.Entry<UUID, Iterator<UUID>>> path = new ArrayDeque<>();
+        for (UUID root : dependencies.keySet()) {
+            if (finished.contains(root)) {
+                continue;
+            }
+            visiting.add(root);
+            path.push(Map.entry(root, dependencies.getOrDefault(root, Set.of()).iterator()));
+            while (!path.isEmpty()) {
+                Map.Entry<UUID, Iterator<UUID>> top = path.peek();
+                if (!top.getValue().hasNext()) {
+                    path.pop();
+                    visiting.remove(top.getKey());
+                    finished.add(top.getKey());
+                    continue;
+                }
+                UUID prerequisite = top.getValue().next();
+                if (finished.contains(prerequisite)) {
+                    continue;
+                }
+                if (!visiting.add(prerequisite)) {
+                    throw new CycleException("Prerequisites must not contain a cycle");
+                }
+                path.push(Map.entry(prerequisite, dependencies.getOrDefault(prerequisite, Set.of()).iterator()));
+            }
         }
-    }
-
-    private static void visit(UUID skillId, Map<UUID, Set<UUID>> dependencies,
-            Set<UUID> visiting, Set<UUID> finished) {
-        if (finished.contains(skillId)) {
-            return;
-        }
-        if (!visiting.add(skillId)) {
-            throw new CycleException("Prerequisites must not contain a cycle");
-        }
-        for (UUID prerequisite : dependencies.getOrDefault(skillId, Set.of())) {
-            visit(prerequisite, dependencies, visiting, finished);
-        }
-        visiting.remove(skillId);
-        finished.add(skillId);
     }
 
     private static String identity(UUID id) {
