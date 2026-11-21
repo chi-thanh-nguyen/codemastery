@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, and the six CO08 CT22.progress/resume operations (#174); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the eight AD07 CT05 skill-graph operations (#165); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -1017,7 +1017,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Returns all valid Course skills, prerequisites and Lesson mappings. No pagination; empty graph valid for draft authoring. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Returns all valid Course skills, prerequisites and Lesson mappings. No pagination; empty graph valid for draft authoring. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1061,7 +1061,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
       }
     },
@@ -1071,7 +1070,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Creates one skill with server UUID. Nonblank name, optional null/nonblank description. Names are not unique; no invented length cap. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Creates one skill with server UUID. Nonblank name, optional null/nonblank description. Names are not unique; no invented length cap. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1115,7 +1114,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -1135,7 +1133,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Replaces name/description; omitted description becomes null. Course/identity immutable. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Replaces name/description; omitted description becomes null. Course/identity immutable. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1188,7 +1186,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -1206,7 +1203,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Rejects any prerequisite, mapping, Question or mastery reference (409); no cascade. Missing skill is 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Rejects any prerequisite, mapping, Question or mastery reference (409); no cascade. Missing skill is 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1255,7 +1252,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
@@ -1273,7 +1269,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent add after both scoped endpoints validate. Self-edge 400, new cycle 409. Full DFS reachability and Course-row serialization required. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Idempotent add after both scoped endpoints validate. Self-edge 400, new cycle 409. Full DFS reachability and Course-row serialization required. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1331,7 +1327,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
@@ -1347,7 +1342,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent remove after validating both endpoints; absent pair succeeds, missing/foreign endpoint 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Idempotent remove after validating both endpoints; absent pair succeeds, missing/foreign endpoint 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1402,7 +1397,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
@@ -1420,7 +1414,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent mapping under Course-owned ancestry assertion and Adaptive same-Course skill check; no extra mapping structural read. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Idempotent mapping under Course-owned ancestry assertion and Adaptive same-Course skill check; no extra mapping structural read. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1475,7 +1469,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
@@ -1491,7 +1484,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent unmap after validating Course Lesson/skill scope. May suspend effective readiness while preserving stored enabled intent and earned progress. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Idempotent unmap after validating Course Lesson/skill scope. May suspend effective readiness while preserving stored enabled intent and earned progress. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1546,7 +1539,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
