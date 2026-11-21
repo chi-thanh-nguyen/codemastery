@@ -501,6 +501,18 @@ async function themeChecks({ engine, check, notExercised, newPage, ready, overfl
             await page.waitForFunction(() => [...document.querySelectorAll('.MuiTooltip-popper')].some((node) => node.textContent === 'Theme' && node.getClientRects().length), null, { timeout: 250 })
                 .catch(() => { throw new Error('cold keyboard focus did not show the tooltip within 250 ms (F-03)'); });
             await page.keyboard.press('Tab'); await settle();
+            // N-04: Escape within 400 ms of keyboard focus leaves MUI's pending focus timer running. With focus unchanged, a later
+            // pointer hover must still take the full 400 ms: MUI's 200 ms hysteresis delay (left set by that timer) would open it at ~200 ms.
+            const present = () => page.evaluate(() => [...document.querySelectorAll('.MuiTooltip-popper')].some((node) => node.textContent === 'Theme' && node.getClientRects().length));
+            await away(); await page.waitForTimeout(1000); await page.keyboard.press('Shift+Tab');
+            await page.waitForTimeout(100); await page.keyboard.press('Escape'); await page.waitForTimeout(2000);
+            assert.equal(await tips(), 0, 'N-04: Escape did not dismiss the keyboard-focus tooltip for good');
+            assert.equal(await button.evaluate((node) => node === document.activeElement), true);
+            await page.mouse.move(centre.x, centre.y, { steps: 2 }); await page.waitForTimeout(300);
+            assert.equal(await present(), false, 'N-04: the hover tooltip opened before its 400 ms delay (hysteresis left set by the focus timer)');
+            await page.waitForFunction(() => [...document.querySelectorAll('.MuiTooltip-popper')].some((node) => node.textContent === 'Theme' && node.getClientRects().length), null, { timeout: 800 })
+                .catch(() => { throw new Error('N-04: the hover tooltip did not open after its 400 ms delay'); });
+            await page.keyboard.press('Tab'); await away(); await settle();
             // Repeated cycles, then a route change: nothing stays behind.
             for (let round = 0; round < 4; round++) { await button.click(); await menu.waitFor(); await page.keyboard.press('Escape'); await menu.waitFor({ state: 'hidden' }); }
             await away(); await page.getByRole('link', { name: 'My courses' }).first().click(); await ready(page); await settle();

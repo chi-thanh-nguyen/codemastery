@@ -989,6 +989,59 @@ describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
         await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
         await tabTo(other('After')); await tabTo(trigger(), true); expect(tooltipShown(), 'genuine keyboard refocus').toBe(true);
     });
+    /** A genuine pointer entry opens the tooltip after exactly 400 ms, never earlier (MUI's 200 ms hysteresis delay would show at 399). */
+    const hoverNeedsFullDelay = async (what: string) => {
+        await pointerEnters(trigger()); await advance(399);
+        expect(tooltipShown(), `${what}: opened before 400 ms`).toBe(false);
+        await advance(1); expect(tooltipShown(), `${what}: not open at 400 ms`).toBe(true);
+    };
+    it('N-04: an Escape at 100 ms leaves MUI\'s pending focus timer behind, and the next pointer hover still takes the full 400 ms', async () => {
+        await start();
+        await tabTo(other('Before')); await tabTo(trigger());
+        expect(tooltipShown(), 'keyboard focus shows it at once').toBe(true);
+        await advance(100);
+        await key(trigger(), 'Escape'); await advance(1);
+        expect(tooltipShown(), 'Escape hid it').toBe(false);
+        // Through MUI's original 400 ms focus timer, then well beyond its 800 ms hysteresis window and a 2 s idle control.
+        await advance(400); expect(tooltipShown(), 'reopened by the pending timer').toBe(false);
+        await advance(1000); expect(tooltipShown()).toBe(false);
+        await advance(2000); expect(tooltipShown()).toBe(false);
+        expect(document.activeElement).toBe(trigger());
+        // Focus unchanged; the pointer enters the button from outside.
+        await hoverNeedsFullDelay('hover after an early Escape');
+    });
+    it('N-04: an Escape at 500 ms (after the focus timer fired) also leaves the next hover at the full 400 ms', async () => {
+        await start();
+        await tabTo(other('Before')); await tabTo(trigger());
+        await advance(500); expect(tooltipShown(), 'still shown at 500 ms').toBe(true);
+        await key(trigger(), 'Escape'); await advance(1); expect(tooltipShown()).toBe(false);
+        await advance(2000); expect(tooltipShown()).toBe(false);
+        await hoverNeedsFullDelay('hover after a late Escape');
+    });
+    it('N-04: every pointer hover takes 400 ms: repeated, right after leaving, and after a stale hover, a choice and rapid cycles', async () => {
+        await start();
+        // Repeated hovering, including a re-entry 300 ms after leaving (inside MUI's 800 ms hysteresis window).
+        await hoverNeedsFullDelay('first hover');
+        await pointerLeaves(trigger()); await advance(300);
+        await hoverNeedsFullDelay('re-entry 300 ms after leaving');
+        await pointerLeaves(trigger()); await advance(2000);
+        // A stale hover after the menu closed by Escape, then a genuine leave and re-entry.
+        await press(trigger()); await advance(1); expect(menus()).toBe(1);
+        await key(document.activeElement!, 'Escape'); await advance(1000);
+        expect(menus()).toBe(0); expect(tooltipShown()).toBe(false);
+        await pointerLeaves(trigger()); await advance(100);
+        await hoverNeedsFullDelay('re-entry after a menu Escape');
+        await pointerLeaves(trigger()); await advance(2000);
+        // A choice in the menu, focus restored by Escape, and a rapid series of opens and closes.
+        await press(trigger()); await advance(1);
+        await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.startsWith('Dark'))!.click());
+        await key(document.activeElement!, 'Escape'); await advance(1);
+        expect(document.activeElement).toBe(trigger());
+        for (let round = 0; round < 6; round++) await press(trigger());
+        await key(document.activeElement!, 'Escape'); await advance(100);
+        await pointerLeaves(trigger()); await advance(100);
+        await hoverNeedsFullDelay('re-entry after a choice and rapid cycles');
+    });
     // One test per choice keeps each well inside the per-test timeout on a loaded CI runner.
     for (const label of ['System', 'Light', 'Dark']) it(`never leaves the tooltip behind after choosing ${label} and dismissing by outside click, Tab, Shift+Tab or a second press`, async () => {
         await start();
