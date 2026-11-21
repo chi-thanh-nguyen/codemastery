@@ -3,10 +3,14 @@ package com.codemastery.modules.course.api.dto;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.modules.course.domain.model.PublishStatus;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.InvalidMediaTypeException;
+import org.springframework.http.MediaType;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -39,6 +43,24 @@ public final class CourseRequest {
                     case "published" -> Optional.of(PublishStatus.PUBLISHED);
                     default -> Optional.empty();
                 });
+    }
+
+    /**
+     * OpenAPI JSON-only rule: a request whose Content-Type is absent, unparsable or not application/json
+     * is 415 before path, query or CT03 checks. Spring applies its {@code consumes} match only when a
+     * body is present (the body parameter is optional so that CT03 admission precedes body 400), so
+     * this repeats the same check for empty requests with Spring's own exception and representation.
+     */
+    public static void requireJson(String contentType) throws HttpMediaTypeNotSupportedException {
+        MediaType type;
+        try {
+            type = contentType == null ? null : MediaType.parseMediaType(contentType);
+        } catch (InvalidMediaTypeException invalid) {
+            throw new HttpMediaTypeNotSupportedException("Invalid Content-Type");
+        }
+        if (type == null || !MediaType.APPLICATION_JSON.includes(type)) {
+            throw new HttpMediaTypeNotSupportedException(type, List.of(MediaType.APPLICATION_JSON));
+        }
     }
 
     public static BusinessRuleException invalidBody() {

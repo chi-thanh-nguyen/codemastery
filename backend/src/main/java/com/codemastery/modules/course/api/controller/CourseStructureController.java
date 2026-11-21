@@ -10,10 +10,12 @@ import com.codemastery.modules.course.api.dto.CourseStructureResponses.SiblingOr
 import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.application.service.CourseStructureService;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -36,7 +38,9 @@ public class CourseStructureController {
     @PostMapping(path = COURSE + "/chapters", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<OwnedChapter> createCourseChapter(@PathVariable String courseId,
                                                             @RequestParam MultiValueMap<String, String> params,
-                                                            @RequestBody(required = false) String body) {
+                                                            @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
+                                                            @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
+        CourseRequest.requireJson(contentType);
         CourseSearchRequest.noQuery(params);
         UUID course = parseCourseId(courseId);
         var title = CourseStructureRequests.chapterTitle(body);
@@ -50,7 +54,9 @@ public class CourseStructureController {
     @PutMapping(path = COURSE + "/chapters/order", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<SiblingOrder> orderCourseChapters(@PathVariable String courseId,
                                                             @RequestParam MultiValueMap<String, String> params,
-                                                            @RequestBody(required = false) String body) {
+                                                            @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
+                                                            @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
+        CourseRequest.requireJson(contentType);
         CourseSearchRequest.noQuery(params);
         UUID course = parseCourseId(courseId);
         var order = CourseStructureRequests.siblingOrder(body);
@@ -64,7 +70,9 @@ public class CourseStructureController {
     @PutMapping(path = COURSE + "/chapters/{chapterId}", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<OwnedChapter> updateCourseChapter(@PathVariable String courseId, @PathVariable String chapterId,
                                                             @RequestParam MultiValueMap<String, String> params,
-                                                            @RequestBody(required = false) String body) {
+                                                            @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
+                                                            @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
+        CourseRequest.requireJson(contentType);
         CourseSearchRequest.noQuery(params);
         UUID course = parseCourseId(courseId);
         UUID chapter = parseCourseId(chapterId);
@@ -79,7 +87,9 @@ public class CourseStructureController {
     @PostMapping(path = COURSE + "/chapters/{chapterId}/lessons", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<OwnedLesson> createCourseLesson(@PathVariable String courseId, @PathVariable String chapterId,
                                                           @RequestParam MultiValueMap<String, String> params,
-                                                          @RequestBody(required = false) String body) {
+                                                          @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
+                                                          @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
+        CourseRequest.requireJson(contentType);
         CourseSearchRequest.noQuery(params);
         UUID course = parseCourseId(courseId);
         UUID chapter = parseCourseId(chapterId);
@@ -94,7 +104,9 @@ public class CourseStructureController {
     @PutMapping(path = COURSE + "/chapters/{chapterId}/lessons/order", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<SiblingOrder> orderChapterLessons(@PathVariable String courseId, @PathVariable String chapterId,
                                                             @RequestParam MultiValueMap<String, String> params,
-                                                            @RequestBody(required = false) String body) {
+                                                            @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
+                                                            @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
+        CourseRequest.requireJson(contentType);
         CourseSearchRequest.noQuery(params);
         UUID course = parseCourseId(courseId);
         UUID chapter = parseCourseId(chapterId);
@@ -116,7 +128,9 @@ public class CourseStructureController {
     @PutMapping(path = COURSE + "/lessons/{lessonId}", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<OwnedLesson> updateCourseLesson(@PathVariable String courseId, @PathVariable String lessonId,
                                                           @RequestParam MultiValueMap<String, String> params,
-                                                          @RequestBody(required = false) String body) {
+                                                          @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
+                                                          @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
+        CourseRequest.requireJson(contentType);
         CourseSearchRequest.noQuery(params);
         UUID course = parseCourseId(courseId);
         UUID lesson = parseCourseId(lessonId);
@@ -131,7 +145,9 @@ public class CourseStructureController {
     @PutMapping(path = COURSE + "/lessons/{lessonId}/publication", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<OwnedLesson> setCourseLessonPublication(@PathVariable String courseId, @PathVariable String lessonId,
                                                                   @RequestParam MultiValueMap<String, String> params,
-                                                                  @RequestBody(required = false) String body) {
+                                                                  @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
+                                                                  @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
+        CourseRequest.requireJson(contentType);
         CourseSearchRequest.noQuery(params);
         UUID course = parseCourseId(courseId);
         UUID lesson = parseCourseId(lessonId);

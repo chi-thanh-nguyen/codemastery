@@ -254,8 +254,8 @@ public class CourseManagementService {
             default -> throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid publication status");
         };
         String title = query == null ? "" : query;
-        // PostgreSQL text cannot hold NUL; reject it as malformed input instead of failing in the driver.
-        if (title.indexOf(0) >= 0) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid query");
+        // NUL or an unpaired surrogate cannot be sent faithfully to PostgreSQL: malformed input, not a 500 or a '?'.
+        if (!isStorable(title)) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid query");
         return snapshotRead.execute(read -> PageResponse.from(
                 courses.findForAdministration(title, status, PageRequest.of(page, size)).map(AdminCourseView::of)));
     }
@@ -320,13 +320,15 @@ public class CourseManagementService {
     }
 
     /**
-     * CT21 descriptive text: trimmed and nonblank; no length limit is added. PostgreSQL text cannot
-     * store NUL, so it is malformed input (400) rather than a driver failure (500).
+     * CT21 descriptive text: trimmed and nonblank; no length limit is added. Text PostgreSQL cannot
+     * store faithfully is malformed input (400) rather than a driver failure or silent change.
      */
     static String requiredText(String value) {
-        if (value == null || value.isBlank()) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Text must not be blank");
+        if (value == null) throw blank();
         requireStorable(value);
-        return value.strip();
+        String trimmed = trim(value);
+        if (trimmed.isEmpty()) throw blank();
+        return trimmed;
     }
 
     /** Optional descriptive text: null or trimmed nonblank. */
@@ -336,13 +338,46 @@ public class CourseManagementService {
 
     /** Markdown is null or nonblank and stored verbatim, preserving indentation. */
     static String markdown(String value) {
-        if (value != null && value.isBlank()) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Content must not be blank");
-        if (value != null) requireStorable(value);
+        if (value == null) return null;
+        requireStorable(value);
+        if (trim(value).isEmpty()) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Content must not be blank");
         return value;
     }
 
+    /**
+     * Blank means every code point is space under one of the definitions that judge this text: Java
+     * whitespace, Unicode space separators and U+FEFF (OpenAPI's ECMA-262 {@code \S} pattern) and
+     * U+0085, which the PostgreSQL checks {@code ~ '[^[:space:]]'} treat as space under the image's
+     * musl {@code en_US.utf8} locale. Accepted text therefore satisfies both the contract and the database.
+     */
+    static boolean isSpace(int codePoint) {
+        return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)
+                || codePoint == 0x0085 || codePoint == 0xFEFF;
+    }
+
+    private static String trim(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end && isSpace(value.codePointAt(start))) start += Character.charCount(value.codePointAt(start));
+        while (end > start && isSpace(value.codePointBefore(end))) end -= Character.charCount(value.codePointBefore(end));
+        return value.substring(start, end);
+    }
+
+    /**
+     * PostgreSQL text cannot hold NUL, and the driver silently replaces an unpaired UTF-16 surrogate,
+     * so the stored value would differ from the accepted one. Both are rejected before any write.
+     */
+    static boolean isStorable(String value) {
+        return value.codePoints().noneMatch(codePoint -> codePoint == 0
+                || codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE);
+    }
+
     private static void requireStorable(String value) {
-        if (value.indexOf(0) >= 0) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Text must not contain NUL");
+        if (!isStorable(value)) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Text must be storable Unicode");
+    }
+
+    private static BusinessRuleException blank() {
+        return new BusinessRuleException(HttpStatus.BAD_REQUEST, "Text must not be blank");
     }
 
     private <T> T guarded(UUID courseId, Supplier<T> work, boolean failFast) {
