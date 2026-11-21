@@ -13,6 +13,7 @@ import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
 import com.codemastery.modules.course.application.service.CourseManagementService;
 import com.codemastery.modules.course.application.service.CourseManagementService.AdaptiveConfiguration;
 import com.codemastery.modules.course.application.service.CourseManagementService.ConfigurationBusy;
+import com.codemastery.modules.course.application.service.CourseStructureService;
 import com.codemastery.modules.course.application.service.EnrollmentService;
 import com.codemastery.modules.course.domain.model.LearningMaterial;
 import com.codemastery.modules.course.domain.model.MaterialType;
@@ -81,6 +82,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 
@@ -108,8 +110,10 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
  *
  * <p>AD07 B1-O01/O03/O04/O11 (ADR005 §§3.2, 4, 5, 8): the skill graph through the production
  * security chain, real Course ownership/ancestry, the Course-root guard, PostgreSQL foreign keys
- * and committed state observed on separate connections. Course publication, Question writers and
- * enablement are other Issues' participants and are not exercised here.
+ * and committed state observed on separate connections. Every assembled graph proves its persisted
+ * Lesson mappings against CO06's CT40 projection ({@code CourseStructureService.readStructure},
+ * ADR005 §§3.1, 4.1) in the same snapshot or under the held Course root; CO06 Lesson creation and
+ * mapping serialize on that root. Question writers and enablement are other Issues' participants.
  *
  * <p>The context is closed after this class so its connection pool does not count against
  * PostgreSQL's connection limit while later suites run.
@@ -127,6 +131,7 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired CourseManagementService service;
     @Autowired SkillGraphService graph;
+    @Autowired CourseStructureService structure;
     @Autowired JwtTokenProvider tokens;
     @Autowired WebApplicationContext context;
     @Autowired EnrollmentService enrollment;
@@ -1090,6 +1095,92 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         assertEquals(List.of(new PrerequisiteReference(late, a)), after.prerequisites());
     }
 
+    // AD07 x CO06 CT40 projection (ADR005 §§3.1, 4.1, 4.3, 5): mapping ancestry on PostgreSQL.
+
+    @Test void mappingsOfPublishedAndHiddenLessonsOfTheCourseAreReadAndAForeignLessonMappingFailsClosed() throws Exception {
+        UUID chapter = chapter(COURSE, 1), published = lesson(chapter, 1), hidden = hiddenLesson(chapter, 2);
+        UUID a = skillRow(COURSE, "A"), b = skillRow(COURSE, "B"), free = skillRow(COURSE, "Free");
+        as(OWNER, Role.INSTRUCTOR, () -> { graph.mapLesson(COURSE, published, a); graph.mapLesson(COURSE, hidden, b); return null; });
+        String owner = bearer(OWNER), base = "/api/courses/" + COURSE;
+        JsonNode read = json(call(new Operation(HttpMethod.GET, base + "/skill-graph", null), owner), 200);
+        assertEquals(2, read.get("mappings").size(), "the owner's graph includes the hidden Lesson's mapping");
+
+        // Raw SQL is not a qualified writer: a mapping whose Lesson belongs to another Course is corrupt state.
+        UUID foreignLesson = lesson(chapter(SECOND, 1), 1);
+        jdbc.update("INSERT INTO public.lesson_skills (id,lesson_id,skill_id) VALUES (?,?,?)", UUID.randomUUID(), foreignLesson, a);
+        String before = graphState();
+        MvcResult corrupt = call(new Operation(HttpMethod.GET, base + "/skill-graph", null), owner);
+        assertProblem(corrupt, 500, "An unexpected error occurred.");
+        String body = corrupt.getResponse().getContentAsString();
+        assertFalse(body.contains(foreignLesson.toString()) || body.contains(SECOND.toString()) || body.contains("Lesson"), body);
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/skills/" + a + "/prerequisites/" + b, null), owner), 500, null);
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/skills/" + b + "/prerequisites/" + a, null), owner), 500, null);
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/skills/" + free, null), owner), 500, null);
+        assertEquals(before, graphState(), "nothing was repaired, removed or written");
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    @Test void aLessonMovedOutsideTheCourseBehindTheApplicationMakesItsMappingCorrupt() throws Exception {
+        UUID lesson = lesson(chapter(COURSE, 1), 1), a = skillRow(COURSE, "A"), foreignChapter = chapter(SECOND, 1);
+        as(OWNER, Role.INSTRUCTOR, () -> { graph.mapLesson(COURSE, lesson, a); return null; });
+        jdbc.update("UPDATE public.lessons SET chapter_id = ? WHERE id = ?", foreignChapter, lesson);
+        assertThrows(IllegalStateException.class, () -> as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE)));
+        assertProblem(call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/skill-graph", null), bearer(OWNER)), 500, null);
+        assertEquals(List.of(lesson + "->" + a), mappingsElsewhere());
+    }
+
+    @Test void theOwnerReadProvesMappingsAgainstTheStructureOfTheSameSnapshot() {
+        UUID chapter = chapter(COURSE, 1), lesson = lesson(chapter, 1), a = skillRow(COURSE, "A");
+        UUID foreignChapter = chapter(SECOND, 1), late = UUID.randomUUID();
+        as(OWNER, Role.INSTRUCTOR, () -> { graph.mapLesson(COURSE, lesson, a); return null; });
+        BEFORE_PREREQUISITES.set(() -> {
+            // Between the read's statements another connection appends a Lesson with a mapping and
+            // moves the mapped Lesson out of the Course. The snapshot sees neither change.
+            commitSqlElsewhere("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) "
+                    + "VALUES (?,?,'Late',2,'hidden')", late, chapter);
+            commitSqlElsewhere("INSERT INTO public.lesson_skills (id,lesson_id,skill_id) VALUES (?,?,?)", UUID.randomUUID(), late, a);
+            commitSqlElsewhere("UPDATE public.lessons SET chapter_id = ? WHERE id = ?", foreignChapter, lesson);
+        });
+        GraphSnapshot during = as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE));
+        assertNull(BEFORE_PREREQUISITES.get(), "the concurrent commits ran between the read's statements");
+        assertEquals(List.of(new MappingReference(lesson, a)), during.mappings());
+        assertThrows(IllegalStateException.class, () -> as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE)),
+                "the committed state now holds a foreign-Course mapping and fails closed");
+    }
+
+    @ParameterizedTest @ValueSource(booleans = {true, false})
+    void mappingALessonWaitsForTheCourseWriterCreatingItAndRereadsCommittedStructure(boolean creatorCommits) throws Exception {
+        UUID chapter = chapter(COURSE, 1), a = skillRow(COURSE, "A");
+        AtomicReference<UUID> created = new AtomicReference<>();
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        Future<Object> creator = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> service.withCourseConfigurationWrite(COURSE, () -> {
+            created.set(structure.createCourseLesson(COURSE, chapter, "Concurrent", null).id());
+            entered.countDown();
+            await(release);
+            if (!creatorCommits) throw new IllegalStateException("creator rolls back");
+            return null;
+        })));
+        await(entered);
+        Future<Object> mapper = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> {
+            graph.mapLesson(COURSE, created.get(), a);
+            return null;
+        }));
+        awaitLockWaiters(1);
+        assertFalse(mapper.isDone(), "the mapping waits on the Course root held by the structural writer");
+        release.countDown();
+        if (creatorCommits) {
+            creator.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            mapper.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertEquals(List.of(created.get() + "->" + a), mappingsElsewhere());
+            GraphSnapshot read = as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE));
+            assertEquals(List.of(new MappingReference(created.get(), a)), read.mappings());
+        } else {
+            failureOf(creator);
+            assertTrue(failureOf(mapper) instanceof ResourceNotFoundException, "a rolled-back Lesson is not in the Course");
+            assertEquals(List.of(), mappingsElsewhere());
+        }
+    }
+
     private static void assertCommitRefused(org.junit.jupiter.api.function.Executable unit) {
         RuntimeException refused = assertThrows(RuntimeException.class, unit);
         assertTrue(refused instanceof UnexpectedRollbackException || refused instanceof IllegalStateException,
@@ -1342,6 +1433,13 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     private UUID lesson(UUID chapter, int position) {
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) VALUES (?,?,?,?,'published')",
+                id, chapter, "Lesson " + position, position);
+        return id;
+    }
+
+    private UUID hiddenLesson(UUID chapter, int position) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) VALUES (?,?,?,?,'hidden')",
                 id, chapter, "Lesson " + position, position);
         return id;
     }

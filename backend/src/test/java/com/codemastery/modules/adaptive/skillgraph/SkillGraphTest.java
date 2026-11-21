@@ -10,6 +10,9 @@ import com.codemastery.modules.adaptive.domain.model.SkillPrerequisite;
 import com.codemastery.modules.adaptive.domain.repository.SkillRepository;
 import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.application.service.CourseManagementService;
+import com.codemastery.modules.course.application.service.CourseStructureService;
+import com.codemastery.modules.course.application.service.CourseStructureService.LessonReference;
+import com.codemastery.modules.course.application.service.CourseStructureService.StructureSnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -37,6 +40,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SkillGraphTest {
@@ -172,13 +176,15 @@ class SkillGraphTest {
         @Mock
         private CourseManagementService courseConfiguration;
         @Mock
+        private CourseStructureService structure;
+        @Mock
         private PlatformTransactionManager transactions;
 
         private SkillGraphService service;
 
         @BeforeEach
         void setUp() {
-            service = new SkillGraphService(skills, access, courseConfiguration, transactions);
+            service = new SkillGraphService(skills, access, courseConfiguration, structure, transactions);
             lenient().when(courseConfiguration.<Object>withCourseConfigurationWrite(any(), any()))
                     .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(1)).get());
         }
@@ -430,6 +436,85 @@ class SkillGraphTest {
             assertThrows(ResourceNotFoundException.class, () -> service.unmapLesson(COURSE, LESSON, SKILL_A));
             verify(skills, never()).findSkill(any(), any());
             verify(skills, never()).deleteMapping(any(), any());
+        }
+
+        // CT40 structural projection (ADR005 §§3.1, 4.1): every assembled graph proves its mappings.
+
+        private void mappedAs(LessonSkill... mappings) {
+            lenient().when(skills.findSkills(COURSE)).thenReturn(List.of(skill(SKILL_A), skill(SKILL_B)));
+            lenient().when(skills.findPrerequisites(COURSE)).thenReturn(List.of());
+            lenient().when(skills.findMappingsForSkills(any())).thenReturn(List.of(mappings));
+        }
+
+        private static LessonReference lessonRow(UUID lessonId, boolean published) {
+            return new LessonReference(lessonId, UUID.randomUUID(), 1, 1, published);
+        }
+
+        @Test
+        void mappingsOfTheCoursesOwnLessonsIncludingHiddenOnesAreReadAfterTheMappingsInTheSameSnapshot() {
+            UUID hidden = new UUID(4, 2);
+            mappedAs(new LessonSkill(UUID.randomUUID(), LESSON, SKILL_A), new LessonSkill(UUID.randomUUID(), hidden, SKILL_B));
+            when(structure.readStructure(COURSE)).thenReturn(new StructureSnapshot(COURSE,
+                    List.of(lessonRow(LESSON, true), lessonRow(hidden, false))));
+            var order = inOrder(transactions, access, skills, structure);
+
+            var graph = service.readGraph(COURSE);
+
+            order.verify(transactions).getTransaction(any());
+            order.verify(access).requireCourseOwnership(COURSE);
+            order.verify(skills).findMappingsForSkills(any());
+            order.verify(structure).readStructure(COURSE);
+            order.verify(transactions).commit(any());
+            assertEquals(2, graph.mappings().size());
+        }
+
+        @Test
+        void aGraphWithoutMappingsNeedsNoStructuralRead() {
+            mappedAs();
+
+            service.readGraph(COURSE);
+
+            verifyNoInteractions(structure);
+        }
+
+        @Test
+        void aMappingToALessonOutsideTheCourseFailsClosedOnReadAndOnEveryGraphCommand() {
+            mappedAs(new LessonSkill(UUID.randomUUID(), LESSON, SKILL_A));
+            lenient().when(structure.readStructure(COURSE)).thenReturn(new StructureSnapshot(COURSE, List.of()));
+
+            assertThrows(IllegalStateException.class, () -> service.readGraph(COURSE));
+            assertThrows(IllegalStateException.class, () -> service.addPrerequisite(COURSE, SKILL_A, SKILL_B));
+            assertThrows(IllegalStateException.class, () -> service.removePrerequisite(COURSE, SKILL_A, SKILL_B));
+            assertThrows(IllegalStateException.class, () -> service.deleteSkill(COURSE, SKILL_B));
+            verify(skills, never()).insertPrerequisite(any());
+            verify(skills, never()).deletePrerequisite(any(), any(), any());
+            verify(skills, never()).deleteSkill(any(), any());
+        }
+
+        @Test
+        void anInconsistentOrForeignStructureProjectionIsAProviderFailureNeverAPartialGraph() {
+            mappedAs(new LessonSkill(UUID.randomUUID(), LESSON, SKILL_A));
+
+            when(structure.readStructure(COURSE)).thenReturn(new StructureSnapshot(OTHER_COURSE, List.of(lessonRow(LESSON, true))));
+            assertThrows(IllegalStateException.class, () -> service.readGraph(COURSE));
+
+            when(structure.readStructure(COURSE)).thenReturn(new StructureSnapshot(COURSE,
+                    List.of(lessonRow(LESSON, true), lessonRow(LESSON, true))));
+            assertThrows(IllegalStateException.class, () -> service.readGraph(COURSE));
+
+            when(structure.readStructure(COURSE)).thenThrow(new IllegalStateException("Inconsistent Course structure"));
+            assertThrows(IllegalStateException.class, () -> service.readGraph(COURSE));
+        }
+
+        @Test
+        void mappingCommandsKeepTheCt03AssertionAndNeverReadTheProjection() {
+            when(skills.findSkill(COURSE, SKILL_A)).thenReturn(Optional.of(skill(SKILL_A)));
+
+            service.mapLesson(COURSE, LESSON, SKILL_A);
+            service.unmapLesson(COURSE, LESSON, SKILL_A);
+
+            verify(access, org.mockito.Mockito.times(2)).requireLessonOwnership(COURSE, LESSON);
+            verifyNoInteractions(structure);
         }
     }
 }

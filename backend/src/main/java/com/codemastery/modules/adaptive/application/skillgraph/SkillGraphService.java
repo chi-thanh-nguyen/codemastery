@@ -9,6 +9,9 @@ import com.codemastery.modules.adaptive.domain.model.SkillPrerequisite;
 import com.codemastery.modules.adaptive.domain.repository.SkillRepository;
 import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.application.service.CourseManagementService;
+import com.codemastery.modules.course.application.service.CourseStructureService;
+import com.codemastery.modules.course.application.service.CourseStructureService.LessonReference;
+import com.codemastery.modules.course.application.service.CourseStructureService.StructureSnapshot;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -17,9 +20,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -28,6 +33,15 @@ import java.util.UUID;
  * locks the Course row and supplies the READ COMMITTED transaction; invariant inputs are read
  * only after that lock. The owner graph read uses one read-only REPEATABLE READ snapshot, so
  * its ownership check, skills, prerequisites and mappings come from the same committed state.
+ *
+ * <p>Every assembled graph also proves each persisted Lesson mapping against Course's CT40
+ * structural projection ({@code CourseStructureService.readStructure}, ADR005 §§3.1, 4.1): the
+ * mapped Lesson must be one of the Course's own Lessons through Lesson → Chapter → Course. The
+ * projection joins the caller's transaction, so the owner read sees Course and Adaptive state from
+ * one snapshot and a guarded command reads it under the held Course root. A mapping outside the
+ * Course, or an inconsistent projection, is a persisted-integrity failure (safe 500): nothing is
+ * repaired and no partial graph is returned. Mapping commands keep the cheaper CT03
+ * {@code requireLessonOwnership} assertion, which ADR005 §3.1 selects for known identities.
  */
 @Service
 public class SkillGraphService {
@@ -35,16 +49,19 @@ public class SkillGraphService {
     private final SkillRepository skills;
     private final CourseAccessService access;
     private final CourseManagementService courseConfiguration;
+    private final CourseStructureService structure;
     private final TransactionTemplate snapshotRead;
 
     public SkillGraphService(
             SkillRepository skills,
             CourseAccessService access,
             CourseManagementService courseConfiguration,
+            CourseStructureService structure,
             PlatformTransactionManager transactionManager) {
         this.skills = Objects.requireNonNull(skills);
         this.access = Objects.requireNonNull(access);
         this.courseConfiguration = Objects.requireNonNull(courseConfiguration);
+        this.structure = Objects.requireNonNull(structure);
         this.snapshotRead = new TransactionTemplate(Objects.requireNonNull(transactionManager));
         snapshotRead.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
         snapshotRead.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
@@ -202,12 +219,42 @@ public class SkillGraphService {
         List<SkillPrerequisite> edges = skills.findPrerequisites(courseId);
         List<LessonSkill> mappings = skills.findMappingsForSkills(
                 courseSkills.stream().map(Skill::id).toList());
+        SkillGraph graph;
         try {
-            return new SkillGraph(courseId, courseSkills, edges, mappings);
+            graph = new SkillGraph(courseId, courseSkills, edges, mappings);
         } catch (SkillGraph.CycleException corrupt) {
             throw new IllegalStateException("Persisted skill graph is cyclic", corrupt);
         } catch (IllegalArgumentException corrupt) {
             throw new IllegalStateException("Persisted skill graph is malformed", corrupt);
+        }
+        requireMappedLessonsInCourse(graph);
+        return graph;
+    }
+
+    /**
+     * ADR005 §4.1: "mappings must pass §4.3", and a pure container cannot establish Lesson ancestry.
+     * Read after the mappings, inside the same transaction, so a mapping can only reference a Lesson
+     * that existed in the snapshot (owner read) or under the held Course root (guarded command).
+     * An empty mapping set needs no structural read.
+     */
+    private void requireMappedLessonsInCourse(SkillGraph graph) {
+        if (graph.mappings().isEmpty()) {
+            return;
+        }
+        StructureSnapshot snapshot = structure.readStructure(graph.courseId());
+        if (snapshot == null || !graph.courseId().equals(snapshot.courseId())) {
+            throw new IllegalStateException("Course structure provider returned another Course");
+        }
+        Set<UUID> lessons = new HashSet<>();
+        for (LessonReference lesson : snapshot.lessons()) {
+            if (lesson == null || !lessons.add(lesson.lessonId())) {
+                throw new IllegalStateException("Course structure provider returned an inconsistent projection");
+            }
+        }
+        for (LessonSkill mapping : graph.mappings()) {
+            if (!lessons.contains(mapping.lessonId())) {
+                throw new IllegalStateException("Persisted Lesson mapping is outside the Course");
+            }
         }
     }
 
