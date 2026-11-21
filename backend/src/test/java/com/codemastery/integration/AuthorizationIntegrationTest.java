@@ -1716,6 +1716,7 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                     valid.replace("120", "2147483648"),
                     valid.replace("\"test\"", "\"exam\""),
                     valid.replace("\"Loops II\"", "\"   \""),
+                    valid.replace("\"Loops II\"", "\"Loops \\ud800\""),
                     valid.replace("\"Loops II\"", "null"),
                     valid.replace(",\"timeLimitSeconds\":120", ""),
                     valid.replace("[\"" + q1 + "\"]", "[\"" + q1 + "\",\"" + q1 + "\"]"),

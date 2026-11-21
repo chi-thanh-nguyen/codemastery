@@ -198,6 +198,8 @@ class AttemptServiceTest {
                     new QuizInput("   ", "practice", 60, List.of()),
                     new QuizInput(" ", "practice", 60, List.of()),
                     new QuizInput("Title\u0000", "practice", 60, List.of()),
+                    new QuizInput("Title\uD800", "practice", 60, List.of()),
+                    new QuizInput("\uDC00", "practice", 60, List.of()),
                     new QuizInput(null, "practice", 60, List.of()),
                     new QuizInput("Title", "Practice", 60, List.of()),
                     new QuizInput("Title", "exam", 60, List.of()),

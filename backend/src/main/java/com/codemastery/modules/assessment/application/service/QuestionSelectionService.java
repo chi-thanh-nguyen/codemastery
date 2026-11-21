@@ -127,7 +127,9 @@ public class QuestionSelectionService {
     }
 
     private static boolean isText(String value) {
-        return value != null && value.indexOf('\0') < 0 && NON_SPACE.matcher(value).find();
+        // PostgreSQL text stores neither NUL nor an unpaired UTF-16 surrogate (PgJDBC would write '?').
+        return value != null && NON_SPACE.matcher(value).find() && value.codePoints().noneMatch(codePoint -> codePoint == 0
+                || codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE);
     }
 
     private static IllegalStateException invalidStoredQuestion() {
