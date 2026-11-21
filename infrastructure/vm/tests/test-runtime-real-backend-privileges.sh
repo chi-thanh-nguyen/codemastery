@@ -267,6 +267,43 @@ call DELETE "$graph/skills/$skill_b" "$token_i"; check "a skill a Question refer
 call DELETE "$graph/skills/$skill_a" "$token_i"; check "delete an unreferenced skill" "$STATUS" 204
 check "graph rows left: the referenced skill only" "$(psql_admin <<<"SELECT (SELECT count(*) FROM public.skills WHERE course_id='20000000-0000-0000-0000-0000000000c3') || '/' || (SELECT count(*) FROM public.skill_prerequisites) || '/' || (SELECT count(*) FROM public.lesson_skills);")" "1/0/0"
 
+echo "== AS05 question bank (r6: questions SELECT, INSERT, DELETE, UPDATE(definition); quiz_questions and attempt_answers SELECT(id, question_id))"
+call POST "$graph/skills" "$token_i" '{"name":"Tagged"}'; check "create the tagging skill" "$STATUS" 201
+skill_q="$(field id)"
+qbody() { printf '{"skillId":"%s","prompt":"%s","kind":"single_choice","difficulty":"medium","options":["1","2"],"correctOptions":[false,true]}' "$1" "$2"; }
+call POST "$graph/questions" "$token_i" "$(qbody "$skill_q" 'x = 1; x += 1; x?')"
+check "create a question (CT40 tag check under the Course root)" "$STATUS/$(field skillId)/$(field difficulty)" "201/$skill_q/medium"
+question_a="$(field id)"
+call GET "$graph/questions" "$token_i"; check "owner list (both stored questions)" "$STATUS/$(field totalElements)" "200/2"
+call GET "$graph/questions/$question_a" "$token_i"; check "owner read includes the answer key" "$STATUS/$(field correctOptions.1)" "200/True"
+call PUT "$graph/questions/$question_a" "$token_i" "$(qbody "$skill_q" 'Replaced')"
+check "replace an unused definition (UPDATE six columns)" "$STATUS/$(field prompt)" "200/Replaced"
+call GET "$graph/questions" "$token_a"; check "a Learner cannot read the question bank" "$STATUS" 403
+psql_admin >/dev/null <<<"INSERT INTO public.skills VALUES ('70000000-0000-0000-0000-0000000000f1','20000000-0000-0000-0000-0000000000c1','Foreign',NULL);"
+call POST "$graph/questions" "$token_i" "$(qbody 70000000-0000-0000-0000-0000000000f1 'Foreign')"
+check "a skill of another Course is concealed" "$STATUS" 404
+psql_admin >/dev/null <<SQL
+INSERT INTO public.quizzes VALUES ('80000000-0000-0000-0000-0000000000a1','20000000-0000-0000-0000-0000000000c3','Referencing','practice',60,'hidden');
+INSERT INTO public.quiz_questions VALUES (gen_random_uuid(),'80000000-0000-0000-0000-0000000000a1','$question_a',1);
+SQL
+call DELETE "$graph/questions/$question_a" "$token_i"; check "a question a Quiz references cannot be deleted (SELECT quiz_questions)" "$STATUS" 409
+psql_admin >/dev/null <<SQL
+INSERT INTO public.attempts SELECT '80000000-0000-0000-0000-0000000000b1', id, '80000000-0000-0000-0000-0000000000a1', 1, now(), now() + interval '5 minutes' FROM public.users WHERE email='learner.a@example.test';
+INSERT INTO public.attempt_answers VALUES (gen_random_uuid(),'80000000-0000-0000-0000-0000000000b1','$question_a',1,ARRAY[false,false],NULL);
+SQL
+call PUT "$graph/questions/$question_a" "$token_i" "$(qbody "$skill_q" 'Changed')"
+check "a used definition is frozen (SELECT attempt_answers)" "$STATUS" 409
+check "the used definition is unchanged" "$(psql_admin <<<"SELECT prompt FROM public.questions WHERE id='$question_a';")" "Replaced"
+call POST "$graph/questions" "$token_i" "$(qbody "$skill_q" 'Temporary')"; question_b="$(field id)"
+call DELETE "$graph/questions/$question_b" "$token_i"; check "delete an unreferenced question" "$STATUS/$(field id)" "200/$question_b"
+psql_admin >/dev/null <<SQL
+DELETE FROM public.attempt_answers WHERE attempt_id='80000000-0000-0000-0000-0000000000b1';
+DELETE FROM public.attempts WHERE id='80000000-0000-0000-0000-0000000000b1';
+DELETE FROM public.quiz_questions WHERE quiz_id='80000000-0000-0000-0000-0000000000a1';
+DELETE FROM public.quizzes WHERE id='80000000-0000-0000-0000-0000000000a1';
+DELETE FROM public.skills WHERE id='70000000-0000-0000-0000-0000000000f1';
+SQL
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
@@ -331,7 +368,7 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume and the AD07 skill graph under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph and the AS05 question bank under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \
