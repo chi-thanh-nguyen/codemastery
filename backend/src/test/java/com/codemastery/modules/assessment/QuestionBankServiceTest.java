@@ -273,6 +273,8 @@ class QuestionBankServiceTest {
                     Arguments.of("blank prompt", new QuestionInput(skill, " \t\n", "single_choice", "easy", ab, tf)),
                     Arguments.of("Unicode-space prompt", new QuestionInput(skill, "  ", "single_choice", "easy", ab, tf)),
                     Arguments.of("NUL in prompt", new QuestionInput(skill, "a\0b", "single_choice", "easy", ab, tf)),
+                    Arguments.of("unpaired high surrogate in prompt", new QuestionInput(skill, "a\uD800", "single_choice", "easy", ab, tf)),
+                    Arguments.of("unpaired low surrogate option", new QuestionInput(skill, "P", "single_choice", "easy", List.of("A", "\uDC00"), tf)),
                     Arguments.of("null prompt", new QuestionInput(skill, null, "single_choice", "easy", ab, tf)),
                     Arguments.of("null skill", new QuestionInput(null, "P", "single_choice", "easy", ab, tf)),
                     Arguments.of("unknown kind", new QuestionInput(skill, "P", "essay", "easy", ab, tf)),
@@ -314,7 +316,8 @@ class QuestionBankServiceTest {
             List<QuestionInput> valid = List.of(
                     new QuestionInput(skillId, "  keep  spaces ", "single_choice", "easy", List.of(" a ", "b"), List.of(false, true)),
                     new QuestionInput(skillId, "Select all", "multiple_choice", "medium", List.of("a", "b", "c"), List.of(true, false, true)),
-                    new QuestionInput(skillId, "Statement", "true_false", "hard", List.of("True", "False"), List.of(false, true)));
+                    new QuestionInput(skillId, "Statement", "true_false", "hard", List.of("True", "False"), List.of(false, true)),
+                    new QuestionInput(skillId, "Emoji \uD83D\uDE00 pair", "single_choice", "easy", List.of("\uD83D\uDE00", "b"), List.of(true, false)));
             for (QuestionInput definition : valid) {
                 QuestionView view = service.create(courseId, definition);
                 assertEquals(definition.prompt(), view.prompt());

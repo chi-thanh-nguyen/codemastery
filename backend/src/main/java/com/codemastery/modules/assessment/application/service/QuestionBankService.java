@@ -213,9 +213,13 @@ public class QuestionBankService {
         return kind.equals("multiple_choice") ? keys >= 1 : keys == 1;
     }
 
-    /** Nonblank and representable in PostgreSQL text (no NUL); never trimmed. */
+    /**
+     * Nonblank and representable in PostgreSQL text: no NUL and no unpaired UTF-16 surrogate, which
+     * PgJDBC would store as '?' while the response echoed the input. Never trimmed.
+     */
     private static boolean isText(String value) {
-        return value != null && value.indexOf('\0') < 0 && NON_SPACE.matcher(value).find();
+        return value != null && NON_SPACE.matcher(value).find() && value.codePoints().noneMatch(codePoint -> codePoint == 0
+                || codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE);
     }
 
     private static Question toQuestion(UUID id, QuestionInput input) {

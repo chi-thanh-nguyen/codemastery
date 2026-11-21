@@ -954,6 +954,7 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                     valid.replace("[true,false]", "[true,true]"),
                     valid.replace("[true,false]", "[true]"),
                     valid.replace("\"Predict the output\"", "\"   \""),
+                    valid.replace("\"Predict the output\"", "\"Predict \\ud800\""),
                     valid.replace("\"single_choice\"", "\"true_false\""),
                     valid + " {}",
                     "{",
