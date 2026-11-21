@@ -349,7 +349,13 @@ code and wordmark text rendered without fallback glyphs (Chromium font inspectio
 and the logo's colour regions distinct on the ink frame at 16–40 px; the active-tab
 reach centred, symmetric and following clicks, child routes and history; production routes never loading the preview chunk; the
 preview sending no API request and writing no storage; computed text contrast on
-twelve screens; skip link, route focus and visible focus on every catalogue tab
+fourteen sampled screens in the light and the dark scheme; the FE34 theme checks (first
+paint before the bundle for each stored value and operating-system setting, a live
+operating-system change, Light and Dark ignoring it, another tab following, the Theme
+menu by keyboard with its status message, exactly one 44 px control per shell at 320–1440 px
+in both schemes, the Focus bar below 600 px, preview-local isolation, dark surfaces, light
+printing, `prefers-contrast: more` and, in Chromium, forced colours, with screenshots of
+each shell in both schemes); skip link, route focus and visible focus on every catalogue tab
 stop; drawer and dialog focus behavior including the full-screen sheet below
 600 px; form labels, required markers and error focus; `pagehide` input blur;
 catalogue submit-only search and error states; the 1.2 s skeleton shimmer and its
@@ -358,7 +364,17 @@ and absence of API requests; Learner home and My courses tile membership actions
 and the Mastery Map's 220 × 72 nodes, initial viewport and keyboard operation. It writes
 screenshots, accessibility snapshots and `browser-report.json` to `--out`
 (default: a new directory under the OS temporary directory), and exits non-zero
-on any failed check or browser that cannot launch. Positional FE01 arguments
+on any failed check or browser that cannot launch. A scenario that cannot run in an
+engine because of a verified browser-emulation limitation is reported as
+`NOT EXERCISED [engine] <scenario>: <reason>`, listed under `notExercised` in the
+report and counted separately in the summary (`N passed, N failed, N scenario(s) not
+exercised`); it is never counted as a pass, and the check that contains it names how
+many of its rows ran. Today that is only the first-paint row "no stored value, OS
+reports no preference" in WebKit, which reports the host appearance instead of
+`no-preference` (a host in Dark mode reports dark). The same mismatch in any other
+engine fails the check as an emulation failure. Chromium and Firefox report `light`
+under `no-preference`, so that row tests "not dark resolves System to light", not a
+state in which neither scheme matches. Positional FE01 arguments
 (`<playwright-module> <evidence-dir> <url> [engine]`) are still accepted.
 
 **E2E suite** (from `e2e/`):
@@ -737,13 +753,13 @@ test-count or coverage-percentage claim is made for them.
   upload or delivery (CT09).
 - **Assistive technology.** No test establishes actual screen-reader output; no
   manual VoiceOver, NVDA or TalkBack session has been recorded.
-- **DESIGN r12 behavior.** Light, Dark and System rendering, the Theme control, and
-  the r12 quiz-attempt, autosave and Instructor-management states are specified in
-  `DESIGN.md` but not implemented, so no test covers them
-  ([verification guidance](#design-r12-uiux-verification-guidance--specified-not_run)).
-  The theme system and its developer verification are assigned to FE34 #255.
-  The preview suite does not cover the recorded A13 case (a sign-in in another tab
-  makes the `/preview` document send `POST /api/auth/refresh`).
+- **DESIGN r12 behavior.** FE34 (#255, PR #261) adds unit, component and browser-harness
+  checks for the Light, Dark and System schemes and the Theme control
+  ([record](#fe34-theme-system-verification--20-november-2026)). They are developer
+  evidence: no screen-reader output, Firefox run, real backend or QA07 #63 acceptance is
+  recorded for them. The r12 quiz-attempt, autosave and Instructor-management states remain
+  specified, not implemented. The A13 preview-isolation case is covered by the provider,
+  preview and harness checks of the FE34 record.
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
@@ -4316,22 +4332,24 @@ E2E case, executes nothing and records no result. It does not change the CT14 co
 isolation and Profile/Auth UI contracts, the CT19 and CT35 E2E case selections, the CT34
 runner and fixture contracts, or the ADR014 `CT14-SESSION-2026-11-16-r1` obligations.
 
-**Current state.** `main` renders the light scheme only and has no Theme control. The r12
-colour schemes, the quiz-attempt entry and answer-saving states, and the Instructor
-management workflows are specified, not implemented, so no evidence exists for them.
-Nothing in the table below has passed.
+**Current state.** The colour schemes and the Theme control are implemented by FE34
+(#255, PR #261); their developer evidence is the
+[FE34 record](#fe34-theme-system-verification--20-november-2026), which covers the theme
+parts of the first three rows below. The quiz-attempt entry and answer-saving states and
+the Instructor management workflows are specified, not implemented, so no evidence exists
+for them. Rows without a recorded run stay NOT_RUN.
 
 **Theme verification handoff (19 November 2026).** FE34 #255 (assigned to `heizseung`,
-implementation authorized by the Project Leader on 19 November 2026, not implemented)
+implementation authorized by the Project Leader on 19 November 2026; implemented in PR #261)
 owns the theme system and its developer verification: the first three rows of the table
 below, with unit and component tests for the preference, storage fallbacks, other tabs,
 operating-system changes, the Theme control and the preview override, and rendered
 Light, Dark and System checks of the implemented shells and Live screens. That evidence
 is implementation evidence only. QA07 #63 keeps independent Final acceptance and runs
 its theme checks only after FE34 delivers the schemes; until then they are coverage gaps.
-FE34 adds no E2E case outside the CT19 and CT35 selections, and it excludes the A13
-preview-isolation case and the A14 response-metadata capability, which have no owning
-Issue. Every row stays NOT_RUN until a check actually runs.
+FE34 adds no E2E case outside the CT19 and CT35 selections. It excluded the A13
+preview-isolation case and the A14 response-metadata capability; both were later
+remediated on PR #261 under the Leader's FE03 authorization of 20 November 2026. Every row stays NOT_RUN until a check actually runs.
 
 | Area | What to verify once implemented | Layer |
 | --- | --- | --- |
@@ -4343,11 +4361,588 @@ Issue. Every row stays NOT_RUN until a check actually runs.
 | Server-authoritative quiz lifecycle | Only the explicit start actions send `b3StartAttempt`; Resume, Back, Forward, reload and direct links read the attempt by its identity; each start and read outcome shows its F6 state; the timer counts to the returned `expiresAt`; no request after `expiresAt`; the result read's 409 before finalization | Vitest with controlled responses; real-backend checks only within the CT19/CT35 selections |
 | Autosave reconciliation | Every F6 save-state transition, including failed and unknown saves, Checking, Reconcile, "Save my answers" and "Use saved answers", submit gating after a confirmed final save, and late responses ignored by attempt, save sequence and session generation | Vitest with controlled responses and timers |
 | Instructor management workflows | Server-decided editability (a 409 keeps the draft; "Save as a new question"; no automatic replacement), editor recovery and unknown outcomes, URL replacement after creation, regrading with the exact `submittedAt`, and the adaptive-settings snapshot with `ETag`/`If-Match` and 412/428 recovery | Vitest; the settings cases keep their existing [CT14 B1-O18/O19](decisions/005-batch-01-contract-approvals.md#163-ct14-acceptance-oracles-and-direct-consumer-traceability) allocation |
-| Data, API and preview isolation | Production screens show only decoded data from approved operations and no fixture or sample data; `/preview` sends no request, reads no session and writes no storage, including when another tab signs in or out (the A13 case, currently a known defect) | Existing preview suite, extended for A13 by its owner |
+| Data, API and preview isolation | Production screens show only decoded data from approved operations and no fixture or sample data; `/preview` sends no request, reads no session and writes no storage, including when another tab signs in or out (the A13 case, fixed and covered by PR #261) | Existing preview suite, `AuthProvider.test.tsx` and the browser harness |
 
 Report results per layer and only after the checks actually run. Unit results do not
 establish browser, assistive-technology, backend or deployment behavior, and a design
 preview is never integration evidence.
+
+## FE34 theme system verification — 20 November 2026
+
+**Scope and authority.** Developer verification of FE34 #255 (Leader authorization of
+19 November 2026, recorded in the Issue) on PR #261, branch
+`255-fe34-implement-global-lightdarksystem-theme-system`, based on `main` `307e8c2`. It is
+implementation evidence only; independent Final UI acceptance stays with QA07 #63. Run on
+macOS 27.2 arm64 with Node 24 and the Playwright 1.63.0 installed in `e2e/`.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Unit and component tests | `cd frontend && npm test` | 598 tests in 16 files passed |
+| Type check and build | `cd frontend && npm run build` | Passed (the existing chunk-size warning for the main bundle is unchanged in kind) |
+| Browser harness | `cd frontend && npm run test:browser -- --engine all --playwright ../e2e/node_modules/@playwright/test` | Chromium 153: 56 passed, 0 failed. WebKit 26.6: 55 passed, 0 failed (the forced-colours check is Chromium-only). Firefox did not launch on this host (environmental, as in earlier records); the command therefore exits non-zero |
+
+**What the automated tests cover.** `presentation.test.tsx`: preference resolution,
+invalid and empty values, storage that throws on read or write, `matchMedia` missing or
+throwing, the button's accessible name, `aria-haspopup`, `aria-expanded` and
+`aria-controls`, the menu caption, labelled group and `menuitemradio` items with
+`aria-checked`, focus on the chosen item, arrows with wrap, Home, End, Enter, Escape
+returning focus, an outside click, the drawer `radiogroup` with roving tab stop and
+arrow keys, the System caption, one status message per change, 44 px targets, one control
+per workspace shell at ≥ 900 px and < 900 px with none in the account menu, the auth
+layout placement, the light values of `main` and the r12 dark values, and the suspended
+transitions of a switch. `routes/index.test.tsx`: the control and the stored scheme during
+the ADR014 restore; a visitor's choice kept through sign-in, sign-out and another account
+signing in, with no request carrying theme data and no other storage key; invalid and
+blocked storage at startup. `PreviewApp.test.tsx`: storage writes that fail, other tabs
+(new, cleared and invalid values), operating-system changes, and the preview-local
+override (memory only, not reaching other tabs, kept by "Reset sample data", dropped when
+leaving `/preview` and on reload) with no request. `assessment.test.tsx`: in the Focus bar
+the control sits right of the exit button and opening or using it does not change the
+timer or answers, open a dialog, or call navigation, answer, submit or exit handlers.
+
+**Light-scheme fidelity.** A one-off Playwright comparison (not part of the repository)
+rendered the six live routes and all 28 preview screens at 1280 and 390 px from builds of
+`main` `307e8c2` and of this branch, light operating-system setting, with the new control
+hidden. Every difference was confined to the intended changes: header utility positions
+moved by the new Theme slot, the D9-7 landing header and D10-1 Focus bar layouts below
+600 px, and the dual-scheme design reference. It also found and fixed two light
+deviations of the reused commit (the info alert glyph and a 2 px shift of the auth brand
+panel).
+
+**Limits.** No screen-reader session, Firefox run, real backend, 200% browser zoom of the
+open menu, or Windows high-contrast session was recorded; forced colours were checked only
+through Chromium emulation. Contrast was computed from rendered colours on the sampled
+screens, not across every state. The `e2e/` suites were not run locally for this change.
+
+## FE03 remediation and FE34 completion verification — 20 November 2026
+
+**Scope and authority.** The Project Leader's FE03/FE34 remediation instruction of
+20 November 2026 on PR #261 (Refs #56, #255): the A13 preview-isolation fix, the landing
+restore view, the A14 frontend transport capability and the D9-7 E2E assertion. Developer
+evidence only; QA01 and QA07 acceptance are not claimed. Same host as the FE34 record.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Unit and component tests | `cd frontend && npm test` | 638 tests in 16 files passed |
+| Type check and build | `cd frontend && npm run build` | Passed |
+| Browser harness | `npm run test:browser -- --engine all --playwright ../e2e/node_modules/@playwright/test` | Chromium 153: 60 passed. WebKit 26.6: 59 passed. Firefox did not launch (environmental) |
+| E2E on the disposable stack | `cd e2e && npm ci && npm test` | 87 passed, 6 skipped by design, 22 failed: every failure is `firefox-desktop` at browser launch. The two CI failures of run 44763711438 (`chromium-mobile` and `webkit-mobile`, landing navigation) pass |
+| E2E lifecycle | `cd e2e && node --test fixtures/*.test.mjs` | 155 passed |
+
+**A13 reproduction.** On the previous PR head (`5346144`), the new `AuthProvider.test.tsx`
+and `PreviewApp.test.tsx` A13 cases failed (seven cases). Against a real local Compose
+stack (an isolated project with its own volumes, removed afterwards) and a build of that
+head served on `localhost:5173`, a Playwright CLI run with two tabs recorded two
+`POST /api/auth/refresh` requests from the `/preview` tab while the other tab signed out
+and in twice. With the fix, the same run recorded none in Chromium and in WebKit. A third,
+normal tab still adopted the session. A Playwright trace of the fixed run was kept locally.
+
+**Real-backend browser checks (Playwright CLI 0.1.23, Chromium and WebKit; Pixel 7 and
+iPhone 14 emulation).**
+
+- Registration and sign-in: the refresh cookie is `HttpOnly` and `SameSite=Strict`, and no
+  token is written to storage.
+- Landing restore view with a held refresh: one Theme control and no sign-in actions.
+- Theme kept through sign-in, reload of `/profile` and sign-out.
+- A sign-out in another tab: this tab goes to Sign in and shows the session-ended notice once.
+- A refused refresh: Sign in, with no notice.
+- A network failure on sign-in: a safe message and exactly one request.
+- Theme menu by keyboard, with its status message.
+- No page overflow and the correct control count on `/home`, `/courses`, `/my-courses` and
+  `/profile` at 320–1440 px in both schemes.
+- The mobile landing header (D9-7) and the drawer control.
+- Printing in light, `prefers-contrast: more`, forced colours on tinted states, and a live
+  OS change under System.
+- No console errors.
+
+Firefox could not be launched by the CLI either.
+
+**Limits.** No screen-reader session and no Firefox run. The A14 capability is verified
+only at the transport level; FE18's binding and the backend CORS change it needs are not
+part of this work.
+
+## PR #261 fresh-session audit remediation — 21 November 2026
+
+**Scope and authority.** A fresh Claude Code session audited the whole of PR #261 (FE34
+#255 and the FE03 #56 remediation) at `1b3f558` on `main` `307e8c2`, under the Project
+Leader's audit-and-remediation instruction of 21 November 2026. Developer evidence only: it
+is not an independent CODEOWNER review, and QA01 and QA07 #63 acceptance are not claimed.
+Host: macOS 27.2 arm64, Node 24.21.0, Docker 29.8.1, Playwright 1.63.0 from `e2e/`,
+Playwright CLI 0.1.23.
+
+**Findings fixed.**
+
+| ID | Severity | Finding | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| R-01 | P2 | Opening the Theme menu from a button whose "Theme" tooltip was already showing (keyboard focus always shows it; so does hover) left the tooltip open above the menu (z-index 1500 over 1300), covering the menu's "Theme" caption. `disableFocusListener`/`disableHoverListener` stop new openings but never close an open tooltip | The tooltip is controlled and closed while the menu is open | Harness check (hover and keyboard paths); real-backend CLI in Chrome and WebKit |
+| R-02 | P3 | The menu's `Popper` kept MUI's default `role="tooltip"`, so the accessibility tree read `tooltip > menu "Theme"` | `role="presentation"` on the popup container | Unit test (fails before); harness check; CLI accessibility snapshot |
+| R-03 | P3 | Tab or Shift+Tab from the open Theme menu closed it without restoring focus. The menu is portalled to the end of `<body>`, so focus left the page or wrapped to its first stop ("Skip to main content") | Tab and Shift+Tab close the menu and return focus to the button before the default action, so the sequence continues from the button | Unit test (fails before); harness check for both directions; CLI in Chrome and WebKit on `/courses`, `/login` and `/` |
+| R-04 | P3 | Printing with the Dark preference kept `color-scheme: dark`: the print rule re-declared the light variables, but the inline `color-scheme` set by the first-paint script and the preference state won, so native controls and system colours stayed dark | `color-scheme: light !important` in the print rule | Harness print check now asserts the computed `color-scheme`; CLI print emulation (Chrome, WebKit) |
+| R-05 | P3 | Below 900 px the workspace drawer showed "Create account" while the ADR014 restore ran, although F2 hides sign-in actions during the restore (pre-existing on `main`) | The drawer footer omits it while `restoring` | Route test (fails before); real-backend CLI with a held refresh (Chrome, WebKit) |
+| R-07 | P3 | In forced colours, floating surfaces (the Theme menu, the account menu, popovers, dialogs) had no edge: their outline is an inset box shadow, which forced colours removes, so a menu was not separated from the page (r12 Fallbacks: shadow-drawn boundaries need a real line) | A 1 px `CanvasText` outline on popover, dialog, drawer and popper papers under `forced-colors: active` | Chromium harness forced-colours check now asserts an edge on the Theme menu and the account menu; CLI on the previous build: outline `none`, border `none`, shadow `none` |
+| R-06 | Test | The harness `prefers-contrast` check used a runtime `emulateMedia({ contrast })`. In Playwright's Firefox, `matchMedia` changes but the stylesheets are not re-evaluated, so the check failed on Firefox although the application is correct | The check uses a context created with `contrast: 'more'` | Linux Firefox: the application's values are correct with the context option |
+
+**Commands and results** (final tree).
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check | `cd frontend && npm run typecheck` | Passed |
+| Unit and component tests | `cd frontend && npm test` | 641 tests in 16 files passed (638 before, plus three regression tests) |
+| Production build | `cd frontend && npm run build` | Passed (`main`'s existing >500 kB chunk warning) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit`, then `--engine chromium` again after R-07 | Chromium 153: 62 passed; after R-07: 62 passed, including the extended forced-colours check. WebKit 26.6: 61 passed (forced colours stays Chromium-only) |
+| Browser harness, Linux Firefox | The same harness with `--url` and `--engine firefox`, run in `mcr.microsoft.com/playwright:v1.63.0-noble` (arm64, Firefox 155 from the pinned 1.63.0 build) against the harness build served on the host; a loopback forwarder inside the container keeps the page origin `http://127.0.0.1` | Firefox 155: 61 passed, 0 failed (build before R-07, whose rule only applies under forced colours). Before R-06: 59 passed, 1 failed (the contrast check only) |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed. This run predates R-07, a CSS rule that applies only under `forced-colors: active` |
+
+`firefox-desktop` was left out of the local E2E run on purpose. On this host the pinned
+Firefox build (`firefox-1543`) exits at launch with `Could not find profile folder.`, with
+the Claude Code sandbox on and off and with another temporary directory, so the failure is
+environmental. CI runs `firefox-desktop` on Linux.
+
+**Real-backend checks.** An isolated Compose project (`-p fe34audit`: PostgreSQL, MinIO and
+the backend from this checkout), with the frontend built against `http://localhost:8080` and
+served by `vite preview` on `localhost:5173`. Playwright CLI sessions: Chrome, WebKit, Pixel 7
+and iPhone 14 emulation.
+
+- **A13**, two tabs: a sign-in, a sign-out and a second sign-in in the other tab, a
+  preview-local theme change, synthetic `focus`, `pageshow` and `visibilitychange`, then
+  leaving `/preview` by SPA navigation and changing the theme there. The preview document
+  sent no `/api/auth/*` request and showed no session; its only request was the public
+  catalogue `GET` after it left the preview. Same result in Chrome and WebKit.
+- **Theme change keeps state:** the registration form keeps its values and its `main`
+  element (no remount); there is one "Theme set to Dark." message, and Escape returns focus
+  to the button.
+- **Restore views** with a held refresh: on `/` the landing header shows only the Theme
+  button; on a protected route at 390 px the drawer has the Theme control and no "Create
+  account" (R-05).
+- **Widths:** 320, 360, 390, 599, 600, 768, 899, 900, 1024, 1280 and 1440 px on `/courses`,
+  `/login`, `/`, `/register`, a missing route and two preview screens, in Pixel 7 and
+  iPhone 14 emulation: exactly one Theme control and no page overflow everywhere. The drawer
+  segments are 91 × 44 px, the drawer stays open after a selection, arrows select, and
+  Escape returns focus to the menu toggle.
+- **Before and after:** R-03, R-04 and R-05 reproduced on a build of `1b3f558`, R-01 and
+  R-02 on the build with the first three fixes, and R-07 on the build before its fix.
+  R-01 to R-05 were gone on the next builds; R-07 is covered by the Chromium harness.
+- **Console:** no errors, apart from the browser's network log of the anonymous
+  `401 /api/auth/refresh`.
+
+**Limits.** No screen-reader session. Forced colours only through Chromium emulation, not a
+Windows contrast theme. The A14 capability is verified only at the transport level; FE18's binding and the
+backend CORS change remain separate dependencies.
+
+## PR #261 FE34 UI refinement (DESIGN r13) verification — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery
+PR #261 — Final UI Refinement, Theme Interaction Fixes & Comprehensive Playwright
+Verification", for PR #261 (Refs #255): icon colour inheritance, Theme menu states, header
+order, the Theme tooltip lifecycle and `DESIGN.md` r13 (D13-1–D13-5). Developer evidence
+only; QA07 #63 and QA01 acceptance are not claimed. Same host and tools as the 21 November
+audit record above.
+
+**Findings fixed.**
+
+| ID | Severity | Finding and root cause | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| U-01 | P2 | Theme tooltip stuck after the menu closed (Leader report). R-01 controlled the tooltip, but MUI calls `onClose` only while it considers the tooltip open, and it was held closed while the menu was open, so the state stayed `true` and the tooltip reappeared after dismissal until the next hover | The state resets when the menu opens or closes; after a close it stays suppressed while the pointer still rests on the button or focus was returned to it, until the pointer enters again or the button loses focus | Harness lifecycle check (pointer and keyboard, three selections, repeated cycles, route change, normal and reduced motion); reproduced on the previous build with the CLI (`afterDismiss: 1`, `afterMoveAway: 1`), gone after |
+| U-02 | P2 | Theme menu: a hovered item looked selected (Leader report). The shared `MuiMenuItem` override used `bg.selected` for hover, focus-visible and selected | Hover and keyboard focus use the new `bg.raisedHover` role (light `fill-150`, dark `graphite-600`); selected keeps `bg.selected` + 600; selected + hover adds a 1 px inset `line.strong` ring; focus adds the 2 px ring | Harness check for System (light and dark OS), Light and Dark: every hovered item, selected + hover, keyboard focus; CLI before: hovered `rgb(227, 238, 255)` = selected, after: `rgb(238, 238, 240)` against `rgb(227, 238, 255)` (dark `rgb(54, 58, 67)` against `rgb(27, 46, 77)`) |
+| U-03 | P3 | StatusPill glyphs used the family strong colour, not the label colour (Published eye glyph green, label ink) | `currentColor` | Unit test for all eight tones, mastery and recommendation tags in both schemes (fails before); harness check on Teaching, Courses, course path and the design reference; rendered audit of 32 preview screens in both schemes found StatusPill as the only mismatch |
+| U-04 | P3 | Landing header order Catalogue → Sign in → Theme → Create account split the account actions | DOM order Catalogue → Theme → Sign in → Create account | Route test (fails before); harness; CLI at 11 widths |
+| U-05 | P3 | Workspace top bar put Theme before the notification button | `AppHeader` `utilities` (bell) → Theme → `actions` (account or sign-in actions); `DashboardLayout` `headerUtilities` | Layout test (fails before); harness; CLI at ≥ 900 px |
+| U-06 | P3 | After the menu opened, the tooltip faded out over the menu for about 290 ms | The tooltip's exit transition is 0 while the menu is open | Harness asserts no tooltip trace 50 ms after opening; CLI: 0 traces after 30 ms |
+
+Buttons needed no change: the rendered audit found no button whose glyph differed from its
+label, and sampling a primary button during its 120 ms hover transition showed the glyph
+equal to the label in every sample. No KPI component has a glyph (`StatTile` has none;
+S22/S23 exclude KPI cards), so the KPI exception has no target today. The Needs-attention
+glyphs keep their accents (harness asserts it).
+
+**Commands and results (final tree).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 643 tests in 16 files (641 + 2; the two edited tests also gained assertions) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed; WebKit 26.6: 67 passed, with the "no preference" first-paint row reported as not exercised (U-07) |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble`, as in the audit record | Firefox 155: 67 passed, 0 failed (run before U-07, which changes only a WebKit-specific row) |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed |
+
+U-07 (test). The WebKit harness first-paint row "no stored value, OS reports no preference"
+failed after the host switched macOS to Dark. Playwright's WebKit does not emulate
+`no-preference`: it reports the host appearance (`matchMedia('(prefers-color-scheme: dark)')`
+is `true` under that emulation, while Chromium reports `false`). The application correctly
+resolved System to dark. That row is now reported as not exercised when the engine reports a
+dark preference under `no-preference`, instead of failing; Chromium and Firefox still
+exercise it.
+
+**Playwright CLI (Chrome and WebKit desktop sessions; Pixel 7 and iPhone 14 emulation)**
+against a production build served by `vite preview`:
+
+- **Widths:** 320, 360, 390, 599, 600, 768, 899, 900, 1024, 1280 and 1440 px × `/`,
+  `/login`, `/courses`, a missing route, preview Learner home, Teaching, Platform overview
+  and Courses × Light and Dark, in both desktop engines (mobile emulation at 320–768 px).
+  Every combination had exactly one Theme control and no page overflow. The landing header
+  always put Theme before "Sign in". From 900 px the Learner header ended Notifications →
+  Theme → Account menu.
+- **Theme menu states**, in Chrome and WebKit: for System (light and dark OS), Light and Dark,
+  a hovered item never matched the selected fill. Selected + hover kept the fill and added the
+  ring, and keyboard focus showed the ring.
+- **Tooltip:** the Leader's sequence (hover, open, choose, outside click, move away) left no
+  tooltip, and no trace 30 ms after opening.
+- **Animation:**
+  - A primary button's 120 ms hover transition kept glyph = label in every sample.
+  - Tile hover lift (−2 px, 200 ms) caused no layout shift.
+  - The canvas reach moved 385 → 509 px in 240 ms.
+  - The drawer slide (225 ms) returned focus to the toggle.
+  - The open menu sat on top of the stacking order with no page overflow.
+  - Theme switches showed one colour per probe over 20 frames, with transitions suspended for
+    the switch and restored.
+  - With `prefers-reduced-motion: reduce`, transitions computed to 1e-5 s, the reach and
+    drawer were instant, and the Theme menu and tooltip worked unchanged.
+- **Screenshots** of the menu states and the Teaching screen were kept locally, not committed.
+
+**Limits.**
+
+- No screen-reader session.
+- The tooltip scenarios ran on the preview's Learner home, which uses the same `AppHeader` and
+  `ThemeControl` as the live `/home`; no real-backend session was used for this pass.
+- Skeleton shimmer and the Path Spine completion fill rely on the existing harness checks.
+- Touch-only tooltip behaviour was not examined.
+
+## PR #261 independent review remediation — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery PR #261 —
+Complete Remediation of Independent Codex & Claude Code Review Findings", on PR #261 (Refs #255, #56),
+based on `6cc501b`. Developer evidence only: no independent review approval, QA07 #63 or QA01
+acceptance is claimed, and no screen-reader session was run.
+
+**Findings and dispositions.**
+
+| ID | Priority | Root cause | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| AUD-01 | P2 | `App.tsx` decided "opened at the preview" with `^/preview(/\|$)`, while React Router matches the `/preview` route case-insensitively, with trailing slashes, after decoding each path segment. `/PREVIEW`, `/Preview`, `/pre%76iew`, `/%70review` rendered the isolated preview but restored the session (one `POST /api/auth/refresh` each). The pattern also isolated `/preview/<anything>`, which renders "Page not found", so that document never restored | `isPreviewPath` in `routes/index.tsx` asks `matchRoutes` with the same `PREVIEW_PATH` the route uses; the decision is still taken once per document | 18 App-level tests in `PreviewApp.test.tsx` (the refresh endpoint answers with a valid session): 9 accepted aliases send no request through other tabs' sign-in, sign-out and sign-in, focus, page show, visibility, a theme change and SPA navigation, and store nothing but the theme; 9 controls (`/`, `/courses`, `/previewish`, `/preview-x`, `/preview/extra`, `/pre%76iewish` and three malformed encodings) restore once. The 5 case or encoding aliases and `/preview/extra` fail on `6cc501b`. Real backend: see below |
+| AUD-02 / F-01 | P3 | One `suppressTooltip` flag served both stale hover and restored focus, and `onBlur` kept it while the pointer rested on the button, so a later genuine keyboard focus stayed suppressed | Separate `staleHover` (released when the pointer genuinely enters) and `restoredFocus` (released on blur); `showTooltip` checks the source of the event; the menu state is a ref, so a hover timer started before the menu opened cannot show the tooltip over it | Vitest "Theme tooltip lifecycle" (7 tests, fake timers); harness tooltip check extended; Playwright CLI and library runs below |
+| F-03 | P3 | MUI's `enterDelay` (400 ms) also applies to focus, so keyboard focus showed the tooltip after about 410–425 ms (200 ms within hysteresis) | `onFocus` shows it at once when the button matches `:focus-visible`; hover keeps the 400 ms delay; the global Tooltip delays are unchanged | Vitest (immediate on Tab, not before 400 ms on hover); harness (≤ 250 ms on refocus and cold focus); CLI 0 ms in Chrome and WebKit |
+| F-02 | P3 | `DESIGN.md` D13-5 listed "a selection" as a menu dismissal, contradicting "Behavior everywhere" (the menu stays open after a choice) | D13-5 rewritten (dismissal by outside click, second press, Escape, Tab or Shift+Tab; a choice keeps the menu open and the tooltip hidden; per-source release; immediate keyboard focus); D13-5 decision row and the r13 revision entry record the amendment | Documentation review |
+| F-04 | P3 | Tooltip lifecycle and menu-item fills were covered only by the optional harness, which CI does not run | CI-run Vitest tests: "Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)" and "Menu item states (D13-4)" in `presentation.test.tsx` | The tooltip tests fail on `6cc501b`'s `AppHeader.tsx` (3 of the 5 scenarios); the menu-state test fails on the pre-`c2e4eaf` theme (hovered = selected) |
+| F-05 | P4 | The WebKit "no preference" first-paint row printed a note but its check still counted as a pass, and the skip applied to any engine | `notExercised` record in the harness result and `browser-report.json`, a separate count in the summary, the check name states how many rows ran; only WebKit's verified limitation is recorded as not exercised, the same mismatch elsewhere fails as an emulation failure | Harness output below |
+
+**Found during remediation: a CI timeout (fixed).** The first `CI Frontend` attempt on `a737a82` failed:
+`isolated design preview › follows global theme changes until locally overridden without writing the
+preference` timed out at 5000 ms (667 of 668 passed). The Project Leader re-ran the job and the second
+attempt passed. That failure was not dismissed:
+
+- **Evidence.** The test already took 3009 ms in CI on `6cc501b`, and 2719 ms in the passing attempt.
+  The failing attempt ran on a slower runner (54.7 s for the suite, against 30.5 s).
+- **Reproduction.** Run locally with three busy processes per CPU, the same test timed out (5146 and
+  5055 ms). So did one of the new tooltip tests (its 12 cycles took 5183 ms).
+- **Root cause.** The test opened the preview index, which renders the whole design reference
+  (about 1,900 nodes, against 140 for a workspace screen). It then re-rendered it on every scheme
+  change and mounted it twice.
+- **Fix.** The test now uses `?screen=learner-home`; its assertions and the timeout are unchanged.
+  The preview chunk is imported once in a `beforeAll`. The tooltip test is split into one test per
+  choice.
+- **Result.** Under the same stress the full suite passed 670 of 670 twice (before: 2–3 timeouts,
+  and once a cascade through the rest of the file). It also passed twice under one busy process per
+  CPU, and once unloaded.
+
+**What the CI tests prove and what stays harness-only.** The Vitest tooltip tests drive the real
+`ThemeControl` with real `mouseover`/`mouseout`, focus and `keydown` events and MUI's own timers (fake
+timers). jsdom's `:focus-visible` heuristic recognises a Tab only from a target other than the element
+losing focus, so the tests dispatch the Tab key from the document before moving focus. The menu-state
+test reads the computed styles at rest and, because jsdom never matches `:hover`, resolves the hover and
+keyboard-focus states from the rendered style sheet's cascade (specificity, then order; media blocks
+such as `hover: none` are not applied). Rendered colours, the paint of the focus ring, real pointer
+heuristics, touch, motion and Firefox remain covered by the optional browser harness and the
+Playwright runs below.
+
+**Commands and results (final tree).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 670 tests in 16 files (643 + 27 new) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed, 0 failed, 0 not exercised; WebKit 26.6: 67 passed, 0 failed, 1 not exercised (first paint "no stored value, OS no preference"; host in Dark) |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed. `firefox-desktop` was not run on macOS, where the pinned Firefox does not launch |
+
+**Real backend (review-only disposable stack).** Images built from this checkout
+(`backend/`, `infrastructure/postgres/`), a private Docker network, random credentials, free
+loopback ports and a production build with `VITE_API_BASE_URL` on that backend; a synthetic Learner
+registered through the API. After a real sign-in (refresh cookie `cm_refresh` set), each alias was
+opened in a new tab of the same browser:
+
+- `/preview`, `/PREVIEW`, `/pre%76iew`, `/%70review`, `/preview/`, `/Preview/`: preview rendered,
+  0 refresh requests, no session, nothing stored. This held after the first tab signed out and in
+  again, after focus, page-show and visibility events, after choosing Dark (memory only) and after
+  SPA navigation to `/courses`. Results were the same in Chrome 157 and WebKit 27.2 (Playwright
+  CLI) and in Linux Firefox 155 (Playwright in the pinned image).
+- Controls `/courses`, `/preview/extra`, `/previewish`: one refresh request and the signed-in
+  Learner shown.
+- `/preview%` does not reach the application: the Vite preview server rejects the malformed URL.
+  The unit tests cover the application's handling of malformed encodings.
+- On a build of `6cc501b` served at the same origin, `/PREVIEW` and `/pre%76iew` each sent one
+  refresh request, and `/preview/extra` sent none and restored no session.
+
+**Tooltip (Playwright CLI, Chrome 157 and WebKit 27.2, normal and reduced motion; library runs on
+Chromium 153, WebKit 26.6 and Linux Firefox 155).**
+
+- Hover is not shown at 250 ms and is shown at 650 ms.
+- Opening the menu hides it. After Escape with the pointer resting on the button, focus is on the
+  button and there is no tooltip, also while the pointer moves over the glyph.
+- Tab away and Shift+Tab back with the pointer still resting shows it at once (0 ms; Firefox
+  96 ms with polling). Cold keyboard focus also shows it at once (0 ms).
+- Choosing with the keyboard keeps the menu open. Tab and Shift+Tab close it and continue the tab
+  sequence.
+- Outside click, 11 rapid presses, choosing System, Light and Dark each closed by a second press,
+  and a route change: no stranded or duplicate tooltip.
+- The adversarial cases A1–A10, L1, L2 and M1 of the earlier review all pass in the three engines;
+  A4 and A6 failed before the fix.
+
+**Regression smoke (fixed build).**
+
+- Theme menu in Light and Dark, Chrome and WebKit: a hovered item never takes the selected fill;
+  selected + hover keeps it and adds the ring; keyboard focus shows the ring; `aria-checked`
+  follows the choice.
+- The landing header reads Catalogue → Theme → Sign in → Create account.
+- Teaching pills draw their glyph in the label colour, and the three Needs-attention glyphs keep
+  their accents.
+- No page overflow. The 390 px drawer control switches the theme and stores it on the device.
+- The header, responsive and menu matrices of the earlier review were repeated on Chromium and
+  WebKit: the 11-width header matrix passed 1,280 of 1,280 checks per engine; the menu and glyph checks passed except the pre-existing Select case listed under Limits.
+
+**Limits.**
+
+- No screen-reader session.
+- The Playwright CLI is not available in the Linux image, so Firefox was driven by Playwright
+  scripts there.
+- The pre-existing MUI Select behaviour remains: ArrowDown on the last, already-selected option
+  moves nothing, so no focus ring appears there; ArrowUp shows it.
+- Other tooltips (icon-only navigation, header icon buttons, view rail, pills, code copy) keep
+  MUI's delay on keyboard focus. The instruction limits F-03 to the Theme tooltip and leaves the
+  global delays unchanged.
+
+## PR #261 final focused remediation (N-01–N-03) — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery PR #261 —
+Final Focused Remediation (N-01, N-02, N-03)", on PR #261 (Refs #255), based on `e9383c9`. It addresses
+the three P3 findings of the independent re-review of `e9383c9`. Developer evidence only: no independent
+review approval, QA07 #63 or QA01 acceptance is claimed, and no screen-reader session was run.
+`DESIGN.md` is unchanged: its Tooltip rule ("dismissible with Escape") already states the required
+behaviour, so no normative inconsistency remained.
+
+**Findings and dispositions.**
+
+| ID | Root cause | Fix | Regression evidence |
+| --- | --- | --- | --- |
+| N-01 | The button's `onFocus` showed the tooltip at once, but MUI Tooltip's focus listener also started its delayed open (400 ms, 200 ms within its hysteresis). Escape closes the tooltip through MUI's document listener without cancelling that timer, so a tooltip dismissed within about 400 ms of keyboard focus reappeared (reproduced before the fix: Chrome, WebKit and Firefox reopened it 408–461 ms after focus; the new Vitest test failed with "reopened at 400 ms after focus") | `AppHeader.tsx`: MUI's focus-driven `onOpen` is ignored, since `onFocus` already handles keyboard focus; MUI's focus and blur listeners stay attached, so blur still closes through MUI and restarts its hysteresis (`disableFocusListener` was rejected after reading MUI 9.4.0's Tooltip: it removes the blur close too, and a manual close would skip the hysteresis reset). An Escape dismissal also persists (`escaped`) until the pointer genuinely enters again or focus leaves the button, so a hover timer cannot bring it back | Two Vitest tests: focus → Escape at 100 ms → beyond 400 ms and 1.4 s still hidden, refocus shows it; Escape holds against pointer movement inside the button, a genuine new hover or focus shows it. Playwright: Escape at 60, 150 and 300 ms stays dismissed in Chrome, WebKit and Firefox, normal and reduced motion |
+| N-02 | jsdom does not report the focus that closing the menu returns to the button as `:focus-visible` (the test comment said it did), so no CI test exercised the restored-focus suppression; the pending-hover-timer test never asserted the state after the menu closed with the pointer still resting | Test only: a scoped `Element.prototype.matches` spy simulates the browser's `:focus-visible` for the restored focus (Chrome and WebKit report it), and the test asserts the simulation took effect; Escape, Tab and Shift+Tab are each checked at once and after 1 s, then a genuine keyboard refocus shows the tooltip. The pending-timer test now asserts no tooltip right after, and 1 s after, an outside close with the pointer resting. Comments corrected | Mutation runs below |
+| N-03 | MUI Tooltip keeps its hysteresis flag in module state. A suppressed open (the hover timer firing over the open menu) sets it without arming its 800 ms reset, so the next test's hover opened after 200 ms and "not before 400 ms" failed in some random orders (reproduced on `e9383c9`: seeds 13 and 1234 failed at line 864) | Test only: every tooltip test starts with `start()`, which settles the hysteresis under the test's fake clock (a hover that opens, a leave that closes and arms the reset, then 1 s); the 400 ms assertions and the timeout are unchanged. MUI's internal `testReset` export was not used: it is not part of MUI's typed public API | Random-order runs below |
+
+**Mutation evidence (disposable worktree, `presentation.test.tsx` and `PreviewApp.test.tsx`, 111 tests).**
+Each row reintroduces a defect into the corrected code and records which tests fail.
+
+| Reintroduced defect | Result |
+| --- | --- |
+| `AppHeader.tsx` of `e9383c9` (N-01 present) | 2 fail: both N-01 tests |
+| Escape memory removed (focus-open filter kept) | 1 fails: the pointer-movement N-01 test |
+| Focus-open filter removed (Escape memory kept) | 0 fail: the Escape memory alone also blocks the reopening; both removed fail 2 |
+| Restored-focus check ignored for focus, or `restoredFocus` never set | 1 fails each: the N-02 restored-focus test (on `e9383c9` both passed all tests) |
+| Close reset and menu-open guard both removed | 1 fails: the pending-timer test (passed all tests on `e9383c9`); either guard alone is redundant with the other and changes no behaviour |
+| Close reset and open reset both removed | 4 fail |
+| AUD-01 old pattern; F-01 blur and single-flag variants; stale hover never set; immediate keyboard focus removed | 6, 1, 1, 1 and 6 fail |
+| Any focus (not only `:focus-visible`) shows the tooltip | 0 fail; covered by the browser check that a mouse press shows no tooltip |
+| Hysteresis settling removed from `start()` | 8 of 25 random seeds fail (the corrected file: 0 of 25) |
+
+**Random-order stability.** `npx vitest run src/shared/components/presentation.test.tsx --sequence.shuffle
+--sequence.seed=<n>` for 25 seeds: 0 failures (before the fix the same file failed for seeds 13 and 1234).
+The two tooltip-related files together, five seeds: 111 of 111 each. The file ten times in default order:
+73 of 73 each. Three full-suite shuffled runs: seeds 5 and 2026 passed 673 of 673; seed 77 failed one test
+in `routes/index.test.tsx` ("direct entry /", `ResizeObserver is not defined`). Run alone with the same seed on
+`e9383c9`, that file also fails (2 tests); this remediation does not touch it, and it is recorded
+here as a pre-existing order dependence outside this instruction's scope.
+
+**Playwright CLI and library (production build of `750aaab` on a review-only stack with a real backend).**
+
+- Chrome 157 and WebKit 27.2 (Playwright CLI), Firefox 155 (Playwright in
+  `mcr.microsoft.com/playwright:v1.63.0-noble`): the 25-scenario tooltip matrix passed in each. It covers hover
+  after the delay; menu open and close by click, Escape, Tab, Shift+Tab, outside click, a second press and 11
+  rapid presses; stale hover; restored focus; keyboard refocus under a resting pointer; choices; scheme
+  switching with the menu open; route changes; Escape within and after the delay; Escape on a hover tooltip
+  followed by pointer movement and re-entry; Escape followed by keyboard refocus; and rapid Tab/Shift+Tab. Two
+  early Chrome runs aborted after a first hover that showed no tooltip within 1.5 s and a press that did not open
+  the menu (the first ran concurrently with the harness). Four later fresh-session Chrome runs passed all 25
+  scenarios, and the cause was not identified.
+- Escape at 60, 150 and 300 ms after keyboard focus, normal and reduced motion: hidden after Escape and not
+  visible again in the following 1.2 s in all three browsers (before the fix it reappeared 408–461 ms after focus).
+- AUD-01 with a real refresh cookie: `/preview`, `/PREVIEW`, `/pre%76iew`, `/%70review`, `/preview/` and
+  `/Preview/` rendered the preview with 0 refresh requests through other tabs' sign-out and sign-in, wake-ups, a
+  preview-local theme change and SPA navigation; `/courses`, `/preview/extra` and `/previewish` restored once.
+  Chrome, WebKit and Firefox.
+
+**Commands and results (`750aaab`).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 673 tests in 16 files (670 + 3) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed; WebKit 26.6: 67 passed, 0 not exercised (the host was in Light mode, so the "no preference" first-paint row ran: 7 of 7) |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed |
+
+**Limits.**
+
+- No screen-reader session.
+- Touch long-press tooltips were not verified.
+- `firefox-desktop` E2E was not run on macOS, where the pinned Firefox still does not launch; CI runs it.
+- The remaining redundancy is deliberate: the focus-open filter and the Escape memory each block the N-01
+  reopening, and the menu-open guard and the reset on close each block a pending hover timer. CI guards
+  both pairs together, not each defence alone.
+
+## PR #261 N-04 remediation (MUI tooltip hysteresis) — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery PR #261 — Focused
+Remediation of N-04 (MUI Tooltip Hysteresis)", on PR #261 (Refs #255), based on `1f23e9b`. Developer evidence only:
+no independent review approval, QA07 #63 or QA01 acceptance is claimed, and no screen-reader session was run.
+`DESIGN.md` is unchanged: D13-5 and › Tooltip already require 400 ms for a pointer hover.
+
+**N-04 — root cause (MUI 9.4.0, `Tooltip.js`).** The button's `onFocus` shows the tooltip at once, but MUI's own focus
+listener also starts its open timer (`handleFocus` → `handleMouseOver` → `enterTimer`, 400 ms). Escape closes the tooltip
+through `handleClose`, which starts the 800 ms reset of the module-level `hystersisOpen` flag; the pending focus timer
+then fires `handleOpen` (the application ignores its `onOpen`), which calls `hystersisTimer.clear()` and sets
+`hystersisOpen = true`. Nothing resets it while focus stays on the button, so the next pointer hover uses
+`enterNextDelay` (the theme's 200 ms) instead of `enterDelay` (400 ms).
+
+**Correction.** `AppHeader.tsx`: `enterNextDelay={400}` on the Theme `Tooltip` (one prop and a comment). With
+`enterDelay` 400 the open timer is `hystersisOpen ? enterNextDelay : enterDelay`, so the hover delay is 400 ms
+whatever the flag. Rejected: `disableFocusListener` (removes MUI's blur close, which the earlier remediations keep),
+a manual reset of MUI state (not public API) and extra timers. The global `MuiTooltip` defaults are unchanged. One
+deliberate consequence: a re-entry within 800 ms of leaving the Theme button also takes 400 ms, as D13-5 specifies,
+where MUI's default would open it after 200 ms.
+
+**Timing before and after (production build, MUI opening delay measured from the pointer's first `mouseover` to the
+tooltip node's insertion; the fade follows, about 90–100 ms; milliseconds).**
+
+| Sequence | Before (`1f23e9b`) Chrome / WebKit / Firefox | After Chrome / WebKit / Firefox |
+| --- | --- | --- |
+| Keyboard focus, Escape at 100 ms, 2 s idle, pointer enters | **205 / 206 / 208** | 406 / 406 / 411 |
+| Same, 600 ms idle | **206 / 206 / 210** | 405 / 405 / 414 |
+| Escape at 500 ms, 2 s idle, pointer enters | 405 / 404 / 415 | 406 / 406 / 413 |
+| Pointer only, fresh page | 407 / 418 / 420 | 411 / 418 / 415 |
+| Repeated hover: first, 300 ms after leaving, 1.2 s after leaving | 408, **205**, 406 / 413, **207**, 406 / 452, **213**, 405 | 408, 405, 405 / 415, 408, 406 / 412, 413, 420 |
+| Pointer resting after a menu closed by Escape, then leave and re-enter 400 ms later | **203 / 206 / 410** | 405 / 404 / 409 |
+| Keyboard focus without Escape: tooltip already shown at focus (1 ms), nothing reopens | pass | pass |
+
+Bold rows are the sub-400 ms openings, the first two being N-04. Escape at 500 ms was never affected, because
+the flag was reset after the focus timer had fired. Chrome 157 and WebKit 27.2 ran through the Playwright CLI and
+Firefox 155 through Playwright in `mcr.microsoft.com/playwright:v1.63.0-noble`; the script and the unfixed build are
+not committed.
+
+**Other tooltips (unchanged, recorded).** The same stuck flag is global. With the Theme tooltip dismissed by an
+early Escape and focus still on the Theme button, an icon-only navigation tooltip ("My courses" at 1024 px) opens
+after 205–210 ms in all three browsers instead of 408–419 ms. It is the theme's `enterNextDelay` (200 ms) applied
+to the stale flag, it affects only that interval, and it clears when focus leaves the Theme button (406–418 ms after a
+Tab and 1.2 s). Escape at 500 ms leaves it at 403–412 ms. The local prop cannot influence other instances; removing
+the cause would need `disableFocusListener` on the Theme tooltip with a managed blur, a larger change that this
+remediation did not make.
+
+**Regression tests.** Three Vitest tests (`presentation.test.tsx`, `start()` settles MUI's hysteresis first):
+keyboard focus → shown at once → Escape at 100 ms → hidden → through MUI's original 400 ms timer, 1 s and 2 s more
+→ hidden, focus unchanged → pointer entry absent at 399 ms and open at 400 ms; the same for Escape at 500 ms; and a
+hover that takes 400 ms when repeated, 300 ms after leaving, after a stale hover and a menu Escape, and after a choice,
+focus restoration and six rapid open/close presses. The browser harness gains the same early-Escape step (hover
+tooltip present at 300 ms fails it, then it must open within 800 ms).
+
+**Mutation evidence (disposable worktree).**
+
+| Change | Result |
+| --- | --- |
+| Corrected code | 114 of 114 pass in `presentation.test.tsx` and `PreviewApp.test.tsx` |
+| `enterNextDelay` prop removed (the N-04 defect), or set to `200` | 2 fail: the Escape-at-100 ms test and the repeated-hover test; the Escape-at-500 ms test passes, as it did before the fix |
+| `AppHeader.tsx` of `1f23e9b` | the same 2 fail |
+| Harness on the code without the prop (Chromium) | 66 passed, 2 failed: both motion variants of the tooltip check, "the hover tooltip opened before its 400 ms delay" |
+
+**Random-order stability.** `presentation.test.tsx` with `--sequence.shuffle`, 25 seeds: 0 failures; five default-order
+repeats: 76 of 76 each. The pre-existing `routes/index.test.tsx` order dependence is not part of N-04 and is not
+changed.
+
+**Commands and results (this tree).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 676 tests in 16 files (673 + 3) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed; WebKit 26.6: 67 passed; none failed or not exercised |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` (lifecycle coordinator) | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed |
+| Whitespace | `git diff --check` | Clean |
+
+**Limits.** No screen-reader session; touch long-press was not verified; `firefox-desktop` E2E was not run on macOS,
+where the pinned Firefox does not launch (CI runs it); the residual hysteresis effect on other tooltips above.
+
+## PR #261 G-01/G-02 remediation — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026 to implement both remaining P3
+findings directly on PR #261 (Refs #255), based on `6ba62b4`. OpenAI Codex implemented and ran the developer
+verification below under that instruction; the commits retain the requested `heizseung` author and committer
+attribution. This record grants no independent CODEOWNER review, QA07/QA01 acceptance, merge or release approval.
+No contract, dependency, route, Auth/session behavior or production attempt lifecycle was changed.
+
+**G-01 — permanent countdown regression coverage.** Six cases in the existing CI-executed `PreviewApp.test.tsx`
+mount the real `App` and preview attempt controller: quiz and diagnostic, each selecting Light, Dark or System
+from a different stored preference. Each seeds an answer and advances the controller's real interval under fake
+timers: two seconds with the Theme menu open, one second after selecting, and one second after Escape closes it.
+The exact countdown must advance in every phase; all answer checked/disabled states, the attempt route and the
+stored global preference remain unchanged; no dialog, save/submit request or other fetch occurs. Selection keeps
+the menu open and focus on the chosen item; Escape restores focus. The countdown component and controller are real;
+only their scheduling APIs use fake timers.
+One transition per case avoids unrelated question-navigation work and keeps the default five-second timeout.
+
+**G-02 — text enlargement without clipping.** `AppHeader.tsx` keeps the normal 44 px track, three equal segments
+and 36 px selected pill. The drawer control establishes an inline-size container; at or below `14rem` of available
+space, relative to the enlarged text, its existing radios flow into full-width rows of at least 44 px. Text and
+glyphs are neither hidden nor shrunk; the labels retain their rem-based size. The same roles, DOM order, roving
+tab stop, arrow/Home/End behavior, selected colours and announcements remain. This is a CSS-only accessibility
+fallback; the Theme button/menu and all N-01–N-04 tooltip guards are unchanged. `DESIGN.md` was not edited.
+
+The existing browser harness now opens the drawer for Learner, Instructor and Administrator previews in both
+schemes at 320 and 640 px, at 100%, 120% and 200% text size: 36 configurations per engine. It checks that every
+label and glyph fits within the inset pill bounds, each target is at least 44 × 44 px, glyph and label colours
+match, text enlargement is honoured, and normal track height stays 44 px. Keyboard selection checks every
+preference, the visible focus ring, scheme resolution, the drawer staying open and Escape focus restoration.
+
+**Mutation evidence (disposable copy, restored afterwards).**
+
+| Intentional regression | Result |
+| --- | --- |
+| Pause the countdown only while Theme is open | All six G-01 cases fail on the exact countdown assertion |
+| Clear answers while Theme is open | All six fail on the answer-state assertion |
+| Send an unexpected request while Theme is open | All six fail on the fetch assertion |
+| Submit the sample attempt while Theme is open | All six fail because the answering countdown disappears |
+| Restore `AppHeader.tsx` from `6ba62b4` | The exact permanent G-02 browser check fails in Chromium and WebKit: `learner-home/light/320/120%/System: label or glyph escapes its pill` |
+
+The final G-01 mutation failures were assertion failures, not timeouts. The G-02 negative and final positive
+checks were run by disposable drivers that rebuilt the source and invoked the permanent harness check body
+without replacing its assertions. No mutation or temporary driver is a repository file.
+
+**Commands and results.** macOS arm64, Node 24.21.0, npm 11.19.0, installed Playwright 1.63.0.
+
+| Check | Command or method | Result |
+| --- | --- | --- |
+| Full frontend suite, default worker settings | `cd frontend && npm test` (JSON reporter used for the evidence) | 682 passed in 16 files; six added cases |
+| Type check and production build | `cd frontend && npm run build` | Passed, including `npm run typecheck`; existing bundle-size warning |
+| Full browser harness | `npm run test:browser -- --engine chromium,webkit --playwright ../e2e/node_modules/@playwright/test` | Chromium 153.0.8010.12: 69 passed; WebKit 26.6: 68 passed; no failures. WebKit recorded one first-paint row as not exercised |
+| Final affected browser matrix | Exact permanent G-02 check on rebuilt final source, after tightening the breakpoint and adding the 120%/font/glyph assertions | Passed all 36 configurations per engine in Chromium and WebKit; the earlier full harness covered 100%/200% before that refinement |
+| E2E lifecycle regression tests | `cd e2e && node --test fixtures/*.test.mjs` | 155 passed, zero failed |
+| E2E on the owned disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, five skipped, zero failed; lifecycle inventory reports every owned resource absent |
+| Whitespace | `git diff --check` | Passed |
+
+**Execution limits and remaining gaps.** Early runs exceeded default test timeouts;
+the final cases retain all timing/answer/request assertions and the timeout, with a smaller single-question
+fixture. A one-worker full run passed all new cases but reproduced the previously documented
+`routes/index.test.tsx` direct-entry `/` failure (`ResizeObserver is not defined`): 681 passed, one failed. The
+default full run subsequently passed all 682. No routing test was changed or quarantined.
+
+The WebKit no-preference first-paint row was explicitly not exercised because that emulation reported the host's
+Dark appearance. These browser checks use controlled API responses; the E2E row uses the real disposable backend.
+There was no screen-reader or native Windows contrast-theme session, no native browser-UI zoom acceptance pass,
+and no local Firefox run. Full-page zoom and text-only enlargement remain distinct. The production quiz/diagnostic
+route and real attempt integration stay with FE09/FE10; this countdown evidence is for their existing presentation
+and preview samples. Independent QA and the wider FE34 verification gaps are not declared complete here.
 
 ## AS04 quiz grading unit verification — 20 November 2026
 

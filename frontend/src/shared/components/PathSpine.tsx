@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Box, Typography } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
-import { color, motion, pathLine } from '../../app/theme/theme';
+import { motion, pathLine, roles } from '../../app/theme/theme';
 
 /** Decorative node state; the item's own text (status pill) always carries the meaning. */
 export type SpineNode = 'done' | 'current' | 'recommended' | 'todo' | 'static';
@@ -40,8 +40,8 @@ export function PathSpine({ sections, listLabel, density = 'tiles', headingLevel
                         {section.items.length > 1 && <Box aria-hidden data-path-line={solid && !last ? 'solid' : 'dashed'} sx={{ position: 'absolute', left: { xs: gutter.xs / 2 - 1, sm: gutter.sm / 2 - 1 }, width: pathLine.width,
                             top: first ? nodeTop : 0, bottom: last ? `calc(100% - ${nodeTop}px)` : 0,
                             // A drawn 4/6 dash (pathLine), the same rhythm as the map's prerequisite edges; CSS `dashed` borders vary by browser.
-                            background: solid && !last ? color.mint700
-                                : `repeating-linear-gradient(to bottom, ${color.brand400} 0 ${pathLine.dash}px, transparent ${pathLine.dash}px ${pathLine.dash + pathLine.gap}px)`,
+                            background: solid && !last ? roles.tone.mint.strong
+                                : `repeating-linear-gradient(to bottom, ${roles.accent.path} 0 ${pathLine.dash}px, transparent ${pathLine.dash}px ${pathLine.dash + pathLine.gap}px)`,
                             transition: `background-color ${motion.signature}ms ${motion.easeIn}` }} />}
                         <Box aria-hidden sx={{ position: 'relative', zIndex: 1 }}><SpineDot node={item.node} top={nodeTop} /></Box>
                         <Box sx={{ minWidth: 0 }}>{item.content}</Box>
@@ -56,9 +56,9 @@ function SpineDot({ node, top }: { node: SpineNode; top: number }) {
     const size = node === 'static' ? 10 : node === 'todo' ? 14 : 20;
     const common = { position: 'absolute', left: '50%', top, width: size, height: size, borderRadius: '50%', transform: 'translate(-50%, -50%)', boxSizing: 'border-box',
         display: 'grid', placeItems: 'center', transition: `background-color ${motion.signature}ms ${motion.easeIn}, box-shadow ${motion.signature}ms` } as const;
-    if (node === 'done') return <Box sx={{ ...common, bgcolor: color.mint700, color: color.surface }}><PresentationIcon name="check" sx={{ fontSize: 14, strokeWidth: 2.5 }} /></Box>;
-    if (node === 'current') return <Box sx={{ ...common, bgcolor: color.brand600, boxShadow: `0 0 0 4px ${color.brand100}` }} />;
-    if (node === 'recommended') return <Box sx={{ ...common, bgcolor: color.surface, border: `4px solid ${color.lilac700}` }} />;
-    if (node === 'static') return <Box sx={{ ...common, bgcolor: color.ink400 }} />;
-    return <Box sx={{ ...common, bgcolor: color.surface, border: `2px solid ${color.ink400}` }} />;
+    if (node === 'done') return <Box sx={{ ...common, bgcolor: roles.tone.mint.strong, color: roles.text.onStrong }}><PresentationIcon name="check" sx={{ fontSize: 14, strokeWidth: 2.5 }} /></Box>;
+    if (node === 'current') return <Box sx={{ ...common, bgcolor: roles.accent.link, boxShadow: `0 0 0 4px ${roles.bg.selected}` }} />;
+    if (node === 'recommended') return <Box sx={{ ...common, bgcolor: roles.bg.surface, border: `4px solid ${roles.tone.lilac.strong}` }} />;
+    if (node === 'static') return <Box sx={{ ...common, bgcolor: roles.line.strong }} />;
+    return <Box sx={{ ...common, bgcolor: roles.bg.surface, border: `2px solid ${roles.line.strong}` }} />;
 }
