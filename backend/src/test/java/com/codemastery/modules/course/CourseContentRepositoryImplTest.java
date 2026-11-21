@@ -37,6 +37,8 @@ class CourseContentRepositoryImplTest {
     private org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Mock
     private jakarta.persistence.EntityManager entityManager;
+    @Mock
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
 
     private CourseContentRepositoryImpl repository;
 
@@ -48,7 +50,7 @@ class CourseContentRepositoryImplTest {
 
     @BeforeEach
     void setUp() {
-        repository = new CourseContentRepositoryImpl(chapters, lessons, new CourseContentMapper(), jdbc, entityManager);
+        repository = new CourseContentRepositoryImpl(chapters, lessons, new CourseContentMapper(), jdbc, entityManager, transactionManager);
     }
 
     @Test
@@ -125,15 +127,17 @@ class CourseContentRepositoryImplTest {
         for (var call : calls) {
             org.junit.jupiter.api.Assertions.assertThrows(NullPointerException.class, call);
         }
-        verifyNoInteractions(jdbc, chapters, lessons, entityManager);
+        verifyNoInteractions(jdbc, chapters, lessons, entityManager, transactionManager);
     }
 
     @Test
-    void reorderingRequiresTheCallersTransactionBeforeChangingConstraintModes() {
-        when(jdbc.queryForList(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(UUID.class),
-                org.mockito.ArgumentMatchers.<Object>any())).thenReturn(java.util.List.of(CHAPTER_1_ID));
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+    void reorderingRequiresTheCallersTransactionBeforeAnyStatement() {
+        when(transactionManager.getTransaction(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new org.springframework.transaction.IllegalTransactionStateException("No existing transaction"));
+        org.junit.jupiter.api.Assertions.assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,
                 () -> repository.reorderChapters(COURSE_ID, java.util.List.of(CHAPTER_1_ID)));
-        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute(org.mockito.ArgumentMatchers.anyString());
+        org.junit.jupiter.api.Assertions.assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,
+                () -> repository.appendChapter(COURSE_ID, CHAPTER_2_ID, "Title"));
+        verifyNoInteractions(jdbc, entityManager);
     }
 }

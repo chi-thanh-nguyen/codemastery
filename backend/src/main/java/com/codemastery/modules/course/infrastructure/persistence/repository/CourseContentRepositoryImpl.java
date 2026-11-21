@@ -12,13 +12,17 @@ import com.codemastery.modules.course.infrastructure.persistence.mapper.CourseCo
 import jakarta.persistence.EntityManager;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Repository
 public class CourseContentRepositoryImpl implements CourseContentRepository {
@@ -33,18 +37,26 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
     private final CourseContentMapper courseContentMapper;
     private final JdbcTemplate jdbc;
     private final EntityManager entityManager;
+    private final TransactionTemplate callerTransaction;
 
     public CourseContentRepositoryImpl(
             ChapterJpaRepository chapterJpaRepository,
             LessonJpaRepository lessonJpaRepository,
             CourseContentMapper courseContentMapper,
             JdbcTemplate jdbc,
-            EntityManager entityManager) {
+            EntityManager entityManager,
+            PlatformTransactionManager transactionManager) {
         this.chapterJpaRepository = chapterJpaRepository;
         this.lessonJpaRepository = lessonJpaRepository;
         this.courseContentMapper = courseContentMapper;
         this.jdbc = jdbc;
         this.entityManager = entityManager;
+        this.callerTransaction = CourseRepositoryImpl.callerTransaction(transactionManager);
+    }
+
+    /** See {@link CourseRepositoryImpl#directWrite}: rejects pending JPA changes, dooms the unit on failure. */
+    private <T> T directWrite(Class<?> changedType, Collection<?> changedIds, Supplier<T> write) {
+        return CourseRepositoryImpl.directWrite(callerTransaction, entityManager, changedType, changedIds, write);
     }
 
     @Override
@@ -128,10 +140,10 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
     public Optional<Chapter> appendChapter(UUID courseId, UUID chapterId, String title) {
         Objects.requireNonNull(courseId, "courseId");
         Objects.requireNonNull(chapterId, "chapterId");
-        return jdbc.query("INSERT INTO public.chapters (id, course_id, title, position) "
+        return directWrite(ChapterEntity.class, List.of(), () -> jdbc.query("INSERT INTO public.chapters (id, course_id, title, position) "
                         + "SELECT ?, ?, ?, next_position FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position "
                         + "FROM public.chapters WHERE course_id = ?) next WHERE next_position <= 2147483647 RETURNING position",
-                (row, index) -> row.getInt("position"), chapterId, courseId, title, courseId)
+                (row, index) -> row.getInt("position"), chapterId, courseId, title, courseId))
                 .stream().findFirst().map(position -> new Chapter(chapterId, courseId, title, position));
     }
 
@@ -141,11 +153,12 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         Objects.requireNonNull(chapterId, "chapterId");
         Objects.requireNonNull(lessonId, "lessonId");
         Objects.requireNonNull(publicationStatus, "publicationStatus");
-        return jdbc.query("INSERT INTO public.lessons (id, chapter_id, title, content_markdown, position, publication_status) "
+        return directWrite(LessonEntity.class, List.of(), () -> jdbc.query(
+                "INSERT INTO public.lessons (id, chapter_id, title, content_markdown, position, publication_status) "
                         + "SELECT ?, ?, ?, ?, next_position, ? FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position "
                         + "FROM public.lessons WHERE chapter_id = ?) next WHERE next_position <= 2147483647 RETURNING position",
                 (row, index) -> row.getInt("position"), lessonId, chapterId, title, contentMarkdown,
-                publicationStatus.getStatus(), chapterId)
+                publicationStatus.getStatus(), chapterId))
                 .stream().findFirst()
                 .map(position -> new Lesson(lessonId, chapterId, title, contentMarkdown, position, publicationStatus));
     }
@@ -154,18 +167,17 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
     public void updateChapterTitle(UUID courseId, UUID chapterId, String title) {
         Objects.requireNonNull(courseId, "courseId");
         Objects.requireNonNull(chapterId, "chapterId");
-        requireOneRow(jdbc.update("UPDATE public.chapters SET title = ? WHERE id = ? AND course_id = ?",
-                title, chapterId, courseId));
-        CourseRepositoryImpl.detachManaged(entityManager, ChapterEntity.class, chapterId);
+        directWrite(ChapterEntity.class, List.of(chapterId), () -> requireOneRow(jdbc.update(
+                "UPDATE public.chapters SET title = ? WHERE id = ? AND course_id = ?", title, chapterId, courseId)));
     }
 
     @Override
     public void updateLesson(UUID chapterId, UUID lessonId, String title, String contentMarkdown) {
         Objects.requireNonNull(chapterId, "chapterId");
         Objects.requireNonNull(lessonId, "lessonId");
-        requireOneRow(jdbc.update("UPDATE public.lessons SET title = ?, content_markdown = ? WHERE id = ? AND chapter_id = ?",
-                title, contentMarkdown, lessonId, chapterId));
-        CourseRepositoryImpl.detachManaged(entityManager, LessonEntity.class, lessonId);
+        directWrite(LessonEntity.class, List.of(lessonId), () -> requireOneRow(jdbc.update(
+                "UPDATE public.lessons SET title = ?, content_markdown = ? WHERE id = ? AND chapter_id = ?",
+                title, contentMarkdown, lessonId, chapterId)));
     }
 
     @Override
@@ -173,27 +185,27 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         Objects.requireNonNull(chapterId, "chapterId");
         Objects.requireNonNull(lessonId, "lessonId");
         Objects.requireNonNull(publicationStatus, "publicationStatus");
-        requireOneRow(jdbc.update("UPDATE public.lessons SET publication_status = ? WHERE id = ? AND chapter_id = ?",
-                publicationStatus.getStatus(), lessonId, chapterId));
-        CourseRepositoryImpl.detachManaged(entityManager, LessonEntity.class, lessonId);
+        directWrite(LessonEntity.class, List.of(lessonId), () -> requireOneRow(jdbc.update(
+                "UPDATE public.lessons SET publication_status = ? WHERE id = ? AND chapter_id = ?",
+                publicationStatus.getStatus(), lessonId, chapterId)));
     }
 
     @Override
     public void reorderChapters(UUID courseId, List<UUID> orderedChapterIds) {
         Objects.requireNonNull(courseId, "courseId");
-        reorder("public.uq_chapters_course_position",
+        Objects.requireNonNull(orderedChapterIds, "orderedChapterIds");
+        directWrite(ChapterEntity.class, orderedChapterIds, () -> reorder("public.uq_chapters_course_position",
                 jdbc.queryForList("SELECT id FROM public.chapters WHERE course_id = ?", UUID.class, courseId),
-                orderedChapterIds, "UPDATE public.chapters SET position = ? WHERE id = ? AND course_id = ?", courseId);
-        orderedChapterIds.forEach(id -> CourseRepositoryImpl.detachManaged(entityManager, ChapterEntity.class, id));
+                orderedChapterIds, "UPDATE public.chapters SET position = ? WHERE id = ? AND course_id = ?", courseId));
     }
 
     @Override
     public void reorderLessons(UUID chapterId, List<UUID> orderedLessonIds) {
         Objects.requireNonNull(chapterId, "chapterId");
-        reorder("public.uq_lessons_chapter_position",
+        Objects.requireNonNull(orderedLessonIds, "orderedLessonIds");
+        directWrite(LessonEntity.class, orderedLessonIds, () -> reorder("public.uq_lessons_chapter_position",
                 jdbc.queryForList("SELECT id FROM public.lessons WHERE chapter_id = ?", UUID.class, chapterId),
-                orderedLessonIds, "UPDATE public.lessons SET position = ? WHERE id = ? AND chapter_id = ?", chapterId);
-        orderedLessonIds.forEach(id -> CourseRepositoryImpl.detachManaged(entityManager, LessonEntity.class, id));
+                orderedLessonIds, "UPDATE public.lessons SET position = ? WHERE id = ? AND chapter_id = ?", chapterId));
     }
 
     @Override
@@ -201,11 +213,12 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         Objects.requireNonNull(material, "material");
         Objects.requireNonNull(material.materialType(), "materialType");
         Objects.requireNonNull(material.publicationStatus(), "publicationStatus");
-        jdbc.update("INSERT INTO public.learning_materials (id, lesson_id, title, material_type, publication_status, "
+        directWrite(LearningMaterialEntity.class, List.of(), () -> jdbc.update(
+                "INSERT INTO public.learning_materials (id, lesson_id, title, material_type, publication_status, "
                         + "text_content, object_key, original_filename, external_video_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 material.id(), material.lessonId(), material.title(), material.materialType().getType(),
                 material.publicationStatus().getStatus(), material.textContent(), material.objectKey(),
-                material.originalFileName(), material.externalVideoUrl());
+                material.originalFileName(), material.externalVideoUrl()));
     }
 
     @Override
@@ -214,11 +227,11 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         Objects.requireNonNull(material.id(), "id");
         Objects.requireNonNull(material.lessonId(), "lessonId");
         Objects.requireNonNull(material.materialType(), "materialType");
-        requireOneRow(jdbc.update("UPDATE public.learning_materials SET title = ?, text_content = ?, object_key = ?, "
+        directWrite(LearningMaterialEntity.class, List.of(material.id()), () -> requireOneRow(jdbc.update(
+                "UPDATE public.learning_materials SET title = ?, text_content = ?, object_key = ?, "
                         + "original_filename = ?, external_video_url = ? WHERE id = ? AND lesson_id = ? AND material_type = ?",
                 material.title(), material.textContent(), material.objectKey(), material.originalFileName(),
-                material.externalVideoUrl(), material.id(), material.lessonId(), material.materialType().getType()));
-        CourseRepositoryImpl.detachManaged(entityManager, LearningMaterialEntity.class, material.id());
+                material.externalVideoUrl(), material.id(), material.lessonId(), material.materialType().getType())));
     }
 
     @Override
@@ -226,16 +239,16 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
         Objects.requireNonNull(lessonId, "lessonId");
         Objects.requireNonNull(materialId, "materialId");
         Objects.requireNonNull(publicationStatus, "publicationStatus");
-        requireOneRow(jdbc.update("UPDATE public.learning_materials SET publication_status = ? WHERE id = ? AND lesson_id = ?",
-                publicationStatus.getStatus(), materialId, lessonId));
-        CourseRepositoryImpl.detachManaged(entityManager, LearningMaterialEntity.class, materialId);
+        directWrite(LearningMaterialEntity.class, List.of(materialId), () -> requireOneRow(jdbc.update(
+                "UPDATE public.learning_materials SET publication_status = ? WHERE id = ? AND lesson_id = ?",
+                publicationStatus.getStatus(), materialId, lessonId)));
     }
 
     /**
      * ADR006 §5: defer the existing sibling-position uniqueness, assign 1..N, then restore
      * immediate checking before returning, so a duplicate fails here rather than at commit.
      */
-    private void reorder(String constraint, List<UUID> current, List<UUID> ordered, String update, UUID parentId) {
+    private Void reorder(String constraint, List<UUID> current, List<UUID> ordered, String update, UUID parentId) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Sibling reordering requires the caller's transaction");
         }
@@ -250,11 +263,13 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
             requireOneRow(jdbc.update(update, index + 1, ordered.get(index), parentId));
         }
         jdbc.execute("SET CONSTRAINTS " + constraint + " IMMEDIATE");
+        return null;
     }
 
-    private static void requireOneRow(int rows) {
+    private static Integer requireOneRow(int rows) {
         if (rows != 1) {
             throw new IllegalStateException("Course content write lost its row");
         }
+        return rows;
     }
 }

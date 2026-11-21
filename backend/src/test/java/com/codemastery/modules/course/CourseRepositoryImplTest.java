@@ -53,6 +53,9 @@ class CourseRepositoryImplTest {
     @Mock
     private jakarta.persistence.EntityManager entityManager;
 
+    @Mock
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     private CourseRepositoryImpl repository;
 
     private static final UUID COURSE_ID = UUID.fromString("00000000-0000-4000-8000-000000000001");
@@ -60,7 +63,7 @@ class CourseRepositoryImplTest {
 
     @BeforeEach
     void setUp() {
-        repository = new CourseRepositoryImpl(jpa, new CourseMapper(), jdbc, entityManager);
+        repository = new CourseRepositoryImpl(jpa, new CourseMapper(), jdbc, entityManager, transactionManager);
     }
 
     @Test
@@ -395,7 +398,7 @@ class CourseRepositoryImplTest {
         for (var call : calls) {
             assertThrows(NullPointerException.class, call);
         }
-        org.mockito.Mockito.verifyNoInteractions(jdbc, entityManager, jpa);
+        org.mockito.Mockito.verifyNoInteractions(jdbc, entityManager, jpa, transactionManager);
     }
 
     @Test
@@ -406,5 +409,19 @@ class CourseRepositoryImplTest {
                 .thenReturn(java.util.List.of());
         assertTrue(repository.lockCourseRootNoWait(COURSE_ID));
         org.junit.jupiter.api.Assertions.assertFalse(repository.lockCourseRoot(COURSE_ID));
+    }
+
+    @Test
+    void directWritesRequireTheCallersTransactionBeforeAnyStatement() {
+        when(transactionManager.getTransaction(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new org.springframework.transaction.IllegalTransactionStateException("No existing transaction"));
+        java.util.List<org.junit.jupiter.api.function.Executable> writes = java.util.List.of(
+                () -> repository.updateMetadata(COURSE_ID, "T", "D", null),
+                () -> repository.updatePublicationStatus(COURSE_ID, com.codemastery.modules.course.domain.model.PublishStatus.HIDDEN),
+                () -> repository.replaceAdaptiveConfiguration(COURSE_ID, false, null, false, null));
+        for (var write : writes) {
+            assertThrows(org.springframework.transaction.IllegalTransactionStateException.class, write);
+        }
+        org.mockito.Mockito.verifyNoInteractions(jdbc, entityManager);
     }
 }

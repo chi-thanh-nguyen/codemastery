@@ -17,6 +17,8 @@ import java.util.UUID;
  * service. Writes run inside the caller's transaction and choose no policy or default.
  * A lost row or an invalid sibling order is an internal failure, surfaced by the
  * repository's exception translation as Spring's InvalidDataAccessApiUsageException.
+ * Writes require the caller's transaction and reject pending JPA changes (flush them first);
+ * any write failure marks that transaction rollback-only.
  */
 public interface CourseContentRepository {
 

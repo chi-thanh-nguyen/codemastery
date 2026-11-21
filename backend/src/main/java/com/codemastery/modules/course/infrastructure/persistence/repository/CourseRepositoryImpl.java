@@ -17,9 +17,14 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.Types;
+import java.util.Collection;
+import java.util.function.Supplier;
 import java.util.Map;
 import java.util.Optional;
 import java.util.List;
@@ -40,12 +45,44 @@ public class CourseRepositoryImpl implements CourseRepository {
     private final JdbcTemplate jdbc;
     private final EntityManager entityManager;
 
+    private final TransactionTemplate callerTransaction;
+
     public CourseRepositoryImpl(CourseJpaRepository courseJpaRepository, CourseMapper courseMapper,
-                                JdbcTemplate jdbc, EntityManager entityManager) {
+                                JdbcTemplate jdbc, EntityManager entityManager,
+                                PlatformTransactionManager transactionManager) {
         this.courseJpaRepository = courseJpaRepository;
         this.courseMapper = courseMapper;
         this.jdbc = jdbc;
         this.entityManager = entityManager;
+        this.callerTransaction = callerTransaction(transactionManager);
+    }
+
+    /** Participates in, and requires, the caller's transaction; a failure marks it rollback-only. */
+    static TransactionTemplate callerTransaction(PlatformTransactionManager transactionManager) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_MANDATORY);
+        return template;
+    }
+
+    /**
+     * Runs one direct-SQL write in the caller's transaction. Pending JPA changes are rejected before
+     * any statement, because a direct write would otherwise be overwritten by their later flush or
+     * silently discard them; afterwards the clean managed copies of the changed rows are detached,
+     * so later JPA reads reload them. Any failure, including the rejection, marks the caller's
+     * transaction rollback-only, so a caught exception cannot commit a partial operation.
+     */
+    static <T> T directWrite(TransactionTemplate callerTransaction, EntityManager entityManager,
+                             Class<?> changedType, Collection<?> changedIds, Supplier<T> write) {
+        return callerTransaction.execute(status -> {
+            if (entityManager.unwrap(Session.class).isDirty()) {
+                throw new IllegalStateException("Pending persistence changes conflict with a direct Course write");
+            }
+            T result = write.get();
+            for (Object id : changedIds) {
+                detachManaged(entityManager, changedType, id);
+            }
+            return result;
+        });
     }
 
     @Override
@@ -163,28 +200,29 @@ public class CourseRepositoryImpl implements CourseRepository {
     @Override
     public void insert(Course course) {
         Objects.requireNonNull(course, "course");
-        jdbc.update("INSERT INTO public.courses (id, instructor_id, title, description, prerequisite_description, "
+        String status = Objects.requireNonNull(course.publicationStatus(), "publicationStatus").getStatus();
+        String settings = CourseMapper.settingsToJson(course.adaptiveSettings());
+        directWrite(callerTransaction, entityManager, CourseEntity.class, List.of(), () -> jdbc.update(
+                "INSERT INTO public.courses (id, instructor_id, title, description, prerequisite_description, "
                         + "publication_status, adaptive_enabled, adaptive_settings) VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))",
                 course.id(), course.instructorId(), course.title(), course.description(), course.prerequisiteDescription(),
-                Objects.requireNonNull(course.publicationStatus(), "publicationStatus").getStatus(), course.adaptiveEnabled(),
-                json(CourseMapper.settingsToJson(course.adaptiveSettings())));
+                status, course.adaptiveEnabled(), json(settings)));
     }
 
     @Override
     public void updateMetadata(UUID courseId, String title, String description, String prerequisiteDescription) {
         Objects.requireNonNull(courseId, "courseId");
-        requireOneRow(jdbc.update("UPDATE public.courses SET title = ?, description = ?, prerequisite_description = ? "
-                + "WHERE id = ?", title, description, prerequisiteDescription, courseId));
-        detachManaged(entityManager, CourseEntity.class, courseId);
+        directWrite(callerTransaction, entityManager, CourseEntity.class, List.of(courseId), () -> requireOneRow(jdbc.update(
+                "UPDATE public.courses SET title = ?, description = ?, prerequisite_description = ? WHERE id = ?",
+                title, description, prerequisiteDescription, courseId)));
     }
 
     @Override
     public void updatePublicationStatus(UUID courseId, PublishStatus publicationStatus) {
         Objects.requireNonNull(courseId, "courseId");
         Objects.requireNonNull(publicationStatus, "publicationStatus");
-        requireOneRow(jdbc.update("UPDATE public.courses SET publication_status = ? WHERE id = ?",
-                publicationStatus.getStatus(), courseId));
-        detachManaged(entityManager, CourseEntity.class, courseId);
+        directWrite(callerTransaction, entityManager, CourseEntity.class, List.of(courseId), () -> requireOneRow(jdbc.update(
+                "UPDATE public.courses SET publication_status = ? WHERE id = ?", publicationStatus.getStatus(), courseId)));
     }
 
     // ADR005 Course-root guard and stored adaptive configuration (CO14).
@@ -217,12 +255,13 @@ public class CourseRepositoryImpl implements CourseRepository {
             boolean expectedEnabled, Map<String, Object> expectedSettings,
             boolean adaptiveEnabled, Map<String, Object> adaptiveSettings) {
         Objects.requireNonNull(courseId, "courseId");
+        String settings = CourseMapper.settingsToJson(adaptiveSettings);
+        String expected = CourseMapper.settingsToJson(expectedSettings);
         // jsonb equality is structural: key order, whitespace and duplicate formatting are irrelevant.
-        int rows = jdbc.update("UPDATE public.courses SET adaptive_enabled = ?, adaptive_settings = CAST(? AS jsonb) "
-                        + "WHERE id = ? AND adaptive_enabled = ? "
-                        + "AND adaptive_settings IS NOT DISTINCT FROM CAST(? AS jsonb)",
-                adaptiveEnabled, json(CourseMapper.settingsToJson(adaptiveSettings)), courseId, expectedEnabled,
-                json(CourseMapper.settingsToJson(expectedSettings)));
+        int rows = directWrite(callerTransaction, entityManager, CourseEntity.class, List.of(courseId), () -> jdbc.update(
+                "UPDATE public.courses SET adaptive_enabled = ?, adaptive_settings = CAST(? AS jsonb) "
+                        + "WHERE id = ? AND adaptive_enabled = ? AND adaptive_settings IS NOT DISTINCT FROM CAST(? AS jsonb)",
+                adaptiveEnabled, json(settings), courseId, expectedEnabled, json(expected)));
         if (rows > 1) {
             throw new IllegalStateException("Course configuration write matched more than one row");
         }
@@ -298,9 +337,10 @@ public class CourseRepositoryImpl implements CourseRepository {
         return new SqlParameterValue(Types.VARCHAR, json);
     }
 
-    private static void requireOneRow(int rows) {
+    private static Integer requireOneRow(int rows) {
         if (rows != 1) {
             throw new IllegalStateException("Course write lost its row");
         }
+        return rows;
     }
 }

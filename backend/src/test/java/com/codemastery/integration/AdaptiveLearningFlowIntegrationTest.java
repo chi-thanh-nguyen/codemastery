@@ -7,7 +7,14 @@ import com.codemastery.modules.course.application.service.CourseManagementServic
 import com.codemastery.modules.course.application.service.CourseManagementService.AdaptiveConfiguration;
 import com.codemastery.modules.course.application.service.CourseManagementService.ConfigurationBusy;
 import com.codemastery.modules.course.application.service.EnrollmentService;
+import com.codemastery.modules.course.domain.model.LearningMaterial;
+import com.codemastery.modules.course.domain.model.MaterialType;
+import com.codemastery.modules.course.domain.model.PublishStatus;
+import com.codemastery.modules.course.domain.repository.CourseContentRepository;
+import com.codemastery.modules.course.domain.repository.CourseRepository;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository;
+import com.codemastery.modules.course.infrastructure.persistence.entity.LearningMaterialEntity;
+import com.codemastery.modules.course.infrastructure.persistence.entity.LessonEntity;
 import com.codemastery.modules.course.infrastructure.persistence.entity.ChapterEntity;
 import com.codemastery.modules.course.infrastructure.persistence.entity.CourseEntity;
 import jakarta.persistence.EntityManager;
@@ -20,6 +27,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
@@ -65,6 +73,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -90,6 +100,8 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     @Autowired CourseManagementService service;
     @Autowired EnrollmentService enrollment;
     @Autowired EnrollmentRepository enrollments;
+    @Autowired CourseRepository courseRepository;
+    @Autowired CourseContentRepository courseContentRepository;
     @Autowired JdbcTemplate jdbc;
     @Autowired DataSource dataSource;
     @Autowired PlatformTransactionManager transactions;
@@ -120,6 +132,10 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         }
         workers.shutdownNow();
         assertTrue(workers.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS));
+        jdbc.update("DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT l.id FROM public.lessons l "
+                + "JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id IN (?,?,?))", COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.lessons WHERE chapter_id IN (SELECT id FROM public.chapters WHERE course_id IN (?,?,?))",
+                COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.chapters WHERE course_id IN (?,?,?)", COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.enrollments WHERE course_id IN (?,?,?)", COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.courses WHERE id IN (?,?,?)", COURSE, SECOND, HIDDEN);
@@ -280,7 +296,7 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
 
     @Test void aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker() {
         AtomicInteger reentered = new AtomicInteger();
-        assertThrows(UnexpectedRollbackException.class, () -> as(OWNER, Role.INSTRUCTOR,
+        assertCommitRefused(() -> as(OWNER, Role.INSTRUCTOR,
                 () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false).execute(status -> {
                     // A caller-managed savepoint opened before the guard; Spring NESTED is not enabled.
                     jdbc.execute("SAVEPOINT before_guard");
@@ -571,7 +587,150 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         assertNotEquals(Boolean.TRUE, jdbc.queryForObject("SELECT adaptive_enabled FROM public.courses WHERE id = ?", Boolean.class, COURSE));
     }
 
+    // Independent-review P2-01: the held root must survive until the unit completes.
+
+    @Test void aSavepointRollbackInsideTheCallbackCannotCommitAStaleWriteOverTheWinner() {
+        IllegalStateException[] reported = new IllegalStateException[1];
+        assertCommitRefused(() -> as(OWNER, Role.INSTRUCTOR,
+                () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false).execute(status -> {
+                    jdbc.execute("SAVEPOINT before_guard");
+                    try {
+                        service.withCourseConfigurationWrite(COURSE, () -> {
+                            String stale = jdbc.queryForObject("SELECT title FROM public.courses WHERE id = ?", String.class, COURSE);
+                            jdbc.execute("ROLLBACK TO SAVEPOINT before_guard");
+                            commitElsewhere("UPDATE public.courses SET title = 'Intervening winner' WHERE id = ?", COURSE);
+                            jdbc.update("UPDATE public.courses SET title = ? WHERE id = ?", stale + " (stale edit)", COURSE);
+                            return null;
+                        });
+                    } catch (IllegalStateException released) {
+                        reported[0] = released; // a caller that swallows the failure still cannot commit
+                    }
+                    return null;
+                })));
+        assertNotNull(reported[0], "the guard reports the released root before returning");
+        assertEquals("Intervening winner", titleElsewhere(COURSE));
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    @Test void aSavepointRollbackAfterTheCallbackReturnedFailsTheOuterCommit() {
+        RuntimeException failure = assertThrows(RuntimeException.class, () -> as(OWNER, Role.INSTRUCTOR,
+                () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false).execute(status -> {
+                    jdbc.execute("SAVEPOINT before_guard");
+                    String stale = service.withCourseConfigurationWrite(COURSE,
+                            () -> jdbc.queryForObject("SELECT title FROM public.courses WHERE id = ?", String.class, COURSE));
+                    jdbc.execute("ROLLBACK TO SAVEPOINT before_guard");
+                    commitElsewhere("UPDATE public.courses SET title = 'Intervening winner' WHERE id = ?", COURSE);
+                    courseRepository.updateMetadata(COURSE, stale + " (stale edit)", "Guarded course", null);
+                    return null;
+                })));
+        assertInstanceOf(IllegalStateException.class, failure);
+        assertEquals("Intervening winner", titleElsewhere(COURSE));
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    // Independent-review P2-02: a direct write never discards pending JPA changes.
+
+    @Test void pendingCourseJsonChangesAreNeverDiscardedByADirectMetadataWrite() {
+        jdbc.update("UPDATE public.courses SET adaptive_settings = '{\"pending\": 1}'::jsonb WHERE id = ?", COURSE);
+        assertThrows(UnexpectedRollbackException.class, () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false)
+                .execute(status -> {
+                    entityManager.find(CourseEntity.class, COURSE).getAdaptiveSettings().put("pending", 2);
+                    assertThrows(InvalidDataAccessApiUsageException.class,
+                            () -> courseRepository.updateMetadata(COURSE, "Direct title", "Guarded course", null));
+                    return null; // the caller caught the rejection; the unit must still not commit
+                }));
+        assertEquals("Alpha", titleElsewhere(COURSE));
+        assertTrue(jdbc.queryForObject("SELECT adaptive_settings = '{\"pending\": 1}'::jsonb FROM public.courses WHERE id = ?",
+                Boolean.class, COURSE));
+    }
+
+    @Test void aPendingChapterMergeIsNeverDiscardedByADirectReorder() {
+        UUID first = chapter(COURSE, 1), second = chapter(COURSE, 2);
+        String before = contentSnapshot();
+        assertThrows(UnexpectedRollbackException.class, () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false)
+                .execute(status -> {
+                    entityManager.merge(new ChapterEntity(first, COURSE, "Merged title", 1));
+                    assertThrows(InvalidDataAccessApiUsageException.class,
+                            () -> courseContentRepository.reorderChapters(COURSE, List.of(second, first)));
+                    return null;
+                }));
+        assertEquals(before, contentSnapshot());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"course-publication", "chapter-title", "chapter-append", "lesson", "lesson-publication",
+            "lesson-reorder", "material", "material-publication", "material-insert", "adaptive-settings"})
+    void everyDirectWriteRejectsPendingChangesOfItsRowsAndDoomsTheUnit(String path) {
+        UUID chapter = chapter(COURSE, 1);
+        UUID lesson = lesson(chapter, 1), otherLesson = lesson(chapter, 2);
+        UUID material = material(lesson);
+        String before = contentSnapshot();
+        assertThrows(UnexpectedRollbackException.class, () -> as(OWNER, Role.INSTRUCTOR,
+                () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false).execute(status -> {
+                    if (path.startsWith("course") || path.startsWith("adaptive")) {
+                        entityManager.find(CourseEntity.class, COURSE).getAdaptiveSettings();
+                        entityManager.merge(new ChapterEntity(chapter, COURSE, "Pending chapter", 1));
+                    } else if (path.startsWith("chapter")) {
+                        entityManager.merge(new ChapterEntity(chapter, COURSE, "Pending chapter", 1));
+                    } else if (path.startsWith("lesson")) {
+                        entityManager.merge(new LessonEntity(lesson, chapter, "Pending lesson", null, 1, "published"));
+                    } else {
+                        entityManager.merge(new LearningMaterialEntity(material, lesson, "Pending material", "text",
+                                "hidden", "Pending text", null, null, null));
+                    }
+                    Runnable write = switch (path) {
+                        case "course-publication" -> () -> courseRepository.updatePublicationStatus(COURSE, PublishStatus.HIDDEN);
+                        case "adaptive-settings" -> () -> courseRepository.replaceAdaptiveConfiguration(COURSE, false, null, false, Map.of("a", 1));
+                        case "chapter-title" -> () -> courseContentRepository.updateChapterTitle(COURSE, chapter, "Direct chapter");
+                        case "chapter-append" -> () -> courseContentRepository.appendChapter(COURSE, UUID.randomUUID(), "Appended");
+                        case "lesson" -> () -> courseContentRepository.updateLesson(chapter, lesson, "Direct lesson", null);
+                        case "lesson-publication" -> () -> courseContentRepository.updateLessonPublicationStatus(chapter, lesson, PublishStatus.HIDDEN);
+                        case "lesson-reorder" -> () -> courseContentRepository.reorderLessons(chapter, List.of(otherLesson, lesson));
+                        case "material" -> () -> courseContentRepository.replaceMaterialContent(new LearningMaterial(material, lesson,
+                                "Direct material", MaterialType.TEXT, PublishStatus.HIDDEN, "Direct text", null, null, null));
+                        case "material-publication" -> () -> courseContentRepository.updateMaterialPublicationStatus(lesson, material, PublishStatus.PUBLISHED);
+                        case "material-insert" -> () -> courseContentRepository.insertMaterial(new LearningMaterial(UUID.randomUUID(), lesson,
+                                "Inserted", MaterialType.TEXT, PublishStatus.HIDDEN, "Inserted text", null, null, null));
+                        default -> throw new IllegalArgumentException(path);
+                    };
+                    assertThrows(InvalidDataAccessApiUsageException.class, write::run);
+                    return null;
+                })));
+        assertEquals(before, contentSnapshot());
+    }
+
+    @Test void cleanManagedEntitiesAreInvalidatedSoTheCommittedDirectWriteIsReadBackFresh() {
+        UUID first = chapter(COURSE, 1), second = chapter(COURSE, 2);
+        outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false).execute(status -> {
+            ChapterEntity managed = entityManager.find(ChapterEntity.class, first);
+            CourseEntity course = entityManager.find(CourseEntity.class, COURSE);
+            assertEquals(1, managed.getPosition());
+            courseContentRepository.reorderChapters(COURSE, List.of(second, first));
+            courseRepository.updateMetadata(COURSE, "Directly renamed", "Guarded course", null);
+            ChapterEntity reread = entityManager.find(ChapterEntity.class, first);
+            assertNotSame(managed, reread);
+            assertEquals(2, reread.getPosition());
+            assertNotSame(course, entityManager.find(CourseEntity.class, COURSE));
+            assertEquals("Directly renamed", entityManager.find(CourseEntity.class, COURSE).getTitle());
+            return null;
+        });
+        assertEquals("Directly renamed", titleElsewhere(COURSE));
+        assertEquals(List.of(second, first), jdbc.queryForList(
+                "SELECT id FROM public.chapters WHERE course_id = ? ORDER BY position", UUID.class, COURSE));
+    }
+
     // Helpers.
+
+    /**
+     * The commit is refused and rolled back. Spring runs beforeCommit before it inspects the
+     * rollback-only flag, so the guard's pre-commit check (IllegalStateException) may report the
+     * refusal instead of UnexpectedRollbackException; callers assert the database outcome too.
+     */
+    private static void assertCommitRefused(org.junit.jupiter.api.function.Executable unit) {
+        RuntimeException refused = assertThrows(RuntimeException.class, unit);
+        assertTrue(refused instanceof UnexpectedRollbackException || refused instanceof IllegalStateException,
+                () -> "unexpected refusal " + refused);
+    }
 
     private <T> T guard(boolean failFast, UUID course, Supplier<T> work) {
         return failFast ? service.tryWithCourseConfigurationWrite(course, work) : service.withCourseConfigurationWrite(course, work);
@@ -687,4 +846,38 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         }
         return "none: " + Arrays.toString(failure.getStackTrace());
     }
+
+    private UUID chapter(UUID course, int position) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.chapters (id,course_id,title,position) VALUES (?,?,?,?)", id, course, "Chapter " + position, position);
+        return id;
+    }
+
+    private UUID lesson(UUID chapter, int position) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) VALUES (?,?,?,?,'published')",
+                id, chapter, "Lesson " + position, position);
+        return id;
+    }
+
+    private UUID material(UUID lesson) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.learning_materials (id,lesson_id,title,material_type,publication_status,text_content) "
+                + "VALUES (?,?,'Notes','text','hidden','Original text')", id, lesson);
+        return id;
+    }
+
+    /** Every Course-owned value the direct-write regressions could change, read on a fresh connection. */
+    private String contentSnapshot() {
+        return jdbc.queryForObject("SELECT concat_ws('|', (SELECT concat_ws(',', title, publication_status, adaptive_enabled, "
+                + "adaptive_settings::text) FROM public.courses WHERE id = ?), "
+                + "(SELECT string_agg(concat_ws(',', id, title, position), ';' ORDER BY id) FROM public.chapters WHERE course_id = ?), "
+                + "(SELECT string_agg(concat_ws(',', l.id, l.title, l.position, l.publication_status), ';' ORDER BY l.id) "
+                + "FROM public.lessons l JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id = ?), "
+                + "(SELECT string_agg(concat_ws(',', m.id, m.title, m.publication_status, m.text_content), ';' ORDER BY m.id) "
+                + "FROM public.learning_materials m JOIN public.lessons l ON l.id = m.lesson_id "
+                + "JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id = ?))",
+                String.class, COURSE, COURSE, COURSE, COURSE);
+    }
+
 }

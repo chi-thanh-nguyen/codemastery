@@ -16,6 +16,8 @@ import java.util.UUID;
  * and the ADR005 Course-root guard and stored adaptive configuration (CO14).
  * Never exported through the Course application boundary. A lost row is an internal failure,
  * surfaced by the repository's exception translation as InvalidDataAccessApiUsageException.
+ * Writes require the caller's transaction and reject pending JPA changes (flush them first);
+ * any write failure marks that transaction rollback-only.
  */
 public interface CourseRepository {
 

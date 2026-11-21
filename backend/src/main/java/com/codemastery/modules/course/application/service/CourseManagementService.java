@@ -34,6 +34,8 @@ import java.util.function.Supplier;
  * Course is rejected. The held root is recorded transaction-locally in PostgreSQL, so a
  * savepoint rollback that releases the row lock also releases the marker, and a REQUIRES_NEW
  * entry behind a suspended holder on the same thread fails instead of waiting for itself.
+ * The marker is rechecked when the callback returns and before the transaction commits, so work
+ * done after a savepoint rollback released the root can never commit.
  * Entities loaded before entry are detached after the lock: re-read them inside the callback.
  * Contract violations are internal errors (500). Any failure rolls the
  * whole unit back; an outer caller must still commit before reporting success. There is no
@@ -155,11 +157,22 @@ public class CourseManagementService {
         // READ COMMITTED: this fresh statement observes ownership/existence committed before the lock.
         access.requireCourseOwnership(courseId);
         if (held == null) {
-            claimThreadRoot(courseId);
+            claimRoot(courseId);
             courses.markCourseRootHeld(courseId);
             courses.discardCleanPersistenceState();
         }
-        return work.get();
+        T result = work.get();
+        // A savepoint rollback inside the callback may have released the root; never report success then.
+        requireRootStillHeld(courseId);
+        return result;
+    }
+
+    /** Fails, dooming the unit, unless PostgreSQL still records this transaction's root. */
+    private void requireRootStillHeld(UUID courseId) {
+        TransactionFacts facts = courses.currentTransactionFacts();
+        if (facts == null || !courseId.equals(facts.heldCourseRoot())) {
+            throw new IllegalStateException("The Course root was released before the unit completed");
+        }
     }
 
     /**
@@ -224,9 +237,12 @@ public class CourseManagementService {
         return false;
     }
 
-    /** Records the root for this thread until the acquiring physical transaction completes. */
-    private static void claimThreadRoot(UUID courseId) {
-        TransactionSynchronizationManager.registerSynchronization(new ThreadRootRelease(courseId));
+    /**
+     * Records the root for this thread until the acquiring physical transaction completes, and
+     * rechecks it before that transaction commits (a savepoint rollback after the callback returned).
+     */
+    private void claimRoot(UUID courseId) {
+        TransactionSynchronizationManager.registerSynchronization(new HeldRoot(courseId));
         List<UUID> roots = THREAD_ROOTS.get();
         if (roots == null) {
             roots = new ArrayList<>(1);
@@ -267,12 +283,21 @@ public class CourseManagementService {
         }
     }
 
-    /** Removes this transaction's root from the thread record when the transaction completes. */
-    private static final class ThreadRootRelease implements TransactionSynchronization {
+    /**
+     * Bound to the physical transaction that took the root. beforeCommit runs before the
+     * commit, so a failure there rolls the transaction back; afterCompletion always releases
+     * the thread record.
+     */
+    private final class HeldRoot implements TransactionSynchronization {
         private final UUID courseId;
 
-        private ThreadRootRelease(UUID courseId) {
+        private HeldRoot(UUID courseId) {
             this.courseId = courseId;
+        }
+
+        @Override
+        public void beforeCommit(boolean readOnly) {
+            requireRootStillHeld(courseId);
         }
 
         @Override
