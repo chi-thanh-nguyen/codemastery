@@ -622,7 +622,10 @@ files only:
   show it over the menu. Escape dismisses the tooltip until the pointer genuinely enters
   again or focus leaves the button; MUI Tooltip's own delayed focus open is ignored,
   because the button's `onFocus` already handles keyboard focus, so no pending timer
-  reopens a dismissed tooltip (N-01). The menu's popup container carries
+  reopens a dismissed tooltip (N-01). That ignored MUI timer still sets MUI's module-wide
+  tooltip hysteresis when it fires, so this tooltip sets `enterNextDelay={400}` locally and every
+  pointer hover takes the specified 400 ms (N-04); the global Tooltip delays are unchanged. The
+  menu's popup container carries
   no `tooltip` role. Menu items (all menus) hover and focus on `bg.raisedHover`; only the
   selected item uses `bg.selected`.
 - Glyphs in buttons and in `StatusPill` (pills, mastery, recommendation and other tags)

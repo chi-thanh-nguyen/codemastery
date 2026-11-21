@@ -4794,6 +4794,86 @@ here as a pre-existing order dependence outside this instruction's scope.
   reopening, and the menu-open guard and the reset on close each block a pending hover timer. CI guards
   both pairs together, not each defence alone.
 
+## PR #261 N-04 remediation (MUI tooltip hysteresis) — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery PR #261 — Focused
+Remediation of N-04 (MUI Tooltip Hysteresis)", on PR #261 (Refs #255), based on `1f23e9b`. Developer evidence only:
+no independent review approval, QA07 #63 or QA01 acceptance is claimed, and no screen-reader session was run.
+`DESIGN.md` is unchanged: D13-5 and › Tooltip already require 400 ms for a pointer hover.
+
+**N-04 — root cause (MUI 9.4.0, `Tooltip.js`).** The button's `onFocus` shows the tooltip at once, but MUI's own focus
+listener also starts its open timer (`handleFocus` → `handleMouseOver` → `enterTimer`, 400 ms). Escape closes the tooltip
+through `handleClose`, which starts the 800 ms reset of the module-level `hystersisOpen` flag; the pending focus timer
+then fires `handleOpen` (the application ignores its `onOpen`), which calls `hystersisTimer.clear()` and sets
+`hystersisOpen = true`. Nothing resets it while focus stays on the button, so the next pointer hover uses
+`enterNextDelay` (the theme's 200 ms) instead of `enterDelay` (400 ms).
+
+**Correction.** `AppHeader.tsx`: `enterNextDelay={400}` on the Theme `Tooltip` (one prop and a comment). With
+`enterDelay` 400 the open timer is `hystersisOpen ? enterNextDelay : enterDelay`, so the hover delay is 400 ms
+whatever the flag. Rejected: `disableFocusListener` (removes MUI's blur close, which the earlier remediations keep),
+a manual reset of MUI state (not public API) and extra timers. The global `MuiTooltip` defaults are unchanged. One
+deliberate consequence: a re-entry within 800 ms of leaving the Theme button also takes 400 ms, as D13-5 specifies,
+where MUI's default would open it after 200 ms.
+
+**Timing before and after (production build, MUI opening delay measured from the pointer's first `mouseover` to the
+tooltip node's insertion; the fade follows, about 90–100 ms; milliseconds).**
+
+| Sequence | Before (`1f23e9b`) Chrome / WebKit / Firefox | After Chrome / WebKit / Firefox |
+| --- | --- | --- |
+| Keyboard focus, Escape at 100 ms, 2 s idle, pointer enters | **205 / 206 / 208** | 406 / 406 / 411 |
+| Same, 600 ms idle | **206 / 206 / 210** | 405 / 405 / 414 |
+| Escape at 500 ms, 2 s idle, pointer enters | 405 / 404 / 415 | 406 / 406 / 413 |
+| Pointer only, fresh page | 407 / 418 / 420 | 411 / 418 / 415 |
+| Repeated hover: first, 300 ms after leaving, 1.2 s after leaving | 408, **205**, 406 / 413, **207**, 406 / 452, **213**, 405 | 408, 405, 405 / 415, 408, 406 / 412, 413, 420 |
+| Pointer resting after a menu closed by Escape, then leave and re-enter 400 ms later | **203 / 206 / 410** | 405 / 404 / 409 |
+| Keyboard focus without Escape: tooltip already shown at focus (1 ms), nothing reopens | pass | pass |
+
+Bold rows are the sub-400 ms openings, the first two being N-04. Escape at 500 ms was never affected, because
+the flag was reset after the focus timer had fired. Chrome 157 and WebKit 27.2 ran through the Playwright CLI and
+Firefox 155 through Playwright in `mcr.microsoft.com/playwright:v1.63.0-noble`; the script and the unfixed build are
+not committed.
+
+**Other tooltips (unchanged, recorded).** The same stuck flag is global. With the Theme tooltip dismissed by an
+early Escape and focus still on the Theme button, an icon-only navigation tooltip ("My courses" at 1024 px) opens
+after 205–210 ms in all three browsers instead of 408–419 ms. It is the theme's `enterNextDelay` (200 ms) applied
+to the stale flag, it affects only that interval, and it clears when focus leaves the Theme button (406–418 ms after a
+Tab and 1.2 s). Escape at 500 ms leaves it at 403–412 ms. The local prop cannot influence other instances; removing
+the cause would need `disableFocusListener` on the Theme tooltip with a managed blur, a larger change that this
+remediation did not make.
+
+**Regression tests.** Three Vitest tests (`presentation.test.tsx`, `start()` settles MUI's hysteresis first):
+keyboard focus → shown at once → Escape at 100 ms → hidden → through MUI's original 400 ms timer, 1 s and 2 s more
+→ hidden, focus unchanged → pointer entry absent at 399 ms and open at 400 ms; the same for Escape at 500 ms; and a
+hover that takes 400 ms when repeated, 300 ms after leaving, after a stale hover and a menu Escape, and after a choice,
+focus restoration and six rapid open/close presses. The browser harness gains the same early-Escape step (hover
+tooltip present at 300 ms fails it, then it must open within 800 ms).
+
+**Mutation evidence (disposable worktree).**
+
+| Change | Result |
+| --- | --- |
+| Corrected code | 114 of 114 pass in `presentation.test.tsx` and `PreviewApp.test.tsx` |
+| `enterNextDelay` prop removed (the N-04 defect), or set to `200` | 2 fail: the Escape-at-100 ms test and the repeated-hover test; the Escape-at-500 ms test passes, as it did before the fix |
+| `AppHeader.tsx` of `1f23e9b` | the same 2 fail |
+| Harness on the code without the prop (Chromium) | 66 passed, 2 failed: both motion variants of the tooltip check, "the hover tooltip opened before its 400 ms delay" |
+
+**Random-order stability.** `presentation.test.tsx` with `--sequence.shuffle`, 25 seeds: 0 failures; five default-order
+repeats: 76 of 76 each. The pre-existing `routes/index.test.tsx` order dependence is not part of N-04 and is not
+changed.
+
+**Commands and results (this tree).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 676 tests in 16 files (673 + 3) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed; WebKit 26.6: 67 passed; none failed or not exercised |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` (lifecycle coordinator) | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed |
+| Whitespace | `git diff --check` | Clean |
+
+**Limits.** No screen-reader session; touch long-press was not verified; `firefox-desktop` E2E was not run on macOS,
+where the pinned Firefox does not launch (CI runs it); the residual hysteresis effect on other tooltips above.
+
 ## AS04 quiz grading unit verification — 20 November 2026
 
 Implementation of AS04 ([#32](https://github.com/chi-thanh-nguyen/codemastery/issues/32),
