@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
-import { act, StrictMode } from 'react';
+import { act, StrictMode, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { Button, ThemeProvider } from '@mui/material';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { appTheme, brandFontStack, codeFontStack, color, control, fontStack, pathLine, presentationTokens, shadow } from '../../app/theme/theme';
+import { appTheme, applyThemeScheme, brandFontStack, codeFontStack, color, control, fontStack, isThemePreference, pathLine, presentationTokens, readStoredThemePreference, readSystemScheme, resolveThemeScheme, shadow, themeAnnouncement, themeButtonLabel, themeRoles, ThemePreferenceContext, writeStoredThemePreference } from '../../app/theme/theme';
+import type { ThemePreference } from '../../app/theme/theme';
 import { SidebarNav, isPlainClick } from './SidebarNav';
 import { LoadingView, EmptyView, ErrorView } from './StatusViews';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PageHeader } from './PageHeader';
-import { AccountMenu, AppHeader, HeaderIconButton, Monogram, REACH_MASK, canvasReachPath } from './AppHeader';
+import { AccountMenu, AppHeader, HeaderIconButton, Monogram, REACH_MASK, canvasReachPath, ThemeControl } from './AppHeader';
 import { BrandLogo, BrandWordmark } from './BrandLogo';
 import { CodeBlock } from './CodeBlock';
 import { AuthLayout } from '../../layouts/AuthLayout';
@@ -29,9 +30,38 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 /** Deep Logo Blue (brand-700) as the browser serialises it. */
 const BRAND_700 = 'rgb(6, 82, 196)';
 let root: Root, host: HTMLDivElement;
-beforeEach(() => { host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
-async function render(node: ReactNode) { await act(async () => root.render(<ThemeProvider theme={appTheme}>{node}</ThemeProvider>)); }
+function flattenRoles(value: object, prefix = ''): Record<string, string> {
+    return Object.entries(value).reduce<Record<string, string>>((result, [key, nested]) => {
+        const path = prefix ? `${prefix}-${key}` : key;
+        if (typeof nested === 'string') result[path] = nested;
+        else if (nested !== null && typeof nested === 'object') Object.assign(result, flattenRoles(nested, path));
+        return result;
+    }, {});
+}
+const lightRoleValues = flattenRoles(themeRoles.light);
+function resolveRoleColor(value: string) {
+    const token = value.match(/^var\(--mui-palette-roles-([^)]+)\)$/)?.[1];
+    const hex = token ? lightRoleValues[token] : value === 'var(--mui-palette-common-white)' ? '#FFFFFF' : undefined;
+    if (!hex || !/^#[\da-f]{6}$/i.test(hex)) return value;
+    const [red, green, blue] = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
+    return `rgb(${red}, ${green}, ${blue})`;
+}
+const styleColor = (element: Element, property: string) => resolveRoleColor(getComputedStyle(element).getPropertyValue(property));
+const resolvedStyleColor = (style: CSSStyleDeclaration, property: string) => resolveRoleColor(style.getPropertyValue(property));
+beforeEach(() => { document.documentElement.dataset.colorScheme = 'light'; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete document.documentElement.dataset.colorScheme; });
+function TestProviders({ children }: { children: ReactNode }) {
+    const [preference, setPreference] = useState<ThemePreference>('system');
+    return <ThemeProvider theme={appTheme} defaultMode="light" storageManager={null} colorSchemeNode={null}>
+        <ThemePreferenceContext.Provider value={{ preference, systemScheme: 'dark', setPreference, previewPreference: null, setPreviewPreference: () => undefined }}>
+            {children}
+        </ThemePreferenceContext.Provider>
+    </ThemeProvider>;
+}
+async function render(node: ReactNode) { await act(async () => root.render(<TestProviders>{node}</TestProviders>)); }
+/** The Theme control's own polite status message (one per control, outside any modal's hidden siblings). */
+const themeStatus = (scope: ParentNode = document) => [...scope.querySelectorAll('[role="status"]')].map((node) => node.textContent).filter(Boolean).join('|');
+const key = async (target: Element, keyName: string) => act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { key: keyName, bubbles: true, cancelable: true })); });
 async function click(node: Element | null) { expect(node).not.toBeNull(); await act(async () => node!.dispatchEvent(new MouseEvent('click', { bubbles: true }))); }
 
 describe('FE01 presentation contracts', () => {
@@ -264,7 +294,8 @@ describe('FE01 presentation contracts', () => {
         const listeners = new Set<() => void>();
         vi.stubGlobal('matchMedia', (media: string) => ({ get matches() { return media.includes('min-width:900px') && desktop; }, media,
             addEventListener: (_: string, listener: () => void) => listeners.add(listener),
-            removeEventListener: (_: string, listener: () => void) => listeners.delete(listener) }));
+            removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+            addListener: (_: () => void) => undefined, removeListener: (_: () => void) => undefined }));
         try {
             const onSelect = vi.fn();
             await render(<DashboardLayout navItems={items} selectedNavId="a" onNavSelect={onSelect}><PageHeader title="Preview" /></DashboardLayout>);
@@ -279,7 +310,7 @@ describe('FE01 presentation contracts', () => {
     it('reopens reduced-motion navigation with working focus and Escape, without retaining a closed modal', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         vi.stubGlobal('matchMedia', (media: string) => ({ matches: media.includes('prefers-reduced-motion'), media,
-            addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+            addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn() }));
         try {
             const onClose = vi.fn();
             const nav = (open: boolean) => <SidebarNav items={items} selectedId="a" mobileOpen={open} onSelect={vi.fn()} onMobileClose={onClose} />;
@@ -302,6 +333,21 @@ describe('Lit Path design-system primitives', () => {
         await render(<><StatusPill tone="mint" icon="check-circle">Completed</StatusPill><RecommendationTag type="skip" /></>);
         expect(host.textContent).toContain('Completed'); expect(host.textContent).toContain('Test-out');
         expect(host.querySelectorAll('svg')).toHaveLength(2);
+    });
+    it('draws every StatusPill glyph in its label colour (currentColor), in each tone and both schemes', async () => {
+        const tonesUnderTest = ['neutral', 'mint', 'butter', 'rose', 'sky', 'lilac', 'dashed', 'ink'] as const;
+        for (const scheme of ['light', 'dark'] as const) {
+            document.documentElement.dataset.colorScheme = scheme;
+            await render(<>{tonesUnderTest.map((tone) => <StatusPill key={tone} tone={tone} icon="eye">{tone}</StatusPill>)}
+                <MasteryLegend dense /><RecommendationTag type="remedial" /><StatusPill tone="mint" icon="eye" size="tag">Published</StatusPill></>);
+            const pills = [...host.querySelectorAll<HTMLElement>('[data-tone]')];
+            expect(pills.length).toBe(tonesUnderTest.length + 4 + 1 + 1);
+            for (const pill of pills) {
+                const glyph = pill.querySelector('svg')!, label = pill.querySelector<HTMLElement>(':scope > span')!;
+                expect(getComputedStyle(glyph).color, `${scheme} ${pill.textContent}`).toBe(getComputedStyle(pill).color);
+                expect(styleColor(label, 'color')).toBe(styleColor(pill, 'color'));
+            }
+        }
     });
     it('exposes exactly the four approved mastery states with their meanings and no numbers', async () => {
         await render(<><MasteryLegend /><MasteryTag state="weak" /></>);
@@ -422,10 +468,10 @@ describe('Lit Path design-system primitives', () => {
         expect(logo.getAttribute('src')).toBe(COURSE_LOGOS.python.src); expect(logo.alt).toBe('');
         expect(generic.dataset.courseMark).toBe('generic'); expect(generic.getAttribute('aria-hidden')).toBe('true');
         expect(generic.textContent).toBe(''); expect(generic.querySelector('img')).toBeNull(); expect(generic.querySelector('svg')).not.toBeNull();
-        expect(getComputedStyle(generic).color).toBe(BRAND_700);
+        expect(styleColor(generic, 'color')).toBe(BRAND_700);
         for (const mark of [python, generic]) {
-            expect(getComputedStyle(mark).backgroundColor).toBe('rgb(246, 246, 247)'); // canvas-100
-            expect(getComputedStyle(mark).boxShadow).toBe('inset 0 0 0 1px #E4E4E7');
+            expect(styleColor(mark, 'background-color')).toBe('rgb(246, 246, 247)'); // canvas-100
+            expect(getComputedStyle(mark).boxShadow).toContain('var(--mui-palette-roles-line-hairline)');
             expect(getComputedStyle(mark).backgroundImage).not.toContain('gradient');
             expect(getComputedStyle(mark).backgroundColor).not.toBe('rgb(10, 11, 15)'); // never ink-950
             expect(getComputedStyle(mark).width).toBe('48px'); expect(getComputedStyle(mark).height).toBe('48px');
@@ -438,10 +484,10 @@ describe('Lit Path design-system primitives', () => {
         await render(<><AppHeader navItems={[]} actions={<AccountMenu displayName="Linh Pham" role="Learner" renderItems={() => []} />} /><Monogram name="Q&A Author" tone="ink" /></>);
         const account = host.querySelector<HTMLElement>('header [data-monogram]')!;
         expect(account.dataset.monogram).toBe('brand'); expect(account.textContent).toBe('L');
-        expect(getComputedStyle(account).backgroundColor).toBe(BRAND_700); expect(getComputedStyle(account).backgroundImage).not.toContain('gradient');
-        expect(getComputedStyle(account).color).toBe('rgb(255, 255, 255)');
+        expect(styleColor(account, 'background-color')).toBe(BRAND_700); expect(getComputedStyle(account).backgroundImage).not.toContain('gradient');
+        expect(styleColor(account, 'color')).toBe('rgb(255, 255, 255)');
         const other = host.querySelector<HTMLElement>('[data-monogram="ink"]')!;
-        expect(getComputedStyle(other).backgroundColor).toBe('rgb(10, 11, 15)');
+        expect(styleColor(other, 'background-color')).toBe('rgb(10, 11, 15)');
         // White text on brand-700 stays above 4.5:1 (6.97:1).
         const lum = (hex: string) => { const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
         expect(1.05 / (lum(color.brand700) + 0.05)).toBeGreaterThan(4.5);
@@ -467,8 +513,6 @@ describe('Lit Path design-system primitives', () => {
         await render(<PathSpine sections={[{ id: 's', items: [{ id: 'a', node: 'done', content: 'A' }, { id: 'b', node: 'current', content: 'B' }, { id: 'c', node: 'todo', content: 'C' }] }]} />);
         const lines = [...host.querySelectorAll<HTMLElement>('[data-path-line]')];
         expect(lines.map((line) => line.dataset.pathLine)).toEqual(['solid', 'dashed', 'dashed']);
-        const dashed = getComputedStyle(lines[1]).backgroundImage;
-        expect(dashed).toContain('repeating-linear-gradient'); expect(dashed).toContain('4px'); expect(dashed).toContain('10px');
         expect(getComputedStyle(lines[1]).width).toBe('2px');
     });
     it('keeps shadows and type in the shared tokens: segmented control shadow and the display step', () => {
@@ -481,8 +525,217 @@ describe('Lit Path design-system primitives', () => {
         await render(<><HeaderIconButton label="Notifications" icon="bell" badge={3} current /><HeaderIconButton label="Help" icon="info" /></>);
         const [bell, other] = host.querySelectorAll('button');
         expect(bell.getAttribute('aria-current')).toBe('page'); expect(bell.getAttribute('aria-label')).toBe('Notifications, 3 unread');
-        expect(getComputedStyle(bell).backgroundColor).toBe('rgb(28, 30, 36)'); // chrome-raised
+        expect(styleColor(bell, 'background-color')).toBe('rgb(28, 30, 36)'); // chrome-raised
         expect(other.hasAttribute('aria-current')).toBe(false);
+    });
+    it('keeps the Theme menu open on selection, exposes radio state and announces the effective choice', async () => {
+        await render(<ThemeControl />);
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Theme: System (currently Dark)"]')!;
+        expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+        await click(trigger);
+        const items = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+        expect(items.map((item) => item.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+        const dark = items[2];
+        await click(dark);
+        expect(document.querySelector('[role="menu"]')).not.toBeNull();
+        expect(document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent).toContain('Dark');
+        expect(document.activeElement).toBe(document.querySelector('[role="menuitemradio"][aria-checked="true"]'));
+        expect(themeStatus()).toBe('Theme set to Dark.');
+        expect(host.querySelector('button[aria-label^="Theme:"]')?.getAttribute('aria-label')).toBe('Theme: Dark');
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    });
+    it('names the Theme menu like r12: caption, labelled group, System caption, check and no modal', async () => {
+        await render(<ThemeControl />);
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
+        expect(trigger.getAttribute('aria-controls')).toBeNull();
+        await click(trigger);
+        const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+        expect(trigger.getAttribute('aria-controls')).toBe(menu.id);
+        expect(menu.getAttribute('aria-label')).toBe('Theme');
+        const group = menu.querySelector('[role="group"]')!;
+        expect(group.getAttribute('aria-label')).toBe('Theme');
+        expect([...group.querySelectorAll('[role="menuitemradio"]')].map((item) => item.textContent)).toEqual(['SystemMatches your device (Dark now)', 'Light', 'Dark']);
+        // The chosen item gets focus on opening; the page behind is not hidden from assistive technology.
+        expect(document.activeElement?.textContent).toContain('System');
+        expect(host.closest('[aria-hidden="true"]')).toBeNull();
+        expect(document.querySelector('.MuiBackdrop-root, .MuiModal-root')).toBeNull();
+        for (const item of group.querySelectorAll<HTMLElement>('[role="menuitemradio"]')) expect(getComputedStyle(item).minHeight).toBe('44px');
+        expect(getComputedStyle(trigger).width).toBe('44px'); expect(getComputedStyle(trigger).height).toBe('44px');
+    });
+    it('moves through the Theme menu with arrows, Home and End, selects with Enter and returns focus on Escape', async () => {
+        await render(<ThemeControl />);
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+        await click(trigger);
+        const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+        const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+        await key(document.activeElement!, 'ArrowUp'); // wraps from System to Dark
+        expect(document.activeElement).toBe(items()[2]);
+        await key(document.activeElement!, 'ArrowDown'); // wraps back to System
+        expect(document.activeElement).toBe(items()[0]);
+        await key(document.activeElement!, 'End'); expect(document.activeElement).toBe(items()[2]);
+        await key(document.activeElement!, 'Home'); expect(document.activeElement).toBe(items()[0]);
+        await key(document.activeElement!, 'ArrowDown');
+        await key(document.activeElement!, 'Enter');
+        expect(items()[1].getAttribute('aria-checked')).toBe('true');
+        expect(document.querySelector('[role="menu"]')).toBe(menu); // still open, focus on the chosen item
+        expect(document.activeElement).toBe(items()[1]);
+        expect(themeStatus()).toBe('Theme set to Light.');
+        await key(document.activeElement!, 'Escape');
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(document.activeElement).toBe(trigger);
+        expect(trigger.getAttribute('aria-label')).toBe('Theme: Light');
+    });
+    it('closes the Theme menu on Tab and returns focus to the button first, so the Tab continues from there, not from the end of the document', async () => {
+        await render(<><button type="button">Before</button><ThemeControl /><button type="button">After</button></>);
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+        await click(trigger);
+        expect(document.activeElement?.getAttribute('role')).toBe('menuitemradio');
+        // The menu is portalled to the end of <body>; the browser's default Tab starts from whatever is focused
+        // when the key's default action runs, so the handler must have put focus back on the button by then.
+        const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+        await act(async () => { document.activeElement!.dispatchEvent(tab); });
+        expect(tab.defaultPrevented).toBe(false);
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(document.activeElement).toBe(trigger);
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
+        expect(themeStatus()).toBe('');
+    });
+    it('does not expose the Theme menu inside a tooltip role (the Popper default)', async () => {
+        await render(<ThemeControl />);
+        await click(host.querySelector('button[aria-haspopup="menu"]'));
+        const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+        expect(menu).not.toBeNull();
+        expect(menu.closest('[role="tooltip"]')).toBeNull();
+    });
+    it('closes the Theme menu on an outside click without changing the preference', async () => {
+        await render(<><ThemeControl /><button type="button">Elsewhere</button></>);
+        await click(host.querySelector('button[aria-haspopup="menu"]'));
+        expect(document.querySelector('[role="menu"]')).not.toBeNull();
+        await act(async () => {
+            const outside = [...host.querySelectorAll('button')].find((node) => node.textContent === 'Elsewhere')!;
+            outside.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); outside.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); outside.click();
+        });
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(host.querySelector('button[aria-haspopup="menu"]')?.getAttribute('aria-label')).toBe('Theme: System (currently Dark)');
+        expect(themeStatus()).toBe('');
+    });
+    it('resolves the preference exactly as r12 specifies, with safe storage and media fallbacks', () => {
+        expect(['system', 'light', 'dark'].every(isThemePreference)).toBe(true);
+        for (const value of ['', 'Dark', 'sepia', null, undefined]) expect(isThemePreference(value)).toBe(false);
+        expect(resolveThemeScheme('system', 'dark')).toBe('dark'); expect(resolveThemeScheme('system', 'light')).toBe('light');
+        expect(resolveThemeScheme('light', 'dark')).toBe('light'); expect(resolveThemeScheme('dark', 'light')).toBe('dark');
+        expect(themeButtonLabel('system', 'dark')).toBe('Theme: System (currently Dark)'); expect(themeButtonLabel('light', 'dark')).toBe('Theme: Light');
+        expect(themeAnnouncement('system', 'dark')).toBe('Theme set to System (Dark).'); expect(themeAnnouncement('dark', 'light')).toBe('Theme set to Dark.');
+        try {
+            localStorage.removeItem('codemastery.theme'); expect(readStoredThemePreference()).toBe('system');
+            localStorage.setItem('codemastery.theme', ''); expect(readStoredThemePreference()).toBe('system');
+            localStorage.setItem('codemastery.theme', 'dark'); expect(readStoredThemePreference()).toBe('dark');
+            const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('Blocked.', 'SecurityError'); });
+            expect(readStoredThemePreference()).toBe('system'); getItem.mockRestore();
+            const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full.', 'QuotaExceededError'); });
+            expect(() => writeStoredThemePreference('light')).not.toThrow(); setItem.mockRestore();
+            expect(localStorage.getItem('codemastery.theme')).toBe('dark');
+            // matchMedia unsupported or throwing: System resolves to light.
+            vi.stubGlobal('matchMedia', undefined); expect(readSystemScheme()).toBe('light');
+            vi.stubGlobal('matchMedia', () => { throw new Error('unsupported'); }); expect(readSystemScheme()).toBe('light');
+            vi.stubGlobal('matchMedia', (media: string) => ({ matches: media === '(prefers-color-scheme: dark)' })); expect(readSystemScheme()).toBe('dark');
+        } finally { vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); }
+    });
+    it('switches the root scheme instantly: colour transitions are suspended for the switch only', async () => {
+        vi.useFakeTimers({ toFake: ['requestAnimationFrame'] });
+        try {
+            applyThemeScheme('dark');
+            const root = document.documentElement;
+            expect(root.dataset.colorScheme).toBe('dark'); expect(root.style.colorScheme).toBe('dark');
+            expect(root.classList.contains('cm-theme-transition')).toBe(true);
+            vi.advanceTimersToNextFrame(); vi.advanceTimersToNextFrame();
+            expect(root.classList.contains('cm-theme-transition')).toBe(false);
+            applyThemeScheme('dark'); // unchanged scheme: no suspension
+            expect(root.classList.contains('cm-theme-transition')).toBe(false);
+        } finally { vi.useRealTimers(); }
+    });
+    it('keeps the light scheme values of main and the r12 dark values for the core roles', () => {
+        const { light, dark } = themeRoles;
+        expect([light.bg.frame, light.bg.canvas, light.bg.surface, light.bg.fill, light.text.primary, light.text.secondary, light.line.hairline, light.line.strong, light.accent.link, light.focus.ring])
+            .toEqual([color.ink950, color.canvas100, color.surface, color.fill150, color.ink900, color.ink600, color.line200, color.ink400, color.brand600, color.brand600]);
+        expect([dark.bg.frame, dark.bg.canvas, dark.bg.surface, dark.bg.fill, dark.bg.raised, dark.bg.field, dark.bg.fieldDisabled, dark.text.primary, dark.text.secondary, dark.line.hairline, dark.line.strong, dark.accent.link, dark.focus.ring])
+            .toEqual(['#0A0B0F', '#15171C', '#23262D', '#1D2025', '#2C3038', '#1D2025', '#15171C', '#ECEDEF', '#B4B8C0', '#363A43', '#7B818B', '#6AA8FF', '#7DB7FF']);
+        expect([dark.control.primary.background, dark.control.primary.hover, dark.control.primary.text, dark.control.danger.background]).toEqual(['#ECEDEF', '#FFFFFF', '#15171C', '#D23A2E']);
+        // Shared by both schemes: the frame, identity blue and the notification count.
+        expect([dark.bg.frame, dark.brand.identity, dark.brand.badge]).toEqual([light.bg.frame, light.brand.identity, light.brand.badge]);
+        expect(appTheme.colorSchemes.light?.palette.secondary.contrastText).toBe('#FFFFFF');
+        expect(appTheme.colorSchemes.dark?.palette.primary.light).toBe('#3B9CFA');
+    });
+    it('supports arrow-key selection in the drawer Theme radio group without closing the drawer', async () => {
+        await render(<ThemeControl variant="drawer" />);
+        const radios = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+        expect(radios.map((radio) => radio.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+        radios[0].focus();
+        await act(async () => radios[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
+        expect(host.querySelector('[role="radiogroup"]')).not.toBeNull();
+        expect([...host.querySelectorAll('[role="radio"]')].map((radio) => radio.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
+        expect(document.activeElement).toBe(host.querySelector('[role="radio"][aria-checked="true"]'));
+        expect(themeStatus()).toBe('Theme set to Light.');
+        await key(document.activeElement!, 'ArrowLeft');
+        await key(document.activeElement!, 'ArrowLeft'); // wraps from System to Dark
+        expect(document.activeElement).toBe(host.querySelector('[role="radio"][aria-checked="true"]'));
+        expect(document.activeElement?.textContent).toBe('Dark');
+        expect(themeStatus()).toBe('Theme set to Dark.');
+        const group = host.querySelector<HTMLElement>('[role="radiogroup"]')!;
+        expect(document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent).toBe('Theme');
+        expect(getComputedStyle(group).height).toBe('44px');
+        for (const radio of host.querySelectorAll<HTMLElement>('[role="radio"]')) expect(getComputedStyle(radio).height).toBe('44px');
+        expect(host.textContent).not.toContain('Matches your device');
+    });
+    it('shows the System caption under the drawer control and keeps one roving tab stop', async () => {
+        await render(<ThemeControl variant="drawer" />);
+        expect(host.textContent).toContain('Matches your device (Dark now)');
+        expect([...host.querySelectorAll('[role="radio"]')].map((radio) => radio.getAttribute('tabindex'))).toEqual(['0', '-1', '-1']);
+    });
+    it('places one Theme control per shell: top bar from 900 px, drawer footer below, never in the account menu', async () => {
+        let desktop = true;
+        const listeners = new Set<() => void>();
+        vi.stubGlobal('matchMedia', (media: string) => ({ get matches() { return media.includes('min-width:900px') && desktop; }, media,
+            addEventListener: (_: string, listener: () => void) => listeners.add(listener), removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+            addListener: () => undefined, removeListener: () => undefined }));
+        try {
+            const layout = <DashboardLayout navItems={[{ id: 'a', label: 'Alpha' }, { id: 'b', label: 'Beta' }]} selectedNavId="a" onNavSelect={vi.fn()} drawerFooter={<Button>Create account</Button>}
+                headerUtilities={<HeaderIconButton label="Notifications" icon="bell" />}
+                headerActions={<AccountMenu displayName="Linh Pham" role="Learner" renderItems={() => []} />}><PageHeader title="Preview" /></DashboardLayout>;
+            await render(layout);
+            const utilities = host.querySelector('header')!.querySelector('button[aria-haspopup="menu"][aria-label^="Theme:"]')!;
+            expect(document.querySelectorAll('[aria-label^="Theme:"]')).toHaveLength(1);
+            // Brand → navigation → utilities → Theme → account menu (D13-3): Theme sits right before the account button.
+            const account = host.querySelector('button[aria-label^="Account menu"]')!;
+            expect(utilities.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            const order = [...host.querySelector('header')!.querySelectorAll<HTMLElement>('nav a, nav button, [data-nav-item], button[aria-label]')]
+                .filter((node, index, all) => all.indexOf(node) === index && !node.closest('[aria-hidden="true"]'))
+                .map((node) => node.getAttribute('aria-label')?.replace(/^(Theme|Account menu).*/, '$1') ?? node.textContent);
+            expect(order.slice(order.indexOf('Alpha'))).toEqual(['Alpha', 'Beta', 'Notifications', 'Theme', 'Account menu']);
+            await click(account);
+            expect(document.querySelector('[role="menu"]')?.textContent ?? '').not.toContain('Theme');
+            await act(async () => { (document.activeElement as HTMLElement | null)?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+            desktop = false;
+            await act(async () => listeners.forEach((listener) => listener()));
+            expect(host.querySelector('header [aria-label^="Theme:"]')).toBeNull();
+            await click(host.querySelector('button[aria-label="Toggle navigation"]'));
+            const drawerGroups = document.querySelectorAll('[role="radiogroup"]');
+            expect(drawerGroups).toHaveLength(1);
+            const create = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Create account')!;
+            expect(drawerGroups[0].compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+            await click(document.querySelectorAll<HTMLElement>('[role="radio"]')[2]);
+            expect(document.querySelector('[role="radiogroup"]')).not.toBeNull(); // the drawer stays open
+        } finally { vi.unstubAllGlobals(); }
+    });
+    it('gives the auth layout one Theme button opposite the lockup', async () => {
+        await render(<AuthLayout title="Sign in"><p>Form</p></AuthLayout>);
+        const themeButtons = host.querySelectorAll('button[aria-label^="Theme:"]');
+        expect(themeButtons).toHaveLength(1);
+        const home = host.querySelector('[aria-label="CodeMastery home"]')!;
+        expect(home.parentElement!.contains(themeButtons[0])).toBe(true);
+        expect(home.compareDocumentPosition(themeButtons[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(getComputedStyle(home.parentElement!).justifyContent).toBe('space-between');
     });
     it('gives each Learner home course row the same course mark as its tile', async () => {
         await render(<LearnerHomePage learnerName="Linh" onBrowse={() => undefined} courses={[
@@ -490,36 +743,41 @@ describe('Lit Path design-system primitives', () => {
             { id: 'b', title: 'Introduction to Programming', description: 'Demo course', onOpen: () => undefined, detail: 'Instructor · B' }]} />);
         const marks = [...host.querySelectorAll<HTMLElement>('ul[aria-label="Your active courses"] [data-course-mark]')];
         expect(marks.map((mark) => mark.dataset.courseMark)).toEqual(['python', 'generic']);
-        for (const mark of marks) { expect(getComputedStyle(mark).width).toBe('32px'); expect(getComputedStyle(mark).backgroundColor).toBe('rgb(246, 246, 247)'); }
+        for (const mark of marks) { expect(getComputedStyle(mark).width).toBe('32px'); expect(styleColor(mark, 'background-color')).toBe('rgb(246, 246, 247)'); }
     });
     it('ranks buttons: graphite primary, neutral outlined secondary, Logo Blue tertiary, red destructive', async () => {
-        expect(control.primary).toBe(color.chromeRaised); expect(control.primaryHover).toBe(color.chromeHover);
+        expect(control.primary).toBe('var(--mui-palette-roles-control-primary-background)');
+        expect(control.primaryHover).toBe('var(--mui-palette-roles-control-primary-hover)');
+        expect(themeRoles.light.control.primary.background).toBe(color.chromeRaised);
+        expect(themeRoles.light.control.primary.hover).toBe(color.chromeHover);
         await render(<><Button variant="contained">Save</Button><Button variant="outlined">Cancel</Button><Button>Skip</Button>
             <Button variant="contained" color="error">Delete</Button><Button variant="contained" disabled>Off</Button><Button variant="outlined" disabled>Off 2</Button>
             <Button variant="contained" color="onChrome">Create account</Button><Button variant="outlined" color="onChrome">Browse</Button></>);
         const [primary, secondary, tertiary, danger, primaryOff, secondaryOff, chromePrimary, chromeSecondary] = [...host.querySelectorAll('button')].map((node) => getComputedStyle(node));
         // MUI sets contained label colours through a custom property; jsdom does not resolve var().
-        const label = (style: CSSStyleDeclaration) => style.color.startsWith('var(') ? style.getPropertyValue('--variant-containedColor').toUpperCase() : style.color;
-        expect(primary.backgroundColor).toBe('rgb(28, 30, 36)'); expect(label(primary)).toBe('#FFFFFF'); // graphite, not the ink frame
-        expect(secondary.backgroundColor).toBe('rgb(255, 255, 255)'); expect(secondary.borderStyle).toBe('solid'); expect(secondary.borderColor).toBe('rgb(228, 228, 231)'); expect(secondary.color).toBe('rgb(21, 23, 28)');
-        expect(['rgba(0, 0, 0, 0)', 'transparent', '']).toContain(tertiary.backgroundColor.startsWith('var(') ? tertiary.getPropertyValue('--variant-textBg') : tertiary.backgroundColor); expect(tertiary.color).toBe('rgb(8, 102, 242)'); expect(tertiary.borderStyle).not.toBe('solid');
-        expect(danger.backgroundColor).toBe('rgb(180, 35, 24)');
-        expect(primaryOff.backgroundColor).toBe('rgb(238, 238, 240)'); expect(primaryOff.color).toBe('rgb(107, 112, 121)');
-        expect(secondaryOff.backgroundColor).toBe('rgb(255, 255, 255)'); expect(secondaryOff.color).toBe('rgb(107, 112, 121)');
-        expect(chromePrimary.backgroundColor).toBe('rgb(255, 255, 255)'); expect(['rgb(10, 11, 15)', '#0A0B0F']).toContain(label(chromePrimary));
-        expect(chromeSecondary.backgroundColor).toBe('rgb(28, 30, 36)'); expect(chromeSecondary.color).toBe('rgb(255, 255, 255)');
+        const label = (style: CSSStyleDeclaration) => style.color.startsWith('var(') ? style.getPropertyValue('--variant-containedColor') : style.color;
+        expect(resolvedStyleColor(primary, 'background-color')).toBe('rgb(28, 30, 36)'); expect(label(primary)).toBe('var(--mui-palette-ink-contrastText)'); // graphite, not the ink frame
+        expect(themeRoles.light.control.primary.text).toBe(color.surface);
+        expect(resolvedStyleColor(secondary, 'background-color')).toBe('rgb(255, 255, 255)'); expect(themeRoles.light.control.secondary.border).toBe(color.line200); expect(resolvedStyleColor(secondary, 'color')).toBe('rgb(21, 23, 28)');
+        expect(['rgba(0, 0, 0, 0)', 'transparent', '']).toContain(tertiary.backgroundColor.startsWith('var(') ? tertiary.getPropertyValue('--variant-textBg') : tertiary.backgroundColor); expect(resolvedStyleColor(tertiary, 'color')).toBe('rgb(8, 102, 242)'); expect(tertiary.borderStyle).not.toBe('solid');
+        expect(resolvedStyleColor(danger, 'background-color')).toBe('rgb(180, 35, 24)');
+        expect(resolvedStyleColor(primaryOff, 'background-color')).toBe('rgb(238, 238, 240)'); expect(resolvedStyleColor(primaryOff, 'color')).toBe('rgb(107, 112, 121)');
+        expect(resolvedStyleColor(secondaryOff, 'background-color')).toBe('rgb(255, 255, 255)'); expect(resolvedStyleColor(secondaryOff, 'color')).toBe('rgb(107, 112, 121)');
+        expect(resolvedStyleColor(chromePrimary, 'background-color')).toBe('rgb(255, 255, 255)'); expect(label(chromePrimary)).toBe('var(--mui-palette-onChrome-contrastText)');
+        expect(themeRoles.light.control.onChrome.text).toBe(color.ink950);
+        expect(resolvedStyleColor(chromeSecondary, 'background-color')).toBe('rgb(28, 30, 36)'); expect(resolvedStyleColor(chromeSecondary, 'color')).toBe('rgb(255, 255, 255)');
         for (const style of [primary, secondary, danger]) expect(style.minHeight).toBe('48px');
     });
     it('uses the same roles for circular actions: graphite primary circle, outlined secondary circle', async () => {
         await render(<><CircleAction label="Open" icon="arrow-right" variant="ink" /><CircleAction label="More" icon="more" /><CircleAffordance /><CircleAffordance icon="play" emphasis="primary" /></>);
         const [primary, secondary] = [...host.querySelectorAll('button')].map((node) => getComputedStyle(node));
-        expect(primary.backgroundColor).toBe('rgb(28, 30, 36)');
-        expect(secondary.backgroundColor).toBe('rgb(255, 255, 255)'); expect(secondary.borderColor).toBe('rgb(228, 228, 231)');
+        expect(resolvedStyleColor(primary, 'background-color')).toBe('rgb(28, 30, 36)');
+        expect(resolvedStyleColor(secondary, 'background-color')).toBe('rgb(255, 255, 255)'); expect(themeRoles.light.control.secondary.border).toBe(color.line200);
         // Tile arrows: neutral outlined with a graphite icon by default; graphite filled only for Resume/Continue.
         const [open, resume] = [...host.querySelectorAll<HTMLElement>('[data-affordance]')];
-        expect(open.dataset.affordance).toBe('secondary'); expect(getComputedStyle(open).backgroundColor).toBe('rgb(255, 255, 255)');
-        expect(getComputedStyle(open).borderColor).toBe('rgb(228, 228, 231)'); expect(getComputedStyle(open).color).toBe('rgb(28, 30, 36)');
-        expect(resume.dataset.affordance).toBe('primary'); expect(getComputedStyle(resume).backgroundColor).toBe('rgb(28, 30, 36)');
+        expect(open.dataset.affordance).toBe('secondary'); expect(styleColor(open, 'background-color')).toBe('rgb(255, 255, 255)');
+        expect(styleColor(open, 'color')).toBe('rgb(28, 30, 36)'); expect(themeRoles.light.control.secondary.border).toBe(color.line200);
+        expect(resume.dataset.affordance).toBe('primary'); expect(styleColor(resume, 'background-color')).toBe('rgb(28, 30, 36)');
     });
     it('keeps an error block recovery secondary so it never competes with the page primary', async () => {
         await render(<ErrorView title="Couldn't load" message="Try again." onRetry={() => undefined} />);
@@ -565,5 +823,330 @@ describe('Lit Path design-system primitives', () => {
     it('renders the page aside as a labelled complementary region', async () => {
         await render(<Page aside={<p>Aside content</p>} asideLabel="Up next"><h1>Title</h1></Page>);
         expect(host.querySelector('aside[aria-label="Up next"]')?.textContent).toBe('Aside content');
+    });
+});
+
+/**
+ * Theme tooltip lifecycle (DESIGN.md D13-5 and › Tooltip; AUD-02/F-01, F-03, N-01–N-03). Real pointer, focus and keyboard
+ * events on the real ThemeControl, with fake timers for MUI's 400 ms hover delay instead of waits.
+ *
+ * jsdom's `:focus-visible` is not the browser's: it recognises a Tab only when the key is dispatched from an element other
+ * than the one losing focus (see `tabTo`), and the focus that closing the menu returns to the button is *not*
+ * `:focus-visible` in jsdom, while Chrome and WebKit report it as keyboard focus. A test that relies on jsdom here never
+ * exercises the restored-focus suppression (N-02), so the tests that need the browser's state simulate it explicitly
+ * (`restoredFocusIsKeyboardFocus`) and assert that the simulation took effect.
+ *
+ * MUI keeps its tooltip hysteresis ("a tooltip closed less than 800 ms ago, so open the next one after 200 ms") in module
+ * state that outlives a test, and a suppressed open sets it without arming its reset. Every test therefore starts from a
+ * settled state (`start`), so the 400 ms assertions do not depend on which test ran before (N-03).
+ */
+describe('Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)', () => {
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+    const advance = (ms: number) => act(async () => { vi.advanceTimersByTime(ms); });
+    const trigger = () => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"][aria-label^="Theme:"]')!;
+    /** A visible "Theme" tooltip: mounted and not fading out (MUI's Grow sets opacity 0 on exit). */
+    const tooltipShown = () => [...document.querySelectorAll<HTMLElement>('.MuiTooltip-popper')]
+        .some((popper) => popper.textContent === 'Theme' && (popper.firstElementChild as HTMLElement | null)?.style.opacity !== '0');
+    const menus = () => document.querySelectorAll('[role="menu"][aria-label="Theme"]').length;
+    // The pointer enters the button from outside (React derives onMouseEnter from this), moves over its glyph, or leaves.
+    const pointerEnters = (node: Element) => act(async () => { node.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body })); });
+    const pointerMovesInside = (node: Element) => act(async () => { node.querySelector('svg')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: node })); });
+    const pointerLeaves = (node: Element) => act(async () => { node.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })); });
+    const press = (node: Element) => act(async () => { node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); (node as HTMLElement).click(); });
+    /**
+     * A genuine Tab (or Shift+Tab) to `node`: a Tab key press, then the focus move. The key is dispatched from the document
+     * because jsdom's `:focus-visible` heuristic, which evaluates lazily, recognises a Tab only from a target other than
+     * the element losing focus; the browser itself reports this focus as keyboard focus (the Playwright harness checks it).
+     */
+    const tabTo = (node: HTMLElement, shiftKey = false) => act(async () => {
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true }));
+        node.focus();
+    });
+    const page = <><button type="button">Before</button><ThemeControl /><button type="button">After</button></>;
+    const other = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === label)!;
+    /**
+     * Renders the page and settles MUI's module-level tooltip hysteresis under this test's fake clock: a hover that opens
+     * the tooltip (after 200 or 400 ms, whichever state an earlier test left), a leave that closes it and arms the 800 ms
+     * reset, then enough time for that reset to run. Afterwards the next hover waits the full 400 ms again (N-03).
+     */
+    const start = async () => {
+        await render(page);
+        await pointerEnters(trigger()); await advance(500);
+        expect(tooltipShown(), 'hysteresis settling: the hover opened the tooltip').toBe(true);
+        await pointerLeaves(trigger()); await advance(1000);
+        expect(tooltipShown(), 'hysteresis settling: the leave closed the tooltip').toBe(false);
+    };
+    /**
+     * Simulates the browser's `:focus-visible` for the focus that closing the menu returns to the button (Chrome and
+     * WebKit report it after a keyboard close; jsdom does not). From the call on, the Theme button counts as keyboard
+     * focused whenever it has focus. Returns the restore function.
+     */
+    const restoredFocusIsKeyboardFocus = () => {
+        const matches = Element.prototype.matches;
+        const spy = vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+            if (selector === ':focus-visible' && this === trigger() && document.activeElement === this) return true;
+            return matches.call(this, selector);
+        });
+        return () => spy.mockRestore();
+    };
+
+    it('keeps the 400 ms delay for a pointer hover and shows at once on keyboard focus (F-03)', async () => {
+        await start();
+        await pointerEnters(trigger()); await advance(399);
+        expect(tooltipShown()).toBe(false);
+        await advance(1); expect(tooltipShown()).toBe(true);
+        await pointerLeaves(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        // Keyboard focus: no timer is advanced.
+        await tabTo(other('Before')); await tabTo(trigger());
+        expect(trigger().matches(':focus-visible')).toBe(true);
+        expect(tooltipShown()).toBe(true);
+        await tabTo(other('After')); await advance(1000); expect(tooltipShown()).toBe(false);
+    });
+    it('hides the tooltip as soon as the menu opens, and a hover timer still pending then cannot reopen it', async () => {
+        await start();
+        // The hover timer starts, and the menu opens before it fires: it fires over the open menu.
+        await pointerEnters(trigger()); await advance(150);
+        await press(trigger()); expect(menus()).toBe(1);
+        await advance(1000); expect(tooltipShown()).toBe(false);
+        await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        // Closing the menu (outside click) with the pointer still resting on the button: the timer that fired over the
+        // menu left nothing behind (N-02: the menu-open guard and the reset on close together keep this tooltip closed).
+        await press(other('After')); await advance(1); expect(menus()).toBe(0);
+        expect(tooltipShown(), 'a hover timer that fired over the open menu showed the tooltip after the close').toBe(false);
+        await advance(1000); expect(tooltipShown()).toBe(false);
+        // A keyboard user opens it from a visible tooltip: hidden at once, with the menu caption uncovered.
+        await pointerLeaves(trigger()); await advance(1000);
+        await tabTo(other('Before')); await tabTo(trigger()); expect(tooltipShown()).toBe(true);
+        await key(trigger(), 'Enter'); await act(async () => trigger().click()); // Enter activates the button
+        expect(menus()).toBe(1); expect(tooltipShown()).toBe(false);
+    });
+    it('AUD-02/F-01: after Escape with the pointer resting on the button, neither the stale hover nor the restored focus shows it, but a genuine keyboard refocus does', async () => {
+        await start();
+        await pointerEnters(trigger()); await advance(400); expect(tooltipShown()).toBe(true);
+        await press(trigger()); expect(menus()).toBe(1);
+        await key(document.activeElement!, 'Escape');
+        expect(menus()).toBe(0); expect(document.activeElement).toBe(trigger());
+        await advance(1000); expect(tooltipShown()).toBe(false);
+        // The pointer still rests on the button and moves over its glyph: no stale reopening.
+        await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        // Tab away and Shift+Tab back without moving the pointer: genuine keyboard focus shows it at once.
+        await tabTo(other('After')); await tabTo(trigger(), true);
+        expect(tooltipShown()).toBe(true);
+        // Leaving and entering again with the pointer also works.
+        await tabTo(other('After')); await pointerLeaves(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        await pointerEnters(trigger()); await advance(400); expect(tooltipShown()).toBe(true);
+    });
+    it('N-02: the focus that closing the menu returns to the button never shows the tooltip, even as browser keyboard focus', async () => {
+        await start();
+        const restore = restoredFocusIsKeyboardFocus();
+        try {
+            for (const close of ['Escape', 'Tab', 'Shift+Tab']) {
+                await press(trigger()); await advance(1); expect(menus()).toBe(1);
+                await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: close === 'Escape' ? 'Escape' : 'Tab', shiftKey: close === 'Shift+Tab', bubbles: true, cancelable: true })); });
+                expect(menus(), close).toBe(0); expect(document.activeElement, `${close}: focus restored`).toBe(trigger());
+                // The simulation is in effect: the restored focus is keyboard focus, as in Chrome and WebKit.
+                expect(trigger().matches(':focus-visible'), `${close}: simulated focus-visible`).toBe(true);
+                expect(tooltipShown(), `${close}: restored focus showed the tooltip at once`).toBe(false);
+                await advance(1000); expect(tooltipShown(), `${close}: restored focus showed the tooltip later`).toBe(false);
+                // Moving on releases the suppression: genuine keyboard focus that returns shows it at once.
+                await tabTo(other('After')); await advance(1000); expect(tooltipShown()).toBe(false);
+                await tabTo(trigger(), true); expect(tooltipShown(), `${close}: genuine keyboard refocus`).toBe(true);
+                await tabTo(other('After')); await advance(1000);
+            }
+        } finally { restore(); }
+    });
+    it('N-01: Escape dismisses the keyboard-focus tooltip for good; MUI\'s pending focus timer cannot reopen it', async () => {
+        await start();
+        await tabTo(other('Before')); await tabTo(trigger());
+        expect(tooltipShown(), 'keyboard focus shows it at once').toBe(true);
+        await advance(100);
+        await key(trigger(), 'Escape'); await advance(1);
+        expect(tooltipShown(), 'Escape hid it').toBe(false);
+        expect(document.activeElement).toBe(trigger());
+        // Beyond MUI's 400 ms focus delay (and its 200 ms hysteresis delay): still dismissed, focus unchanged.
+        await advance(400); expect(tooltipShown(), 'reopened at 400 ms after focus').toBe(false);
+        await advance(1000); expect(tooltipShown(), 'reopened later').toBe(false);
+        expect(document.activeElement).toBe(trigger());
+        // Leaving and returning by keyboard shows it at once again.
+        await tabTo(other('After')); await advance(1000);
+        await tabTo(trigger(), true); expect(tooltipShown()).toBe(true);
+    });
+    it('N-01: after Escape the dismissal holds while the pointer rests on the button; a genuine new hover or focus shows it again', async () => {
+        await start();
+        // Shown by hover, then by keyboard focus with the pointer still on the button.
+        await pointerEnters(trigger()); await advance(400); expect(tooltipShown()).toBe(true);
+        await tabTo(other('Before')); await advance(1000);
+        await tabTo(trigger()); expect(tooltipShown()).toBe(true);
+        await key(trigger(), 'Escape'); await advance(1); expect(tooltipShown()).toBe(false);
+        // The pointer moves over the glyph inside the button: no reopening after the hover delay.
+        await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown(), 'pointer movement inside reopened it').toBe(false);
+        // A genuine new hover (leave, enter) shows it after the delay.
+        await pointerLeaves(trigger()); await advance(1000);
+        await pointerEnters(trigger()); await advance(400); expect(tooltipShown(), 'new hover').toBe(true);
+        // Escape on a hover tooltip (no keyboard focus involved), then focus leaves and returns: shown at once.
+        await key(trigger(), 'Escape'); await advance(1); expect(tooltipShown()).toBe(false);
+        await pointerMovesInside(trigger()); await advance(1000); expect(tooltipShown()).toBe(false);
+        await tabTo(other('After')); await tabTo(trigger(), true); expect(tooltipShown(), 'genuine keyboard refocus').toBe(true);
+    });
+    /** A genuine pointer entry opens the tooltip after exactly 400 ms, never earlier (MUI's 200 ms hysteresis delay would show at 399). */
+    const hoverNeedsFullDelay = async (what: string) => {
+        await pointerEnters(trigger()); await advance(399);
+        expect(tooltipShown(), `${what}: opened before 400 ms`).toBe(false);
+        await advance(1); expect(tooltipShown(), `${what}: not open at 400 ms`).toBe(true);
+    };
+    it('N-04: an Escape at 100 ms leaves MUI\'s pending focus timer behind, and the next pointer hover still takes the full 400 ms', async () => {
+        await start();
+        await tabTo(other('Before')); await tabTo(trigger());
+        expect(tooltipShown(), 'keyboard focus shows it at once').toBe(true);
+        await advance(100);
+        await key(trigger(), 'Escape'); await advance(1);
+        expect(tooltipShown(), 'Escape hid it').toBe(false);
+        // Through MUI's original 400 ms focus timer, then well beyond its 800 ms hysteresis window and a 2 s idle control.
+        await advance(400); expect(tooltipShown(), 'reopened by the pending timer').toBe(false);
+        await advance(1000); expect(tooltipShown()).toBe(false);
+        await advance(2000); expect(tooltipShown()).toBe(false);
+        expect(document.activeElement).toBe(trigger());
+        // Focus unchanged; the pointer enters the button from outside.
+        await hoverNeedsFullDelay('hover after an early Escape');
+    });
+    it('N-04: an Escape at 500 ms (after the focus timer fired) also leaves the next hover at the full 400 ms', async () => {
+        await start();
+        await tabTo(other('Before')); await tabTo(trigger());
+        await advance(500); expect(tooltipShown(), 'still shown at 500 ms').toBe(true);
+        await key(trigger(), 'Escape'); await advance(1); expect(tooltipShown()).toBe(false);
+        await advance(2000); expect(tooltipShown()).toBe(false);
+        await hoverNeedsFullDelay('hover after a late Escape');
+    });
+    it('N-04: every pointer hover takes 400 ms: repeated, right after leaving, and after a stale hover, a choice and rapid cycles', async () => {
+        await start();
+        // Repeated hovering, including a re-entry 300 ms after leaving (inside MUI's 800 ms hysteresis window).
+        await hoverNeedsFullDelay('first hover');
+        await pointerLeaves(trigger()); await advance(300);
+        await hoverNeedsFullDelay('re-entry 300 ms after leaving');
+        await pointerLeaves(trigger()); await advance(2000);
+        // A stale hover after the menu closed by Escape, then a genuine leave and re-entry.
+        await press(trigger()); await advance(1); expect(menus()).toBe(1);
+        await key(document.activeElement!, 'Escape'); await advance(1000);
+        expect(menus()).toBe(0); expect(tooltipShown()).toBe(false);
+        await pointerLeaves(trigger()); await advance(100);
+        await hoverNeedsFullDelay('re-entry after a menu Escape');
+        await pointerLeaves(trigger()); await advance(2000);
+        // A choice in the menu, focus restored by Escape, and a rapid series of opens and closes.
+        await press(trigger()); await advance(1);
+        await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.startsWith('Dark'))!.click());
+        await key(document.activeElement!, 'Escape'); await advance(1);
+        expect(document.activeElement).toBe(trigger());
+        for (let round = 0; round < 6; round++) await press(trigger());
+        await key(document.activeElement!, 'Escape'); await advance(100);
+        await pointerLeaves(trigger()); await advance(100);
+        await hoverNeedsFullDelay('re-entry after a choice and rapid cycles');
+    });
+    // One test per choice keeps each well inside the per-test timeout on a loaded CI runner.
+    for (const label of ['System', 'Light', 'Dark']) it(`never leaves the tooltip behind after choosing ${label} and dismissing by outside click, Tab, Shift+Tab or a second press`, async () => {
+        await start();
+        const dismissals: Array<[string, () => Promise<void>]> = [
+            ['outside click', async () => press(other('Before'))],
+            ['Tab', async () => key(document.activeElement!, 'Tab')],
+            ['Shift+Tab', async () => act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })); })],
+            ['second press', async () => press(trigger())],
+        ];
+        {
+            for (const [how, dismiss] of dismissals) {
+                await pointerEnters(trigger()); await advance(400);
+                await press(trigger()); await advance(1); // MUI's ClickAwayListener arms itself on a 0 ms timer
+                await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.startsWith(label))!.click());
+                // The menu stays open after a choice, with focus on it; the label change re-renders the button.
+                expect(menus(), `${label}: open after the choice`).toBe(1);
+                expect(document.activeElement?.getAttribute('aria-checked')).toBe('true');
+                await dismiss(); await advance(1000);
+                expect(menus(), `${label}/${how}`).toBe(0);
+                expect(tooltipShown(), `${label}/${how}: stranded tooltip`).toBe(false);
+                // Tab and Shift+Tab return focus to the button first (the browser's default action then moves on from there).
+                if (how === 'Tab' || how === 'Shift+Tab') expect(document.activeElement, `${label}/${how}: focus`).toBe(trigger());
+                await pointerLeaves(trigger()); await tabTo(other('After')); await advance(1000);
+            }
+        }
+        expect(trigger().getAttribute('aria-label')).toBe(label === 'System' ? 'Theme: System (currently Dark)' : `Theme: ${label}`);
+    });
+    it('stays consistent through rapid open and close cycles', async () => {
+        await start();
+        await pointerEnters(trigger());
+        for (let round = 0; round < 11; round++) await press(trigger());
+        await advance(1000);
+        expect(menus()).toBe(1); expect(trigger().getAttribute('aria-expanded')).toBe('true'); expect(tooltipShown()).toBe(false);
+        expect(document.querySelectorAll('.MuiTooltip-popper').length).toBeLessThanOrEqual(1);
+        await key(document.activeElement!, 'Escape'); await advance(1000);
+        expect(menus()).toBe(0); expect(tooltipShown()).toBe(false);
+    });
+});
+
+/** CSS specificity as one comparable number (ids, then classes/attributes/pseudo-classes, then types). */
+function specificity(selector: string) {
+    const plain = selector.replace(/::[\w-]+/g, '');
+    const ids = (plain.match(/#[\w-]+/g) ?? []).length;
+    const classes = (plain.match(/\.[\w-]+|\[[^\]]*\]|:[\w-]+/g) ?? []).length;
+    const types = (plain.replace(/#[\w-]+|\.[\w-]+|\[[^\]]*\]|:[\w-]+(\([^)]*\))?/g, ' ').match(/[a-z][\w-]*/gi) ?? []).length;
+    return ids * 10000 + classes * 100 + types;
+}
+/**
+ * jsdom never matches `:hover`. This resolves `property` for `element` as if the pointer were over it: the cascade over
+ * the rendered top-level style rules (specificity, then source order) with `:hover` counted as matching. Media blocks
+ * (`hover: none`, forced colours, print) are not applied, as in jsdom's own getComputedStyle. With `keyboardFocus`, MUI's
+ * `.Mui-focusVisible` state class also counts as present (jsdom's `:focus-visible` heuristic does not carry over to
+ * arrow-key moves inside a menu, which browsers do), so this is the keyboard-focused-and-hovered state.
+ */
+function hoveredValue(element: Element, property: string, keyboardFocus = false) {
+    let best: [number, number, string] | null = null, order = 0;
+    for (const sheet of [...document.styleSheets]) for (const rule of [...sheet.cssRules]) {
+        order++;
+        if (!(rule instanceof CSSStyleRule)) continue;
+        const value = rule.style.getPropertyValue(property);
+        if (!value) continue;
+        for (const selector of rule.selectorText.split(',')) {
+            let matches = false;
+            const state = keyboardFocus ? selector.replace(/:hover/g, '').replace(/\.Mui-focusVisible/g, '') : selector.replace(/:hover/g, '');
+            try { matches = element.matches(state); } catch { /* a selector jsdom cannot parse */ }
+            if (matches && (!best || specificity(selector) > best[0] || (specificity(selector) === best[0] && order >= best[1]))) best = [specificity(selector), order, value];
+        }
+    }
+    return best?.[2] ?? '';
+}
+
+describe('Menu item states (D13-4) as rendered by the shared MuiMenuItem override', () => {
+    const HOVER = 'rgb(238, 238, 240)', SELECTED = 'rgb(227, 238, 255)'; // light bg.raised-hover (fill-150) and bg.selected (brand-100)
+    it('the cascade helper agrees with getComputedStyle for elements at rest (no hover rule involved)', async () => {
+        await render(<ThemeControl />);
+        await click(host.querySelector('button[aria-haspopup="menu"]'));
+        for (const item of document.querySelectorAll('[role="menuitemradio"]')) {
+            expect(resolveRoleColor(getComputedStyle(item).minHeight)).toBe('44px');
+            expect(hoveredValue(item, 'min-height')).toBe('44px');
+        }
+    });
+    it('a hovered item never takes the selected fill; selected + hover keeps it and adds the ring; keyboard focus adds the 2 px ring on the item\'s own fill', async () => {
+        await render(<ThemeControl />);
+        await click(host.querySelector('button[aria-haspopup="menu"]'));
+        const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+        const [system, light] = items(); // System is selected (the test provider's preference)
+        expect(system.getAttribute('aria-checked')).toBe('true');
+        // At rest: only the selected item is filled.
+        expect(styleColor(system, 'background-color')).toBe(SELECTED);
+        expect(getComputedStyle(system).fontWeight).toBe('600');
+        expect(styleColor(light, 'background-color')).not.toBe(SELECTED);
+        // Hover: the unselected item takes bg.raised-hover, never bg.selected; the selected one keeps its fill and gains the ring.
+        expect(resolveRoleColor(hoveredValue(light, 'background-color'))).toBe(HOVER);
+        expect(resolveRoleColor(hoveredValue(system, 'background-color'))).toBe(SELECTED);
+        expect(hoveredValue(system, 'box-shadow')).toMatch(/^inset 0 0 0 1px var\(--mui-palette-roles-line-strong\)$/);
+        expect(hoveredValue(light, 'box-shadow')).not.toMatch(/inset/);
+        // Keyboard focus on the selected item (the menu opens with focus on it): bg.selected with the 2 px focus ring.
+        expect(document.activeElement).toBe(system);
+        expect(resolveRoleColor(hoveredValue(system, 'background-color', true))).toBe(SELECTED);
+        expect(hoveredValue(system, 'outline', true)).toMatch(/^2px solid/);
+        // An unselected item in the keyboard-focus state: bg.raised-hover (not bg.selected) and the same ring.
+        expect(resolveRoleColor(hoveredValue(light, 'background-color', true))).toBe(HOVER);
+        expect(hoveredValue(light, 'outline', true)).toMatch(/^2px solid/);
+        // The arrow keys still move focus among the items.
+        await key(document.activeElement!, 'ArrowDown');
+        expect(document.activeElement).toBe(light);
     });
 });

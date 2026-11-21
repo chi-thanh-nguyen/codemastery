@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Box, useMediaQuery, useTheme } from '@mui/material';
-import { AppHeader } from '../shared/components/AppHeader';
+import { AppHeader, ThemeControl } from '../shared/components/AppHeader';
 import { SidebarNav } from '../shared/components/SidebarNav';
 import type { NavItem } from '../shared/components/SidebarNav';
-import { color, presentationTokens, radius } from '../app/theme/theme';
+import { presentationTokens, radius, roles } from '../app/theme/theme';
 
 export interface DashboardLayoutProps {
     /** Retained for API compatibility; the wordmark names the product. */
@@ -13,6 +13,9 @@ export interface DashboardLayoutProps {
     navItems: NavItem[];
     selectedNavId?: string;
     onNavSelect: (id: string) => void;
+    /** Page utilities placed left of the Theme button (for example the notification bell). */
+    headerUtilities?: ReactNode;
+    /** Session actions right of the Theme button: the account menu, or Sign in and Create account. */
     headerActions?: ReactNode;
     headerSearch?: ReactNode;
     /** Account and utility content repeated at the bottom of the mobile drawer. */
@@ -38,7 +41,7 @@ export function canvasOutlinePath(width: number, height: number, rise: number, t
 }
 
 /** Ink frame + sticky top bar + rounded canvas (DESIGN.md › Layout › Shell). */
-export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerActions, headerSearch, drawerFooter, banner, brandHref, onBrandSelect, children }: DashboardLayoutProps) {
+export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerUtilities, headerActions, headerSearch, drawerFooter, banner, brandHref, onBrandSelect, children }: DashboardLayoutProps) {
     const [mobileOpen, setMobileOpen] = useState(false);
     const theme = useTheme();
     const desktop = useMediaQuery(theme.breakpoints.up('md')), inset = useMediaQuery(theme.breakpoints.up('sm'));
@@ -63,17 +66,18 @@ export function DashboardLayout({ navItems, selectedNavId, onNavSelect, headerAc
             ?? document.getElementById('main-content');
         target?.focus();
     }, [desktop, mobileOpen]);
-    return <Box sx={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', bgcolor: color.ink950 }}>
+    return <Box sx={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', bgcolor: roles.bg.frame }}>
         <Box component="a" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}
-            sx={{ position: 'absolute', left: 16, top: -80, zIndex: 'tooltip', px: 2.5, py: 1.5, borderRadius: `${radius.pill}px`, bgcolor: 'common.white', color: color.ink950,
+            sx={{ position: 'absolute', left: 16, top: -80, zIndex: 'tooltip', px: 2.5, py: 1.5, borderRadius: `${radius.pill}px`, bgcolor: roles.control.onChrome.background, color: roles.control.onChrome.text,
                 fontWeight: 600, textDecoration: 'none', '&:focus': { top: 12 } }}>
             Skip to main content
         </Box>
-        <AppHeader navItems={navItems} selectedNavId={selectedNavId} onNavSelect={onNavSelect} actions={headerActions} search={headerSearch}
+        <AppHeader navItems={navItems} selectedNavId={selectedNavId} onNavSelect={onNavSelect} utilities={headerUtilities} actions={headerActions} search={headerSearch}
             brandHref={brandHref} onBrandSelect={onBrandSelect} onMenuToggle={() => setMobileOpen((open) => !open)} menuOpen={mobileOpen && !desktop} />
-        <SidebarNav items={navItems} selectedId={selectedNavId} onSelect={onNavSelect} footer={drawerFooter}
+        <SidebarNav items={navItems} selectedId={selectedNavId} onSelect={onNavSelect}
+            footer={<Box sx={{ display: 'grid', gap: 2 }}><ThemeControl variant="drawer" />{drawerFooter}</Box>}
             mobileOpen={mobileOpen && !desktop} onMobileClose={() => setMobileOpen(false)} />
-        <Box component="main" id="main-content" tabIndex={-1} ref={canvas} sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', bgcolor: color.canvas100,
+        <Box component="main" id="main-content" tabIndex={-1} ref={canvas} sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', bgcolor: roles.bg.canvas,
             mx: { xs: 0, sm: `${presentationTokens.canvasInset}px` }, mb: { xs: 0, sm: `${presentationTokens.canvasInset}px` },
             // Starts RISE px under the sticky bar (padding keeps content where it was); the bar's reach opening shows it.
             mt: `-${RISE}px`, pt: `${RISE}px`, clipPath: outline,
@@ -104,7 +108,7 @@ export function Page({ children, aside, asideLabel, width = 'wide', stickyAside 
         gridTemplateColumns: aside ? { xs: 'minmax(0, 1fr)', lg: `minmax(0, 1fr) ${presentationTokens.asideWidth}px`, xl: `minmax(0, 1fr) ${presentationTokens.asideWidthWide}px` } : 'minmax(0, 1fr)' }}>
         <Box sx={{ ...padding, minWidth: 0, width: '100%', maxWidth: aside ? undefined : maxWidth + 80, mx: aside ? 0 : 'auto', boxSizing: 'border-box',
             ...(aside && width !== 'wide' ? { '& > *': { maxWidth } } : {}) }}>{children}</Box>
-        {aside && <Box component="aside" aria-label={asideLabel} sx={{ minWidth: 0, bgcolor: color.fill150, boxSizing: 'border-box',
+        {aside && <Box component="aside" aria-label={asideLabel} sx={{ minWidth: 0, bgcolor: roles.bg.fill, boxSizing: 'border-box',
             px: { xs: 2, sm: 3 }, py: { xs: 3, lg: 5 }, mx: { xs: 2, sm: 3, md: 4, lg: 0 }, mb: { xs: 4, lg: 0 },
             borderRadius: { xs: `${radius.lg}px`, lg: 0 } }}>
             {stickyAside ? <Box sx={{ position: { lg: 'sticky' }, top: { lg: presentationTokens.topBarHeight + 24 } }}>{aside}</Box> : aside}

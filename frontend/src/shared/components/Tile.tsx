@@ -5,7 +5,7 @@ import { PresentationIcon } from './PresentationIcon';
 import { CourseMark } from './CourseMark';
 import { isPlainClick } from './SidebarNav';
 import type { PresentationIconName } from './PresentationIcon';
-import { color, control, motion, radius, shadow, tones } from '../../app/theme/theme';
+import { control, motion, radius, shadow, tones, roles } from '../../app/theme/theme';
 import type { Tone } from '../../app/theme/theme';
 
 export interface TileProps {
@@ -22,12 +22,12 @@ export interface TileProps {
 /** Borderless white tile at 24 px radius (DESIGN.md › Tiles). Never nest tiles. */
 export function Tile({ children, component = 'div', interactive = false, padding = 3, sx, ...rest }: TileProps) {
     return <Box component={component} {...rest} sx={[{
-        position: 'relative', bgcolor: color.surface, borderRadius: `${radius.lg}px`, p: padding, minWidth: 0, boxSizing: 'border-box',
+        position: 'relative', bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, p: padding, minWidth: 0, boxSizing: 'border-box',
         ...(interactive ? {
             transition: `transform ${motion.standard}ms ${motion.easeIn}, box-shadow ${motion.standard}ms ${motion.easeIn}`,
             // The whole tile is the link: hovering it also fills a secondary arrow circle, like a hovered secondary button.
-            '@media (hover: hover) and (pointer: fine)': { '&:hover': { transform: 'translateY(-2px)', boxShadow: shadow.hover, '& [data-affordance="secondary"]': { bgcolor: color.fill150 } } },
-            '&:focus-within:has(a[data-tile-link]:focus-visible)': { boxShadow: `0 0 0 2px ${color.brand600}` },
+            '@media (hover: hover) and (pointer: fine)': { '&:hover': { transform: 'translateY(-2px)', boxShadow: shadow.hover, '& [data-affordance="secondary"]': { bgcolor: roles.bg.fill } } },
+            '&:focus-within:has(a[data-tile-link]:focus-visible)': { boxShadow: `0 0 0 2px ${roles.focus.ring}` },
         } : {}),
     }, ...(Array.isArray(sx) ? sx : [sx])]}>{children}</Box>;
 }
@@ -59,7 +59,7 @@ export function TileLayer({ children, sx }: { children: ReactNode; sx?: SxProps<
 /** 40 px marker overlapping the tile's top-right corner. Decorative: its meaning is repeated as a text tag. */
 export function CornerBadge({ tone, icon }: { tone: Tone; icon: PresentationIconName }) {
     return <Box aria-hidden sx={{ position: 'absolute', top: -12, right: -12, width: 40, height: 40, borderRadius: '50%', bgcolor: tones[tone].tint,
-        border: `4px solid ${color.canvas100}`, display: 'grid', placeItems: 'center', color: tones[tone].strong, zIndex: 2, '& svg': { fontSize: 18 } }}>
+        border: `4px solid ${roles.bg.canvas}`, display: 'grid', placeItems: 'center', color: tones[tone].strong, zIndex: 2, '& svg': { fontSize: 18 } }}>
         <PresentationIcon name={icon} />
     </Box>;
 }
@@ -80,14 +80,14 @@ export interface CircleActionProps {
 export function CircleAction({ label, icon, onClick, href, variant = 'fill', disabled, size = 'md', ...aria }: CircleActionProps) {
     const s = size === 'sm' ? 36 : 44;
     // ink = primary (graphite fill); fill = secondary (neutral outlined circle); plain = no surface.
-    const palette = variant === 'ink' ? { bgcolor: control.primary, color: color.surface, '&:hover': { bgcolor: control.primaryHover } }
+    const palette = variant === 'ink' ? { bgcolor: control.primary, color: roles.control.primary.text, '&:hover': { bgcolor: control.primaryHover } }
         : variant === 'fill' ? control.secondary
-            : { color: color.ink700, '&:hover': { bgcolor: color.fill150 } };
+            : { color: roles.text.strongSecondary, '&:hover': { bgcolor: roles.bg.fill } };
     return <Tooltip title={label}>
         <span style={{ display: 'inline-flex' }}>
             <IconButton aria-label={label} onClick={(event: MouseEvent) => { if (href && onClick) event.preventDefault(); onClick?.(); }} disabled={disabled}
                 {...(href ? { component: 'a', href } : {})} {...aria}
-                sx={{ width: s, height: s, flexShrink: 0, ...palette, '&.Mui-disabled': { bgcolor: variant === 'plain' ? 'transparent' : variant === 'fill' ? color.surface : color.fill150, color: variant === 'plain' ? color.line200 : color.ink500 }, '& svg': { fontSize: 20 } }}>
+                sx={{ width: s, height: s, flexShrink: 0, ...palette, '&.Mui-disabled': { bgcolor: variant === 'plain' ? 'transparent' : variant === 'fill' ? roles.bg.surface : roles.bg.fill, color: variant === 'plain' ? roles.line.hairline : roles.text.disabled }, '& svg': { fontSize: 20 } }}>
                 <PresentationIcon name={icon} />
             </IconButton>
         </span>
@@ -100,8 +100,8 @@ export function CircleAction({ label, icon, onClick, href, variant = 'fill', dis
  * `primary`: graphite circle, only for the one important next step (Resume, Continue).
  */
 export function CircleAffordance({ icon = 'arrow-right', emphasis = 'secondary' }: { icon?: PresentationIconName; emphasis?: 'primary' | 'secondary' }) {
-    const surface = emphasis === 'primary' ? { bgcolor: control.primary, color: color.surface }
-        : { bgcolor: color.surface, color: control.primary, border: `1px solid ${color.line200}`, boxSizing: 'border-box' };
+    const surface = emphasis === 'primary' ? { bgcolor: control.primary, color: roles.control.primary.text }
+        : { bgcolor: roles.bg.surface, color: control.primary, border: `1px solid ${roles.line.hairline}`, boxSizing: 'border-box' };
     return <Box aria-hidden data-affordance={emphasis} sx={{ width: 44, height: 44, borderRadius: '50%', ...surface, display: 'grid', placeItems: 'center',
         flexShrink: 0, pointerEvents: 'none', transition: `background-color ${motion.fast}ms`, '& svg': { fontSize: 20 } }}><PresentationIcon name={icon} /></Box>;
 }
@@ -109,9 +109,9 @@ export function CircleAffordance({ icon = 'arrow-right', emphasis = 'secondary' 
 export interface StatTileProps { value: ReactNode; label: string; tone?: 'sky' | 'mint' | 'butter' | 'lilac' | 'neutral' | 'dashed' | 'white' }
 /** Real counts only. Dashed means "not yet" (Remaining, Unknown). */
 export function StatTile({ value, label, tone = 'white' }: StatTileProps) {
-    const bg = tone === 'dashed' || tone === 'white' ? color.surface : tone === 'neutral' ? color.fill150 : tones[tone].tint;
-    return <Box component="li" sx={{ flex: '1 1 0', minWidth: 112, bgcolor: bg, borderRadius: `${radius.lg}px`, p: { xs: 2, sm: 2.5 }, textAlign: 'center',
-        border: tone === 'dashed' ? `1.5px dashed ${color.ink400}` : 0, boxSizing: 'border-box', listStyle: 'none' }}>
+    const bg = tone === 'dashed' || tone === 'white' ? roles.bg.surface : tone === 'neutral' ? roles.bg.fill : tones[tone].tint;
+    return <Box component="li" data-tone={tone} sx={{ flex: '1 1 0', minWidth: 112, bgcolor: bg, borderRadius: `${radius.lg}px`, p: { xs: 2, sm: 2.5 }, textAlign: 'center',
+        border: tone === 'dashed' ? `1.5px dashed ${roles.line.strong}` : 0, boxSizing: 'border-box', listStyle: 'none' }}>
         <Typography component="span" variant="stat" sx={{ display: 'block' }}>{value}</Typography>
         <Typography component="span" sx={{ display: 'block', mt: 1, color: 'text.secondary', fontWeight: 500 }}>{label}</Typography>
     </Box>;

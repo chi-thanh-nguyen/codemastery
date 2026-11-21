@@ -4,7 +4,7 @@ import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import { StatusPill } from '../../../shared/components/StatusPill';
 import { Monogram } from '../../../shared/components/AppHeader';
 import type { DiscussionPostView, DiscussionReplyView } from '../types/interactionTypes';
-import { color, radius } from '../../../app/theme/theme';
+import { radius, roles } from '../../../app/theme/theme';
 
 export interface DiscussionPanelProps {
     lessonTitle: string;
@@ -24,16 +24,16 @@ export function DiscussionPanel({ lessonTitle, posts, onAsk, onReply, onReport, 
         <Typography id="discussion-title" variant="h2" sx={{ mb: .5 }}>{title}</Typography>
         <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>Questions about “{lessonTitle}”. Your instructor gets notified.</Typography>
         {onAsk && <Box component="form" onSubmit={(event) => { event.preventDefault(); if (!draft.trim()) { setError('Write your question first.'); return; } onAsk(draft.trim()); setDraft(''); setError(null); }}
-            sx={{ bgcolor: color.surface, borderRadius: `${radius.lg}px`, p: 2.5, mb: 3 }}>
+            sx={{ bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, p: 2.5, mb: 3 }}>
             <TextField label="Ask a question" name="question" multiline minRows={3} fullWidth value={draft} onChange={(event) => setDraft(event.target.value)} error={!!error} helperText={error ?? 'Be specific: include the line of code or the step that confused you.'} />
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.5 }}><Button type="submit" variant="contained" startIcon={<PresentationIcon name="send" />}>Post question</Button></Box>
         </Box>}
-        {posts.length === 0 ? <Box sx={{ border: `1.5px dashed ${color.ink400}`, borderRadius: `${radius.lg}px`, p: 3, textAlign: 'center' }}>
+        {posts.length === 0 ? <Box sx={{ border: `1.5px dashed ${roles.line.strong}`, borderRadius: `${radius.lg}px`, p: 3, textAlign: 'center' }}>
             <Typography sx={{ fontWeight: 600 }}>No questions yet</Typography><Typography variant="body2" sx={{ color: 'text.secondary', mt: .5 }}>Questions about this lesson will appear here.</Typography>
         </Box> : <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 2 }}>
-            {posts.map((post) => <Box component="li" key={post.id} sx={{ bgcolor: color.surface, borderRadius: `${radius.lg}px`, p: { xs: 2, sm: 2.5 } }}>
+            {posts.map((post) => <Box component="li" key={post.id} sx={{ bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, p: { xs: 2, sm: 2.5 } }}>
                 <Post item={post} onReport={onReport} />
-                {post.replies.length > 0 && <Box component="ul" aria-label="Replies" sx={{ listStyle: 'none', m: 0, mt: 2, p: 0, pl: { xs: 2, sm: 6 }, display: 'grid', gap: 2, borderLeft: { xs: `2px solid ${color.line200}`, sm: 0 } }}>
+                {post.replies.length > 0 && <Box component="ul" aria-label="Replies" sx={{ listStyle: 'none', m: 0, mt: 2, p: 0, pl: { xs: 2, sm: 6 }, display: 'grid', gap: 2, borderLeft: { xs: `2px solid ${roles.line.hairline}`, sm: 0 } }}>
                     {post.replies.map((reply) => <Box component="li" key={reply.id}><Post item={reply} onReport={onReport} /></Box>)}
                 </Box>}
                 {canReply && onReply && <ReplyComposer onSend={(text) => onReply(post.id, text)} />}

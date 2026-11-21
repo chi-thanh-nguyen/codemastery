@@ -1,5 +1,5 @@
 import { Box } from '@mui/material';
-import { color, radius } from '../../app/theme/theme';
+import { radius, roles } from '../../app/theme/theme';
 import { PresentationIcon } from './PresentationIcon';
 import pythonLogo from './course-logo-python.svg';
 import typescriptLogo from './course-logo-typescript.svg';
@@ -76,10 +76,10 @@ export function CourseMark({ title, description, size = 48 }: CourseMarkProps) {
     // One neutral container for every course: canvas ground, inset hairline, rounded.md at the 48 px
     // tile size (scaled with the mark so smaller marks keep the same squircle).
     const container = { position: 'relative', width: size, height: size, flexShrink: 0, overflow: 'hidden',
-        borderRadius: `${Math.round((radius.md * size) / 48)}px`, bgcolor: color.canvas100, boxShadow: `inset 0 0 0 1px ${color.line200}` } as const;
+        borderRadius: `${Math.round((radius.md * size) / 48)}px`, bgcolor: roles.bg.courseMark, boxShadow: `inset 0 0 0 1px ${roles.line.hairline}` } as const;
     if (!logo) {
         // No letters: one Deep Logo Blue code glyph, the same for every such course.
-        return <Box aria-hidden data-course-mark="generic" sx={{ ...container, display: 'grid', placeItems: 'center', color: color.brand700 }}>
+        return <Box aria-hidden data-course-mark="generic" sx={{ ...container, display: 'grid', placeItems: 'center', color: roles.brand.courseMark }}>
             <PresentationIcon name="code" sx={{ fontSize: Math.round(size * 0.5), display: 'block' }} />
         </Box>;
     }
