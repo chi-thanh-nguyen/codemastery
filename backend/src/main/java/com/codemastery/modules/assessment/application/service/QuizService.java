@@ -8,6 +8,7 @@ import com.codemastery.modules.assessment.domain.model.Quiz;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository.Member;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import com.codemastery.modules.course.application.service.CourseManagementService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -30,11 +31,10 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>Every operation first consumes a CT03 assertion: Course ownership for authoring and owner
  * reads, Learner Course access for the learner list. Writes then run inside ADR005's Course
  * configuration guard, which locks the Course root before the quiz row, so composition, publication
- * and the attempt-existence probe share one serialization point with attempt start. That guard is
- * not implemented yet, so {@link #withCourseConfigurationWrite(UUID, Supplier)} fails closed with a
- * safe 500 (B3Failure) instead of substituting another lock. It mirrors the approved producer
- * signature exactly and becomes a single delegation when CO14 (#177) integrates it. Question scope
- * comes from {@link QuestionSelectionService}, which has the same fail-closed CT40 seam.
+ * and the attempt-existence probe share one serialization point with attempt start.
+ * {@link #withCourseConfigurationWrite(UUID, Supplier)} mirrors the approved producer signature and
+ * delegates to CO14's (#177) guard. Question scope comes from {@link QuestionSelectionService},
+ * whose CT40 seam fails closed until AD07 (#165) is on {@code main}.
  *
  * <p>Reads run in one read-only REPEATABLE READ snapshot covering admission, rows and count.
  */
@@ -85,12 +85,14 @@ public class QuizService {
     private final QuizRepository quizzes;
     private final QuestionSelectionService selection;
     private final CourseAccessService courseAccess;
+    private final CourseManagementService courseConfiguration;
 
     public QuizService(QuizRepository quizzes, QuestionSelectionService selection,
-                       CourseAccessService courseAccess) {
+                       CourseAccessService courseAccess, CourseManagementService courseConfiguration) {
         this.quizzes = Objects.requireNonNull(quizzes, "quizzes");
         this.selection = Objects.requireNonNull(selection, "selection");
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
+        this.courseConfiguration = Objects.requireNonNull(courseConfiguration, "courseConfiguration");
     }
 
     /** Creates a hidden quiz with the exact supplied membership (an empty draft is allowed). */
@@ -213,8 +215,7 @@ public class QuizService {
      * the Course-root READ COMMITTED write unit that owns the transaction. Producer: CO14 (#177).
      */
     protected <T> T withCourseConfigurationWrite(UUID courseId, Supplier<T> work) {
-        throw new IllegalStateException(
-                "ADR005 CourseManagementService.withCourseConfigurationWrite is not implemented; failing closed");
+        return courseConfiguration.withCourseConfigurationWrite(courseId, work);
     }
 
     private List<Quiz> page(UUID courseId, boolean publishedOnly, int page, int size, long total) {

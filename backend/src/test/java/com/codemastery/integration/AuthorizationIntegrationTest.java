@@ -1745,21 +1745,17 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             assertEquals(before, quizState());
         }
 
+        /** CO14's guard is integrated; writes that resolve question scope need AD07's CT40 producer. */
         @Test
-        void admittedOwnerWritesFailClosedWhileTheCourseGuardAndCt40AreAbsent() throws Exception {
+        void admittedOwnerWritesNeedingCt40FailClosedWhileTheProducerIsAbsent() throws Exception {
             String bearer = sessionToken(owner);
             String before = quizState();
             String base = "/api/courses/" + course;
             List<org.springframework.test.web.servlet.RequestBuilder> writes = authorized(bearer, List.of(
                     post(base + "/quizzes").contentType(MediaType.APPLICATION_JSON).content(validBody()),
-                    post(base + "/quizzes").contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"title\":\"Draft\",\"kind\":\"practice\",\"timeLimitSeconds\":60,\"questionIds\":[]}"),
                     request(HttpMethod.PUT, base + "/quizzes/" + quiz).contentType(MediaType.APPLICATION_JSON).content(validBody()),
-                    request(HttpMethod.DELETE, base + "/quizzes/" + quiz),
                     request(HttpMethod.PUT, base + "/quizzes/" + quiz + "/publication")
-                            .contentType(MediaType.APPLICATION_JSON).content("{\"publicationStatus\":\"published\"}"),
-                    request(HttpMethod.PUT, base + "/quizzes/" + quiz + "/publication")
-                            .contentType(MediaType.APPLICATION_JSON).content("{\"publicationStatus\":\"hidden\"}")));
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"publicationStatus\":\"published\"}")));
             for (var request : writes) {
                 String body = mvc.perform(request)
                         .andExpect(status().isInternalServerError())
@@ -1769,7 +1765,50 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                 assertFalse(body.contains("CT40") || body.contains("withCourseConfigurationWrite")
                         || body.contains("Prompt") || body.contains("correctOptions"));
             }
-            assertEquals(before, quizState());
+            assertEquals(before, quizState(), "each failed unit rolled back inside the Course guard");
+        }
+
+        /** Writes that need no question scope run in CO14's Course-root unit against real rows. */
+        @Test
+        void guardOnlyWritesCommitThroughTheCourseRootUnit() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course;
+            UUID live = insertQuiz(course, "Live", "published", q1);
+
+            String created = mvc.perform(post(base + "/quizzes").header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\":\"Draft\",\"kind\":\"practice\",\"timeLimitSeconds\":60,\"questionIds\":[]}"))
+                    .andExpect(status().isCreated())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.published").value(false))
+                    .andExpect(jsonPath("$.questionCount").value(0))
+                    .andReturn().getResponse().getContentAsString();
+            UUID draft = UUID.fromString(JSON.readTree(created).get("id").asString());
+            assertEquals("hidden", jdbc.queryForObject("SELECT publication_status FROM public.quizzes WHERE id = ? AND course_id = ?",
+                    String.class, draft, course));
+
+            // Hiding is idempotent and never touches membership; a published quiz is frozen against deletion.
+            for (UUID target : List.of(quiz, live)) {
+                mvc.perform(request(HttpMethod.PUT, base + "/quizzes/" + target + "/publication")
+                                .header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content("{\"publicationStatus\":\"hidden\"}"))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.published").value(false));
+            }
+            assertEquals("hidden", jdbc.queryForObject("SELECT publication_status FROM public.quizzes WHERE id = ?", String.class, live));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.quiz_questions WHERE quiz_id = ?", Integer.class, live));
+            UUID frozen = insertQuiz(course, "Frozen", "published", q2);
+            mvc.perform(request(HttpMethod.DELETE, base + "/quizzes/" + frozen).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isConflict());
+
+            mvc.perform(request(HttpMethod.DELETE, base + "/quizzes/" + quiz).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(quiz.toString()))
+                    .andExpect(jsonPath("$.questions[0].question.id").value(q2.toString()));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.quizzes WHERE id = ?", Integer.class, quiz));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.quiz_questions WHERE quiz_id = ?", Integer.class, quiz));
+            assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE id IN (?, ?)", Integer.class, q1, q2));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.quiz_questions WHERE quiz_id = ?", Integer.class, frozen));
         }
 
         @Test

@@ -2,6 +2,7 @@ package com.codemastery.modules.assessment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -9,11 +10,13 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -33,6 +36,7 @@ import com.codemastery.modules.assessment.domain.model.Quiz;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository.Member;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import com.codemastery.modules.course.application.service.CourseManagementService;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -67,6 +71,7 @@ class AttemptServiceTest {
 
     private QuizRepository quizzes;
     private CourseAccessService courseAccess;
+    private CourseManagementService guard;
     private final List<UUID> guardedCourses = new ArrayList<>();
     private List<UUID> courseSkills;
     private QuizService service;
@@ -75,6 +80,7 @@ class AttemptServiceTest {
     void setUp() {
         quizzes = mock(QuizRepository.class);
         courseAccess = mock(CourseAccessService.class);
+        guard = mock(CourseManagementService.class);
         courseSkills = List.of(SKILL);
         QuestionSelectionService selection = new QuestionSelectionService(quizzes) {
             @Override
@@ -82,7 +88,7 @@ class AttemptServiceTest {
                 return courseSkills;
             }
         };
-        service = new QuizService(quizzes, selection, courseAccess) {
+        service = new QuizService(quizzes, selection, courseAccess, guard) {
             @Override
             protected <T> T withCourseConfigurationWrite(UUID courseId, Supplier<T> work) {
                 guardedCourses.add(courseId);
@@ -466,15 +472,29 @@ class AttemptServiceTest {
     class ApprovedBoundaries {
 
         @Test
-        void withoutTheCourseGuardAndCt40ProducersEveryWriteFailsClosedWithNoEffect() {
-            QuizService unintegrated = new QuizService(quizzes, new QuestionSelectionService(quizzes), courseAccess);
+        void everyWriteDelegatesToTheCo14GuardAndItsRefusalPrecedesAnyQuizAccess() {
+            ResourceNotFoundException concealed = new ResourceNotFoundException("Resource not available");
+            when(guard.withCourseConfigurationWrite(eq(COURSE), any())).thenThrow(concealed);
+            QuizService production = new QuizService(quizzes, new QuestionSelectionService(quizzes), courseAccess, guard);
 
-            assertThrows(IllegalStateException.class, () -> unintegrated.create(COURSE, input(List.of())));
-            assertThrows(IllegalStateException.class, () -> unintegrated.update(COURSE, QUIZ, input(List.of())));
-            assertThrows(IllegalStateException.class, () -> unintegrated.delete(COURSE, QUIZ));
-            assertThrows(IllegalStateException.class, () -> unintegrated.publish(COURSE, QUIZ, true));
-            assertThrows(IllegalStateException.class, () -> unintegrated.publish(COURSE, QUIZ, false));
+            assertSame(concealed, assertThrows(ResourceNotFoundException.class, () -> production.create(COURSE, input(List.of()))));
+            assertSame(concealed, assertThrows(ResourceNotFoundException.class, () -> production.update(COURSE, QUIZ, input(List.of()))));
+            assertSame(concealed, assertThrows(ResourceNotFoundException.class, () -> production.delete(COURSE, QUIZ)));
+            assertSame(concealed, assertThrows(ResourceNotFoundException.class, () -> production.publish(COURSE, QUIZ, true)));
+            assertSame(concealed, assertThrows(ResourceNotFoundException.class, () -> production.publish(COURSE, QUIZ, false)));
+            verify(guard, times(5)).withCourseConfigurationWrite(eq(COURSE), any());
             verifyNoInteractions(quizzes);
+        }
+
+        @Test
+        void insideTheRealGuardWritesNeedingCt40StillFailClosedBeforeAnyWrite() {
+            when(guard.withCourseConfigurationWrite(eq(COURSE), any())).thenAnswer(
+                    invocation -> invocation.<Supplier<?>>getArgument(1).get());
+            QuizService production = new QuizService(quizzes, new QuestionSelectionService(quizzes), courseAccess, guard);
+
+            assertThrows(IllegalStateException.class, () -> production.create(COURSE, input(List.of(Q1))));
+            verify(quizzes, never()).save(any());
+            verify(quizzes, never()).replaceMembership(any(), any());
         }
 
         @Test

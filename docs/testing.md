@@ -5045,6 +5045,23 @@ AD07 #165; attempt start under the same Course root (AS08); CT17 runtime grants 
 Assessment tables for the deployed runtime role; independent review, CI and delivery.
 These are local developer runs, not independent QA, CI or deployment evidence.
 
+### CO14 guard integration — 22 November 2026
+
+CO14's `CourseManagementService.withCourseConfigurationWrite` is on `main` (`b506500`), so
+`QuizService.withCourseConfigurationWrite` now delegates to it. Writes that need no question scope
+(an empty draft, deleting a hidden never-attempted quiz, hiding) now commit through the Course-root
+READ COMMITTED unit; the guard's refusal precedes any quiz access. Writes that resolve question scope
+(membership, publishing) still fail closed at `QuestionSelectionService.readSkillIds` until AD07
+PR #264 is on `main`; that delegation and the integrated PostgreSQL flows are prepared on a stacked
+integration branch and are not part of this PR. Placement: the HTTP effects stay in
+`AuthorizationIntegrationTest`, beside this PR's reviewed owner-read cases.
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='AttemptServiceTest*,AuthorizationIntegrationTest*,AssessmentPersistenceIntegrationTest'` | 42 unit, 70 + 5 PostgreSQL tests, 0 failures |
+
+These are local developer runs, not independent review, QA or CI evidence.
+
 ## CO03 and CO14 Course persistence and configuration guard verification — 21 November 2026
 
 [PR #262](https://github.com/chi-thanh-nguyen/codemastery/pull/262) completes the
