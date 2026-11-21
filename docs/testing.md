@@ -5187,9 +5187,22 @@ tree based on `main` `b506500`:
 | `cd backend && ./mvnw verify` | BUILD SUCCESS; Surefire 778, Failsafe 307, 0 failures, errors or skips |
 | Disposable stack: the packaged backend on a random loopback port against a private `infrastructure/postgres` container, synthetic accounts, removed afterwards | 401/403/403 for anonymous, Learner and non-owner; owner create/update/read; direct and transitive cycles 409; self-edge 400; hidden owner Lesson mapped; foreign Lesson 404; delete of a skill referenced by an edge or only by a Question 409; repeated member and Unicode-blank name 400; committed rows matched the responses |
 
-These are local developer runs, not independent QA, CI or deployment evidence. The VM
-runtime role has no privilege on `skills`, `skill_prerequisites` or `lesson_skills`
-(`RUNTIME_PRIVILEGE_MATRIX`, r1–r4), so a deployed backend refuses these operations with a
-safe 500 until a dated CT17-P6 matrix revision within the ADR012 §19.2 ceiling is
-authorized and added with its script and CI tests. The frontend client and types
-(`skillGraphApi.ts`, `useSkillGraph.ts`) remain FE18-owned and empty.
+These are local developer runs, not independent QA, CI or deployment evidence. The frontend
+client and types (`skillGraphApi.ts`, `useSkillGraph.ts`) remain FE18-owned and empty.
+
+### CT17-P6 r5 runtime privileges — 22 November 2026
+
+The dated record `CT17-P6-PRIVILEGES-2026-11-22-r5` in
+[deployment.md](deployment.md#ct17-p6-privileges-2026-11-22-r5--ad07-skill-graph-within-the-adr012-192-ceiling-22-november-2026)
+grants the runtime role exactly the ADR012 §19.2 ceiling rows for `skills` (SELECT, INSERT,
+DELETE; UPDATE (name, description)), `skill_prerequisites` and `lesson_skills` (SELECT, INSERT,
+DELETE). `RUNTIME_PRIVILEGE_MATRIX`, `verify_role_separation` and the three VM tests change with it.
+Nothing was provisioned on any real database.
+
+| Command | Result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2, r3, r4 and r5 (3 rows) |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` (local Docker) | the AD07 graph SQL succeeds; missing-Lesson mapping and Question-referenced delete 23503; in-place UPDATE and TRUNCATE 42501; containment and upgrade suites pass |
+| `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` (local Docker) | `RUNTIME_CONSUMER_TESTS_PASS` including the eight AD07 operations (create, replace, edge, cycle 409, mapping, owner read, Learner 403, unmap, referenced delete 409, delete); no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+These local runs are not the required CI evidence; the VM workflow runs on the PR.
