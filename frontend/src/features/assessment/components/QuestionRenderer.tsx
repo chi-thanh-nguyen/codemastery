@@ -2,7 +2,7 @@ import { Box, Typography } from '@mui/material';
 import type { ChangeEvent } from 'react';
 import { CodeBlock } from '../../../shared/components/CodeBlock';
 import type { QuestionView } from '../types/assessmentTypes';
-import { color, radius } from '../../../app/theme/theme';
+import { radius, roles } from '../../../app/theme/theme';
 
 export interface QuestionRendererProps { question: QuestionView; selected: string[]; onChange: (optionIds: string[]) => void; disabled?: boolean; total?: number }
 
@@ -26,12 +26,12 @@ export function QuestionRenderer({ question, selected, onChange, disabled, total
                 const checked = selected.includes(option.id);
                 const letter = String.fromCharCode(65 + index);
                 return <Box key={option.id} component="label" sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 2, minHeight: 64, px: 2, py: 1.5, cursor: disabled ? 'default' : 'pointer',
-                    bgcolor: color.surface, borderRadius: `${radius.md}px`, border: `${checked ? 2 : 1.5}px solid ${checked ? color.brand600 : color.line200}`,
-                    '&:hover': disabled ? {} : { borderColor: checked ? color.brand600 : color.ink400 }, '&:has(input:focus-visible)': { outline: `2px solid ${color.brand600}`, outlineOffset: 2 } }}>
+                    bgcolor: roles.bg.field, borderRadius: `${radius.md}px`, border: `${checked ? 2 : 1.5}px solid ${checked ? roles.accent.progress : roles.line.hairline}`,
+                    '&:hover': disabled ? {} : { borderColor: checked ? roles.accent.progress : roles.line.strong }, '&:has(input:focus-visible)': { outline: `2px solid ${roles.focus.ring}`, outlineOffset: 2 } }}>
                     <Box component="input" type={multiple ? 'checkbox' : 'radio'} name={name} value={option.id} checked={checked} onChange={toggle(option.id)} disabled={disabled}
                         sx={{ position: 'absolute', opacity: 0, width: 1, height: 1, m: 0 }} />
                     <Box aria-hidden sx={{ width: 32, height: 32, borderRadius: multiple ? `${radius.xs}px` : '50%', flexShrink: 0, display: 'grid', placeItems: 'center', fontWeight: 600,
-                        bgcolor: checked ? color.brand600 : color.fill150, color: checked ? color.surface : color.ink900 }}>{letter}</Box>
+                        bgcolor: checked ? roles.accent.link : roles.bg.fill, color: checked ? roles.text.onStrong : roles.text.primary }}>{letter}</Box>
                     <Typography component="span" sx={{ flex: 1, fontSize: '1rem', fontWeight: 500, overflowWrap: 'anywhere' }}>{option.label}</Typography>
                 </Box>;
             })}

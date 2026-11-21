@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -21,17 +21,24 @@ async function typeInto(input: HTMLInputElement, value: string) {
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 class DOMMatrixStub { m22 = 1; constructor(transform?: string) { const scale = transform?.match(/scale\(([\d.]+)\)/)?.[1]; this.m22 = scale ? Number(scale) : 1; } }
 
+// The preview is a lazily loaded chunk. Its first import (transforming and evaluating every preview screen and the
+// graph library) is a one-off cost of the test environment, paid here under the hook timeout rather than inside the
+// 5 s timeout of whichever test mounts the preview first; App's lazy import then resolves at once.
+beforeAll(async () => { await import('./PreviewApp'); }, 30_000);
+
 beforeEach(() => {
     vi.stubGlobal('ResizeObserver', ResizeObserverStub);
     vi.stubGlobal('DOMMatrixReadOnly', DOMMatrixStub);
     fetcher = vi.fn(() => Promise.reject(new Error('The preview must not call the network.')));
     vi.stubGlobal('fetch', fetcher);
+    // A configured API base, so a stray request reaches fetch (and fails these tests) instead of a configuration error.
+    vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
     localStorage.clear(); sessionStorage.clear();
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => {
     await act(async () => root.unmount()); host.remove();
-    window.history.replaceState(null, '', '/'); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear(); sessionStorage.clear();
+    window.history.replaceState(null, '', '/'); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear();
 });
 
 /** Mount the real App at /preview and wait for the lazily loaded preview chunk. */
@@ -42,6 +49,14 @@ async function mount(search = '') {
         await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     }
     expect(host.querySelector('[data-preview-screen]')).not.toBeNull();
+}
+async function mountGlobalShell(path = '/login') {
+    window.history.replaceState(null, '', path);
+    await act(async () => root.render(<App />));
+    for (let attempt = 0; attempt < 50 && !host.querySelector('button[aria-label^="Theme:"]'); attempt++) {
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    }
+    expect(host.querySelector('button[aria-label^="Theme:"]')).not.toBeNull();
 }
 const h1 = () => host.querySelector('main h1')?.textContent;
 const buttons = (text: string, scope: ParentNode = host) => [...scope.querySelectorAll<HTMLElement>('button, a, [role="menuitem"]')].filter((node) => node.textContent?.trim() === text);
@@ -64,13 +79,154 @@ async function waitUntil(done: () => boolean, what: string, timeoutMs = 3000) {
 async function settle(ms: number) { await act(async () => { vi.advanceTimersByTime(ms); }); }
 
 describe('isolated design preview', () => {
+    it('persists an explicit global preference and keeps it active when storage writes fail', async () => {
+        await mountGlobalShell();
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Theme: System (currently Light)"]')!;
+        await act(async () => trigger.click());
+        const dark = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.trim().startsWith('Dark'))!;
+        await act(async () => dark.click());
+        expect(localStorage.getItem('codemastery.theme')).toBe('dark');
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        expect(host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')?.getAttribute('aria-label')).toBe('Theme: Dark');
+
+        const originalSetItem = Storage.prototype.setItem;
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+            if (key === 'codemastery.theme') throw new DOMException('Storage is unavailable.', 'QuotaExceededError');
+            return originalSetItem.call(this, key, value);
+        });
+        const light = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.trim().startsWith('Light'))!;
+        await act(async () => light.click());
+        expect(host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')?.getAttribute('aria-label')).toBe('Theme: Light');
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        expect(localStorage.getItem('codemastery.theme')).toBe('dark');
+    });
+
+    it('follows global theme changes until locally overridden without writing the preference', async () => {
+        localStorage.setItem('codemastery.theme', 'light');
+        const writePreference = vi.spyOn(Storage.prototype, 'setItem');
+        // A workspace screen, not the index: the index renders the whole design reference (about 1,900 nodes), and
+        // re-rendering it on every scheme change made this test the slowest of the suite (it timed out once on CI).
+        await mount('?screen=learner-home');
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'dark' })));
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+
+        const navToggle = host.querySelector<HTMLButtonElement>('button[aria-label="Toggle navigation"]')!;
+        await act(async () => navToggle.click());
+        const light = [...document.querySelectorAll<HTMLElement>('[role="radio"]')].find((item) => item.textContent?.includes('Light'))!;
+        await act(async () => light.click());
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        expect(document.querySelector('.MuiDrawer-modal')).not.toBeNull();
+        expect(localStorage.getItem('codemastery.theme')).toBe('light');
+        expect(writePreference).not.toHaveBeenCalled();
+
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'dark' })));
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        expect(host.textContent).not.toContain('Theme set to'); // another tab's change is not announced here
+
+        // "Reset sample data" keeps the preview-local scheme.
+        await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+        const drawerReset = [...document.querySelectorAll<HTMLElement>('button, a, [role="menuitem"]')].find((node) => node.textContent?.trim() === 'Reset sample data');
+        if (!drawerReset) {
+            await act(async () => host.querySelector<HTMLElement>('button[aria-label^="Account menu"]')!.click());
+            await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((node) => node.textContent?.trim() === 'Reset sample data')!.click());
+        } else await act(async () => drawerReset.click());
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(writePreference).not.toHaveBeenCalled();
+        expect(sessionStorage.length).toBe(0);
+
+        // Leaving /preview in the same document drops the override: the shared preference (dark, from the other tab) applies.
+        await act(async () => { window.history.pushState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); });
+        expect(host.querySelector('[data-preview-screen]')).toBeNull();
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        expect(host.querySelector('button[aria-label^="Theme:"]')?.getAttribute('aria-label')).toBe('Theme: Dark');
+
+        // A reload discards any preview selection and starts from the stored preference.
+        writePreference.mockRestore();
+        await act(async () => root.unmount());
+        root = createRoot(host);
+        await mount('?screen=learner-home');
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Toggle navigation"]')!.click());
+        expect(document.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Light');
+    });
+
+    it('follows other tabs in production shells: a new value applies, a cleared or invalid value means System', async () => {
+        await mountGlobalShell();
+        const label = () => host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')?.getAttribute('aria-label');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'dark' })));
+        expect(label()).toBe('Theme: Dark'); expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated.key', newValue: 'x' })));
+        expect(label()).toBe('Theme: Dark');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'sepia' })));
+        expect(label()).toBe('Theme: System (currently Light)'); expect(document.documentElement.dataset.colorScheme).toBe('light');
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'codemastery.theme', newValue: 'light' })));
+        await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: null, newValue: null })));
+        expect(label()).toBe('Theme: System (currently Light)');
+        expect(host.textContent).not.toContain('Theme set to'); // only a choice in this tab is announced
+    });
+
+    it('tracks operating-system theme changes while System is selected without storing the derived scheme', async () => {
+        let matches = false;
+        const listeners = new Set<(event: MediaQueryListEvent) => void>();
+        const mediaQuery = {
+            get matches() { return matches; },
+            media: '(prefers-color-scheme: dark)',
+            onchange: null,
+            addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+            removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+            addListener: (listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+            removeListener: (listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+            dispatchEvent: () => true,
+        };
+        const staticQuery = (media: string) => ({
+            matches: false, media, onchange: null, addEventListener: () => undefined, removeEventListener: () => undefined,
+            addListener: () => undefined, removeListener: () => undefined, dispatchEvent: () => true,
+        });
+        vi.stubGlobal('matchMedia', (media: string) => media === '(prefers-color-scheme: dark)' ? mediaQuery : staticQuery(media));
+        await mount();
+        expect(document.documentElement.dataset.colorScheme).toBe('light');
+        await act(async () => {
+            matches = true;
+            listeners.forEach((listener) => listener({ matches, media: mediaQuery.media } as MediaQueryListEvent));
+        });
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        expect(localStorage.getItem('codemastery.theme')).toBeNull();
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('A13: with /preview open, another tab signing in or out sends no request and installs no session', async () => {
+        const tabs: { onmessage: ((event: MessageEvent) => void) | null }[] = [];
+        vi.stubGlobal('BroadcastChannel', class { onmessage: ((event: MessageEvent) => void) | null = null; constructor() { tabs.push(this); } postMessage() { /* test double */ } close() { /* test double */ } });
+        await mount();
+        for (const type of ['signed-in', 'signed-out', 'signed-in', 'signed-in']) {
+            for (const tab of tabs) await act(async () => tab.onmessage?.({ data: { type } } as MessageEvent));
+        }
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(host.querySelector('[data-preview-screen]')).not.toBeNull();
+        expect(location.pathname).toBe('/preview');
+        expect(localStorage.length + sessionStorage.length).toBe(0);
+    });
+    it('A13: leaving /preview in the same document and changing the theme still restores nothing', async () => {
+        await mount();
+        await act(async () => { window.history.pushState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); });
+        const theme = host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')!;
+        await act(async () => theme.click());
+        await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.startsWith('Dark'))!.click());
+        expect(document.documentElement.dataset.colorScheme).toBe('dark');
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(host.textContent).not.toContain('Restoring your session');
+    });
+
     it('lists every workspace on the index and never calls the network or writes storage', async () => {
         await mount();
         expect(h1()).toBe('CodeMastery design preview');
         // Status pills: Live mint, Preview sky, Proposed dashed (lilac stays reserved for adaptive guidance).
         const pill = (text: string) => [...host.querySelectorAll<HTMLElement>('span')].find((node) => node.textContent === text && node.querySelector('span') !== null)!;
-        expect(getComputedStyle(pill('Proposed')).borderStyle).toBe('dashed');
-        expect(getComputedStyle(pill('Proposed')).backgroundColor).toBe('rgb(255, 255, 255)');
+        expect(pill('Proposed').dataset.tone).toBe('dashed');
         for (const group of ['Live screens', 'Learner', 'Instructor', 'Administrator', 'Public and account']) expect(host.textContent).toContain(group);
         for (const spec of ['S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13', 'S14', 'S15', 'S17', 'S18', 'S21', 'S22', 'S23', 'S24', 'S25', 'S26']) expect(host.textContent).toContain(spec);
         expect(fetcher).not.toHaveBeenCalled(); expect(localStorage.length + sessionStorage.length).toBe(0);
@@ -134,6 +290,52 @@ describe('isolated design preview', () => {
         expect(host.textContent).toContain('16.67'); expect(host.textContent).toContain('1/6');
         expect(host.textContent).toContain("CodeMastery's server is the scoring authority");
         expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    // One transition per case keeps the real App/controller coverage within the default CI timeout.
+    for (const [kind, search] of [
+        ['quiz', '?screen=quiz-attempt'],
+        ['diagnostic', '?screen=quiz-attempt&item=diagnostic'],
+    ] as const) it.each(['Light', 'Dark', 'System'] as const)(`G-01: the ${kind} countdown keeps running through Theme open, %s selection and close without changing answers or sending requests`, async (label) => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+        const stored = label === 'Dark' ? 'light' : 'dark';
+        localStorage.setItem('codemastery.theme', stored); // Every case selects a different preference.
+        await mount(search);
+        const firstAnswer = host.querySelector<HTMLInputElement>('main input[type="radio"][value="a"]')!;
+        await act(async () => firstAnswer.click());
+        expect(firstAnswer.checked).toBe(true);
+        const answerState = () => [...host.querySelectorAll<HTMLInputElement>('main input')].map((input) => ({ value: input.value, checked: input.checked, disabled: input.disabled }));
+        const answersBefore = answerState();
+        const remaining = () => {
+            const timer = host.querySelector('[role="timer"]');
+            expect(timer, 'the attempt is still answering, with its countdown visible').not.toBeNull();
+            return timer!.textContent!.split(':').map(Number).reduce((total, part) => total * 60 + part, 0);
+        };
+        let expected = remaining();
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')!;
+        const unchanged = () => {
+            expect(remaining()).toBe(expected);
+            expect(answerState()).toEqual(answersBefore);
+            expect(new URLSearchParams(location.search).get('screen')).toBe('quiz-attempt');
+            expect(new URLSearchParams(location.search).get('item')).toBe(kind === 'diagnostic' ? 'diagnostic' : null);
+            expect(document.querySelector('[role="dialog"]')).toBeNull();
+            expect(fetcher).not.toHaveBeenCalled(); // Includes any accidental save or submit request.
+            expect(localStorage.getItem('codemastery.theme')).toBe(stored);
+        };
+        await act(async () => trigger.click());
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        await settle(2000); expected -= 2; unchanged(); // The real preview controller ticks while the menu stays open.
+        const choice = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((node) => node.textContent?.startsWith(label))!;
+        await act(async () => choice.click());
+        expect(choice.getAttribute('aria-checked')).toBe('true');
+        expect(document.activeElement).toBe(choice);
+        expect(document.documentElement.dataset.colorScheme).toBe(label === 'Dark' ? 'dark' : 'light');
+        await settle(1000); expected--; unchanged();
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        await act(async () => choice.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(document.activeElement).toBe(trigger);
+        await settle(1000); expected--; unchanged();
     });
 
     it('auto-submits when the sample timer runs out', async () => {
@@ -286,4 +488,74 @@ describe('isolated design preview', () => {
         }
         expect(fetcher).not.toHaveBeenCalled();
     });
+});
+
+/**
+ * AUD-01: the bootstrap isolation decision must follow the router's own matching. React Router 7 matches
+ * `/preview` case-insensitively, with trailing slashes, after decoding each path segment, so every URL that
+ * renders the preview must also start without restoring. The refresh endpoint answers with a valid session
+ * here, so a missing isolation would install "Restored Person" instead of failing silently.
+ */
+describe('AUD-01: preview isolation follows the router for every URL that renders the preview', () => {
+    let tabs: { onmessage: ((event: MessageEvent) => void) | null }[];
+    const refreshCalls = () => fetcher.mock.calls.filter(([url]) => new URL(String(url), 'http://localhost').pathname === '/api/auth/refresh').length;
+    beforeEach(() => {
+        tabs = [];
+        vi.stubGlobal('BroadcastChannel', class { onmessage: ((event: MessageEvent) => void) | null = null; constructor() { tabs.push(this); } postMessage() { /* test double */ } close() { /* test double */ } });
+        fetcher.mockImplementation((url: string) => {
+            const path = new URL(url, 'http://localhost').pathname;
+            if (path === '/api/auth/refresh') return Promise.resolve(json(loginResponse('Restored Person')));
+            if (path === '/api/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
+            if (path === '/api/me/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
+            return Promise.resolve(json({ type: 'about:blank', title: 'Not Found', status: 404 }, 404));
+        });
+    });
+    async function open(path: string) {
+        window.history.replaceState(null, '', path);
+        await act(async () => root.render(<App />));
+        await waitUntil(() => !!host.querySelector('[data-preview-screen], header, main'), `a shell at ${path}`);
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    }
+
+    for (const path of ['/preview', '/PREVIEW', '/Preview', '/pre%76iew', '/%70review', '/PRE%56IEW', '/preview/', '/preview//', '/preview?screen=learner-home']) {
+        it(`${path}: renders the preview, sends no refresh and installs no session, through tabs, wake-ups, theme changes and navigation`, async () => {
+            await open(path);
+            expect(host.querySelector('[data-preview-screen]'), 'the preview renders').not.toBeNull();
+            expect(refreshCalls()).toBe(0);
+            // Another tab signs in, out and in again; this document wakes up.
+            for (const type of ['signed-in', 'signed-out', 'signed-in']) {
+                for (const tab of tabs) await act(async () => tab.onmessage?.({ data: { type } } as MessageEvent));
+            }
+            await act(async () => {
+                window.dispatchEvent(new Event('focus')); window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+                document.dispatchEvent(new Event('visibilitychange'));
+                await new Promise((resolve) => setTimeout(resolve, 30));
+            });
+            expect(fetcher).not.toHaveBeenCalled();
+            // A theme change, then leaving the preview in the same document: still no restore.
+            await act(async () => { window.history.pushState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); });
+            await waitUntil(() => !!host.querySelector('button[aria-label^="Theme:"]'), 'the landing page');
+            await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')!.click());
+            await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent?.startsWith('Dark'))!.click());
+            await act(async () => { window.history.pushState(null, '', '/courses'); window.dispatchEvent(new PopStateEvent('popstate')); await new Promise((resolve) => setTimeout(resolve, 30)); });
+            expect(refreshCalls()).toBe(0);
+            expect(host.textContent).not.toContain('Restored Person');
+            expect(host.querySelector('button[aria-label^="Account menu"]')).toBeNull();
+            expect(sessionStorage.length).toBe(0);
+            expect(Object.keys(localStorage)).toEqual(['codemastery.theme']);
+        });
+    }
+
+    // Controls: these do not render the preview, so they restore once as usual. Malformed encodings are not
+    // decoded by the router either (it keeps the raw path), and must neither throw nor count as the preview.
+    for (const path of ['/', '/courses', '/previewish', '/preview-x', '/preview/extra', '/pre%76iewish', '/preview%', '/pre%7view', '/%E0%A4%A']) {
+        it(`${path}: does not render the preview and restores the session once`, async () => {
+            vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+            await open(path);
+            expect(host.querySelector('[data-preview-screen]')).toBeNull();
+            await waitUntil(() => refreshCalls() === 1, 'one restore request');
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+            expect(refreshCalls()).toBe(1);
+        });
+    }
 });

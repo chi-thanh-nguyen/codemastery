@@ -11,7 +11,7 @@ import { getPublishedCourseById } from '../api/catalogueApi';
 import { ApiError } from '../../../shared/types/apiTypes';
 import type { CourseDetail, SyllabusChapter } from '../types/catalogueTypes';
 import { instructorLabel } from '../components/CourseCard';
-import { color, radius } from '../../../app/theme/theme';
+import { radius, roles } from '../../../app/theme/theme';
 
 export interface CourseDetailPageProps {
     courseId: string;
@@ -68,7 +68,7 @@ export function CourseDetailPage({ courseId, onBack, membershipActions }: Course
                             : course.syllabus.map((chapter, index) => <SyllabusChapterView key={chapter.id} courseId={course.id} chapter={chapter} defaultExpanded={index === 0} />)}
                     </Tile>
                 </Box>
-                <Box component="section" aria-labelledby="course-facts" sx={{ bgcolor: color.fill150, borderRadius: `${radius.lg}px`, p: { xs: 3, sm: 3.5 }, minWidth: 0 }}>
+                <Box component="section" aria-labelledby="course-facts" sx={{ bgcolor: roles.bg.fill, borderRadius: `${radius.lg}px`, p: { xs: 3, sm: 3.5 }, minWidth: 0 }}>
                     <Typography variant="h4" component="h2" id="course-facts" sx={{ mb: 2.5 }}>Course facts</Typography>
                     <FactList items={[
                         { label: 'Prerequisites', value: course.prerequisiteDescription ?? 'None specified' },
@@ -81,9 +81,9 @@ export function CourseDetailPage({ courseId, onBack, membershipActions }: Course
 
 function SyllabusChapterView({ courseId, chapter, defaultExpanded }: { courseId: string; chapter: SyllabusChapter; defaultExpanded: boolean }) {
     const base = `course-${courseId}-chapter-${chapter.id}`;
-    return <Accordion defaultExpanded={defaultExpanded} sx={{ borderTop: `1px solid ${color.line200}`, '&:first-of-type': { borderTop: 0 } }}>
+    return <Accordion defaultExpanded={defaultExpanded} sx={{ borderTop: `1px solid ${roles.line.hairline}`, '&:first-of-type': { borderTop: 0 } }}>
         <AccordionSummary id={`${base}-summary`} aria-controls={`${base}-panel`} expandIcon={<PresentationIcon name="chevron-down" />}
-            sx={{ px: 0, minHeight: 56, '&.Mui-focusVisible': { bgcolor: 'transparent', outline: `2px solid ${color.brand600}`, outlineOffset: 2, borderRadius: `${radius.sm}px` } }}>
+            sx={{ px: 0, minHeight: 56, '&.Mui-focusVisible': { bgcolor: 'transparent', outline: `2px solid ${roles.focus.ring}`, outlineOffset: 2, borderRadius: `${radius.sm}px` } }}>
             <Typography component="span" variant="h4">Chapter {chapter.position}: {chapter.title}</Typography>
             <Typography component="span" variant="caption" sx={{ ml: 1.5, color: 'text.secondary', alignSelf: 'center' }}>{chapter.lessons.length} {chapter.lessons.length === 1 ? 'lesson' : 'lessons'}</Typography>
         </AccordionSummary>

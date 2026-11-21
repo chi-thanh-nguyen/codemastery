@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box } from '@mui/material';
 import { PresentationIcon } from '../../../shared/components/PresentationIcon';
-import { color, radius } from '../../../app/theme/theme';
+import { radius, roles } from '../../../app/theme/theme';
 
 const pad = (value: number) => String(value).padStart(2, '0');
 export const formatClock = (seconds: number) => {
@@ -26,8 +26,8 @@ export function QuizTimer({ remainingSeconds, totalSeconds }: { remainingSeconds
             previous.current = level;
         }
     }, [level, remainingSeconds]);
-    const palette = urgent ? { bg: color.rose100, fg: color.rose700 } : low ? { bg: color.butter100, fg: color.butter800 } : { bg: color.surface, fg: color.ink900 };
-    return <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, height: 40, px: 2, borderRadius: `${radius.pill}px`, bgcolor: palette.bg, color: color.ink900, fontWeight: 600 }}>
+    const palette = urgent ? { bg: roles.tone.rose.tint, fg: roles.tone.rose.strong } : low ? { bg: roles.tone.butter.tint, fg: roles.tone.butter.strong } : { bg: roles.bg.surface, fg: roles.text.primary };
+    return <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, height: 40, px: 2, borderRadius: `${radius.pill}px`, bgcolor: palette.bg, color: roles.text.primary, fontWeight: 600 }}>
         <PresentationIcon name="clock" sx={{ fontSize: 18, color: palette.fg }} />
         <Box component="span" className="cm-tabular" aria-label={`Time left ${formatClock(remainingSeconds)}`} role="timer">{formatClock(remainingSeconds)}</Box>
         <span role="status" aria-live="polite" className="cm-visually-hidden">{announcement}</span>

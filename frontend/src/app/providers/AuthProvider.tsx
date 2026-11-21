@@ -83,12 +83,21 @@ const refused = (error: unknown) => error instanceof ApiError &&
 /**
  * `refreshSessions` enables the ADR014 hybrid lifecycle: restore on load from the HttpOnly refresh
  * cookie, renew before access-token expiry, server sign-out and cross-tab coordination. Without it
- * the provider keeps the memory-only behavior (used by isolated component tests). `restoreOnLoad`
- * false skips only the load-time restore (a document opened at the network-free design preview).
+ * the provider keeps the memory-only behavior (used by isolated component tests).
+ *
+ * `restoreOnLoad` false isolates a document opened at the network-free design preview (CT14, ADR014
+ * §7, DESIGN S26/A13): it never restores by itself, neither on load nor when another tab signs in
+ * or out, so it sends no session request and installs no session. The value is read once, at mount;
+ * a later change cannot start a restore. The isolation ends only when the person signs in
+ * explicitly in this document (after leaving the preview for the sign-in page); from then on the
+ * document owns a session and follows the normal lifecycle.
  */
 export function AuthProvider({ children, refreshSessions = false, restoreOnLoad = true }: { children: ReactNode; refreshSessions?: boolean; restoreOnLoad?: boolean }) {
+    const [restoresOnLoad] = useState(restoreOnLoad);
+    /** True while this document must not restore or adopt a session on its own (see above). */
+    const isolated = useRef(refreshSessions && !restoresOnLoad);
     const [snapshot, setSnapshot] = useState<Session | null>(null);
-    const [restoring, setRestoring] = useState(refreshSessions && restoreOnLoad);
+    const [restoring, setRestoring] = useState(refreshSessions && restoresOnLoad);
     const session = useRef<Session | null>(null), generation = useRef(0), attempt = useRef(0);
     const explicitLogout = useRef(false);
     const alive = useRef(true), returnPath = useRef<'/profile' | null>(null);
@@ -146,6 +155,8 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
      * advanced and a sign-in is pending), a sign-out (here or broadcast), or another installation.
      */
     const restore = useCallback(async () => {
+        // An isolated preview document never asks the server for a session (A13).
+        if (isolated.current) return;
         const run = ++restoreRun.current, captured = generation.current;
         const stillCurrent = () => alive.current && run === restoreRun.current && captured === generation.current && !lastLogin.current;
         if (alive.current) setRestoring(true);
@@ -207,22 +218,25 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
     useEffect(() => {
         if (!refreshSessions) return;
         // StrictMode re-runs share the in-flight rotation through coordinatedRefresh.
-        if (restoreOnLoad) void restore();
+        if (restoresOnLoad) void restore();
         if (typeof BroadcastChannel === 'undefined') return;
         const tabs = new BroadcastChannel(CHANNEL);
         tabs.onmessage = (event: MessageEvent<{ type?: unknown }>) => {
             // Another tab signed out: clear this tab without another server call, and discard any
             // pending restore, so a late refresh response cannot bring the old account back (F04).
+            // An isolated document with nothing to end is left untouched.
             if (event.data?.type === 'signed-out') {
+                if (isolated.current && !session.current && !lastLogin.current) return;
                 restoreRun.current++; clear(false, true);
                 if (alive.current) setRestoring(false);
             }
-            // Another tab signed in (its sign-in revoked any previous cookie session): adopt it.
-            else if (event.data?.type === 'signed-in') void restore();
+            // Another tab signed in (its sign-in revoked any previous cookie session): adopt it,
+            // except in an isolated preview document (A13); restore() checks that too.
+            else if (event.data?.type === 'signed-in' && !isolated.current) void restore();
         };
         channel.current = tabs;
         return () => { tabs.close(); if (channel.current === tabs) channel.current = null; };
-    }, [clear, refreshSessions, restoreOnLoad, restore]);
+    }, [clear, refreshSessions, restoresOnLoad, restore]);
     useEffect(() => {
         window.addEventListener('focus', expire);
         window.addEventListener('pageshow', expire);
@@ -268,6 +282,8 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
             expire();
             if (!current()) throw cancelled();
             const installed = install(response, true, controller);
+            // An explicit sign-in in this document ends the preview isolation: it now owns a session.
+            isolated.current = false;
             if (refreshSessions) {
                 pendingSignOut(false);
                 restoreRun.current++; if (alive.current) setRestoring(false);
