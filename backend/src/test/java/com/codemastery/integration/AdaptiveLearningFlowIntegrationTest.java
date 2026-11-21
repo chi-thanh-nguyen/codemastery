@@ -1,11 +1,19 @@
 package com.codemastery.integration;
 
+import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService.GraphSnapshot;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService.MappingReference;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService.PrerequisiteReference;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService.SkillReference;
 import com.codemastery.modules.auth.domain.model.Role;
 import com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser;
+import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
 import com.codemastery.modules.course.application.service.CourseManagementService;
 import com.codemastery.modules.course.application.service.CourseManagementService.AdaptiveConfiguration;
 import com.codemastery.modules.course.application.service.CourseManagementService.ConfigurationBusy;
+import com.codemastery.modules.course.application.service.CourseStructureService;
 import com.codemastery.modules.course.application.service.EnrollmentService;
 import com.codemastery.modules.course.domain.model.LearningMaterial;
 import com.codemastery.modules.course.domain.model.MaterialType;
@@ -19,6 +27,7 @@ import com.codemastery.modules.course.infrastructure.persistence.entity.ChapterE
 import com.codemastery.modules.course.infrastructure.persistence.entity.CourseEntity;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +37,8 @@ import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
@@ -37,11 +48,18 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.util.AopTestUtils;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.context.WebApplicationContext;
+import org.springframework.web.filter.DelegatingFilterProxy;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import javax.sql.DataSource;
 import java.math.BigDecimal;
@@ -64,6 +82,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 
@@ -80,12 +99,21 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
+import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
 /**
  * CO14 B1-O14/B1-O15 guard and storage evidence on real Spring transactions and PostgreSQL
  * (ADR005 §§5, 7.1, 13.1–13.3; CT14-B1-COVERAGE r2). Concurrency uses latches and observed
  * pg_stat_activity lock waits, never sleeps. Adaptive's AD08 orchestration, ETags and the
  * readiness/history providers are not implemented and are not exercised here.
+ *
+ * <p>AD07 B1-O01/O03/O04/O11 (ADR005 §§3.2, 4, 5, 8): the skill graph through the production
+ * security chain, real Course ownership/ancestry, the Course-root guard, PostgreSQL foreign keys
+ * and committed state observed on separate connections. Every assembled graph proves its persisted
+ * Lesson mappings against CO06's CT40 projection ({@code CourseStructureService.readStructure},
+ * ADR005 §§3.1, 4.1) in the same snapshot or under the held Course root; CO06 Lesson creation and
+ * mapping serialize on that root. Question writers and enablement are other Issues' participants.
  *
  * <p>The context is closed after this class so its connection pool does not count against
  * PostgreSQL's connection limit while later suites run.
@@ -97,7 +125,15 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     private static final long WAIT_SECONDS = 20;
     private static final String KEY = key();
 
+    /** Runs once on the reading thread immediately before its prerequisite query is prepared. */
+    private static final ThreadLocal<Runnable> BEFORE_PREREQUISITES = new ThreadLocal<>();
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+
     @Autowired CourseManagementService service;
+    @Autowired SkillGraphService graph;
+    @Autowired CourseStructureService structure;
+    @Autowired JwtTokenProvider tokens;
+    @Autowired WebApplicationContext context;
     @Autowired EnrollmentService enrollment;
     @Autowired EnrollmentRepository enrollments;
     @Autowired CourseRepository courseRepository;
@@ -108,11 +144,29 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     @PersistenceContext EntityManager entityManager;
 
     private final ExecutorService workers = Executors.newFixedThreadPool(4);
+    private MockMvc mvc;
     private final List<Connection> held = new ArrayList<>();
 
     private static UUID id(String name) { return UUID.nameUUIDFromBytes(("co14/" + name).getBytes(StandardCharsets.UTF_8)); }
     private static String key() { byte[] key = new byte[32]; new SecureRandom().nextBytes(key); return HexFormat.of().formatHex(key); }
-    @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) { registry.add("JWT_SECRET", () -> KEY); }
+    @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) {
+        registry.add("JWT_SECRET", () -> KEY);
+        registry.add("spring.jpa.properties.hibernate.session_factory.statement_inspector",
+                () -> SkillGraphStatementInspector.class.getName());
+    }
+
+    /** Test hook only: lets a separate connection commit between two statements of one graph read. */
+    public static class SkillGraphStatementInspector implements StatementInspector {
+        @Override
+        public String inspect(String sql) {
+            Runnable concurrentChange = BEFORE_PREREQUISITES.get();
+            if (concurrentChange != null && sql.contains("from skill_prerequisites")) {
+                BEFORE_PREREQUISITES.remove();
+                concurrentChange.run();
+            }
+            return sql;
+        }
+    }
 
     @BeforeEach void fixtures() {
         for (UUID user : List.of(OWNER, OTHER, LEARNER, ADMIN)) {
@@ -123,6 +177,7 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         jdbc.update("INSERT INTO public.courses (id,instructor_id,title,description,publication_status,adaptive_enabled) "
                 + "VALUES (?,?,'Alpha','Guarded course','published',false),(?,?,'Beta','Independent course','published',false),"
                 + "(?,?,'Hidden','Draft course','hidden',false)", COURSE, OWNER, SECOND, OWNER, HIDDEN, OWNER);
+        mvc = webAppContextSetup(context).addFilters(new DelegatingFilterProxy("springSecurityFilterChain", context)).build();
     }
 
     @AfterEach void cleanup() throws Exception {
@@ -132,6 +187,14 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         }
         workers.shutdownNow();
         assertTrue(workers.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS));
+        BEFORE_PREREQUISITES.remove();
+        String courseSkills = "(SELECT id FROM public.skills WHERE course_id IN (?,?,?))";
+        jdbc.update("DELETE FROM public.lesson_skills WHERE skill_id IN " + courseSkills, COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.skill_prerequisites WHERE course_id IN (?,?,?)", COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.questions WHERE skill_id IN " + courseSkills, COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.learner_skill_masteries WHERE skill_id IN " + courseSkills, COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.skills WHERE course_id IN (?,?,?)", COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id IN (?,?,?,?)", OWNER, OTHER, LEARNER, ADMIN);
         jdbc.update("DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT l.id FROM public.lessons l "
                 + "JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id IN (?,?,?))", COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.lessons WHERE chapter_id IN (SELECT id FROM public.chapters WHERE course_id IN (?,?,?))",
@@ -726,10 +789,564 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
      * rollback-only flag, so the guard's pre-commit check (IllegalStateException) may report the
      * refusal instead of UnexpectedRollbackException; callers assert the database outcome too.
      */
+    // AD07 B1-O01/O11: the skill graph through the production security chain (ADR005 §8.1).
+
+    @Test void everyGraphOperationAdmitsOnlyTheOwningInstructorBeforeAnyDescendantLookupOrWrite() throws Exception {
+        UUID skill = UUID.randomUUID(), other = UUID.randomUUID(), lesson = UUID.randomUUID();
+        for (UUID course : List.of(COURSE, HIDDEN)) {
+            for (Operation operation : operations(course, skill, other, lesson)) {
+                assertEquals(401, call(operation, null).getResponse().getStatus(), operation::toString);
+                assertEquals(403, call(operation, bearer(LEARNER)).getResponse().getStatus(), operation::toString);
+                assertEquals(403, call(operation, bearer(ADMIN)).getResponse().getStatus(), operation::toString);
+                MvcResult nonOwner = call(operation, bearer(OTHER));
+                // Published non-owner 403; hidden Course concealed as 404 (ADR001 §12.4 stages 3-4).
+                assertEquals(course.equals(HIDDEN) ? 404 : 403, nonOwner.getResponse().getStatus(), operation::toString);
+                assertProblem(nonOwner);
+            }
+        }
+        assertEquals(0, graphRows());
+    }
+
+    @Test void theOwnerAuthorsTheGraphOverHttpWithIdempotentPairsAndContractStatuses() throws Exception {
+        UUID lesson = lesson(chapter(COURSE, 1), 1), foreignLesson = lesson(chapter(SECOND, 1), 1);
+        UUID foreignSkill = skillRow(SECOND, "Foreign");
+        String owner = bearer(OWNER), base = "/api/courses/" + COURSE;
+
+        JsonNode empty = json(call(new Operation(HttpMethod.GET, base + "/skill-graph", null), owner), 200);
+        assertEquals(COURSE.toString(), empty.get("courseId").asString());
+        assertEquals(0, empty.get("skills").size() + empty.get("prerequisites").size() + empty.get("mappings").size());
+
+        JsonNode created = json(call(new Operation(HttpMethod.POST, base + "/skills", "{\"name\":\"Variables\"}"), owner), 201);
+        UUID a = UUID.fromString(created.get("id").asString());
+        assertEquals("Variables", created.get("name").asString());
+        assertTrue(created.has("description") && created.get("description").isNull(), "description is present and null");
+        UUID b = UUID.fromString(json(call(new Operation(HttpMethod.POST, base + "/skills",
+                "{\"name\":\"Loops\",\"description\":\"for and while\"}"), owner), 201).get("id").asString());
+
+        JsonNode replaced = json(call(new Operation(HttpMethod.PUT, base + "/skills/" + b, "{\"name\":\"Iteration\"}"), owner), 200);
+        assertEquals(b.toString(), replaced.get("id").asString());
+        assertTrue(replaced.get("description").isNull(), "omitted description is replaced with null");
+        assertEquals("Iteration", jdbc.queryForObject("SELECT name FROM public.skills WHERE id = ? AND course_id = ?",
+                String.class, b, COURSE));
+
+        String ab = base + "/skills/" + a + "/prerequisites/" + b, ba = base + "/skills/" + b + "/prerequisites/" + a;
+        for (int repeat = 0; repeat < 2; repeat++) {
+            noContent(call(new Operation(HttpMethod.PUT, ab, null), owner));
+        }
+        assertEquals(List.of(a + "->" + b), edgesElsewhere(COURSE));
+        assertProblem(call(new Operation(HttpMethod.PUT, ba, null), owner), 409, "The request conflicts with an existing resource.");
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/skills/" + a + "/prerequisites/" + a, null), owner), 400, null);
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/skills/" + a + "/prerequisites/" + foreignSkill, null), owner), 404, null);
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/skills/" + UUID.randomUUID() + "/prerequisites/" + a, null), owner), 404, null);
+        assertEquals(List.of(a + "->" + b), edgesElsewhere(COURSE));
+
+        String map = base + "/lessons/" + lesson + "/skills/" + a;
+        for (int repeat = 0; repeat < 2; repeat++) {
+            noContent(call(new Operation(HttpMethod.PUT, map, null), owner));
+        }
+        assertEquals(List.of(lesson + "->" + a), mappingsElsewhere());
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/lessons/" + foreignLesson + "/skills/" + a, null), owner), 404, null);
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/lessons/" + lesson + "/skills/" + foreignSkill, null), owner), 404, null);
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/lessons/" + foreignLesson + "/skills/" + a, null), owner), 404, null);
+        assertEquals(List.of(lesson + "->" + a), mappingsElsewhere());
+
+        JsonNode read = json(call(new Operation(HttpMethod.GET, base + "/skill-graph", null), owner), 200);
+        List<String> expectedSkills = sortedText(a, b);
+        assertEquals(expectedSkills, List.of(read.get("skills").get(0).get("id").asString(), read.get("skills").get(1).get("id").asString()));
+        assertEquals(a.toString(), read.get("prerequisites").get(0).get("skillId").asString());
+        assertEquals(b.toString(), read.get("prerequisites").get(0).get("prerequisiteSkillId").asString());
+        assertEquals(lesson.toString(), read.get("mappings").get(0).get("lessonId").asString());
+
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/skills/" + a, null), owner), 409, null);
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/skills/" + UUID.randomUUID(), null), owner), 404, null);
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/skills/" + foreignSkill, null), owner), 404, null);
+        for (int repeat = 0; repeat < 2; repeat++) {
+            noContent(call(new Operation(HttpMethod.DELETE, map, null), owner));
+            noContent(call(new Operation(HttpMethod.DELETE, ab, null), owner));
+        }
+        assertEquals(List.of(), mappingsElsewhere());
+        assertEquals(List.of(), edgesElsewhere(COURSE));
+        noContent(call(new Operation(HttpMethod.DELETE, base + "/skills/" + a, null), owner));
+        assertEquals(List.of(b.toString()), jdbc.queryForList("SELECT id::text FROM public.skills WHERE course_id = ?", String.class, COURSE));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.skills WHERE id = ?", Integer.class, foreignSkill));
+    }
+
+    @Test void malformedRequestsAreBadRequestsWithoutEffectsAndTheOwnerMayAuthorAHiddenCourse() throws Exception {
+        String owner = bearer(OWNER), skills = "/api/courses/" + COURSE + "/skills";
+        assertProblem(call(new Operation(HttpMethod.GET, "/api/courses/not-a-uuid/skill-graph", null), owner), 400, null);
+        assertProblem(call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/skill-graph?page=1", null), owner), 400, null);
+        assertProblem(call(new Operation(HttpMethod.PUT, skills + "/" + UUID.randomUUID() + "/prerequisites/x", null), owner), 400, null);
+        for (String body : List.of("{}", "{\"name\":null}", "{\"name\":\"  \"}", "{\"name\":\"\\u2003\"}", "{\"name\":\"\\u0000\"}",
+                "{\"name\":5}", "{\"name\":\"A\",\"description\":\"\"}", "{\"name\":\"A\",\"description\":\" \\t\"}", "{\"name\":\"A\",\"description\":\"\\u2003\"}",
+                "{\"name\":\"A\",\"description\":7}", "{\"name\":\"A\",\"courseId\":\"" + SECOND + "\"}",
+                "{\"name\":\"A\",\"id\":\"" + UUID.randomUUID() + "\"}", "[]", "null", "\"A\"", "{\"name\":\"A\"", "",
+                "{\"name\":\"A\"} {\"name\":\"B\"}", "{\"name\":\"A\"}x", "{\"name\":[\"A\"]}", "{\"name\":{\"text\":\"A\"}}")) {
+            assertProblem(call(new Operation(HttpMethod.POST, skills, body), owner), 400, null);
+        }
+        MvcResult text = mvc.perform(request(HttpMethod.POST, skills).header("Authorization", owner)
+                .contentType(MediaType.TEXT_PLAIN).content("{\"name\":\"A\"}")).andReturn();
+        assertEquals(415, text.getResponse().getStatus());
+        assertEquals(0, graphRows());
+
+        JsonNode hidden = json(call(new Operation(HttpMethod.POST, "/api/courses/" + HIDDEN + "/skills", "{\"name\":\"Draft skill\"}"), owner), 201);
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.skills WHERE id = ? AND course_id = ?", Integer.class,
+                UUID.fromString(hidden.get("id").asString()), HIDDEN));
+        assertProblem(call(new Operation(HttpMethod.GET, "/api/courses/" + UUID.randomUUID() + "/skill-graph", null), owner), 404, null);
+    }
+
+    @Test void aRepeatedBodyMemberIsAMalformedClosedObjectAndWritesNothing() throws Exception {
+        String owner = bearer(OWNER), skills = "/api/courses/" + COURSE + "/skills";
+        UUID existing = skillRow(COURSE, "Existing");
+        for (String body : List.of("{\"name\":\"First\",\"name\":\"Second\"}",
+                "{\"name\":\"A\",\"description\":null,\"description\":\"B\"}", "{\"name\":\"A\",\"name\":null}")) {
+            assertProblem(call(new Operation(HttpMethod.POST, skills, body), owner), 400, null);
+            assertProblem(call(new Operation(HttpMethod.PUT, skills + "/" + existing, body), owner), 400, null);
+        }
+        assertEquals("Existing", jdbc.queryForObject("SELECT name FROM public.skills WHERE id = ?", String.class, existing));
+        assertEquals(1, graphRows());
+    }
+
+    @Test void unpairedSurrogatesAreBadRequestsWithoutEffectsAndSupplementaryTextRoundTripsUnchanged() throws Exception {
+        String owner = bearer(OWNER), skills = "/api/courses/" + COURSE + "/skills";
+        UUID existing = skillRow(COURSE, "Existing");
+        jdbc.update("UPDATE public.skills SET description = 'Kept' WHERE id = ?", existing);
+        String before = graphState();
+        // JSON escapes reach Java as unpaired UTF-16 surrogates; the driver would have stored them as '?'.
+        for (String unpaired : List.of("\\ud800", "\\udc00", "Loops \\ud83d", "\\ude00 Loops", "\\ud83d\\ude00\\ud800")) {
+            for (String body : List.of("{\"name\":\"" + unpaired + "\"}",
+                    "{\"name\":\"Loops\",\"description\":\"" + unpaired + "\"}")) {
+                assertProblem(call(new Operation(HttpMethod.POST, skills, body), owner), 400, null);
+                assertProblem(call(new Operation(HttpMethod.PUT, skills + "/" + existing, body), owner), 400, null);
+            }
+        }
+        assertEquals(before, graphState(), "no INSERT or UPDATE reached PostgreSQL");
+        assertFalse(rootLockedElsewhere(COURSE));
+
+        // Valid surrogate pairs (supplementary characters) and a non-space Mongolian vowel separator persist exactly.
+        String name = "Graphs 𝔸 😀", description = "᠎ pairs 􏿿";
+        JsonNode created = json(call(new Operation(HttpMethod.POST, skills,
+                "{\"name\":\"Graphs \\ud835\\udd38 \\ud83d\\ude00\",\"description\":\"\\u180e pairs \\udbff\\udfff\"}"), owner), 201);
+        UUID createdId = UUID.fromString(created.get("id").asString());
+        assertEquals(name, created.get("name").asString());
+        assertEquals(description, created.get("description").asString());
+        JsonNode replaced = json(call(new Operation(HttpMethod.PUT, skills + "/" + existing,
+                "{\"name\":\"" + name + "\",\"description\":\"" + description + "\"}"), owner), 200);
+        assertEquals(name, replaced.get("name").asString());
+        assertEquals(description, replaced.get("description").asString());
+        String utf8 = HexFormat.of().formatHex((name + "|" + description).getBytes(StandardCharsets.UTF_8));
+        for (UUID skill : List.of(createdId, existing)) {
+            assertEquals(utf8, jdbc.queryForObject("SELECT encode(convert_to(name || '|' || description, 'UTF8'), 'hex') "
+                    + "FROM public.skills WHERE id = ?", String.class, skill), "persisted bytes equal the accepted text");
+        }
+        JsonNode graphRead = json(call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/skill-graph", null), owner), 200);
+        assertEquals(2, graphRead.get("skills").size());
+        for (JsonNode skill : graphRead.get("skills")) {
+            assertEquals(name, skill.get("name").asString());
+            assertEquals(description, skill.get("description").asString());
+        }
+    }
+
+    @Test void aCorruptPersistedGraphFailsClosedWithASafeServerError() throws Exception {
+        UUID a = skillRow(COURSE, "A"), b = skillRow(COURSE, "B");
+        edgeRow(COURSE, a, b);
+        edgeRow(COURSE, b, a);
+        MvcResult read = call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/skill-graph", null), bearer(OWNER));
+        assertProblem(read, 500, "An unexpected error occurred.");
+        String body = read.getResponse().getContentAsString();
+        assertFalse(body.contains(a.toString()) || body.contains("cycl") || body.contains("SQL"), body);
+        assertProblem(call(new Operation(HttpMethod.PUT, "/api/courses/" + COURSE + "/skills/" + a + "/prerequisites/"
+                + skillRow(COURSE, "C"), null), bearer(OWNER)), 500, null);
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM public.skill_prerequisites WHERE course_id = ?", Integer.class, COURSE));
+    }
+
+    // AD07 B1-O11: referenced skills and foreign keys.
+
+    @Test void referencedSkillsConflictWithoutCascadeAndAnUnreferencedSkillIsDeleted() {
+        UUID dependent = skillRow(COURSE, "Dependent"), prerequisite = skillRow(COURSE, "Prerequisite");
+        UUID mapped = skillRow(COURSE, "Mapped"), questioned = skillRow(COURSE, "Questioned");
+        UUID mastered = skillRow(COURSE, "Mastered"), free = skillRow(COURSE, "Free");
+        UUID lesson = lesson(chapter(COURSE, 1), 1);
+        edgeRow(COURSE, dependent, prerequisite);
+        jdbc.update("INSERT INTO public.lesson_skills (id,lesson_id,skill_id) VALUES (?,?,?)", UUID.randomUUID(), lesson, mapped);
+        jdbc.update("INSERT INTO public.questions (id,skill_id,prompt,kind,difficulty,options,correct_options) "
+                + "VALUES (?,?,'Pick one','true_false','easy',ARRAY['True','False'],ARRAY[true,false])", UUID.randomUUID(), questioned);
+        jdbc.update("INSERT INTO public.learner_skill_masteries (id,user_id,skill_id,state) VALUES (?,?,?,'learning')",
+                UUID.randomUUID(), LEARNER, mastered);
+        String before = graphState();
+
+        for (UUID referenced : List.of(dependent, prerequisite, mapped, questioned, mastered)) {
+            BusinessRuleException refused = assertThrows(BusinessRuleException.class,
+                    () -> as(OWNER, Role.INSTRUCTOR, () -> { graph.deleteSkill(COURSE, referenced); return null; }));
+            assertEquals(409, refused.getStatus().value());
+            assertFalse(rootLockedElsewhere(COURSE), "the refused unit rolled back and released the root");
+        }
+        assertEquals(before, graphState());
+        as(OWNER, Role.INSTRUCTOR, () -> { graph.deleteSkill(COURSE, free); return null; });
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.skills WHERE id = ?", Integer.class, free));
+        assertEquals(5, jdbc.queryForObject("SELECT count(*) FROM public.skills WHERE course_id = ?", Integer.class, COURSE));
+    }
+
+    @Test void crossCourseReferencesAreConcealedAndWriteNothing() {
+        UUID a = skillRow(COURSE, "A"), foreign = skillRow(SECOND, "Foreign");
+        UUID lesson = lesson(chapter(COURSE, 1), 1), foreignLesson = lesson(chapter(SECOND, 1), 1);
+        List<org.junit.jupiter.api.function.Executable> attempts = List.of(
+                () -> graph.addPrerequisite(COURSE, a, foreign),
+                () -> graph.addPrerequisite(COURSE, foreign, a),
+                () -> graph.removePrerequisite(COURSE, a, foreign),
+                () -> graph.mapLesson(COURSE, foreignLesson, a),
+                () -> graph.mapLesson(COURSE, lesson, foreign),
+                () -> graph.unmapLesson(COURSE, lesson, foreign),
+                () -> graph.updateSkill(COURSE, foreign, "Renamed", null),
+                () -> graph.deleteSkill(COURSE, foreign),
+                () -> graph.requireSkillInCourse(COURSE, foreign));
+        for (var attempt : attempts) {
+            as(OWNER, Role.INSTRUCTOR, () -> assertThrows(ResourceNotFoundException.class, attempt));
+        }
+        assertEquals(List.of(), edgesElsewhere(COURSE));
+        assertEquals(List.of(), mappingsElsewhere());
+        assertEquals("Foreign", jdbc.queryForObject("SELECT name FROM public.skills WHERE id = ?", String.class, foreign));
+    }
+
+    // AD07 CT40.skill-tag producers (ADR005 §3.2) against real Course ownership.
+
+    @Test void skillLookupBoundariesAdmitTheOwnerAndWorkInsideTheConsumersGuard() {
+        UUID a = skillRow(COURSE, "A"), b = skillRow(COURSE, "B");
+        skillRow(SECOND, "Elsewhere");
+        List<UUID> expected = sortedText(a, b).stream().map(UUID::fromString).toList();
+        assertEquals(expected, as(OWNER, Role.INSTRUCTOR, () -> graph.readSkillIds(COURSE)));
+        assertEquals(List.of(), as(OWNER, Role.INSTRUCTOR, () -> graph.readSkillIds(HIDDEN)));
+        as(OWNER, Role.INSTRUCTOR, () -> { graph.requireSkillInCourse(COURSE, a); return null; });
+        as(OWNER, Role.INSTRUCTOR, () -> assertThrows(ResourceNotFoundException.class, () -> graph.requireSkillInCourse(COURSE, UUID.randomUUID())));
+        as(OWNER, Role.INSTRUCTOR, () -> assertThrows(ResourceNotFoundException.class, () -> graph.readSkillIds(UUID.randomUUID())));
+        as(OTHER, Role.INSTRUCTOR, () -> assertThrows(AccessDeniedException.class, () -> graph.readSkillIds(COURSE)));
+        as(OTHER, Role.INSTRUCTOR, () -> assertThrows(ResourceNotFoundException.class, () -> graph.requireSkillInCourse(HIDDEN, a)));
+        as(LEARNER, Role.LEARNER, () -> assertThrows(AccessDeniedException.class, () -> graph.requireSkillInCourse(COURSE, a)));
+        assertThrows(AuthenticationCredentialsNotFoundException.class, () -> graph.readSkillIds(COURSE));
+        assertThrows(IllegalArgumentException.class, () -> graph.requireSkillInCourse(COURSE, null));
+
+        // Assessment validates tags under its own guard: the lookups join that unit and read committed state.
+        commitElsewhere("INSERT INTO public.skills (id,course_id,name) VALUES ('" + UUID.randomUUID() + "', ?, 'Late')", COURSE);
+        List<UUID> inGuard = as(OWNER, Role.INSTRUCTOR, () -> service.withCourseConfigurationWrite(COURSE, () -> {
+            graph.requireSkillInCourse(COURSE, b);
+            return graph.readSkillIds(COURSE);
+        }));
+        assertEquals(3, inGuard.size());
+        assertEquals(inGuard.stream().sorted(java.util.Comparator.comparing(UUID::toString)).toList(), inGuard);
+    }
+
+    // AD07 B1-O03/O04: Course-root serialization, independence and rollback on PostgreSQL.
+
+    @ParameterizedTest @ValueSource(booleans = {true, false})
+    void reverseEdgesRaceOnTheCourseRootAndTheWaiterRecomputesAgainstTheCommittedWinner(boolean winnerCommits) throws Exception {
+        UUID a = skillRow(COURSE, "A"), b = skillRow(COURSE, "B");
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        Future<Object> winner = workers.submit(() -> as(OWNER, Role.INSTRUCTOR,
+                () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false).execute(status -> {
+                    graph.addPrerequisite(COURSE, a, b);
+                    entityManager.flush();
+                    entered.countDown();
+                    await(release);
+                    if (!winnerCommits) throw new IllegalStateException("winner rolls back");
+                    return null;
+                })));
+        await(entered);
+        assertEquals(List.of(), edgesElsewhere(COURSE), "the winner's edge is not yet committed");
+        Future<Object> waiter = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> {
+            graph.addPrerequisite(COURSE, b, a);
+            return null;
+        }));
+        awaitLockWaiters(1);
+        assertFalse(waiter.isDone(), "the reverse edge waits for the Course root");
+        release.countDown();
+        if (winnerCommits) {
+            winner.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            BusinessRuleException cycle = assertInstanceOf(BusinessRuleException.class, failureOf(waiter));
+            assertEquals(409, cycle.getStatus().value());
+            assertEquals(List.of(a + "->" + b), edgesElsewhere(COURSE));
+        } else {
+            failureOf(winner);
+            waiter.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertEquals(List.of(b + "->" + a), edgesElsewhere(COURSE));
+        }
+        GraphSnapshot finalGraph = as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE));
+        assertEquals(1, finalGraph.prerequisites().size(), "the committed graph stays acyclic");
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    @Test void graphWritesOnIndependentCoursesDoNotShareTheGuard() throws Exception {
+        UUID a = skillRow(COURSE, "A"), b = skillRow(COURSE, "B"), c = skillRow(SECOND, "C"), d = skillRow(SECOND, "D");
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        Future<Object> holder = workers.submit(() -> as(OWNER, Role.INSTRUCTOR,
+                () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false).execute(status -> {
+                    graph.addPrerequisite(COURSE, a, b);
+                    entered.countDown();
+                    await(release);
+                    return null;
+                })));
+        await(entered);
+        Future<Object> other = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> {
+            graph.addPrerequisite(SECOND, c, d);
+            graph.mapLesson(SECOND, lesson(chapter(SECOND, 1), 1), c);
+            return null;
+        }));
+        other.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        assertFalse(holder.isDone(), "the first Course is still held while the second committed");
+        assertEquals(List.of(c + "->" + d), edgesElsewhere(SECOND));
+        assertTrue(rootLockedElsewhere(COURSE));
+        release.countDown();
+        holder.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        assertEquals(List.of(a + "->" + b), edgesElsewhere(COURSE));
+    }
+
+    @Test void aFailureInsideTheUnitRollsBackEveryGraphEffectAndPersistsNothing() {
+        UUID a = skillRow(COURSE, "A"), foreignLesson = lesson(chapter(SECOND, 1), 1), lesson = lesson(chapter(COURSE, 1), 1);
+        String before = graphState();
+        assertThrows(ResourceNotFoundException.class, () -> as(OWNER, Role.INSTRUCTOR,
+                () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false).execute(status -> {
+                    SkillReference created = graph.createSkill(COURSE, "Temporary", "Rolled back");
+                    graph.updateSkill(COURSE, a, "Renamed", null);
+                    graph.addPrerequisite(COURSE, created.id(), a);
+                    graph.mapLesson(COURSE, lesson, a);
+                    graph.mapLesson(COURSE, foreignLesson, a); // Course ancestry refuses: the whole unit rolls back
+                    return null;
+                })));
+        assertEquals(before, graphState());
+        assertFalse(rootLockedElsewhere(COURSE));
+
+        SkillReference kept = as(OWNER, Role.INSTRUCTOR, () -> graph.createSkill(COURSE, "Kept", null));
+        as(OWNER, Role.INSTRUCTOR, () -> { graph.addPrerequisite(COURSE, kept.id(), a); graph.mapLesson(COURSE, lesson, a); return null; });
+        GraphSnapshot committed = as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE));
+        assertEquals(List.of(new PrerequisiteReference(kept.id(), a)), committed.prerequisites());
+        assertEquals(List.of(new MappingReference(lesson, a)), committed.mappings());
+    }
+
+    @Test void theOwnerReadIsOneSnapshotEvenWhenAWriterCommitsBetweenItsStatements() {
+        UUID a = skillRow(COURSE, "A"), late = UUID.randomUUID();
+        BEFORE_PREREQUISITES.set(() -> {
+            commitSqlElsewhere("INSERT INTO public.skills (id,course_id,name) VALUES (?,?,'Late')", late, COURSE);
+            commitSqlElsewhere("INSERT INTO public.skill_prerequisites (id,course_id,skill_id,prerequisite_skill_id) VALUES (?,?,?,?)",
+                    UUID.randomUUID(), COURSE, late, a);
+        });
+        GraphSnapshot during = as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE));
+        assertNull(BEFORE_PREREQUISITES.get(), "the concurrent commit ran between the read's statements");
+        assertEquals(List.of(a), during.skills().stream().map(SkillReference::id).toList());
+        assertEquals(List.of(), during.prerequisites());
+        GraphSnapshot after = as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE));
+        assertEquals(List.of(new PrerequisiteReference(late, a)), after.prerequisites());
+    }
+
+    // AD07 x CO06 CT40 projection (ADR005 §§3.1, 4.1, 4.3, 5): mapping ancestry on PostgreSQL.
+
+    @Test void mappingsOfPublishedAndHiddenLessonsOfTheCourseAreReadAndAForeignLessonMappingFailsClosed() throws Exception {
+        UUID chapter = chapter(COURSE, 1), published = lesson(chapter, 1), hidden = hiddenLesson(chapter, 2);
+        UUID a = skillRow(COURSE, "A"), b = skillRow(COURSE, "B"), free = skillRow(COURSE, "Free");
+        as(OWNER, Role.INSTRUCTOR, () -> { graph.mapLesson(COURSE, published, a); graph.mapLesson(COURSE, hidden, b); return null; });
+        String owner = bearer(OWNER), base = "/api/courses/" + COURSE;
+        JsonNode read = json(call(new Operation(HttpMethod.GET, base + "/skill-graph", null), owner), 200);
+        assertEquals(2, read.get("mappings").size(), "the owner's graph includes the hidden Lesson's mapping");
+
+        // Raw SQL is not a qualified writer: a mapping whose Lesson belongs to another Course is corrupt state.
+        UUID foreignLesson = lesson(chapter(SECOND, 1), 1);
+        jdbc.update("INSERT INTO public.lesson_skills (id,lesson_id,skill_id) VALUES (?,?,?)", UUID.randomUUID(), foreignLesson, a);
+        String before = graphState();
+        MvcResult corrupt = call(new Operation(HttpMethod.GET, base + "/skill-graph", null), owner);
+        assertProblem(corrupt, 500, "An unexpected error occurred.");
+        String body = corrupt.getResponse().getContentAsString();
+        assertFalse(body.contains(foreignLesson.toString()) || body.contains(SECOND.toString()) || body.contains("Lesson"), body);
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/skills/" + a + "/prerequisites/" + b, null), owner), 500, null);
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/skills/" + b + "/prerequisites/" + a, null), owner), 500, null);
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/skills/" + free, null), owner), 500, null);
+        assertEquals(before, graphState(), "nothing was repaired, removed or written");
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    @Test void aLessonMovedOutsideTheCourseBehindTheApplicationMakesItsMappingCorrupt() throws Exception {
+        UUID lesson = lesson(chapter(COURSE, 1), 1), a = skillRow(COURSE, "A"), foreignChapter = chapter(SECOND, 1);
+        as(OWNER, Role.INSTRUCTOR, () -> { graph.mapLesson(COURSE, lesson, a); return null; });
+        jdbc.update("UPDATE public.lessons SET chapter_id = ? WHERE id = ?", foreignChapter, lesson);
+        assertThrows(IllegalStateException.class, () -> as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE)));
+        assertProblem(call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/skill-graph", null), bearer(OWNER)), 500, null);
+        assertEquals(List.of(lesson + "->" + a), mappingsElsewhere());
+    }
+
+    @Test void theOwnerReadProvesMappingsAgainstTheStructureOfTheSameSnapshot() {
+        UUID chapter = chapter(COURSE, 1), lesson = lesson(chapter, 1), a = skillRow(COURSE, "A");
+        UUID foreignChapter = chapter(SECOND, 1), late = UUID.randomUUID();
+        as(OWNER, Role.INSTRUCTOR, () -> { graph.mapLesson(COURSE, lesson, a); return null; });
+        BEFORE_PREREQUISITES.set(() -> {
+            // Between the read's statements another connection appends a Lesson with a mapping and
+            // moves the mapped Lesson out of the Course. The snapshot sees neither change.
+            commitSqlElsewhere("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) "
+                    + "VALUES (?,?,'Late',2,'hidden')", late, chapter);
+            commitSqlElsewhere("INSERT INTO public.lesson_skills (id,lesson_id,skill_id) VALUES (?,?,?)", UUID.randomUUID(), late, a);
+            commitSqlElsewhere("UPDATE public.lessons SET chapter_id = ? WHERE id = ?", foreignChapter, lesson);
+        });
+        GraphSnapshot during = as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE));
+        assertNull(BEFORE_PREREQUISITES.get(), "the concurrent commits ran between the read's statements");
+        assertEquals(List.of(new MappingReference(lesson, a)), during.mappings());
+        assertThrows(IllegalStateException.class, () -> as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE)),
+                "the committed state now holds a foreign-Course mapping and fails closed");
+    }
+
+    @ParameterizedTest @ValueSource(booleans = {true, false})
+    void mappingALessonWaitsForTheCourseWriterCreatingItAndRereadsCommittedStructure(boolean creatorCommits) throws Exception {
+        UUID chapter = chapter(COURSE, 1), a = skillRow(COURSE, "A");
+        AtomicReference<UUID> created = new AtomicReference<>();
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        Future<Object> creator = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> service.withCourseConfigurationWrite(COURSE, () -> {
+            created.set(structure.createCourseLesson(COURSE, chapter, "Concurrent", null).id());
+            entered.countDown();
+            await(release);
+            if (!creatorCommits) throw new IllegalStateException("creator rolls back");
+            return null;
+        })));
+        await(entered);
+        Future<Object> mapper = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> {
+            graph.mapLesson(COURSE, created.get(), a);
+            return null;
+        }));
+        awaitLockWaiters(1);
+        assertFalse(mapper.isDone(), "the mapping waits on the Course root held by the structural writer");
+        release.countDown();
+        if (creatorCommits) {
+            creator.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            mapper.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertEquals(List.of(created.get() + "->" + a), mappingsElsewhere());
+            GraphSnapshot read = as(OWNER, Role.INSTRUCTOR, () -> graph.readGraph(COURSE));
+            assertEquals(List.of(new MappingReference(created.get(), a)), read.mappings());
+        } else {
+            failureOf(creator);
+            assertTrue(failureOf(mapper) instanceof ResourceNotFoundException, "a rolled-back Lesson is not in the Course");
+            assertEquals(List.of(), mappingsElsewhere());
+        }
+    }
+
     private static void assertCommitRefused(org.junit.jupiter.api.function.Executable unit) {
         RuntimeException refused = assertThrows(RuntimeException.class, unit);
         assertTrue(refused instanceof UnexpectedRollbackException || refused instanceof IllegalStateException,
                 () -> "unexpected refusal " + refused);
+    }
+
+    private record Operation(HttpMethod method, String path, String body) { }
+
+    private static List<Operation> operations(UUID course, UUID skill, UUID other, UUID lesson) {
+        String base = "/api/courses/" + course;
+        String body = "{\"name\":\"Probe\"}";
+        return List.of(
+                new Operation(HttpMethod.GET, base + "/skill-graph", null),
+                new Operation(HttpMethod.POST, base + "/skills", body),
+                new Operation(HttpMethod.PUT, base + "/skills/" + skill, body),
+                new Operation(HttpMethod.DELETE, base + "/skills/" + skill, null),
+                new Operation(HttpMethod.PUT, base + "/skills/" + skill + "/prerequisites/" + other, null),
+                new Operation(HttpMethod.DELETE, base + "/skills/" + skill + "/prerequisites/" + other, null),
+                new Operation(HttpMethod.PUT, base + "/lessons/" + lesson + "/skills/" + skill, null),
+                new Operation(HttpMethod.DELETE, base + "/lessons/" + lesson + "/skills/" + skill, null));
+    }
+
+    private MvcResult call(Operation operation, String authorization) throws Exception {
+        MockHttpServletRequestBuilder builder = request(operation.method(), java.net.URI.create(operation.path()));
+        if (authorization != null) builder.header("Authorization", authorization);
+        if (operation.body() != null) builder.contentType(MediaType.APPLICATION_JSON).content(operation.body());
+        return mvc.perform(builder).andReturn();
+    }
+
+    /** ADR014: an access JWT is bound to an unrevoked refresh session of the same account. */
+    private String bearer(UUID user) {
+        UUID session = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) VALUES (?,?,now(),now() + interval '1 hour')",
+                session, user);
+        return "Bearer " + tokens.createToken(user, session);
+    }
+
+    private static JsonNode json(MvcResult result, int status) throws Exception {
+        String body = result.getResponse().getContentAsString();
+        assertEquals(status, result.getResponse().getStatus(), body);
+        assertTrue(MediaType.APPLICATION_JSON.isCompatibleWith(MediaType.parseMediaType(result.getResponse().getContentType())));
+        return JSON.readTree(result.getResponse().getContentAsString());
+    }
+
+    private static void noContent(MvcResult result) throws Exception {
+        String body = result.getResponse().getContentAsString();
+        assertEquals(204, result.getResponse().getStatus(), body);
+        assertEquals("", body);
+    }
+
+    private static void assertProblem(MvcResult result) throws Exception {
+        assertEquals("application/problem+json", MediaType.parseMediaType(result.getResponse().getContentType()).getType() + "/"
+                + MediaType.parseMediaType(result.getResponse().getContentType()).getSubtype());
+        JsonNode problem = JSON.readTree(result.getResponse().getContentAsString());
+        assertEquals(result.getResponse().getStatus(), problem.get("status").asInt());
+    }
+
+    private static void assertProblem(MvcResult result, int status, String detail) throws Exception {
+        assertEquals(status, result.getResponse().getStatus(), result.getResponse().getContentAsString());
+        assertProblem(result);
+        if (detail != null) assertEquals(detail, JSON.readTree(result.getResponse().getContentAsString()).get("detail").asString());
+    }
+
+    private UUID skillRow(UUID course, String name) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.skills (id,course_id,name) VALUES (?,?,?)", id, course, name);
+        return id;
+    }
+
+    private void edgeRow(UUID course, UUID skill, UUID prerequisite) {
+        jdbc.update("INSERT INTO public.skill_prerequisites (id,course_id,skill_id,prerequisite_skill_id) VALUES (?,?,?,?)",
+                UUID.randomUUID(), course, skill, prerequisite);
+    }
+
+    private static List<String> sortedText(UUID... ids) {
+        return Arrays.stream(ids).map(UUID::toString).sorted().toList();
+    }
+
+    /** Committed edges of one Course, read on a separate connection. */
+    private List<String> edgesElsewhere(UUID course) {
+        return queryElsewhere("SELECT skill_id || '->' || prerequisite_skill_id FROM public.skill_prerequisites "
+                + "WHERE course_id = ? ORDER BY 1", course);
+    }
+
+    private List<String> mappingsElsewhere() {
+        return queryElsewhere("SELECT m.lesson_id || '->' || m.skill_id FROM public.lesson_skills m JOIN public.skills s "
+                + "ON s.id = m.skill_id WHERE s.course_id IN (?, '" + SECOND + "', '" + HIDDEN + "') ORDER BY 1", COURSE);
+    }
+
+    private List<String> queryElsewhere(String sql, UUID parameter) {
+        try (Connection connection = dataSource.getConnection(); PreparedStatement read = connection.prepareStatement(sql)) {
+            read.setObject(1, parameter);
+            List<String> rows = new ArrayList<>();
+            try (ResultSet result = read.executeQuery()) {
+                while (result.next()) rows.add(result.getString(1));
+            }
+            return rows;
+        } catch (SQLException failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
+
+    private int graphRows() {
+        return jdbc.queryForObject("SELECT (SELECT count(*) FROM public.skills WHERE course_id IN (?,?,?)) "
+                + "+ (SELECT count(*) FROM public.skill_prerequisites WHERE course_id IN (?,?,?)) "
+                + "+ (SELECT count(*) FROM public.lesson_skills)", Integer.class, COURSE, SECOND, HIDDEN, COURSE, SECOND, HIDDEN);
+    }
+
+    /** Every skill-graph value of the guarded Course plus its foreign-key referrers, on a fresh connection. */
+    private String graphState() {
+        return queryElsewhere("SELECT concat_ws('|', "
+                + "(SELECT string_agg(concat_ws(',', id, name, description), ';' ORDER BY id) FROM public.skills WHERE course_id = ?), "
+                + "(SELECT string_agg(concat_ws(',', skill_id, prerequisite_skill_id), ';' ORDER BY 1) FROM public.skill_prerequisites "
+                + "WHERE course_id = '" + COURSE + "'), "
+                + "(SELECT string_agg(concat_ws(',', lesson_id, skill_id), ';' ORDER BY 1) FROM public.lesson_skills), "
+                + "(SELECT count(*) FROM public.questions), (SELECT count(*) FROM public.learner_skill_masteries))", COURSE).getFirst();
+    }
+
+    private void commitSqlElsewhere(String sql, Object... parameters) {
+        try (Connection connection = dataSource.getConnection(); PreparedStatement update = connection.prepareStatement(sql)) {
+            connection.setAutoCommit(true);
+            for (int index = 0; index < parameters.length; index++) update.setObject(index + 1, parameters[index]);
+            assertEquals(1, update.executeUpdate());
+        } catch (SQLException failure) {
+            throw new IllegalStateException(failure);
+        }
     }
 
     private <T> T guard(boolean failFast, UUID course, Supplier<T> work) {
@@ -856,6 +1473,13 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     private UUID lesson(UUID chapter, int position) {
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) VALUES (?,?,?,?,'published')",
+                id, chapter, "Lesson " + position, position);
+        return id;
+    }
+
+    private UUID hiddenLesson(UUID chapter, int position) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) VALUES (?,?,?,?,'hidden')",
                 id, chapter, "Lesson " + position, position);
         return id;
     }

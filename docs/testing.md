@@ -5287,3 +5287,121 @@ Executed locally (macOS, OpenJDK 25.0.4.1, Docker 29.8.1) in an isolated worktre
 These are local developer runs, not independent review, QA or CI evidence. Still gated: the IN20
 Administrator REST route and audit, materials (CO09), the CT26 event (CO12), runtime grants for the
 Course writes (CT17-P6), Adaptive consumers of the projection, deployed and browser verification.
+
+## AD07 skill graph verification — 21 November 2026
+
+Implementation of AD07 ([#165](https://github.com/chi-thanh-nguyen/codemastery/issues/165),
+[PR #264](https://github.com/chi-thanh-nguyen/codemastery/pull/264)) against
+`CT05-REPRESENTATION-2026-11-08-r1`, `CT05-MUTATION-2026-11-08-r1`,
+`CT05-MAPPING-2026-11-08-r1`, `CT05-BINDINGS-2026-11-08-r1`, `CT40-LESSON-READ-2026-11-08-r1`
+(mapping assertion only) and `CT40-SKILL-TAG-2026-11-08-r1`
+([ADR005 §§3.1, 3.2, 4, 5, 8](decisions/005-batch-01-contract-approvals.md#4-ct05-graph-behavior)),
+consuming the CO14 Course-root guard and the CT03 ownership assertions. The eight
+operations are reachable through Instructor-only route rules in Auth's `SecurityConfig`.
+A remediation pass on the PR fixed these verified defects before this evidence was recorded:
+
+| Severity | Defect | Fix | Regression evidence |
+| --- | --- | --- | --- |
+| P1 | Auth's default-deny chain returned 403 to every role on all eight operations | Instructor-only rules for the exact eight method/path pairs; Course ownership stays CT03's decision in the service | `everyGraphOperationAdmitsOnlyTheOwningInstructorBeforeAnyDescendantLookupOrWrite` and the owner HTTP lifecycle test |
+| P2 | The owner read ran three autocommit statements, so a writer committing between them made a valid graph fail as malformed (500) | One read-only REPEATABLE READ snapshot covering admission and all graph reads (ADR005 §5 "coherent read snapshot") | `theOwnerReadIsOneSnapshotEvenWhenAWriterCommitsBetweenItsStatements` fails with `IllegalStateException` without the fix; `SkillGraphTest` transaction-definition check |
+| P2 | The recursive cycle check overflowed the stack on a long dependency path (`StackOverflowError` at 50 000 skills), contrary to "arbitrarily long path" (B1-O02) | Iterative depth-first search with a visited set; same order and result | `anArbitrarilyLongPathStillRejectsTheClosingEdgeWithoutExhaustingTheStack` fails on the previous code |
+| P2 | Text passing `@NotBlank` but blank under Unicode whitespace, or containing NUL, reached an `IllegalArgumentException` or the V003 CHECK and returned 500 | The service rejects such text as 400 before the guard | `textBlankUnderAnyWhitespaceRuleOrHoldingNulIsBadRequestBeforeTheGuard`; HTTP bodies in `malformedRequestsAreBadRequests…` |
+| P3 | A repeated body member was silently accepted (last value wins); the strict mapper in `SkillRequests` was unused | A streaming reader rejects repeated, unknown and non-string members of the closed object as 400 | `aRepeatedBodyMemberIsAMalformedClosedObjectAndWritesNothing` returned 201 before the fix |
+
+| Oracle (ADR005 §8.2) | Covered by |
+| --- | --- |
+| B1-O01 mapping, idempotence, foreign 404, Learner/Admin 403 before lookup, anonymous 401 | `SkillGraphTest$Commands`; `AdaptiveLearningFlowIntegrationTest.everyGraphOperationAdmits…`, `theOwnerAuthorsTheGraphOverHttp…`, `crossCourseReferencesAreConcealedAndWriteNothing` |
+| B1-O02 direct/transitive cycle 409 without edge, self-edge 400, duplicate unchanged, missing 404, arbitrarily long path | `SkillGraphTest$Representation`, `SkillGraphTest$Commands`; HTTP lifecycle test |
+| B1-O03 A→B / B→A race on real PostgreSQL; waiter observes the committed winner (409) or recomputes after its rollback | `reverseEdgesRaceOnTheCourseRootAndTheWaiterRecomputesAgainstTheCommittedWinner` (both outcomes; barrier on `pg_stat_activity` lock waits, no sleeps) |
+| B1-O04 (AD07 part) independent Courses do not share the guard; a fault inside the unit rolls back every graph effect | `graphWritesOnIndependentCoursesDoNotShareTheGuard`, `aFailureInsideTheUnitRollsBackEveryGraphEffectAndPersistsNothing` |
+| B1-O11 (AD07 part) delete referenced by edge (either end), mapping, Question or mastery → 409, no cascade | `referencedSkillsConflictWithoutCascadeAndAnUnreferencedSkillIsDeleted`; corrupt stored cycle → safe 500 in `aCorruptPersistedGraphFailsClosedWithASafeServerError` |
+| CT40.skill-tag producers with real Course ownership, including inside a consumer's guard | `skillLookupBoundariesAdmitTheOwnerAndWorkInsideTheConsumersGuard` |
+
+Not covered here, because the participant belongs to another Issue: B1-O04's publication,
+Question and enablement races (CO06, AS05, AD08), B1-O11's CT40 structure projection
+(CO06 `CourseStructureService.readStructure`, still empty), and verification that a stored
+mapping's Lesson still belongs to the Course on read, which needs that projection. Writes
+prove Lesson ancestry through `requireLessonOwnership`. The Assessment consumers of
+`requireSkillInCourse`/`readSkillIds` (PR #259, PR #260) still use fail-closed seams.
+
+> **Historical, superseded on 22 November 2026.** The paragraph above records the state of
+> 21 November and is kept as evidence. CO06 (#172, PR #265) has since merged (`75cdb8b`) with
+> `CourseStructureService.readStructure` implemented, and AD07 now proves every persisted mapping
+> against it; see "CT40 structural projection consumption — 22 November 2026" below. The runtime
+> grants are recorded in "CT17-P6 r5 runtime privileges — 22 November 2026". The PR #259/#260
+> seam statement still describes those branches.
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #264 working
+tree based on `main` `b506500`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw test -Dtest='SkillGraphTest*'` | 39 tests (10 representation, 29 command), 0 failures or errors |
+| `cd backend && ./mvnw verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AdaptiveLearningFlowIntegrationTest` (PostgreSQL Testcontainer) | 61 tests, 0 failures or errors |
+| `cd backend && ./mvnw verify` | BUILD SUCCESS; Surefire 778, Failsafe 307, 0 failures, errors or skips |
+| Disposable stack: the packaged backend on a random loopback port against a private `infrastructure/postgres` container, synthetic accounts, removed afterwards | 401/403/403 for anonymous, Learner and non-owner; owner create/update/read; direct and transitive cycles 409; self-edge 400; hidden owner Lesson mapped; foreign Lesson 404; delete of a skill referenced by an edge or only by a Question 409; repeated member and Unicode-blank name 400; committed rows matched the responses |
+
+These are local developer runs, not independent QA, CI or deployment evidence. The frontend
+client and types (`skillGraphApi.ts`, `useSkillGraph.ts`) remain FE18-owned and empty.
+
+### CT17-P6 r5 runtime privileges — 22 November 2026
+
+The dated record `CT17-P6-PRIVILEGES-2026-11-22-r5` in
+[deployment.md](deployment.md#ct17-p6-privileges-2026-11-22-r5--ad07-skill-graph-within-the-adr012-192-ceiling-22-november-2026)
+grants the runtime role exactly the ADR012 §19.2 ceiling rows for `skills` (SELECT, INSERT,
+DELETE; UPDATE (name, description)), `skill_prerequisites` and `lesson_skills` (SELECT, INSERT,
+DELETE). `RUNTIME_PRIVILEGE_MATRIX`, `verify_role_separation` and the three VM tests change with it.
+Nothing was provisioned on any real database.
+
+| Command | Result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2, r3, r4 and r5 (3 rows) |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` (local Docker) | the AD07 graph SQL succeeds; missing-Lesson mapping and Question-referenced delete 23503; in-place UPDATE and TRUNCATE 42501; containment and upgrade suites pass |
+| `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` (local Docker) | `RUNTIME_CONSUMER_TESTS_PASS` including the eight AD07 operations (create, replace, edge, cycle 409, mapping, owner read, Learner 403, unmap, referenced delete 409, delete); no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+These local runs are not the required CI evidence; the VM workflow runs on the PR.
+
+### CT40 structural projection consumption — 22 November 2026
+
+With CO06 on `main` (`75cdb8b`), every assembled skill graph (the owner read and the guarded edge
+and delete commands) now proves each persisted `lesson_skills` row against
+`CourseStructureService.readStructure` (ADR005 §§3.1, 4.1). The projection joins the caller's
+transaction: the owner read sees Course and Adaptive state in one REPEATABLE READ snapshot, and
+commands read it under the held Course root. A mapping whose Lesson is not one of the Course's own
+Lessons, or an inconsistent projection, is a safe 500 with nothing repaired and no partial graph.
+`mapLesson`/`unmapLesson` keep the CT03 `requireLessonOwnership` assertion that ADR005 §3.1 selects.
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='SkillGraphTest*,AdaptiveLearningFlowIntegrationTest'` | 44 unit and 66 PostgreSQL tests, 0 failures (new: ordering, no-mapping fast path, foreign and inconsistent projections, hidden-Lesson mappings, raw-SQL foreign mappings, a Lesson moved out of the Course, a structural change committed mid-read, CO06 Lesson creation racing a mapping, commit and rollback) |
+
+Local developer runs, not independent review, QA or CI evidence.
+
+### R-01 unpaired-surrogate text remediation — 22 November 2026
+
+An independent review of `f83237e` found that `SkillGraphService` rejected NUL but not unpaired
+UTF-16 surrogates. `POST /skills` with `{"name":"\ud800"}` returned 201 echoing U+D800 while the
+PostgreSQL JDBC driver stored `?`, so the response did not match the committed row. Skill text now
+follows the same storability rule as CO06's `CourseManagementService.isStorable`: an unpaired high
+or low surrogate is rejected with 400 before the Course guard, with nothing written. A valid
+surrogate pair is one supplementary code point and is stored unchanged. The whitespace rules are
+unchanged.
+
+| Case | Expected and observed |
+| --- | --- |
+| `SkillGraphTest$Commands` unit: unpaired high, low, reversed and trailing surrogates in `name` and `description` on create and update | 400 before the guard; no repository write |
+| `SkillGraphTest$Commands` unit: valid pairs (U+1F600, U+1D538, U+10FFFF, U+10000), U+180E and a combining sequence | accepted and returned unchanged |
+| `AdaptiveLearningFlowIntegrationTest#unpairedSurrogatesAreBadRequestsWithoutEffectsAndSupplementaryTextRoundTripsUnchanged` (PostgreSQL, HTTP): five unpaired-surrogate values in `name` and in `description`, on POST and PUT | 400 each; graph rows unchanged; Course root released |
+| Same test: supplementary text by JSON escape (POST) and raw UTF-8 (PUT) | 201 and 200; persisted UTF-8 bytes equal the accepted text; the graph read returns it unchanged |
+| The new unit and HTTP tests against the unfixed `f83237e` service | 7 unit cases fail; HTTP returns 201 instead of 400 |
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='SkillGraphTest*'` | 56 tests, 0 failures |
+| `cd backend && ./mvnw -B verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AdaptiveLearningFlowIntegrationTest` | 67 tests, 0 failures |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 808, Failsafe 335, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`, 27 relations, r1–r5 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | pass |
+| `test-runtime-real-backend-privileges.sh` (run with a locally built image under a private tag) | `RUNTIME_CONSUMER_TESTS_PASS`; no `42501` in the backend log |
+
+Local developer runs, not independent review, QA or CI evidence. Nothing was granted on any real database.

@@ -230,6 +230,43 @@ check "My Courses lists the Course as completed" "$STATUS/$(field totalElements)
 call GET "/api/courses/$course/resume" "$token_a"
 check "per-Course resume keeps the pointer; no next Lesson remains" "$STATUS/$(field resumeLessonId)/$(field nextLessonId)" "200/$lesson/None"
 
+echo "== AD07 skill graph (r5: skills SELECT, INSERT, DELETE, UPDATE(name, description); skill_prerequisites and lesson_skills SELECT, INSERT, DELETE)"
+# The account is registered, then promoted by the bootstrap administrator: no Instructor
+# provisioning API exists, and the role change is not a runtime-role capability.
+call POST /api/auth/register "" "{\"email\":\"instructor.ad07@example.test\",\"password\":\"$password\",\"displayName\":\"AD07 instructor\"}"
+check "register the AD07 instructor" "$STATUS" 201
+psql_admin >/dev/null <<<"UPDATE public.users SET role='instructor' WHERE email='instructor.ad07@example.test';"
+call POST /api/auth/login "" "{\"email\":\"instructor.ad07@example.test\",\"password\":\"$password\"}"
+check "login the AD07 instructor" "$STATUS" 200
+token_i="$(field accessToken)"
+psql_admin >/dev/null <<'SQL'
+INSERT INTO public.courses SELECT '20000000-0000-0000-0000-0000000000c3', id, 'Graphs', 'AD07 course', NULL, 'hidden', false, NULL
+  FROM public.users WHERE email='instructor.ad07@example.test';
+INSERT INTO public.chapters VALUES ('30000000-0000-0000-0000-0000000000d3','20000000-0000-0000-0000-0000000000c3','Basics',1);
+INSERT INTO public.lessons VALUES ('40000000-0000-0000-0000-0000000000e3','30000000-0000-0000-0000-0000000000d3','Hidden lesson','Body',1,'hidden');
+SQL
+graph=/api/courses/20000000-0000-0000-0000-0000000000c3; graph_lesson=40000000-0000-0000-0000-0000000000e3
+call POST "$graph/skills" "$token_i" '{"name":"Variables"}'
+check "create a skill (Course root lock, INSERT)" "$STATUS" 201
+skill_a="$(field id)"
+call POST "$graph/skills" "$token_i" '{"name":"Loops","description":"for and while"}'
+check "create a second skill" "$STATUS" 201
+skill_b="$(field id)"
+call PUT "$graph/skills/$skill_b" "$token_i" '{"name":"Iteration"}'
+check "replace a skill (UPDATE name, description)" "$STATUS/$(field name)/$(field description)" "200/Iteration/None"
+call PUT "$graph/skills/$skill_a/prerequisites/$skill_b" "$token_i"; check "add a prerequisite edge" "$STATUS" 204
+call PUT "$graph/skills/$skill_b/prerequisites/$skill_a" "$token_i"; check "a cycle-closing edge is refused" "$STATUS" 409
+call PUT "$graph/lessons/$graph_lesson/skills/$skill_a" "$token_i"; check "map the hidden Lesson" "$STATUS" 204
+call GET "$graph/skill-graph" "$token_i"
+check "owner graph read" "$STATUS/$(field prerequisites.0.skillId)/$(field mappings.0.lessonId)" "200/$skill_a/$graph_lesson"
+call GET "$graph/skill-graph" "$token_a"; check "a Learner cannot read the authoring graph" "$STATUS" 403
+psql_admin >/dev/null <<<"INSERT INTO public.questions (id,skill_id,prompt,kind,difficulty,options,correct_options) VALUES (gen_random_uuid(),'$skill_b','P','true_false','easy',ARRAY['True','False'],ARRAY[true,false]);"
+call DELETE "$graph/lessons/$graph_lesson/skills/$skill_a" "$token_i"; check "unmap" "$STATUS" 204
+call DELETE "$graph/skills/$skill_a/prerequisites/$skill_b" "$token_i"; check "remove the edge" "$STATUS" 204
+call DELETE "$graph/skills/$skill_b" "$token_i"; check "a skill a Question references is a 409 (FK 23503)" "$STATUS" 409
+call DELETE "$graph/skills/$skill_a" "$token_i"; check "delete an unreferenced skill" "$STATUS" 204
+check "graph rows left: the referenced skill only" "$(psql_admin <<<"SELECT (SELECT count(*) FROM public.skills WHERE course_id='20000000-0000-0000-0000-0000000000c3') || '/' || (SELECT count(*) FROM public.skill_prerequisites) || '/' || (SELECT count(*) FROM public.lesson_skills);")" "1/0/0"
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
@@ -294,7 +331,7 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership and CO08 progress/resume under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume and the AD07 skill graph under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \

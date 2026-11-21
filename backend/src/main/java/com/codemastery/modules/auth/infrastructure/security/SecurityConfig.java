@@ -110,6 +110,16 @@ public class SecurityConfig {
                                 "/api/instructor/courses/{courseId}/lessons/{lessonId}",
                                 "/api/instructor/courses/{courseId}/lessons/{lessonId}/publication").hasRole("INSTRUCTOR")
                         .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/lessons/{lessonId}").hasRole("LEARNER")
+                        // CT05.bindings (ADR005 §8.1): Instructor only, including the graph read; Course
+                        // ownership is CT03's decision in the handler. Administrator has no Instructor inheritance.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/skill-graph").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/skills").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/skills/{skillId}",
+                                "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}",
+                                "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/skills/{skillId}",
+                                "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}",
+                                "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}").hasRole("INSTRUCTOR")
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),
