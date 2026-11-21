@@ -94,6 +94,67 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
     private String membership(UUID course) { return "/api/courses/" + course + "/membership"; }
     private void row(String status) { jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status,resume_lesson_id) VALUES (?,?,?,?,?)", ENROLLMENT, LEARNER, COURSE, status, LESSON); }
 
+    // CO06 CT21.authoring (ADR006 §5) through real MVC, security, the ADR005 guard and PostgreSQL.
+    @Test void instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion() throws Exception {
+        UUID rival = UUID.randomUUID();
+        UUID created = null;
+        jdbc.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) VALUES (?,?,'not-a-login-fixture','Rival','instructor','active')", rival, rival + "@example.test");
+        try {
+            String body = "{\"title\":\"  New course \",\"description\":\"About\",\"prerequisiteDescription\":null}";
+            for (var actor : List.of(ADMIN, LEARNER)) {
+                mvc.perform(as(post("/api/instructor/courses").contentType("application/json").content(body), actor)).andExpect(status().isForbidden());
+            }
+            mvc.perform(as(post("/api/instructor/courses").contentType("application/json").content("{\"title\":\"T\",\"description\":\"D\",\"prerequisiteDescription\":null,\"instructorId\":\"" + rival + "\"}"), OWNER))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+            String response = mvc.perform(as(post("/api/instructor/courses").contentType("application/json").content(body), OWNER))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.title").value("New course"))
+                    .andExpect(jsonPath("$.publicationStatus").value("hidden")).andExpect(jsonPath("$.chapters", hasSize(0)))
+                    .andReturn().getResponse().getContentAsString();
+            created = UUID.fromString(com.jayway.jsonpath.JsonPath.read(response, "$.id"));
+            assertEquals(List.of(OWNER, false), jdbc.queryForList("SELECT instructor_id, adaptive_enabled FROM public.courses WHERE id = ?", created).stream()
+                    .flatMap(row -> java.util.stream.Stream.of(row.get("instructor_id"), row.get("adaptive_enabled"))).toList());
+
+            mvc.perform(as(get("/api/instructor/courses/" + COURSE), rival)).andExpect(status().isForbidden());
+            mvc.perform(as(get("/api/instructor/courses/" + HIDDEN), rival)).andExpect(status().isNotFound());
+            mvc.perform(as(put("/api/instructor/courses/" + HIDDEN).contentType("application/json").content("{}"), rival)).andExpect(status().isNotFound());
+
+            String chapters = "/api/instructor/courses/" + HIDDEN + "/chapters";
+            String chapter = com.jayway.jsonpath.JsonPath.read(mvc.perform(as(post(chapters).contentType("application/json").content("{\"title\":\"Basics\"}"), OWNER))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.position").value(1)).andReturn().getResponse().getContentAsString(), "$.id");
+            String lessons = chapters + "/" + chapter + "/lessons";
+            String first = com.jayway.jsonpath.JsonPath.read(mvc.perform(as(post(lessons).contentType("application/json").content("{\"title\":\"One\",\"contentMarkdown\":\"    code\"}"), OWNER))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.publicationStatus").value("hidden"))
+                    .andExpect(jsonPath("$.contentMarkdown").value("    code")).andReturn().getResponse().getContentAsString(), "$.id");
+            String second = com.jayway.jsonpath.JsonPath.read(mvc.perform(as(post(lessons).contentType("application/json").content("{\"title\":\"Two\",\"contentMarkdown\":null}"), OWNER))
+                    .andExpect(jsonPath("$.position").value(2)).andReturn().getResponse().getContentAsString(), "$.id");
+            mvc.perform(as(put(lessons + "/order").contentType("application/json").content("{\"orderedIds\":[\"" + second + "\",\"" + second + "\"]}"), OWNER)).andExpect(status().isBadRequest());
+            mvc.perform(as(put(lessons + "/order").contentType("application/json").content("{\"orderedIds\":[\"" + second + "\",\"" + LESSON + "\"]}"), OWNER)).andExpect(status().isNotFound());
+            mvc.perform(as(put(lessons + "/order").contentType("application/json").content("{\"orderedIds\":[\"" + second + "\",\"" + first + "\"]}"), OWNER)).andExpect(status().isOk());
+            mvc.perform(as(get("/api/instructor/courses/" + HIDDEN), OWNER)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.chapters[0].lessons[*].id", contains(second, first)))
+                    .andExpect(jsonPath("$.chapters[0].lessons[*].position", contains(1, 2)));
+
+            row("completed");
+            jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (?,?,?,true,false)", PROGRESS, ENROLLMENT, LESSON);
+            String publication = "/api/instructor/courses/" + COURSE + "/lessons/" + HIDDEN_LESSON + "/publication";
+            mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + HIDDEN_LESSON), LEARNER)).andExpect(status().isNotFound());
+            mvc.perform(as(put(publication).contentType("application/json").content("{\"publicationStatus\":\"published\"}"), OWNER))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.publicationStatus").value("published"));
+            assertEquals("active", jdbc.queryForObject("SELECT status FROM public.enrollments WHERE id = ?", String.class, ENROLLMENT));
+            mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + HIDDEN_LESSON), LEARNER)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.courseId").value(COURSE.toString())).andExpect(jsonPath("$.materials", hasSize(0)));
+            mvc.perform(as(put(publication).contentType("application/json").content("{\"publicationStatus\":\"hidden\"}"), OWNER)).andExpect(status().isOk());
+            assertEquals("completed", jdbc.queryForObject("SELECT status FROM public.enrollments WHERE id = ?", String.class, ENROLLMENT));
+            mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + HIDDEN_LESSON), LEARNER)).andExpect(status().isNotFound())
+                    .andExpect(header().string("Cache-Control", "no-store"));
+            mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + LESSON), OWNER)).andExpect(status().isForbidden());
+        } finally {
+            if (created != null) jdbc.update("DELETE FROM public.courses WHERE id = ?", created);
+            jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id = ?", rival);
+            jdbc.update("DELETE FROM public.users WHERE id = ?", rival);
+        }
+    }
+
     @Test void anonymousCatalogueSearchFilteringPagingAndPublishedSyllabus() throws Exception {
         mvc.perform(get("/api/courses").param("size", "1")).andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2)).andExpect(jsonPath("$.content[0].title").value("Alpha")).andExpect(jsonPath("$.content[0].instructorDisplayName").value("FE07 Instructor"));
         mvc.perform(get("/api/courses").param("q", "BASICS").param("prerequisites", "described")).andExpect(status().isOk()).andExpect(jsonPath("$.content", hasSize(1))).andExpect(jsonPath("$.content[0].id").value(SECOND.toString()));
