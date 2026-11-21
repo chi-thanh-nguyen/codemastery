@@ -436,7 +436,9 @@ class CourseServiceTest {
     // and PostgreSQL behavior are verified in integration/AdaptiveLearningFlowIntegrationTest.
 
     private CourseManagementService management(org.springframework.transaction.PlatformTransactionManager transactions) {
-        return new CourseManagementService(repository, service, transactions);
+        return new CourseManagementService(repository, service, identity,
+                mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class),
+                mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class), transactions);
     }
 
     @Test void managementGuardsRejectNullInputsBeforeAnyTransactionOrLookup() {
@@ -544,5 +546,91 @@ class CourseServiceTest {
         assertEquals("Course configuration is busy", busy.getMessage());
         assertNull(busy.getCause());
         assertEquals(0, busy.getStackTrace().length);
+    }
+
+    // CO06 CT21.authoring and CT12.course local rules. Real guard, SQL and HTTP security are
+    // verified by the integration suites; these doubles prove ordering and validation only.
+
+    @Test void authoringTextIsTrimmedNonblankAndMarkdownIsVerbatim() {
+        assertEquals("Title", CourseManagementService.requiredText("  Title \n"));
+        assertNull(CourseManagementService.optionalText(null));
+        assertEquals("    code", CourseManagementService.markdown("    code"));
+        assertNull(CourseManagementService.markdown(null));
+        for (Runnable invalid : List.<Runnable>of(() -> CourseManagementService.requiredText(null),
+                () -> CourseManagementService.requiredText(" \t"), () -> CourseManagementService.optionalText(" "),
+                () -> CourseManagementService.markdown("\n "))) {
+            assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class, invalid::run)
+                    .getStatus().value());
+        }
+    }
+
+    @Test void siblingOrderMustBeACompletePermutationOfCurrentSiblings() {
+        UUID a = UUID.randomUUID(), b = UUID.randomUUID();
+        CourseStructureService.requirePermutation(List.of(b, a), List.of(a, b));
+        CourseStructureService.requirePermutation(List.of(), List.of());
+        assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                () -> CourseStructureService.requirePermutation(List.of(a, a), List.of(a, b))).getStatus().value());
+        assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                () -> CourseStructureService.requirePermutation(List.of(a), List.of(a, b))).getStatus().value());
+        assertThrows(ResourceNotFoundException.class,
+                () -> CourseStructureService.requirePermutation(List.of(a, UUID.randomUUID()), List.of(a, b)));
+    }
+
+    @Test void authoringBodiesAreStrictJsonWithExactlyTheDeclaredFields() {
+        assertEquals(Optional.of(new com.codemastery.modules.course.api.dto.CourseRequest.OwnedCourseWrite("T", "D", null)),
+                com.codemastery.modules.course.api.dto.CourseRequest.courseWrite(
+                        "{\"title\":\"T\",\"description\":\"D\",\"prerequisiteDescription\":null}"));
+        for (String invalid : List.of("", "[]", "{\"title\":\"T\",\"description\":\"D\"}",
+                "{\"title\":\"T\",\"description\":\"D\",\"prerequisiteDescription\":null,\"instructorId\":\"x\"}",
+                "{\"title\":\"T\",\"title\":\"U\",\"description\":\"D\",\"prerequisiteDescription\":null}",
+                "{\"title\":1,\"description\":\"D\",\"prerequisiteDescription\":null}")) {
+            assertTrue(com.codemastery.modules.course.api.dto.CourseRequest.courseWrite(invalid).isEmpty(), invalid);
+        }
+        assertEquals(Optional.of(HIDDEN), com.codemastery.modules.course.api.dto.CourseRequest.publication("{\"publicationStatus\":\"hidden\"}"));
+        assertTrue(com.codemastery.modules.course.api.dto.CourseRequest.publication("{\"publicationStatus\":\"draft\"}").isEmpty());
+        UUID id = UUID.randomUUID();
+        assertEquals(Optional.of(List.of(id)), com.codemastery.modules.course.api.dto.CourseStructureRequests
+                .siblingOrder("{\"orderedIds\":[\"" + id + "\"]}"));
+        assertTrue(com.codemastery.modules.course.api.dto.CourseStructureRequests.siblingOrder("{\"orderedIds\":[\"not-a-uuid\"]}").isEmpty());
+        assertTrue(com.codemastery.modules.course.api.dto.CourseStructureRequests.lessonWrite("{\"title\":\"T\"}").isEmpty());
+    }
+
+    @Test void createdCourseIsHiddenOwnedByTheTrustedInstructorWithAdaptiveDisabled() {
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var management = new CourseManagementService(repository, service, identity, content,
+                mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class),
+                mock(org.springframework.transaction.PlatformTransactionManager.class));
+        actor(IdentityRole.INSTRUCTOR);
+        var created = management.createOwnedCourse(" Title ", "Description", null);
+        var stored = org.mockito.ArgumentCaptor.forClass(com.codemastery.modules.course.domain.model.Course.class);
+        verify(repository).insert(stored.capture());
+        assertEquals(ACTOR, stored.getValue().instructorId());
+        assertEquals("Title", stored.getValue().title());
+        assertEquals(HIDDEN, stored.getValue().publicationStatus());
+        assertFalse(stored.getValue().adaptiveEnabled());
+        assertNull(stored.getValue().adaptiveSettings());
+        assertEquals("hidden", created.publicationStatus());
+        assertEquals(List.of(), created.chapters());
+    }
+
+    @ParameterizedTest @EnumSource(value = IdentityRole.class, names = {"LEARNER", "ADMINISTRATOR"})
+    void onlyAnInstructorCreatesAndOnlyAnAdministratorHidesBeforeAnyLookupOrWrite(IdentityRole role) {
+        var management = management(mock(org.springframework.transaction.PlatformTransactionManager.class));
+        actor(role);
+        assertThrows(AccessDeniedException.class, () -> management.createOwnedCourse("T", "D", null));
+        if (role == IdentityRole.LEARNER) {
+            assertThrows(AccessDeniedException.class, () -> management.hideCourseAsAdministrator(COURSE));
+            assertThrows(AccessDeniedException.class, () -> management.hideLessonAsAdministrator(LESSON));
+            assertThrows(AccessDeniedException.class, () -> management.listCoursesForAdministration(null, null, 0, 20));
+        }
+        verifyNoInteractions(repository);
+    }
+
+    @Test void administratorListRejectsAnUnknownPublicationStatus() {
+        var management = management(mock(org.springframework.transaction.PlatformTransactionManager.class));
+        actor(IdentityRole.ADMINISTRATOR);
+        assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                () -> management.listCoursesForAdministration(null, "draft", 0, 20));
+        verifyNoInteractions(repository);
     }
 }

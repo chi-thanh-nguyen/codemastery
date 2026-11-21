@@ -54,6 +54,12 @@ public interface CourseRepository {
     /** Courses of one Instructor (hidden and published), ordered by title COLLATE "C" ASC, then id ASC. */
     Page<Course> findByInstructorId(UUID instructorId, Pageable pageable);
 
+    /**
+     * CT12.course: every Course (hidden and published) whose title contains {@code query}
+     * case-insensitively, optionally of one publication status, ordered by title COLLATE "C", then id.
+     */
+    Page<Course> findForAdministration(String query, PublishStatus publicationStatus, Pageable pageable);
+
     /** Inserts exactly the supplied Course row, including its publication and adaptive fields. */
     void insert(Course course);
 

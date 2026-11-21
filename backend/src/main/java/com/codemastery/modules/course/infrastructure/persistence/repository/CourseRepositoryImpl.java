@@ -198,6 +198,22 @@ public class CourseRepositoryImpl implements CourseRepository {
     }
 
     @Override
+    public Page<Course> findForAdministration(String query, PublishStatus publicationStatus, Pageable pageable) {
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(pageable, "pageable");
+        String status = publicationStatus == null ? null : publicationStatus.getStatus();
+        String where = " FROM public.courses WHERE strpos(lower(title), lower(?)) > 0 "
+                + "AND (CAST(? AS text) IS NULL OR publication_status = ?)";
+        Long total = jdbc.queryForObject("SELECT count(*)" + where, Long.class, query, status, status);
+        List<Course> rows = jdbc.query("SELECT " + COURSE_COLUMNS + where
+                        + " ORDER BY title COLLATE \"C\" ASC, id ASC LIMIT ? OFFSET ?",
+                (row, index) -> courseMapper.courseFromRow(row),
+                query, status, status, pageable.getPageSize(), pageable.getOffset());
+        return new PageImpl<>(rows, PageRequest.of(pageable.getPageNumber(), pageable.getPageSize()),
+                total == null ? 0 : total);
+    }
+
+    @Override
     public void insert(Course course) {
         Objects.requireNonNull(course, "course");
         String status = Objects.requireNonNull(course.publicationStatus(), "publicationStatus").getStatus();
