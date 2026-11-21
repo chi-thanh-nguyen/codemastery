@@ -4415,8 +4415,10 @@ ownership after the lock and run the callback in one programmatic READ COMMITTED
 read-write transaction that holds the row lock until commit or rollback. A compatible
 outer transaction is joined only when PostgreSQL reports READ COMMITTED, it is not
 read-only, and it has no earlier write or row lock (no assigned transaction ID) and no
-queued persistence change; a nested call for another Course is rejected. Clean managed
-entities are discarded after the lock, so reads observe committed state. Only the guard's
+queued persistence change; a nested call for another Course is rejected. The held root is
+recorded with a transaction-local PostgreSQL setting, which a savepoint rollback releases
+together with the row lock. Clean managed entities are discarded after the lock, so reads
+observe committed state. Only the guard's
 own SQLSTATE 55P03 becomes `ConfigurationBusy`. The settings write runs only inside the
 held guard of the same Course and replaces both stored fields only when they structurally
 equal (jsonb equality) the expected snapshot; a mismatch rolls the unit back.
@@ -4441,6 +4443,8 @@ publication updates. Direct statements return domain records, never managed enti
 | Joined unit commits only with the outer transaction | `joiningACompatibleOuterTransactionCommitsOnlyWithTheOuterUnit` |
 | Read-only, REPEATABLE READ, SERIALIZABLE, prior write, prior row lock and queued persist rejected before callback effects | `incompatibleOuterContextsAreRejectedBeforeAnyCallbackEffect` (6 cases) |
 | Pre-lock managed entity is not trusted | `entitiesLoadedBeforeTheRootAreDiscardedSoReadsObserveTheCommittedWinner` |
+| A savepoint rollback that released the root leaves no usable held marker; the unit is doomed | `aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker` |
+| A REQUIRES_NEW entry behind a suspended holder on the same thread fails instead of waiting for itself; the thread can retry afterwards | `aRequiresNewGuardBehindASuspendedHolderOnTheSameThreadFailsInsteadOfWaitingForItself` |
 | Same-Course serialization; waiter rereads the committed or rolled-back result | `sameCourseWritersSerializeAndTheWaiterRereadsCommittedState` (both outcomes) |
 | Independent Courses do not serialize | `independentCoursesDoNotSerialize` |
 | Enrollment holds root: settings NOWAIT → `ConfigurationBusy`, no change, both participants preserved | `settingsNowaitIsBusyWhileEnrollmentHoldsTheRootAndPreservesBothParticipants` |
@@ -4490,3 +4494,28 @@ guard's row lock and the read work under it, but the settings write and the CO03
 writes and full material reads need a separately approved CT17 revision before any
 consumer is deployed. CI, independent CODEOWNER review and B1-O16 (CT36) are outside this
 record.
+
+### Focused self-review remediation — 21 November 2026
+
+A focused self-review by the same author (not an independent review) of PR #262 at
+`c570f76` reproduced three defects on PostgreSQL before fixing them:
+
+| Severity | Finding | Fix | Regression test |
+| --- | --- | --- | --- |
+| P2 | The held-root marker was a Spring synchronization that survived a caller-managed `ROLLBACK TO SAVEPOINT` taken before the guard. PostgreSQL had released the row lock, yet re-entry and settings writes proceeded as if it were held (ADR005 §13.3). The configured JPA transaction manager rejects Spring `NESTED`, so only a manual savepoint reaches this path. | The marker is a transaction-local PostgreSQL setting (`set_config(..., true)`) that the same savepoint rollback clears; re-entry then fails and the unit becomes rollback-only. | `aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker`; marker reversion in `CourseRepositoryIntegrationTest` |
+| P2 | A `REQUIRES_NEW` call back into the guard for the same Course waited forever on its own suspended transaction's row lock (no deadline is selected), holding a thread and two connections. | A per-thread record of held roots, cleared when the acquiring transaction completes, makes such an entry fail at once. | `aRequiresNewGuardBehindASuspendedHolderOnTheSameThreadFailsInsteadOfWaitingForItself` (including a retry on the same thread) |
+| P2 | After a direct-SQL write (reorder, title, Lesson, Course metadata or publication), a later JPA read in the same transaction returned the previously managed entity, with stale positions or titles. | Each direct write detaches the managed copies of the rows it changed. | strengthened reorder, Lesson and owner-row tests in `CourseRepositoryIntegrationTest` |
+
+The earlier fixes were rechecked on the final code: the null-safe reorder check, the
+`@DirtiesContext` connection-pool fix, the post-lock discard of stale entities, the
+earlier-write and row-lock rejection, and the NOWAIT `ConfigurationBusy` mapping.
+Re-executed locally after the remediation:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw verify -Dtest='com.codemastery.modules.course.**' -Dit.test='AdaptiveLearningFlowIntegrationTest,CourseRepositoryIntegrationTest'` | 220 unit, 33 + 9 PostgreSQL tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 738, Failsafe 279, 0 failures, errors or skips |
+
+The marker uses only the built-in `set_config` and `current_setting` functions, so it
+needs no new CT17 privilege. These are local developer runs, not independent QA or CI
+evidence.
