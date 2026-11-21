@@ -5173,7 +5173,7 @@ Executed locally (macOS, OpenJDK 25, Docker) on branch `feat/course-content-auth
 | `cd backend && ./mvnw test` | 746 tests, 0 failures, errors or skips |
 | `cd backend && ./mvnw test -Dtest='Course*Test,EnrollmentServiceTest,LessonProgressServiceTest,CourseRepositoryIntegrationTest,CourseCatalogueIntegrationTest,AdaptiveLearningFlowIntegrationTest,EnrollmentIntegrationTest'` (before the HTTP authoring test was added) | 12 suites, 0 failures, errors or skips, including 48 + 14 + 75 + 11 PostgreSQL tests |
 | `cd backend && ./mvnw test -Dtest='EnrollmentIntegrationTest#instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion'` | 1 test, 0 failures |
-| `cd backend && ./mvnw -B verify` | Not complete when this record was committed; no result is claimed |
+| `cd backend && ./mvnw -B verify` (on the `e69d521` code) | BUILD SUCCESS; Surefire 746, Failsafe 297, 0 failures, errors or skips |
 
 These are local developer runs, not independent review, QA or CI evidence.
 
