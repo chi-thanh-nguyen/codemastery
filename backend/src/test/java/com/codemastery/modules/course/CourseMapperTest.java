@@ -273,4 +273,31 @@ class CourseMapperTest {
             assertEquals(domain, mappedBack);
         }
     }
+
+    @Test
+    @DisplayName("jsonb settings codec keeps exact numbers, null and immutable nesting without defaults")
+    void settingsCodecIsExactAndStrict() {
+        Map<String, Object> parsed = CourseMapper.settingsFromJson("{\"a\": [1, 2.50, null], \"b\": {\"big\": 9223372036854775808}}");
+        assertEquals(java.util.Arrays.asList(1, new java.math.BigDecimal("2.50"), null), parsed.get("a"));
+        assertEquals(new java.math.BigInteger("9223372036854775808"), ((Map<?, ?>) parsed.get("b")).get("big"));
+        assertThrows(UnsupportedOperationException.class, () -> parsed.put("c", 1));
+        assertNull(CourseMapper.settingsFromJson(null));
+        assertNull(CourseMapper.settingsToJson(null));
+        assertEquals(parsed, CourseMapper.settingsFromJson(CourseMapper.settingsToJson(parsed)));
+        assertThrows(RuntimeException.class, () -> CourseMapper.settingsFromJson("{\"a\": 1, \"a\": 2}"));
+        assertThrows(RuntimeException.class, () -> CourseMapper.settingsFromJson("[1]"));
+        assertThrows(RuntimeException.class, () -> CourseMapper.settingsFromJson("{} {}"));
+        assertEquals(PublishStatus.HIDDEN, CourseMapper.publicationFromCode("hidden"));
+        assertThrows(IllegalStateException.class, () -> CourseMapper.publicationFromCode("HIDDEN"));
+    }
+
+    @Test
+    @DisplayName("Course domain values never alias the caller's mutable settings object")
+    void courseSettingsAreDefensivelyCopied() {
+        Map<String, Object> settings = new java.util.HashMap<>(Map.of("k", new java.util.ArrayList<>(java.util.List.of(1))));
+        Course course = new Course(UUID.randomUUID(), UUID.randomUUID(), "T", "D", null, PublishStatus.HIDDEN, false, settings);
+        settings.put("later", true);
+        assertEquals(Map.of("k", java.util.List.of(1)), course.adaptiveSettings());
+        assertThrows(UnsupportedOperationException.class, () -> ((java.util.List<?>) course.adaptiveSettings().get("k")).clear());
+    }
 }

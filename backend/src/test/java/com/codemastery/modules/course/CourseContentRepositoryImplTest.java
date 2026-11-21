@@ -33,6 +33,8 @@ class CourseContentRepositoryImplTest {
     private ChapterJpaRepository chapters;
     @Mock
     private LessonJpaRepository lessons;
+    @Mock
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     private CourseContentRepositoryImpl repository;
 
@@ -44,7 +46,7 @@ class CourseContentRepositoryImplTest {
 
     @BeforeEach
     void setUp() {
-        repository = new CourseContentRepositoryImpl(chapters, lessons, new CourseContentMapper());
+        repository = new CourseContentRepositoryImpl(chapters, lessons, new CourseContentMapper(), jdbc);
     }
 
     @Test
@@ -97,5 +99,39 @@ class CourseContentRepositoryImplTest {
         assertEquals("select l from LessonEntity l join ChapterEntity c on c.id = l.chapterId "
                 + "where c.courseId = :courseId and l.publicationStatus = 'published' "
                 + "order by c.position asc, l.position asc", query.value());
+    }
+
+    @Test
+    void contentOperationsRejectMissingScopeBeforeIssuingSql() {
+        java.util.List<org.junit.jupiter.api.function.Executable> calls = java.util.List.of(
+                () -> repository.findLessonsByCourseId(null),
+                () -> repository.findChapter(COURSE_ID, null),
+                () -> repository.findLesson(null, LESSON_1_ID),
+                () -> repository.findMaterialsByCourseId(null),
+                () -> repository.findPublishedMaterialsByLessonId(null),
+                () -> repository.findMaterial(LESSON_1_ID, null),
+                () -> repository.appendChapter(null, CHAPTER_1_ID, "Title"),
+                () -> repository.appendLesson(CHAPTER_1_ID, LESSON_1_ID, "Title", null, null),
+                () -> repository.updateChapterTitle(COURSE_ID, null, "Title"),
+                () -> repository.updateLesson(null, LESSON_1_ID, "Title", null),
+                () -> repository.updateLessonPublicationStatus(CHAPTER_1_ID, LESSON_1_ID, null),
+                () -> repository.reorderChapters(null, java.util.List.of()),
+                () -> repository.reorderLessons(null, java.util.List.of()),
+                () -> repository.insertMaterial(null),
+                () -> repository.replaceMaterialContent(null),
+                () -> repository.updateMaterialPublicationStatus(LESSON_1_ID, null, PublishStatus.HIDDEN));
+        for (var call : calls) {
+            org.junit.jupiter.api.Assertions.assertThrows(NullPointerException.class, call);
+        }
+        verifyNoInteractions(jdbc, chapters, lessons);
+    }
+
+    @Test
+    void reorderingRequiresTheCallersTransactionBeforeChangingConstraintModes() {
+        when(jdbc.queryForList(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(UUID.class),
+                org.mockito.ArgumentMatchers.<Object>any())).thenReturn(java.util.List.of(CHAPTER_1_ID));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> repository.reorderChapters(COURSE_ID, java.util.List.of(CHAPTER_1_ID)));
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute(org.mockito.ArgumentMatchers.anyString());
     }
 }

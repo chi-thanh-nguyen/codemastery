@@ -47,6 +47,12 @@ class CourseRepositoryImplTest {
     @Mock
     private CourseJpaRepository jpa;
 
+    @Mock
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    @Mock
+    private jakarta.persistence.EntityManager entityManager;
+
     private CourseRepositoryImpl repository;
 
     private static final UUID COURSE_ID = UUID.fromString("00000000-0000-4000-8000-000000000001");
@@ -54,7 +60,7 @@ class CourseRepositoryImplTest {
 
     @BeforeEach
     void setUp() {
-        repository = new CourseRepositoryImpl(jpa, new CourseMapper());
+        repository = new CourseRepositoryImpl(jpa, new CourseMapper(), jdbc, entityManager);
     }
 
     @Test
@@ -371,4 +377,33 @@ class CourseRepositoryImplTest {
         assertEquals(2147483660L, PageRequest.of(request.page(), request.size()).getOffset());
     }
 
+    @Test
+    void ownerRowAndGuardOperationsRejectMissingIdentifiersBeforeIssuingSql() {
+        java.util.List<org.junit.jupiter.api.function.Executable> calls = java.util.List.of(
+                () -> repository.findById(null),
+                () -> repository.findByInstructorId(null, org.springframework.data.domain.PageRequest.of(0, 1)),
+                () -> repository.findByInstructorId(INSTRUCTOR_ID, null),
+                () -> repository.insert(null),
+                () -> repository.updateMetadata(null, "T", "D", null),
+                () -> repository.updatePublicationStatus(COURSE_ID, null),
+                () -> repository.lockCourseRoot(null),
+                () -> repository.lockCourseRootNoWait(null),
+                () -> repository.findAdaptiveConfiguration(null),
+                () -> repository.replaceAdaptiveConfiguration(null, false, null, false, null),
+                () -> repository.detachManagedCourse(null));
+        for (var call : calls) {
+            assertThrows(NullPointerException.class, call);
+        }
+        org.mockito.Mockito.verifyNoInteractions(jdbc, entityManager, jpa);
+    }
+
+    @Test
+    void theNowaitEntryIssuesExactlyTheFailFastRowLock() {
+        when(jdbc.queryForList("SELECT id FROM public.courses WHERE id = ? FOR UPDATE NOWAIT", UUID.class, COURSE_ID))
+                .thenReturn(java.util.List.of(COURSE_ID));
+        when(jdbc.queryForList("SELECT id FROM public.courses WHERE id = ? FOR UPDATE", UUID.class, COURSE_ID))
+                .thenReturn(java.util.List.of());
+        assertTrue(repository.lockCourseRootNoWait(COURSE_ID));
+        org.junit.jupiter.api.Assertions.assertFalse(repository.lockCourseRoot(COURSE_ID));
+    }
 }
