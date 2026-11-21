@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from './httpClient';
-import type { AuthSessionAccess, HttpSession, RequestOptions } from './httpClient';
+import type { AuthSessionAccess, HttpSession, MetadataRequestOptions, NoContentRequestOptions, RequestOptions, ResponseWithMetadata } from './httpClient';
 import { decodePublicUser } from '../../features/auth/types/authTypes';
 import { ApiError } from '../types/apiTypes';
 const user = { id: '00000000-0000-4000-8000-000000000001', displayName: 'Learner', role: 'Learner' };
@@ -156,3 +156,119 @@ it('malformed ProblemDetail missing its title retains status with no field diagn
     const result = await createHttpClient('https://api.test')('/auth/register', operation()).catch((e) => e);
     expect(result).toMatchObject({ kind: 'http', status: 400, fields: {} }); expect(result.problem).toBeUndefined(); expect(JSON.stringify(result)).not.toContain('PRIVATE SENTINEL');
 });
+
+// ---- A14 / CT16-B1-NO-CONTENT-2026-11-09-r1 / CT14 B1-O19 (ADR005 §§16.2–16.3) ----
+describe('explicit no-content mode', () => {
+    const noContent = (extra: Partial<NoContentRequestOptions> = {}): NoContentRequestOptions => ({ method: 'DELETE', auth: 'public', expectedStatus: 204, responseMode: 'no-content', ...extra });
+    it.each([['PUT', undefined], ['DELETE', undefined], ['PUT', 'application/json'], ['DELETE', 'text/html']] as const)('resolves an exact %s 204 (Content-Type %s) to undefined without reading a body', async (method, media) => {
+        const response = new Response(null, { status: 204, headers: media ? { 'Content-Type': media } : {} });
+        const json = vi.spyOn(response, 'json'), text = vi.spyOn(response, 'text');
+        fetcher.mockResolvedValue(response);
+        await expect(createHttpClient('https://api.test')('/courses/a/skills/b', noContent({ method }))).resolves.toBeUndefined();
+        expect(json).not.toHaveBeenCalled(); expect(text).not.toHaveBeenCalled();
+        expect(fetcher.mock.calls[0][1]).toMatchObject({ method, credentials: 'omit', redirect: 'error' });
+    });
+    it.each([200, 201, 202])('treats an unexpected %s success as a protocol failure, never as void success', async (status) => {
+        fetcher.mockResolvedValue(json({}, status));
+        await expect(createHttpClient('https://api.test')('/courses/a', noContent())).rejects.toMatchObject({ kind: 'protocol' });
+    });
+    it.each([
+        ['a decoder', { decode: () => undefined }],
+        ['a non-204 status', { expectedStatus: 200 }],
+        ['an unknown mode', { responseMode: 'empty' }],
+        ['metadata on POST', { responseMode: 'json-with-metadata', method: 'POST', expectedStatus: 200, decode: (value: unknown) => value }],
+    ])('rejects %s before fetch, including untyped callers', async (_name, extra) => {
+        const send = createHttpClient('https://api.test') as unknown as (path: string, options: object) => Promise<unknown>;
+        await expect(send('/courses/a', { ...noContent(), ...extra })).rejects.toMatchObject({ kind: 'configuration' });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('keeps JSON callers strict: no decoder is a configuration error and a 204 is a protocol failure', async () => {
+        const send = createHttpClient('https://api.test') as unknown as (path: string, options: object) => Promise<unknown>;
+        await expect(send('/courses', { method: 'GET', auth: 'public', expectedStatus: 200 })).rejects.toMatchObject({ kind: 'configuration' });
+        fetcher.mockResolvedValue(new Response(null, { status: 204 }));
+        await expect(createHttpClient('https://api.test')('/courses', operation())).rejects.toMatchObject({ kind: 'protocol' });
+        fetcher.mockResolvedValue(new Response('', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        await expect(createHttpClient('https://api.test')('/courses', operation())).rejects.toMatchObject({ kind: 'protocol' });
+    });
+    it.each([400, 401, 403, 404, 409, 412, 428, 500, 503])('keeps HTTP %s as an error in no-content mode, with valid or unusable problem bodies', async (status) => {
+        const reason: Record<number, string> = { 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 409: 'Conflict', 412: 'Precondition Failed', 428: 'Precondition Required', 500: 'Internal Server Error', 503: 'Service Unavailable' };
+        fetcher.mockResolvedValueOnce(json({ type: 'about:blank', title: reason[status], status, detail: 'server text', instance: '/api/courses/a' }, status, 'application/problem+json'));
+        await expect(createHttpClient('https://api.test')('/courses/a', noContent())).rejects.toMatchObject({ kind: 'http', status });
+        for (const body of [new Response('<html>x</html>', { status, headers: { 'Content-Type': 'text/html' } }), new Response('', { status, headers: { 'Content-Type': 'application/problem+json' } })]) {
+            fetcher.mockResolvedValueOnce(body);
+            await expect(createHttpClient('https://api.test')('/courses/a', noContent())).rejects.toMatchObject({ kind: 'http', status });
+        }
+    });
+    it('gives 412 and 428 safe titles and local messages, never the server text', async () => {
+        for (const [status, title] of [[412, 'Precondition Failed'], [428, 'Precondition Required']] as const) {
+            fetcher.mockResolvedValueOnce(json({ type: 'about:blank', title, status, detail: 'PRIVATE SENTINEL', instance: '/api/courses/a/adaptive-settings' }, status, 'application/problem+json'));
+            const error = await createHttpClient('https://api.test')('/courses/a/adaptive-settings', noContent({ method: 'PUT' })).catch((caught: unknown) => caught) as ApiError;
+            expect(error.problem?.title).toBe(title); expect(error.message).not.toContain('PRIVATE'); expect(error.problem?.detail).not.toContain('PRIVATE');
+        }
+    });
+    it('invalidates only a current authenticated 401 and keeps every current check through the return', async () => {
+        const { access, logout } = sessionAccess(), send = createHttpClient('https://api.test', access);
+        fetcher.mockResolvedValueOnce(new Response(null, { status: 401 }));
+        await expect(send('/courses/a', noContent({ auth: 'authenticated' }))).rejects.toMatchObject({ status: 401 });
+        expect(access.invalidate).toHaveBeenCalledWith(1);
+        const second = sessionAccess(); let finish!: (response: Response) => void;
+        fetcher.mockReturnValueOnce(new Promise<Response>((done) => { finish = done; }));
+        const pending = createHttpClient('https://api.test', second.access)('/courses/a', noContent({ auth: 'authenticated' }));
+        second.logout(); finish(new Response(null, { status: 204 }));
+        await expect(pending).rejects.toMatchObject({ kind: 'cancelled' });
+        const controller = new AbortController(); let settle!: (response: Response) => void;
+        fetcher.mockReturnValueOnce(new Promise<Response>((done) => { settle = done; }));
+        const aborted = createHttpClient('https://api.test')('/courses/a', noContent({ signal: controller.signal }));
+        controller.abort(); settle(new Response(null, { status: 204 }));
+        await expect(aborted).rejects.toMatchObject({ kind: 'cancelled' });
+        let superseded = false; fetcher.mockResolvedValueOnce(new Response(null, { status: 204 }));
+        const obsolete = createHttpClient('https://api.test')('/courses/a', noContent({ isCurrent: () => !superseded }));
+        superseded = true;
+        await expect(obsolete).rejects.toMatchObject({ kind: 'cancelled' });
+        void logout; expect(fetcher).toHaveBeenCalledTimes(4); // no retries
+    });
+});
+describe('GET response metadata (A14)', () => {
+    const withMetadata = (extra: Partial<MetadataRequestOptions<typeof user>> = {}): MetadataRequestOptions<typeof user> =>
+        ({ method: 'GET', auth: 'public', expectedStatus: 200, decode: (value) => decodePublicUser(value), responseMode: 'json-with-metadata', ...extra });
+    it('returns the decoded body with its ETag verbatim, or null when absent', async () => {
+        fetcher.mockResolvedValueOnce(new Response(JSON.stringify(user), { status: 200, headers: { 'Content-Type': 'application/json', ETag: '"v1-strong"' } }));
+        await expect(createHttpClient('https://api.test')('/courses/a/adaptive-settings', withMetadata())).resolves.toEqual({ body: user, etag: '"v1-strong"' });
+        fetcher.mockResolvedValueOnce(json(user));
+        await expect(createHttpClient('https://api.test')('/courses/a/adaptive-settings', withMetadata())).resolves.toEqual({ body: user, etag: null });
+    });
+    it('never exposes a tag for a failed status, media, decoding or obsolete response', async () => {
+        const tagged = (body: string, status: number, media: string) => new Response(body, { status, headers: { 'Content-Type': media, ETag: '"leak"' } });
+        fetcher.mockResolvedValueOnce(tagged(JSON.stringify({ wrong: true }), 200, 'application/json'));
+        await expect(createHttpClient('https://api.test')('/x', withMetadata())).rejects.toMatchObject({ kind: 'protocol' });
+        fetcher.mockResolvedValueOnce(tagged(JSON.stringify(user), 201, 'application/json'));
+        await expect(createHttpClient('https://api.test')('/x', withMetadata())).rejects.toMatchObject({ kind: 'protocol' });
+        fetcher.mockResolvedValueOnce(tagged(JSON.stringify(user), 200, 'text/plain'));
+        await expect(createHttpClient('https://api.test')('/x', withMetadata())).rejects.toMatchObject({ kind: 'protocol' });
+        fetcher.mockResolvedValueOnce(tagged('{}', 404, 'application/problem+json'));
+        await expect(createHttpClient('https://api.test')('/x', withMetadata())).rejects.toMatchObject({ kind: 'http', status: 404 });
+        let current = true; fetcher.mockResolvedValueOnce(tagged(JSON.stringify(user), 200, 'application/json'));
+        const late = createHttpClient('https://api.test')('/x', withMetadata({ isCurrent: () => current })); current = false;
+        await expect(late).rejects.toMatchObject({ kind: 'cancelled' });
+    });
+    it('sends a caller If-Match unchanged and keeps credential headers managed by the client', async () => {
+        fetcher.mockResolvedValueOnce(new Response(null, { status: 204 }));
+        await createHttpClient('https://api.test')('/courses/a/adaptive-settings', { method: 'PUT', auth: 'public', expectedStatus: 204, responseMode: 'no-content', headers: { 'If-Match': '"v1-strong"' }, body: { enabled: true } });
+        expect(fetcher.mock.calls[0][1].headers.get('If-Match')).toBe('"v1-strong"');
+    });
+});
+// Compile-time overload checks (typecheck runs over test files).
+async function typeChecks() {
+    const send = createHttpClient('https://api.test');
+    const nothing: void = await send('/a', { method: 'DELETE', auth: 'public', expectedStatus: 204, responseMode: 'no-content' });
+    const pair: ResponseWithMetadata<number> = await send('/a', { method: 'GET', auth: 'public', expectedStatus: 200, decode: () => 1, responseMode: 'json-with-metadata' });
+    const plain: number = await send('/a', { method: 'GET', auth: 'public', expectedStatus: 200, decode: () => 1 });
+    // @ts-expect-error no-content takes no decoder
+    await send('/a', { method: 'DELETE', auth: 'public', expectedStatus: 204, responseMode: 'no-content', decode: () => 1 });
+    // @ts-expect-error no-content requires 204
+    await send('/a', { method: 'DELETE', auth: 'public', expectedStatus: 200, responseMode: 'no-content' });
+    // @ts-expect-error metadata is only for GET
+    await send('/a', { method: 'POST', auth: 'public', expectedStatus: 200, decode: () => 1, responseMode: 'json-with-metadata' });
+    return [nothing, pair, plain];
+}
+void typeChecks;

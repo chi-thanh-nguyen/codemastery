@@ -15,7 +15,7 @@ import { SkillDetailPanel } from '../components/SkillDetailPanel';
 import { recommendationEntry } from '../components/NextRecommendedCard';
 import { masteryGraphLayout, orderedSkillIds } from '../utils/masteryGraphLayout';
 import type { RecommendationView, SkillView } from '../types/masteryTypes';
-import { color, pathLine, radius } from '../../../app/theme/theme';
+import { pathLine, radius, roles } from '../../../app/theme/theme';
 
 export type MasteryView = 'graph' | 'list';
 export interface MasteryMapPageProps {
@@ -57,7 +57,7 @@ export function MasteryMapPage({ courseTitle, skills, view, onViewChange, select
                     : <DataTable label={`Skills in ${courseTitle}`} rows={ordered} getRowId={(skill) => skill.id} selectedId={selectedId ?? undefined}
                         columns={[
                             { key: 'skill', header: 'Skill', primary: true, render: (skill) => <ButtonBase onClick={() => onSelect(skill.id)} aria-pressed={skill.id === selectedId}
-                                sx={{ fontWeight: 600, fontSize: '0.9375rem', textAlign: 'left', borderRadius: `${radius.xs}px`, color: color.ink900, minHeight: 36, '&:hover': { textDecoration: 'underline' } }}>{skill.name}</ButtonBase> },
+                                sx={{ fontWeight: 600, fontSize: '0.9375rem', textAlign: 'left', borderRadius: `${radius.xs}px`, color: roles.text.primary, minHeight: 36, '&:hover': { textDecoration: 'underline' } }}>{skill.name}</ButtonBase> },
                             { key: 'state', header: 'State', render: (skill) => <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}><MasteryStateChip state={skill.state} />{updatedIds?.includes(skill.id) && <Typography component="span" variant="caption" sx={{ color: 'text.secondary', alignSelf: 'center' }}>Updated</Typography>}</Box> },
                             { key: 'prerequisites', header: 'Prerequisites', render: (skill) => skill.prerequisiteIds.length === 0 ? <Typography variant="body2" sx={{ color: 'text.secondary' }}>None</Typography>
                                 : skill.prerequisiteIds.map((id) => byId.get(id)).filter(Boolean).map((p) => `${p!.name} (${masteryMeta[p!.state].label})`).join(', ') },
@@ -67,7 +67,7 @@ export function MasteryMapPage({ courseTitle, skills, view, onViewChange, select
                 <Box sx={{ mt: 2.5, display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center', justifyContent: 'space-between' }}>
                     <MasteryLegend dense={embedded} />
                     <Typography variant="caption" sx={{ color: 'text.secondary', display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box component="svg" aria-hidden viewBox="0 0 40 10" sx={{ width: 40, height: 10 }}><path d="M2 5h30" stroke={color.ink400} strokeWidth="2" strokeDasharray={pathLine.dasharray} /><path d="m30 1 6 4-6 4Z" fill={color.ink400} /></Box>
+                        <Box component="svg" aria-hidden viewBox="0 0 40 10" sx={{ width: 40, height: 10 }}><path d="M2 5h30" stroke={roles.line.strong} strokeWidth="2" strokeDasharray={pathLine.dasharray} /><path d="m30 1 6 4-6 4Z" fill={roles.line.strong} /></Box>
                         Arrow: from a prerequisite to the skill that builds on it
                     </Typography>
                 </Box>

@@ -4,6 +4,31 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0A0B0F" />
+    <!-- FE34 first paint (DESIGN.md › Rendering): the root colour is keyed to data-color-scheme. Both schemes
+         share the frame colour (bg.frame #0A0B0F), so neither scheme can flash the other before the bundle runs. -->
+    <style>
+      html { background-color: #0A0B0F; color-scheme: light; }
+      html[data-color-scheme="light"] { background-color: #0A0B0F; color-scheme: light; }
+      html[data-color-scheme="dark"] { background-color: #0A0B0F; color-scheme: dark; }
+    </style>
+    <!-- Synchronous, before the application bundle; reads only codemastery.theme and prefers-color-scheme.
+         Keep it static so a future Content Security Policy can allow-list its SHA-256 hash (docs/setup.md). -->
+    <script>
+      (() => {
+        let preference = 'system';
+        try {
+          const stored = localStorage.getItem('codemastery.theme');
+          if (stored === 'light' || stored === 'dark' || stored === 'system') preference = stored;
+        } catch { /* System is the safe default when storage is unavailable. */ }
+        let scheme = 'light';
+        try {
+          if (preference === 'dark' || (preference === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)) scheme = 'dark';
+        } catch { /* System resolves to light when the media preference is unavailable. */ }
+        const root = document.documentElement;
+        root.setAttribute('data-color-scheme', scheme);
+        root.style.colorScheme = scheme;
+      })();
+    </script>
     <!-- Canonical artwork: public/favicon.svg. Version matches the ICO's SHA-256 prefix. -->
     <link rel="icon" type="image/x-icon" sizes="16x16 32x32 48x48 64x64" href="%BASE_URL%favicon.ico?v=519da8b54ade" />
     <title>CodeMastery</title>
