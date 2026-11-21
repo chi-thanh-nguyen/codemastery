@@ -13,6 +13,8 @@ import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
 import com.codemastery.modules.course.application.service.CourseManagementService;
 import com.codemastery.modules.course.application.service.CourseManagementService.AdaptiveConfiguration;
 import com.codemastery.modules.course.application.service.CourseManagementService.ConfigurationBusy;
+import com.codemastery.modules.assessment.application.service.QuestionBankService;
+import com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionInput;
 import com.codemastery.modules.course.application.service.CourseStructureService;
 import com.codemastery.modules.course.application.service.EnrollmentService;
 import com.codemastery.modules.course.domain.model.LearningMaterial;
@@ -32,6 +34,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -132,6 +135,7 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     @Autowired CourseManagementService service;
     @Autowired SkillGraphService graph;
     @Autowired CourseStructureService structure;
+    @Autowired QuestionBankService questionBank;
     @Autowired JwtTokenProvider tokens;
     @Autowired WebApplicationContext context;
     @Autowired EnrollmentService enrollment;
@@ -188,6 +192,12 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         workers.shutdownNow();
         assertTrue(workers.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS));
         BEFORE_PREREQUISITES.remove();
+        String courseQuizzes = "(SELECT id FROM public.quizzes WHERE course_id IN (?,?,?))";
+        jdbc.update("DELETE FROM public.attempt_answers WHERE attempt_id IN (SELECT id FROM public.attempts WHERE quiz_id IN "
+                + courseQuizzes + ")", COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.attempts WHERE quiz_id IN " + courseQuizzes, COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.quiz_questions WHERE quiz_id IN " + courseQuizzes, COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.quizzes WHERE course_id IN (?,?,?)", COURSE, SECOND, HIDDEN);
         String courseSkills = "(SELECT id FROM public.skills WHERE course_id IN (?,?,?))";
         jdbc.update("DELETE FROM public.lesson_skills WHERE skill_id IN " + courseSkills, COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.skill_prerequisites WHERE course_id IN (?,?,?)", COURSE, SECOND, HIDDEN);
@@ -1219,6 +1229,110 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
             assertTrue(failureOf(mapper) instanceof ResourceNotFoundException, "a rolled-back Lesson is not in the Course");
             assertEquals(List.of(), mappingsElsewhere());
         }
+    }
+
+    // AS05 CT23.questions (ADR005 §§3.2, 5; ADR007 §4): the real CT40 producer inside CO14's guard.
+
+    @ParameterizedTest @ValueSource(booleans = {true, false})
+    void taggingAQuestionWithASkillBeingDeletedWaitsAndRereadsTheCommittedGraph(boolean deleteCommits) throws Exception {
+        UUID skill = skillRow(COURSE, "Doomed");
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        Future<Object> deleter = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> service.withCourseConfigurationWrite(COURSE, () -> {
+            graph.deleteSkill(COURSE, skill);
+            entered.countDown();
+            await(release);
+            if (!deleteCommits) throw new IllegalStateException("deleter rolls back");
+            return null;
+        })));
+        await(entered);
+        Future<Object> tagger = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> questionBank.create(COURSE, trueFalse(skill))));
+        awaitLockWaiters(1);
+        assertFalse(tagger.isDone(), "the tag check waits on the Course root held by the graph writer");
+        release.countDown();
+        if (deleteCommits) {
+            deleter.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertTrue(failureOf(tagger) instanceof ResourceNotFoundException, "the deleted skill is no longer in the Course");
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE skill_id = ?", Integer.class, skill));
+        } else {
+            failureOf(deleter);
+            tagger.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE skill_id = ?", Integer.class, skill));
+        }
+    }
+
+    /** AS08 capture is not implemented; a separate connection inserts the AttemptAnswer reference. */
+    @ParameterizedTest
+    @CsvSource({"delete,true", "delete,false", "update,true", "update,false"})
+    void anAttemptCaptureReferencingAQuestionFreezesItBeforeAWaitingReplaceOrDelete(String operation, boolean captureCommits)
+            throws Exception {
+        UUID skill = skillRow(COURSE, "Tagged"), question = questionRow(skill), attempt = attemptRow(quizRow(COURSE));
+        Connection capture = dataSource.getConnection();
+        held.add(capture);
+        capture.setAutoCommit(false);
+        try (PreparedStatement insert = capture.prepareStatement("INSERT INTO public.attempt_answers "
+                + "(id,attempt_id,question_id,position,selected_options) VALUES (?,?,?,1,ARRAY[false,false])")) {
+            insert.setObject(1, UUID.randomUUID());
+            insert.setObject(2, attempt);
+            insert.setObject(3, question);
+            insert.executeUpdate();
+        }
+        Future<Object> writer = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> operation.equals("delete")
+                ? questionBank.delete(COURSE, question)
+                : questionBank.update(COURSE, question,
+                        new QuestionInput(skill, "Changed", "true_false", "hard", List.of("True", "False"), List.of(false, true)))));
+        awaitLockWaiters(1);
+        assertFalse(writer.isDone(), "the question row lock waits for the uncommitted reference");
+        if (captureCommits) capture.commit(); else capture.rollback();
+        if (captureCommits) {
+            BusinessRuleException frozen = assertInstanceOf(BusinessRuleException.class, failureOf(writer));
+            assertEquals(409, frozen.getStatus().value());
+            assertEquals("Pick one|easy", questionElsewhere(question));
+        } else {
+            writer.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertEquals(operation.equals("delete") ? "none" : "Changed|hard", questionElsewhere(question));
+        }
+    }
+
+    @Test void questionScopesOfIndependentCoursesStayApart() {
+        UUID mine = skillRow(COURSE, "Mine"), theirs = skillRow(SECOND, "Theirs"), foreignQuestion = questionRow(theirs);
+        assertThrows(ResourceNotFoundException.class, () -> as(OWNER, Role.INSTRUCTOR, () -> questionBank.create(COURSE, trueFalse(theirs))));
+        assertThrows(ResourceNotFoundException.class, () -> as(OWNER, Role.INSTRUCTOR, () -> questionBank.read(COURSE, foreignQuestion)));
+        assertThrows(ResourceNotFoundException.class, () -> as(OWNER, Role.INSTRUCTOR, () -> questionBank.delete(COURSE, foreignQuestion)));
+        assertEquals(mine, as(OWNER, Role.INSTRUCTOR, () -> questionBank.create(COURSE, trueFalse(mine))).skillId());
+        assertEquals(1L, as(OWNER, Role.INSTRUCTOR, () -> questionBank.list(COURSE, 0, 20)).totalElements());
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE id = ?", Integer.class, foreignQuestion));
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    private static QuestionInput trueFalse(UUID skill) {
+        return new QuestionInput(skill, "Pick one", "true_false", "easy", List.of("True", "False"), List.of(true, false));
+    }
+
+    private UUID questionRow(UUID skill) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.questions (id,skill_id,prompt,kind,difficulty,options,correct_options) "
+                + "VALUES (?,?,'Pick one','true_false','easy',ARRAY['True','False'],ARRAY[true,false])", id, skill);
+        return id;
+    }
+
+    private UUID quizRow(UUID course) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.quizzes (id,course_id,title,kind,time_limit_seconds,publication_status) "
+                + "VALUES (?,?,'Draft','practice',60,'hidden')", id, course);
+        return id;
+    }
+
+    private UUID attemptRow(UUID quiz) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.attempts (id,user_id,quiz_id,attempt_number,started_at,expires_at) "
+                + "VALUES (?,?,?,1,now(),now() + interval '5 minutes')", id, LEARNER, quiz);
+        return id;
+    }
+
+    /** Committed prompt and difficulty of a question, or "none", on a separate connection. */
+    private String questionElsewhere(UUID question) {
+        List<String> rows = queryElsewhere("SELECT prompt || '|' || difficulty FROM public.questions WHERE id = ?", question);
+        return rows.isEmpty() ? "none" : rows.getFirst();
     }
 
     private static void assertCommitRefused(org.junit.jupiter.api.function.Executable unit) {

@@ -973,19 +973,96 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             assertEquals(before, bank());
         }
 
-        /** The CO14 guard is integrated; the AD07 CT40 producer is not yet on main, so the seams fail closed. */
+        /** CT23.questions: a QuizQuestion or AttemptAnswer reference freezes and protects the definition. */
         @Test
-        void admittedOwnerRequestsFailClosedWhileTheCt40ProducerIsAbsent() throws Exception {
+        void referencedQuestionsConflictOverHttpAndKeepTheirDefinition() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course + "/questions/" + question;
+            UUID quiz = UUID.randomUUID(), attempt = UUID.randomUUID(), learner = insertUser("learner", "active");
+            try {
+                jdbc.update("INSERT INTO public.quizzes (id, course_id, title, kind, time_limit_seconds, publication_status) "
+                        + "VALUES (?, ?, 'Referencing quiz', 'practice', 60, 'hidden')", quiz, course);
+                jdbc.update("INSERT INTO public.quiz_questions (id, quiz_id, question_id, position) VALUES (?, ?, ?, 1)",
+                        UUID.randomUUID(), quiz, question);
+                String before = bank();
+                // Membership alone: the unused definition may still be replaced, but not deleted.
+                mvc.perform(request(HttpMethod.DELETE, base).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isConflict())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+                assertEquals(before, bank());
+                mvc.perform(request(HttpMethod.PUT, base).header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content(validBody()))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.prompt").value("Predict the output"));
+
+                // An AttemptAnswer makes every definition field immutable, and the delete stays refused.
+                jdbc.update("INSERT INTO public.attempts (id, user_id, quiz_id, attempt_number, started_at, expires_at) "
+                        + "VALUES (?, ?, ?, 1, now(), now() + interval '5 minutes')", attempt, learner, quiz);
+                jdbc.update("INSERT INTO public.attempt_answers (id, attempt_id, question_id, position, selected_options) "
+                        + "VALUES (?, ?, ?, 1, ARRAY[false,false])", UUID.randomUUID(), attempt, question);
+                String used = bank();
+                mvc.perform(request(HttpMethod.PUT, base).header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content(validBody().replace("Predict the output", "Changed")))
+                        .andExpect(status().isConflict());
+                mvc.perform(request(HttpMethod.DELETE, base).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isConflict());
+                assertEquals(used, bank());
+                // The used definition stays readable by its owner, key included.
+                mvc.perform(get(base).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.correctOptions[0]").value(true));
+            } finally {
+                jdbc.update("DELETE FROM public.attempt_answers WHERE attempt_id = ?", attempt);
+                jdbc.update("DELETE FROM public.attempts WHERE id = ?", attempt);
+                jdbc.update("DELETE FROM public.quiz_questions WHERE quiz_id = ?", quiz);
+                jdbc.update("DELETE FROM public.quizzes WHERE id = ?", quiz);
+            }
+        }
+
+        /** AD07's CT40 producer and CO14's guard are integrated: the owner's operations reach real rows. */
+        @Test
+        void admittedOwnerOperationsUseTheRealCt40ProducerAndCourseGuard() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course + "/questions";
+            mvc.perform(get(base).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].id").value(question.toString()));
+            mvc.perform(get(base + "/" + question).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.correctOptions[0]").value(true));
+
+            String created = mvc.perform(post(base).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content(validBody()))
+                    .andExpect(status().isCreated())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.skillId").value(skill.toString()))
+                    .andReturn().getResponse().getContentAsString();
+            UUID createdId = UUID.fromString(JSON.readTree(created).get("id").asString());
+            assertEquals(skill, jdbc.queryForObject("SELECT skill_id FROM public.questions WHERE id = ?", UUID.class, createdId));
+
+            // A skill of another Course (even the same owner's) is the producer's concealed 404 and writes nothing.
+            UUID foreignSkill = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.skills (id, course_id, name) VALUES (?, ?, 'Foreign skill')", foreignSkill, hiddenCourse);
             String before = bank();
-            for (var request : operations(course, sessionToken(owner))) {
-                String body = mvc.perform(request)
-                        .andExpect(status().isInternalServerError())
-                        .andExpect(header().string("Cache-Control", "no-store"))
-                        .andExpect(jsonPath("$.detail").value("An unexpected error occurred."))
-                        .andReturn().getResponse().getContentAsString();
-                assertFalse(body.contains("CT40") || body.contains("Stored prompt") || body.contains("correctOptions"));
+            for (var request : List.of(post(base), request(HttpMethod.PUT, base + "/" + createdId))) {
+                mvc.perform(request.header("Authorization", "Bearer " + bearer).contentType(MediaType.APPLICATION_JSON)
+                                .content(validBody().replace(skill.toString(), foreignSkill.toString())))
+                        .andExpect(status().isNotFound())
+                        .andExpect(jsonPath("$.detail").value("The requested resource is unavailable."));
             }
             assertEquals(before, bank());
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE skill_id = ?", Integer.class, foreignSkill));
+
+            mvc.perform(request(HttpMethod.PUT, base + "/" + createdId).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content(validBody().replace("Predict the output", "Replaced")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.prompt").value("Replaced"));
+            mvc.perform(request(HttpMethod.DELETE, base + "/" + createdId).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(createdId.toString()));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE id = ?", Integer.class, createdId));
+            jdbc.update("DELETE FROM public.skills WHERE id = ?", foreignSkill);
         }
     }
 

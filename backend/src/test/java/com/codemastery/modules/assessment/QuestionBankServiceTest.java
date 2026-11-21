@@ -36,6 +36,7 @@ import com.codemastery.modules.assessment.application.service.QuestionBankServic
 import com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionInput;
 import com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionView;
 import com.codemastery.modules.assessment.domain.model.Question;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService;
 import com.codemastery.modules.assessment.domain.repository.QuestionRepository;
 import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.application.service.CourseManagementService;
@@ -65,16 +66,16 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * CT23.questions/bindings unit evidence (ADR007 §§4, 7). The Course configuration guard (CO14 #177)
- * is integrated by delegation; the CT40 producer (AD07 #165) is not yet on {@code main}, so
- * production instances fail closed at its seams. Integrated behavior is exercised through a test
- * subclass that emulates exactly the approved producer signatures; real-producer evidence is the
- * PostgreSQL suite.
+ * and the CT40 producer (AD07 #165) are integrated by delegation; {@code ProducerDelegation} proves
+ * each seam reaches its producer. The remaining cases use a test subclass that emulates the approved
+ * producer semantics; real-producer evidence is the PostgreSQL suites.
  */
 class QuestionBankServiceTest {
 
     private QuestionRepository questions;
     private CourseAccessService access;
     private CourseManagementService guard;
+    private SkillGraphService skillGraph;
     private UUID courseId;
     private UUID skillId;
     private UUID otherSkillId;
@@ -88,6 +89,7 @@ class QuestionBankServiceTest {
         questions = mock(QuestionRepository.class);
         access = mock(CourseAccessService.class);
         guard = mock(CourseManagementService.class);
+        skillGraph = mock(SkillGraphService.class);
         courseId = UUID.randomUUID();
         skillId = UUID.randomUUID();
         otherSkillId = UUID.randomUUID();
@@ -103,7 +105,7 @@ class QuestionBankServiceTest {
     }
 
     private QuestionBankService integrated(List<UUID> courseSkills) {
-        return new QuestionBankService(questions, access, guard) {
+        return new QuestionBankService(questions, access, guard, skillGraph) {
             @Override
             protected void requireSkillInCourse(UUID course, UUID skill) {
                 calls.add("requireSkillInCourse");
@@ -166,25 +168,68 @@ class QuestionBankServiceTest {
     }
 
     @Nested
-    class UpstreamProducersAbsent {
+    class ProducerDelegation {
+
+        private QuestionBankService production() {
+            when(guard.withCourseConfigurationWrite(eq(courseId), any())).thenAnswer(invocation -> {
+                guardDepth++;
+                try {
+                    return invocation.<Supplier<?>>getArgument(1).get();
+                } finally {
+                    guardDepth--;
+                }
+            });
+            return new QuestionBankService(questions, access, guard, skillGraph);
+        }
 
         @Test
-        void productionInstanceFailsClosedForEveryOperationAfterAdmissionWithoutTouchingTheBank() {
-            when(guard.withCourseConfigurationWrite(eq(courseId), any())).thenAnswer(
-                    invocation -> invocation.<Supplier<?>>getArgument(1).get());
-            QuestionBankService production = new QuestionBankService(questions, access, guard);
-            List<Executable> operations = List.of(
-                    () -> production.create(courseId, validInput()),
-                    () -> production.update(courseId, questionId, validInput()),
-                    () -> production.delete(courseId, questionId),
-                    () -> production.read(courseId, questionId),
-                    () -> production.list(courseId, 0, 20));
-            for (Executable operation : operations) {
-                IllegalStateException failure = assertThrows(IllegalStateException.class, operation);
-                assertTrue(failure.getMessage().contains("not implemented"));
-            }
-            verify(access, org.mockito.Mockito.times(5)).requireCourseOwnership(courseId);
-            verify(guard, org.mockito.Mockito.times(3)).withCourseConfigurationWrite(eq(courseId), any());
+        void createValidatesTheSkillThroughCt40InsideTheGuardBeforeSaving() {
+            QuestionBankService production = production();
+            answerSaveInsideGuard();
+            org.mockito.Mockito.doAnswer(invocation -> {
+                assertTrue(guardDepth > 0, "the CT40 tag check runs under the held Course root");
+                calls.add("requireSkillInCourse");
+                return null;
+            }).when(skillGraph).requireSkillInCourse(courseId, skillId);
+
+            production.create(courseId, validInput());
+
+            assertEquals(List.of("requireSkillInCourse", "save"), calls);
+        }
+
+        @Test
+        void aSkillOutsideTheCourseIsTheProducersConcealed404AndNothingIsSaved() {
+            QuestionBankService production = production();
+            ResourceNotFoundException concealed = new ResourceNotFoundException("Resource not available");
+            doThrow(concealed).when(skillGraph).requireSkillInCourse(courseId, skillId);
+
+            assertSame(concealed, assertThrows(ResourceNotFoundException.class, () -> production.create(courseId, validInput())));
+            verify(questions, never()).save(any());
+        }
+
+        @Test
+        void scopedOperationsUseTheProducersCompleteSkillSet() {
+            QuestionBankService production = production();
+            when(skillGraph.readSkillIds(courseId)).thenReturn(List.of(skillId, otherSkillId));
+            lockReturns(stored(questionId, skillId));
+            answerSaveInsideGuard();
+            when(questions.findInSkills(eq(questionId), anyCollection())).thenReturn(Optional.of(stored(questionId, skillId)));
+
+            production.update(courseId, questionId, validInput());
+            production.read(courseId, questionId);
+
+            verify(skillGraph, org.mockito.Mockito.times(2)).readSkillIds(courseId);
+            verify(skillGraph).requireSkillInCourse(courseId, skillId);
+            verify(questions).findInSkills(questionId, List.of(skillId, otherSkillId));
+        }
+
+        @Test
+        void anInconsistentProducerProjectionIsAServerErrorNeverAWiderScope() {
+            QuestionBankService production = production();
+            when(skillGraph.readSkillIds(courseId)).thenReturn(List.of(skillId, skillId));
+
+            assertThrows(IllegalStateException.class, () -> production.read(courseId, questionId));
+            assertThrows(IllegalStateException.class, () -> production.delete(courseId, questionId));
             verifyNoInteractions(questions);
         }
 
@@ -192,7 +237,7 @@ class QuestionBankServiceTest {
         void everyMutationDelegatesToTheCo14GuardAndItsRefusalPrecedesAnyBankAccess() {
             ResourceNotFoundException concealed = new ResourceNotFoundException("Resource not available");
             when(guard.withCourseConfigurationWrite(eq(courseId), any())).thenThrow(concealed);
-            QuestionBankService production = new QuestionBankService(questions, access, guard);
+            QuestionBankService production = new QuestionBankService(questions, access, guard, skillGraph);
             List<Executable> mutations = List.of(
                     () -> production.create(courseId, validInput()),
                     () -> production.update(courseId, questionId, validInput()),
@@ -205,12 +250,12 @@ class QuestionBankServiceTest {
         }
 
         @Test
-        void invalidDefinitionIsStill400BeforeTheMissingProviderIsReached() {
-            QuestionBankService production = new QuestionBankService(questions, access, guard);
+        void invalidDefinitionIsStill400BeforeAnyProducerIsReached() {
+            QuestionBankService production = new QuestionBankService(questions, access, guard, skillGraph);
             BusinessRuleException invalid = assertThrows(BusinessRuleException.class,
                     () -> production.create(courseId, input("essay", List.of("A", "B"), List.of(true, false))));
             assertEquals(HttpStatus.BAD_REQUEST, statusOf(invalid));
-            verifyNoInteractions(questions);
+            verifyNoInteractions(questions, guard, skillGraph);
         }
 
         @Test

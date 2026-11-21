@@ -5,6 +5,7 @@ import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
 import com.codemastery.modules.assessment.domain.model.Question;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService;
 import com.codemastery.modules.assessment.domain.repository.QuestionRepository;
 import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.application.service.CourseManagementService;
@@ -32,11 +33,11 @@ import org.springframework.transaction.annotation.Transactional;
  * configuration guard. Each upstream producer is reached through one protected delegation point
  * that mirrors the approved producer signature exactly:
  * <ul>
- *   <li>{@code CourseManagementService.withCourseConfigurationWrite}: CO14 (#177), integrated;</li>
- *   <li>{@code SkillGraphService.requireSkillInCourse} and {@code readSkillIds}: AD07 (#165). Until
- *       that producer is on {@code main} these two fail closed with a safe 500 (B3Failure) instead
- *       of substituting another scope lookup.</li>
+ *   <li>{@code CourseManagementService.withCourseConfigurationWrite}: CO14 (#177);</li>
+ *   <li>{@code SkillGraphService.requireSkillInCourse} and {@code readSkillIds}: AD07 (#165).</li>
  * </ul>
+ * Both CT40 lookups join the caller's transaction: inside the guard they read under the held
+ * Course root, and in an owner read they share its REPEATABLE READ snapshot.
  */
 @Service
 public class QuestionBankService {
@@ -78,12 +79,14 @@ public class QuestionBankService {
     private final QuestionRepository questions;
     private final CourseAccessService courseAccess;
     private final CourseManagementService courseConfiguration;
+    private final SkillGraphService skillGraph;
 
     public QuestionBankService(QuestionRepository questions, CourseAccessService courseAccess,
-                               CourseManagementService courseConfiguration) {
+                               CourseManagementService courseConfiguration, SkillGraphService skillGraph) {
         this.questions = Objects.requireNonNull(questions, "questions");
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
         this.courseConfiguration = Objects.requireNonNull(courseConfiguration, "courseConfiguration");
+        this.skillGraph = Objects.requireNonNull(skillGraph, "skillGraph");
     }
 
     public QuestionView create(UUID courseId, QuestionInput input) {
@@ -160,7 +163,7 @@ public class QuestionBankService {
      * normally for a skill of the Course, otherwise the same safe 404. Producer: AD07 (#165).
      */
     protected void requireSkillInCourse(UUID courseId, UUID skillId) {
-        throw providerUnavailable("CT40 SkillGraphService.requireSkillInCourse");
+        skillGraph.requireSkillInCourse(courseId, skillId);
     }
 
     /**
@@ -168,7 +171,7 @@ public class QuestionBankService {
      * skill set of the Course. Producer: AD07 (#165).
      */
     protected List<UUID> readSkillIds(UUID courseId) {
-        throw providerUnavailable("CT40 SkillGraphService.readSkillIds");
+        return skillGraph.readSkillIds(courseId);
     }
 
     /**
@@ -246,9 +249,5 @@ public class QuestionBankService {
 
     private static ResourceNotFoundException unavailable() {
         return new ResourceNotFoundException("Question not available in this Course");
-    }
-
-    private static IllegalStateException providerUnavailable(String producer) {
-        return new IllegalStateException(producer + " is not implemented; failing closed");
     }
 }
