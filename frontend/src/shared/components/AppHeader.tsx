@@ -134,6 +134,10 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
     // delayed open (400 ms, or 200 ms within its hysteresis) and Escape does not cancel that timer, so its focus-driven
     // onOpen is ignored here (N-01). Its focus and blur listeners stay attached: blur still closes the tooltip through
     // Tooltip's own close, which also restarts its hysteresis timer (`disableFocusListener` would remove both).
+    // That ignored focus timer still runs inside MUI: when it fires, `handleOpen` sets MUI's module-level hysteresis flag
+    // and cancels the reset timer that Escape's close had started, so the flag stays set while focus stays on the button
+    // and the next pointer hover would open after `enterNextDelay` (200 ms by default) instead of 400 ms (N-04). The
+    // Theme tooltip therefore takes the specified 400 ms for every pointer hover (DESIGN.md › Tooltip, D13-5).
     const onTooltipOpen = (event: { type: string }) => { if (event.type !== 'focus') showTooltip(event); };
     // Tooltip closes itself on Escape (a document keydown listener while it is open); that dismissal persists (N-01).
     const onTooltipClose = (event: { type: string; key?: string }) => {
@@ -150,7 +154,7 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
     };
     return <>
         {/* While the menu is open the tooltip exits without its fade, so it never overlaps the menu's caption. */}
-        <Tooltip title="Theme" open={tooltip && !open} onOpen={onTooltipOpen} onClose={onTooltipClose}
+        <Tooltip title="Theme" enterNextDelay={400} open={tooltip && !open} onOpen={onTooltipOpen} onClose={onTooltipClose}
             slotProps={{ transition: open ? { timeout: 0 } : {} }}>
             <IconButton ref={button} aria-label={themeButtonLabel(preference, systemScheme)} data-theme-control="button"
                 aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} onClick={() => (open ? close(false) : openMenu())}
