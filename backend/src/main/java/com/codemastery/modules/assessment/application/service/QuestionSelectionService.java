@@ -1,6 +1,7 @@
 package com.codemastery.modules.assessment.application.service;
 
 import com.codemastery.common.exception.ResourceNotFoundException;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService;
 import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
@@ -21,10 +22,9 @@ import org.springframework.stereotype.Service;
  * order only. No count cap, randomization, weighting or adaptive/difficulty selection.
  *
  * <p>Course scope comes only from the approved CT40 projection
- * {@code SkillGraphService.readSkillIds(courseId)} (ADR005 §3.2). Its producer, AD07 (#165), is not
- * implemented, so {@link #readSkillIds(UUID)} fails closed with a safe 500 instead of substituting
- * another scope lookup. It mirrors the approved signature and becomes a single delegation when the
- * producer is integrated. Callers invoke this service only inside the Course configuration guard.
+ * {@code SkillGraphService.readSkillIds(courseId)} (ADR005 §3.2), produced by AD07 (#165) and reached
+ * through the single delegation {@link #readSkillIds(UUID)}. Callers invoke this service only inside
+ * the Course configuration guard, so the projection is read under the held Course root.
  */
 @Service
 public class QuestionSelectionService {
@@ -36,9 +36,11 @@ public class QuestionSelectionService {
     private static final Pattern NON_SPACE = Pattern.compile("\\S", Pattern.UNICODE_CHARACTER_CLASS);
 
     private final QuizRepository quizzes;
+    private final SkillGraphService skillGraph;
 
-    public QuestionSelectionService(QuizRepository quizzes) {
+    public QuestionSelectionService(QuizRepository quizzes, SkillGraphService skillGraph) {
         this.quizzes = Objects.requireNonNull(quizzes, "quizzes");
+        this.skillGraph = Objects.requireNonNull(skillGraph, "skillGraph");
     }
 
     /**
@@ -114,7 +116,7 @@ public class QuestionSelectionService {
      * set of the Course. Producer: AD07 (#165).
      */
     protected List<UUID> readSkillIds(UUID courseId) {
-        throw new IllegalStateException("CT40 SkillGraphService.readSkillIds is not implemented; failing closed");
+        return skillGraph.readSkillIds(courseId);
     }
 
     private List<UUID> courseSkillIds(UUID courseId) {

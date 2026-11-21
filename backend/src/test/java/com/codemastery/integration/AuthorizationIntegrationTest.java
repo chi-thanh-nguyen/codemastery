@@ -2073,27 +2073,59 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             assertEquals(before, quizState());
         }
 
-        /** CO14's guard is integrated; writes that resolve question scope need AD07's CT40 producer. */
+        /** AD07's CT40 producer scopes membership and publication inside CO14's guard. */
         @Test
-        void admittedOwnerWritesNeedingCt40FailClosedWhileTheProducerIsAbsent() throws Exception {
+        void membershipAndPublicationUseTheRealCt40ProducerAndReachTheLearner() throws Exception {
             String bearer = sessionToken(owner);
-            String before = quizState();
             String base = "/api/courses/" + course;
-            List<org.springframework.test.web.servlet.RequestBuilder> writes = authorized(bearer, List.of(
-                    post(base + "/quizzes").contentType(MediaType.APPLICATION_JSON).content(validBody()),
-                    request(HttpMethod.PUT, base + "/quizzes/" + quiz).contentType(MediaType.APPLICATION_JSON).content(validBody()),
-                    request(HttpMethod.PUT, base + "/quizzes/" + quiz + "/publication")
-                            .contentType(MediaType.APPLICATION_JSON).content("{\"publicationStatus\":\"published\"}")));
-            for (var request : writes) {
-                String body = mvc.perform(request)
-                        .andExpect(status().isInternalServerError())
-                        .andExpect(header().string("Cache-Control", "no-store"))
-                        .andExpect(jsonPath("$.detail").value("An unexpected error occurred."))
-                        .andReturn().getResponse().getContentAsString();
-                assertFalse(body.contains("CT40") || body.contains("withCourseConfigurationWrite")
-                        || body.contains("Prompt") || body.contains("correctOptions"));
-            }
-            assertEquals(before, quizState(), "each failed unit rolled back inside the Course guard");
+            String created = mvc.perform(post(base + "/quizzes").header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content(validBody()))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.questions[0].question.id").value(q1.toString()))
+                    .andReturn().getResponse().getContentAsString();
+            UUID composed = UUID.fromString(JSON.readTree(created).get("id").asString());
+            mvc.perform(request(HttpMethod.PUT, base + "/quizzes/" + composed).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\":\"Ordered\",\"kind\":\"practice\",\"timeLimitSeconds\":90,\"questionIds\":[\""
+                                    + q2 + "\",\"" + q1 + "\"]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.questions[0].position").value(1))
+                    .andExpect(jsonPath("$.questions[0].question.id").value(q2.toString()))
+                    .andExpect(jsonPath("$.questions[1].question.id").value(q1.toString()));
+
+            // A question of another Course is the same concealed 404 and writes nothing.
+            UUID foreignSkill = UUID.randomUUID(), foreignQuestion = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.skills (id, course_id, name) VALUES (?, ?, 'Foreign skill')", foreignSkill, hiddenCourse);
+            jdbc.update("INSERT INTO public.questions (id, skill_id, prompt, kind, difficulty, options, correct_options) "
+                    + "VALUES (?, ?, 'Foreign prompt', 'single_choice', 'easy', ARRAY['A','B'], ARRAY[true,false])",
+                    foreignQuestion, foreignSkill);
+            String before = quizState();
+            mvc.perform(post(base + "/quizzes").header("Authorization", "Bearer " + bearer).contentType(MediaType.APPLICATION_JSON)
+                            .content(validBody().replace(q1.toString(), foreignQuestion.toString())))
+                    .andExpect(status().isNotFound());
+            assertEquals(before, quizState());
+
+            mvc.perform(request(HttpMethod.PUT, base + "/quizzes/" + composed + "/publication").header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"publicationStatus\":\"published\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.published").value(true));
+            mvc.perform(request(HttpMethod.PUT, base + "/quizzes/" + composed).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content(validBody()))
+                    .andExpect(status().isConflict());
+
+            UUID learner = insertUser("learner", "active");
+            enrol(learner, course, "active");
+            String page = mvc.perform(learnerList(course, sessionToken(learner)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            JsonNode listed = JSON.readTree(page).get("content");
+            assertEquals(1, listed.size());
+            assertEquals(composed.toString(), listed.get(0).get("id").asString());
+            assertEquals(2, listed.get(0).get("questionCount").asInt());
+            assertFalse(page.contains("correctOptions") || page.contains("Prompt"), page);
+            jdbc.update("DELETE FROM public.enrollments WHERE user_id = ?", learner);
+            jdbc.update("DELETE FROM public.questions WHERE id = ?", foreignQuestion);
+            jdbc.update("DELETE FROM public.skills WHERE id = ?", foreignSkill);
         }
 
         /** Writes that need no question scope run in CO14's Course-root unit against real rows. */

@@ -210,6 +210,20 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         assertTrue(workers.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS));
         BEFORE_PREREQUISITES.remove();
         BEFORE_QUESTION_PAGE.remove();
+        for (UUID course : jdbc.queryForList("SELECT id FROM public.courses WHERE instructor_id IN (?,?)", UUID.class, OWNER, OTHER)) {
+            purgeAssessmentAndGraph(course);
+        }
+        jdbc.update("DELETE FROM public.lesson_progress WHERE enrollment_id IN (SELECT id FROM public.enrollments WHERE user_id IN (?,?,?,?))",
+                OWNER, OTHER, LEARNER, ADMIN);
+        jdbc.update("DELETE FROM public.enrollments WHERE user_id IN (?,?,?,?)", OWNER, OTHER, LEARNER, ADMIN);
+        for (UUID course : jdbc.queryForList("SELECT id FROM public.courses WHERE instructor_id IN (?,?) AND id NOT IN (?,?,?)",
+                UUID.class, OWNER, OTHER, COURSE, SECOND, HIDDEN)) {
+            jdbc.update("DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT l.id FROM public.lessons l "
+                    + "JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id = ?)", course);
+            jdbc.update("DELETE FROM public.lessons WHERE chapter_id IN (SELECT id FROM public.chapters WHERE course_id = ?)", course);
+            jdbc.update("DELETE FROM public.chapters WHERE course_id = ?", course);
+            jdbc.update("DELETE FROM public.courses WHERE id = ?", course);
+        }
         String courseQuizzes = "(SELECT id FROM public.quizzes WHERE course_id IN (?,?,?))";
         jdbc.update("DELETE FROM public.attempt_answers WHERE attempt_id IN (SELECT id FROM public.attempts WHERE quiz_id IN "
                 + courseQuizzes + ")", COURSE, SECOND, HIDDEN);
@@ -811,6 +825,111 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     }
 
     // Helpers.
+
+    // CO06 + AD07 + AS05 + AS06 (ADR005 §§3, 5; ADR007 §§4–7): the integrated authoring flow over HTTP.
+
+    @Test void anInstructorAuthorsStructureGraphQuestionsAndAQuizThatAnEnrolledLearnerSees() throws Exception {
+        String owner = bearer(OWNER), courses = "/api/instructor/courses";
+        UUID course = idOf(json(call(new Operation(HttpMethod.POST, courses,
+                "{\"title\":\"Integrated\",\"description\":\"Cross-PR flow\",\"prerequisiteDescription\":null}"), owner), 201));
+        UUID chapter = idOf(json(call(new Operation(HttpMethod.POST, courses + "/" + course + "/chapters",
+                "{\"title\":\"Basics\"}"), owner), 201));
+        UUID lesson = idOf(json(call(new Operation(HttpMethod.POST, courses + "/" + course + "/chapters/" + chapter + "/lessons",
+                "{\"title\":\"Variables\",\"contentMarkdown\":\"# Variables\"}"), owner), 201));
+        json(call(new Operation(HttpMethod.PUT, courses + "/" + course + "/lessons/" + lesson + "/publication",
+                "{\"publicationStatus\":\"published\"}"), owner), 200);
+
+        String base = "/api/courses/" + course;
+        UUID skill = idOf(json(call(new Operation(HttpMethod.POST, base + "/skills", "{\"name\":\"Variables\"}"), owner), 201));
+        noContent(call(new Operation(HttpMethod.PUT, base + "/lessons/" + lesson + "/skills/" + skill, null), owner));
+        JsonNode graphRead = json(call(new Operation(HttpMethod.GET, base + "/skill-graph", null), owner), 200);
+        assertEquals(lesson.toString(), graphRead.get("mappings").get(0).get("lessonId").asString(),
+                "the CO06 Lesson passes the CT40 structural check of the graph read");
+
+        String question = "{\"skillId\":\"" + skill + "\",\"prompt\":\"x = 1; x += 1; x?\",\"kind\":\"single_choice\","
+                + "\"difficulty\":\"easy\",\"options\":[\"1\",\"2\"],\"correctOptions\":[false,true]}";
+        UUID questionId = idOf(json(call(new Operation(HttpMethod.POST, base + "/questions", question), owner), 201));
+        String quiz = "{\"title\":\"Check\",\"kind\":\"practice\",\"timeLimitSeconds\":300,\"questionIds\":[\"" + questionId + "\"]}";
+        JsonNode composed = json(call(new Operation(HttpMethod.POST, base + "/quizzes", quiz), owner), 201);
+        UUID quizId = idOf(composed);
+        assertEquals(questionId.toString(), composed.get("questions").get(0).get("question").get("id").asString());
+
+        // Foreign references, unauthorized actors and referenced deletes are refused without effects.
+        UUID foreignSkill = skillRow(SECOND, "Foreign"), foreignQuestion = questionRow(foreignSkill);
+        assertProblem(call(new Operation(HttpMethod.POST, base + "/questions",
+                question.replace(skill.toString(), foreignSkill.toString())), owner), 404, null);
+        assertProblem(call(new Operation(HttpMethod.POST, base + "/quizzes",
+                quiz.replace(questionId.toString(), foreignQuestion.toString())), owner), 404, null);
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/lessons/" + lesson + "/skills/" + foreignSkill, null), owner), 404, null);
+        String other = bearer(OTHER);
+        assertEquals(404, call(new Operation(HttpMethod.POST, base + "/questions", question), other).getResponse().getStatus(),
+                "the hidden Course is concealed from a non-owner");
+        assertEquals(403, call(new Operation(HttpMethod.POST, base + "/quizzes", quiz), bearer(LEARNER)).getResponse().getStatus());
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/skills/" + skill, null), owner), 409, null);
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/questions/" + questionId, null), owner), 409, null);
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.questions q JOIN public.skills s ON s.id = q.skill_id "
+                + "WHERE s.course_id = ?", Integer.class, course));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.quizzes WHERE course_id = ?", Integer.class, course));
+
+        json(call(new Operation(HttpMethod.PUT, base + "/quizzes/" + quizId + "/publication",
+                "{\"publicationStatus\":\"published\"}"), owner), 200);
+        json(call(new Operation(HttpMethod.PUT, courses + "/" + course + "/publication",
+                "{\"publicationStatus\":\"published\"}"), owner), 200);
+        String learner = bearer(LEARNER);
+        assertEquals(200, call(new Operation(HttpMethod.PUT, base + "/membership", null), learner).getResponse().getStatus());
+        MvcResult listed = call(new Operation(HttpMethod.GET, base + "/quizzes", null), learner);
+        JsonNode page = json(listed, 200);
+        assertEquals(1, page.get("content").size());
+        assertEquals(quizId.toString(), page.get("content").get(0).get("id").asString());
+        assertEquals(1, page.get("content").get(0).get("questionCount").asInt());
+        String body = listed.getResponse().getContentAsString();
+        assertFalse(body.contains("correctOptions") || body.contains("x += 1"), body);
+
+        // Published and then attempted quizzes stay frozen even after hiding.
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/quizzes/" + quizId, quiz), owner), 409, null);
+        json(call(new Operation(HttpMethod.PUT, base + "/quizzes/" + quizId + "/publication",
+                "{\"publicationStatus\":\"hidden\"}"), owner), 200);
+        jdbc.update("INSERT INTO public.attempts (id,user_id,quiz_id,attempt_number,started_at,expires_at) "
+                + "VALUES (?,?,?,1,now(),now() + interval '5 minutes')", UUID.randomUUID(), LEARNER, quizId);
+        assertProblem(call(new Operation(HttpMethod.PUT, base + "/quizzes/" + quizId, quiz), owner), 409, null);
+        assertProblem(call(new Operation(HttpMethod.DELETE, base + "/quizzes/" + quizId, null), owner), 409, null);
+    }
+
+    @ParameterizedTest @ValueSource(booleans = {true, false})
+    void composingAQuizWithAQuestionBeingDeletedWaitsAndRereadsTheCommittedBank(boolean deleteCommits) throws Exception {
+        UUID question = questionRow(skillRow(COURSE, "Tagged"));
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        Future<Object> deleter = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> service.withCourseConfigurationWrite(COURSE, () -> {
+            questionBank.delete(COURSE, question);
+            entered.countDown();
+            await(release);
+            if (!deleteCommits) throw new IllegalStateException("deleter rolls back");
+            return null;
+        })));
+        await(entered);
+        Future<Object> composer = workers.submit(() -> as(OWNER, Role.INSTRUCTOR,
+                () -> quizService.create(COURSE, new QuizInput("Race", "practice", 60, List.of(question)))));
+        awaitLockWaiters(1);
+        assertFalse(composer.isDone(), "composition waits on the Course root held by the question writer");
+        release.countDown();
+        if (deleteCommits) {
+            deleter.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertTrue(failureOf(composer) instanceof ResourceNotFoundException, "the deleted question is no longer selectable");
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.quizzes WHERE course_id = ?", Integer.class, COURSE));
+        } else {
+            failureOf(deleter);
+            composer.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.quiz_questions WHERE question_id = ?", Integer.class, question));
+        }
+    }
+
+    @Test void aQuizCannotComposeAQuestionOfAnotherCourse() {
+        UUID theirs = skillRow(SECOND, "Theirs"), foreignQuestion = questionRow(theirs);
+        assertThrows(ResourceNotFoundException.class, () -> as(OWNER, Role.INSTRUCTOR,
+                () -> quizService.create(COURSE, new QuizInput("Mixed", "practice", 60, List.of(foreignQuestion)))));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.quizzes WHERE course_id IN (?,?)", Integer.class, COURSE, SECOND));
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
 
     // AS06 CT23.composition (ADR007 §§5, 8): quiz writes, attempt start and the Course root. Attempt
     // start (AS08) is not implemented; a separate connection plays it in the contract's lock order.
@@ -1476,6 +1595,25 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
 
     private static QuestionInput trueFalse(UUID skill) {
         return new QuestionInput(skill, "Pick one", "true_false", "easy", List.of("True", "False"), List.of(true, false));
+    }
+
+    private static UUID idOf(JsonNode node) {
+        return UUID.fromString(node.get("id").asString());
+    }
+
+    /** Removes one Course's Assessment and graph rows, children first, in committed statements. */
+    private void purgeAssessmentAndGraph(UUID course) {
+        String quizzes = "(SELECT id FROM public.quizzes WHERE course_id = ?)";
+        jdbc.update("DELETE FROM public.attempt_answers WHERE attempt_id IN (SELECT id FROM public.attempts WHERE quiz_id IN " + quizzes + ")", course);
+        jdbc.update("DELETE FROM public.attempts WHERE quiz_id IN " + quizzes, course);
+        jdbc.update("DELETE FROM public.quiz_questions WHERE quiz_id IN " + quizzes, course);
+        jdbc.update("DELETE FROM public.quizzes WHERE course_id = ?", course);
+        String skills = "(SELECT id FROM public.skills WHERE course_id = ?)";
+        jdbc.update("DELETE FROM public.lesson_skills WHERE skill_id IN " + skills, course);
+        jdbc.update("DELETE FROM public.skill_prerequisites WHERE course_id = ?", course);
+        jdbc.update("DELETE FROM public.questions WHERE skill_id IN " + skills, course);
+        jdbc.update("DELETE FROM public.learner_skill_masteries WHERE skill_id IN " + skills, course);
+        jdbc.update("DELETE FROM public.skills WHERE course_id = ?", course);
     }
 
     private UUID questionRow(UUID skill) {

@@ -35,6 +35,7 @@ import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.model.Quiz;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository.Member;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService;
 import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.application.service.CourseManagementService;
 import java.util.ArrayList;
@@ -72,6 +73,7 @@ class AttemptServiceTest {
     private QuizRepository quizzes;
     private CourseAccessService courseAccess;
     private CourseManagementService guard;
+    private SkillGraphService skillGraph;
     private final List<UUID> guardedCourses = new ArrayList<>();
     private List<UUID> courseSkills;
     private QuizService service;
@@ -81,8 +83,9 @@ class AttemptServiceTest {
         quizzes = mock(QuizRepository.class);
         courseAccess = mock(CourseAccessService.class);
         guard = mock(CourseManagementService.class);
+        skillGraph = mock(SkillGraphService.class);
         courseSkills = List.of(SKILL);
-        QuestionSelectionService selection = new QuestionSelectionService(quizzes) {
+        QuestionSelectionService selection = new QuestionSelectionService(quizzes, skillGraph) {
             @Override
             protected List<UUID> readSkillIds(UUID courseId) {
                 return courseSkills;
@@ -477,7 +480,7 @@ class AttemptServiceTest {
         void everyWriteDelegatesToTheCo14GuardAndItsRefusalPrecedesAnyQuizAccess() {
             ResourceNotFoundException concealed = new ResourceNotFoundException("Resource not available");
             when(guard.withCourseConfigurationWrite(eq(COURSE), any())).thenThrow(concealed);
-            QuizService production = new QuizService(quizzes, new QuestionSelectionService(quizzes), courseAccess, guard);
+            QuizService production = new QuizService(quizzes, new QuestionSelectionService(quizzes, skillGraph), courseAccess, guard);
 
             assertSame(concealed, assertThrows(ResourceNotFoundException.class, () -> production.create(COURSE, input(List.of()))));
             assertSame(concealed, assertThrows(ResourceNotFoundException.class, () -> production.update(COURSE, QUIZ, input(List.of()))));
@@ -489,10 +492,28 @@ class AttemptServiceTest {
         }
 
         @Test
-        void insideTheRealGuardWritesNeedingCt40StillFailClosedBeforeAnyWrite() {
+        void insideTheRealGuardMembershipIsScopedByTheProducersSkillSet() {
             when(guard.withCourseConfigurationWrite(eq(COURSE), any())).thenAnswer(
                     invocation -> invocation.<Supplier<?>>getArgument(1).get());
-            QuizService production = new QuizService(quizzes, new QuestionSelectionService(quizzes), courseAccess, guard);
+            when(skillGraph.readSkillIds(COURSE)).thenReturn(List.of(SKILL));
+            when(quizzes.findQuestionsInSkills(List.of(Q1), List.of(SKILL))).thenReturn(List.of(question(Q1, SKILL)));
+            QuizService production = new QuizService(quizzes, new QuestionSelectionService(quizzes, skillGraph), courseAccess, guard);
+
+            production.create(COURSE, input(List.of(Q1)));
+
+            var order = inOrder(guard, skillGraph, quizzes);
+            order.verify(guard).withCourseConfigurationWrite(eq(COURSE), any());
+            order.verify(skillGraph).readSkillIds(COURSE);
+            order.verify(quizzes).findQuestionsInSkills(List.of(Q1), List.of(SKILL));
+            order.verify(quizzes).replaceMembership(any(), eq(List.of(Q1)));
+        }
+
+        @Test
+        void aProducerFailureInsideTheGuardWritesNothing() {
+            when(guard.withCourseConfigurationWrite(eq(COURSE), any())).thenAnswer(
+                    invocation -> invocation.<Supplier<?>>getArgument(1).get());
+            when(skillGraph.readSkillIds(COURSE)).thenThrow(new IllegalStateException("provider failure"));
+            QuizService production = new QuizService(quizzes, new QuestionSelectionService(quizzes, skillGraph), courseAccess, guard);
 
             assertThrows(IllegalStateException.class, () -> production.create(COURSE, input(List.of(Q1))));
             verify(quizzes, never()).save(any());
@@ -500,14 +521,25 @@ class AttemptServiceTest {
         }
 
         @Test
-        void withoutCt40SelectionFailsClosedRatherThanSubstitutingAScope() {
-            QuestionSelectionService unintegrated = new QuestionSelectionService(quizzes);
+        void selectionNeverWidensAnInvalidProducerProjection() {
+            QuestionSelectionService selection = new QuestionSelectionService(quizzes, skillGraph);
+            when(skillGraph.readSkillIds(COURSE)).thenReturn(java.util.Arrays.asList(SKILL, null));
 
             assertThrows(IllegalStateException.class,
-                    () -> unintegrated.requireOrderedCourseQuestions(COURSE, List.of(Q1)));
+                    () -> selection.requireOrderedCourseQuestions(COURSE, List.of(Q1)));
             assertThrows(IllegalStateException.class,
-                    () -> unintegrated.requireCourseMembers(COURSE, List.of(question(Q1, SKILL))));
+                    () -> selection.requireCourseMembers(COURSE, List.of(question(Q1, SKILL))));
             verifyNoInteractions(quizzes);
+        }
+
+        @Test
+        void publicationRevalidatesMembersAgainstTheProducersCurrentSkillSet() {
+            QuestionSelectionService selection = new QuestionSelectionService(quizzes, skillGraph);
+            when(skillGraph.readSkillIds(COURSE)).thenReturn(List.of(SKILL));
+
+            selection.requireCourseMembers(COURSE, List.of(question(Q1, SKILL)));
+            assertThrows(IllegalStateException.class,
+                    () -> selection.requireCourseMembers(COURSE, List.of(question(Q2, FOREIGN_SKILL))));
         }
 
         @Test
