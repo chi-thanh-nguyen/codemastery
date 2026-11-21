@@ -66,7 +66,7 @@ verification is separate work.
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119; CO03/CO14, PR #262; CO06 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations; CO03.content owner rows, scoped reads, appends, reorders and materials, and CO14 adaptive-field storage ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
-| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)). CO06 additions: Instructor authoring over HTTP, Course and Lesson publication reconciliation, the CT12.course Administrator handoff as a Course-root participant, and authoring, Administrator and Learner races on the Course root ([record](#co06-instructor-authoring-and-administrator-course-handoff-verification--22-november-2026)) |
+| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)). CO06 additions: Instructor authoring over HTTP, Course and Lesson publication reconciliation, the CT12.course Administrator handoff as a Course-root participant, and authoring, Administrator and Learner races on the Course root ([record](#co06-instructor-authoring-and-administrator-course-handoff-verification--22-november-2026)); after the independent re-review, text the database rejects or cannot store, the JSON-only 415 for empty requests, owner success paths, settings NOWAIT versus authoring, and the CT40 structure projection ([record](#pr-265-independent-re-review-remediation-and-ct40-structure-projection--22-november-2026)) |
 | `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
 | `SharedRestInfrastructureIntegrationTest` | SH01, PR #78 | Spring MVC ProblemDetail, validation and paging with test-only routes; it does not start PostgreSQL or the security chain |
 
@@ -5235,3 +5235,55 @@ here: the IN20 Administrator REST route, `published` 400, audit rows and the ful
 barrier set (IN20/QA06, `InteractionAdminIntegrationTest`); materials (CO09/CT09); the CT26
 event (CO12); B2-O09 readiness (Adaptive); runtime grants for the new Course writes (CT17-P6);
 deployed and browser verification.
+
+### PR #265 independent re-review remediation and CT40 structure projection — 22 November 2026
+
+An independent AI-assisted re-review of PR #265 at `8d9cbc9` (Claude Code, read-only, under the
+Project Leader's instruction) confirmed R1–R4 and reported F1–F4 below; it is not a GitHub,
+CODEOWNER or QA review. Under a further explicit Leader instruction the same PR then fixed F1–F4
+and implemented the CT40 Course structure projection. F5, that Course hide/republish keeps
+completion because the required set counts published Lessons whatever the Course status, was
+recorded as an interpretation consistent with ADR006 §3, ADR006 §5 and ADR012 §10.2, and is unchanged.
+
+| ID | Severity | Finding (reproduced on real PostgreSQL) | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| F1 | P2 | Java `isBlank`/`strip` and the database checks `~ '[^[:space:]]'` disagree: the image's musl `en_US.utf8` locale treats U+0085 as space, Java does not, so a Course title, a padded description, a Chapter title or Lesson Markdown made only of U+0085 returned 500 (check violation) | Blank now means every code point is space under Java whitespace, Unicode space separators and U+FEFF (OpenAPI's ECMA-262 `\S` pattern) or U+0085 (the database), so accepted text satisfies both; descriptive text is trimmed with the same rule; Markdown stays verbatim | `CourseServiceTest.blankAndUnstorableTextFollowsTheContractAndDatabaseDefinitions`; `EnrollmentIntegrationTest.textThatPostgresqlRejectsOrCannotStoreFaithfullyIs400WithoutAnyWrite` (400, no row or content change) |
+| F2 | P3 | An unpaired UTF-16 surrogate was accepted (201), stored by the driver as `?` and echoed unchanged, so response and storage differed; the Administrator query matched the replacement | `requiredText`, `optionalText`, `markdown` and `listCoursesForAdministration` reject NUL and unpaired high or low surrogates with 400 before any write or query; valid pairs are kept | the same tests: lone high/low surrogates 400; `Café 😀`, `Naïve 中文` and Markdown with a pair are stored exactly as returned; `administratorListRejectsAnUnknownPublicationStatus` |
+| F3 | P3 | An empty request with an absent or non-JSON Content-Type reached the handler (Spring matches `consumes` only when a body is present and the body parameter is optional so that CT03 admission precedes body 400), returning 400/403/404 instead of the documented 415 | `CourseRequest.requireJson`, first in each of the ten JSON-body handlers, raises Spring's own `HttpMediaTypeNotSupportedException` (same ProblemDetail, `no-store`) for an absent, unparsable or non-`application/json` type; parameters such as `charset` are accepted | `CourseServiceTest.onlyAnApplicationJsonContentTypeIsAccepted`; `EnrollmentIntegrationTest.jsonBodyOperationsReturn415ForAbsentOrNonJsonMediaTypesEvenWithAnEmptyBody` (all ten operations: `text/plain`, none, `application/xml` → 415; empty and malformed JSON → 400; 415 before path 400 and CT03 404; role 403 first) |
+| F4 | P3 | No automated success-path coverage for the owner list, metadata update, Chapter rename, Lesson edit and Chapter reorder over REST; B2-O09 settings NOWAIT versus authoring not exercised with an authoring writer | Tests only | `ownerListMetadataChapterLessonEditsAndChapterReorderSucceedOverRest`; `settingsNowaitIsBusyWhileAnAuthoringWriteHoldsTheRootAndNeitherWriteIsPartial` (`ConfigurationBusy`, settings work never runs, publication commits, stored settings unchanged, later settings write succeeds) |
+
+**CT40 structure projection.** `CourseStructureService.readStructure(UUID)` with the nested
+`StructureSnapshot(UUID courseId, List<LessonReference> lessons)` and
+`LessonReference(UUID lessonId, UUID chapterId, int chapterPosition, int lessonPosition, boolean published)`
+implements `CT40-LESSON-READ-2026-11-08-r1` (ADR005 §3.1, CT40 [#46](https://github.com/chi-thanh-nguyen/codemastery/issues/46)) in the
+file ADR005 names. It was added to PR #265 by explicit Leader authorization; it is not one of
+CO06's four checkpoints. The trusted CT01 role selects the CT03 assertion before any lookup
+(Instructor `requireCourseOwnership`, all Lessons; Learner `requireLearnerCourseAccess`, published
+Lessons only; Administrator 403). Rows are sorted by Chapter then Lesson position with stored gaps,
+an empty Course is an empty list, every row must belong to a Chapter of the requested Course, and a
+provider failure or inconsistent ancestry fails with a safe 500. Admission and both reads share one
+read-only REPEATABLE READ snapshot. No REST operation, repository method, schema or file was added,
+and no consumer calls it yet; AD07's mappings keep `requireLessonOwnership` as ADR005 §3.1 requires.
+
+| ADR005 §3.1 obligation | Covered by |
+| --- | --- |
+| Owner sees hidden and published Lessons; canonical order with gaps; no foreign rows; immutable result | `EnrollmentIntegrationTest.structureProjectionAdmitsByTrustedRoleFiltersHiddenLessonsForLearnersAndKeepsCanonicalOrderWithGaps`; `CourseServiceTest.structureProjectionSortsByChapterThenLessonPositionKeepsGapsAndFiltersHiddenForLearners` |
+| Joined (active/completed) Learner sees published Lessons only; unenrolled or left 403; hidden Course 404 even with membership; non-owner Instructor 403/404; Administrator 403 even for a missing Course; no identity is an authentication failure (401); empty Course empty; missing Course 404 | the same integration test; `CourseServiceTest.structureProjectionRefusesOtherRolesAndFailedAdmissionBeforeAnyStructureRead` (no structure read after a refusal) |
+| Provider failure, null rows, foreign or duplicate Chapter, Lesson outside the Course, duplicate Lesson, impossible position → safe 500, never partial | `CourseServiceTest.structureProjectionFailsClosedOnProviderFailureOrInconsistentAncestry` |
+| Exact signatures, nested records, read-only REPEATABLE READ | `CourseServiceTest.structureProjectionHasExactlyTheApprovedShape` |
+| One coherent snapshot: a commit that publishes Lessons, moves and appends Chapters and hides the Course after the read's snapshot began is wholly invisible, and the next read sees all of it | `EnrollmentIntegrationTest.structureProjectionReadsOneCoherentSnapshotAcrossConcurrentStructuralCommits`; with the isolation temporarily set to READ COMMITTED it failed (`ResourceNotFoundException`), so it guards the isolation choice |
+
+Executed locally (macOS, OpenJDK 25.0.4.1, Docker 29.8.1) in an isolated worktree of
+`feat/course-content-authoring` at `8d9cbc9` plus these changes, `main` `b506500`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -q test -Dtest='CourseServiceTest'` | 74 tests (68 before), 0 failures |
+| `cd backend && ./mvnw -B test -Dtest='EnrollmentIntegrationTest'` | 95 tests (89 before), 0 failures, errors or skips |
+| The snapshot test with `readStructure` at READ COMMITTED (reverted) | failed as intended |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 752 (746 before, plus 6), Failsafe 316 (310 before, plus 6), 0 failures, errors or skips |
+| AD07 PR #264 head `590a134` merged with this branch in a disposable worktree (`SecurityConfig` matcher blocks combined, docs ignored, nothing pushed): `./mvnw -B test -Dtest='SkillGraphTest,AdaptiveLearningFlowIntegrationTest,CourseServiceTest,EnrollmentIntegrationTest'` | 269 tests, 0 failures; source-compatible |
+
+These are local developer runs, not independent review, QA or CI evidence. Still gated: the IN20
+Administrator REST route and audit, materials (CO09), the CT26 event (CO12), runtime grants for the
+Course writes (CT17-P6), Adaptive consumers of the projection, deployed and browser verification.
