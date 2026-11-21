@@ -19,7 +19,10 @@ public interface QuizRepository {
     /** One captured membership row: its stored 1-based position and the referenced question. */
     record Member(int position, Question question) {}
 
-    /** Inserts a new quiz row or replaces the row stored at its ID. */
+    /**
+     * Inserts a new quiz row, or replaces title, kind, time limit and publication of the row stored at
+     * its ID within the same Course; the Course of a stored quiz is never rewritten.
+     */
     Quiz save(Quiz quiz);
 
     /**

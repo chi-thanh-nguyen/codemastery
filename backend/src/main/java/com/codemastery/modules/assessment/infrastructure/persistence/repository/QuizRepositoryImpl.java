@@ -36,7 +36,20 @@ public class QuizRepositoryImpl implements QuizRepository {
 
     @Override
     public Quiz save(Quiz quiz) {
-        return toDomain(jpaRepository.saveAndFlush(toEntity(quiz)));
+        Objects.requireNonNull(quiz, "quiz");
+        if (!jpaRepository.existsById(quiz.id())) {
+            QuizEntity created = toEntity(quiz);
+            entityManager.persist(created);
+            entityManager.flush();
+            return toDomain(created);
+        }
+        // Never a full-row merge: the Course of a stored quiz is immutable (CT17-P6 grants no
+        // course_id update), so a replacement names the same Course or changes nothing.
+        if (jpaRepository.updateDefinition(quiz.id(), quiz.course_id(), quiz.title(), quiz.kind(),
+                quiz.time_limit_seconds(), quiz.publication_status()) != 1) {
+            throw new IllegalStateException("Quiz replacement lost its row or named another Course");
+        }
+        return quiz;
     }
 
     @Override

@@ -1,6 +1,11 @@
 package com.codemastery.integration;
 
+import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
+import com.codemastery.modules.assessment.application.service.QuizService;
+import com.codemastery.modules.assessment.application.service.QuizService.QuizInput;
+import com.codemastery.modules.assessment.domain.model.Quiz;
+import com.codemastery.modules.assessment.domain.repository.QuizRepository;
 import com.codemastery.modules.auth.domain.model.Role;
 import com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser;
 import com.codemastery.modules.course.application.service.CourseManagementService;
@@ -23,6 +28,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -98,6 +104,8 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     private static final String KEY = key();
 
     @Autowired CourseManagementService service;
+    @Autowired QuizService quizService;
+    @Autowired QuizRepository quizRepository;
     @Autowired EnrollmentService enrollment;
     @Autowired EnrollmentRepository enrollments;
     @Autowired CourseRepository courseRepository;
@@ -132,6 +140,10 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         }
         workers.shutdownNow();
         assertTrue(workers.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS));
+        String quizzes = "(SELECT id FROM public.quizzes WHERE course_id IN (?,?,?))";
+        jdbc.update("DELETE FROM public.attempts WHERE quiz_id IN " + quizzes, COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.quiz_questions WHERE quiz_id IN " + quizzes, COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.quizzes WHERE course_id IN (?,?,?)", COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT l.id FROM public.lessons l "
                 + "JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id IN (?,?,?))", COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.lessons WHERE chapter_id IN (SELECT id FROM public.chapters WHERE course_id IN (?,?,?))",
@@ -720,6 +732,124 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     }
 
     // Helpers.
+
+    // AS06 CT23.composition (ADR007 §§5, 8): quiz writes, attempt start and the Course root. Attempt
+    // start (AS08) is not implemented; a separate connection plays it in the contract's lock order.
+
+    @Test void aStoredQuizKeepsItsCourseAndAReplacementWritesOnlyItsDefinition() {
+        UUID quiz = quizRow(COURSE);
+        TransactionTemplate unit = outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false);
+        // An integrity failure (the repository's translated IllegalStateException), never a client error.
+        RuntimeException refused = assertThrows(RuntimeException.class, () -> unit.execute(status ->
+                quizRepository.save(new Quiz(quiz, SECOND, "Moved", "test", 90, "published"))));
+        assertFalse(refused instanceof BusinessRuleException || refused instanceof ResourceNotFoundException, refused::toString);
+        assertEquals("Draft|practice|60|hidden|" + COURSE, quizStateElsewhere(quiz));
+        unit.execute(status -> quizRepository.save(new Quiz(quiz, COURSE, "Renamed", "test", 90, "published")));
+        assertEquals("Renamed|test|90|published|" + COURSE, quizStateElsewhere(quiz));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"delete,true", "delete,false", "update,true", "update,false"})
+    void anAttemptStartHoldingTheRootFreezesTheQuizBeforeAWaitingEditOrDelete(String operation, boolean starterCommits)
+            throws Exception {
+        UUID quiz = quizRow(COURSE);
+        Connection starter = holdRootElsewhere(COURSE);
+        insertAttempt(starter, quiz);
+        Future<Object> writer = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> operation.equals("delete")
+                ? quizService.delete(COURSE, quiz)
+                : quizService.update(COURSE, quiz, new QuizInput("Edited", "test", 90, List.of()))));
+        awaitLockWaiters(1);
+        assertFalse(writer.isDone(), "the quiz writer waits on the Course root held by the attempt start");
+        if (starterCommits) starter.commit(); else starter.rollback();
+        if (starterCommits) {
+            BusinessRuleException frozen = assertInstanceOf(BusinessRuleException.class, failureOf(writer));
+            assertEquals(409, frozen.getStatus().value());
+            assertEquals("Draft|practice|60|hidden|" + COURSE, quizStateElsewhere(quiz));
+        } else {
+            writer.get(WAIT_SECONDS, TimeUnit.SECONDS);
+            assertEquals(operation.equals("delete") ? "none" : "Edited|test|90|hidden|" + COURSE, quizStateElsewhere(quiz));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"delete,true", "delete,false", "update,true", "update,false"})
+    void aQuizWriterHoldingTheRootAndQuizRowMakesAnAttemptStartWaitForItsOutcome(String operation, boolean starterTakesRoot)
+            throws Exception {
+        UUID quiz = quizRow(COURSE);
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        Future<Object> writer = workers.submit(() -> as(OWNER, Role.INSTRUCTOR, () -> service.withCourseConfigurationWrite(COURSE, () -> {
+            Object result = operation.equals("delete") ? quizService.delete(COURSE, quiz)
+                    : quizService.update(COURSE, quiz, new QuizInput("Edited", "test", 90, List.of()));
+            entered.countDown();
+            await(release);
+            return result;
+        })));
+        await(entered);
+        // Without the root, the attempt's foreign-key check still waits on the quiz row lock.
+        Future<String> starter = workers.submit(() -> {
+            try (Connection connection = dataSource.getConnection()) {
+                connection.setAutoCommit(false);
+                if (starterTakesRoot) {
+                    try (PreparedStatement lock = connection.prepareStatement("SELECT id FROM public.courses WHERE id = ? FOR UPDATE")) {
+                        lock.setObject(1, COURSE);
+                        lock.executeQuery().close();
+                    }
+                }
+                try {
+                    insertAttempt(connection, quiz);
+                    connection.commit();
+                    return "started";
+                } catch (SQLException refused) {
+                    connection.rollback();
+                    return refused.getSQLState();
+                }
+            }
+        });
+        awaitLockWaiters(1);
+        assertFalse(starter.isDone(), "the attempt start waits for the quiz writer's unit");
+        release.countDown();
+        writer.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        if (operation.equals("delete")) {
+            assertEquals("23503", starter.get(WAIT_SECONDS, TimeUnit.SECONDS), "the deleted quiz cannot be started");
+            assertEquals("none", quizStateElsewhere(quiz));
+        } else {
+            assertEquals("started", starter.get(WAIT_SECONDS, TimeUnit.SECONDS));
+            assertEquals("Edited|test|90|hidden|" + COURSE, quizStateElsewhere(quiz), "the attempt freezes the committed definition");
+            BusinessRuleException frozen = assertThrows(BusinessRuleException.class, () -> as(OWNER, Role.INSTRUCTOR,
+                    () -> quizService.update(COURSE, quiz, new QuizInput("Again", "test", 90, List.of()))));
+            assertEquals(409, frozen.getStatus().value());
+        }
+    }
+
+    private UUID quizRow(UUID course) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.quizzes (id,course_id,title,kind,time_limit_seconds,publication_status) "
+                + "VALUES (?,?,'Draft','practice',60,'hidden')", id, course);
+        return id;
+    }
+
+    private static void insertAttempt(Connection connection, UUID quiz) throws SQLException {
+        try (PreparedStatement insert = connection.prepareStatement("INSERT INTO public.attempts "
+                + "(id,user_id,quiz_id,attempt_number,started_at,expires_at) VALUES (?,?,?,1,now(),now() + interval '5 minutes')")) {
+            insert.setObject(1, UUID.randomUUID());
+            insert.setObject(2, LEARNER);
+            insert.setObject(3, quiz);
+            insert.executeUpdate();
+        }
+    }
+
+    /** Committed quiz row on a separate connection, or "none". */
+    private String quizStateElsewhere(UUID quiz) {
+        try (Connection connection = dataSource.getConnection(); PreparedStatement read = connection.prepareStatement(
+                "SELECT concat_ws('|', title, kind, time_limit_seconds, publication_status, course_id) FROM public.quizzes WHERE id = ?")) {
+            read.setObject(1, quiz);
+            try (ResultSet row = read.executeQuery()) {
+                return row.next() ? row.getString(1) : "none";
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
 
     /**
      * The commit is refused and rolled back. Spring runs beforeCommit before it inspects the

@@ -57,6 +57,17 @@ public interface QuizJpaRepository extends JpaRepository<QuizEntity, UUID> {
     List<QuestionEntity> findQuestionsInSkills(@Param("questionIds") Collection<UUID> questionIds,
                                                @Param("skillIds") Collection<UUID> skillIds);
 
+    /**
+     * Targeted definition write (ADR012 §19.2): the runtime role may update only title, kind, time
+     * limit and publication of a quiz, never its {@code course_id}, so no full-row merge is issued.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE QuizEntity q SET q.title = :title, q.kind = :kind, q.time_limit_seconds = :timeLimitSeconds, "
+            + "q.publication_status = :publicationStatus WHERE q.id = :id AND q.course_id = :courseId")
+    int updateDefinition(@Param("id") UUID id, @Param("courseId") UUID courseId, @Param("title") String title,
+                         @Param("kind") String kind, @Param("timeLimitSeconds") Integer timeLimitSeconds,
+                         @Param("publicationStatus") String publicationStatus);
+
     @Modifying(flushAutomatically = true)
     @Query("DELETE FROM QuizQuestionEntity qq WHERE qq.quiz_id = :quizId")
     void deleteMembership(@Param("quizId") UUID quizId);
