@@ -1017,7 +1017,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Returns all valid Course skills, prerequisites and Lesson mappings. No pagination; empty graph valid for draft authoring. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
+        "description": "Returns all valid Course skills, prerequisites and Lesson mappings. No pagination; empty graph valid for draft authoring. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1070,7 +1070,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Creates one skill with server UUID. Nonblank name, optional null/nonblank description. Names are not unique; no invented length cap. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
+        "description": "Creates one skill with server UUID. Nonblank name, optional null/nonblank description. Names are not unique; no invented length cap. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1133,7 +1133,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Replaces name/description; omitted description becomes null. Course/identity immutable. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
+        "description": "Replaces name/description; omitted description becomes null. Course/identity immutable. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1203,7 +1203,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Rejects any prerequisite, mapping, Question or mastery reference (409); no cascade. Missing skill is 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
+        "description": "Rejects any prerequisite, mapping, Question or mastery reference (409); no cascade. Missing skill is 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1269,7 +1269,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent add after both scoped endpoints validate. Self-edge 400, new cycle 409. Full DFS reachability and Course-row serialization required. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
+        "description": "Idempotent add after both scoped endpoints validate. Self-edge 400, new cycle 409. Full DFS reachability and Course-row serialization required. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1342,7 +1342,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent remove after validating both endpoints; absent pair succeeds, missing/foreign endpoint 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
+        "description": "Idempotent remove after validating both endpoints; absent pair succeeds, missing/foreign endpoint 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1414,7 +1414,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent mapping under Course-owned ancestry assertion and Adaptive same-Course skill check; no extra mapping structural read. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
+        "description": "Idempotent mapping under Course-owned ancestry assertion and Adaptive same-Course skill check; no extra mapping structural read. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1484,7 +1484,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent unmap after validating Course Lesson/skill scope. May suspend effective readiness while preserving stored enabled intent and earned progress. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. Runtime database grants (a CT17-P6 matrix revision within the ADR012 section 19.2 ceiling), independent review and protected integration remain gated. ADR005 is authoritative.",
+        "description": "Idempotent unmap after validating Course Lesson/skill scope. May suspend effective readiness while preserving stored enabled intent and earned progress. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []

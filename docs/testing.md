@@ -5324,6 +5324,13 @@ mapping's Lesson still belongs to the Course on read, which needs that projectio
 prove Lesson ancestry through `requireLessonOwnership`. The Assessment consumers of
 `requireSkillInCourse`/`readSkillIds` (PR #259, PR #260) still use fail-closed seams.
 
+> **Historical, superseded on 22 November 2026.** The paragraph above records the state of
+> 21 November and is kept as evidence. CO06 (#172, PR #265) has since merged (`75cdb8b`) with
+> `CourseStructureService.readStructure` implemented, and AD07 now proves every persisted mapping
+> against it; see "CT40 structural projection consumption — 22 November 2026" below. The runtime
+> grants are recorded in "CT17-P6 r5 runtime privileges — 22 November 2026". The PR #259/#260
+> seam statement still describes those branches.
+
 Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #264 working
 tree based on `main` `b506500`:
 
@@ -5369,3 +5376,32 @@ Lessons, or an inconsistent projection, is a safe 500 with nothing repaired and 
 | `cd backend && ./mvnw -B test -Dtest='SkillGraphTest*,AdaptiveLearningFlowIntegrationTest'` | 44 unit and 66 PostgreSQL tests, 0 failures (new: ordering, no-mapping fast path, foreign and inconsistent projections, hidden-Lesson mappings, raw-SQL foreign mappings, a Lesson moved out of the Course, a structural change committed mid-read, CO06 Lesson creation racing a mapping, commit and rollback) |
 
 Local developer runs, not independent review, QA or CI evidence.
+
+### R-01 unpaired-surrogate text remediation — 22 November 2026
+
+An independent review of `f83237e` found that `SkillGraphService` rejected NUL but not unpaired
+UTF-16 surrogates. `POST /skills` with `{"name":"\ud800"}` returned 201 echoing U+D800 while the
+PostgreSQL JDBC driver stored `?`, so the response did not match the committed row. Skill text now
+follows the same storability rule as CO06's `CourseManagementService.isStorable`: an unpaired high
+or low surrogate is rejected with 400 before the Course guard, with nothing written. A valid
+surrogate pair is one supplementary code point and is stored unchanged. The whitespace rules are
+unchanged.
+
+| Case | Expected and observed |
+| --- | --- |
+| `SkillGraphTest$Commands` unit: unpaired high, low, reversed and trailing surrogates in `name` and `description` on create and update | 400 before the guard; no repository write |
+| `SkillGraphTest$Commands` unit: valid pairs (U+1F600, U+1D538, U+10FFFF, U+10000), U+180E and a combining sequence | accepted and returned unchanged |
+| `AdaptiveLearningFlowIntegrationTest#unpairedSurrogatesAreBadRequestsWithoutEffectsAndSupplementaryTextRoundTripsUnchanged` (PostgreSQL, HTTP): five unpaired-surrogate values in `name` and in `description`, on POST and PUT | 400 each; graph rows unchanged; Course root released |
+| Same test: supplementary text by JSON escape (POST) and raw UTF-8 (PUT) | 201 and 200; persisted UTF-8 bytes equal the accepted text; the graph read returns it unchanged |
+| The new unit and HTTP tests against the unfixed `f83237e` service | 7 unit cases fail; HTTP returns 201 instead of 400 |
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='SkillGraphTest*'` | 56 tests, 0 failures |
+| `cd backend && ./mvnw -B verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AdaptiveLearningFlowIntegrationTest` | 67 tests, 0 failures |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 808, Failsafe 335, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`, 27 relations, r1–r5 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | pass |
+| `test-runtime-real-backend-privileges.sh` (run with a locally built image under a private tag) | `RUNTIME_CONSUMER_TESTS_PASS`; no `42501` in the backend log |
+
+Local developer runs, not independent review, QA or CI evidence. Nothing was granted on any real database.
