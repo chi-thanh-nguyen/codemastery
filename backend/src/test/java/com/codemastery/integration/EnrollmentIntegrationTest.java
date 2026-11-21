@@ -1,6 +1,16 @@
 package com.codemastery.integration;
 
+import com.codemastery.common.exception.BusinessRuleException;
+import com.codemastery.common.exception.ResourceNotFoundException;
+import com.codemastery.modules.auth.domain.model.Role;
+import com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser;
 import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import com.codemastery.modules.course.application.service.CourseManagementService;
+import com.codemastery.modules.course.application.service.CourseManagementService.AdminCourseView;
+import com.codemastery.modules.course.application.service.CourseManagementService.CourseChange;
+import com.codemastery.modules.course.application.service.CourseManagementService.LessonChange;
+import com.codemastery.modules.course.application.service.CourseStructureService;
+import com.codemastery.modules.course.domain.model.PublishStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,16 +22,27 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 
+import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.function.Supplier;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.List;
@@ -46,10 +67,14 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
     private static final UUID ENROLLMENT = id("enrollment"), PROGRESS = id("progress");
     private static final String KEY = key();
     private static final ThreadLocal<List<String>> INPUT_SQL = new ThreadLocal<>();
+    /** One-shot hook run on this thread before its next Hibernate statement (CT40 snapshot test). */
+    private static final ThreadLocal<Runnable> BEFORE_NEXT_SQL = new ThreadLocal<>();
     public static class InputStatementInspector implements StatementInspector {
         @Override public String inspect(String sql) {
             var statements = INPUT_SQL.get();
             if (statements != null) statements.add(sql);
+            Runnable hook = BEFORE_NEXT_SQL.get();
+            if (hook != null) { BEFORE_NEXT_SQL.remove(); hook.run(); }
             return sql;
         }
     }
@@ -58,6 +83,9 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
     @Autowired com.codemastery.modules.course.infrastructure.persistence.repository.CourseJpaRepository catalogueRows;
     @Autowired JwtTokenProvider tokens;
     @Autowired PlatformTransactionManager transactions;
+    @Autowired CourseManagementService management;
+    @Autowired CourseStructureService structure;
+    @Autowired DataSource dataSource;
     private MockMvc mvc;
 
     private static UUID id(String name) { return UUID.nameUUIDFromBytes(("fe07/" + name).getBytes(StandardCharsets.UTF_8)); }
@@ -81,6 +109,7 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         jdbc.update("DELETE FROM public.lesson_progress WHERE id=?", PROGRESS);
         jdbc.update("DELETE FROM public.lesson_progress WHERE enrollment_id IN (SELECT id FROM public.enrollments WHERE course_id IN (?,?,?))", COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.enrollments WHERE course_id IN (?,?,?)", COURSE, SECOND, HIDDEN);
+        jdbc.update("DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT l.id FROM public.lessons l JOIN public.chapters ch ON ch.id=l.chapter_id WHERE ch.course_id IN (?,?,?))", COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.lessons WHERE chapter_id IN (SELECT id FROM public.chapters WHERE course_id IN (?,?,?))", COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.chapters WHERE course_id IN (?,?,?)", COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.courses WHERE id IN (?,?,?)", COURSE, SECOND, HIDDEN);
@@ -93,6 +122,67 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
     private UUID refreshSession(UUID actor) { UUID session = UUID.randomUUID(); jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) SELECT ?, id, now(), now() + interval '1 hour' FROM public.users WHERE id = ?", session, actor); return session; }
     private String membership(UUID course) { return "/api/courses/" + course + "/membership"; }
     private void row(String status) { jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status,resume_lesson_id) VALUES (?,?,?,?,?)", ENROLLMENT, LEARNER, COURSE, status, LESSON); }
+
+    // CO06 CT21.authoring (ADR006 §5) through real MVC, security, the ADR005 guard and PostgreSQL.
+    @Test void instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion() throws Exception {
+        UUID rival = UUID.randomUUID();
+        UUID created = null;
+        jdbc.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) VALUES (?,?,'not-a-login-fixture','Rival','instructor','active')", rival, rival + "@example.test");
+        try {
+            String body = "{\"title\":\"  New course \",\"description\":\"About\",\"prerequisiteDescription\":null}";
+            for (var actor : List.of(ADMIN, LEARNER)) {
+                mvc.perform(as(post("/api/instructor/courses").contentType("application/json").content(body), actor)).andExpect(status().isForbidden());
+            }
+            mvc.perform(as(post("/api/instructor/courses").contentType("application/json").content("{\"title\":\"T\",\"description\":\"D\",\"prerequisiteDescription\":null,\"instructorId\":\"" + rival + "\"}"), OWNER))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+            String response = mvc.perform(as(post("/api/instructor/courses").contentType("application/json").content(body), OWNER))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.title").value("New course"))
+                    .andExpect(jsonPath("$.publicationStatus").value("hidden")).andExpect(jsonPath("$.chapters", hasSize(0)))
+                    .andReturn().getResponse().getContentAsString();
+            created = UUID.fromString(com.jayway.jsonpath.JsonPath.read(response, "$.id"));
+            assertEquals(List.of(OWNER, false), jdbc.queryForList("SELECT instructor_id, adaptive_enabled FROM public.courses WHERE id = ?", created).stream()
+                    .flatMap(row -> java.util.stream.Stream.of(row.get("instructor_id"), row.get("adaptive_enabled"))).toList());
+
+            mvc.perform(as(get("/api/instructor/courses/" + COURSE), rival)).andExpect(status().isForbidden());
+            mvc.perform(as(get("/api/instructor/courses/" + HIDDEN), rival)).andExpect(status().isNotFound());
+            mvc.perform(as(put("/api/instructor/courses/" + HIDDEN).contentType("application/json").content("{}"), rival)).andExpect(status().isNotFound());
+
+            String chapters = "/api/instructor/courses/" + HIDDEN + "/chapters";
+            String chapter = com.jayway.jsonpath.JsonPath.read(mvc.perform(as(post(chapters).contentType("application/json").content("{\"title\":\"Basics\"}"), OWNER))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.position").value(1)).andReturn().getResponse().getContentAsString(), "$.id");
+            String lessons = chapters + "/" + chapter + "/lessons";
+            String first = com.jayway.jsonpath.JsonPath.read(mvc.perform(as(post(lessons).contentType("application/json").content("{\"title\":\"One\",\"contentMarkdown\":\"    code\"}"), OWNER))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.publicationStatus").value("hidden"))
+                    .andExpect(jsonPath("$.contentMarkdown").value("    code")).andReturn().getResponse().getContentAsString(), "$.id");
+            String second = com.jayway.jsonpath.JsonPath.read(mvc.perform(as(post(lessons).contentType("application/json").content("{\"title\":\"Two\",\"contentMarkdown\":null}"), OWNER))
+                    .andExpect(jsonPath("$.position").value(2)).andReturn().getResponse().getContentAsString(), "$.id");
+            mvc.perform(as(put(lessons + "/order").contentType("application/json").content("{\"orderedIds\":[\"" + second + "\",\"" + second + "\"]}"), OWNER)).andExpect(status().isBadRequest());
+            mvc.perform(as(put(lessons + "/order").contentType("application/json").content("{\"orderedIds\":[\"" + second + "\",\"" + LESSON + "\"]}"), OWNER)).andExpect(status().isNotFound());
+            mvc.perform(as(put(lessons + "/order").contentType("application/json").content("{\"orderedIds\":[\"" + second + "\",\"" + first + "\"]}"), OWNER)).andExpect(status().isOk());
+            mvc.perform(as(get("/api/instructor/courses/" + HIDDEN), OWNER)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.chapters[0].lessons[*].id", contains(second, first)))
+                    .andExpect(jsonPath("$.chapters[0].lessons[*].position", contains(1, 2)));
+
+            row("completed");
+            jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (?,?,?,true,false)", PROGRESS, ENROLLMENT, LESSON);
+            String publication = "/api/instructor/courses/" + COURSE + "/lessons/" + HIDDEN_LESSON + "/publication";
+            mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + HIDDEN_LESSON), LEARNER)).andExpect(status().isNotFound());
+            mvc.perform(as(put(publication).contentType("application/json").content("{\"publicationStatus\":\"published\"}"), OWNER))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.publicationStatus").value("published"));
+            assertEquals("active", jdbc.queryForObject("SELECT status FROM public.enrollments WHERE id = ?", String.class, ENROLLMENT));
+            mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + HIDDEN_LESSON), LEARNER)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.courseId").value(COURSE.toString())).andExpect(jsonPath("$.materials", hasSize(0)));
+            mvc.perform(as(put(publication).contentType("application/json").content("{\"publicationStatus\":\"hidden\"}"), OWNER)).andExpect(status().isOk());
+            assertEquals("completed", jdbc.queryForObject("SELECT status FROM public.enrollments WHERE id = ?", String.class, ENROLLMENT));
+            mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + HIDDEN_LESSON), LEARNER)).andExpect(status().isNotFound())
+                    .andExpect(header().string("Cache-Control", "no-store"));
+            mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + LESSON), OWNER)).andExpect(status().isForbidden());
+        } finally {
+            if (created != null) jdbc.update("DELETE FROM public.courses WHERE id = ?", created);
+            jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id = ?", rival);
+            jdbc.update("DELETE FROM public.users WHERE id = ?", rival);
+        }
+    }
 
     @Test void anonymousCatalogueSearchFilteringPagingAndPublishedSyllabus() throws Exception {
         mvc.perform(get("/api/courses").param("size", "1")).andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2)).andExpect(jsonPath("$.content[0].title").value("Alpha")).andExpect(jsonPath("$.content[0].instructorDisplayName").value("FE07 Instructor"));
@@ -798,6 +888,660 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         // After the wait a still-valid target is written; the last committed visit wins.
         visit(LEARNER, COURSE, L3).andExpect(status().isOk()).andExpect(jsonPath("$.resumeLessonId").value(L3.toString()));
         assertEquals(L3, jdbc.queryForObject("SELECT resume_lesson_id FROM public.enrollments WHERE id=?", UUID.class, ENROLLMENT));
+    }
+
+    // ---- CO06 remediation (PR #265): Course publication reconciliation (ADR006 §§3, 5), the CT12.course
+    // Administrator handoff as an ADR005 §13.3 root participant (ADR012 §10.2) and authoring races on
+    // the Course root, against real PostgreSQL, Spring transactions and, where a route exists, MVC.
+    // The Administrator REST route and audit are IN20/CT31 work; their B7-O09 parts stay with IN20/QA06.
+
+    private static <T> T asIdentity(UUID user, Role role, Supplier<T> action) {
+        AuthenticatedUser principal = new AuthenticatedUser(user, role);
+        var securityContext = SecurityContextHolder.createEmptyContext();
+        securityContext.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(principal, null, principal.getAuthorities()));
+        SecurityContextHolder.setContext(securityContext);
+        try { return action.get(); } finally { SecurityContextHolder.clearContext(); }
+    }
+    private TransactionTemplate unit(int isolation, boolean readOnly) {
+        var template = new TransactionTemplate(transactions);
+        template.setIsolationLevel(isolation);
+        template.setReadOnly(readOnly);
+        return template;
+    }
+    private static final int READ_COMMITTED = TransactionDefinition.ISOLATION_READ_COMMITTED;
+    private String coursePublication(UUID course) { return "/api/instructor/courses/" + course + "/publication"; }
+    private String lessonPublication(UUID course, UUID lesson) { return "/api/instructor/courses/" + course + "/lessons/" + lesson + "/publication"; }
+    private org.springframework.test.web.servlet.ResultActions setPublication(String path, String status) throws Exception {
+        return mvc.perform(as(put(path), OWNER).contentType("application/json").content("{\"publicationStatus\":\"" + status + "\"}"));
+    }
+    private String courseStatus(UUID course) { return jdbc.queryForObject("SELECT publication_status FROM public.courses WHERE id=?", String.class, course); }
+    private String lessonStatus(UUID lesson) { return jdbc.queryForObject("SELECT publication_status FROM public.lessons WHERE id=?", String.class, lesson); }
+    private String courseTitle(UUID course) { return jdbc.queryForObject("SELECT title FROM public.courses WHERE id=?", String.class, course); }
+    private List<UUID> listedForAdministration(String query, String status) {
+        return asIdentity(ADMIN, Role.ADMIN, () -> management.listCoursesForAdministration(query, status, 0, 100)).content().stream()
+                .map(AdminCourseView::courseId).filter(List.of(COURSE, SECOND, HIDDEN)::contains).toList();
+    }
+    /** NOWAIT probe on another connection: true while some transaction holds the Course root. */
+    private boolean rootLockedElsewhere(UUID course) {
+        try (Connection connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement lock = connection.prepareStatement("SELECT id FROM public.courses WHERE id=? FOR UPDATE NOWAIT")) {
+                lock.setObject(1, course);
+                lock.executeQuery().close();
+                return false;
+            } catch (SQLException failure) {
+                if ("55P03".equals(failure.getSQLState())) return true;
+                throw failure;
+            } finally { connection.rollback(); }
+        } catch (SQLException failure) { throw new IllegalStateException(failure); }
+    }
+    private static void await(CountDownLatch latch) {
+        try { if (!latch.await(20, TimeUnit.SECONDS)) throw new IllegalStateException("latch timed out"); }
+        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted); }
+    }
+    private static Throwable failureOf(Future<?> future) throws Exception {
+        try { future.get(20, TimeUnit.SECONDS); } catch (ExecutionException failure) { return failure.getCause(); }
+        throw new AssertionError("Expected a failure");
+    }
+    private void completeLessonOneAndTwo() throws Exception {
+        moreLessons(); row("active");
+        complete(LEARNER, COURSE, LESSON).andExpect(status().isOk()); complete(LEARNER, COURSE, L2).andExpect(status().isOk());
+    }
+
+    /** Regression: a real Course publication change reconciled nothing although ADR006 §5 and OpenAPI require it. */
+    @Test void coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite() throws Exception {
+        // Rejoined after completing R = {LESSON}: stored ACTIVE while complete (ADR006 §3, FE07 rejoin rule).
+        row("active");
+        jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (?,?,?,true,false)", PROGRESS, ENROLLMENT, LESSON);
+        UUID left = id("left-enrolment");
+        jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,'left')", left, OTHER, COURSE);
+        jdbc.update("UPDATE public.courses SET adaptive_enabled=true, adaptive_settings=CAST(? AS jsonb) WHERE id=?", "{\"policy\":\"stored\"}", COURSE);
+        // An idempotent repeat is no change, so nothing is reconciled.
+        setPublication(coursePublication(COURSE), "published").andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"));
+        assertEquals("active", storedStatus());
+        // A real change reconciles joined rows in the same unit; LEFT history stays; no cascade to Lessons.
+        setPublication(coursePublication(COURSE), "hidden").andExpect(status().isOk()).andExpect(jsonPath("$.publicationStatus").value("hidden"))
+                .andExpect(jsonPath("$.chapters[0].lessons[0].publicationStatus").value("published"));
+        assertEquals("completed", storedStatus());
+        assertEquals("left", jdbc.queryForObject("SELECT status FROM public.enrollments WHERE id=?", String.class, left));
+        assertEquals("published", lessonStatus(LESSON));
+        mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + LESSON), LEARNER)).andExpect(status().isNotFound());
+        // Lesson publication under the hidden Course still reconciles as R grows and shrinks.
+        setPublication(lessonPublication(COURSE, HIDDEN_LESSON), "published").andExpect(status().isOk());
+        assertEquals("active", storedStatus());
+        setPublication(lessonPublication(COURSE, HIDDEN_LESSON), "hidden").andExpect(status().isOk());
+        assertEquals("completed", storedStatus());
+        // Republishing reconciles again: a stale stored ACTIVE (rejoin) is corrected in the same unit.
+        jdbc.update("UPDATE public.enrollments SET status='active' WHERE id=?", ENROLLMENT);
+        setPublication(coursePublication(COURSE), "published").andExpect(status().isOk());
+        assertEquals("completed", storedStatus());
+        mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + LESSON), LEARNER)).andExpect(status().isOk());
+        // B2-O09: publication never rewrites the stored adaptive configuration.
+        assertEquals(Boolean.TRUE, jdbc.queryForObject("SELECT adaptive_enabled AND adaptive_settings = CAST(? AS jsonb) FROM public.courses WHERE id=?",
+                Boolean.class, "{\"policy\":\"stored\"}", COURSE));
+    }
+
+    @Test void administratorHandoffListsAndHidesWithCt21EffectsIdempotentlyAndConceals() throws Exception {
+        completeLessonOneAndTwo();
+        assertEquals(List.of(COURSE, SECOND, HIDDEN), listedForAdministration(null, null), "hidden and published, title COLLATE \"C\" order");
+        assertEquals(List.of(HIDDEN), listedForAdministration("hIDDe", null), "case-insensitive title substring");
+        assertEquals(List.of(COURSE, SECOND), listedForAdministration("", "published"));
+        assertEquals(400, assertThrows(BusinessRuleException.class, () -> listedForAdministration("a\u0000", null)).getStatus().value());
+        assertEquals(400, assertThrows(BusinessRuleException.class, () -> listedForAdministration(null, "draft")).getStatus().value());
+        for (var role : List.of(Role.LEARNER, Role.INSTRUCTOR)) {
+            UUID actor = role == Role.LEARNER ? LEARNER : OWNER;
+            assertThrows(AccessDeniedException.class, () -> asIdentity(actor, role, () -> management.listCoursesForAdministration(null, null, 0, 20)));
+            assertThrows(AccessDeniedException.class, () -> asIdentity(actor, role, () -> management.hideLessonAsAdministrator(L3)));
+            assertThrows(AccessDeniedException.class, () -> asIdentity(actor, role, () -> management.hideCourseAsAdministrator(COURSE)));
+        }
+        assertEquals("published", lessonStatus(L3)); assertEquals("published", courseStatus(COURSE));
+
+        assertEquals(new LessonChange(COURSE, L3, "hidden", true), asIdentity(ADMIN, Role.ADMIN, () -> management.hideLessonAsAdministrator(L3)));
+        assertEquals("completed", storedStatus(), "hiding the last incomplete Lesson completes a nonempty Course (CT22)");
+        assertEquals(new LessonChange(COURSE, L3, "hidden", false), asIdentity(ADMIN, Role.ADMIN, () -> management.hideLessonAsAdministrator(L3)));
+        complete(LEARNER, COURSE, L3).andExpect(status().isNotFound());
+        mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + L3), LEARNER)).andExpect(status().isNotFound());
+
+        jdbc.update("UPDATE public.enrollments SET status='active' WHERE id=?", ENROLLMENT);
+        assertEquals(new CourseChange(new AdminCourseView(COURSE, "Alpha", "hidden", OWNER), true),
+                asIdentity(ADMIN, Role.ADMIN, () -> management.hideCourseAsAdministrator(COURSE)));
+        assertEquals("completed", storedStatus(), "the Course hide has the Instructor hidden change's reconciliation");
+        assertFalse(asIdentity(ADMIN, Role.ADMIN, () -> management.hideCourseAsAdministrator(COURSE)).changed());
+        assertEquals("published", lessonStatus(LESSON), "no cascade");
+        mvc.perform(get("/api/courses/" + COURSE)).andExpect(status().isNotFound());
+        mvc.perform(as(get(progressPath(COURSE)), LEARNER)).andExpect(status().isNotFound());
+        assertThrows(ResourceNotFoundException.class, () -> asIdentity(ADMIN, Role.ADMIN, () -> management.hideCourseAsAdministrator(id("missing"))));
+        assertThrows(ResourceNotFoundException.class, () -> asIdentity(ADMIN, Role.ADMIN, () -> management.hideLessonAsAdministrator(id("missing"))));
+        // No Administrator publish exists; the owning Instructor may republish through CT21.
+        setPublication(coursePublication(COURSE), "published").andExpect(status().isOk());
+        setPublication(lessonPublication(COURSE, L3), "published").andExpect(status().isOk());
+        assertEquals("active", storedStatus());
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    @Test void administratorHideAdmitsBeforeLockingAndRereadsStateAfterWaitingForTheRoot() throws Exception {
+        var pool = Executors.newFixedThreadPool(2);
+        try (Connection holder = dataSource.getConnection()) {
+            holder.setAutoCommit(false);
+            try {
+                try (PreparedStatement lock = holder.prepareStatement("SELECT id FROM public.courses WHERE id=? FOR UPDATE")) {
+                    lock.setObject(1, COURSE); lock.executeQuery().close();
+                }
+                // Admission precedes acquisition: denials return although another transaction holds the root.
+                assertInstanceOf(AccessDeniedException.class, failureOf(pool.submit(() -> asIdentity(LEARNER, Role.LEARNER, () -> management.hideCourseAsAdministrator(COURSE)))));
+                assertInstanceOf(AccessDeniedException.class, failureOf(pool.submit(() -> asIdentity(OWNER, Role.INSTRUCTOR, () -> management.hideLessonAsAdministrator(LESSON)))));
+                Future<CourseChange> waiting = pool.submit(() -> asIdentity(ADMIN, Role.ADMIN, () -> management.hideCourseAsAdministrator(COURSE)));
+                awaitLockWaiters(1);
+                assertFalse(waiting.isDone());
+                try (PreparedStatement hide = holder.prepareStatement("UPDATE public.courses SET publication_status='hidden' WHERE id=?")) {
+                    hide.setObject(1, COURSE); hide.executeUpdate();
+                }
+                holder.commit();
+                assertFalse(waiting.get(20, TimeUnit.SECONDS).changed(), "the waiter re-reads the committed winner");
+            } finally { holder.rollback(); }
+        } finally { pool.shutdownNow(); assertTrue(pool.awaitTermination(20, TimeUnit.SECONDS)); }
+        assertEquals("hidden", courseStatus(COURSE));
+    }
+
+    /** Regression: a second same-Course participant in one unit failed because the first did not record the root. */
+    @Test void administratorHidesJoinACompatibleOuterUnitHoldTheRootUntilItCompletesAndShareItsOutcome() throws Exception {
+        completeLessonOneAndTwo();
+        IllegalStateException outerFailure = new IllegalStateException("outer failure after both hides returned");
+        assertSame(outerFailure, assertThrows(IllegalStateException.class, () -> asIdentity(ADMIN, Role.ADMIN,
+                () -> unit(READ_COMMITTED, false).execute(status -> {
+                    assertTrue(management.hideLessonAsAdministrator(L3).changed());
+                    assertTrue(management.hideCourseAsAdministrator(COURSE).changed(), "same-Course re-entry joins the held root");
+                    assertTrue(rootLockedElsewhere(COURSE), "the root stays locked until outer completion");
+                    throw outerFailure;
+                }))));
+        assertEquals("published", courseStatus(COURSE)); assertEquals("published", lessonStatus(L3)); assertEquals("active", storedStatus());
+        assertFalse(rootLockedElsewhere(COURSE));
+        asIdentity(ADMIN, Role.ADMIN, () -> unit(TransactionDefinition.ISOLATION_DEFAULT, false).execute(status -> {
+            management.hideLessonAsAdministrator(L3);
+            return management.hideCourseAsAdministrator(COURSE);
+        }));
+        assertEquals("hidden", courseStatus(COURSE)); assertEquals("hidden", lessonStatus(L3)); assertEquals("completed", storedStatus());
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"read-only", "repeatable-read", "prior-write", "other-course-root"})
+    void administratorHideRejectsIncompatibleUnitsBeforeAnyEffect(String context) {
+        int isolation = context.equals("repeatable-read") ? TransactionDefinition.ISOLATION_REPEATABLE_READ : READ_COMMITTED;
+        assertThrows(IllegalStateException.class, () -> asIdentity(ADMIN, Role.ADMIN, () -> unit(isolation, context.equals("read-only")).execute(status -> {
+            switch (context) {
+                case "prior-write" -> jdbc.update("UPDATE public.courses SET title='Earlier write' WHERE id=?", SECOND);
+                case "other-course-root" -> management.hideCourseAsAdministrator(SECOND);
+                default -> { }
+            }
+            return management.hideLessonAsAdministrator(LESSON);
+        })));
+        assertEquals("published", lessonStatus(LESSON)); assertEquals("published", courseStatus(SECOND)); assertEquals("Beta", courseTitle(SECOND));
+        assertFalse(rootLockedElsewhere(COURSE)); assertFalse(rootLockedElsewhere(SECOND));
+    }
+
+    /** Regression: an unrecorded participant root let a REQUIRES_NEW unit wait for its own suspended holder. */
+    @Test void aRequiresNewHideBehindASuspendedHolderFailsFastAndASavepointReleasedRootCannotCommit() throws Exception {
+        var independent = new TransactionTemplate(transactions);
+        independent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        var pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<Object> outcome = pool.submit(() -> asIdentity(ADMIN, Role.ADMIN, () -> {
+                try {
+                    unit(READ_COMMITTED, false).execute(status -> {
+                        management.hideCourseAsAdministrator(COURSE);
+                        return independent.execute(inner -> management.hideLessonAsAdministrator(LESSON));
+                    });
+                    return "no failure";
+                } catch (RuntimeException failure) { return failure; }
+            }));
+            assertInstanceOf(IllegalStateException.class, outcome.get(20, TimeUnit.SECONDS));
+        } finally { pool.shutdownNow(); }
+        assertEquals("published", courseStatus(COURSE)); assertEquals("published", lessonStatus(LESSON));
+        assertFalse(rootLockedElsewhere(COURSE));
+        // A caller savepoint rollback that releases the root leaves no usable record, so the unit cannot commit.
+        RuntimeException refused = assertThrows(RuntimeException.class, () -> asIdentity(ADMIN, Role.ADMIN, () -> unit(READ_COMMITTED, false).execute(status -> {
+            jdbc.execute("SAVEPOINT before_hide");
+            management.hideCourseAsAdministrator(COURSE);
+            jdbc.execute("ROLLBACK TO SAVEPOINT before_hide");
+            assertFalse(rootLockedElsewhere(COURSE), "PostgreSQL released the root with the savepoint");
+            jdbc.update("UPDATE public.courses SET title='Written without the root' WHERE id=?", SECOND);
+            return null;
+        })));
+        assertTrue(refused instanceof IllegalStateException || refused instanceof org.springframework.transaction.UnexpectedRollbackException, refused::toString);
+        assertEquals("Beta", courseTitle(SECOND)); assertEquals("published", courseStatus(COURSE));
+    }
+
+    @Test void learnerCompletionWaitsBehindAnAdministratorLessonHideAndRereadsTheReconciledState() throws Exception {
+        completeLessonOneAndTwo();
+        var locked = new CountDownLatch(1); var release = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            try {
+                Future<Object> admin = pool.submit(() -> asIdentity(ADMIN, Role.ADMIN, () -> unit(READ_COMMITTED, false).execute(status -> {
+                    LessonChange change = management.hideLessonAsAdministrator(L3);
+                    locked.countDown(); await(release);
+                    return change;
+                })));
+                await(locked);
+                var waiting = pool.submit(() -> complete(LEARNER, COURSE, L3).andReturn().getResponse().getStatus());
+                awaitLockWaiters(1);
+                assertFalse(waiting.isDone());
+                release.countDown();
+                assertTrue(((LessonChange) admin.get(20, TimeUnit.SECONDS)).changed());
+                assertEquals(404, waiting.get(20, TimeUnit.SECONDS), "the Lesson is re-checked after the wait");
+            } finally { release.countDown(); }
+        }
+        assertEquals("completed", storedStatus()); assertEquals(2, progressRows());
+    }
+
+    @Test void learnerCompletionWaitsBehindAnInstructorLessonPublicationAndCountsTheNewRequiredSet() throws Exception {
+        completeLessonOneAndTwo();
+        var locked = new CountDownLatch(1); var release = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            try {
+                Future<Object> owner = pool.submit(() -> asIdentity(OWNER, Role.INSTRUCTOR, () -> unit(READ_COMMITTED, false).execute(status -> {
+                    structure.setCourseLessonPublication(COURSE, HIDDEN_LESSON, PublishStatus.PUBLISHED);
+                    locked.countDown(); await(release);
+                    return null;
+                })));
+                await(locked);
+                var waiting = pool.submit(() -> complete(LEARNER, COURSE, L3).andReturn().getResponse());
+                awaitLockWaiters(1);
+                assertFalse(waiting.isDone());
+                release.countDown();
+                owner.get(20, TimeUnit.SECONDS);
+                var response = waiting.get(20, TimeUnit.SECONDS);
+                assertEquals(200, response.getStatus());
+                assertTrue(response.getContentAsString().contains("\"totalLessons\":4"), response.getContentAsString());
+                assertTrue(response.getContentAsString().contains("\"membershipStatus\":\"active\""));
+            } finally { release.countDown(); }
+        }
+        assertEquals("active", storedStatus());
+    }
+
+    @Test void instructorPublicationAndAdministratorHideSerializeOnTheRootAndTheLastCommitWins() throws Exception {
+        // Administrator first: the owner's publication waits, re-reads the hidden state and republishes.
+        var locked = new CountDownLatch(1); var release = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            try {
+                Future<Object> admin = pool.submit(() -> asIdentity(ADMIN, Role.ADMIN, () -> unit(READ_COMMITTED, false).execute(status -> {
+                    CourseChange change = management.hideCourseAsAdministrator(COURSE);
+                    locked.countDown(); await(release);
+                    return change;
+                })));
+                await(locked);
+                var owner = pool.submit(() -> setPublication(coursePublication(COURSE), "published").andReturn().getResponse());
+                awaitLockWaiters(1);
+                assertFalse(owner.isDone());
+                release.countDown();
+                assertTrue(((CourseChange) admin.get(20, TimeUnit.SECONDS)).changed());
+                var response = owner.get(20, TimeUnit.SECONDS);
+                assertEquals(200, response.getStatus());
+                assertTrue(response.getContentAsString().contains("\"publicationStatus\":\"published\""), response.getContentAsString());
+            } finally { release.countDown(); }
+        }
+        assertEquals("published", courseStatus(COURSE));
+        // Owner first: the Administrator waits, re-reads the committed publication and hides it.
+        var ownerLocked = new CountDownLatch(1); var ownerRelease = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            try {
+                Future<Object> owner = pool.submit(() -> asIdentity(OWNER, Role.INSTRUCTOR, () -> unit(READ_COMMITTED, false).execute(status -> {
+                    management.setOwnedCoursePublication(HIDDEN, PublishStatus.PUBLISHED);
+                    ownerLocked.countDown(); await(ownerRelease);
+                    return null;
+                })));
+                await(ownerLocked);
+                Future<CourseChange> admin = pool.submit(() -> asIdentity(ADMIN, Role.ADMIN, () -> management.hideCourseAsAdministrator(HIDDEN)));
+                awaitLockWaiters(1);
+                assertFalse(admin.isDone());
+                ownerRelease.countDown();
+                owner.get(20, TimeUnit.SECONDS);
+                assertTrue(admin.get(20, TimeUnit.SECONDS).changed(), "the Administrator re-reads the owner's committed publication");
+            } finally { ownerRelease.countDown(); }
+        }
+        assertEquals("hidden", courseStatus(HIDDEN));
+    }
+
+    @Test void authoringRestKeepsNullableFieldsExplicitConcealsForeignChildrenAndRefusesInvalidInput() throws Exception {
+        String created = mvc.perform(as(post("/api/instructor/courses").contentType("application/json")
+                        .content("{\"title\":\"Draft\",\"description\":\"Body\",\"prerequisiteDescription\":null}"), OWNER))
+                .andExpect(status().isCreated()).andExpect(header().string("Cache-Control", "no-store")).andReturn().getResponse().getContentAsString();
+        assertTrue(created.contains("\"prerequisiteDescription\":null"), created);
+        UUID draft = UUID.fromString(com.jayway.jsonpath.JsonPath.read(created, "$.id"));
+        try {
+            String lesson = mvc.perform(as(post("/api/instructor/courses/" + COURSE + "/chapters/" + CHAPTER + "/lessons").contentType("application/json")
+                            .content("{\"title\":\"No body\",\"contentMarkdown\":null}"), OWNER))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.position").value(3)).andReturn().getResponse().getContentAsString();
+            assertTrue(lesson.contains("\"contentMarkdown\":null"), lesson);
+            // Learner reads only published materials in UUID order and never a storage payload; the owner sees all.
+            UUID text = UUID.fromString("10000000-0000-4000-8000-000000000006"), file = UUID.fromString("20000000-0000-4000-8000-000000000006");
+            UUID video = UUID.fromString("30000000-0000-4000-8000-000000000006"), hiddenText = UUID.fromString("40000000-0000-4000-8000-000000000006");
+            jdbc.update("INSERT INTO public.learning_materials (id,lesson_id,title,material_type,publication_status,text_content,object_key,original_filename,external_video_url) VALUES "
+                            + "(?,?,'Notes','text','published','Read me',NULL,NULL,NULL),(?,?,'Slides','file','published',NULL,'private/object-key','slides.pdf',NULL),"
+                            + "(?,?,'Clip','external_video','published',NULL,NULL,NULL,'https://www.youtube-nocookie.com/embed/abc'),(?,?,'Draft notes','text','hidden','Secret',NULL,NULL,NULL)",
+                    text, LESSON, file, LESSON, video, LESSON, hiddenText, LESSON);
+            row("active");
+            String learnerView = mvc.perform(as(get("/api/courses/" + COURSE + "/lessons/" + LESSON), LEARNER)).andExpect(status().isOk())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.materials[*].id", contains(text.toString(), file.toString(), video.toString())))
+                    .andReturn().getResponse().getContentAsString();
+            for (String secret : List.of("private/object-key", "slides.pdf", "objectKey", "originalFilename", "Secret", hiddenText.toString()))
+                assertFalse(learnerView.contains(secret), secret + " leaked: " + learnerView);
+            mvc.perform(as(get("/api/instructor/courses/" + COURSE + "/lessons/" + LESSON), OWNER)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.materials[*].id", contains(text.toString(), file.toString(), video.toString(), hiddenText.toString())))
+                    .andExpect(content().string(not(containsString("private/object-key"))));
+            // Foreign children of another owned Course are concealed: the generic ProblemDetail (whose instance
+            // is only the requested path) never names the real parent or the child's content, and nothing moves.
+            mvc.perform(as(put("/api/instructor/courses/" + draft + "/chapters/" + CHAPTER).contentType("application/json").content("{\"title\":\"Moved\"}"), OWNER))
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.detail").value("The requested resource is unavailable."))
+                    .andExpect(content().string(not(containsString(COURSE.toString())))).andExpect(content().string(not(containsString("\"Chapter\""))));
+            assertEquals(List.of(COURSE.toString(), "Chapter"), jdbc.queryForList("SELECT course_id::text AS c, title FROM public.chapters WHERE id=?", CHAPTER)
+                    .stream().flatMap(r -> java.util.stream.Stream.of(r.get("c"), r.get("title"))).toList());
+            mvc.perform(as(get("/api/instructor/courses/" + draft + "/lessons/" + LESSON), OWNER)).andExpect(status().isNotFound());
+            // JSON only (415 before admission, no-store); malformed path, query and bodies are 400.
+            mvc.perform(as(put(coursePublication(COURSE)), OWNER).contentType("text/plain").content("{}")).andExpect(status().isUnsupportedMediaType())
+                    .andExpect(header().string("Cache-Control", "no-store")).andExpect(content().contentTypeCompatibleWith("application/problem+json"));
+            mvc.perform(as(put(coursePublication(HIDDEN)), ADMIN).contentType("text/plain").content("{}")).andExpect(status().isForbidden());
+            mvc.perform(as(put("/api/instructor/courses/not-a-uuid/publication"), OWNER).contentType("application/json").content("{\"publicationStatus\":\"hidden\"}"))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(as(put(coursePublication(COURSE)).param("instructorId", OTHER.toString()), OWNER).contentType("application/json")
+                    .content("{\"publicationStatus\":\"hidden\"}")).andExpect(status().isBadRequest());
+            for (var body : List.of("{\"publicationStatus\":\"hidden\"} garbage", "{\"publicationStatus\":\"Hidden\"}", "{\"publicationStatus\":null}",
+                    "{\"publicationStatus\":\"hidden\",\"publicationStatus\":\"hidden\"}", "{\"publicationStatus\":\"hidden\",\"cascade\":true}"))
+                mvc.perform(as(put(coursePublication(COURSE)), OWNER).contentType("application/json").content(body)).andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            assertEquals("published", courseStatus(COURSE));
+            // Regression: NUL (legal JSON, not storable PostgreSQL text) was a driver failure (500); it is 400 with no write.
+            mvc.perform(as(post("/api/instructor/courses"), OWNER).contentType("application/json")
+                    .content("{\"title\":\"A\\u0000B\",\"description\":\"Body\",\"prerequisiteDescription\":null}"))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+            mvc.perform(as(put("/api/instructor/courses/" + COURSE + "/lessons/" + LESSON), OWNER).contentType("application/json")
+                    .content("{\"title\":\"Visible lesson\",\"contentMarkdown\":\"code\\u0000\"}")).andExpect(status().isBadRequest());
+            assertNull(jdbc.queryForObject("SELECT content_markdown FROM public.lessons WHERE id=?", String.class, LESSON));
+            // Representable position exhaustion is 409 and writes nothing (ADR006 §5).
+            jdbc.update("INSERT INTO public.chapters (id,course_id,title,position) VALUES (?,?,'Last',2147483647)", id("last-chapter"), SECOND);
+            mvc.perform(as(post("/api/instructor/courses/" + SECOND + "/chapters"), OWNER).contentType("application/json").content("{\"title\":\"Overflow\"}"))
+                    .andExpect(status().isConflict()).andExpect(header().string("Cache-Control", "no-store"));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.chapters WHERE course_id=?", Integer.class, SECOND));
+            // A locked Instructor is 401 before any authoring effect.
+            jdbc.update("UPDATE public.users SET account_status='locked' WHERE id=?", OWNER);
+            mvc.perform(as(post("/api/instructor/courses"), OWNER).contentType("application/json")
+                    .content("{\"title\":\"Locked\",\"description\":\"Body\",\"prerequisiteDescription\":null}")).andExpect(status().isUnauthorized());
+            mvc.perform(as(put(coursePublication(COURSE)), OWNER).contentType("application/json").content("{\"publicationStatus\":\"hidden\"}")).andExpect(status().isUnauthorized());
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.courses WHERE instructor_id=? AND title IN ('Draft','Locked')", Integer.class, OWNER));
+            assertEquals("published", courseStatus(COURSE));
+        } finally { jdbc.update("DELETE FROM public.courses WHERE id=?", draft); }
+    }
+
+    // ---- PR #265 independent-review remediation (F1-F4) against real PostgreSQL, MVC and security.
+
+    private static final String INSTRUCTOR_COURSES = "/api/instructor/courses";
+    private static String courseBody(String title, String description) {
+        return "{\"title\":\"" + title + "\",\"description\":\"" + description + "\",\"prerequisiteDescription\":null}";
+    }
+    private int ownedCourses() { return jdbc.queryForObject("SELECT count(*) FROM public.courses WHERE instructor_id=?", Integer.class, OWNER); }
+
+    /** F1/F2: text PostgreSQL would reject or silently change is 400 with no write; valid Unicode round-trips. */
+    @Test void textThatPostgresqlRejectsOrCannotStoreFaithfullyIs400WithoutAnyWrite() throws Exception {
+        int before = ownedCourses();
+        // JSON escapes: U+0085 (space to the database's [:space:]), U+00A0 (space to OpenAPI's \S), lone surrogates.
+        for (String body : List.of(courseBody("\\u0085", "D"), courseBody("T", " \\u0085 "), courseBody("\\u00a0", "D"),
+                courseBody("A\\uD800B", "D"), courseBody("A\\uDC00B", "D"), courseBody("T", "D\\uD83D"))) {
+            mvc.perform(as(post(INSTRUCTOR_COURSES).contentType("application/json").content(body), OWNER))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+        }
+        mvc.perform(as(post(INSTRUCTOR_COURSES + "/" + COURSE + "/chapters").contentType("application/json").content("{\"title\":\"\\u0085\"}"), OWNER))
+                .andExpect(status().isBadRequest());
+        for (String markdown : List.of("\\u0085", "\\uDC00 code")) {
+            mvc.perform(as(put(INSTRUCTOR_COURSES + "/" + COURSE + "/lessons/" + LESSON).contentType("application/json")
+                    .content("{\"title\":\"Visible lesson\",\"contentMarkdown\":\"" + markdown + "\"}"), OWNER)).andExpect(status().isBadRequest());
+        }
+        assertEquals(before, ownedCourses());
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM public.chapters WHERE course_id=?", Integer.class, COURSE));
+        assertNull(jdbc.queryForObject("SELECT content_markdown FROM public.lessons WHERE id=?", String.class, LESSON));
+        for (String query : List.of("\uD800", "\uDC00", "a\u0000"))
+            assertEquals(400, assertThrows(BusinessRuleException.class, () -> listedForAdministration(query, null)).getStatus().value());
+
+        // A valid surrogate pair and other Unicode are accepted, trimmed only at the edges, and stored exactly as returned.
+        String created = mvc.perform(as(post(INSTRUCTOR_COURSES).contentType("application/json")
+                        .content(courseBody("\\u0085 Caf\\u00e9 \\uD83D\\uDE00\\u00a0", "Na\\u00efve \\u4e2d\\u6587")), OWNER))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        UUID id = UUID.fromString(com.jayway.jsonpath.JsonPath.read(created, "$.id"));
+        try {
+            assertEquals("Caf\u00e9 \uD83D\uDE00", com.jayway.jsonpath.JsonPath.read(created, "$.title"));
+            assertEquals(List.of("Caf\u00e9 \uD83D\uDE00", "Na\u00efve \u4e2d\u6587"), jdbc.queryForList(
+                    "SELECT unnest(ARRAY[title, description]) FROM public.courses WHERE id=?", String.class, id));
+            mvc.perform(as(put(INSTRUCTOR_COURSES + "/" + COURSE + "/lessons/" + LESSON).contentType("application/json")
+                    .content("{\"title\":\"Visible lesson\",\"contentMarkdown\":\"\\u0085  \\uD83D\\uDE00 code\\n\"}"), OWNER))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.contentMarkdown").value("\u0085  \uD83D\uDE00 code\n"));
+            assertEquals("\u0085  \uD83D\uDE00 code\n", jdbc.queryForObject("SELECT content_markdown FROM public.lessons WHERE id=?", String.class, LESSON),
+                    "Markdown is stored verbatim");
+        } finally { jdbc.update("DELETE FROM public.courses WHERE id=?", id); }
+    }
+
+    /** F3: every JSON-body operation is 415 for an absent or non-JSON Content-Type, also with an empty body, before path, query and CT03 checks. */
+    @Test void jsonBodyOperationsReturn415ForAbsentOrNonJsonMediaTypesEvenWithAnEmptyBody() throws Exception {
+        String course = INSTRUCTOR_COURSES + "/" + COURSE, chapter = course + "/chapters/" + CHAPTER, lesson = course + "/lessons/" + LESSON;
+        List<String[]> operations = List.of(new String[]{"POST", INSTRUCTOR_COURSES}, new String[]{"PUT", course},
+                new String[]{"PUT", course + "/publication"}, new String[]{"POST", course + "/chapters"},
+                new String[]{"PUT", course + "/chapters/order"}, new String[]{"PUT", chapter}, new String[]{"POST", chapter + "/lessons"},
+                new String[]{"PUT", chapter + "/lessons/order"}, new String[]{"PUT", lesson}, new String[]{"PUT", lesson + "/publication"});
+        for (String[] operation : operations) {
+            for (String type : java.util.Arrays.asList("text/plain", null, "application/xml")) {
+                MockHttpServletRequestBuilder empty = request(org.springframework.http.HttpMethod.valueOf(operation[0]), operation[1]);
+                if (type != null) empty.contentType(type);
+                mvc.perform(as(empty, OWNER)).andExpect(status().isUnsupportedMediaType())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith("application/problem+json"));
+            }
+            // JSON with an empty or malformed body passes media-type matching and is the body 400 after admission.
+            mvc.perform(as(request(org.springframework.http.HttpMethod.valueOf(operation[0]), operation[1]).contentType("application/json"), OWNER))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(as(request(org.springframework.http.HttpMethod.valueOf(operation[0]), operation[1]).contentType("application/json").content("{"), OWNER))
+                    .andExpect(status().isBadRequest());
+        }
+        // 415 precedes the malformed path (400) and CT03 concealment (404) of an empty request.
+        mvc.perform(as(put(INSTRUCTOR_COURSES + "/not-a-uuid/publication"), OWNER).contentType("text/plain")).andExpect(status().isUnsupportedMediaType());
+        UUID rival = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) VALUES (?,?,'not-a-login-fixture','Rival','instructor','active')", rival, rival + "@example.test");
+        try {
+            mvc.perform(as(put(INSTRUCTOR_COURSES + "/" + HIDDEN + "/publication"), rival)).andExpect(status().isUnsupportedMediaType());
+            mvc.perform(as(put(INSTRUCTOR_COURSES + "/" + HIDDEN + "/publication"), rival).contentType("application/json")).andExpect(status().isNotFound());
+        } finally {
+            jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id = ?", rival);
+            jdbc.update("DELETE FROM public.users WHERE id = ?", rival);
+        }
+        // Role precedes media type; a JSON type with parameters is JSON.
+        mvc.perform(as(put(course + "/publication"), LEARNER)).andExpect(status().isForbidden());
+        mvc.perform(as(put(course + "/publication"), OWNER).contentType("application/json;charset=UTF-8").content("{\"publicationStatus\":\"published\"}"))
+                .andExpect(status().isOk());
+        assertEquals("published", courseStatus(COURSE));
+    }
+    /** F4: success paths of the owner list, metadata, Chapter and Lesson edits and Chapter reorder over REST. */
+    @Test void ownerListMetadataChapterLessonEditsAndChapterReorderSucceedOverRest() throws Exception {
+        UUID rival = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) VALUES (?,?,'not-a-login-fixture','Rival','instructor','active')", rival, rival + "@example.test");
+        jdbc.update("INSERT INTO public.courses (id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'Aardvark','Not mine','published',false)", id("rival-course"), rival);
+        try {
+            // Self Courses only, hidden included, title COLLATE "C" then UUID, with paging.
+            mvc.perform(as(get(INSTRUCTOR_COURSES), OWNER)).andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.content[*].id", contains(COURSE.toString(), SECOND.toString(), HIDDEN.toString())))
+                    .andExpect(jsonPath("$.content[2].publicationStatus").value("hidden")).andExpect(jsonPath("$.totalElements").value(3));
+            mvc.perform(as(get(INSTRUCTOR_COURSES).param("page", "1").param("size", "2"), OWNER)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[*].id", contains(HIDDEN.toString()))).andExpect(jsonPath("$.totalPages").value(2));
+            mvc.perform(as(get(INSTRUCTOR_COURSES), rival)).andExpect(jsonPath("$.content[*].title", contains("Aardvark")));
+
+            // Full metadata replacement: trimmed, nullable prerequisite set and cleared; children untouched.
+            mvc.perform(as(put(INSTRUCTOR_COURSES + "/" + COURSE).contentType("application/json")
+                            .content("{\"title\":\" Alpha 2 \",\"description\":\" New \",\"prerequisiteDescription\":\" Read first \"}"), OWNER))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.title").value("Alpha 2"))
+                    .andExpect(jsonPath("$.prerequisiteDescription").value("Read first")).andExpect(jsonPath("$.chapters", hasSize(2)));
+            mvc.perform(as(put(INSTRUCTOR_COURSES + "/" + COURSE).contentType("application/json").content(courseBody("Alpha 3", "Newer")), OWNER))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.prerequisiteDescription").value(nullValue()));
+            assertEquals(java.util.Arrays.asList("Alpha 3", "Newer", null), jdbc.queryForList(
+                    "SELECT unnest(ARRAY[title, description, prerequisite_description]) FROM public.courses WHERE id=?", String.class, COURSE));
+            mvc.perform(as(put(INSTRUCTOR_COURSES + "/" + COURSE).contentType("application/json").content(courseBody("Stolen", "x")), rival))
+                    .andExpect(status().isForbidden());
+
+            // Chapter rename and Lesson edit return the committed state; Markdown is verbatim.
+            mvc.perform(as(put(INSTRUCTOR_COURSES + "/" + COURSE + "/chapters/" + CHAPTER).contentType("application/json").content("{\"title\":\" Basics \"}"), OWNER))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.title").value("Basics")).andExpect(jsonPath("$.position").value(1))
+                    .andExpect(jsonPath("$.lessons[*].id", contains(LESSON.toString(), HIDDEN_LESSON.toString())));
+            mvc.perform(as(put(INSTRUCTOR_COURSES + "/" + COURSE + "/lessons/" + HIDDEN_LESSON).contentType("application/json")
+                            .content("{\"title\":\" Draft \",\"contentMarkdown\":\"  - item\\n\"}"), OWNER))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.title").value("Draft")).andExpect(jsonPath("$.contentMarkdown").value("  - item\n"))
+                    .andExpect(jsonPath("$.publicationStatus").value("hidden")).andExpect(jsonPath("$.position").value(2));
+
+            // Chapter reorder: occupied positions swap atomically; a refused order changes nothing.
+            String order = INSTRUCTOR_COURSES + "/" + COURSE + "/chapters/order";
+            for (var refused : List.of(List.of(CHAPTER.toString()), List.of(CHAPTER.toString(), CHAPTER.toString())))
+                mvc.perform(as(put(order).contentType("application/json").content("{\"orderedIds\":[\"" + String.join("\",\"", refused) + "\"]}"), OWNER))
+                        .andExpect(status().isBadRequest());
+            mvc.perform(as(put(order).contentType("application/json").content("{\"orderedIds\":[\"" + EMPTY_CHAPTER + "\",\"" + SECOND_CHAPTER + "\"]}"), OWNER))
+                    .andExpect(status().isNotFound());
+            assertEquals(List.of(CHAPTER, EMPTY_CHAPTER), chapterOrder(COURSE));
+            mvc.perform(as(put(order).contentType("application/json").content("{\"orderedIds\":[\"" + EMPTY_CHAPTER + "\",\"" + CHAPTER + "\"]}"), OWNER))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.orderedIds", contains(EMPTY_CHAPTER.toString(), CHAPTER.toString())));
+            assertEquals(List.of(EMPTY_CHAPTER, CHAPTER), chapterOrder(COURSE));
+            assertEquals(List.of(1, 2), jdbc.queryForList("SELECT position FROM public.chapters WHERE course_id=? ORDER BY position", Integer.class, COURSE));
+            mvc.perform(as(put(order).contentType("application/json").content("{\"orderedIds\":[]}"), rival)).andExpect(status().isForbidden());
+        } finally {
+            jdbc.update("DELETE FROM public.courses WHERE id=?", id("rival-course"));
+            jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id = ?", rival);
+            jdbc.update("DELETE FROM public.users WHERE id = ?", rival);
+        }
+    }
+    private List<UUID> chapterOrder(UUID course) {
+        return jdbc.queryForList("SELECT id FROM public.chapters WHERE course_id=? ORDER BY position", UUID.class, course);
+    }
+
+    /** F4 / B2-O09: settings NOWAIT is busy while an authoring write holds the root; neither write is partial. */
+    @Test void settingsNowaitIsBusyWhileAnAuthoringWriteHoldsTheRootAndNeitherWriteIsPartial() throws Exception {
+        jdbc.update("UPDATE public.courses SET adaptive_enabled=true, adaptive_settings=CAST(? AS jsonb) WHERE id=?", "{\"policy\":\"stored\"}", COURSE);
+        var locked = new CountDownLatch(1); var release = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(1)) {
+            try {
+                Future<Object> authoring = pool.submit(() -> asIdentity(OWNER, Role.INSTRUCTOR, () -> unit(READ_COMMITTED, false).execute(status -> {
+                    structure.setCourseLessonPublication(COURSE, HIDDEN_LESSON, PublishStatus.PUBLISHED);
+                    locked.countDown(); await(release);
+                    return null;
+                })));
+                await(locked);
+                var calls = new java.util.concurrent.atomic.AtomicInteger();
+                assertThrows(CourseManagementService.ConfigurationBusy.class, () -> asIdentity(OWNER, Role.INSTRUCTOR,
+                        () -> management.tryWithCourseConfigurationWrite(COURSE, () -> {
+                            calls.incrementAndGet();
+                            management.writeAdaptiveConfiguration(COURSE, management.readAdaptiveConfiguration(COURSE), false, null);
+                            return null;
+                        })));
+                assertEquals(0, calls.get(), "the settings work never ran");
+                release.countDown();
+                authoring.get(20, TimeUnit.SECONDS);
+            } finally { release.countDown(); }
+        }
+        assertEquals("published", lessonStatus(HIDDEN_LESSON));
+        assertEquals(Boolean.TRUE, jdbc.queryForObject("SELECT adaptive_enabled AND adaptive_settings = CAST(? AS jsonb) FROM public.courses WHERE id=?",
+                Boolean.class, "{\"policy\":\"stored\"}", COURSE), "publication never rewrites stored settings");
+        assertFalse(rootLockedElsewhere(COURSE));
+        // Once the root is free, the settings write proceeds against the committed authoring state.
+        asIdentity(OWNER, Role.INSTRUCTOR, () -> management.tryWithCourseConfigurationWrite(COURSE, () -> {
+            management.writeAdaptiveConfiguration(COURSE, management.readAdaptiveConfiguration(COURSE), false, null);
+            return null;
+        }));
+        assertEquals(Boolean.FALSE, jdbc.queryForObject("SELECT adaptive_enabled FROM public.courses WHERE id=?", Boolean.class, COURSE));
+    }
+
+    // ---- CT40-LESSON-READ-2026-11-08-r1 (ADR005 §3.1): the Course structure projection, real PostgreSQL.
+
+    private static final UUID GAP_CHAPTER = id("gap-chapter"), GAP_PUBLISHED = id("gap-published"), GAP_HIDDEN = id("gap-hidden");
+    /** COURSE: CHAPTER@1 {LESSON@1 pub, HIDDEN_LESSON@2 hidden, L2@3 pub}, EMPTY_CHAPTER@2 {L3@1 pub}, GAP_CHAPTER@6 {GAP_HIDDEN@4, GAP_PUBLISHED@9}. */
+    private void structureFixture() {
+        moreLessons(); secondCourseLesson();
+        jdbc.update("INSERT INTO public.chapters (id,course_id,title,position) VALUES (?,?,'Gap chapter',6)", GAP_CHAPTER, COURSE);
+        jdbc.update("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) VALUES (?,?,'Gap published',9,'published'),(?,?,'Gap hidden',4,'hidden')",
+                GAP_PUBLISHED, GAP_CHAPTER, GAP_HIDDEN, GAP_CHAPTER);
+    }
+    private static CourseStructureService.LessonReference ref(UUID lesson, UUID chapter, int chapterPosition, int lessonPosition, boolean published) {
+        return new CourseStructureService.LessonReference(lesson, chapter, chapterPosition, lessonPosition, published);
+    }
+    private CourseStructureService.StructureSnapshot structureAs(UUID actor, Role role, UUID course) {
+        return asIdentity(actor, role, () -> structure.readStructure(course));
+    }
+
+    @Test void structureProjectionAdmitsByTrustedRoleFiltersHiddenLessonsForLearnersAndKeepsCanonicalOrderWithGaps() {
+        structureFixture();
+        var owner = structureAs(OWNER, Role.INSTRUCTOR, COURSE);
+        assertEquals(new CourseStructureService.StructureSnapshot(COURSE, List.of(
+                ref(LESSON, CHAPTER, 1, 1, true), ref(HIDDEN_LESSON, CHAPTER, 1, 2, false), ref(L2, CHAPTER, 1, 3, true),
+                ref(L3, EMPTY_CHAPTER, 2, 1, true), ref(GAP_HIDDEN, GAP_CHAPTER, 6, 4, false), ref(GAP_PUBLISHED, GAP_CHAPTER, 6, 9, true))), owner,
+                "the owner sees hidden drafts; stored positions and gaps are retained; no foreign row");
+        assertThrows(UnsupportedOperationException.class, () -> owner.lessons().add(ref(SECOND_LESSON, SECOND_CHAPTER, 1, 1, true)));
+        assertThrows(UnsupportedOperationException.class, () -> owner.lessons().clear());
+
+        // Not enrolled: published Course, missing membership is 403 (CT03); joined Learners see published Lessons only.
+        assertThrows(AccessDeniedException.class, () -> structureAs(LEARNER, Role.LEARNER, COURSE));
+        for (String membership : List.of("active", "completed")) {
+            jdbc.update("DELETE FROM public.enrollments WHERE id=?", ENROLLMENT); row(membership);
+            assertEquals(List.of(ref(LESSON, CHAPTER, 1, 1, true), ref(L2, CHAPTER, 1, 3, true), ref(L3, EMPTY_CHAPTER, 2, 1, true),
+                    ref(GAP_PUBLISHED, GAP_CHAPTER, 6, 9, true)), structureAs(LEARNER, Role.LEARNER, COURSE).lessons());
+        }
+        jdbc.update("UPDATE public.enrollments SET status='left' WHERE id=?", ENROLLMENT);
+        assertThrows(AccessDeniedException.class, () -> structureAs(LEARNER, Role.LEARNER, COURSE));
+
+        // Hidden Course: concealed from Learners (even with membership) and from other Instructors; the owner sees it, empty.
+        jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,'active')", id("hidden-membership"), LEARNER, HIDDEN);
+        assertThrows(ResourceNotFoundException.class, () -> structureAs(LEARNER, Role.LEARNER, HIDDEN));
+        assertEquals(new CourseStructureService.StructureSnapshot(HIDDEN, List.of()), structureAs(OWNER, Role.INSTRUCTOR, HIDDEN), "empty, not missing");
+        assertEquals(List.of(ref(SECOND_LESSON, SECOND_CHAPTER, 1, 1, true)), structureAs(OWNER, Role.INSTRUCTOR, SECOND).lessons());
+        assertThrows(ResourceNotFoundException.class, () -> structureAs(OWNER, Role.INSTRUCTOR, id("missing")));
+
+        UUID rival = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) VALUES (?,?,'not-a-login-fixture','Rival','instructor','active')", rival, rival + "@example.test");
+        try {
+            assertThrows(AccessDeniedException.class, () -> structureAs(rival, Role.INSTRUCTOR, COURSE));
+            assertThrows(ResourceNotFoundException.class, () -> structureAs(rival, Role.INSTRUCTOR, HIDDEN));
+        } finally { jdbc.update("DELETE FROM public.users WHERE id = ?", rival); }
+        // Other roles are 403, even for a missing Course; no identity is a CT01 authentication failure (401).
+        assertThrows(AccessDeniedException.class, () -> structureAs(ADMIN, Role.ADMIN, COURSE));
+        assertThrows(AccessDeniedException.class, () -> structureAs(ADMIN, Role.ADMIN, id("missing")));
+        SecurityContextHolder.clearContext();
+        assertThrows(org.springframework.security.core.AuthenticationException.class, () -> structure.readStructure(COURSE));
+        assertThrows(IllegalArgumentException.class, () -> structureAs(OWNER, Role.INSTRUCTOR, null));
+    }
+
+    /**
+     * The admission check and both structure reads share one REPEATABLE READ snapshot: a structural commit
+     * landing after the read's snapshot began (publication, append, reorder, Course hide) is wholly invisible
+     * to it, and the next read sees all of it. Under READ COMMITTED the Learner would be refused (hidden Course)
+     * or see a mixed structure, so this fails if the projection's isolation regresses.
+     */
+    @Test void structureProjectionReadsOneCoherentSnapshotAcrossConcurrentStructuralCommits() throws Exception {
+        structureFixture();
+        row("active");
+        var before = structureAs(LEARNER, Role.LEARNER, COURSE);
+        UUID appendedChapter = id("appended-chapter"), appendedLesson = id("appended-lesson");
+        var pool = Executors.newSingleThreadExecutor();
+        try {
+            BEFORE_NEXT_SQL.set(() -> {
+                // Same transaction and connection as the projection: begin its snapshot, then commit elsewhere.
+                assertEquals(1, jdbc.queryForObject("SELECT 1", Integer.class));
+                try {
+                    pool.submit(() -> {
+                        jdbc.update("UPDATE public.lessons SET publication_status='published' WHERE id IN (?,?)", HIDDEN_LESSON, GAP_HIDDEN);
+                        jdbc.update("UPDATE public.chapters SET position=8 WHERE id=?", CHAPTER);
+                        jdbc.update("INSERT INTO public.chapters (id,course_id,title,position) VALUES (?,?,'Appended',3)", appendedChapter, COURSE);
+                        jdbc.update("INSERT INTO public.lessons (id,chapter_id,title,position,publication_status) VALUES (?,?,'Appended',1,'published')", appendedLesson, appendedChapter);
+                        jdbc.update("UPDATE public.courses SET publication_status='hidden' WHERE id=?", COURSE);
+                    }).get(20, TimeUnit.SECONDS);
+                } catch (Exception failure) { throw new IllegalStateException(failure); }
+            });
+            assertEquals(before, structureAs(LEARNER, Role.LEARNER, COURSE), "nothing committed after the snapshot began is visible");
+            assertNull(BEFORE_NEXT_SQL.get(), "the concurrent commit ran inside the projection's transaction");
+        } finally { BEFORE_NEXT_SQL.remove(); pool.shutdownNow(); }
+        assertThrows(ResourceNotFoundException.class, () -> structureAs(LEARNER, Role.LEARNER, COURSE), "a new read sees the hidden Course");
+        assertEquals(List.of(ref(L3, EMPTY_CHAPTER, 2, 1, true), ref(appendedLesson, appendedChapter, 3, 1, true),
+                ref(GAP_HIDDEN, GAP_CHAPTER, 6, 4, true), ref(GAP_PUBLISHED, GAP_CHAPTER, 6, 9, true),
+                ref(LESSON, CHAPTER, 8, 1, true), ref(HIDDEN_LESSON, CHAPTER, 8, 2, true), ref(L2, CHAPTER, 8, 3, true)),
+                structureAs(OWNER, Role.INSTRUCTOR, COURSE).lessons(), "and the whole committed structure, in the new order");
     }
 
     private void awaitLockWaiters(int expected) throws InterruptedException {

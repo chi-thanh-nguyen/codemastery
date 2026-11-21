@@ -78,6 +78,9 @@ class CourseRepositoryIntegrationTest extends AbstractIntegrationTest {
     private CourseContentRepository courseContentRepository;
 
     @Autowired
+    private com.codemastery.modules.course.domain.repository.EnrollmentRepository enrollmentRepository;
+
+    @Autowired
     private CourseMapper courseMapper;
 
     @Autowired
@@ -720,6 +723,72 @@ class CourseRepositoryIntegrationTest extends AbstractIntegrationTest {
         courseRepository.detachManagedCourse(course);
         assertFalse(entityManager.contains(managed));
         courseRepository.discardCleanPersistenceState();
+    }
+
+    @Test
+    void completionIsReconciledToTheCurrentPublishedLessonSetAndLeftRowsKeepTheirStatus() {
+        UUID course = course(instructor());
+        UUID chapter = chapter(course, 1);
+        UUID published = lesson(chapter, 1, "published");
+        UUID hidden = lesson(chapter, 2, "hidden");
+        UUID done = enrollment(course, "active", published);
+        UUID stale = enrollment(course, "completed");
+        UUID left = enrollment(course, "left", published);
+
+        enrollmentRepository.reconcileCompletion(course);
+        assertEquals(List.of("completed", "active", "left"), statuses(done, stale, left));
+
+        jdbcTemplate.update("UPDATE public.lessons SET publication_status = 'published' WHERE id = ?", hidden);
+        enrollmentRepository.reconcileCompletion(course);
+        assertEquals(List.of("active", "active", "left"), statuses(done, stale, left), "a new incomplete Lesson reopens");
+
+        jdbcTemplate.update("UPDATE public.lessons SET publication_status = 'hidden' WHERE chapter_id = ?", chapter);
+        jdbcTemplate.update("UPDATE public.enrollments SET status = 'completed' WHERE id = ?", done);
+        enrollmentRepository.reconcileCompletion(course);
+        assertEquals(List.of("active", "active", "left"), statuses(done, stale, left), "no vacuous completion");
+    }
+
+    @Test
+    void administrationListMatchesTitleCaseInsensitivelyAcrossStatusesInCollationOrder() {
+        UUID owner = instructor();
+        String token = UUID.randomUUID().toString();
+        UUID lower = titledCourse(owner, "beta " + token.toUpperCase(), "published");
+        UUID upper = titledCourse(owner, "Alpha " + token, "hidden");
+        titledCourse(owner, "Unrelated", "published");
+
+        Page<Course> all = courseRepository.findForAdministration(token, null, PageRequest.of(0, 10));
+        assertEquals(List.of(upper, lower), all.map(Course::id).getContent());
+        assertEquals(2, all.getTotalElements());
+        assertEquals(List.of(lower), courseRepository.findForAdministration(token, PublishStatus.PUBLISHED,
+                PageRequest.of(0, 10)).map(Course::id).getContent());
+        assertEquals(List.of(lower), courseRepository.findForAdministration(token, null,
+                PageRequest.of(1, 1)).map(Course::id).getContent());
+    }
+
+    private UUID titledCourse(UUID owner, String title, String status) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO public.courses (id,instructor_id,title,description,publication_status,adaptive_enabled) "
+                + "VALUES (?,?,?,'Description',?,false)", id, owner, title, status);
+        return id;
+    }
+
+    private UUID enrollment(UUID course, String status, UUID... completedLessons) {
+        UUID learner = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) "
+                + "VALUES (?,?,'not-a-login-fixture','CO06 Learner','learner','active')", learner, learner + "@example.test");
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,?)",
+                id, learner, course, status);
+        for (UUID lesson : completedLessons) {
+            jdbcTemplate.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) "
+                    + "VALUES (?,?,?,true,false)", UUID.randomUUID(), id, lesson);
+        }
+        return id;
+    }
+
+    private List<String> statuses(UUID... enrollments) {
+        return Arrays.stream(enrollments).map(id -> jdbcTemplate.queryForObject(
+                "SELECT status FROM public.enrollments WHERE id = ?", String.class, id)).toList();
     }
 
     private UUID instructor() {

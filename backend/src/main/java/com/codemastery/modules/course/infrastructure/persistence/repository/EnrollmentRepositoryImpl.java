@@ -120,6 +120,17 @@ public class EnrollmentRepositoryImpl implements EnrollmentRepository {
                 (rs, row) -> new LessonFlags(rs.getObject("id", UUID.class), rs.getBoolean("completed"), rs.getBoolean("skipped")),
                 enrollmentId, courseId);
     }
+    @Override public void reconcileCompletion(UUID courseId) {
+        jdbc.update("WITH required AS (SELECT l.id FROM public.lessons l JOIN public.chapters ch ON ch.id = l.chapter_id "
+                + "WHERE ch.course_id = ? AND l.publication_status = 'published'), "
+                + "target AS (SELECT e.id, CASE WHEN (SELECT count(*) FROM required) > 0 AND count(p.lesson_id) = "
+                + "(SELECT count(*) FROM required) THEN 'completed' ELSE 'active' END AS status FROM public.enrollments e "
+                + "LEFT JOIN public.lesson_progress p ON p.enrollment_id = e.id AND p.completed "
+                + "AND p.lesson_id IN (SELECT id FROM required) "
+                + "WHERE e.course_id = ? AND e.status IN ('active','completed') GROUP BY e.id) "
+                + "UPDATE public.enrollments e SET status = t.status FROM target t WHERE e.id = t.id AND e.status <> t.status",
+                courseId, courseId);
+    }
     @Override public void markCompleted(UUID enrollmentId, UUID lessonId) {
         // Monotonic: only completed is written; an existing mastery_skipped=true is untouched.
         if (jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) "

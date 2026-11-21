@@ -50,6 +50,13 @@ public interface EnrollmentRepository {
     /** Currently published Lessons of the Course in canonical order; absent progress rows are false/false. */
     List<LessonFlags> publishedLessonFlags(UUID courseId, UUID enrollmentId);
 
+    /**
+     * CT22.progress reconciliation after a change to the required set R, under the held Course root:
+     * every joined (active/completed) Enrollment becomes completed exactly when R is nonempty and
+     * fully completed, otherwise active. LEFT rows are untouched.
+     */
+    void reconcileCompletion(UUID courseId);
+
     /** Idempotently sets completed=true for the pair, preserving any mastery_skipped flag. */
     void markCompleted(UUID enrollmentId, UUID lessonId);
 

@@ -1,8 +1,25 @@
 package com.codemastery.modules.course.application.service;
 
+import com.codemastery.common.api.PageResponse;
+import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
+import com.codemastery.modules.auth.application.service.UserAccountService;
+import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
+import com.codemastery.modules.auth.application.service.UserAccountService.IdentityRole;
+import com.codemastery.modules.course.api.dto.CourseStructureResponses.OwnedChapter;
+import com.codemastery.modules.course.api.dto.CourseStructureResponses.OwnedCourse;
+import com.codemastery.modules.course.api.dto.CourseStructureResponses.OwnedCourseSummary;
+import com.codemastery.modules.course.api.dto.CourseStructureResponses.OwnedLesson;
 import com.codemastery.modules.course.domain.model.Course;
+import com.codemastery.modules.course.domain.model.LearningMaterial;
+import com.codemastery.modules.course.domain.model.Lesson;
+import com.codemastery.modules.course.domain.model.PublishStatus;
+import com.codemastery.modules.course.domain.repository.CourseContentRepository;
 import com.codemastery.modules.course.domain.repository.CourseRepository;
+import com.codemastery.modules.course.domain.repository.EnrollmentRepository;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import com.codemastery.modules.course.domain.repository.CourseRepository.StoredAdaptiveConfiguration;
 import com.codemastery.modules.course.domain.repository.CourseRepository.TransactionFacts;
 import org.springframework.stereotype.Service;
@@ -14,6 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -54,13 +72,20 @@ public class CourseManagementService {
 
     private final CourseRepository courses;
     private final CourseAccessService access;
+    private final UserAccountService identities;
+    private final CourseContentRepository content;
+    private final EnrollmentRepository enrollments;
     private final TransactionTemplate writeUnit;
     private final TransactionTemplate snapshotRead;
 
-    public CourseManagementService(CourseRepository courses, CourseAccessService access,
+    public CourseManagementService(CourseRepository courses, CourseAccessService access, UserAccountService identities,
+                                   CourseContentRepository content, EnrollmentRepository enrollments,
                                    PlatformTransactionManager transactionManager) {
         this.courses = Objects.requireNonNull(courses);
         this.access = Objects.requireNonNull(access);
+        this.identities = Objects.requireNonNull(identities);
+        this.content = Objects.requireNonNull(content);
+        this.enrollments = Objects.requireNonNull(enrollments);
         Objects.requireNonNull(transactionManager);
         this.writeUnit = new TransactionTemplate(transactionManager);
         writeUnit.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
@@ -136,6 +161,223 @@ public class CourseManagementService {
             }
             courses.detachManagedCourse(courseId);
         });
+    }
+
+    // CT21.authoring (ADR006 §5), Course metadata and publication. Existing-Course mutations run
+    // inside withCourseConfigurationWrite, so admission precedes validation and every effect.
+
+    public void requireActiveInstructor() {
+        actor(IdentityRole.INSTRUCTOR);
+    }
+
+    public PageResponse<OwnedCourseSummary> listOwnedCourses(int page, int size) {
+        UUID owner = actor(IdentityRole.INSTRUCTOR).userId();
+        PageResponse.validateRequest(page, size);
+        return snapshotRead.execute(status -> PageResponse.from(
+                courses.findByInstructorId(owner, PageRequest.of(page, size)).map(OwnedCourseSummary::of)));
+    }
+
+    /** The trusted Instructor owns a new hidden Course with adaptive mode disabled and no settings. */
+    public OwnedCourse createOwnedCourse(String title, String description, String prerequisiteDescription) {
+        UUID owner = actor(IdentityRole.INSTRUCTOR).userId();
+        Course course = new Course(UUID.randomUUID(), owner, requiredText(title), requiredText(description),
+                optionalText(prerequisiteDescription), PublishStatus.HIDDEN, false, null);
+        writeUnit.executeWithoutResult(status -> courses.insert(course));
+        return new OwnedCourse(course.id(), course.title(), course.description(), course.publicationStatus().getStatus(),
+                course.prerequisiteDescription(), List.of());
+    }
+
+    public OwnedCourse getOwnedCourse(UUID courseId) {
+        requireId(courseId);
+        return snapshotRead.execute(status -> {
+            access.requireCourseOwnership(courseId);
+            return ownedCourse(courseId);
+        });
+    }
+
+    /** Full metadata replacement; the last serialized successful commit wins. */
+    public OwnedCourse updateOwnedCourse(UUID courseId, String title, String description, String prerequisiteDescription) {
+        return withCourseConfigurationWrite(courseId, () -> {
+            courses.updateMetadata(courseId, requiredText(title), requiredText(description),
+                    optionalText(prerequisiteDescription));
+            return ownedCourse(courseId);
+        });
+    }
+
+    /**
+     * Idempotent and without cascade; a hidden Course still conceals its children. A real change
+     * reconciles joined completion in the same unit (ADR006 §5 "Course/Lesson publication/set
+     * changes", OpenAPI setOwnedCoursePublication "completion reconciliation"; ADR006 §3).
+     */
+    public OwnedCourse setOwnedCoursePublication(UUID courseId, PublishStatus publicationStatus) {
+        Objects.requireNonNull(publicationStatus, "publicationStatus");
+        return withCourseConfigurationWrite(courseId, () -> {
+            Course course = courses.findById(courseId).orElseThrow(CourseManagementService::unavailable);
+            if (course.publicationStatus() != publicationStatus) {
+                courses.updatePublicationStatus(courseId, publicationStatus);
+                enrollments.reconcileCompletion(courseId);
+            }
+            return ownedCourse(courseId);
+        });
+    }
+
+    /** The owner view: every Chapter, Lesson and material in canonical order, hidden ones included. */
+    OwnedCourse ownedCourse(UUID courseId) {
+        Course course = courses.findById(courseId).orElseThrow(CourseManagementService::unavailable);
+        Map<UUID, List<LearningMaterial>> materials = new LinkedHashMap<>();
+        content.findMaterialsByCourseId(courseId).forEach(material ->
+                materials.computeIfAbsent(material.lessonId(), id -> new ArrayList<>()).add(material));
+        Map<UUID, List<OwnedLesson>> lessons = new LinkedHashMap<>();
+        for (Lesson lesson : content.findLessonsByCourseId(courseId)) {
+            lessons.computeIfAbsent(lesson.chapterId(), id -> new ArrayList<>())
+                    .add(OwnedLesson.of(lesson, materials.getOrDefault(lesson.id(), List.of())));
+        }
+        List<OwnedChapter> chapters = content.findChaptersByCourseId(courseId).stream()
+                .map(chapter -> new OwnedChapter(chapter.id(), chapter.title(), chapter.position(),
+                        lessons.getOrDefault(chapter.id(), List.of())))
+                .toList();
+        return new OwnedCourse(course.id(), course.title(), course.description(), course.publicationStatus().getStatus(),
+                course.prerequisiteDescription(), chapters);
+    }
+
+    // CT12.course (ADR012 §10.2): Administrator list and hide only; the sole caller is Admin
+    // AdminCourseService (CT32 also uses the Lesson method). Hiding is a root-lock participant,
+    // not the Instructor-only guard, and has exactly the effects of CT21's hidden change.
+
+    public PageResponse<AdminCourseView> listCoursesForAdministration(String query, String publicationStatus,
+                                                                      int page, int size) {
+        actor(IdentityRole.ADMINISTRATOR);
+        PageResponse.validateRequest(page, size);
+        PublishStatus status = publicationStatus == null ? null : switch (publicationStatus) {
+            case "hidden" -> PublishStatus.HIDDEN;
+            case "published" -> PublishStatus.PUBLISHED;
+            default -> throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid publication status");
+        };
+        String title = query == null ? "" : query;
+        // NUL or an unpaired surrogate cannot be sent faithfully to PostgreSQL: malformed input, not a 500 or a '?'.
+        if (!isStorable(title)) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid query");
+        return snapshotRead.execute(read -> PageResponse.from(
+                courses.findForAdministration(title, status, PageRequest.of(page, size)).map(AdminCourseView::of)));
+    }
+
+    /** Idempotent; a real change reconciles joined completion exactly as the Instructor hidden change does. */
+    public CourseChange hideCourseAsAdministrator(UUID courseId) {
+        requireId(courseId);
+        actor(IdentityRole.ADMINISTRATOR);
+        return writeUnit.execute(status -> {
+            participateInRoot(courseId);
+            Course course = courses.findById(courseId).orElseThrow(CourseManagementService::unavailable);
+            boolean changed = course.publicationStatus() != PublishStatus.HIDDEN;
+            if (changed) {
+                courses.updatePublicationStatus(courseId, PublishStatus.HIDDEN);
+                enrollments.reconcileCompletion(courseId);
+            }
+            requireRootStillHeld(courseId);
+            return new CourseChange(new AdminCourseView(courseId, course.title(), PublishStatus.HIDDEN.getStatus(),
+                    course.instructorId()), changed);
+        });
+    }
+
+    /** Hides one Lesson and reconciles joined completion for its Course in the same unit (CT22). */
+    public LessonChange hideLessonAsAdministrator(UUID lessonId) {
+        requireId(lessonId);
+        UUID administrator = actor(IdentityRole.ADMINISTRATOR).userId();
+        return writeUnit.execute(status -> {
+            // Plain read of the immutable ancestry only (no reparenting exists); state is re-read under the root.
+            UUID courseId = courses.findLessonAccessSnapshot(administrator, lessonId)
+                    .map(CourseRepository.AccessSnapshot::courseId).orElseThrow(CourseManagementService::unavailable);
+            participateInRoot(courseId);
+            Lesson lesson = content.findLesson(courseId, lessonId).orElseThrow(CourseManagementService::unavailable);
+            boolean changed = lesson.publicationStatus() != PublishStatus.HIDDEN;
+            if (changed) {
+                content.updateLessonPublicationStatus(lesson.chapterId(), lessonId, PublishStatus.HIDDEN);
+                enrollments.reconcileCompletion(courseId);
+            }
+            requireRootStillHeld(courseId);
+            return new LessonChange(courseId, lessonId, PublishStatus.HIDDEN.getStatus(), changed);
+        });
+    }
+
+    /**
+     * ADR005 §13.3 root participant (ADR012 §10.2): a compatible READ COMMITTED read-write unit with no
+     * earlier write or lock, the root first, state re-read after it. Like the guard, the held root is
+     * recorded for the physical transaction and the thread, so a same-Course participant or guard in the
+     * same unit joins it, another Course or a REQUIRES_NEW unit behind a suspended holder fails instead
+     * of waiting for itself, and a savepoint rollback that released the root can never commit. Course
+     * reads here are direct statements, so the caller's managed persistence state is left untouched.
+     */
+    private void participateInRoot(UUID courseId) {
+        if (requireCompatibleWriteUnit(courseId) != null) return;
+        acquire(courseId, false);
+        claimRoot(courseId);
+        courses.markCourseRootHeld(courseId);
+    }
+
+    private CurrentIdentity actor(IdentityRole role) {
+        CurrentIdentity actor = identities.requireCurrentIdentity();
+        if (actor.role() != role) throw new AccessDeniedException("Access denied");
+        return actor;
+    }
+
+    /**
+     * CT21 descriptive text: trimmed and nonblank; no length limit is added. Text PostgreSQL cannot
+     * store faithfully is malformed input (400) rather than a driver failure or silent change.
+     */
+    static String requiredText(String value) {
+        if (value == null) throw blank();
+        requireStorable(value);
+        String trimmed = trim(value);
+        if (trimmed.isEmpty()) throw blank();
+        return trimmed;
+    }
+
+    /** Optional descriptive text: null or trimmed nonblank. */
+    static String optionalText(String value) {
+        return value == null ? null : requiredText(value);
+    }
+
+    /** Markdown is null or nonblank and stored verbatim, preserving indentation. */
+    static String markdown(String value) {
+        if (value == null) return null;
+        requireStorable(value);
+        if (trim(value).isEmpty()) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Content must not be blank");
+        return value;
+    }
+
+    /**
+     * Blank means every code point is space under one of the definitions that judge this text: Java
+     * whitespace, Unicode space separators and U+FEFF (OpenAPI's ECMA-262 {@code \S} pattern) and
+     * U+0085, which the PostgreSQL checks {@code ~ '[^[:space:]]'} treat as space under the image's
+     * musl {@code en_US.utf8} locale. Accepted text therefore satisfies both the contract and the database.
+     */
+    static boolean isSpace(int codePoint) {
+        return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)
+                || codePoint == 0x0085 || codePoint == 0xFEFF;
+    }
+
+    private static String trim(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end && isSpace(value.codePointAt(start))) start += Character.charCount(value.codePointAt(start));
+        while (end > start && isSpace(value.codePointBefore(end))) end -= Character.charCount(value.codePointBefore(end));
+        return value.substring(start, end);
+    }
+
+    /**
+     * PostgreSQL text cannot hold NUL, and the driver silently replaces an unpaired UTF-16 surrogate,
+     * so the stored value would differ from the accepted one. Both are rejected before any write.
+     */
+    static boolean isStorable(String value) {
+        return value.codePoints().noneMatch(codePoint -> codePoint == 0
+                || codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE);
+    }
+
+    private static void requireStorable(String value) {
+        if (!isStorable(value)) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Text must be storable Unicode");
+    }
+
+    private static BusinessRuleException blank() {
+        return new BusinessRuleException(HttpStatus.BAD_REQUEST, "Text must not be blank");
     }
 
     private <T> T guarded(UUID courseId, Supplier<T> work, boolean failFast) {
@@ -276,6 +518,17 @@ public class CourseManagementService {
             adaptiveSettings = adaptiveSettings == null ? null : Course.immutableJsonObject(adaptiveSettings);
         }
     }
+
+    public record AdminCourseView(UUID courseId, String title, String publicationStatus, UUID instructorId) {
+        static AdminCourseView of(Course course) {
+            return new AdminCourseView(course.id(), course.title(), course.publicationStatus().getStatus(),
+                    course.instructorId());
+        }
+    }
+
+    public record CourseChange(AdminCourseView course, boolean changed) {}
+
+    public record LessonChange(UUID courseId, UUID lessonId, String publicationStatus, boolean changed) {}
 
     public static final class ConfigurationBusy extends RuntimeException {
         public ConfigurationBusy() {

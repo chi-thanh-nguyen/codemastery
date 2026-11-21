@@ -436,7 +436,9 @@ class CourseServiceTest {
     // and PostgreSQL behavior are verified in integration/AdaptiveLearningFlowIntegrationTest.
 
     private CourseManagementService management(org.springframework.transaction.PlatformTransactionManager transactions) {
-        return new CourseManagementService(repository, service, transactions);
+        return new CourseManagementService(repository, service, identity,
+                mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class),
+                mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class), transactions);
     }
 
     @Test void managementGuardsRejectNullInputsBeforeAnyTransactionOrLookup() {
@@ -544,5 +546,262 @@ class CourseServiceTest {
         assertEquals("Course configuration is busy", busy.getMessage());
         assertNull(busy.getCause());
         assertEquals(0, busy.getStackTrace().length);
+    }
+
+    // CO06 CT21.authoring and CT12.course local rules. Real guard, SQL and HTTP security are
+    // verified by the integration suites; these doubles prove ordering and validation only.
+
+    @Test void authoringTextIsTrimmedNonblankAndMarkdownIsVerbatim() {
+        assertEquals("Title", CourseManagementService.requiredText("  Title \n"));
+        assertNull(CourseManagementService.optionalText(null));
+        assertEquals("    code", CourseManagementService.markdown("    code"));
+        assertNull(CourseManagementService.markdown(null));
+        for (Runnable invalid : List.<Runnable>of(() -> CourseManagementService.requiredText(null),
+                () -> CourseManagementService.requiredText(" \t"), () -> CourseManagementService.optionalText(" "),
+                () -> CourseManagementService.markdown("\n "), () -> CourseManagementService.requiredText("A\u0000B"),
+                () -> CourseManagementService.optionalText("\u0000"), () -> CourseManagementService.markdown("    code\u0000"))) {
+            assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class, invalid::run)
+                    .getStatus().value());
+        }
+    }
+
+    /** F1/F2: blank follows Java, OpenAPI (ECMA-262 \s) and PostgreSQL [:space:] together; unstorable UTF-16 is refused. */
+    @Test void blankAndUnstorableTextFollowsTheContractAndDatabaseDefinitions() {
+        for (String blank : List.of("\u0085", " \u0085 ", " ", "  ", "﻿", "　\t", " ")) {
+            for (Runnable invalid : List.<Runnable>of(() -> CourseManagementService.requiredText(blank),
+                    () -> CourseManagementService.optionalText(blank), () -> CourseManagementService.markdown(blank))) {
+                assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class, invalid::run).getStatus().value());
+            }
+        }
+        for (String unstorable : List.of("A\uD800B", "A\uDC00B", "\uD83D", "x\uDE00", "\uDE00\uD83D")) {
+            assertFalse(CourseManagementService.isStorable(unstorable));
+            for (Runnable invalid : List.<Runnable>of(() -> CourseManagementService.requiredText(unstorable),
+                    () -> CourseManagementService.markdown(unstorable))) {
+                assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class, invalid::run).getStatus().value());
+            }
+        }
+        // Valid Unicode, including a surrogate pair, is kept; descriptive text is trimmed at its edges only.
+        assertEquals("Café 😀 中", CourseManagementService.requiredText("\u0085  Café 😀 中﻿ "));
+        assertEquals("a b", CourseManagementService.requiredText("a b"));
+        assertEquals("\u0085  😀 code\n", CourseManagementService.markdown("\u0085  😀 code\n"));
+        assertTrue(CourseManagementService.isStorable("😀"));
+        assertTrue(CourseManagementService.isSpace(0x0085));
+        assertFalse(CourseManagementService.isSpace('a'));
+    }
+
+    /** F3: the controllers' JSON-only check, shared by every JSON-body operation. */
+    @Test void onlyAnApplicationJsonContentTypeIsAccepted() throws Exception {
+        com.codemastery.modules.course.api.dto.CourseRequest.requireJson("application/json");
+        com.codemastery.modules.course.api.dto.CourseRequest.requireJson("application/json;charset=UTF-8");
+        for (String type : java.util.Arrays.asList(null, "", "text/plain", "application/xml", "application/*", "*/*",
+                "application/problem+json", "not a media type")) {
+            assertThrows(org.springframework.web.HttpMediaTypeNotSupportedException.class,
+                    () -> com.codemastery.modules.course.api.dto.CourseRequest.requireJson(type), String.valueOf(type));
+        }
+    }
+
+    // CT40-LESSON-READ-2026-11-08-r1 (ADR005 §3.1): local projection rules. Real admission, snapshot
+    // isolation and PostgreSQL ancestry are verified in integration/EnrollmentIntegrationTest.
+
+    private static final UUID CHAPTER_A = UUID.fromString("00000000-0000-0000-0000-00000000000a");
+    private static final UUID CHAPTER_B = UUID.fromString("00000000-0000-0000-0000-00000000000b");
+    private static final UUID L1 = UUID.fromString("00000000-0000-0000-0000-000000000011");
+    private static final UUID L2 = UUID.fromString("00000000-0000-0000-0000-000000000012");
+    private static final UUID L3 = UUID.fromString("00000000-0000-0000-0000-000000000013");
+
+    private com.codemastery.modules.course.domain.repository.CourseContentRepository structureContent;
+
+    private CourseStructureService structure() {
+        structureContent = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        return new CourseStructureService(mock(CourseManagementService.class), service, structureContent,
+                mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class), identity);
+    }
+    private static com.codemastery.modules.course.domain.model.Chapter chapter(UUID id, UUID course, int position) {
+        return new com.codemastery.modules.course.domain.model.Chapter(id, course, "Chapter title", position);
+    }
+    private static com.codemastery.modules.course.domain.model.Lesson structureLesson(UUID id, UUID chapter, int position, PublishStatus status) {
+        return new com.codemastery.modules.course.domain.model.Lesson(id, chapter, "Lesson title", "Body", position, status);
+    }
+    private void structureRows(List<com.codemastery.modules.course.domain.model.Chapter> chapters,
+                               List<com.codemastery.modules.course.domain.model.Lesson> lessons) {
+        when(structureContent.findChaptersByCourseId(COURSE)).thenReturn(chapters);
+        when(structureContent.findLessonsByCourseId(COURSE)).thenReturn(lessons);
+    }
+
+    @Test void structureProjectionSortsByChapterThenLessonPositionKeepsGapsAndFiltersHiddenForLearners() {
+        var structure = structure();
+        // Provider rows deliberately out of canonical order, with gaps.
+        var chapters = List.of(chapter(CHAPTER_B, COURSE, 7), chapter(CHAPTER_A, COURSE, 2));
+        var lessons = new java.util.ArrayList<>(List.of(structureLesson(L3, CHAPTER_B, 1, PUBLISHED),
+                structureLesson(L2, CHAPTER_A, 9, HIDDEN), structureLesson(L1, CHAPTER_A, 3, PUBLISHED)));
+        actor(IdentityRole.INSTRUCTOR);
+        course(snapshot(ACTOR, HIDDEN, null, null, null), null, null);
+        structureRows(chapters, lessons);
+        var owner = structure.readStructure(COURSE);
+        assertEquals(new CourseStructureService.StructureSnapshot(COURSE, List.of(
+                new CourseStructureService.LessonReference(L1, CHAPTER_A, 2, 3, true),
+                new CourseStructureService.LessonReference(L2, CHAPTER_A, 2, 9, false),
+                new CourseStructureService.LessonReference(L3, CHAPTER_B, 7, 1, true))), owner);
+        lessons.clear();
+        assertEquals(3, owner.lessons().size(), "the snapshot is a defensive copy");
+        assertThrows(UnsupportedOperationException.class, () -> owner.lessons().remove(0));
+
+        reset(identity, repository);
+        actor(IdentityRole.LEARNER);
+        course(snapshot(OTHER, PUBLISHED, null, null, EnrollmentStatus.ACTIVE), null, null);
+        lessons.addAll(List.of(structureLesson(L1, CHAPTER_A, 3, PUBLISHED), structureLesson(L2, CHAPTER_A, 9, HIDDEN)));
+        assertEquals(List.of(new CourseStructureService.LessonReference(L1, CHAPTER_A, 2, 3, true)),
+                structure.readStructure(COURSE).lessons(), "a Learner never receives a hidden Lesson");
+
+        reset(structureContent);
+        structureRows(List.of(), List.of());
+        assertEquals(new CourseStructureService.StructureSnapshot(COURSE, List.of()), structure.readStructure(COURSE), "empty, not missing");
+        assertThrows(NullPointerException.class, () -> new CourseStructureService.StructureSnapshot(COURSE, null));
+        assertThrows(NullPointerException.class, () -> new CourseStructureService.LessonReference(null, CHAPTER_A, 1, 1, true));
+    }
+
+    @Test void structureProjectionRefusesOtherRolesAndFailedAdmissionBeforeAnyStructureRead() {
+        var structure = structure();
+        actor(IdentityRole.ADMINISTRATOR);
+        assertThrows(AccessDeniedException.class, () -> structure.readStructure(COURSE));
+        verifyNoInteractions(repository, structureContent);
+
+        reset(identity);
+        actor(IdentityRole.INSTRUCTOR);
+        course(snapshot(OTHER, PUBLISHED, null, null, null), null, null);
+        assertThrows(AccessDeniedException.class, () -> structure.readStructure(COURSE));
+        reset(identity, repository);
+        actor(IdentityRole.LEARNER);
+        course(snapshot(OTHER, HIDDEN, null, null, EnrollmentStatus.ACTIVE), null, null);
+        assertThrows(ResourceNotFoundException.class, () -> structure.readStructure(COURSE));
+        verifyNoInteractions(structureContent);
+
+        reset(identity);
+        var denial = new AuthenticationCredentialsNotFoundException("Authentication required");
+        when(identity.requireCurrentIdentity()).thenThrow(denial);
+        assertSame(denial, assertThrows(AuthenticationCredentialsNotFoundException.class, () -> structure.readStructure(COURSE)));
+        assertThrows(IllegalArgumentException.class, () -> structure.readStructure(null));
+        verifyNoInteractions(structureContent);
+    }
+
+    @Test void structureProjectionFailsClosedOnProviderFailureOrInconsistentAncestry() {
+        var structure = structure();
+        when(identity.requireCurrentIdentity()).thenReturn(new CurrentIdentity(ACTOR, IdentityRole.INSTRUCTOR));
+        when(repository.findCourseAccessSnapshot(ACTOR, COURSE, null, null)).thenReturn(Optional.of(snapshot(ACTOR, PUBLISHED, null, null, null)));
+        UUID foreignCourse = UUID.randomUUID();
+        var ok = chapter(CHAPTER_A, COURSE, 1);
+        for (var rows : List.<List<?>>of(
+                List.of(List.of(chapter(CHAPTER_A, foreignCourse, 1)), List.of()),                       // foreign Chapter
+                List.of(List.of(ok), List.of(structureLesson(L1, CHAPTER_B, 1, PUBLISHED))),              // Lesson outside the Course
+                List.of(List.of(ok), List.of(structureLesson(L1, CHAPTER_A, 1, PUBLISHED), structureLesson(L1, CHAPTER_A, 2, HIDDEN))),
+                List.of(List.of(ok, ok), List.of()),                                                      // duplicate Chapter
+                List.of(List.of(chapter(CHAPTER_A, COURSE, 0)), List.of()),                               // impossible position
+                List.of(List.of(ok), List.of(structureLesson(L1, CHAPTER_A, 1, null))))) {
+            reset(structureContent);
+            @SuppressWarnings("unchecked") var chapters = (List<com.codemastery.modules.course.domain.model.Chapter>) rows.get(0);
+            @SuppressWarnings("unchecked") var lessons = (List<com.codemastery.modules.course.domain.model.Lesson>) rows.get(1);
+            when(structureContent.findChaptersByCourseId(COURSE)).thenReturn(chapters);
+            lenient().when(structureContent.findLessonsByCourseId(COURSE)).thenReturn(lessons);
+            assertThrows(IllegalStateException.class, () -> structure.readStructure(COURSE));
+        }
+        reset(structureContent);
+        when(structureContent.findChaptersByCourseId(COURSE)).thenReturn(null);
+        assertThrows(IllegalStateException.class, () -> structure.readStructure(COURSE));
+        reset(structureContent);
+        var failure = new DataAccessResourceFailureException("provider down");
+        when(structureContent.findChaptersByCourseId(COURSE)).thenReturn(List.of(ok));
+        when(structureContent.findLessonsByCourseId(COURSE)).thenThrow(failure);
+        assertSame(failure, assertThrows(DataAccessResourceFailureException.class, () -> structure.readStructure(COURSE)));
+    }
+
+    @Test void structureProjectionHasExactlyTheApprovedShape() throws Exception {
+        var method = CourseStructureService.class.getMethod("readStructure", UUID.class);
+        assertEquals(CourseStructureService.StructureSnapshot.class, method.getReturnType());
+        var transactional = method.getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+        assertTrue(transactional.readOnly());
+        assertEquals(org.springframework.transaction.annotation.Isolation.REPEATABLE_READ, transactional.isolation());
+        assertEquals(List.of("courseId:UUID", "lessons:List"), components(CourseStructureService.StructureSnapshot.class));
+        assertEquals(List.of("lessonId:UUID", "chapterId:UUID", "chapterPosition:int", "lessonPosition:int", "published:boolean"),
+                components(CourseStructureService.LessonReference.class));
+        assertEquals(CourseStructureService.class, CourseStructureService.LessonReference.class.getEnclosingClass());
+    }
+    private static List<String> components(Class<?> record) {
+        return Arrays.stream(record.getRecordComponents()).map(c -> c.getName() + ":" + c.getType().getSimpleName()).toList();
+    }
+
+    @Test void siblingOrderMustBeACompletePermutationOfCurrentSiblings() {
+        UUID a = UUID.randomUUID(), b = UUID.randomUUID();
+        CourseStructureService.requirePermutation(List.of(b, a), List.of(a, b));
+        CourseStructureService.requirePermutation(List.of(), List.of());
+        assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                () -> CourseStructureService.requirePermutation(List.of(a, a), List.of(a, b))).getStatus().value());
+        assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                () -> CourseStructureService.requirePermutation(List.of(a), List.of(a, b))).getStatus().value());
+        assertThrows(ResourceNotFoundException.class,
+                () -> CourseStructureService.requirePermutation(List.of(a, UUID.randomUUID()), List.of(a, b)));
+    }
+
+    @Test void authoringBodiesAreStrictJsonWithExactlyTheDeclaredFields() {
+        assertEquals(Optional.of(new com.codemastery.modules.course.api.dto.CourseRequest.OwnedCourseWrite("T", "D", null)),
+                com.codemastery.modules.course.api.dto.CourseRequest.courseWrite(
+                        "{\"title\":\"T\",\"description\":\"D\",\"prerequisiteDescription\":null}"));
+        for (String invalid : List.of("", "[]", "{\"title\":\"T\",\"description\":\"D\"}",
+                "{\"title\":\"T\",\"description\":\"D\",\"prerequisiteDescription\":null,\"instructorId\":\"x\"}",
+                "{\"title\":\"T\",\"title\":\"U\",\"description\":\"D\",\"prerequisiteDescription\":null}",
+                "{\"title\":1,\"description\":\"D\",\"prerequisiteDescription\":null}")) {
+            assertTrue(com.codemastery.modules.course.api.dto.CourseRequest.courseWrite(invalid).isEmpty(), invalid);
+        }
+        assertEquals(Optional.of(HIDDEN), com.codemastery.modules.course.api.dto.CourseRequest.publication("{\"publicationStatus\":\"hidden\"}"));
+        assertTrue(com.codemastery.modules.course.api.dto.CourseRequest.publication("{\"publicationStatus\":\"draft\"}").isEmpty());
+        UUID id = UUID.randomUUID();
+        assertEquals(Optional.of(List.of(id)), com.codemastery.modules.course.api.dto.CourseStructureRequests
+                .siblingOrder("{\"orderedIds\":[\"" + id + "\"]}"));
+        assertTrue(com.codemastery.modules.course.api.dto.CourseStructureRequests.siblingOrder("{\"orderedIds\":[\"not-a-uuid\"]}").isEmpty());
+        assertTrue(com.codemastery.modules.course.api.dto.CourseStructureRequests.lessonWrite("{\"title\":\"T\"}").isEmpty());
+    }
+
+    @Test void createdCourseIsHiddenOwnedByTheTrustedInstructorWithAdaptiveDisabled() {
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var management = new CourseManagementService(repository, service, identity, content,
+                mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class),
+                mock(org.springframework.transaction.PlatformTransactionManager.class));
+        actor(IdentityRole.INSTRUCTOR);
+        var created = management.createOwnedCourse(" Title ", "Description", null);
+        var stored = org.mockito.ArgumentCaptor.forClass(com.codemastery.modules.course.domain.model.Course.class);
+        verify(repository).insert(stored.capture());
+        assertEquals(ACTOR, stored.getValue().instructorId());
+        assertEquals("Title", stored.getValue().title());
+        assertEquals(HIDDEN, stored.getValue().publicationStatus());
+        assertFalse(stored.getValue().adaptiveEnabled());
+        assertNull(stored.getValue().adaptiveSettings());
+        assertEquals("hidden", created.publicationStatus());
+        assertEquals(List.of(), created.chapters());
+    }
+
+    @ParameterizedTest @EnumSource(value = IdentityRole.class, names = {"LEARNER", "ADMINISTRATOR"})
+    void onlyAnInstructorCreatesAndOnlyAnAdministratorHidesBeforeAnyLookupOrWrite(IdentityRole role) {
+        var management = management(mock(org.springframework.transaction.PlatformTransactionManager.class));
+        actor(role);
+        assertThrows(AccessDeniedException.class, () -> management.createOwnedCourse("T", "D", null));
+        if (role == IdentityRole.LEARNER) {
+            assertThrows(AccessDeniedException.class, () -> management.hideCourseAsAdministrator(COURSE));
+            assertThrows(AccessDeniedException.class, () -> management.hideLessonAsAdministrator(LESSON));
+            assertThrows(AccessDeniedException.class, () -> management.listCoursesForAdministration(null, null, 0, 20));
+        }
+        verifyNoInteractions(repository);
+    }
+
+    @Test void administratorListRejectsAnUnknownPublicationStatus() {
+        var management = management(mock(org.springframework.transaction.PlatformTransactionManager.class));
+        actor(IdentityRole.ADMINISTRATOR);
+        assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                () -> management.listCoursesForAdministration(null, "draft", 0, 20));
+        // PostgreSQL text cannot hold NUL: malformed input is 400, never a driver failure (500).
+        assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                () -> management.listCoursesForAdministration("a\u0000b", null, 0, 20)).getStatus().value());
+        for (String unpaired : List.of("\uD800", "a\uDC00"))
+            assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                    () -> management.listCoursesForAdministration(unpaired, null, 0, 20)).getStatus().value());
+        verifyNoInteractions(repository);
     }
 }
