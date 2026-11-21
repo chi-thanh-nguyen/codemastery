@@ -4399,7 +4399,7 @@ effects) and `integration/repository/AssessmentPersistenceIntegrationTest.java`.
 | Obligation | Covered by |
 | --- | --- |
 | Closed body: unknown, duplicate, missing or null members, wrong scalar or element types, trailing tokens, non-canonical UUIDs and non-JSON media types are 400 | `QuestionBankServiceTest$ClosedRequestBody`, `$Controller`; `AuthorizationIntegrationTest$QuestionBankEndpoints.ownerBodiesOutsideTheClosedContractAre400WithNoEffect` |
-| V004 validity: kinds, difficulties, `True`/`False` labels, key counts, nonblank text without trimming, no NUL | `QuestionBankServiceTest$Validation` |
+| V004 validity: kinds, difficulties, `True`/`False` labels, key counts, nonblank text without trimming, no NUL and no unpaired surrogate | `QuestionBankServiceTest$Validation` |
 | CT03 admission before validation, scope and writes; Learner and Administrator 403; non-owner 403 or 404; unauthenticated 401 | `$Admission`, `$Controller`; `QuestionBankEndpoints` (production security chain) |
 | PUT frozen only by an AttemptAnswer reference; DELETE refused by either reference | `$Replace`, `$Delete`; adapter references in `AssessmentPersistenceIntegrationTest.questionAdapterReplacesDeletesAndReportsQuizAndAttemptReferencesSeparately` |
 | Course-wide list: PostgreSQL UUID order, filtering before count and paging, empty pages past the end, no int overflow, one REPEATABLE READ snapshot | `$Reads`, `$UpstreamProducersAbsent`; `questionAdapterScopesPagesInPostgresUuidOrderAndCountsBeforePaging` |
@@ -4437,6 +4437,12 @@ stacked integration branch and are not part of this PR.
 | --- | --- |
 | `cd backend && ./mvnw -B test -Dtest='QuestionBankServiceTest*'` | 80 tests, 0 failures |
 | `cd backend && ./mvnw -B test -Dtest='AuthorizationIntegrationTest*,AssessmentPersistenceIntegrationTest'` | 68 + 9 PostgreSQL tests, 0 failures |
+
+A prompt or option containing an unpaired UTF-16 surrogate is 400 since 22 November 2026 (PgJDBC
+would store `?` while the response echoed the input), matching CO06's `isStorable` rule:
+`QuestionBankServiceTest$Validation` (82 tests in the class, 0 failures) and
+`AuthorizationIntegrationTest$QuestionBankEndpoints.ownerBodiesOutsideTheClosedContractAre400WithNoEffect`
+(68 PostgreSQL tests, 0 failures).
 
 These are local developer runs, not independent review, QA or CI evidence.
 
