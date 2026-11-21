@@ -5098,9 +5098,9 @@ remain unverified.
 PR #260 (Refs #157) implements the CT23.composition, CT23.publication and quiz
 CT23.bindings slices of [ADR007 §§5–7](decisions/007-batch-03-contract-approvals.md#5-ct23composition).
 Every write runs inside ADR005's Course configuration guard and resolves question scope
-through the CT40 `readSkillIds` projection. Neither producer exists yet (CO14 #177,
-AD07 #165), so both protected delegation points fail closed with a safe 500 and no
-effect. Owner and learner reads do not depend on them and run against real rows.
+through the CT40 `readSkillIds` projection. On 21 November neither producer existed (CO14 #177,
+AD07 #165) and both delegation points failed closed; both are integrated since 22 November (below).
+Owner and learner reads do not depend on them.
 
 Test placement follows [ADR008 §5](decisions/008-batch-04-contract-approvals.md#5-ct14coverage):
 unit cases in `modules/assessment/AttemptServiceTest.java` (placement confirmed by the
@@ -5115,7 +5115,7 @@ Project Leader on 21 November 2026 for this remediation) and real endpoint cases
 | `PublicationWrite` `publicationStatus` mapped to the `published` boolean; closed `B3QuizWrite` body | `AttemptServiceTest$Publication`, `$ApprovedBoundaries`, `AuthorizationIntegrationTest$QuizEndpoints` |
 | B3-O01 precedence: 401, role 403 (Learner-only list, Instructor-only authoring, no Administrator inheritance), CT03 403/404 before body 400, no-store on every outcome, no key leakage | `AuthorizationIntegrationTest$QuizEndpoints` |
 | Reads: title `COLLATE "C"` then UUID, filtering before count and paging, learner metadata only for ACTIVE/COMPLETED members of a published Course | `AuthorizationIntegrationTest$QuizEndpoints` (PostgreSQL), `AttemptServiceTest$Reads` |
-| Writes fail closed with no effect while the guard and CT40 are absent | `AttemptServiceTest$ApprovedBoundaries`, `AuthorizationIntegrationTest$QuizEndpoints` |
+| Writes delegate to the real guard and CT40 producer; a refusal or provider failure writes nothing | `AttemptServiceTest$ApprovedBoundaries`, `AuthorizationIntegrationTest$QuizEndpoints` (22 November) |
 
 Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #260
 remediation working tree, based on `main` `307e8c2`:
@@ -5136,28 +5136,52 @@ reference until commit. It used a 500 ms observation window, which the committed
 suites do not. It is evidence for the repositories only, not for the real guard or
 CT40 producer.
 
-Open gates: committed real-PostgreSQL coverage of the write paths and B3-O04 races has
-no approved placement (ADR008 §5 records it as a gap); integration with CO14 #177 and
-AD07 #165; attempt start under the same Course root (AS08); CT17 runtime grants on the
-Assessment tables for the deployed runtime role; independent review, CI and delivery.
+The open gates recorded here on 21 November (real-PostgreSQL write and race coverage, CO14 and
+AD07 integration, CT17 grants) are closed by the 22 November sections below; attempt start itself
+(AS08), independent review, CI and delivery remain.
 These are local developer runs, not independent QA, CI or deployment evidence.
 
-### CO14 guard integration — 22 November 2026
+### Producer integration, cross-module flow and runtime privileges — 22 November 2026
 
-CO14's `CourseManagementService.withCourseConfigurationWrite` is on `main` (`b506500`), so
-`QuizService.withCourseConfigurationWrite` now delegates to it. Writes that need no question scope
-(an empty draft, deleting a hidden never-attempted quiz, hiding) now commit through the Course-root
-READ COMMITTED unit; the guard's refusal precedes any quiz access. Writes that resolve question scope
-(membership, publishing) still fail closed at `QuestionSelectionService.readSkillIds` until AD07
-PR #264 is on `main`; that delegation and the integrated PostgreSQL flows are prepared on a stacked
-integration branch and are not part of this PR. Placement: the HTTP effects stay in
-`AuthorizationIntegrationTest`, beside this PR's reviewed owner-read cases.
+Under the Project Leader's instruction of 22 November 2026, with @minhtan29042006's agreement to
+Leader-assisted commits on this branch:
 
-| Command | Result |
+- **CO14.** `QuizService.withCourseConfigurationWrite` delegates to `CourseManagementService` (on
+  `main` since `b506500`).
+- **AD07.** `QuestionSelectionService.readSkillIds` delegates to `SkillGraphService` (PR #264);
+  membership and publication resolve question scope under the held Course root. No AS06 seam fails
+  closed any more.
+- **CT17.** `CT17-P6-PRIVILEGES-2026-11-22-r7` in [deployment.md](deployment.md) grants exactly the
+  AS06 SQL: `quizzes` SELECT, INSERT, DELETE and UPDATE of title, kind, time limit and publication;
+  `quiz_questions` SELECT, INSERT, DELETE; `attempts` SELECT (id, quiz_id) for the existence probe.
+  Nothing was provisioned on any real database.
+- **Placement.** Integrated HTTP effects stay in `AuthorizationIntegrationTest`; the cross-module
+  flow and the Course-root races are Assessment participation in the adaptive flow and go in
+  `AdaptiveLearningFlowIntegrationTest` (ADR008 §5). No test file was added.
+
+| Obligation | Covered by (PostgreSQL unless noted) |
 | --- | --- |
-| `cd backend && ./mvnw -B test -Dtest='AttemptServiceTest*,AuthorizationIntegrationTest*,AssessmentPersistenceIntegrationTest'` | 42 unit, 70 + 5 PostgreSQL tests, 0 failures |
+| Delegation, order inside the guard, provider failure writes nothing, publication revalidates against the current skill set | `AttemptServiceTest$ApprovedBoundaries` (unit) |
+| Ordered composition and replacement, foreign-Course question 404, publication, published freeze, the Learner's keyless list | `AuthorizationIntegrationTest$QuizEndpoints.membershipAndPublicationUseTheRealCt40ProducerAndReachTheLearner` |
+| Empty draft, delete of a hidden never-attempted quiz, idempotent hide through the root | `guardOnlyWritesCommitThroughTheCourseRootUnit` |
+| CO06 Course/Chapter/Lesson → AD07 skill and mapping → AS05 question → AS06 quiz → Learner, with refusals and the attempt freeze | `AdaptiveLearningFlowIntegrationTest.anInstructorAuthorsStructureGraphQuestionsAndAQuizThatAnEnrolledLearnerSees` |
+| Question deletion racing quiz composition (commit and rollback) | `composingAQuizWithAQuestionBeingDeletedWaitsAndRereadsTheCommittedBank` |
+| A foreign question never composes | `aQuizCannotComposeAQuestionOfAnotherCourse` |
+| Runtime role: allowed AS06 SQL, 23503 on an attempted-quiz delete, re-parenting/in-place/attempt-detail/TRUNCATE denials | `test-postgres-privilege-matrix-containment.sh` |
+| Runtime role: the seven operations over HTTP, the Learner's list, published and attempted 409s, no 42501 | `test-runtime-real-backend-privileges.sh` |
 
-These are local developer runs, not independent review, QA or CI evidence.
+| Command (macOS host, Docker Desktop) | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='QuestionBankServiceTest*,AttemptServiceTest*,AuthorizationIntegrationTest*,AdaptiveLearningFlowIntegrationTest,AssessmentPersistenceIntegrationTest'` | 85 + 44 unit and 74 + 86 + 9 PostgreSQL tests, 0 failures |
+| `cd backend && ./mvnw -B verify` (with AD07 PR #264 `f83237e` and the AS05 stack merged in) | BUILD SUCCESS; Surefire 925, Failsafe 375, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r7 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | AS06 SQL allowed; attempted-quiz delete 23503; re-parenting, in-place membership, attempt-detail and TRUNCATE 42501; containment and upgrade suites pass |
+| `docker build -t codemastery-backend:privilege-test backend`, then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` including the AS05 and AS06 sections; no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+These are local developer runs on a stack that contains AD07 PR #264 and the AS05 stack, not CI,
+independent review or QA evidence. On the deployed VM, authoring the Course, Chapters and Lessons
+themselves still needs CO06's own CT17-P6 revision; the real-backend test seeds them as the
+bootstrap administrator.
 
 ### Runtime-safe quiz writes, attempt-start races and text — 22 November 2026
 
