@@ -4718,6 +4718,82 @@ Chromium 153, WebKit 26.6 and Linux Firefox 155).**
   MUI's delay on keyboard focus. The instruction limits F-03 to the Theme tooltip and leaves the
   global delays unchanged.
 
+## PR #261 final focused remediation (N-01–N-03) — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery PR #261 —
+Final Focused Remediation (N-01, N-02, N-03)", on PR #261 (Refs #255), based on `e9383c9`. It addresses
+the three P3 findings of the independent re-review of `e9383c9`. Developer evidence only: no independent
+review approval, QA07 #63 or QA01 acceptance is claimed, and no screen-reader session was run.
+`DESIGN.md` is unchanged: its Tooltip rule ("dismissible with Escape") already states the required
+behaviour, so no normative inconsistency remained.
+
+**Findings and dispositions.**
+
+| ID | Root cause | Fix | Regression evidence |
+| --- | --- | --- | --- |
+| N-01 | The button's `onFocus` showed the tooltip at once, but MUI Tooltip's focus listener also started its delayed open (400 ms, 200 ms within its hysteresis). Escape closes the tooltip through MUI's document listener without cancelling that timer, so a tooltip dismissed within about 400 ms of keyboard focus reappeared (reproduced before the fix: Chrome, WebKit and Firefox reopened it 408–461 ms after focus; the new Vitest test failed with "reopened at 400 ms after focus") | `AppHeader.tsx`: MUI's focus-driven `onOpen` is ignored, since `onFocus` already handles keyboard focus; MUI's focus and blur listeners stay attached, so blur still closes through MUI and restarts its hysteresis (`disableFocusListener` was rejected after reading MUI 9.4.0's Tooltip: it removes the blur close too, and a manual close would skip the hysteresis reset). An Escape dismissal also persists (`escaped`) until the pointer genuinely enters again or focus leaves the button, so a hover timer cannot bring it back | Two Vitest tests: focus → Escape at 100 ms → beyond 400 ms and 1.4 s still hidden, refocus shows it; Escape holds against pointer movement inside the button, a genuine new hover or focus shows it. Playwright: Escape at 60, 150 and 300 ms stays dismissed in Chrome, WebKit and Firefox, normal and reduced motion |
+| N-02 | jsdom does not report the focus that closing the menu returns to the button as `:focus-visible` (the test comment said it did), so no CI test exercised the restored-focus suppression; the pending-hover-timer test never asserted the state after the menu closed with the pointer still resting | Test only: a scoped `Element.prototype.matches` spy simulates the browser's `:focus-visible` for the restored focus (Chrome and WebKit report it), and the test asserts the simulation took effect; Escape, Tab and Shift+Tab are each checked at once and after 1 s, then a genuine keyboard refocus shows the tooltip. The pending-timer test now asserts no tooltip right after, and 1 s after, an outside close with the pointer resting. Comments corrected | Mutation runs below |
+| N-03 | MUI Tooltip keeps its hysteresis flag in module state. A suppressed open (the hover timer firing over the open menu) sets it without arming its 800 ms reset, so the next test's hover opened after 200 ms and "not before 400 ms" failed in some random orders (reproduced on `e9383c9`: seeds 13 and 1234 failed at line 864) | Test only: every tooltip test starts with `start()`, which settles the hysteresis under the test's fake clock (a hover that opens, a leave that closes and arms the reset, then 1 s); the 400 ms assertions and the timeout are unchanged. MUI's internal `testReset` export was not used: it is not part of MUI's typed public API | Random-order runs below |
+
+**Mutation evidence (disposable worktree, `presentation.test.tsx` and `PreviewApp.test.tsx`, 111 tests).**
+Each row reintroduces a defect into the corrected code and records which tests fail.
+
+| Reintroduced defect | Result |
+| --- | --- |
+| `AppHeader.tsx` of `e9383c9` (N-01 present) | 2 fail: both N-01 tests |
+| Escape memory removed (focus-open filter kept) | 1 fails: the pointer-movement N-01 test |
+| Focus-open filter removed (Escape memory kept) | 0 fail: the Escape memory alone also blocks the reopening; both removed fail 2 |
+| Restored-focus check ignored for focus, or `restoredFocus` never set | 1 fails each: the N-02 restored-focus test (on `e9383c9` both passed all tests) |
+| Close reset and menu-open guard both removed | 1 fails: the pending-timer test (passed all tests on `e9383c9`); either guard alone is redundant with the other and changes no behaviour |
+| Close reset and open reset both removed | 4 fail |
+| AUD-01 old pattern; F-01 blur and single-flag variants; stale hover never set; immediate keyboard focus removed | 6, 1, 1, 1 and 6 fail |
+| Any focus (not only `:focus-visible`) shows the tooltip | 0 fail; covered by the browser check that a mouse press shows no tooltip |
+| Hysteresis settling removed from `start()` | 8 of 25 random seeds fail (the corrected file: 0 of 25) |
+
+**Random-order stability.** `npx vitest run src/shared/components/presentation.test.tsx --sequence.shuffle
+--sequence.seed=<n>` for 25 seeds: 0 failures (before the fix the same file failed for seeds 13 and 1234).
+The two tooltip-related files together, five seeds: 111 of 111 each. The file ten times in default order:
+73 of 73 each. Three full-suite shuffled runs: seeds 5 and 2026 passed 673 of 673; seed 77 failed one test
+in `routes/index.test.tsx` ("direct entry /", `ResizeObserver is not defined`). Run alone with the same seed on
+`e9383c9`, that file also fails (2 tests); this remediation does not touch it, and it is recorded
+here as a pre-existing order dependence outside this instruction's scope.
+
+**Playwright CLI and library (production build of `750aaab` on a review-only stack with a real backend).**
+
+- Chrome 157 and WebKit 27.2 (Playwright CLI), Firefox 155 (Playwright in
+  `mcr.microsoft.com/playwright:v1.63.0-noble`): the 25-scenario tooltip matrix passed in each. It covers hover
+  after the delay; menu open and close by click, Escape, Tab, Shift+Tab, outside click, a second press and 11
+  rapid presses; stale hover; restored focus; keyboard refocus under a resting pointer; choices; scheme
+  switching with the menu open; route changes; Escape within and after the delay; Escape on a hover tooltip
+  followed by pointer movement and re-entry; Escape followed by keyboard refocus; and rapid Tab/Shift+Tab. Two
+  early Chrome runs aborted after a first hover that showed no tooltip within 1.5 s and a press that did not open
+  the menu (the first ran concurrently with the harness). Four later fresh-session Chrome runs passed all 25
+  scenarios, and the cause was not identified.
+- Escape at 60, 150 and 300 ms after keyboard focus, normal and reduced motion: hidden after Escape and not
+  visible again in the following 1.2 s in all three browsers (before the fix it reappeared 408–461 ms after focus).
+- AUD-01 with a real refresh cookie: `/preview`, `/PREVIEW`, `/pre%76iew`, `/%70review`, `/preview/` and
+  `/Preview/` rendered the preview with 0 refresh requests through other tabs' sign-out and sign-in, wake-ups, a
+  preview-local theme change and SPA navigation; `/courses`, `/preview/extra` and `/previewish` restored once.
+  Chrome, WebKit and Firefox.
+
+**Commands and results (`750aaab`).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 673 tests in 16 files (670 + 3) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed; WebKit 26.6: 67 passed, 0 not exercised (the host was in Light mode, so the "no preference" first-paint row ran: 7 of 7) |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed |
+
+**Limits.**
+
+- No screen-reader session.
+- Touch long-press tooltips were not verified.
+- `firefox-desktop` E2E was not run on macOS, where the pinned Firefox still does not launch; CI runs it.
+- The remaining redundancy is deliberate: the focus-open filter and the Escape memory each block the N-01
+  reopening, and the menu-open guard and the reset on close each block a pending hover timer. CI guards
+  both pairs together, not each defence alone.
+
 ## AS04 quiz grading unit verification — 20 November 2026
 
 Implementation of AS04 ([#32](https://github.com/chi-thanh-nguyen/codemastery/issues/32),

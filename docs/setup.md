@@ -619,7 +619,10 @@ files only:
   resting on the button until the pointer enters again, and for the focus returned to the
   button until focus leaves it, so a later Tab back to the button shows it at once. The
   menu state is read from a ref, so a hover timer started before the menu opened cannot
-  show it over the menu. The menu's popup container carries
+  show it over the menu. Escape dismisses the tooltip until the pointer genuinely enters
+  again or focus leaves the button; MUI Tooltip's own delayed focus open is ignored,
+  because the button's `onFocus` already handles keyboard focus, so no pending timer
+  reopens a dismissed tooltip (N-01). The menu's popup container carries
   no `tooltip` role. Menu items (all menus) hover and focus on `bg.raisedHover`; only the
   selected item uses `bg.selected`.
 - Glyphs in buttons and in `StatusPill` (pills, mastery, recommendation and other tags)
