@@ -1646,6 +1646,72 @@ grants on any shared or production database (Flyway applies V009 when any build
 containing it starts, so that execution must be authorized before deploying such a
 build; Leader-reserved). This revision executes no provisioning on any real database.
 
+### CT17-P6-PRIVILEGES-2026-11-22-r5 — AD07 skill graph (within the ADR012 §19.2 ceiling, 22 November 2026)
+
+Prepared for AD07 ([#165](https://github.com/chi-thanh-nguyen/codemastery/issues/165),
+[PR #264](https://github.com/chi-thanh-nguyen/codemastery/pull/264)) under the Project
+Leader's explicit instruction of 22 November 2026 to complete AD07 together with the
+minimum runtime privileges it needs, inside the approved ceiling and with a dated record,
+privilege tests and CI evidence. It follows the extension procedure above and stays inside
+the DELEGATED_APPROVED `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)):
+the implemented consumer (`SkillGraphService`, `SkillRepositoryImpl` and its three JPA
+repositories), `RUNTIME_PRIVILEGE_MATRIX` and the CI tests change together, and every
+privilege below is exercised by that consumer's SQL. No migration is involved: the three
+relations exist since V003. No approval beyond that ceiling is claimed; this is not
+personal Leader review.
+
+The r1–r4 records above are unchanged history. The effective matrix is r1 plus r2, r3 and
+r4, with the three rows below replacing the named relations; no other privilege, role
+elevation or change is introduced. Each row equals its ceiling row.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `skills` (adaptive) | SELECT, INSERT, DELETE; UPDATE (name, description) | graph read and CT40 lookups; create; replace name/description; delete of an unreferenced skill | r5 within ceiling (CT05-MUTATION-2026-11-08-r1, CT05-BINDINGS-2026-11-08-r1, CT40-SKILL-TAG-2026-11-08-r1) |
+| `skill_prerequisites` (adaptive) | SELECT, INSERT, DELETE | graph read; add and remove an edge | r5 within ceiling (CT05-MUTATION-2026-11-08-r1) |
+| `lesson_skills` (adaptive) | SELECT, INSERT, DELETE | graph read; map and unmap a Lesson | r5 within ceiling (CT05-MAPPING-2026-11-08-r1) |
+
+Least privilege exercised by the consumer:
+
+| Operation | SQL | Privilege |
+| --- | --- | --- |
+| Every graph write locks the Course root first (CO14 guard) | `SELECT id FROM courses WHERE id = ? FOR UPDATE` | existing r1 SELECT and UPDATE (id); no new grant |
+| Owner ownership and Lesson ancestry (CT03) | `SELECT` over `courses`, `chapters`, `lessons` | existing r1 SELECT |
+| Graph read and CT40 lookups | `SELECT … FROM skills / skill_prerequisites / lesson_skills WHERE …` | SELECT |
+| Create skill, add edge, map Lesson | `INSERT INTO skills / skill_prerequisites / lesson_skills …` (Hibernate merges an assigned ID with a SELECT first) | SELECT, INSERT |
+| Replace a skill | `UPDATE skills SET name = ?, description = ? WHERE course_id = ? AND id = ?` | UPDATE (name, description); SELECT for the predicate |
+| Delete skill, remove edge, unmap | `DELETE FROM skills / skill_prerequisites / lesson_skills WHERE …` | DELETE, SELECT |
+| Referenced skill delete | the V004/V005 `NO ACTION` foreign keys from `questions` and `learner_skill_masteries` refuse it with SQLSTATE 23503, translated to 409 | none: PostgreSQL runs referential checks with the table owner's rights |
+
+The runtime role still cannot do any of the following:
+
+- move a skill to another Course, or rewrite an edge or a mapping in place (no UPDATE on
+  `course_id`, `skill_prerequisites` or `lesson_skills`);
+- read or write `questions`, `quizzes`, `quiz_questions` or `learner_skill_masteries`;
+- truncate any of the three tables.
+
+A compromised runtime role could create, rename or delete skills, edges and mappings of
+any Course, which the approved CT05 commands inherently require; Course scoping, the
+cycle rule and Lesson ancestry stay application invariants. Referential integrity still
+refuses a mapping to a missing Lesson and the deletion of a skill that a Question,
+mastery row, edge or mapping references.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009),
+  with `verify_role_separation` probing the three in-place UPDATE denials;
+- `test-deploy-privilege-matrix-contract.sh`, which pins r1 history and the r2, r3, r4 and
+  r5 rows against the script;
+- `test-postgres-privilege-matrix-containment.sh`: the AD07 graph SQL, the referenced-delete
+  refusal (23503) and the in-place UPDATE and TRUNCATE denials on the real schema;
+- `test-runtime-real-backend-privileges.sh`: the eight AD07 operations over HTTP under the
+  runtime role, including the referenced-delete 409.
+
+Remaining gates: owning-module (Adaptive @thanhtran0311), `@tihh647-ui` infrastructure and
+independent Leader CODEOWNER review; protected integration; these grants on any shared or
+production database (Leader-reserved). This revision executes no provisioning on any real
+database.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4187,7 +4253,8 @@ to r1): a per-relation **ceiling**
 for the runtime-role grants that later consumers may request. It is not a matrix
 revision. The effective matrix stays r1 plus r2 (and, since 16 November 2026, the
 ADR014 r3 rows for two new V008 relations outside this ceiling; since 17 November 2026,
-the CO08 r4 rows for `enrollments` and `lesson_progress` inside it), and the extension procedure above
+the CO08 r4 rows for `enrollments` and `lesson_progress` inside it; since 22 November 2026, the
+AD07 r5 rows for `skills`, `skill_prerequisites` and `lesson_skills` inside it), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.
