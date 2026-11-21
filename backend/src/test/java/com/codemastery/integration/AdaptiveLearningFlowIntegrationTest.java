@@ -872,7 +872,7 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         assertProblem(call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/skill-graph?page=1", null), owner), 400, null);
         assertProblem(call(new Operation(HttpMethod.PUT, skills + "/" + UUID.randomUUID() + "/prerequisites/x", null), owner), 400, null);
         for (String body : List.of("{}", "{\"name\":null}", "{\"name\":\"  \"}", "{\"name\":\"\\u2003\"}", "{\"name\":\"\\u0000\"}",
-                "{\"name\":5}", "{\"name\":\"A\",\"description\":\"\"}", "{\"name\":\"A\",\"description\":\" \\t\"}",
+                "{\"name\":5}", "{\"name\":\"A\",\"description\":\"\"}", "{\"name\":\"A\",\"description\":\" \\t\"}", "{\"name\":\"A\",\"description\":\"\\u2003\"}",
                 "{\"name\":\"A\",\"description\":7}", "{\"name\":\"A\",\"courseId\":\"" + SECOND + "\"}",
                 "{\"name\":\"A\",\"id\":\"" + UUID.randomUUID() + "\"}", "[]", "null", "\"A\"", "{\"name\":\"A\"", "",
                 "{\"name\":\"A\"} {\"name\":\"B\"}", "{\"name\":\"A\"}x", "{\"name\":[\"A\"]}", "{\"name\":{\"text\":\"A\"}}")) {
