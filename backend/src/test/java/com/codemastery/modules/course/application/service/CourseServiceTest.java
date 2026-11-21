@@ -432,4 +432,117 @@ class CourseServiceTest {
                 publication, true, java.util.Map.of("private", "settings"));
     }
 
+    // CO14 CourseManagementService: local orchestration only. Real transactions, locks, isolation
+    // and PostgreSQL behavior are verified in integration/AdaptiveLearningFlowIntegrationTest.
+
+    private CourseManagementService management(org.springframework.transaction.PlatformTransactionManager transactions) {
+        return new CourseManagementService(repository, service, transactions);
+    }
+
+    @Test void managementGuardsRejectNullInputsBeforeAnyTransactionOrLookup() {
+        var transactions = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        var management = management(transactions);
+        assertThrows(IllegalArgumentException.class, () -> management.withCourseConfigurationWrite(null, () -> 1));
+        assertThrows(IllegalArgumentException.class, () -> management.withCourseConfigurationWrite(COURSE, null));
+        assertThrows(IllegalArgumentException.class, () -> management.tryWithCourseConfigurationWrite(null, () -> 1));
+        assertThrows(IllegalArgumentException.class, () -> management.tryWithCourseConfigurationWrite(COURSE, null));
+        assertThrows(IllegalArgumentException.class, () -> management.readAdaptiveConfiguration(null));
+        verifyNoInteractions(transactions, repository, identity);
+    }
+
+    @Test void guardRefusesAnUnsynchronizedTransactionBeforeOwnershipOrLockingAndRollsItBack() {
+        var transactions = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        var status = new org.springframework.transaction.support.SimpleTransactionStatus(true);
+        when(transactions.getTransaction(any())).thenReturn(status);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        assertThrows(IllegalStateException.class, () -> management(transactions).withCourseConfigurationWrite(COURSE, calls::incrementAndGet));
+        var definition = org.mockito.ArgumentCaptor.forClass(org.springframework.transaction.TransactionDefinition.class);
+        verify(transactions).getTransaction(definition.capture());
+        assertEquals(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED, definition.getValue().getIsolationLevel());
+        assertEquals(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRED, definition.getValue().getPropagationBehavior());
+        assertFalse(definition.getValue().isReadOnly());
+        verify(transactions).rollback(status);
+        assertEquals(0, calls.get());
+        verifyNoInteractions(repository, identity);
+    }
+
+    @Test void readAdmitsTheOwnerBeforeReadingStoredFieldsInARepeatableReadSnapshot() {
+        var transactions = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(transactions.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus(true));
+        actor(IdentityRole.INSTRUCTOR);
+        course(snapshot(ACTOR, HIDDEN, null, null, null), null, null);
+        var stored = new java.util.HashMap<String, Object>();
+        stored.put("policy", new java.util.ArrayList<>(List.of(1, 2)));
+        when(repository.findAdaptiveConfiguration(COURSE))
+                .thenReturn(Optional.of(new CourseRepository.StoredAdaptiveConfiguration(COURSE, true, stored)));
+        var result = management(transactions).readAdaptiveConfiguration(COURSE);
+        assertEquals(new CourseManagementService.AdaptiveConfiguration(COURSE, true, java.util.Map.of("policy", List.of(1, 2))), result);
+        var order = inOrder(repository);
+        order.verify(repository).findCourseAccessSnapshot(ACTOR, COURSE, null, null);
+        order.verify(repository).findAdaptiveConfiguration(COURSE);
+        var definition = org.mockito.ArgumentCaptor.forClass(org.springframework.transaction.TransactionDefinition.class);
+        verify(transactions).getTransaction(definition.capture());
+        assertTrue(definition.getValue().isReadOnly());
+        assertEquals(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ, definition.getValue().getIsolationLevel());
+    }
+
+    @Test void readFailsClosedForEnabledIntentWithoutSettingsAndForNonOwners() {
+        var transactions = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(transactions.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus(true));
+        actor(IdentityRole.INSTRUCTOR);
+        course(snapshot(ACTOR, PUBLISHED, null, null, null), null, null);
+        when(repository.findAdaptiveConfiguration(COURSE))
+                .thenReturn(Optional.of(new CourseRepository.StoredAdaptiveConfiguration(COURSE, true, null)));
+        assertThrows(IllegalStateException.class, () -> management(transactions).readAdaptiveConfiguration(COURSE));
+
+        reset(repository);
+        course(snapshot(OTHER, PUBLISHED, null, null, null), null, null);
+        assertThrows(AccessDeniedException.class, () -> management(transactions).readAdaptiveConfiguration(COURSE));
+        verify(repository, never()).findAdaptiveConfiguration(any());
+    }
+
+    @Test void settingsWritesValidateTheirShapeAndRequireTheHeldGuardBeforeTouchingStorage() {
+        var transactions = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        var management = management(transactions);
+        var current = new CourseManagementService.AdaptiveConfiguration(COURSE, false, null);
+        assertThrows(IllegalArgumentException.class, () -> management.writeAdaptiveConfiguration(null, current, false, null));
+        assertThrows(IllegalArgumentException.class, () -> management.writeAdaptiveConfiguration(COURSE, null, false, null));
+        assertThrows(IllegalArgumentException.class, () -> management.writeAdaptiveConfiguration(COURSE,
+                new CourseManagementService.AdaptiveConfiguration(OTHER, false, null), false, null));
+        assertThrows(IllegalArgumentException.class, () -> management.writeAdaptiveConfiguration(COURSE, current, true, null));
+        assertThrows(IllegalArgumentException.class, () -> management.writeAdaptiveConfiguration(COURSE, current, false,
+                java.util.Map.of("value", Double.NaN)));
+        assertThrows(IllegalStateException.class, () -> management.writeAdaptiveConfiguration(COURSE, current, false,
+                java.util.Map.of("value", 1)));
+        verifyNoInteractions(transactions, repository, identity);
+    }
+
+    @Test void adaptiveConfigurationSnapshotsAreDeeplyImmutableJsonCopies() {
+        var nested = new java.util.ArrayList<Object>(List.of("a"));
+        var settings = new java.util.HashMap<String, Object>();
+        settings.put("list", nested);
+        settings.put("nothing", null);
+        var snapshot = new CourseManagementService.AdaptiveConfiguration(COURSE, true, settings);
+        nested.add("mutated later");
+        settings.put("added", true);
+        assertEquals(List.of("a"), snapshot.adaptiveSettings().get("list"));
+        assertEquals(2, snapshot.adaptiveSettings().size());
+        assertTrue(snapshot.adaptiveSettings().containsKey("nothing"));
+        assertThrows(UnsupportedOperationException.class, () -> snapshot.adaptiveSettings().put("x", 1));
+        assertThrows(UnsupportedOperationException.class, () -> ((List<?>) snapshot.adaptiveSettings().get("list")).clear());
+        assertThrows(IllegalArgumentException.class, () -> new CourseManagementService.AdaptiveConfiguration(COURSE, true, null));
+        assertThrows(IllegalArgumentException.class, () -> new CourseManagementService.AdaptiveConfiguration(null, false, null));
+        assertThrows(IllegalArgumentException.class, () -> new CourseManagementService.AdaptiveConfiguration(COURSE, false,
+                java.util.Map.of("bad", new StringBuilder("mutable"))));
+        assertThrows(IllegalArgumentException.class, () -> new CourseManagementService.AdaptiveConfiguration(COURSE, false,
+                java.util.Map.of("bad", Float.POSITIVE_INFINITY)));
+        assertNull(new CourseManagementService.AdaptiveConfiguration(COURSE, false, null).adaptiveSettings());
+    }
+
+    @Test void configurationBusyCarriesNoDiagnosticState() {
+        var busy = new CourseManagementService.ConfigurationBusy();
+        assertEquals("Course configuration is busy", busy.getMessage());
+        assertNull(busy.getCause());
+        assertEquals(0, busy.getStackTrace().length);
+    }
 }

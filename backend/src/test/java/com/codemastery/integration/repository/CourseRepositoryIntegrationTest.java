@@ -26,6 +26,7 @@ import org.flywaydb.core.api.MigrationInfo;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -472,6 +473,282 @@ class CourseRepositoryIntegrationTest extends AbstractIntegrationTest {
         // 9. Referential integrity ON DELETE NO ACTION: Deleting a Course that still has Chapters must fail
         assertConstraintViolation(() ->
                 jdbcTemplate.update("DELETE FROM public.courses WHERE id = ?", courseId));
+    }
+
+    // CO03.content (CT21.authoring, ADR005 §3.1 structure, CT09 rows) and CO14 storage, on PostgreSQL.
+
+    @Test
+    void ownerCourseRowsRoundTripAcrossPublicationStatesInFixedOwnerOrder() {
+        UUID owner = instructor();
+        UUID other = instructor();
+        UUID sameLow = UUID.fromString("00000000-0000-4000-8000-0000000000a1");
+        UUID sameHigh = UUID.fromString("00000000-0000-4000-8000-0000000000a2");
+        UUID alphaUpper = UUID.randomUUID();
+        UUID alphaLower = UUID.randomUUID();
+        UUID beta = UUID.randomUUID();
+        Map<String, Object> settings = Map.of("opaque", List.of(1, 2));
+        courseRepository.insert(new Course(beta, owner, "beta", "Draft", null, PublishStatus.HIDDEN, false, null));
+        courseRepository.insert(new Course(sameHigh, owner, "Same", "Second", "Needs basics", PublishStatus.PUBLISHED, false, null));
+        courseRepository.insert(new Course(alphaLower, owner, "alpha", "Lower", null, PublishStatus.HIDDEN, false, settings));
+        courseRepository.insert(new Course(sameLow, owner, "Same", "First", null, PublishStatus.HIDDEN, false, null));
+        courseRepository.insert(new Course(alphaUpper, owner, "Alpha", "Upper", null, PublishStatus.PUBLISHED, false, null));
+        courseRepository.insert(new Course(UUID.randomUUID(), other, "Another owner", "Foreign", null, PublishStatus.PUBLISHED, false, null));
+
+        Course draft = courseRepository.findById(alphaLower).orElseThrow();
+        assertEquals(new Course(alphaLower, owner, "alpha", "Lower", null, PublishStatus.HIDDEN, false, settings), draft);
+        assertThrows(UnsupportedOperationException.class, () -> draft.adaptiveSettings().put("x", 1));
+        assertEquals(Optional.empty(), courseRepository.findById(UUID.randomUUID()));
+
+        Page<Course> first = courseRepository.findByInstructorId(owner, PageRequest.of(0, 10, Sort.by("id").descending()));
+        assertEquals(List.of(alphaUpper, sameLow, sameHigh, alphaLower, beta), first.map(Course::id).getContent());
+        assertEquals(5, first.getTotalElements());
+        Page<Course> second = courseRepository.findByInstructorId(owner, PageRequest.of(1, 2));
+        assertEquals(List.of(sameHigh, alphaLower), second.map(Course::id).getContent());
+        assertEquals(3, second.getTotalPages());
+
+        assertEquals("Same", courseRepository.findPublishedById(sameHigh).orElseThrow().title());
+        courseRepository.updateMetadata(sameHigh, "Renamed", "Second", "Needs basics");
+        assertEquals("Renamed", courseRepository.findPublishedById(sameHigh).orElseThrow().title(),
+                "a managed Course read earlier in the transaction must not hide the direct write");
+        courseRepository.updatePublicationStatus(sameHigh, PublishStatus.HIDDEN);
+        assertEquals(Optional.empty(), courseRepository.findPublishedById(sameHigh));
+        courseRepository.updateMetadata(beta, "Beta", "Edited", "Variables");
+        courseRepository.updatePublicationStatus(beta, PublishStatus.PUBLISHED);
+        assertEquals(new Course(beta, owner, "Beta", "Edited", "Variables", PublishStatus.PUBLISHED, false, null),
+                courseRepository.findById(beta).orElseThrow());
+        assertThrows(InvalidDataAccessApiUsageException.class, () -> courseRepository.updateMetadata(UUID.randomUUID(), "T", "D", null));
+        assertThrows(InvalidDataAccessApiUsageException.class,
+                () -> courseRepository.updatePublicationStatus(UUID.randomUUID(), PublishStatus.HIDDEN));
+        assertConstraintViolation(() -> courseRepository.updateMetadata(beta, "   ", "Edited", null));
+        assertConstraintViolation(() -> courseRepository.insert(
+                new Course(UUID.randomUUID(), owner, "Enabled", "No policy", null, PublishStatus.HIDDEN, true, null)));
+    }
+
+    @Test
+    void contentReadsIncludeHiddenDraftsInCanonicalOrderAndStayScopedToTheirCourse() {
+        UUID owner = instructor();
+        UUID course = course(owner);
+        UUID foreignCourse = course(owner);
+        UUID chapterOne = chapter(course, 1);
+        UUID chapterTwo = chapter(course, 2);
+        UUID foreignChapter = chapter(foreignCourse, 1);
+        UUID secondHidden = lesson(chapterOne, 2, "hidden");
+        UUID firstPublished = lesson(chapterOne, 1, "published");
+        UUID laterHidden = lesson(chapterTwo, 1, "hidden");
+        UUID foreignLesson = lesson(foreignChapter, 1, "published");
+
+        assertEquals(List.of(firstPublished, secondHidden, laterHidden),
+                courseContentRepository.findLessonsByCourseId(course).stream().map(Lesson::id).toList());
+        assertEquals(List.of(firstPublished),
+                courseContentRepository.findPublishedLessonsByCourseId(course).stream().map(Lesson::id).toList());
+        assertEquals(new Chapter(chapterTwo, course, "Chapter 2", 2), courseContentRepository.findChapter(course, chapterTwo).orElseThrow());
+        assertEquals(Optional.empty(), courseContentRepository.findChapter(foreignCourse, chapterTwo));
+        assertEquals(new Lesson(secondHidden, chapterOne, "Lesson 2", "# Lesson 2\n\n    indented", 2, PublishStatus.HIDDEN),
+                courseContentRepository.findLesson(course, secondHidden).orElseThrow());
+        assertEquals(Optional.empty(), courseContentRepository.findLesson(course, foreignLesson));
+        assertEquals(List.of(), courseContentRepository.findLessonsByCourseId(UUID.randomUUID()));
+    }
+
+    @Test
+    void appendsUseTheNextSiblingPositionAndRefuseUnrepresentablePositions() {
+        UUID course = course(instructor());
+        UUID first = UUID.randomUUID();
+        assertEquals(Optional.of(new Chapter(first, course, "First", 1)), courseContentRepository.appendChapter(course, first, "First"));
+        jdbcTemplate.update("UPDATE public.chapters SET position = 10 WHERE id = ?", first);
+        UUID next = UUID.randomUUID();
+        assertEquals(11, courseContentRepository.appendChapter(course, next, "Next").orElseThrow().position());
+
+        UUID lesson = UUID.randomUUID();
+        assertEquals(Optional.of(new Lesson(lesson, next, "Draft", null, 1, PublishStatus.HIDDEN)),
+                courseContentRepository.appendLesson(next, lesson, "Draft", null, PublishStatus.HIDDEN));
+        assertEquals(new Lesson(lesson, next, "Draft", null, 1, PublishStatus.HIDDEN),
+                courseContentRepository.findLesson(course, lesson).orElseThrow());
+
+        jdbcTemplate.update("UPDATE public.chapters SET position = 2147483647 WHERE id = ?", next);
+        jdbcTemplate.update("UPDATE public.lessons SET position = 2147483647 WHERE id = ?", lesson);
+        assertEquals(Optional.empty(), courseContentRepository.appendChapter(course, UUID.randomUUID(), "Overflow"));
+        assertEquals(Optional.empty(), courseContentRepository.appendLesson(next, UUID.randomUUID(), "Overflow", null, PublishStatus.HIDDEN));
+        assertEquals(2, jdbcTemplate.queryForObject("SELECT count(*) FROM public.chapters WHERE course_id = ?", Integer.class, course));
+        assertEquals(1, jdbcTemplate.queryForObject("SELECT count(*) FROM public.lessons WHERE chapter_id = ?", Integer.class, next));
+        assertConstraintViolation(() -> courseContentRepository.appendChapter(UUID.randomUUID(), UUID.randomUUID(), "No course"));
+    }
+
+    @Test
+    void reorderingAssignsContiguousPositionsAtomicallyAndRestoresImmediateUniqueness() {
+        UUID course = course(instructor());
+        UUID a = chapter(course, 5);
+        UUID b = chapter(course, 7);
+        UUID c = chapter(course, 9);
+        courseContentRepository.reorderChapters(course, List.of(c, a, b));
+        assertEquals(List.of(new Chapter(c, course, "Chapter 9", 1), new Chapter(a, course, "Chapter 5", 2),
+                new Chapter(b, course, "Chapter 7", 3)), courseContentRepository.findChaptersByCourseId(course));
+        courseContentRepository.reorderChapters(course, List.of(a, b, c));
+        // The first read left managed entities behind; a later read must still see the new positions.
+        assertEquals(List.of(new Chapter(a, course, "Chapter 5", 1), new Chapter(b, course, "Chapter 7", 2),
+                new Chapter(c, course, "Chapter 9", 3)), courseContentRepository.findChaptersByCourseId(course));
+        courseContentRepository.updateChapterTitle(course, a, "Renamed after a managed read");
+        assertEquals("Renamed after a managed read", courseContentRepository.findChaptersByCourseId(course).getFirst().title());
+        // Uniqueness is immediate again once the reorder returns.
+        assertConstraintViolation(() -> jdbcTemplate.update("UPDATE public.chapters SET position = 2 WHERE id = ?", a));
+
+        UUID foreign = chapter(course(instructor()), 1);
+        for (List<UUID> invalid : List.of(List.of(a, b), List.of(a, b, b), List.of(a, b, foreign), Arrays.asList(a, b, null))) {
+            assertThrows(InvalidDataAccessApiUsageException.class, () -> courseContentRepository.reorderChapters(course, invalid));
+        }
+        assertEquals(List.of(1, 2, 3), courseContentRepository.findChaptersByCourseId(course).stream().map(Chapter::position).toList());
+
+        UUID first = lesson(a, 1, "published");
+        UUID second = lesson(a, 2, "published");
+        assertEquals(List.of(1, 2), courseContentRepository.findPublishedLessonsByCourseId(course).stream().map(Lesson::position).toList());
+        courseContentRepository.reorderLessons(a, List.of(second, first));
+        assertEquals(List.of(new Lesson(second, a, "Lesson 2", "# Lesson 2\n\n    indented", 1, PublishStatus.PUBLISHED),
+                new Lesson(first, a, "Lesson 1", "# Lesson 1\n\n    indented", 2, PublishStatus.PUBLISHED)),
+                courseContentRepository.findPublishedLessonsByCourseId(course));
+        courseContentRepository.updateLesson(a, first, "Edited", null);
+        courseContentRepository.updateLessonPublicationStatus(a, second, PublishStatus.HIDDEN);
+        assertEquals(List.of(new Lesson(first, a, "Edited", null, 2, PublishStatus.PUBLISHED)),
+                courseContentRepository.findPublishedLessonsByCourseId(course));
+        assertEquals(List.of(second, first), courseContentRepository.findLessonsByCourseId(course).stream().map(Lesson::id).toList());
+        assertThrows(InvalidDataAccessApiUsageException.class, () -> courseContentRepository.reorderLessons(a, List.of(first)));
+    }
+
+    @Test
+    void materialsKeepExclusivePayloadsVisibilityAndAnImmutableTypeAndLesson() {
+        UUID course = course(instructor());
+        UUID chapter = chapter(course, 1);
+        UUID lesson = lesson(chapter, 1, "published");
+        UUID laterLesson = lesson(chapter, 2, "published");
+        UUID textId = UUID.fromString("00000000-0000-4000-8000-0000000000c3");
+        UUID videoId = UUID.fromString("00000000-0000-4000-8000-0000000000c1");
+        UUID fileId = UUID.fromString("00000000-0000-4000-8000-0000000000c2");
+        UUID laterId = UUID.fromString("00000000-0000-4000-8000-0000000000b0");
+        LearningMaterial text = new LearningMaterial(textId, lesson, "Notes", MaterialType.TEXT, PublishStatus.PUBLISHED,
+                "  indented\ntext", null, null, null);
+        LearningMaterial video = new LearningMaterial(videoId, lesson, "Video", MaterialType.EXTERNAL_VIDEO, PublishStatus.HIDDEN,
+                null, null, null, "https://video.example.test/watch?v=1");
+        LearningMaterial file = new LearningMaterial(fileId, lesson, "Slides", MaterialType.FILE, PublishStatus.PUBLISHED,
+                null, "courses/key.pdf", "slides.pdf", null);
+        LearningMaterial later = new LearningMaterial(laterId, laterLesson, "Later", MaterialType.TEXT, PublishStatus.PUBLISHED,
+                "Later", null, null, null);
+        for (LearningMaterial material : List.of(text, video, file, later)) {
+            courseContentRepository.insertMaterial(material);
+        }
+
+        assertEquals(List.of(video, file, text, later), courseContentRepository.findMaterialsByCourseId(course));
+        assertEquals(List.of(file, text), courseContentRepository.findPublishedMaterialsByLessonId(lesson));
+        assertEquals(Optional.of(video), courseContentRepository.findMaterial(lesson, videoId));
+        assertEquals(Optional.empty(), courseContentRepository.findMaterial(laterLesson, videoId));
+
+        LearningMaterial edited = new LearningMaterial(textId, lesson, "Edited notes", MaterialType.TEXT, PublishStatus.PUBLISHED,
+                "Replaced", null, null, null);
+        courseContentRepository.replaceMaterialContent(edited);
+        assertEquals(Optional.of(edited), courseContentRepository.findMaterial(lesson, textId));
+        assertThrows(InvalidDataAccessApiUsageException.class, () -> courseContentRepository.replaceMaterialContent(new LearningMaterial(
+                textId, lesson, "Type change", MaterialType.EXTERNAL_VIDEO, PublishStatus.PUBLISHED, null, null, null, "https://x.test")));
+        assertThrows(InvalidDataAccessApiUsageException.class, () -> courseContentRepository.replaceMaterialContent(new LearningMaterial(
+                textId, laterLesson, "Move", MaterialType.TEXT, PublishStatus.PUBLISHED, "Moved", null, null, null)));
+        assertEquals(Optional.of(edited), courseContentRepository.findMaterial(lesson, textId));
+
+        courseContentRepository.updateMaterialPublicationStatus(lesson, videoId, PublishStatus.PUBLISHED);
+        assertEquals(List.of(videoId, fileId, textId),
+                courseContentRepository.findPublishedMaterialsByLessonId(lesson).stream().map(LearningMaterial::id).toList());
+        assertThrows(InvalidDataAccessApiUsageException.class,
+                () -> courseContentRepository.updateMaterialPublicationStatus(laterLesson, videoId, PublishStatus.HIDDEN));
+        assertConstraintViolation(() -> courseContentRepository.insertMaterial(new LearningMaterial(UUID.randomUUID(), lesson,
+                "Mixed", MaterialType.TEXT, PublishStatus.HIDDEN, "Text", null, null, "https://mixed.example.test")));
+        assertConstraintViolation(() -> courseContentRepository.replaceMaterialContent(new LearningMaterial(
+                fileId, lesson, "Lost key", MaterialType.FILE, PublishStatus.PUBLISHED, null, null, "slides.pdf", null)));
+
+        courseContentRepository.updateLesson(chapter, lesson, "Renamed", null);
+        courseContentRepository.updateLessonPublicationStatus(chapter, lesson, PublishStatus.HIDDEN);
+        courseContentRepository.updateChapterTitle(course, chapter, "Renamed chapter");
+        assertEquals(new Lesson(lesson, chapter, "Renamed", null, 1, PublishStatus.HIDDEN),
+                courseContentRepository.findLesson(course, lesson).orElseThrow());
+        assertEquals("Renamed chapter", courseContentRepository.findChapter(course, chapter).orElseThrow().title());
+        assertThrows(InvalidDataAccessApiUsageException.class, () -> courseContentRepository.updateChapterTitle(UUID.randomUUID(), chapter, "X"));
+        assertThrows(InvalidDataAccessApiUsageException.class, () -> courseContentRepository.updateLesson(UUID.randomUUID(), lesson, "X", null));
+    }
+
+    @Test
+    void adaptiveFieldsAreReadFreshAndReplacedOnlyOnAStructuralMatchUnderTheRootLock() {
+        UUID course = course(instructor());
+        jdbcTemplate.update("UPDATE public.courses SET adaptive_settings = CAST(? AS jsonb) WHERE id = ?",
+                "{\"b\": {\"y\": [1, 2.0]},   \"a\": \"text\"}", course);
+        assertEquals("read committed", courseRepository.currentTransactionFacts().isolation());
+        assertTrue(courseRepository.currentTransactionFacts().writeIdentityAssigned());
+        assertFalse(courseRepository.currentTransactionFacts().readOnly());
+        assertTrue(courseRepository.lockCourseRoot(course));
+        assertTrue(courseRepository.lockCourseRootNoWait(course));
+        assertFalse(courseRepository.lockCourseRoot(UUID.randomUUID()));
+        assertFalse(courseRepository.lockCourseRootNoWait(UUID.randomUUID()));
+        assertNull(courseRepository.currentTransactionFacts().heldCourseRoot());
+        jdbcTemplate.execute("SAVEPOINT before_marker");
+        courseRepository.markCourseRootHeld(course);
+        assertEquals(course, courseRepository.currentTransactionFacts().heldCourseRoot());
+        jdbcTemplate.execute("ROLLBACK TO SAVEPOINT before_marker");
+        assertNull(courseRepository.currentTransactionFacts().heldCourseRoot(), "a savepoint rollback clears the marker");
+        courseRepository.markCourseRootHeld(course);
+        assertEquals(course, courseRepository.currentTransactionFacts().heldCourseRoot());
+
+        CourseRepository.StoredAdaptiveConfiguration stored = courseRepository.findAdaptiveConfiguration(course).orElseThrow();
+        Map<String, Object> expected = new java.util.LinkedHashMap<>();
+        expected.put("a", "text");
+        expected.put("b", Map.of("y", List.of(1, new java.math.BigDecimal("2.0"))));
+        assertEquals(new CourseRepository.StoredAdaptiveConfiguration(course, false, expected), stored);
+        assertThrows(UnsupportedOperationException.class, () -> stored.adaptiveSettings().clear());
+        assertEquals(Optional.empty(), courseRepository.findAdaptiveConfiguration(UUID.randomUUID()));
+
+        assertFalse(courseRepository.replaceAdaptiveConfiguration(course, true, expected, true, Map.of("n", 1)));
+        assertFalse(courseRepository.replaceAdaptiveConfiguration(course, false, Map.of("a", "text"), true, Map.of("n", 1)));
+        Map<String, Object> reordered = new java.util.LinkedHashMap<>();
+        reordered.put("b", Map.of("y", List.of(1, 2)));
+        reordered.put("a", "text");
+        assertTrue(courseRepository.replaceAdaptiveConfiguration(course, false, reordered, true, Map.of("n", 1)));
+        assertEquals(new CourseRepository.StoredAdaptiveConfiguration(course, true, Map.of("n", 1)),
+                courseRepository.findAdaptiveConfiguration(course).orElseThrow());
+        assertConstraintViolation(() -> courseRepository.replaceAdaptiveConfiguration(course, true, Map.of("n", 1), true, null));
+        assertTrue(courseRepository.replaceAdaptiveConfiguration(course, true, Map.of("n", 1), false, null));
+        assertEquals(new CourseRepository.StoredAdaptiveConfiguration(course, false, null),
+                courseRepository.findAdaptiveConfiguration(course).orElseThrow());
+
+        assertFalse(courseRepository.hasPendingPersistenceChanges());
+        persistInstructor(UUID.randomUUID(), "pending-" + UUID.randomUUID() + "@example.test", "Pending");
+        assertTrue(courseRepository.hasPendingPersistenceChanges());
+        assertThrows(InvalidDataAccessApiUsageException.class, courseRepository::discardCleanPersistenceState);
+        entityManager.flush();
+        CourseEntity managed = entityManager.find(CourseEntity.class, course);
+        courseRepository.detachManagedCourse(course);
+        assertFalse(entityManager.contains(managed));
+        courseRepository.discardCleanPersistenceState();
+    }
+
+    private UUID instructor() {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) "
+                + "VALUES (?,?,'not-a-login-fixture','CO03 Instructor','instructor','active')", id, id + "@example.test");
+        return id;
+    }
+
+    private UUID course(UUID owner) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO public.courses (id,instructor_id,title,description,publication_status,adaptive_enabled) "
+                + "VALUES (?,?,'Course','Description','hidden',false)", id, owner);
+        return id;
+    }
+
+    private UUID chapter(UUID course, int position) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO public.chapters (id,course_id,title,position) VALUES (?,?,?,?)",
+                id, course, "Chapter " + position, position);
+        return id;
+    }
+
+    private UUID lesson(UUID chapter, int position, String status) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("INSERT INTO public.lessons (id,chapter_id,title,content_markdown,position,publication_status) "
+                + "VALUES (?,?,?,?,?,?)", id, chapter, "Lesson " + position, "# Lesson " + position + "\n\n    indented",
+                position, status);
+        return id;
     }
 
     private void persistInstructor(UUID id, String email, String displayName) {

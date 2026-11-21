@@ -63,7 +63,8 @@ verification is separate work.
 | Suite | Added by | What it exercises |
 | --- | --- | --- |
 | `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). AU07 additions (PR #239): digest-only issuance and single-use confirmation; identical 202s for unknown/locked/repeated requests, with only eligible accounts issued; delivery after commit without a held User lock; two concurrent confirmations yield exactly one success; rollback when consumption fails; re-check after the User-lock wait; generic 400 for expired, future, locked and reused capabilities; unchanged CT01 bearer validity; a nested context with unconfigured delivery, where health, registration and login work and nothing is issued; and the production 415 for both recovery operations plus the deny-by-default 403 in the full application context (test-only controllers are `@TestComponent`s and are not component-scanned). `AuthServiceTest` adds real SMTP exchanges with an isolated loopback STARTTLS server: delivery only after STARTTLS and successful AUTH, and no message for a server that does not offer AUTH, rejected credentials, missing STARTTLS, or an untrusted or wrongly named certificate. Uses an ephemeral JWT secret. |
-| `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations |
+| `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119; CO03/CO14, PR #262 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations; CO03.content owner rows, scoped reads, appends, reorders and materials, and CO14 adaptive-field storage ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
+| `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
 | `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)) |
 | `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
@@ -4992,3 +4993,150 @@ do not cover AttemptService orchestration, persistence of `is_correct` or the sc
 the B3-O08 rollback case, auto-submission, REST results, the quiz-submitted event or
 any Adaptive mastery update. Those belong to AS08 and the Adaptive and QA Issues and
 remain unverified.
+
+## CO03 and CO14 Course persistence and configuration guard verification — 21 November 2026
+
+[PR #262](https://github.com/chi-thanh-nguyen/codemastery/pull/262) completes the
+remaining independently implementable scope of CO03
+([#41](https://github.com/chi-thanh-nguyen/codemastery/issues/41)) and CO14
+([#177](https://github.com/chi-thanh-nguyen/codemastery/issues/177)) under the Project
+Leader's 21 November 2026 instruction to finish both Issues in that PR.
+
+**CO14** implements the four approved `CourseManagementService` methods
+(ADR005 §§5, 7.1, 13.1–13.3; `CT03-B1-2026-11-08-r2`, `CT06-ENABLEMENT-2026-11-08-r2`
+with N1 and R1). Both guard entries admit the owning Instructor through CT03, lock the
+existing Course row (`FOR UPDATE`, or `FOR UPDATE NOWAIT` for the settings entry), recheck
+ownership after the lock and run the callback in one programmatic READ COMMITTED
+read-write transaction that holds the row lock until commit or rollback. A compatible
+outer transaction is joined only when PostgreSQL reports READ COMMITTED, it is not
+read-only, and it has no earlier write or row lock (no assigned transaction ID) and no
+queued persistence change; a nested call for another Course is rejected. The held root is
+recorded with a transaction-local PostgreSQL setting, which a savepoint rollback releases
+together with the row lock. Clean managed entities are discarded after the lock, so reads
+observe committed state. Only the guard's
+own SQLSTATE 55P03 becomes `ConfigurationBusy`. The settings write runs only inside the
+held guard of the same Course and replaces both stored fields only when they structurally
+equal (jsonb equality) the expected snapshot; a mismatch rolls the unit back.
+
+**CO03.content** adds Course-private persistence for CT21.authoring
+(ADR006 §5), the CT40 structure projection (ADR005 §3.1) and CT09 material rows: owner
+Course rows of any status (fixed `title COLLATE "C"`, id order), all-status lessons in
+canonical order, Course- and Lesson-scoped lookups, append-at-next-position with an
+unrepresentable-position refusal, atomic sibling reordering with deferred and then
+restored V002 uniqueness, material inserts and type/Lesson-preserving replacement, and
+publication updates. Direct statements return domain records, never managed entities.
+`Course` now copies its settings object, so a domain value never aliases persistence state.
+
+| Obligation | Covered by |
+| --- | --- |
+| Either entry starts a real READ COMMITTED unit, holds the root until commit and returns the value | `AdaptiveLearningFlowIntegrationTest.eitherEntryStartsAReadCommittedUnitHoldsTheRootUntilCommitAndReturnsTheValue` |
+| Self-invocation on the unproxied bean; nested same-Course call shares one transaction | `selfInvocationOnTheUnproxiedBeanUsesTheSameProgrammaticTransaction` |
+| Nested other-Course scope rejected; whole unit rolled back | `nestingAnotherCourseIsRejectedAndDoomsTheWholeUnit` |
+| Owner admission precedes the lock; non-owner, hidden, Learner, Administrator, missing and unauthenticated callers never run the callback | `deniedActorsFailBeforeLockingAndNeverRunTheCallback` |
+| Ownership rechecked after waiting for the root | `ownershipIsRecheckedAfterWaitingForTheRoot` |
+| Callback failure, outer failure after return and rollback-only completion commit nothing and release the root | `callbackFailureRollsBackEveryEffectAndReleasesTheRoot`, `joiningACompatibleOuterTransactionKeepsTheRootUntilOuterRollback`, `rollbackOnlyCompletionNeverReturnsTheCallbackValue` |
+| Joined unit commits only with the outer transaction | `joiningACompatibleOuterTransactionCommitsOnlyWithTheOuterUnit` |
+| Read-only, REPEATABLE READ, SERIALIZABLE, prior write, prior row lock and queued persist rejected before callback effects | `incompatibleOuterContextsAreRejectedBeforeAnyCallbackEffect` (6 cases) |
+| Pre-lock managed entity is not trusted | `entitiesLoadedBeforeTheRootAreDiscardedSoReadsObserveTheCommittedWinner` |
+| A savepoint rollback that released the root leaves no usable held marker; the unit is doomed | `aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker` |
+| A REQUIRES_NEW entry behind a suspended holder on the same thread fails instead of waiting for itself; the thread can retry afterwards | `aRequiresNewGuardBehindASuspendedHolderOnTheSameThreadFailsInsteadOfWaitingForItself` |
+| Same-Course serialization; waiter rereads the committed or rolled-back result | `sameCourseWritersSerializeAndTheWaiterRereadsCommittedState` (both outcomes) |
+| Independent Courses do not serialize | `independentCoursesDoNotSerialize` |
+| Enrollment holds root: settings NOWAIT → `ConfigurationBusy`, no change, both participants preserved | `settingsNowaitIsBusyWhileEnrollmentHoldsTheRootAndPreservesBothParticipants` |
+| Settings holds root: real `EnrollmentService.enroll` waits, then proceeds after commit or rollback | `enrollmentWaitsBehindSettingsAndProceedsAfterCommitOrRollback` |
+| A callback's own 55P03 and a default-guard `lock_timeout` are not `ConfigurationBusy` | `onlyTheGuardsOwnNowaitFailureIsReportedAsBusy` |
+| A caller deadline cancels a waiting guard (SQLSTATE 57014) with no partial effect or leftover lock | `aCallerDeadlineCancelsAWaitingGuardWithoutPartialEffectsOrLeftoverLocks` (1-second test budget) |
+| Owner-only immutable read, legacy disabled null, exact decimals | `ownersReadAnImmutableSnapshotIncludingTheLegacyDisabledNull` |
+| Structural expected-state match persists both fields | `guardedWriteComparesTheFreshStateStructurallyAndPersistsBothFields` |
+| Stale expected state rolls back the whole unit and keeps the newer writer | `staleExpectedStateRollsBackTheWholeUnitAndPreservesTheNewerWriter` |
+| Writes need the held guard of the same Course; enabled/null and non-JSON values rejected | `writesRequireTheHeldGuardOfTheSameCourseAndRejectInvalidStorageShapes` |
+| CO03 owner rows, scoped content reads, appends, reorders, materials and adaptive-field storage on PostgreSQL | `CourseRepositoryIntegrationTest` (six new tests) |
+| Local orchestration: null inputs, compatibility check before ownership or lock, snapshot read, write shape and guard checks, deep immutability | `CourseServiceTest` (seven new tests); codec and copy cases in `CourseMapperTest`; argument checks in `CourseRepositoryImplTest` and `CourseContentRepositoryImplTest` |
+
+A temporary local mutation check, reverted before commit, confirmed that the stale-entity
+test and the prior-write, prior-row-lock and queued-persist cases fail when the
+post-lock discard or the earlier-write check is removed. Concurrency tests use latches
+and observed `pg_stat_activity` lock waits, not sleeps.
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #262
+working tree, branch based on `main` `307e8c2`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -Dit.test=AdaptiveLearningFlowIntegrationTest verify` (unit tests skipped by filter) | 31 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -Dit.test=CourseRepositoryIntegrationTest verify` (unit tests skipped by filter) | 9 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw test -Dtest='com.codemastery.modules.course.**'` | 220 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 738, Failsafe 277, 0 failures, errors or skips |
+
+The first full run failed in `SampleDataSeedIntegrationTest` with PostgreSQL
+`too many clients` (SQLSTATE 53300): the new suite's cached Spring context kept one
+more connection pool open. `AdaptiveLearningFlowIntegrationTest` now closes its context
+after the class (`@DirtiesContext`, as `InteractionRepositoryIntegrationTest` does), and
+the rerun above passed. These are local developer runs, not independent QA, CI or
+deployment evidence.
+
+**Not covered and still gated.** AD08's `AdaptiveSettingsService` (ETags, If-Match/412/428,
+threshold freeze, readiness, the `hasSubmittedAttempts` and mastery-existence probes) is
+empty, so B1-O12, B1-O13, B1-O17–O19 and the Adaptive halves of O14/O15 remain unexecuted,
+and no caller uses the settings handoff yet. CO06/CO09 services, REST and OpenAPI-bound
+authoring are not implemented, so the CO03.content capabilities have no runtime consumer.
+`withLearnerAssessmentWrite`/`withAssessmentExpiryWrite` (ADR007 §3.1) are not part of
+CO14. No production statement or transaction deadline is selected; the 1-second budget is
+a test fixture (ADR005 §13.2 and §13.3 keep finite-deadline qualification open). The VM
+runtime matrix (`CT17-P6-PRIVILEGES-2026-11-17-r4` in `infrastructure/vm/deploy.sh`) grants
+`courses` only SELECT and UPDATE (id), and `learning_materials` only partial SELECT. The
+guard's row lock and the read work under it, but the settings write and the CO03.content
+writes and full material reads need a separately approved CT17 revision before any
+consumer is deployed. CI, independent CODEOWNER review and B1-O16 (CT36) are outside this
+record.
+
+### Focused self-review remediation — 21 November 2026
+
+A focused self-review by the same author (not an independent review) of PR #262 at
+`c570f76` reproduced three defects on PostgreSQL before fixing them:
+
+| Severity | Finding | Fix | Regression test |
+| --- | --- | --- | --- |
+| P2 | The held-root marker was a Spring synchronization that survived a caller-managed `ROLLBACK TO SAVEPOINT` taken before the guard. PostgreSQL had released the row lock, yet re-entry and settings writes proceeded as if it were held (ADR005 §13.3). The configured JPA transaction manager rejects Spring `NESTED`, so only a manual savepoint reaches this path. | The marker is a transaction-local PostgreSQL setting (`set_config(..., true)`) that the same savepoint rollback clears; re-entry then fails and the unit becomes rollback-only. | `aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker`; marker reversion in `CourseRepositoryIntegrationTest` |
+| P2 | A `REQUIRES_NEW` call back into the guard for the same Course waited forever on its own suspended transaction's row lock (no deadline is selected), holding a thread and two connections. | A per-thread record of held roots, cleared when the acquiring transaction completes, makes such an entry fail at once. | `aRequiresNewGuardBehindASuspendedHolderOnTheSameThreadFailsInsteadOfWaitingForItself` (including a retry on the same thread) |
+| P2 | After a direct-SQL write (reorder, title, Lesson, Course metadata or publication), a later JPA read in the same transaction returned the previously managed entity, with stale positions or titles. | Each direct write detaches the managed copies of the rows it changed. | strengthened reorder, Lesson and owner-row tests in `CourseRepositoryIntegrationTest` |
+
+The earlier fixes were rechecked on the final code: the null-safe reorder check, the
+`@DirtiesContext` connection-pool fix, the post-lock discard of stale entities, the
+earlier-write and row-lock rejection, and the NOWAIT `ConfigurationBusy` mapping.
+Re-executed locally after the remediation:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw verify -Dtest='com.codemastery.modules.course.**' -Dit.test='AdaptiveLearningFlowIntegrationTest,CourseRepositoryIntegrationTest'` | 220 unit, 33 + 9 PostgreSQL tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 738, Failsafe 279, 0 failures, errors or skips |
+
+The marker uses only the built-in `set_config` and `current_setting` functions, so it
+needs no new CT17 privilege. These are local developer runs, not independent QA or CI
+evidence.
+
+### Independent-review P2 remediation — 21 November 2026
+
+An independent Codex review of `2439f25` returned `CHANGES_REQUIRED` with two P2 findings,
+each with a failing PostgreSQL reproduction. Both were reproduced here before they were fixed.
+
+| Finding | Root cause | Fix | Regression tests |
+| --- | --- | --- | --- |
+| P2-01: guard loss after a savepoint rollback | The PostgreSQL marker was checked only at the next guard entry or settings write, so a savepoint rollback inside the callback, or after it returned, let stale writes commit over an intervening writer | The guard rechecks the marker when the callback returns and in a `beforeCommit` synchronization of the acquiring transaction; either failure rolls the unit back, including when the caller swallows the exception | `aSavepointRollbackInsideTheCallbackCannotCommitAStaleWriteOverTheWinner`, `aSavepointRollbackAfterTheCallbackReturnedFailsTheOuterCommit`, existing `aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker` |
+| P2-02: dirty JPA entity detached after a direct write | Direct writes detached managed copies without checking pending changes, silently discarding mutable JSON edits and merged updates | Every direct Course write runs in the caller's transaction (`PROPAGATION_MANDATORY`) and rejects pending JPA changes before any statement; only then are clean copies of the changed rows detached. Any failure marks the transaction rollback-only | `pendingCourseJsonChangesAreNeverDiscardedByADirectMetadataWrite`, `aPendingChapterMergeIsNeverDiscardedByADirectReorder`, `everyDirectWriteRejectsPendingChangesOfItsRowsAndDoomsTheUnit` (10 write paths), `cleanManagedEntitiesAreInvalidatedSoTheCommittedDirectWriteIsReadBackFresh` |
+
+Spring runs `beforeCommit` before it inspects the rollback-only flag, so a refused commit
+reports either the guard's `IllegalStateException` or `UnexpectedRollbackException`; the
+tests accept either and assert the database outcome (nothing committed, the intervening
+writer preserved, no leftover lock). A temporary local mutation check, reverted before
+commit, confirmed the coverage. Removing the pre-commit check fails the after-callback
+test. Removing the post-callback and dirty-state checks fails the inside-callback test
+and all 12 dirty-state tests. The `REQUIRES_NEW` test and the clean-entity invalidation
+tests still pass.
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw verify -Dtest='com.codemastery.modules.course.**' -Dit.test='AdaptiveLearningFlowIntegrationTest,CourseRepositoryIntegrationTest'` | 221 unit, 48 + 9 PostgreSQL tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 739, Failsafe 294, 0 failures, errors or skips |
+
+These are local developer runs, not independent re-review, QA or CI evidence.
