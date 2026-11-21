@@ -558,7 +558,8 @@ class CourseServiceTest {
         assertNull(CourseManagementService.markdown(null));
         for (Runnable invalid : List.<Runnable>of(() -> CourseManagementService.requiredText(null),
                 () -> CourseManagementService.requiredText(" \t"), () -> CourseManagementService.optionalText(" "),
-                () -> CourseManagementService.markdown("\n "))) {
+                () -> CourseManagementService.markdown("\n "), () -> CourseManagementService.requiredText("A\u0000B"),
+                () -> CourseManagementService.optionalText("\u0000"), () -> CourseManagementService.markdown("    code\u0000"))) {
             assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class, invalid::run)
                     .getStatus().value());
         }
@@ -631,6 +632,9 @@ class CourseServiceTest {
         actor(IdentityRole.ADMINISTRATOR);
         assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
                 () -> management.listCoursesForAdministration(null, "draft", 0, 20));
+        // PostgreSQL text cannot hold NUL: malformed input is 400, never a driver failure (500).
+        assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                () -> management.listCoursesForAdministration("a\u0000b", null, 0, 20)).getStatus().value());
         verifyNoInteractions(repository);
     }
 }

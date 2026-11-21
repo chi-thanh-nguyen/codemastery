@@ -204,12 +204,19 @@ public class CourseManagementService {
         });
     }
 
-    /** Idempotent and without cascade; a hidden Course still conceals its children. */
+    /**
+     * Idempotent and without cascade; a hidden Course still conceals its children. A real change
+     * reconciles joined completion in the same unit (ADR006 §5 "Course/Lesson publication/set
+     * changes", OpenAPI setOwnedCoursePublication "completion reconciliation"; ADR006 §3).
+     */
     public OwnedCourse setOwnedCoursePublication(UUID courseId, PublishStatus publicationStatus) {
         Objects.requireNonNull(publicationStatus, "publicationStatus");
         return withCourseConfigurationWrite(courseId, () -> {
             Course course = courses.findById(courseId).orElseThrow(CourseManagementService::unavailable);
-            if (course.publicationStatus() != publicationStatus) courses.updatePublicationStatus(courseId, publicationStatus);
+            if (course.publicationStatus() != publicationStatus) {
+                courses.updatePublicationStatus(courseId, publicationStatus);
+                enrollments.reconcileCompletion(courseId);
+            }
             return ownedCourse(courseId);
         });
     }
@@ -234,7 +241,8 @@ public class CourseManagementService {
     }
 
     // CT12.course (ADR012 §10.2): Administrator list and hide only; the sole caller is Admin
-    // AdminCourseService. Hiding is a root-lock participant, not the Instructor-only guard.
+    // AdminCourseService (CT32 also uses the Lesson method). Hiding is a root-lock participant,
+    // not the Instructor-only guard, and has exactly the effects of CT21's hidden change.
 
     public PageResponse<AdminCourseView> listCoursesForAdministration(String query, String publicationStatus,
                                                                       int page, int size) {
@@ -246,18 +254,25 @@ public class CourseManagementService {
             default -> throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid publication status");
         };
         String title = query == null ? "" : query;
+        // PostgreSQL text cannot hold NUL; reject it as malformed input instead of failing in the driver.
+        if (title.indexOf(0) >= 0) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid query");
         return snapshotRead.execute(read -> PageResponse.from(
                 courses.findForAdministration(title, status, PageRequest.of(page, size)).map(AdminCourseView::of)));
     }
 
+    /** Idempotent; a real change reconciles joined completion exactly as the Instructor hidden change does. */
     public CourseChange hideCourseAsAdministrator(UUID courseId) {
         requireId(courseId);
         actor(IdentityRole.ADMINISTRATOR);
         return writeUnit.execute(status -> {
-            lockRootAfterCompatibilityCheck(courseId);
+            participateInRoot(courseId);
             Course course = courses.findById(courseId).orElseThrow(CourseManagementService::unavailable);
             boolean changed = course.publicationStatus() != PublishStatus.HIDDEN;
-            if (changed) courses.updatePublicationStatus(courseId, PublishStatus.HIDDEN);
+            if (changed) {
+                courses.updatePublicationStatus(courseId, PublishStatus.HIDDEN);
+                enrollments.reconcileCompletion(courseId);
+            }
+            requireRootStillHeld(courseId);
             return new CourseChange(new AdminCourseView(courseId, course.title(), PublishStatus.HIDDEN.getStatus(),
                     course.instructorId()), changed);
         });
@@ -268,22 +283,34 @@ public class CourseManagementService {
         requireId(lessonId);
         UUID administrator = actor(IdentityRole.ADMINISTRATOR).userId();
         return writeUnit.execute(status -> {
+            // Plain read of the immutable ancestry only (no reparenting exists); state is re-read under the root.
             UUID courseId = courses.findLessonAccessSnapshot(administrator, lessonId)
                     .map(CourseRepository.AccessSnapshot::courseId).orElseThrow(CourseManagementService::unavailable);
-            lockRootAfterCompatibilityCheck(courseId);
+            participateInRoot(courseId);
             Lesson lesson = content.findLesson(courseId, lessonId).orElseThrow(CourseManagementService::unavailable);
             boolean changed = lesson.publicationStatus() != PublishStatus.HIDDEN;
             if (changed) {
                 content.updateLessonPublicationStatus(lesson.chapterId(), lessonId, PublishStatus.HIDDEN);
                 enrollments.reconcileCompletion(courseId);
             }
+            requireRootStillHeld(courseId);
             return new LessonChange(courseId, lessonId, PublishStatus.HIDDEN.getStatus(), changed);
         });
     }
 
-    /** ADR005 §13.3 for a root participant: compatible READ COMMITTED unit, root first, re-read after it. */
-    private void lockRootAfterCompatibilityCheck(UUID courseId) {
-        if (requireCompatibleWriteUnit(courseId) == null) acquire(courseId, false);
+    /**
+     * ADR005 §13.3 root participant (ADR012 §10.2): a compatible READ COMMITTED read-write unit with no
+     * earlier write or lock, the root first, state re-read after it. Like the guard, the held root is
+     * recorded for the physical transaction and the thread, so a same-Course participant or guard in the
+     * same unit joins it, another Course or a REQUIRES_NEW unit behind a suspended holder fails instead
+     * of waiting for itself, and a savepoint rollback that released the root can never commit. Course
+     * reads here are direct statements, so the caller's managed persistence state is left untouched.
+     */
+    private void participateInRoot(UUID courseId) {
+        if (requireCompatibleWriteUnit(courseId) != null) return;
+        acquire(courseId, false);
+        claimRoot(courseId);
+        courses.markCourseRootHeld(courseId);
     }
 
     private CurrentIdentity actor(IdentityRole role) {
@@ -292,9 +319,13 @@ public class CourseManagementService {
         return actor;
     }
 
-    /** CT21 descriptive text: trimmed and nonblank; no length limit is added. */
+    /**
+     * CT21 descriptive text: trimmed and nonblank; no length limit is added. PostgreSQL text cannot
+     * store NUL, so it is malformed input (400) rather than a driver failure (500).
+     */
     static String requiredText(String value) {
         if (value == null || value.isBlank()) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Text must not be blank");
+        requireStorable(value);
         return value.strip();
     }
 
@@ -306,7 +337,12 @@ public class CourseManagementService {
     /** Markdown is null or nonblank and stored verbatim, preserving indentation. */
     static String markdown(String value) {
         if (value != null && value.isBlank()) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Content must not be blank");
+        if (value != null) requireStorable(value);
         return value;
+    }
+
+    private static void requireStorable(String value) {
+        if (value.indexOf(0) >= 0) throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Text must not contain NUL");
     }
 
     private <T> T guarded(UUID courseId, Supplier<T> work, boolean failFast) {
