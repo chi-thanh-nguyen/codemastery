@@ -4424,6 +4424,22 @@ Still open: integrated CT40 and Course-guard operations and their concurrency or
 (the deployed runtime role currently has no privileges on it), CODEOWNER review, independent
 QA and the remaining AS05 Issue scope.
 
+### CO14 guard integration — 22 November 2026
+
+CO14's `CourseManagementService.withCourseConfigurationWrite` is on `main` (`b506500`), so
+`QuestionBankService.withCourseConfigurationWrite` now delegates to it: create, replace and delete
+run in the Course-root READ COMMITTED unit, and the guard's refusal precedes any bank access. The
+two AD07 seams (`requireSkillInCourse`, `readSkillIds`) still fail closed with a safe 500 until AD07
+PR #264 is on `main`; their delegations and the real-producer PostgreSQL flows are prepared on a
+stacked integration branch and are not part of this PR.
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='QuestionBankServiceTest*'` | 80 tests, 0 failures |
+| `cd backend && ./mvnw -B test -Dtest='AuthorizationIntegrationTest*,AssessmentPersistenceIntegrationTest'` | 68 + 9 PostgreSQL tests, 0 failures |
+
+These are local developer runs, not independent review, QA or CI evidence.
+
 ## FE34 theme system verification — 20 November 2026
 
 **Scope and authority.** Developer verification of FE34 #255 (Leader authorization of

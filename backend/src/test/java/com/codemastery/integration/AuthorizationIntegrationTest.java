@@ -972,8 +972,9 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             assertEquals(before, bank());
         }
 
+        /** The CO14 guard is integrated; the AD07 CT40 producer is not yet on main, so the seams fail closed. */
         @Test
-        void admittedOwnerRequestsFailClosedWhileCt40AndTheCourseGuardAreAbsent() throws Exception {
+        void admittedOwnerRequestsFailClosedWhileTheCt40ProducerIsAbsent() throws Exception {
             String before = bank();
             for (var request : operations(course, sessionToken(owner))) {
                 String body = mvc.perform(request)

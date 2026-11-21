@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -37,6 +38,7 @@ import com.codemastery.modules.assessment.application.service.QuestionBankServic
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.repository.QuestionRepository;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import com.codemastery.modules.course.application.service.CourseManagementService;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -62,15 +64,17 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * CT23.questions/bindings unit evidence (ADR007 §§4, 7). The CT40 producer (AD07 #165) and the
- * Course configuration guard (CO14 #177) are not implemented: production instances must fail
- * closed. Integrated behavior is exercised through a test subclass that emulates exactly the
- * approved producer signatures; it is not evidence of real integration.
+ * CT23.questions/bindings unit evidence (ADR007 §§4, 7). The Course configuration guard (CO14 #177)
+ * is integrated by delegation; the CT40 producer (AD07 #165) is not yet on {@code main}, so
+ * production instances fail closed at its seams. Integrated behavior is exercised through a test
+ * subclass that emulates exactly the approved producer signatures; real-producer evidence is the
+ * PostgreSQL suite.
  */
 class QuestionBankServiceTest {
 
     private QuestionRepository questions;
     private CourseAccessService access;
+    private CourseManagementService guard;
     private UUID courseId;
     private UUID skillId;
     private UUID otherSkillId;
@@ -83,6 +87,7 @@ class QuestionBankServiceTest {
     void setUp() {
         questions = mock(QuestionRepository.class);
         access = mock(CourseAccessService.class);
+        guard = mock(CourseManagementService.class);
         courseId = UUID.randomUUID();
         skillId = UUID.randomUUID();
         otherSkillId = UUID.randomUUID();
@@ -98,7 +103,7 @@ class QuestionBankServiceTest {
     }
 
     private QuestionBankService integrated(List<UUID> courseSkills) {
-        return new QuestionBankService(questions, access) {
+        return new QuestionBankService(questions, access, guard) {
             @Override
             protected void requireSkillInCourse(UUID course, UUID skill) {
                 calls.add("requireSkillInCourse");
@@ -165,7 +170,9 @@ class QuestionBankServiceTest {
 
         @Test
         void productionInstanceFailsClosedForEveryOperationAfterAdmissionWithoutTouchingTheBank() {
-            QuestionBankService production = new QuestionBankService(questions, access);
+            when(guard.withCourseConfigurationWrite(eq(courseId), any())).thenAnswer(
+                    invocation -> invocation.<Supplier<?>>getArgument(1).get());
+            QuestionBankService production = new QuestionBankService(questions, access, guard);
             List<Executable> operations = List.of(
                     () -> production.create(courseId, validInput()),
                     () -> production.update(courseId, questionId, validInput()),
@@ -177,12 +184,29 @@ class QuestionBankServiceTest {
                 assertTrue(failure.getMessage().contains("not implemented"));
             }
             verify(access, org.mockito.Mockito.times(5)).requireCourseOwnership(courseId);
+            verify(guard, org.mockito.Mockito.times(3)).withCourseConfigurationWrite(eq(courseId), any());
+            verifyNoInteractions(questions);
+        }
+
+        @Test
+        void everyMutationDelegatesToTheCo14GuardAndItsRefusalPrecedesAnyBankAccess() {
+            ResourceNotFoundException concealed = new ResourceNotFoundException("Resource not available");
+            when(guard.withCourseConfigurationWrite(eq(courseId), any())).thenThrow(concealed);
+            QuestionBankService production = new QuestionBankService(questions, access, guard);
+            List<Executable> mutations = List.of(
+                    () -> production.create(courseId, validInput()),
+                    () -> production.update(courseId, questionId, validInput()),
+                    () -> production.delete(courseId, questionId));
+            for (Executable mutation : mutations) {
+                assertSame(concealed, assertThrows(ResourceNotFoundException.class, mutation));
+            }
+            verify(guard, org.mockito.Mockito.times(3)).withCourseConfigurationWrite(eq(courseId), any());
             verifyNoInteractions(questions);
         }
 
         @Test
         void invalidDefinitionIsStill400BeforeTheMissingProviderIsReached() {
-            QuestionBankService production = new QuestionBankService(questions, access);
+            QuestionBankService production = new QuestionBankService(questions, access, guard);
             BusinessRuleException invalid = assertThrows(BusinessRuleException.class,
                     () -> production.create(courseId, input("essay", List.of("A", "B"), List.of(true, false))));
             assertEquals(HttpStatus.BAD_REQUEST, statusOf(invalid));

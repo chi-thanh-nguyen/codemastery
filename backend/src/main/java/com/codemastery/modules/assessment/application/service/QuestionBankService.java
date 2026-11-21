@@ -7,6 +7,7 @@ import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.repository.QuestionRepository;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import com.codemastery.modules.course.application.service.CourseManagementService;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -28,13 +29,13 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>Every operation first consumes CT03 {@link CourseAccessService#requireCourseOwnership(UUID)}.
  * Course scope comes only from CT40 (ADR005 §3.2) and mutations run inside ADR005's Course
- * configuration guard. Those two upstream producers are not implemented yet, so the three
- * protected delegation points below fail closed with a safe 500 (B3Failure) instead of
- * substituting another scope or lock. Each mirrors the approved producer signature exactly and
- * becomes a single delegation when its producer is integrated:
+ * configuration guard. Each upstream producer is reached through one protected delegation point
+ * that mirrors the approved producer signature exactly:
  * <ul>
- *   <li>{@code SkillGraphService.requireSkillInCourse} and {@code readSkillIds}: AD07 (#165);</li>
- *   <li>{@code CourseManagementService.withCourseConfigurationWrite}: CO14 (#177).</li>
+ *   <li>{@code CourseManagementService.withCourseConfigurationWrite}: CO14 (#177), integrated;</li>
+ *   <li>{@code SkillGraphService.requireSkillInCourse} and {@code readSkillIds}: AD07 (#165). Until
+ *       that producer is on {@code main} these two fail closed with a safe 500 (B3Failure) instead
+ *       of substituting another scope lookup.</li>
  * </ul>
  */
 @Service
@@ -76,10 +77,13 @@ public class QuestionBankService {
 
     private final QuestionRepository questions;
     private final CourseAccessService courseAccess;
+    private final CourseManagementService courseConfiguration;
 
-    public QuestionBankService(QuestionRepository questions, CourseAccessService courseAccess) {
+    public QuestionBankService(QuestionRepository questions, CourseAccessService courseAccess,
+                               CourseManagementService courseConfiguration) {
         this.questions = Objects.requireNonNull(questions, "questions");
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
+        this.courseConfiguration = Objects.requireNonNull(courseConfiguration, "courseConfiguration");
     }
 
     public QuestionView create(UUID courseId, QuestionInput input) {
@@ -172,7 +176,7 @@ public class QuestionBankService {
      * the Course-root READ COMMITTED write unit that owns the transaction. Producer: CO14 (#177).
      */
     protected <T> T withCourseConfigurationWrite(UUID courseId, Supplier<T> work) {
-        throw providerUnavailable("ADR005 CourseManagementService.withCourseConfigurationWrite");
+        return courseConfiguration.withCourseConfigurationWrite(courseId, work);
     }
 
     private List<UUID> courseSkillIds(UUID courseId) {
