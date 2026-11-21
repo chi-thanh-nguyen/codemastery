@@ -5140,3 +5140,56 @@ tests still pass.
 | `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 739, Failsafe 294, 0 failures, errors or skips |
 
 These are local developer runs, not independent re-review, QA or CI evidence.
+
+## AD07 skill graph verification — 21 November 2026
+
+Implementation of AD07 ([#165](https://github.com/chi-thanh-nguyen/codemastery/issues/165),
+[PR #264](https://github.com/chi-thanh-nguyen/codemastery/pull/264)) against
+`CT05-REPRESENTATION-2026-11-08-r1`, `CT05-MUTATION-2026-11-08-r1`,
+`CT05-MAPPING-2026-11-08-r1`, `CT05-BINDINGS-2026-11-08-r1`, `CT40-LESSON-READ-2026-11-08-r1`
+(mapping assertion only) and `CT40-SKILL-TAG-2026-11-08-r1`
+([ADR005 §§3.1, 3.2, 4, 5, 8](decisions/005-batch-01-contract-approvals.md#4-ct05-graph-behavior)),
+consuming the CO14 Course-root guard and the CT03 ownership assertions. The eight
+operations are reachable through Instructor-only route rules in Auth's `SecurityConfig`.
+A remediation pass on the PR fixed these verified defects before this evidence was recorded:
+
+| Severity | Defect | Fix | Regression evidence |
+| --- | --- | --- | --- |
+| P1 | Auth's default-deny chain returned 403 to every role on all eight operations | Instructor-only rules for the exact eight method/path pairs; Course ownership stays CT03's decision in the service | `everyGraphOperationAdmitsOnlyTheOwningInstructorBeforeAnyDescendantLookupOrWrite` and the owner HTTP lifecycle test |
+| P2 | The owner read ran three autocommit statements, so a writer committing between them made a valid graph fail as malformed (500) | One read-only REPEATABLE READ snapshot covering admission and all graph reads (ADR005 §5 "coherent read snapshot") | `theOwnerReadIsOneSnapshotEvenWhenAWriterCommitsBetweenItsStatements` fails with `IllegalStateException` without the fix; `SkillGraphTest` transaction-definition check |
+| P2 | The recursive cycle check overflowed the stack on a long dependency path (`StackOverflowError` at 50 000 skills), contrary to "arbitrarily long path" (B1-O02) | Iterative depth-first search with a visited set; same order and result | `anArbitrarilyLongPathStillRejectsTheClosingEdgeWithoutExhaustingTheStack` fails on the previous code |
+| P2 | Text passing `@NotBlank` but blank under Unicode whitespace, or containing NUL, reached an `IllegalArgumentException` or the V003 CHECK and returned 500 | The service rejects such text as 400 before the guard | `textBlankUnderAnyWhitespaceRuleOrHoldingNulIsBadRequestBeforeTheGuard`; HTTP bodies in `malformedRequestsAreBadRequests…` |
+| P3 | A repeated body member was silently accepted (last value wins); the strict mapper in `SkillRequests` was unused | A streaming reader rejects repeated, unknown and non-string members of the closed object as 400 | `aRepeatedBodyMemberIsAMalformedClosedObjectAndWritesNothing` returned 201 before the fix |
+
+| Oracle (ADR005 §8.2) | Covered by |
+| --- | --- |
+| B1-O01 mapping, idempotence, foreign 404, Learner/Admin 403 before lookup, anonymous 401 | `SkillGraphTest$Commands`; `AdaptiveLearningFlowIntegrationTest.everyGraphOperationAdmits…`, `theOwnerAuthorsTheGraphOverHttp…`, `crossCourseReferencesAreConcealedAndWriteNothing` |
+| B1-O02 direct/transitive cycle 409 without edge, self-edge 400, duplicate unchanged, missing 404, arbitrarily long path | `SkillGraphTest$Representation`, `SkillGraphTest$Commands`; HTTP lifecycle test |
+| B1-O03 A→B / B→A race on real PostgreSQL; waiter observes the committed winner (409) or recomputes after its rollback | `reverseEdgesRaceOnTheCourseRootAndTheWaiterRecomputesAgainstTheCommittedWinner` (both outcomes; barrier on `pg_stat_activity` lock waits, no sleeps) |
+| B1-O04 (AD07 part) independent Courses do not share the guard; a fault inside the unit rolls back every graph effect | `graphWritesOnIndependentCoursesDoNotShareTheGuard`, `aFailureInsideTheUnitRollsBackEveryGraphEffectAndPersistsNothing` |
+| B1-O11 (AD07 part) delete referenced by edge (either end), mapping, Question or mastery → 409, no cascade | `referencedSkillsConflictWithoutCascadeAndAnUnreferencedSkillIsDeleted`; corrupt stored cycle → safe 500 in `aCorruptPersistedGraphFailsClosedWithASafeServerError` |
+| CT40.skill-tag producers with real Course ownership, including inside a consumer's guard | `skillLookupBoundariesAdmitTheOwnerAndWorkInsideTheConsumersGuard` |
+
+Not covered here, because the participant belongs to another Issue: B1-O04's publication,
+Question and enablement races (CO06, AS05, AD08), B1-O11's CT40 structure projection
+(CO06 `CourseStructureService.readStructure`, still empty), and verification that a stored
+mapping's Lesson still belongs to the Course on read, which needs that projection. Writes
+prove Lesson ancestry through `requireLessonOwnership`. The Assessment consumers of
+`requireSkillInCourse`/`readSkillIds` (PR #259, PR #260) still use fail-closed seams.
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #264 working
+tree based on `main` `b506500`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw test -Dtest='SkillGraphTest*'` | 39 tests (10 representation, 29 command), 0 failures or errors |
+| `cd backend && ./mvnw verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AdaptiveLearningFlowIntegrationTest` (PostgreSQL Testcontainer) | 61 tests, 0 failures or errors |
+| `cd backend && ./mvnw verify` | BUILD SUCCESS; Surefire 778, Failsafe 307, 0 failures, errors or skips |
+| Disposable stack: the packaged backend on a random loopback port against a private `infrastructure/postgres` container, synthetic accounts, removed afterwards | 401/403/403 for anonymous, Learner and non-owner; owner create/update/read; direct and transitive cycles 409; self-edge 400; hidden owner Lesson mapped; foreign Lesson 404; delete of a skill referenced by an edge or only by a Question 409; repeated member and Unicode-blank name 400; committed rows matched the responses |
+
+These are local developer runs, not independent QA, CI or deployment evidence. The VM
+runtime role has no privilege on `skills`, `skill_prerequisites` or `lesson_skills`
+(`RUNTIME_PRIVILEGE_MATRIX`, r1–r4), so a deployed backend refuses these operations with a
+safe 500 until a dated CT17-P6 matrix revision within the ADR012 §19.2 ceiling is
+authorized and added with its script and CI tests. The frontend client and types
+(`skillGraphApi.ts`, `useSkillGraph.ts`) remain FE18-owned and empty.
