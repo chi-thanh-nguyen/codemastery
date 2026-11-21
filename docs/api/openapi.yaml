@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), and the eight AD07 CT05 skill-graph operations (#165); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), and the five AS05 CT23.questions operations (#156); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -3501,7 +3501,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor Course owner; validate same-Course skill under original Instructor guard. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories, and every write runs in CO14's Course-root READ COMMITTED unit. Until the CT40 SkillGraphService producer (AD07 #165) is on main, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. Owner review and protected integration are not claimed.",
+        "description": "Instructor Course owner; validate same-Course skill under original Instructor guard. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3550,7 +3550,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -3568,7 +3567,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner only; answer keys permitted. UUID ascending; coherent scope/count/page. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories, and every write runs in CO14's Course-root READ COMMITTED unit. Until the CT40 SkillGraphService producer (AD07 #165) is on main, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. Owner review and protected integration are not claimed.",
+        "description": "Instructor owner only; answer keys permitted. UUID ascending; coherent scope/count/page. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3636,7 +3635,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -3646,7 +3644,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; scoped Question, includes key. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories, and every write runs in CO14's Course-root READ COMMITTED unit. Until the CT40 SkillGraphService producer (AD07 #165) is on main, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. Owner review and protected integration are not claimed.",
+        "description": "Instructor owner; scoped Question, includes key. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3704,7 +3702,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       },
       "put": {
@@ -3712,7 +3709,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; full replacement only if no AttemptAnswer references. Used definition 409; POST new replacement explicitly. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories, and every write runs in CO14's Course-root READ COMMITTED unit. Until the CT40 SkillGraphService producer (AD07 #165) is on main, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. Owner review and protected integration are not claimed.",
+        "description": "Instructor owner; full replacement only if no AttemptAnswer references. Used definition 409; POST new replacement explicitly. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3773,7 +3770,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -3791,7 +3787,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; no QuizQuestion/AttemptAnswer reference. Returns deleted definition after commit. AS05 (#156, PR #259) wires the Instructor-only route, CT03 admission, the closed body, no-store and the Assessment repositories, and every write runs in CO14's Course-root READ COMMITTED unit. Until the CT40 SkillGraphService producer (AD07 #165) is on main, an admitted owner's request fails closed with B3Failure (500) and no effect. ADR007 is normative. Owner review and protected integration are not claimed.",
+        "description": "Instructor owner; no QuizQuestion/AttemptAnswer reference. Returns deleted definition after commit. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3852,7 +3848,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
