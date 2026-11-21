@@ -417,6 +417,62 @@ async function themeChecks({ engine, check, notExercised, newPage, ready, overfl
                 await context.close();
             }
         });
+        await check('G-02: drawer Theme labels and glyphs stay inside their segments at 100%, 120% and 200% text size, including 320 px, with keyboard selection intact', async () => {
+            for (const os of ['light', 'dark']) for (const width of [320, 640]) for (const textSize of [100, 120, 200]) {
+                for (const screen of ['learner-home', 'teaching', 'admin-overview']) {
+                    const { context, page } = await newPage({ colorScheme: os, viewport: { width, height: 844 } });
+                    const where = `${screen}/${os}/${width}/${textSize}%`;
+                    try {
+                        await page.goto(url(`/preview?screen=${screen}`)); await ready(page);
+                        await page.addStyleTag({ content: `html { font-size: ${textSize}% !important; }` });
+                        await page.evaluate(() => document.fonts.ready);
+                        await page.getByRole('button', { name: 'Toggle navigation' }).click();
+                        const group = page.getByRole('radiogroup', { name: 'Theme', exact: true }); await group.waitFor();
+                        await page.waitForTimeout(400); // Measure the settled drawer, never its Slide transition.
+                        const inspect = async (selected) => {
+                            const rows = await group.getByRole('radio').evaluateAll((nodes) => nodes.map((node) => {
+                                const rect = node.getBoundingClientRect(), pill = getComputedStyle(node, '::before');
+                                const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT), content = [node.querySelector('svg').getBoundingClientRect()];
+                                for (let text = walker.nextNode(); text; text = walker.nextNode()) if (text.textContent.trim() && !text.parentElement.closest('svg, style')) {
+                                    const range = document.createRange(); range.selectNodeContents(text); content.push(range.getBoundingClientRect());
+                                }
+                                return { label: node.textContent, checked: node.getAttribute('aria-checked'), width: rect.width, height: rect.height,
+                                    contained: content.every((part) => part.width > 0 && part.height > 0 && part.left >= rect.left + parseFloat(pill.left) - 1
+                                        && part.right <= rect.right - parseFloat(pill.right) + 1 && part.top >= rect.top + parseFloat(pill.top) - 1
+                                        && part.bottom <= rect.bottom - parseFloat(pill.bottom) + 1),
+                                    fill: pill.backgroundColor, color: getComputedStyle(node).color, glyphColor: getComputedStyle(node.querySelector('svg')).color,
+                                    fontRatio: parseFloat(getComputedStyle(node).fontSize) / parseFloat(getComputedStyle(document.documentElement).fontSize) };
+                            }));
+                            assert.equal(rows.length, 3, where);
+                            assert.deepEqual(rows.filter((row) => row.checked === 'true').map((row) => row.label), [selected], where);
+                            for (const row of rows) {
+                                assert(row.width >= 44 && row.height >= 44, `${where}/${row.label}: target ${row.width} × ${row.height}`);
+                                assert(row.contained, `${where}/${row.label}: label or glyph escapes its pill`);
+                                assert(row.fontRatio >= .8125 - .001, `${where}/${row.label}: text enlargement was suppressed`);
+                                assert.equal(row.glyphColor, row.color, `${where}/${row.label}: glyph follows its label`);
+                            }
+                            const active = rows.find((row) => row.checked === 'true');
+                            assert.deepEqual([active.fill, active.color], ['rgb(255, 255, 255)', 'rgb(10, 11, 15)'], where);
+                            if (textSize === 100) assert.equal(Math.round((await group.boundingBox()).height), 44, `${where}: normal track height`);
+                        };
+                        await inspect('System');
+                        await group.getByRole('radio', { name: 'System', exact: true }).focus();
+                        for (const [key, label] of [['ArrowRight', 'Light'], ['ArrowRight', 'Dark'], ['Home', 'System']]) {
+                            await page.keyboard.press(key); await page.waitForTimeout(150);
+                            await inspect(label);
+                            const selected = group.getByRole('radio', { name: label, exact: true });
+                            assert(await selected.evaluate((node) => node === document.activeElement), `${where}: keyboard focus on ${label}`);
+                            assert(await selected.evaluate((node) => getComputedStyle(node).outlineStyle !== 'none' && parseFloat(getComputedStyle(node).outlineWidth) >= 2), `${where}: visible focus`);
+                            assert.equal(await group.isVisible(), true, `${where}: drawer stays open`);
+                            assert.equal(await scheme(page), label === 'System' ? os : label.toLowerCase(), where);
+                        }
+                        if (width === 320 && screen === 'learner-home') await page.screenshot({ path: path.join(dir, `g02-drawer-${os}-${textSize}.png`) });
+                        await page.keyboard.press('Escape');
+                        assert(await page.getByRole('button', { name: 'Toggle navigation' }).evaluate((node) => node === document.activeElement), `${where}: drawer restores focus`);
+                    } finally { await context.close(); }
+                }
+            }
+        });
         await check('StatusPill glyphs take their label colour; Needs-attention glyphs keep their semantic accents (D13-1)', async () => {
             for (const stored of ['light', 'dark']) {
                 const { context, page } = await newPage();

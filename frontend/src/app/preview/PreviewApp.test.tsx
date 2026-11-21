@@ -292,6 +292,52 @@ describe('isolated design preview', () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 
+    // One transition per case keeps the real App/controller coverage within the default CI timeout.
+    for (const [kind, search] of [
+        ['quiz', '?screen=quiz-attempt'],
+        ['diagnostic', '?screen=quiz-attempt&item=diagnostic'],
+    ] as const) it.each(['Light', 'Dark', 'System'] as const)(`G-01: the ${kind} countdown keeps running through Theme open, %s selection and close without changing answers or sending requests`, async (label) => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+        const stored = label === 'Dark' ? 'light' : 'dark';
+        localStorage.setItem('codemastery.theme', stored); // Every case selects a different preference.
+        await mount(search);
+        const firstAnswer = host.querySelector<HTMLInputElement>('main input[type="radio"][value="a"]')!;
+        await act(async () => firstAnswer.click());
+        expect(firstAnswer.checked).toBe(true);
+        const answerState = () => [...host.querySelectorAll<HTMLInputElement>('main input')].map((input) => ({ value: input.value, checked: input.checked, disabled: input.disabled }));
+        const answersBefore = answerState();
+        const remaining = () => {
+            const timer = host.querySelector('[role="timer"]');
+            expect(timer, 'the attempt is still answering, with its countdown visible').not.toBeNull();
+            return timer!.textContent!.split(':').map(Number).reduce((total, part) => total * 60 + part, 0);
+        };
+        let expected = remaining();
+        const trigger = host.querySelector<HTMLButtonElement>('button[aria-label^="Theme:"]')!;
+        const unchanged = () => {
+            expect(remaining()).toBe(expected);
+            expect(answerState()).toEqual(answersBefore);
+            expect(new URLSearchParams(location.search).get('screen')).toBe('quiz-attempt');
+            expect(new URLSearchParams(location.search).get('item')).toBe(kind === 'diagnostic' ? 'diagnostic' : null);
+            expect(document.querySelector('[role="dialog"]')).toBeNull();
+            expect(fetcher).not.toHaveBeenCalled(); // Includes any accidental save or submit request.
+            expect(localStorage.getItem('codemastery.theme')).toBe(stored);
+        };
+        await act(async () => trigger.click());
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        await settle(2000); expected -= 2; unchanged(); // The real preview controller ticks while the menu stays open.
+        const choice = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((node) => node.textContent?.startsWith(label))!;
+        await act(async () => choice.click());
+        expect(choice.getAttribute('aria-checked')).toBe('true');
+        expect(document.activeElement).toBe(choice);
+        expect(document.documentElement.dataset.colorScheme).toBe(label === 'Dark' ? 'dark' : 'light');
+        await settle(1000); expected--; unchanged();
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        await act(async () => choice.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+        expect(document.activeElement).toBe(trigger);
+        await settle(1000); expected--; unchanged();
+    });
+
     it('auto-submits when the sample timer runs out', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
         await mount('?screen=quiz-attempt');

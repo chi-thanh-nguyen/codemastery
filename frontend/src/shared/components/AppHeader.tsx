@@ -91,10 +91,14 @@ export function ThemeControl({ variant = 'button' }: { variant?: 'button' | 'dra
             optionRefs.current[next]?.focus();
             choose(themeOptions[next].value);
         };
-        return <Box data-theme-control="drawer">
+        return <Box data-theme-control="drawer" sx={{ minWidth: 0, containerType: 'inline-size' }}>
             <Typography id={`${menuId}-label`} component="div" sx={{ mb: 1, color: roles.chrome.muted, fontSize: '0.8125rem', fontWeight: 600 }}>Theme</Typography>
-            {/* 44 px chrome-raised track; each segment's hit area is the full track height and a third of its width. */}
-            <Box role="radiogroup" aria-labelledby={`${menuId}-label`} sx={{ display: 'flex', height: 44, borderRadius: `${radius.pill}px`, bgcolor: roles.chrome.raised }}>
+            {/* At normal text size: a 44 px chrome-raised track, with three equal full-height hit areas. */}
+            <Box role="radiogroup" aria-labelledby={`${menuId}-label`} sx={{ display: 'flex', height: 44, borderRadius: `${radius.pill}px`, bgcolor: roles.chrome.raised,
+                // Keep the normal 44 px track. When enlarged text cannot fit three segments, retain the glyphs and
+                // labels in full-width rows instead of shrinking or clipping them (G-02). rem follows the text size.
+                '@container (max-width: 14rem)': { height: 'auto', flexDirection: 'column', borderRadius: `${radius.lg}px`,
+                    '& > [role="radio"]': { flex: '0 0 auto', width: '100%', height: 'auto', minHeight: 44, py: .5, lineHeight: 1.2 } } }}>
                 {themeOptions.map((option, index) => {
                     const active = index === checkedIndex;
                     return <ButtonBase key={option.value} ref={(element: HTMLButtonElement | null) => { optionRefs.current[index] = element; }}

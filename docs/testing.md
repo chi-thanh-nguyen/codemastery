@@ -4874,6 +4874,76 @@ changed.
 **Limits.** No screen-reader session; touch long-press was not verified; `firefox-desktop` E2E was not run on macOS,
 where the pinned Firefox does not launch (CI runs it); the residual hysteresis effect on other tooltips above.
 
+## PR #261 G-01/G-02 remediation — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026 to implement both remaining P3
+findings directly on PR #261 (Refs #255), based on `6ba62b4`. OpenAI Codex implemented and ran the developer
+verification below under that instruction; the commits retain the requested `heizseung` author and committer
+attribution. This record grants no independent CODEOWNER review, QA07/QA01 acceptance, merge or release approval.
+No contract, dependency, route, Auth/session behavior or production attempt lifecycle was changed.
+
+**G-01 — permanent countdown regression coverage.** Six cases in the existing CI-executed `PreviewApp.test.tsx`
+mount the real `App` and preview attempt controller: quiz and diagnostic, each selecting Light, Dark or System
+from a different stored preference. Each seeds an answer and advances the controller's real interval under fake
+timers: two seconds with the Theme menu open, one second after selecting, and one second after Escape closes it.
+The exact countdown must advance in every phase; all answer checked/disabled states, the attempt route and the
+stored global preference remain unchanged; no dialog, save/submit request or other fetch occurs. Selection keeps
+the menu open and focus on the chosen item; Escape restores focus. The countdown component and controller are real;
+only their scheduling APIs use fake timers.
+One transition per case avoids unrelated question-navigation work and keeps the default five-second timeout.
+
+**G-02 — text enlargement without clipping.** `AppHeader.tsx` keeps the normal 44 px track, three equal segments
+and 36 px selected pill. The drawer control establishes an inline-size container; at or below `14rem` of available
+space, relative to the enlarged text, its existing radios flow into full-width rows of at least 44 px. Text and
+glyphs are neither hidden nor shrunk; the labels retain their rem-based size. The same roles, DOM order, roving
+tab stop, arrow/Home/End behavior, selected colours and announcements remain. This is a CSS-only accessibility
+fallback; the Theme button/menu and all N-01–N-04 tooltip guards are unchanged. `DESIGN.md` was not edited.
+
+The existing browser harness now opens the drawer for Learner, Instructor and Administrator previews in both
+schemes at 320 and 640 px, at 100%, 120% and 200% text size: 36 configurations per engine. It checks that every
+label and glyph fits within the inset pill bounds, each target is at least 44 × 44 px, glyph and label colours
+match, text enlargement is honoured, and normal track height stays 44 px. Keyboard selection checks every
+preference, the visible focus ring, scheme resolution, the drawer staying open and Escape focus restoration.
+
+**Mutation evidence (disposable copy, restored afterwards).**
+
+| Intentional regression | Result |
+| --- | --- |
+| Pause the countdown only while Theme is open | All six G-01 cases fail on the exact countdown assertion |
+| Clear answers while Theme is open | All six fail on the answer-state assertion |
+| Send an unexpected request while Theme is open | All six fail on the fetch assertion |
+| Submit the sample attempt while Theme is open | All six fail because the answering countdown disappears |
+| Restore `AppHeader.tsx` from `6ba62b4` | The exact permanent G-02 browser check fails in Chromium and WebKit: `learner-home/light/320/120%/System: label or glyph escapes its pill` |
+
+The final G-01 mutation failures were assertion failures, not timeouts. The G-02 negative and final positive
+checks were run by disposable drivers that rebuilt the source and invoked the permanent harness check body
+without replacing its assertions. No mutation or temporary driver is a repository file.
+
+**Commands and results.** macOS arm64, Node 24.21.0, npm 11.19.0, installed Playwright 1.63.0.
+
+| Check | Command or method | Result |
+| --- | --- | --- |
+| Full frontend suite, default worker settings | `cd frontend && npm test` (JSON reporter used for the evidence) | 682 passed in 16 files; six added cases |
+| Type check and production build | `cd frontend && npm run build` | Passed, including `npm run typecheck`; existing bundle-size warning |
+| Full browser harness | `npm run test:browser -- --engine chromium,webkit --playwright ../e2e/node_modules/@playwright/test` | Chromium 153.0.8010.12: 69 passed; WebKit 26.6: 68 passed; no failures. WebKit recorded one first-paint row as not exercised |
+| Final affected browser matrix | Exact permanent G-02 check on rebuilt final source, after tightening the breakpoint and adding the 120%/font/glyph assertions | Passed all 36 configurations per engine in Chromium and WebKit; the earlier full harness covered 100%/200% before that refinement |
+| E2E lifecycle regression tests | `cd e2e && node --test fixtures/*.test.mjs` | 155 passed, zero failed |
+| E2E on the owned disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, five skipped, zero failed; lifecycle inventory reports every owned resource absent |
+| Whitespace | `git diff --check` | Passed |
+
+**Execution limits and remaining gaps.** Early runs exceeded default test timeouts;
+the final cases retain all timing/answer/request assertions and the timeout, with a smaller single-question
+fixture. A one-worker full run passed all new cases but reproduced the previously documented
+`routes/index.test.tsx` direct-entry `/` failure (`ResizeObserver is not defined`): 681 passed, one failed. The
+default full run subsequently passed all 682. No routing test was changed or quarantined.
+
+The WebKit no-preference first-paint row was explicitly not exercised because that emulation reported the host's
+Dark appearance. These browser checks use controlled API responses; the E2E row uses the real disposable backend.
+There was no screen-reader or native Windows contrast-theme session, no native browser-UI zoom acceptance pass,
+and no local Firefox run. Full-page zoom and text-only enlargement remain distinct. The production quiz/diagnostic
+route and real attempt integration stay with FE09/FE10; this countdown evidence is for their existing presentation
+and preview samples. Independent QA and the wider FE34 verification gaps are not declared complete here.
+
 ## AS04 quiz grading unit verification — 20 November 2026
 
 Implementation of AS04 ([#32](https://github.com/chi-thanh-nguyen/codemastery/issues/32),
