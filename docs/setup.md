@@ -538,7 +538,7 @@ and a successful build do not establish frontend/backend integration in a real
 browser or deployment readiness.
 
 The MUI theme and `presentationTokens` live in `frontend/src/app/theme/theme.ts`
-and implement the light colour scheme of the root `DESIGN.md` specification (“The Lit Path”; first revision
+and implement the Light and Dark schemes of the root `DESIGN.md` specification (“The Lit Path”; first revision
 `DESIGN-2026-11-06-r1`, tracked in Git from r6; current merged revision `DESIGN-2026-11-19-r12`,
 PR #252, 19 November 2026). An ink frame `#0A0B0F` holds the top bar
 (80 px, 64 px below 600 px) and a `#F6F6F7` canvas that rises under the current
@@ -574,30 +574,104 @@ branding asset pack; TypeScript is a trademark of Microsoft Corporation). Both a
 used only to name the language a course teaches.
 `PresentationIcon.tsx` supplies original outline SVGs without an icon dependency.
 
-**Colour schemes — specified, not implemented.** `DESIGN.md` r12 specifies three theme
-preferences, System (the default), Light and Dark, with one Theme control in each shell
-(the workspace top bar or mobile drawer, the landing header, the auth layout, and the quiz
-and diagnostic Focus bar), a device-scoped `localStorage` preference, a first-paint
-script, live following of the operating-system setting and synchronization across tabs.
-None of this exists on `main`: `theme.ts` defines the light scheme only, every page
-renders light whatever the operating-system setting, no Theme control is rendered, and
-nothing reads or writes a theme preference. The light values in `theme.ts` match r12's
-light scheme.
+**Colour schemes (FE34 #255, PR #261).** `DESIGN.md` r12 specifies three theme
+preferences, System (the default), Light and Dark. FE34 implements them in the existing
+files only:
 
-**Theme implementation handoff (19 November 2026).** FE34 #255, a child of EP07 #12, owns
-the implementation of the shared colour-scheme work. It was created on 19 November 2026
-under the Project Leader's instruction and assigned to `heizseung`, whom the Leader
-authorized to implement it within the Issue's scope; it is not implemented yet. Its scope
-follows `DESIGN.md` r12: the two colour schemes and semantic roles in `theme.ts`; one preference state above the router in
-`App.tsx` (`codemastery.theme`, device-scoped, independent of the session); the first-paint
-script in the existing `index.html`; the Theme control in every shell; the move of the 47
-non-test files that import the light `color` constants to semantic roles (re-counted on
-`cdf1ef8`); and the preview's in-memory override. The theme changes it makes in files that
-other FE Issues list leave those Issues' feature ownership unchanged. A new repository
-file, such as an external first-paint script or a theme hook, still needs structure
-approval under [repository-structure.md](repository-structure.md). FE34 excludes the A13
-preview-isolation fix in `AuthProvider.tsx` and the A14 response-metadata (`ETag`)
-capability of the shared HTTP client; neither has an owning Issue.
+- `theme.ts` defines one MUI theme with two colour schemes (`colorSchemes.light`,
+  `colorSchemes.dark`, `cssVariables` with the selector `[data-color-scheme="%s"]`). The
+  semantic roles of r12 are emitted as CSS variables (`--mui-palette-roles-*`) and exported
+  as `roles`; components read roles, never the raw `color` palette. The light values equal
+  the values on `main` before FE34. `@media print` re-declares the light variables and sets
+  `color-scheme: light !important`, which overrides the inline `color-scheme` that the
+  first-paint script and the preference state set, so native controls and system colours
+  print light too. `prefers-contrast: more` and `forced-colors: active` follow r12's
+  fallback table; under forced colours, floating surfaces (menus, popovers, dialogs, the
+  drawer) also get a 1 px `CanvasText` outline, because their shadow edge is removed.
+- `App.tsx` holds the one preference state above the router and the session. It is stored
+  only under `localStorage` key `codemastery.theme` (`system`, `light` or `dark`); a missing,
+  empty, unknown or unreadable value means System and an invalid value is left until the
+  next choice; storage that throws keeps the choice in memory. System follows the
+  `prefers-color-scheme` change event; other tabs follow the `storage` event. No request,
+  profile field or backend state is involved, and sign-in, sign-out or another account
+  never changes it.
+- `index.html` sets `data-color-scheme` and `color-scheme` on the root before the
+  application bundle runs, from the stored preference and
+  `matchMedia('(prefers-color-scheme: dark)')`; the root colour is the frame `#0A0B0F` in
+  both schemes and `theme-color` stays `#0A0B0F`. The inline script is static so that a
+  future Content Security Policy can allow-list it: its SHA-256 source is
+  `'sha256-gyoHhEeXJZ2cyULAqJ8wHhi0sXEzbmvDVoB9FkJ+UYc='` (recompute it whenever the
+  script changes). No CSP is configured today.
+- The Theme control (`ThemeControl`, exported from `AppHeader.tsx`) renders once per
+  shell: the workspace top bar from 900 px (after page utilities such as the notification
+  button and immediately before the account menu, or before Sign in for visitors), the
+  mobile drawer footer below 900 px (on-chrome segmented control), the landing header
+  (Catalogue → Theme → Sign in → Create account), the split auth layout, and the quiz and
+  diagnostic Focus bar (`QuizAttemptPage.tsx`). It is never in the account menu.
+  `AppHeader` takes page utilities (`utilities`, `DashboardLayout` `headerUtilities`)
+  before the Theme button and session actions (`actions`) after it.
+  Escape closes its menu and returns focus to the button; Tab and Shift+Tab also close it
+  and return focus to the button first, so the tab sequence continues from the button
+  (the menu is rendered at the end of the document). The "Theme" tooltip appears after
+  400 ms on hover and at once on keyboard focus (`:focus-visible`); it is hidden while the
+  menu is open, including after a choice (the menu stays open), and is reset whenever the
+  menu opens or closes. After a close it is suppressed per source: for the pointer still
+  resting on the button until the pointer enters again, and for the focus returned to the
+  button until focus leaves it, so a later Tab back to the button shows it at once. The
+  menu state is read from a ref, so a hover timer started before the menu opened cannot
+  show it over the menu. Escape dismisses the tooltip until the pointer genuinely enters
+  again or focus leaves the button; MUI Tooltip's own delayed focus open is ignored,
+  because the button's `onFocus` already handles keyboard focus, so no pending timer
+  reopens a dismissed tooltip (N-01). That ignored MUI timer still sets MUI's module-wide
+  tooltip hysteresis when it fires, so this tooltip sets `enterNextDelay={400}` locally and every
+  pointer hover takes the specified 400 ms (N-04); the global Tooltip delays are unchanged. The
+  menu's popup container carries
+  no `tooltip` role. Menu items (all menus) hover and focus on `bg.raisedHover`; only the
+  selected item uses `bg.selected`.
+- Glyphs in buttons and in `StatusPill` (pills, mastery, recommendation and other tags)
+  use `currentColor`, the label's colour; guidance and attention glyphs keep their family
+  accent (`DESIGN.md` D13-1).
+- `/preview` follows the stored preference until a preview-local choice is made; that
+  choice is held in memory for the document, never written to storage, never sent to
+  other tabs and gone on reload or when the document leaves `/preview`.
+
+While the ADR014 restore runs, `/` shows the landing header (lockup and Theme button, no
+sign-in actions) with "Restoring your session…" (`LandingRestoringView`), and protected
+routes show the same line inside the workspace frame, so every restore state keeps its
+Theme control. Below 900 px the workspace drawer also leaves out "Create account" until
+the restore has finished, as the header leaves out its sign-in actions (F2). Developer evidence is recorded in
+[testing.md](testing.md#fe34-theme-system-verification--20-november-2026); independent
+Light, Dark and System acceptance stays with QA07 #63.
+
+**FE03 remediation on PR #261 (20 November 2026, Leader authorization).**
+
+- *A13 preview isolation, fixed.* `AuthProvider` reads `restoreOnLoad` once at mount, and
+  `App.tsx` decides once per document whether it was opened at `/preview`. A document opened
+  there never restores by itself: not on load, not when another tab signs in, not after a
+  failed sign-in and not on focus, page show or wake-up. A sign-out broadcast changes
+  nothing there unless the document has a session or a pending sign-in to end. The isolation
+  ends only when the person signs in explicitly in that document (after leaving the preview
+  for the sign-in page); the document then follows the normal ADR014 lifecycle. Before the
+  fix, a sign-in in another tab, or a theme change after leaving `/preview` in the same
+  document, sent `POST /api/auth/refresh` from it.
+- *AUD-01 preview URL aliases, fixed (21 November 2026).* "Opened at `/preview`" is decided
+  with React Router's own `matchRoutes` against the same `PREVIEW_PATH` the route uses
+  (`isPreviewPath` in `routes/index.tsx`), so it accepts exactly what renders the preview:
+  any letter case (`/PREVIEW`), trailing slashes and percent-encoded characters
+  (`/pre%76iew`). A malformed encoding is kept as typed by the router and renders "Page not
+  found", so it restores normally, as does `/preview/<anything>`. The earlier pattern
+  `^/preview(/|$)` missed the aliases (they restored a session) and treated
+  `/preview/<anything>` as the preview although it shows "Page not found".
+- *A14 shared-transport capability, implemented in `shared/api/httpClient.ts`.* The explicit
+  no-content mode of `CT16-B1-NO-CONTENT-2026-11-09-r1` (`responseMode: 'no-content'`,
+  `expectedStatus: 204`, no decoder, `Promise<void>`), a `GET`-only
+  `responseMode: 'json-with-metadata'` that returns `{ body, etag }` with the `ETag` read only
+  after the status, media type, decoding and current-generation checks, and safe 412/428
+  titles and local messages. Existing JSON callers and the ADR014 sign-out 204 are unchanged.
+  Still required before FE18 acceptance: FE18's own client, hook and UI binding, and the
+  backend CORS change that allows `If-Match` and exposes `ETag` for approved origins
+  (`SecurityConfig` allows only `Authorization` and `Content-Type` today); neither is part
+  of this change.
 
 `src/app/App.tsx` mounts one `BrowserRouter` and `AuthProvider` around the routes
 in `src/routes/index.tsx`, listed in
@@ -621,10 +695,9 @@ Learner, Instructor and Administrator workspaces and the proposed public screens
 with synthetic sample data. Since 7 November 2026 it shows no preview notice or
 switcher: screens open by link and the account menu keeps “Preview index” and
 “Reset sample data”. It is designed never to call the API, read the session or write browser
-storage, and it adds no route: screens change through `?screen=` query parameters. One
-recorded defect remains on `main` (`DESIGN.md` A13): when another tab of the same origin
-signs in, `AuthProvider`'s cross-tab handler runs a restore in the preview document,
-which sends `POST /api/auth/refresh`. Screens marked Preview only in `DESIGN.md` exist only
+storage, and it adds no route: screens change through `?screen=` query parameters. A
+document opened at `/preview` also stays out of other tabs' sign-ins and sign-outs (the
+`DESIGN.md` A13 defect, fixed by PR #261). Screens marked Preview only in `DESIGN.md` exist only
 there, with sample data; their contracts are approved, but they are not built for
 production routes or API integration.
 

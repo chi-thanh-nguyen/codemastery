@@ -286,6 +286,91 @@ describe('ADR014 hybrid refresh-session lifecycle', () => {
         await mountHybrid(false, false); await settle();
         expect(fetcher).not.toHaveBeenCalled(); expect(auth.restoring).toBe(false);
     });
+    // ---- A13 (DESIGN S26, ADR014 §7, CT14): a document opened at /preview stays isolated. ----
+    function previewChannels() {
+        const list: { onmessage: ((event: MessageEvent) => void) | null; posted: unknown[] }[] = [];
+        vi.stubGlobal('BroadcastChannel', class { onmessage: ((event: MessageEvent) => void) | null = null; posted: unknown[] = []; constructor() { list.push(this); } postMessage(value: unknown) { this.posted.push(value); } close() { /* test double */ } });
+        return list;
+    }
+    const tell = async (tabs: { onmessage: ((event: MessageEvent) => void) | null }[], type: string) => {
+        for (const tab of tabs) await act(async () => tab.onmessage?.({ data: { type } } as MessageEvent));
+        await settle();
+    };
+    it('A13: another tab signing in, repeatedly, sends nothing from a preview document and installs no session', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(false, false); await settle();
+        const generation = auth.generation;
+        for (let i = 0; i < 3; i++) await tell(tabs, 'signed-in');
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(auth.user).toBeNull(); expect(auth.restoring).toBe(false); expect(auth.generation).toBe(generation);
+        expect(localStorage.length + sessionStorage.length).toBe(0);
+    });
+    it('A13: another tab signing out sends nothing and changes nothing in a preview document', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(false, false); await settle();
+        const generation = auth.generation;
+        await tell(tabs, 'signed-out'); await tell(tabs, 'signed-in'); await tell(tabs, 'signed-out');
+        expect(fetcher).not.toHaveBeenCalled(); expect(auth.generation).toBe(generation); expect(auth.restoring).toBe(false);
+        expect(tabs.flatMap((tab) => tab.posted)).toEqual([]);
+    });
+    it('A13: StrictMode setup and cleanup do not bypass the isolation', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(true, false); await settle();
+        expect(tabs.length).toBeGreaterThanOrEqual(2); // the StrictMode re-run created a second channel
+        await tell(tabs, 'signed-in');
+        expect(fetcher).not.toHaveBeenCalled(); expect(auth.user).toBeNull();
+    });
+    it('A13: focus, page show, visibility changes and timers never restore in a preview document', async () => {
+        previewChannels();
+        await mountHybrid(false, false); await settle();
+        await act(async () => { window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('pageshow')); document.dispatchEvent(new Event('visibilitychange')); });
+        await act(async () => { vi.advanceTimersByTime(20 * 60_000); }); await settle();
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('A13: a later change of restoreOnLoad cannot start a restore', async () => {
+        previewChannels();
+        await mountHybrid(false, false); await settle();
+        await mountHybrid(false, true); await settle();
+        expect(fetcher).not.toHaveBeenCalled(); expect(auth.restoring).toBe(false);
+    });
+    it('A13: a failed explicit sign-in in a preview document does not restore', async () => {
+        previewChannels();
+        await mountHybrid(false, false); await settle();
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        await act(async () => { await auth.login(payload).catch(() => undefined); }); await settle();
+        expect(fetcher.mock.calls.map(path)).toEqual(['/api/auth/login']);
+        expect(auth.user).toBeNull();
+    });
+    it('A13: an explicit sign-in in the document ends the isolation; the normal lifecycle follows', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(false, false); await settle();
+        await signIn('Person A');
+        expect(tabs.at(-1)!.posted).toContainEqual({ type: 'signed-in' });
+        fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+        await tell(tabs.slice(-1), 'signed-in');
+        expect(calls('/api/auth/refresh')).toHaveLength(1); expect(auth.user?.displayName).toBe('Person B');
+        await tell(tabs.slice(-1), 'signed-out');
+        expect(auth.user).toBeNull(); expect(calls('/api/auth/refresh')).toHaveLength(1);
+    });
+    it('A13: a sign-out in another tab still cancels a sign-in pending in a preview document', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(false, false); await settle();
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        let outcome: unknown;
+        await act(async () => { void auth.login(payload).then(() => 'installed', (error: unknown) => error).then((value) => { outcome = value; }); });
+        await tell(tabs.slice(-1), 'signed-out');
+        await act(async () => work.resolve(json(session('Late')))); await settle();
+        expect(auth.user).toBeNull(); expect(outcome).not.toBe('installed');
+    });
+    it('normal documents still adopt another tab\'s sign-in and follow its sign-out', async () => {
+        const tabs = previewChannels();
+        fetcher.mockResolvedValueOnce(json(null, 401)); await mountHybrid(); await settle();
+        fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+        await tell(tabs.slice(-1), 'signed-in');
+        expect(auth.user?.displayName).toBe('Person B'); expect(calls('/api/auth/refresh')).toHaveLength(2);
+        await tell(tabs.slice(-1), 'signed-out');
+        expect(auth.user).toBeNull(); expect(calls('/api/auth/refresh')).toHaveLength(2);
+    });
     it('renews before expiry in place: same generation, new bearer', async () => {
         fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
         const generation = auth.generation, before = await bearer();

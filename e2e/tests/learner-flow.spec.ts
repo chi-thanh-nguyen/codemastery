@@ -112,8 +112,20 @@ test.describe('public landing and Learner start', () => {
         await page.goto('/');
         await expect(page.getByRole('heading', { level: 1, name: 'Learn programming at the pace of what you actually know.' })).toBeVisible();
         const nav = page.getByRole('navigation', { name: 'Main navigation' });
-        await expect(nav.getByRole('link', { name: 'Catalogue' })).toHaveAttribute('href', '/courses');
+        // DESIGN r12 S25/D9-7: below 600 px the header keeps the lockup, "Sign in" and the Theme button;
+        // "Catalogue" and "Create account" leave the header and the hero's actions lead to both pages.
+        const compact = (page.viewportSize()?.width ?? 1280) < 600;
+        if (compact) {
+            await expect(nav.getByRole('link', { name: 'Catalogue' })).toHaveCount(0);
+            await expect(nav.getByRole('link', { name: 'Create account' })).toHaveCount(0);
+        } else {
+            await expect(nav.getByRole('link', { name: 'Catalogue' })).toHaveAttribute('href', '/courses');
+            await expect(nav.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/register');
+        }
         await expect(nav.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
+        await expect(nav.getByRole('button', { name: /^Theme: / })).toBeVisible();
+        await expect(page.getByRole('main').getByRole('link', { name: 'Browse courses' })).toHaveAttribute('href', '/courses');
+        await expect(page.getByRole('main').getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/register');
         await expect(page.getByText('Illustration · not learner data')).toBeVisible();
         await expectNoPageOverflow(page);
         // ADR014: the only request is one bearer-less session check against the (absent) refresh cookie.

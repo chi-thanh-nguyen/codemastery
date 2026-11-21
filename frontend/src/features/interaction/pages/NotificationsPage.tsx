@@ -5,7 +5,7 @@ import { SegmentedControl } from '../../../shared/components/ViewRail';
 import { EmptyView } from '../../../shared/components/StatusViews';
 import { NotificationItem } from '../components/NotificationItem';
 import type { NotificationView } from '../types/interactionTypes';
-import { color, radius } from '../../../app/theme/theme';
+import { radius, roles } from '../../../app/theme/theme';
 
 export interface NotificationsPageProps {
     notifications: NotificationView[];
@@ -29,8 +29,8 @@ export function NotificationsPage({ notifications, filter, onFilterChange, onOpe
             message={filter === 'unread' ? 'New updates will appear here.' : 'Updates about new content, deadlines, results and replies will appear here.'} />
             : groups.map((group) => <Box component="section" key={group} aria-labelledby={`group-${group}`} sx={{ mb: 4 }}>
                 <Typography id={`group-${group}`} component="h2" variant="h4" sx={{ mb: 1.5 }}>{group}</Typography>
-                <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, bgcolor: color.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
-                    {visible.filter((item) => item.dayGroup === group).map((item) => <Box component="li" key={item.id} sx={{ borderBottom: `1px solid ${color.line200}`, '&:last-child': { borderBottom: 0 } }}>
+                <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
+                    {visible.filter((item) => item.dayGroup === group).map((item) => <Box component="li" key={item.id} sx={{ borderBottom: `1px solid ${roles.line.hairline}`, '&:last-child': { borderBottom: 0 } }}>
                         <NotificationItem notification={item} onOpen={onOpen} />
                     </Box>)}
                 </Box>

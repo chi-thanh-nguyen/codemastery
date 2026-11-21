@@ -3,7 +3,7 @@ import { CircleAction } from '../../../../shared/components/Tile';
 import { PresentationIcon } from '../../../../shared/components/PresentationIcon';
 import { PublicationPill } from './PublishToggle';
 import type { ChapterEditView } from '../types/courseManagementTypes';
-import { color, radius } from '../../../../app/theme/theme';
+import { radius, roles } from '../../../../app/theme/theme';
 
 export interface ChapterListProps {
     chapters: ChapterEditView[];
@@ -21,14 +21,14 @@ export function ChapterList({ chapters, onEditLesson, onMoveLesson, onAddLesson,
                 <Typography id={`chapter-${chapter.id}`} component="h2" variant="h3">Chapter {chapter.position}: {chapter.title}</Typography>
                 <Button variant="text" onClick={() => onAddLesson(chapter.id)} startIcon={<PresentationIcon name="plus" />}>Add lesson</Button>
             </Box>
-            {chapter.lessons.length === 0 ? <Box sx={{ border: `1.5px dashed ${color.ink400}`, borderRadius: `${radius.lg}px`, p: 3, textAlign: 'center', color: 'text.secondary' }}>No lessons in this chapter yet.</Box>
-                : <Box component="ol" aria-label={`Lessons in ${chapter.title}`} sx={{ listStyle: 'none', m: 0, p: 0, bgcolor: color.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
+            {chapter.lessons.length === 0 ? <Box sx={{ border: `1.5px dashed ${roles.line.strong}`, borderRadius: `${radius.lg}px`, p: 3, textAlign: 'center', color: 'text.secondary' }}>No lessons in this chapter yet.</Box>
+                : <Box component="ol" aria-label={`Lessons in ${chapter.title}`} sx={{ listStyle: 'none', m: 0, p: 0, bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
                     {chapter.lessons.map((lesson, index) => <Box component="li" key={lesson.id} sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: { xs: 'wrap', sm: 'nowrap' }, px: { xs: 2, sm: 3 }, py: 1.5, minHeight: 64,
-                        borderBottom: `1px solid ${color.line200}`, '&:last-child': { borderBottom: 0 } }}>
+                        borderBottom: `1px solid ${roles.line.hairline}`, '&:last-child': { borderBottom: 0 } }}>
                         <Typography className="cm-tabular" sx={{ color: 'text.secondary', fontWeight: 600, width: 24 }}>{lesson.position}</Typography>
                         <Box sx={{ flex: '1 1 200px', minWidth: 0 }}>
                             <Typography sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{lesson.title}</Typography>
-                            <Typography variant="caption" sx={{ color: lesson.skillIds.length ? 'text.secondary' : color.butter800 }}>{lesson.skillIds.length ? `${lesson.skillIds.length} ${lesson.skillIds.length === 1 ? 'skill' : 'skills'} mapped` : 'No skill mapped yet'}</Typography>
+                            <Typography variant="caption" sx={{ color: lesson.skillIds.length ? 'text.secondary' : roles.tone.butter.strong }}>{lesson.skillIds.length ? `${lesson.skillIds.length} ${lesson.skillIds.length === 1 ? 'skill' : 'skills'} mapped` : 'No skill mapped yet'}</Typography>
                         </Box>
                         <PublicationPill publication={lesson.publication} />
                         <Box sx={{ display: 'flex', gap: .5 }}>

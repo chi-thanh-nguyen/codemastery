@@ -7,7 +7,7 @@ import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import { masteryMeta } from '../../../shared/components/StatusPill';
 import type { MasteryState } from '../../../shared/components/StatusPill';
 import { graphExtent, initialGraphViewport, masteryGraphLayout, orderedSkillIds, NODE_HEIGHT, NODE_WIDTH } from '../utils/masteryGraphLayout';
-import { color, pathLine, radius, shadow, tones } from '../../../app/theme/theme';
+import { pathLine, radius, shadow, tones, roles } from '../../../app/theme/theme';
 
 export interface GraphSkill { id: string; name: string; state: MasteryState; prerequisiteIds: string[] }
 
@@ -32,10 +32,10 @@ export interface MasteryGraphProps {
 type SkillNodeData = { skill: GraphSkill; selected: boolean; recommended: boolean; updated: boolean; hideStates: boolean; onSelect: (id: string) => void; prerequisiteCount: number };
 
 const stateTone: Record<MasteryState, { bg: string; fg: string; dashed?: boolean }> = {
-    unknown: { bg: color.surface, fg: color.ink600, dashed: true },
-    learning: { bg: tones.sky.tint, fg: color.brand600 },
-    mastered: { bg: tones.mint.tint, fg: color.mint700 },
-    weak: { bg: tones.butter.tint, fg: color.butter800 },
+    unknown: { bg: roles.bg.raised, fg: roles.text.secondary, dashed: true },
+    learning: { bg: tones.sky.tint, fg: roles.accent.link },
+    mastered: { bg: tones.mint.tint, fg: roles.tone.mint.strong },
+    weak: { bg: tones.butter.tint, fg: roles.tone.butter.strong },
 };
 
 const SkillNode = memo(function SkillNode({ data }: NodeProps<Node<SkillNodeData>>) {
@@ -46,20 +46,20 @@ const SkillNode = memo(function SkillNode({ data }: NodeProps<Node<SkillNodeData
     return <>
         <Handle type="target" position={Position.Left} isConnectable={false} style={{ opacity: 0, left: 0 }} />
         <ButtonBase onClick={() => onSelect(skill.id)} aria-pressed={selected} aria-label={name} className="nodrag"
-            sx={{ position: 'relative', width: NODE_WIDTH, height: NODE_HEIGHT, borderRadius: `${radius.lg}px`, bgcolor: color.surface, justifyContent: 'flex-start', gap: 1.5, px: 1.5, textAlign: 'left',
-                boxShadow: selected ? `0 0 0 2px ${color.brand600}, ${shadow.raised}` : updated ? `0 0 0 2px ${skill.state === 'mastered' ? color.mint700 : color.butter800}` : `inset 0 0 0 1px ${color.line200}`,
-                transition: 'box-shadow 200ms', '&:hover': { boxShadow: selected ? `0 0 0 2px ${color.brand600}, ${shadow.raised}` : shadow.hover },
-                '&.Mui-focusVisible': { outline: `2px solid ${color.brand600}`, outlineOffset: 3 } }}>
+            sx={{ position: 'relative', width: NODE_WIDTH, height: NODE_HEIGHT, borderRadius: `${radius.lg}px`, bgcolor: roles.bg.raised, justifyContent: 'flex-start', gap: 1.5, px: 1.5, textAlign: 'left',
+                boxShadow: selected ? `0 0 0 2px ${roles.accent.progress}, ${shadow.raised}` : updated ? `0 0 0 2px ${skill.state === 'mastered' ? roles.tone.mint.strong : roles.tone.butter.strong}` : `inset 0 0 0 1px ${roles.line.hairline}`,
+                transition: 'box-shadow 200ms', '&:hover': { boxShadow: selected ? `0 0 0 2px ${roles.accent.progress}, ${shadow.raised}` : shadow.hover },
+                '&.Mui-focusVisible': { outline: `2px solid ${roles.focus.ring}`, outlineOffset: 3 } }}>
             {!hideStates && <Box aria-hidden sx={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center', bgcolor: tone.bg, color: tone.fg,
-                border: tone.dashed ? `1.5px dashed ${color.ink400}` : 0, '& svg': { fontSize: 20 } }}><PresentationIcon name={meta.icon} /></Box>}
+                border: tone.dashed ? `1.5px dashed ${roles.line.strong}` : 0, '& svg': { fontSize: 20 } }}><PresentationIcon name={meta.icon} /></Box>}
             <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography component="span" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontWeight: 600, fontSize: '0.9375rem', lineHeight: 1.25, color: color.ink900 }}>{skill.name}</Typography>
-                <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: color.ink600, mt: .25 }}>
+                <Typography component="span" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontWeight: 600, fontSize: '0.9375rem', lineHeight: 1.25, color: roles.text.primary }}>{skill.name}</Typography>
+                <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: roles.text.secondary, mt: .25 }}>
                     {hideStates ? `${prerequisiteCount} ${prerequisiteCount === 1 ? 'prerequisite' : 'prerequisites'}` : updated ? `${meta.label} · Updated` : meta.label}
                 </Typography>
             </Box>
-            {recommended && <Box aria-hidden sx={{ position: 'absolute', top: -10, right: -10, width: 28, height: 28, borderRadius: '50%', bgcolor: color.lilac100, color: color.lilac700,
-                border: `3px solid ${color.surface}`, display: 'grid', placeItems: 'center', '& svg': { fontSize: 14 } }}><PresentationIcon name="route" /></Box>}
+            {recommended && <Box aria-hidden sx={{ position: 'absolute', top: -10, right: -10, width: 28, height: 28, borderRadius: '50%', bgcolor: roles.tone.lilac.tint, color: roles.tone.lilac.strong,
+                border: `3px solid ${roles.bg.raised}`, display: 'grid', placeItems: 'center', '& svg': { fontSize: 14 } }}><PresentationIcon name="route" /></Box>}
         </ButtonBase>
         <Handle type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0, right: 0 }} />
     </>;
@@ -83,8 +83,8 @@ const Canvas = forwardRef<MasteryGraphHandle, MasteryGraphProps>(function Canvas
         const edges: Edge[] = skills.flatMap((skill) => skill.prerequisiteIds.filter((p) => byId.has(p)).map((prerequisite) => {
             const active = selectedId !== null && (prerequisite === selectedId || skill.id === selectedId);
             return { id: `${prerequisite}->${skill.id}`, source: prerequisite, target: skill.id, type: 'smoothstep', focusable: false, selectable: false,
-                style: { stroke: active ? color.brand600 : color.ink400, strokeWidth: 2, strokeDasharray: active ? undefined : pathLine.dasharray },
-                markerEnd: { type: MarkerType.ArrowClosed, color: active ? color.brand600 : color.ink400, width: 16, height: 16 } };
+                style: { stroke: active ? roles.accent.progress : roles.line.strong, strokeWidth: 2, strokeDasharray: active ? undefined : pathLine.dasharray },
+                markerEnd: { type: MarkerType.ArrowClosed, color: active ? roles.accent.link : roles.line.strong, width: 16, height: 16 } };
         }));
         return { nodes, edges, rows, extent: graphExtent(positions), positions };
     }, [skills, selectedId, recommendedSkillId, updatedIds, hideStates, select]);
@@ -109,7 +109,7 @@ const Canvas = forwardRef<MasteryGraphHandle, MasteryGraphProps>(function Canvas
         observer.observe(element);
         return () => observer.disconnect();
     }, [flow, extent, zoom, selectedId, layoutPositions]);
-    return <Box ref={container} role="group" aria-label={label} data-ready={ready || undefined} sx={{ height: height ?? autoHeight, bgcolor: color.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden', position: 'relative',
+    return <Box ref={container} role="group" aria-label={label} data-ready={ready || undefined} sx={{ height: height ?? autoHeight, bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden', position: 'relative',
         '& .react-flow__node': { cursor: 'default' }, '& .react-flow__attribution': { display: 'none' } }}
         onKeyDown={(event) => { if (event.key === 'Escape' && selectedId) { event.stopPropagation(); onSelect(null); } }}>
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} defaultViewport={{ x: 32, y: 32, zoom }} minZoom={0.4} maxZoom={1.6}

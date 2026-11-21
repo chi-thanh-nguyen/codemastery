@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { Box, ListItemIcon, MenuItem, Snackbar } from '@mui/material';
@@ -16,6 +16,8 @@ import { PublicPreview } from './PublicPreview';
 import * as fx from './fixtures';
 import { PreviewContext, previewHref, usePreviewNav } from './previewKit';
 import type { Workspace } from './previewKit';
+import { ThemePreferenceContext, useThemePreference } from '../theme/theme';
+import type { ThemePreference } from '../theme/theme';
 
 interface ScreenDef { id: string; workspace: Workspace; title: string; spec: string; status: 'Live' | 'Preview' | 'Proposed'; note: string; bare?: boolean; nav?: string }
 /** Every DESIGN.md screen group. `nav` names the top-bar item that stays current (parent-aware). */
@@ -80,6 +82,16 @@ const PERSONA: Record<Workspace, { name: string; role: string }> = { reference: 
 
 /** Isolated design preview at the approved `/preview` route. It never reads AuthProvider or calls the API. */
 export default function PreviewApp() {
+    // S26: the preview follows the stored preference (and other tabs) until a preview-local choice is made;
+    // that choice lives in memory for this document only, never writes storage and is gone on reload.
+    const globalTheme = useThemePreference();
+    const { setPreviewPreference } = globalTheme;
+    useEffect(() => () => setPreviewPreference(null), [setPreviewPreference]);
+    const previewTheme = useMemo(() => ({
+        ...globalTheme,
+        preference: globalTheme.previewPreference ?? globalTheme.preference,
+        setPreference: (next: ThemePreference) => setPreviewPreference(next),
+    }), [globalTheme, setPreviewPreference]);
     const { screen, item, tab, go } = usePreviewNav();
     const navigate = useNavigate(), location = useLocation();
     const [learner, setLearner] = useState(initialLearnerState), [instructor, setInstructor] = useState(initialInstructorState), [admin, setAdmin] = useState(initialAdminState);
@@ -111,24 +123,26 @@ export default function PreviewApp() {
     else content = <AdminPreview state={admin} setState={setAdmin} screen={def.id} />;
     const persona = PERSONA[workspace];
     const unread = learner.notifications.filter((entry) => !entry.read).length;
-    return <PreviewContext.Provider value={context}>
-        <Box key={resetKey} data-preview-screen={def.id}>
-            {/* No preview chrome on any screen (7 November 2026): each screen looks as it would in
-                production. Screens are opened by link (`/preview?screen=<id>`, listed on the index). */}
-            {def.bare ? content
-                : <DashboardLayout navItems={NAV[workspace].map(({ screen: target, live, ...entry }) => ({ ...entry, href: live ?? previewHref(target) }))} selectedNavId={def.nav}
-                    onNavSelect={(id) => { const entry = NAV[workspace].find((candidate) => candidate.id === id); if (entry?.live) navigate(entry.live); else go(entry?.screen ?? 'overview'); }}
-                    brandHref={previewHref('overview')} onBrandSelect={toIndex}
-                    headerActions={<>
-                        {workspace === 'learner' && <NotificationBell unread={unread} href={previewHref('notifications')} onClick={() => go('notifications')} current={def.id === 'notifications'} />}
-                        <AccountMenu displayName={persona.name} role={persona.role} renderItems={(close) => [
-                            <MenuItem key="index" onClick={() => { close(); toIndex(); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="layers" sx={{ fontSize: 20 }} /></ListItemIcon>Preview index</MenuItem>,
-                            <MenuItem key="reset" onClick={() => { close(); reset(); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="refresh" sx={{ fontSize: 20 }} /></ListItemIcon>Reset sample data</MenuItem>,
-                        ]} />
-                    </>}>
-                    {content}
-                </DashboardLayout>}
-        </Box>
-        <Snackbar open={!!toast} autoHideDuration={6000} onClose={(_, reason) => { if (reason !== 'clickaway') setToast(null); }} message={toast ?? ''} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
-    </PreviewContext.Provider>;
+    return <ThemePreferenceContext.Provider value={previewTheme}>
+        <PreviewContext.Provider value={context}>
+            <Box key={resetKey} data-preview-screen={def.id}>
+                {/* No preview chrome on any screen (7 November 2026): each screen looks as it would in
+                    production. Screens are opened by link (`/preview?screen=<id>`, listed on the index). */}
+                {def.bare ? content
+                    : <DashboardLayout navItems={NAV[workspace].map(({ screen: target, live, ...entry }) => ({ ...entry, href: live ?? previewHref(target) }))} selectedNavId={def.nav}
+                        onNavSelect={(id) => { const entry = NAV[workspace].find((candidate) => candidate.id === id); if (entry?.live) navigate(entry.live); else go(entry?.screen ?? 'overview'); }}
+                        brandHref={previewHref('overview')} onBrandSelect={toIndex}
+                        headerUtilities={workspace === 'learner' ? <NotificationBell unread={unread} href={previewHref('notifications')} onClick={() => go('notifications')} current={def.id === 'notifications'} /> : undefined}
+                        headerActions={<>
+                            <AccountMenu displayName={persona.name} role={persona.role} renderItems={(close) => [
+                                <MenuItem key="index" onClick={() => { close(); toIndex(); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="layers" sx={{ fontSize: 20 }} /></ListItemIcon>Preview index</MenuItem>,
+                                <MenuItem key="reset" onClick={() => { close(); reset(); }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="refresh" sx={{ fontSize: 20 }} /></ListItemIcon>Reset sample data</MenuItem>,
+                            ]} />
+                        </>}>
+                        {content}
+                    </DashboardLayout>}
+            </Box>
+            <Snackbar open={!!toast} autoHideDuration={6000} onClose={(_, reason) => { if (reason !== 'clickaway') setToast(null); }} message={toast ?? ''} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
+        </PreviewContext.Provider>
+    </ThemePreferenceContext.Provider>;
 }
