@@ -906,6 +906,46 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         assertEquals(1, graphRows());
     }
 
+    @Test void unpairedSurrogatesAreBadRequestsWithoutEffectsAndSupplementaryTextRoundTripsUnchanged() throws Exception {
+        String owner = bearer(OWNER), skills = "/api/courses/" + COURSE + "/skills";
+        UUID existing = skillRow(COURSE, "Existing");
+        jdbc.update("UPDATE public.skills SET description = 'Kept' WHERE id = ?", existing);
+        String before = graphState();
+        // JSON escapes reach Java as unpaired UTF-16 surrogates; the driver would have stored them as '?'.
+        for (String unpaired : List.of("\\ud800", "\\udc00", "Loops \\ud83d", "\\ude00 Loops", "\\ud83d\\ude00\\ud800")) {
+            for (String body : List.of("{\"name\":\"" + unpaired + "\"}",
+                    "{\"name\":\"Loops\",\"description\":\"" + unpaired + "\"}")) {
+                assertProblem(call(new Operation(HttpMethod.POST, skills, body), owner), 400, null);
+                assertProblem(call(new Operation(HttpMethod.PUT, skills + "/" + existing, body), owner), 400, null);
+            }
+        }
+        assertEquals(before, graphState(), "no INSERT or UPDATE reached PostgreSQL");
+        assertFalse(rootLockedElsewhere(COURSE));
+
+        // Valid surrogate pairs (supplementary characters) and a non-space Mongolian vowel separator persist exactly.
+        String name = "Graphs 𝔸 😀", description = "᠎ pairs 􏿿";
+        JsonNode created = json(call(new Operation(HttpMethod.POST, skills,
+                "{\"name\":\"Graphs \\ud835\\udd38 \\ud83d\\ude00\",\"description\":\"\\u180e pairs \\udbff\\udfff\"}"), owner), 201);
+        UUID createdId = UUID.fromString(created.get("id").asString());
+        assertEquals(name, created.get("name").asString());
+        assertEquals(description, created.get("description").asString());
+        JsonNode replaced = json(call(new Operation(HttpMethod.PUT, skills + "/" + existing,
+                "{\"name\":\"" + name + "\",\"description\":\"" + description + "\"}"), owner), 200);
+        assertEquals(name, replaced.get("name").asString());
+        assertEquals(description, replaced.get("description").asString());
+        String utf8 = HexFormat.of().formatHex((name + "|" + description).getBytes(StandardCharsets.UTF_8));
+        for (UUID skill : List.of(createdId, existing)) {
+            assertEquals(utf8, jdbc.queryForObject("SELECT encode(convert_to(name || '|' || description, 'UTF8'), 'hex') "
+                    + "FROM public.skills WHERE id = ?", String.class, skill), "persisted bytes equal the accepted text");
+        }
+        JsonNode graphRead = json(call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/skill-graph", null), owner), 200);
+        assertEquals(2, graphRead.get("skills").size());
+        for (JsonNode skill : graphRead.get("skills")) {
+            assertEquals(name, skill.get("name").asString());
+            assertEquals(description, skill.get("description").asString());
+        }
+    }
+
     @Test void aCorruptPersistedGraphFailsClosedWithASafeServerError() throws Exception {
         UUID a = skillRow(COURSE, "A"), b = skillRow(COURSE, "B");
         edgeRow(COURSE, a, b);

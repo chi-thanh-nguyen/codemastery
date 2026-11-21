@@ -358,6 +358,42 @@ class SkillGraphTest {
             verify(courseConfiguration, never()).withCourseConfigurationWrite(any(), any());
         }
 
+        @ParameterizedTest
+        @ValueSource(strings = {"\ud800", "\udc00", "Loops \ud83d", "\ude00 Loops", "A\udbff\udbffB", "B\udc00\ud800C",
+                "😀\ud800"})
+        void anUnpairedSurrogateIsUnstorableTextAndBadRequestBeforeTheGuard(String text) {
+            var name = assertThrows(BusinessRuleException.class, () -> service.createSkill(COURSE, text, null));
+            var description = assertThrows(BusinessRuleException.class,
+                    () -> service.updateSkill(COURSE, SKILL_A, "Loops", text));
+            var renamed = assertThrows(BusinessRuleException.class,
+                    () -> service.updateSkill(COURSE, SKILL_A, text, null));
+            var described = assertThrows(BusinessRuleException.class,
+                    () -> service.createSkill(COURSE, "Loops", text));
+
+            for (var refused : List.of(name, description, renamed, described)) {
+                assertEquals(400, refused.getStatus().value());
+            }
+            verify(courseConfiguration, never()).withCourseConfigurationWrite(any(), any());
+            verify(skills, never()).insertSkill(any());
+            verify(skills, never()).updateSkill(any());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"😀", "Graphs 𝔸", "􏿿", "᠎", "é́ 𐀀"})
+        void validSurrogatePairsAndNonSpaceCharactersAreStoredUnchanged(String text) {
+            when(skills.insertSkill(any(Skill.class))).thenAnswer(invocation -> invocation.getArgument(0));
+            when(skills.findSkill(COURSE, SKILL_A)).thenReturn(Optional.of(skill(SKILL_A)));
+            when(skills.updateSkill(any(Skill.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            var created = service.createSkill(COURSE, text, text);
+            var updated = service.updateSkill(COURSE, SKILL_A, text, text);
+
+            assertEquals(text, created.name());
+            assertEquals(text, created.description());
+            assertEquals(text, updated.name());
+            assertEquals(text, updated.description());
+        }
+
         @Test
         void validTextAndANullDescriptionAreStoredUnderTheGuard() {
             when(skills.insertSkill(any(Skill.class))).thenAnswer(invocation -> invocation.getArgument(0));

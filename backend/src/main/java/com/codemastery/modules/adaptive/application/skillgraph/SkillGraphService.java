@@ -302,11 +302,17 @@ public class SkillGraphService {
      * Client text is invalid input (400), never a 500 from the V003 {@code ck_skills_text}
      * CHECK or PostgreSQL's NUL restriction. A value needs one character that is whitespace
      * under none of ECMAScript {@code \s} (the OpenAPI {@code \S} pattern), Java and
-     * PostgreSQL's {@code [:space:]}, and it must not contain NUL, which {@code text} cannot store.
+     * PostgreSQL's {@code [:space:]}. It must not contain NUL, which {@code text} cannot store, nor
+     * an unpaired UTF-16 surrogate, which the JDBC driver would silently store as {@code ?} so the
+     * persisted value would differ from the accepted one (the same rule as CO06's
+     * {@code CourseManagementService.isStorable}). A valid surrogate pair is one supplementary code
+     * point and is accepted.
      */
     private static boolean storableText(String value) {
-        return value.indexOf('\0') < 0 && value.codePoints().anyMatch(point -> !Character.isWhitespace(point)
-                && !Character.isSpaceChar(point) && point != 0x0085 && point != 0xFEFF);
+        return value.codePoints().noneMatch(point -> point == 0
+                        || point >= Character.MIN_SURROGATE && point <= Character.MAX_SURROGATE)
+                && value.codePoints().anyMatch(point -> !Character.isWhitespace(point)
+                        && !Character.isSpaceChar(point) && point != 0x0085 && point != 0xFEFF);
     }
 
     private static BusinessRuleException invalidText(String diagnostic) {
