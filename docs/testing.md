@@ -5353,3 +5353,19 @@ Nothing was provisioned on any real database.
 | `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` (local Docker) | `RUNTIME_CONSUMER_TESTS_PASS` including the eight AD07 operations (create, replace, edge, cycle 409, mapping, owner read, Learner 403, unmap, referenced delete 409, delete); no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
 
 These local runs are not the required CI evidence; the VM workflow runs on the PR.
+
+### CT40 structural projection consumption — 22 November 2026
+
+With CO06 on `main` (`75cdb8b`), every assembled skill graph (the owner read and the guarded edge
+and delete commands) now proves each persisted `lesson_skills` row against
+`CourseStructureService.readStructure` (ADR005 §§3.1, 4.1). The projection joins the caller's
+transaction: the owner read sees Course and Adaptive state in one REPEATABLE READ snapshot, and
+commands read it under the held Course root. A mapping whose Lesson is not one of the Course's own
+Lessons, or an inconsistent projection, is a safe 500 with nothing repaired and no partial graph.
+`mapLesson`/`unmapLesson` keep the CT03 `requireLessonOwnership` assertion that ADR005 §3.1 selects.
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='SkillGraphTest*,AdaptiveLearningFlowIntegrationTest'` | 44 unit and 66 PostgreSQL tests, 0 failures (new: ordering, no-mapping fast path, foreign and inconsistent projections, hidden-Lesson mappings, raw-SQL foreign mappings, a Lesson moved out of the Course, a structural change committed mid-read, CO06 Lesson creation racing a mapping, commit and rollback) |
+
+Local developer runs, not independent review, QA or CI evidence.
