@@ -5062,6 +5062,34 @@ integration branch and are not part of this PR. Placement: the HTTP effects stay
 
 These are local developer runs, not independent review, QA or CI evidence.
 
+### Runtime-safe quiz writes, attempt-start races and text — 22 November 2026
+
+Two corrections that do not depend on AD07, under the Leader's instruction of 22 November 2026 and
+with @minhtan29042006's agreement to Leader-assisted commits:
+
+- `QuizRepositoryImpl.save` no longer merges the full row of a stored quiz. A replacement updates
+  only title, kind, time limit and publication within the same Course, and a new quiz is persisted
+  directly. ADR012 §19.2 never grants the runtime role an update of `quizzes.course_id`, so the
+  full-row merge would have failed (42501) once the CT17-P6 grants exist.
+- Quiz text with an unpaired UTF-16 surrogate is 400 (PgJDBC would store `?`), matching CO06.
+
+AS08 attempt start is not implemented; the race cases let a separate connection play it in the
+ADR007 §8 lock order (Course root, then the attempt insert whose foreign-key check takes `FOR KEY
+SHARE` on the quiz row).
+
+| Obligation | Covered by (`AdaptiveLearningFlowIntegrationTest`, PostgreSQL) |
+| --- | --- |
+| A stored quiz keeps its Course; a replacement writes only its definition | `aStoredQuizKeepsItsCourseAndAReplacementWritesOnlyItsDefinition` |
+| An attempt start holding the root freezes the quiz before a waiting edit or delete (commit 409, rollback proceeds) | `anAttemptStartHoldingTheRootFreezesTheQuizBeforeAWaitingEditOrDelete` |
+| A writer holding the root and quiz row makes an attempt start wait, with and without the root; a committed delete leaves 23503, a committed edit is what the attempt freezes | `aQuizWriterHoldingTheRootAndQuizRowMakesAnAttemptStartWaitForItsOutcome` |
+| Unpaired surrogate in a title is 400 | `AttemptServiceTest`, `AuthorizationIntegrationTest$QuizEndpoints` |
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='AdaptiveLearningFlowIntegrationTest,AuthorizationIntegrationTest*,AttemptServiceTest*'` | 57 + 70 PostgreSQL and 42 unit tests, 0 failures |
+
+These are local developer runs, not independent review, QA or CI evidence.
+
 ## CO03 and CO14 Course persistence and configuration guard verification — 21 November 2026
 
 [PR #262](https://github.com/chi-thanh-nguyen/codemastery/pull/262) completes the
