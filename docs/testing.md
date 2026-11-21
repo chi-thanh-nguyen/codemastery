@@ -4519,3 +4519,29 @@ Re-executed locally after the remediation:
 The marker uses only the built-in `set_config` and `current_setting` functions, so it
 needs no new CT17 privilege. These are local developer runs, not independent QA or CI
 evidence.
+
+### Independent-review P2 remediation — 21 November 2026
+
+An independent Codex review of `2439f25` returned `CHANGES_REQUIRED` with two P2 findings,
+each with a failing PostgreSQL reproduction. Both were reproduced here before they were fixed.
+
+| Finding | Root cause | Fix | Regression tests |
+| --- | --- | --- | --- |
+| P2-01: guard loss after a savepoint rollback | The PostgreSQL marker was checked only at the next guard entry or settings write, so a savepoint rollback inside the callback, or after it returned, let stale writes commit over an intervening writer | The guard rechecks the marker when the callback returns and in a `beforeCommit` synchronization of the acquiring transaction; either failure rolls the unit back, including when the caller swallows the exception | `aSavepointRollbackInsideTheCallbackCannotCommitAStaleWriteOverTheWinner`, `aSavepointRollbackAfterTheCallbackReturnedFailsTheOuterCommit`, existing `aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker` |
+| P2-02: dirty JPA entity detached after a direct write | Direct writes detached managed copies without checking pending changes, silently discarding mutable JSON edits and merged updates | Every direct Course write runs in the caller's transaction (`PROPAGATION_MANDATORY`) and rejects pending JPA changes before any statement; only then are clean copies of the changed rows detached. Any failure marks the transaction rollback-only | `pendingCourseJsonChangesAreNeverDiscardedByADirectMetadataWrite`, `aPendingChapterMergeIsNeverDiscardedByADirectReorder`, `everyDirectWriteRejectsPendingChangesOfItsRowsAndDoomsTheUnit` (10 write paths), `cleanManagedEntitiesAreInvalidatedSoTheCommittedDirectWriteIsReadBackFresh` |
+
+Spring runs `beforeCommit` before it inspects the rollback-only flag, so a refused commit
+reports either the guard's `IllegalStateException` or `UnexpectedRollbackException`; the
+tests accept either and assert the database outcome (nothing committed, the intervening
+writer preserved, no leftover lock). A temporary local mutation check, reverted before
+commit, confirmed the coverage. Removing the pre-commit check fails the after-callback
+test. Removing the post-callback and dirty-state checks fails the inside-callback test
+and all 12 dirty-state tests. The `REQUIRES_NEW` test and the clean-entity invalidation
+tests still pass.
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw verify -Dtest='com.codemastery.modules.course.**' -Dit.test='AdaptiveLearningFlowIntegrationTest,CourseRepositoryIntegrationTest'` | 221 unit, 48 + 9 PostgreSQL tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 739, Failsafe 294, 0 failures, errors or skips |
+
+These are local developer runs, not independent re-review, QA or CI evidence.
