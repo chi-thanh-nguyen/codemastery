@@ -23,6 +23,7 @@ import java.util.UUID;
 @Repository
 public class SkillRepositoryImpl implements SkillRepository {
 
+    /** PostgreSQL foreign_key_violation. Only this state is a business conflict. */
     private static final String FOREIGN_KEY_VIOLATION = "23503";
 
     private final SkillJpaRepository skills;
@@ -70,6 +71,9 @@ public class SkillRepositoryImpl implements SkillRepository {
 
     @Override
     public void deleteSkill(UUID courseId, UUID skillId) {
+        // Question and mastery references live in tables this module may not read, so the
+        // V004/V005 NO ACTION foreign keys are their only evidence. Translate exactly that
+        // refusal into 409 and let every other SQL failure stay a 500 (ADR005 §4.2).
         try {
             if (skills.deleteScoped(courseId, skillId) != 1) {
                 throw new IllegalStateException("Skill removal lost its row");
@@ -144,6 +148,7 @@ public class SkillRepositoryImpl implements SkillRepository {
         }
     }
 
+    /** Spring, Hibernate and JDBC each wrap the driver failure, so walk the cause chain. */
     private static boolean isForeignKeyViolation(Throwable failure) {
         for (Throwable current = failure; current != null; current = current.getCause()) {
             if (current instanceof SQLException sql && FOREIGN_KEY_VIOLATION.equals(sql.getSQLState())) {
