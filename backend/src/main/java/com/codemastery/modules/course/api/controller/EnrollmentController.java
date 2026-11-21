@@ -103,7 +103,8 @@ public class EnrollmentController {
     public static class MembershipCacheAdvice implements ResponseBodyAdvice<Object> {
         private static final java.util.Set<String> PRIVATE_PATHS = java.util.Set.of("/api/me/courses", "/api/me/course-progress", "/api/me/resume");
         private static final java.util.regex.Pattern PRIVATE_COURSE_PATH =
-                java.util.regex.Pattern.compile("/api/courses/[^/]+/(membership|progress|resume|lessons/[^/]+/completion)");
+                java.util.regex.Pattern.compile("/api/courses/[^/]+/(membership|progress|resume|lessons/[^/]+(/completion)?)"
+                        + "|/api/instructor/courses(/.*)?");
         @Override public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) { return true; }
         @Override public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType contentType,
                 Class<? extends HttpMessageConverter<?>> converterType, ServerHttpRequest request, ServerHttpResponse response) {
