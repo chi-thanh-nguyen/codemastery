@@ -5,7 +5,7 @@ import { Page } from '../../../layouts/DashboardLayout';
 import { Tile } from '../../../shared/components/Tile';
 import { StatusPill } from '../../../shared/components/StatusPill';
 import { Monogram } from '../../../shared/components/AppHeader';
-import { color, codeFontStack } from '../../../app/theme/theme';
+import { codeFontStack, roles } from '../../../app/theme/theme';
 
 /** Login-time presentation only: no Profile resource, request, or permission claim (CT16-PROFILE P2). */
 export function ProfilePage() {
@@ -25,7 +25,7 @@ export function ProfilePage() {
                 <Box component="dl" sx={{ m: 0, display: 'grid', rowGap: 2.5, '& dt': { fontSize: '0.8125rem', fontWeight: 600, color: 'text.secondary', mb: .5 }, '& dd': { m: 0 } }}>
                     <Box><Typography component="dt">Display name</Typography><Typography component="dd">{user.displayName}</Typography></Box>
                     <Box><Typography component="dt">Role</Typography><Typography component="dd">{user.role}</Typography></Box>
-                    <Box><Typography component="dt">User ID</Typography><Typography component="dd" sx={{ fontFamily: codeFontStack, fontSize: '0.9375rem', color: color.ink700 }}>{user.id}</Typography></Box>
+                    <Box><Typography component="dt">User ID</Typography><Typography component="dd" sx={{ fontFamily: codeFontStack, fontSize: '0.9375rem', color: roles.text.strongSecondary }}>{user.id}</Typography></Box>
                 </Box>
             </Tile>
         </Box>

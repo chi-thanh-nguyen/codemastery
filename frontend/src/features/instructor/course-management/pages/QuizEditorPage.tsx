@@ -5,7 +5,7 @@ import { SegmentedControl } from '../../../../shared/components/ViewRail';
 import { StatusPill } from '../../../../shared/components/StatusPill';
 import type { QuestionDraft, QuizDraft, SkillOption } from '../types/courseManagementTypes';
 import { difficultyLabel } from '../types/courseManagementTypes';
-import { color, radius } from '../../../../app/theme/theme';
+import { radius, roles } from '../../../../app/theme/theme';
 
 export interface QuizEditorPageProps { initial: QuizDraft; questions: QuestionDraft[]; skills: SkillOption[]; onSave: (quiz: QuizDraft) => void; onCancel: () => void }
 
@@ -41,7 +41,7 @@ export function QuizEditorPage({ initial, questions, skills, onSave, onCancel }:
                 <Typography id="quiz-order" variant="h4" component="h3" sx={{ mb: 1.5 }}>In this quiz ({draft.questionIds.length})</Typography>
                 {errors.questions && <Alert severity="error" sx={{ mb: 1.5 }}>{errors.questions}</Alert>}
                 <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 1 }}>
-                    {draft.questionIds.map((id, index) => { const question = byId.get(id); return question && <Box component="li" key={id} sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1.25, borderRadius: `${radius.md}px`, bgcolor: color.canvas100 }}>
+                    {draft.questionIds.map((id, index) => { const question = byId.get(id); return question && <Box component="li" key={id} sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1.25, borderRadius: `${radius.md}px`, bgcolor: roles.bg.canvas }}>
                         <Typography className="cm-tabular" sx={{ fontWeight: 600, width: 24, color: 'text.secondary' }}>{index + 1}</Typography>
                         <Typography sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{question.prompt}</Typography>
                         <CircleAction size="sm" variant="plain" icon="move-up" label={`Move question ${index + 1} up`} disabled={index === 0} onClick={() => move(index, -1)} />
@@ -53,7 +53,7 @@ export function QuizEditorPage({ initial, questions, skills, onSave, onCancel }:
                 <Typography id="quiz-bank" variant="h4" component="h3" sx={{ mb: 1.5 }}>Question bank</Typography>
                 <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: .5, maxHeight: 360, overflowY: 'auto' }}>
                     {questions.map((question) => <Box component="li" key={question.id}>
-                        <Box component="label" sx={{ display: 'flex', alignItems: 'center', gap: 1, px: .5, borderRadius: `${radius.sm}px`, cursor: 'pointer', '&:hover': { bgcolor: color.canvas100 } }}>
+                        <Box component="label" sx={{ display: 'flex', alignItems: 'center', gap: 1, px: .5, borderRadius: `${radius.sm}px`, cursor: 'pointer', '&:hover': { bgcolor: roles.bg.canvas } }}>
                             <Checkbox checked={draft.questionIds.includes(question.id)} onChange={(event) => set({ questionIds: event.target.checked ? [...draft.questionIds, question.id] : draft.questionIds.filter((item) => item !== question.id) })} />
                             <Box sx={{ minWidth: 0, flex: 1 }}><Typography sx={{ fontSize: '0.9375rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{question.prompt}</Typography>
                                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>{skills.find((skill) => skill.id === question.skillId)?.name ?? 'Unmapped'} · {difficultyLabel[question.difficulty]}</Typography></Box>

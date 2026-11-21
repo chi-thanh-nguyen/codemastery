@@ -8,7 +8,7 @@ import { MasteryTag, StatusPill } from '../../../shared/components/StatusPill';
 import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import { CodeBlock } from '../../../shared/components/CodeBlock';
 import type { ReviewItemView, SkillChangeView } from '../types/assessmentTypes';
-import { color, radius } from '../../../app/theme/theme';
+import { radius, roles } from '../../../app/theme/theme';
 
 export interface QuizResultPageProps {
     quizTitle: string;
@@ -42,8 +42,8 @@ export function QuizResultPage({ quizTitle, kindLabel, score, correct, total, at
         </StatGroup></Box>
         {skillChanges && skillChanges.length > 0 && <Box component="section" aria-labelledby="result-skills" sx={{ mb: 5 }}>
             <Typography id="result-skills" variant="h2" sx={{ mb: 2 }}>Skills updated</Typography>
-            <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, bgcolor: color.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
-                {skillChanges.map((change) => <Box component="li" key={change.skillId} sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5, px: 3, py: 2, borderBottom: `1px solid ${color.line200}`, '&:last-child': { borderBottom: 0 } }}>
+            <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
+                {skillChanges.map((change) => <Box component="li" key={change.skillId} sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5, px: 3, py: 2, borderBottom: `1px solid ${roles.line.hairline}`, '&:last-child': { borderBottom: 0 } }}>
                     <Typography sx={{ fontWeight: 600, flex: '1 1 160px' }}>{change.name}</Typography>
                     <MasteryTag state={change.before} /><PresentationIcon name="arrow-right" aria-label="changed to" sx={{ fontSize: 18, color: 'text.secondary' }} /><MasteryTag state={change.after} />
                 </Box>)}

@@ -18,7 +18,31 @@ export interface RequestOptions<T> {
     signal?: AbortSignal;
     /** Owning feature rejects superseded operations even within one session. */
     isCurrent?: () => boolean;
+    /** Default JSON mode: exact status, JSON media, a nonempty body and successful decoding. */
+    responseMode?: 'json';
 }
+/**
+ * CT16-B1-NO-CONTENT-2026-11-09-r1 (ADR005 §16.2): explicitly selected by approved 204 operations.
+ * Only an exact 204 succeeds; no media type is required, no body is read and no decoder runs.
+ */
+export type NoContentRequestOptions =
+    Omit<RequestOptions<never>, 'responseMode' | 'expectedStatus' | 'decode'> &
+    { responseMode: 'no-content'; expectedStatus: 204; decode?: never };
+/**
+ * A14 response metadata (setup.md Batch 1 / R1–R2 handoffs, ADR005 §§13, 15): a JSON `GET` that also
+ * returns the response `ETag`, observed only after the status, media type, decoding and every
+ * current-generation check succeeded. The tag is returned verbatim (or null when absent); the
+ * caller keeps it paired with this body and never derives or combines tags.
+ */
+export type MetadataRequestOptions<T> = Omit<RequestOptions<T>, 'responseMode' | 'method'> & { method: 'GET'; responseMode: 'json-with-metadata' };
+export interface ResponseWithMetadata<T> { body: T; etag: string | null }
+/** The transport entry point: JSON by default, plus the explicit no-content and metadata modes. */
+export interface HttpSend {
+    (path: string, options: NoContentRequestOptions): Promise<void>;
+    <T>(path: string, options: MetadataRequestOptions<T>): Promise<ResponseWithMetadata<T>>;
+    <T>(path: string, options: RequestOptions<T>): Promise<T>;
+}
+type AnyRequestOptions = RequestOptions<unknown> | NoContentRequestOptions | MetadataRequestOptions<unknown>;
 let authAccess: AuthSessionAccess | undefined;
 /**
  * The only operations that may carry the HttpOnly refresh cookie (ADR014 §5). Every other
@@ -69,10 +93,12 @@ const messages: Record<number, string> = {
     400: 'Please check the supplied information.', 401: 'Authentication failed.',
     403: 'Access is denied.', 404: 'The requested resource is unavailable.',
     409: 'The request conflicts with existing information.',
+    412: 'This information was changed elsewhere. Review the latest version before saving again.',
+    428: 'Your copy of this information is out of date. Load the latest version before saving again.',
 };
 const reasons: Record<number, string> = {
     400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found',
-    405: 'Method Not Allowed', 409: 'Conflict', 415: 'Unsupported Media Type',
+    405: 'Method Not Allowed', 409: 'Conflict', 412: 'Precondition Failed', 415: 'Unsupported Media Type', 428: 'Precondition Required',
     500: 'Internal Server Error', 503: 'Service Unavailable',
 };
 function httpFailure(status: number, value: unknown, media: string, path: string): ApiError {
@@ -95,11 +121,16 @@ function httpFailure(status: number, value: unknown, media: string, path: string
     return new ApiError('http', message, status, problem, fields);
 }
 /** Independently usable transport; the access seam is provider-owned. */
-export function createHttpClient(apiBase: string, access?: AuthSessionAccess, browserOrigin = globalThis.location?.origin ?? '') {
+export function createHttpClient(apiBase: string, access?: AuthSessionAccess, browserOrigin = globalThis.location?.origin ?? ''): HttpSend {
     const root = rootFor(apiBase, browserOrigin);
-    return async function send<T>(path: string, options: RequestOptions<T>): Promise<T> {
+    async function send(path: string, options: AnyRequestOptions): Promise<unknown> {
         const url = endpointFor(root, path, options.query);
-        if (!['public', 'authenticated'].includes(options.auth) || typeof options.decode !== 'function' ||
+        const mode = options.responseMode ?? 'json';
+        // Modes are chosen explicitly; nothing is inferred from method, decoder, status or payload.
+        const modeValid = mode === 'no-content'
+            ? options.decode === undefined && options.expectedStatus === 204
+            : (mode === 'json' || mode === 'json-with-metadata' && options.method === 'GET') && typeof options.decode === 'function';
+        if (!modeValid || !['public', 'authenticated'].includes(options.auth) ||
             !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method) ||
             options.method === 'GET' && options.body !== undefined) {
             throw new ApiError('configuration', 'The API operation is not configured correctly.');
@@ -140,9 +171,15 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
             access!.invalidate(session.generation);
             throw httpFailure(401, undefined, '', url.pathname);
         }
-        if (response.status === 204 && options.expectedStatus === 204) {
-            // No representation: a 204 body is never read or decoded as data.
-            const decoded = options.decode(undefined);
+        if (mode === 'no-content' && response.ok) {
+            // Only an exact 204 succeeds; its body is never read. Other successes are protocol failures.
+            if (response.status !== 204) throw protocolError();
+            requireCurrent();
+            return undefined;
+        }
+        if (mode === 'json' && response.status === 204 && options.expectedStatus === 204) {
+            // ADR014 sign-out: no representation; a 204 body is never read or decoded as data.
+            const decoded = options.decode!(undefined);
             requireCurrent();
             return decoded;
         }
@@ -158,16 +195,22 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
         requireCurrent();
         if (!response.ok) throw httpFailure(response.status, value, media, url.pathname);
         if (response.status !== options.expectedStatus || media !== 'application/json') throw protocolError();
+        let decoded: unknown;
         try {
-            const decoded = options.decode(value);
-            requireCurrent();
-            return decoded;
+            decoded = options.decode!(value);
         } catch (error) {
             if (error instanceof ApiError && error.kind === 'cancelled') throw error;
             throw protocolError();
         }
-    };
+        requireCurrent();
+        // The validator is read only now, after status, media, decoding and current checks (A14).
+        return mode === 'json-with-metadata' ? { body: decoded, etag: response.headers.get('ETag') } : decoded;
+    }
+    return send as HttpSend;
 }
-export function request<T>(path: string, options: RequestOptions<T>): Promise<T> {
-    return createHttpClient(import.meta.env.VITE_API_BASE_URL ?? '', authAccess)(path, options);
+export function request(path: string, options: NoContentRequestOptions): Promise<void>;
+export function request<T>(path: string, options: MetadataRequestOptions<T>): Promise<ResponseWithMetadata<T>>;
+export function request<T>(path: string, options: RequestOptions<T>): Promise<T>;
+export function request(path: string, options: AnyRequestOptions): Promise<unknown> {
+    return (createHttpClient(import.meta.env.VITE_API_BASE_URL ?? '', authAccess) as (path: string, options: AnyRequestOptions) => Promise<unknown>)(path, options);
 }
