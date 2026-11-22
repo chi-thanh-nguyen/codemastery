@@ -1841,8 +1841,8 @@ The following stay synchronized with this record:
   role, including the Learner's keyless list and the published and attempted 409s.
 
 Remaining gates: owning-module (Assessment @minhtan29042006), `@tihh647-ui` infrastructure and
-independent Leader CODEOWNER review; protected integration after r5 (PR #264) and r6 (PR #259);
-these grants on any shared or production database (Leader-reserved). Instructor authoring of the
+independent Leader CODEOWNER review; protected integration of PR #260 (r5 and r6 are on `main` since
+`dfd816c` and `03b2a45`); these grants on any shared or production database (Leader-reserved). Instructor authoring of the
 Course itself on a deployed VM also needs CO06's own CT17-P6 revision (`courses`, `chapters`,
 `lessons` writes), which is not part of this record. This revision executes no provisioning on any
 real database.
