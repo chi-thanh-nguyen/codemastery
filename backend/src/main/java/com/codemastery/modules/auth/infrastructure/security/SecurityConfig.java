@@ -127,6 +127,16 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/questions").hasRole("INSTRUCTOR")
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
                         .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
+                        // CT23.composition/publication/bindings (ADR007 §§5–7): the quiz list is self Learner
+                        // only; authoring and owner reads are Instructor only, with Course ownership decided by
+                        // CT03 in the handler. Administrator has no Instructor inheritance.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/quizzes").hasRole("LEARNER")
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/owned-quizzes",
+                                "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/quizzes").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/quizzes/{quizId}",
+                                "/api/courses/{courseId}/quizzes/{quizId}/publication").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),

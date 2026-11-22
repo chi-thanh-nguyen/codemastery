@@ -162,7 +162,8 @@ naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
 Current unit suites are under `modules/auth/`, `modules/course/` (including
 `application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest`,
-`QuestionBankServiceTest` and `QuizGradingServiceTest`), `modules/adaptive/mastery/` and the shared
+`QuestionBankServiceTest`, `QuizGradingServiceTest` and the AS06 quiz authoring cases in
+`AttemptServiceTest`), `modules/adaptive/mastery/` and the shared
 `support/` package. The other module test files are empty scaffolds. The integration base
 class is compiled but is not initialized by this unit-test lifecycle, so
 `./mvnw test` needs no Docker.
@@ -728,7 +729,8 @@ and the earlier steps remain the gate.
 The following are not covered by any executable test in the repository. No
 test-count or coverage-percentage claim is made for them.
 
-- **Empty scaffolds.** Assessment `AttemptServiceTest` and `SubmissionServiceTest`;
+- **Empty scaffolds.** Assessment `SubmissionServiceTest` (`AttemptServiceTest` holds
+  only the AS06 quiz authoring cases; its attempt cases wait for AS08);
   Interaction and Admin unit tests; Adaptive
   decision, evaluation, listener, settings, mastery-update, placement and skill-graph
   tests; `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
@@ -5090,6 +5092,202 @@ do not cover AttemptService orchestration, persistence of `is_correct` or the sc
 the B3-O08 rollback case, auto-submission, REST results, the quiz-submitted event or
 any Adaptive mastery update. Those belong to AS08 and the Adaptive and QA Issues and
 remain unverified.
+
+## AS06 quiz composition and publication verification — 21 November 2026
+
+PR #260 (Refs #157) implements the CT23.composition, CT23.publication and quiz
+CT23.bindings slices of [ADR007 §§5–7](decisions/007-batch-03-contract-approvals.md#5-ct23composition).
+Every write runs inside ADR005's Course configuration guard and resolves question scope
+through the CT40 `readSkillIds` projection. On 21 November neither producer existed (CO14 #177,
+AD07 #165) and both delegation points failed closed; both are integrated since 22 November (below).
+Owner and learner reads do not depend on them.
+
+Test placement follows [ADR008 §5](decisions/008-batch-04-contract-approvals.md#5-ct14coverage):
+unit cases in `modules/assessment/AttemptServiceTest.java` (placement confirmed by the
+Project Leader on 21 November 2026 for this remediation) and real endpoint cases in
+`integration/AuthorizationIntegrationTest.java`. No new test file is added.
+
+| Obligation | Covered by |
+| --- | --- |
+| B3-O03 exact captured order, positions 1..N, empty hidden draft, duplicate/null/foreign IDs, no selection beyond the explicit list | `AttemptServiceTest$Composition`, `$ApprovedBoundaries` |
+| Hidden and never-attempted edit/delete only; published or attempted quiz 409; delete returns the definition | `AttemptServiceTest$Composition` |
+| Publication: empty draft 409, same-Course revalidation on (re)publish, invalid stored member 500, idempotent hide that cancels nothing | `AttemptServiceTest$Publication` |
+| `PublicationWrite` `publicationStatus` mapped to the `published` boolean; closed `B3QuizWrite` body | `AttemptServiceTest$Publication`, `$ApprovedBoundaries`, `AuthorizationIntegrationTest$QuizEndpoints` |
+| B3-O01 precedence: 401, role 403 (Learner-only list, Instructor-only authoring, no Administrator inheritance), CT03 403/404 before body 400, no-store on every outcome, no key leakage | `AuthorizationIntegrationTest$QuizEndpoints` |
+| Reads: title `COLLATE "C"` then UUID, filtering before count and paging, learner metadata only for ACTIVE/COMPLETED members of a published Course | `AuthorizationIntegrationTest$QuizEndpoints` (PostgreSQL), `AttemptServiceTest$Reads` |
+| Writes delegate to the real guard and CT40 producer; a refusal or provider failure writes nothing | `AttemptServiceTest$ApprovedBoundaries`, `AuthorizationIntegrationTest$QuizEndpoints` (22 November) |
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #260
+remediation working tree, based on `main` `307e8c2`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='AttemptServiceTest,QuizGradingServiceTest,AssessmentRepresentationsTest'` | 56 tests (41 AS06), 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AuthorizationIntegrationTest$QuizEndpoints'` | 8 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 766, Failsafe 248, 0 failures, errors or skips |
+
+A temporary local PostgreSQL test, not committed, exercised the write paths with
+test-only stand-ins for the guard (a Course-row `FOR UPDATE` in a READ COMMITTED
+transaction) and for the CT40 projection: ordered create and reversed replacement,
+publish/hide/delete, the empty-draft 409, the attempted-quiz 409, rollback of every
+change after an injected failure, an edit waiting on the Course root and then seeing
+the committed publication (409), and the quiz-row lock blocking a new attempt
+reference until commit. It used a 500 ms observation window, which the committed
+suites do not. It is evidence for the repositories only, not for the real guard or
+CT40 producer.
+
+The open gates recorded here on 21 November (real-PostgreSQL write and race coverage, CO14 and
+AD07 integration, CT17 grants) are closed by the 22 November sections below; attempt start itself
+(AS08), independent review, CI and delivery remain.
+These are local developer runs, not independent QA, CI or deployment evidence.
+
+### Producer integration, cross-module flow and runtime privileges — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, with @minhtan29042006's agreement to
+Leader-assisted commits on this branch:
+
+- **CO14.** `QuizService.withCourseConfigurationWrite` delegates to `CourseManagementService` (on
+  `main` since `b506500`).
+- **AD07.** `QuestionSelectionService.readSkillIds` delegates to `SkillGraphService` (PR #264);
+  membership and publication resolve question scope under the held Course root. No AS06 seam fails
+  closed any more.
+- **CT17.** `CT17-P6-PRIVILEGES-2026-11-22-r7` in [deployment.md](deployment.md) grants exactly the
+  AS06 SQL: `quizzes` SELECT, INSERT, DELETE and UPDATE of title, kind, time limit and publication;
+  `quiz_questions` SELECT, INSERT, DELETE; `attempts` SELECT (id, quiz_id) for the existence probe.
+  Nothing was provisioned on any real database.
+- **Placement.** Integrated HTTP effects stay in `AuthorizationIntegrationTest`; the cross-module
+  flow and the Course-root races are Assessment participation in the adaptive flow and go in
+  `AdaptiveLearningFlowIntegrationTest` (ADR008 §5). No test file was added.
+
+| Obligation | Covered by (PostgreSQL unless noted) |
+| --- | --- |
+| Delegation, order inside the guard, provider failure writes nothing, publication revalidates against the current skill set | `AttemptServiceTest$ApprovedBoundaries` (unit) |
+| Ordered composition and replacement, foreign-Course question 404, publication, published freeze, the Learner's keyless list | `AuthorizationIntegrationTest$QuizEndpoints.membershipAndPublicationUseTheRealCt40ProducerAndReachTheLearner` |
+| Empty draft, delete of a hidden never-attempted quiz, idempotent hide through the root | `guardOnlyWritesCommitThroughTheCourseRootUnit` |
+| CO06 Course/Chapter/Lesson → AD07 skill and mapping → AS05 question → AS06 quiz → Learner, with refusals and the attempt freeze | `AdaptiveLearningFlowIntegrationTest.anInstructorAuthorsStructureGraphQuestionsAndAQuizThatAnEnrolledLearnerSees` |
+| Question deletion racing quiz composition (commit and rollback) | `composingAQuizWithAQuestionBeingDeletedWaitsAndRereadsTheCommittedBank` |
+| A foreign question never composes | `aQuizCannotComposeAQuestionOfAnotherCourse` |
+| Runtime role: allowed AS06 SQL, 23503 on an attempted-quiz delete, re-parenting/in-place/attempt-detail/TRUNCATE denials | `test-postgres-privilege-matrix-containment.sh` |
+| Runtime role: the seven operations over HTTP, the Learner's list, published and attempted 409s, no 42501 | `test-runtime-real-backend-privileges.sh` |
+
+| Command (macOS host, Docker Desktop) | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='QuestionBankServiceTest*,AttemptServiceTest*,AuthorizationIntegrationTest*,AdaptiveLearningFlowIntegrationTest,AssessmentPersistenceIntegrationTest'` | 85 + 44 unit and 74 + 86 + 9 PostgreSQL tests, 0 failures |
+| `cd backend && ./mvnw -B verify` (with AD07 PR #264 `f83237e` and the AS05 stack merged in) | BUILD SUCCESS; Surefire 925, Failsafe 375, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r7 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | AS06 SQL allowed; attempted-quiz delete 23503; re-parenting, in-place membership, attempt-detail and TRUNCATE 42501; containment and upgrade suites pass |
+| `docker build -t codemastery-backend:privilege-test backend`, then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` including the AS05 and AS06 sections; no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+These are local developer runs on a stack that contains AD07 PR #264 and the AS05 stack, not CI,
+independent review or QA evidence. On the deployed VM, authoring the Course, Chapters and Lessons
+themselves still needs CO06's own CT17-P6 revision; the real-backend test seeds them as the
+bootstrap administrator.
+
+### Runtime-safe quiz writes, attempt-start races and text — 22 November 2026
+
+Two corrections that do not depend on AD07, under the Leader's instruction of 22 November 2026 and
+with @minhtan29042006's agreement to Leader-assisted commits:
+
+- `QuizRepositoryImpl.save` no longer merges the full row of a stored quiz. A replacement updates
+  only title, kind, time limit and publication within the same Course, and a new quiz is persisted
+  directly. ADR012 §19.2 never grants the runtime role an update of `quizzes.course_id`, so the
+  full-row merge would have failed (42501) once the CT17-P6 grants exist.
+- Quiz text with an unpaired UTF-16 surrogate is 400 (PgJDBC would store `?`), matching CO06.
+
+AS08 attempt start is not implemented; the race cases let a separate connection play it in the
+ADR007 §8 lock order (Course root, then the attempt insert whose foreign-key check takes `FOR KEY
+SHARE` on the quiz row).
+
+| Obligation | Covered by (`AdaptiveLearningFlowIntegrationTest`, PostgreSQL) |
+| --- | --- |
+| A stored quiz keeps its Course; a replacement writes only its definition | `aStoredQuizKeepsItsCourseAndAReplacementWritesOnlyItsDefinition` |
+| An attempt start holding the root freezes the quiz before a waiting edit or delete (commit 409, rollback proceeds) | `anAttemptStartHoldingTheRootFreezesTheQuizBeforeAWaitingEditOrDelete` |
+| A writer holding the root and quiz row makes an attempt start wait, with and without the root; a committed delete leaves 23503, a committed edit is what the attempt freezes | `aQuizWriterHoldingTheRootAndQuizRowMakesAnAttemptStartWaitForItsOutcome` |
+| Unpaired surrogate in a title is 400 | `AttemptServiceTest`, `AuthorizationIntegrationTest$QuizEndpoints` |
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='AdaptiveLearningFlowIntegrationTest,AuthorizationIntegrationTest*,AttemptServiceTest*'` | 57 + 70 PostgreSQL and 42 unit tests, 0 failures |
+
+These are local developer runs, not independent review, QA or CI evidence.
+
+### Integration on `main`, fault injection, list snapshots and body precedence — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, with @minhtan29042006's agreement to
+Leader-assisted commits on this branch, PR #260 was brought onto `main` after AD07 (#264,
+`dfd816c`) and AS05 (#259, `03b2a45`) merged:
+
+- **Integration.** `main` `03b2a45` was merged into the branch. `QuizRepository` keeps the AS06
+  surface plus AS05's `findById`; `SecurityConfig` keeps the CT05, CT23.questions and CT23 quiz
+  matcher blocks. The four AS06 commits of `stack/as06-on-as05` (`1edea48`, `6e3ca92`, `519a4e0`,
+  `22c4253`) were cherry-picked; the stack's own historical merges of pre-merge AD07 and AS05 were
+  not. Every file AS06 does not change is identical to `main`, including AD07's unpaired-surrogate
+  rejection in `SkillGraphService`.
+- **Duplicate fixture.** AS05 and AS06 had each added the same `quizRow(UUID)` helper to
+  `AdaptiveLearningFlowIntegrationTest`; the merge kept both and the test sources did not compile.
+  AS05's copy is kept.
+- **Body precedence.** The create, replace and publication handlers treated the parameters of a
+  form-encoded body as a query and answered a non-owner 400 before CT03's 403/404. The no-query
+  check now reads the URI query only; a form body stays 400 for the owner, after admission.
+- **OpenAPI.** The seven AS06 success responses no longer say "specification only, NOT
+  IMPLEMENTED".
+
+| Obligation | Covered by (PostgreSQL) |
+| --- | --- |
+| B3-O04 fault injection: a test-only trigger fails create and replace on the second new member (after the old membership was deleted), delete on the quiz row (after its membership was deleted) and publication on the row update; each is a safe no-store 500 and the quiz, membership and positions are restored, with the Course root released | `AdaptiveLearningFlowIntegrationTest.aFaultPartWayThroughAQuizWriteRestoresTheQuizAndItsMembership` |
+| ADR007 §7: owner and Learner quiz lists are one REPEATABLE READ snapshot when another connection commits a new quiz, a publication and a member between the count and the page (fails under READ COMMITTED, mutation-checked) | `aQuizListIsOneSnapshotEvenWhenAWriterCommitsBetweenItsCountAndItsPage` |
+| A non-owner's form-encoded body is 403 (published Course) or 404 (hidden Course), the owner's is 400, with no effect | `AuthorizationIntegrationTest$QuizEndpoints.nonOwningInstructorIs403OnAPublishedCourseAnd404OnHiddenOrMissingOnes` |
+
+| Command (macOS host, Docker Desktop) | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 937, Failsafe 388, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r7 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | `MATRIX_TESTS_PASS`, `UPGRADE_TESTS_PASS`, both `CONTAINMENT_TEST_PASS` lines |
+| `docker build -t codemastery-backend:privilege-test backend`, then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` including the AS06 section (create, ordered replacement, foreign 404, empty draft and its 409, delete, publish, idempotent publish, published 409, owner list, Learner keyless list, Learner 403 on owner reads, hide, attempted 409s); no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+The CI job "VM runtime privileges with the real backend" failed on the stack head `22c4253` while
+the Docker build bootstrapped the Maven Wrapper: Maven Central answered 404 for
+`apache-maven-3.9.16-bin.tar.gz`. The same wrapper passed that job on `main` `03b2a45`, and the
+artifact resolves again, so the failure was external to the source; the local run above executed
+the runtime-role verification on this head.
+
+These are local developer runs, not independent review, QA or CI evidence.
+
+### AS05/AS06 P3 follow-up: question-bank body precedence, OpenAPI status and the shared nonblank rule — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, on PR #260:
+
+- **AS05 body precedence.** `QuestionBankController` had the defect fixed above for quizzes: the
+  parameters of a form-encoded body counted as a query, so a non-owner's create or replace was 400
+  before CT03's 403/404. Its no-query check now reads the URI query only; a genuine query is still
+  400 before CT03 and a form body is 400 for the owner after admission.
+- **AS05 OpenAPI.** The five question-bank success responses no longer say "specification only,
+  NOT IMPLEMENTED" (descriptions only; the contract is unchanged).
+- **Shared nonblank rule.** CO06 (`CourseManagementService.isSpace`) and AD07
+  (`SkillGraphService.storableText`) already count a code point as space when Java whitespace,
+  a Unicode space separator, U+0085 (PostgreSQL `[:space:]` in the musl image locale) or U+FEFF
+  (OpenAPI's ECMA-262 `\S`) says so. The three Assessment predicates (`QuestionBankService`,
+  `QuizService`, `QuestionSelectionService`) used Java `White_Space` only and accepted text made
+  only of U+FEFF (or U+001C–U+001F), which breaks the OpenAPI `\S` pattern of the request and
+  response. They now use the CO06/AD07 rule; text is still never trimmed. U+0085-only text stays
+  400 in every module because the V002–V004 checks reject it; OpenAPI's pattern alone would allow it,
+  and that gap needs no change while the server is the stricter side.
+
+| Obligation | Covered by |
+| --- | --- |
+| A non-owner's form-encoded question body is 403/404, the owner's 400, a genuine query 400 before CT03; fails without the fix | `AuthorizationIntegrationTest$QuestionBankEndpoints.nonOwningInstructorIs403OnAPublishedCourseAnd404OnHiddenOrMissingOnes` (PostgreSQL) |
+| U+FEFF-, U+0085- and U+001C-only prompts, options and titles are 400; leading and trailing U+FEFF/U+0085 inside nonblank text are kept verbatim | `QuestionBankServiceTest$Validation`, `AttemptServiceTest` (unit) |
+| A stored U+FEFF-only prompt is an integrity failure at publication | `AttemptServiceTest.aMemberOutsideTheCourseOrAnInvalidStoredMemberIsAnIntegrityFailure` (unit) |
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -q -Djacoco.skip=true test '-Dtest=QuestionBankServiceTest*,AttemptServiceTest*'` | 88 + 44 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B -q -Dtest=NoSuch -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AuthorizationIntegrationTest$QuestionBankEndpoints' -Djacoco.skip=true verify` | 9 tests, 0 failures, errors or skips |
+| OpenAPI parsed as JSON; structural diff against the previous head; every `$ref` resolved | only the five descriptions differ; 164 references, none dangling |
+
+The full `verify`, other integration suites, E2E, frontend and VM tests were not rerun: no
+persistence, transaction, security-chain, schema or privilege behavior changed. These are local
+developer runs, not independent review, QA or CI evidence.
 
 ## CO03 and CO14 Course persistence and configuration guard verification — 21 November 2026
 

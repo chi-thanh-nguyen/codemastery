@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), and the five AS05 CT23.questions operations (#156); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -3520,7 +3520,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3605,7 +3605,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3672,7 +3672,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3737,7 +3737,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3815,7 +3815,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3857,7 +3857,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; hidden Quiz, exact explicit ordered same-Course membership. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; hidden Quiz, exact explicit ordered same-Course membership. Implemented under AS06 (#157) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, every write runs in CO14's Course-root READ COMMITTED unit and question scope comes from AD07's CT40 SkillGraphService. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3876,7 +3876,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3906,7 +3906,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -3924,7 +3923,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Current self Learner ACTIVE/COMPLETED membership; published Course/Quiz only. Title COLLATE C then UUID. Metadata only, no keys. Diagnostic workflow/start remains CT25 gated. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Current self Learner ACTIVE/COMPLETED membership; published Course/Quiz only. Title COLLATE C then UUID. Metadata only, no keys. Diagnostic workflow/start remains CT25 gated. Implemented under AS06 (#157) behind a Learner-only route rule: CT03 Learner Course access and one read-only REPEATABLE READ snapshot. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3962,7 +3961,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3992,7 +3991,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4002,7 +4000,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; hidden and published, includes question definitions/keys. Title COLLATE C then UUID. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; hidden and published, includes question definitions/keys. Title COLLATE C then UUID. Implemented under AS06 (#157) behind an Instructor-only route rule: CT03 ownership and one read-only REPEATABLE READ snapshot. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4040,7 +4038,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4070,7 +4068,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4080,7 +4077,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner only; full ordered definition including keys. Learners read metadata list and captured attempt only. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner only; full ordered definition including keys. Learners read metadata list and captured attempt only. Implemented under AS06 (#157) behind an Instructor-only route rule: CT03 ownership and one read-only REPEATABLE READ snapshot. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4108,7 +4105,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4138,7 +4135,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       },
       "put": {
@@ -4146,7 +4142,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; hidden and zero Attempts; replace complete title/kind/time/membership. Any Attempt freezes definitions. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; hidden and zero Attempts; replace complete title/kind/time/membership. Any Attempt freezes definitions. Implemented under AS06 (#157) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, every write runs in CO14's Course-root READ COMMITTED unit and question scope comes from AD07's CT40 SkillGraphService. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4174,7 +4170,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4207,7 +4203,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -4225,7 +4220,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; hidden and zero Attempts; deletes own membership only, returns deleted definition. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; hidden and zero Attempts; deletes own membership only, returns deleted definition. Implemented under AS06 (#157) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, every write runs in CO14's Course-root READ COMMITTED unit and question scope comes from AD07's CT40 SkillGraphService. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4253,7 +4248,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4286,7 +4281,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4296,7 +4290,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; idempotent explicit state command; publish validates nonempty same-Course membership; hiding never cancels captured expiry. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; idempotent explicit state command; publish validates nonempty same-Course membership; hiding never cancels captured expiry. Implemented under AS06 (#157) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, every write runs in CO14's Course-root READ COMMITTED unit and question scope comes from AD07's CT40 SkillGraphService. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4324,7 +4318,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4357,7 +4351,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,

@@ -1778,6 +1778,75 @@ independent Leader CODEOWNER review; protected integration (r5 is on `main` sinc
 `dfd816c`); these grants on any shared or production database (Leader-reserved). This revision
 executes no provisioning on any real database.
 
+### CT17-P6-PRIVILEGES-2026-11-22-r7 — AS06 quiz composition (within the ADR012 §19.2 ceiling, 22 November 2026)
+
+Prepared for AS06 ([#157](https://github.com/chi-thanh-nguyen/codemastery/issues/157),
+[PR #260](https://github.com/chi-thanh-nguyen/codemastery/pull/260)) under the Project Leader's
+explicit instruction of 22 November 2026 to complete AS06 together with the runtime privileges its
+implemented SQL needs, inside the approved ceiling. It follows the extension procedure above and
+stays inside the DELEGATED_APPROVED `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)):
+the implemented consumer (`QuizService`, `QuestionSelectionService`, `QuizRepositoryImpl` and
+`QuizJpaRepository`), `RUNTIME_PRIVILEGE_MATRIX` and the CI tests change together, and every
+privilege below is exercised by that consumer's SQL. It depends on r5 (CT40 scope through AD07) and
+r6 (`questions` SELECT for membership and owner reads). No migration is involved. No approval beyond
+that ceiling is claimed; this is not personal Leader review.
+
+The r1–r6 records above are unchanged history. The effective matrix is r1 plus r2–r6, with the
+three rows below replacing the named relations (r7's `quiz_questions` row supersedes r6's narrower
+one); no other privilege, role elevation or change is introduced.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `quizzes` (assessment) | SELECT, INSERT, DELETE; UPDATE (title, kind, time_limit_seconds, publication_status) | owner and Learner lists and reads, create, targeted replacement, publication, delete of a hidden never-attempted quiz, the lifecycle row lock | r7 within ceiling (CT23-COMPOSITION-2026-11-09-r1, CT23-PUBLICATION-2026-11-09-r1) |
+| `quiz_questions` (assessment) | SELECT, INSERT, DELETE | captured membership reads and counts, atomic membership replacement, delete with the quiz | r7 within ceiling (CT23-COMPOSITION-2026-11-09-r1) |
+| `attempts` (assessment) | SELECT (id, quiz_id) | the edit/delete-time attempt-existence probe | r7 within ceiling (ADR007 §5) |
+
+Least privilege exercised by the consumer:
+
+| Operation | SQL | Privilege |
+| --- | --- | --- |
+| Every write locks the Course root first (CO14 guard) | `SELECT id FROM courses WHERE id = ? FOR UPDATE` | existing r1 SELECT and UPDATE (id); no new grant |
+| CT40 scope and member questions | `SELECT … FROM skills …` (r5); `SELECT … FROM questions WHERE id IN (…) AND skill_id IN (…)` (r6) | existing r5 and r6 SELECT |
+| Lists, counts and reads | `SELECT … FROM quizzes WHERE course_id = ? [AND publication_status = 'published'] ORDER BY title COLLATE "C", id`; membership join `quiz_questions` × `questions` | SELECT |
+| Lifecycle row lock | `SELECT * FROM quizzes WHERE id = ? AND course_id = ? FOR UPDATE` | SELECT plus any column UPDATE |
+| Create | `SELECT count(*) FROM quizzes WHERE id = ?`, then `INSERT INTO quizzes …` | SELECT, INSERT |
+| Replace and publish | `UPDATE quizzes SET title = ?, kind = ?, time_limit_seconds = ?, publication_status = ? WHERE id = ? AND course_id = ?` | UPDATE on those four columns |
+| Membership replacement | `DELETE FROM quiz_questions WHERE quiz_id = ?`, then `INSERT INTO quiz_questions …` at positions 1..N | DELETE, INSERT |
+| Attempt-existence probe | `SELECT count(a.id) FROM attempts a WHERE a.quiz_id = ?` | SELECT (id, quiz_id) |
+| Delete | membership delete, then `DELETE FROM quizzes WHERE id = ?`; the V004 `NO ACTION` foreign keys from `attempts` and `quiz_questions` are checked with the table owner's rights | DELETE |
+
+The runtime role still cannot do any of the following:
+
+- move a quiz to another Course, or rewrite a membership row in place (no UPDATE on
+  `quizzes.course_id` or on `quiz_questions`; the ceiling's `position` update is not used);
+- read an attempt's learner, number, timing or score, or create, update or delete attempts
+  (AS08/CT04 add those within the ceiling when they are implemented);
+- truncate `quizzes` or `quiz_questions`.
+
+A compromised runtime role could create, replace, publish or delete quizzes and their membership in
+any Course, which the approved owner operations inherently require; same-Course membership, the
+publication and attempt freezes and Learner visibility stay application invariants, and referential
+integrity still refuses deleting a quiz that an attempt references.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009), with
+  `verify_role_separation` probing the quiz re-parenting, in-place membership and attempt-detail
+  denials;
+- `test-deploy-privilege-matrix-contract.sh`, which pins r1 history and the r2–r7 rows;
+- `test-postgres-privilege-matrix-containment.sh`: the AS06 SQL, the attempted-quiz delete refusal
+  (23503) and the denials above on the real schema;
+- `test-runtime-real-backend-privileges.sh`: the seven AS06 operations over HTTP under the runtime
+  role, including the Learner's keyless list and the published and attempted 409s.
+
+Remaining gates: owning-module (Assessment @minhtan29042006), `@tihh647-ui` infrastructure and
+independent Leader CODEOWNER review; protected integration of PR #260 (r5 and r6 are on `main` since
+`dfd816c` and `03b2a45`); these grants on any shared or production database (Leader-reserved). Instructor authoring of the
+Course itself on a deployed VM also needs CO06's own CT17-P6 revision (`courses`, `chapters`,
+`lessons` writes), which is not part of this record. This revision executes no provisioning on any
+real database.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4321,7 +4390,8 @@ revision. The effective matrix stays r1 plus r2 (and, since 16 November 2026, th
 ADR014 r3 rows for two new V008 relations outside this ceiling; since 17 November 2026,
 the CO08 r4 rows for `enrollments` and `lesson_progress` inside it; since 22 November 2026, the
 AD07 r5 rows for `skills`, `skill_prerequisites` and `lesson_skills` inside it; since 22 November 2026,
-the AS05 r6 rows for `questions`, `quiz_questions` and `attempt_answers` inside it), and the extension procedure above
+the AS05 r6 rows for `questions`, `quiz_questions` and `attempt_answers` inside it, and the AS06 r7 rows
+for `quizzes`, `quiz_questions` and `attempts` inside it), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.

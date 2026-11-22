@@ -916,6 +916,26 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             mvc.perform(post("/api/courses/{c}/questions", course).header("Authorization", "Bearer " + other)
                             .contentType(MediaType.APPLICATION_JSON).content("{\"unknown\":true}"))
                     .andExpect(status().isForbidden());
+            // A form-encoded body is body input, not a query: it is 400 only after CT03 admits the owner,
+            // while a genuine URI query stays 400 before CT03, even for a non-owner.
+            String owned = sessionToken(owner);
+            for (String path : List.of("POST /api/courses/{c}/questions", "PUT /api/courses/{c}/questions/{q}")) {
+                String[] route = path.split(" ");
+                for (String bearer : List.of(other, owned)) {
+                    mvc.perform(request(HttpMethod.valueOf(route[0]), route[1], course, question)
+                                    .header("Authorization", "Bearer " + bearer)
+                                    .contentType(MediaType.APPLICATION_FORM_URLENCODED).content("prompt=Pick"))
+                            .andExpect(bearer.equals(other) ? status().isForbidden() : status().isBadRequest())
+                            .andExpect(header().string("Cache-Control", "no-store"));
+                }
+                mvc.perform(request(HttpMethod.valueOf(route[0]), route[1] + "?x=1", course, question)
+                                .header("Authorization", "Bearer " + other)
+                                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .andExpect(status().isBadRequest());
+            }
+            mvc.perform(post("/api/courses/{c}/questions", hiddenCourse).header("Authorization", "Bearer " + other)
+                            .contentType(MediaType.APPLICATION_FORM_URLENCODED).content("prompt=Pick"))
+                    .andExpect(status().isNotFound());
             assertEquals(before, bank());
         }
 
@@ -1826,6 +1846,473 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                             .header("Access-Control-Request-Headers", "Authorization"))
                     .andExpect(status().isOk())
                     .andExpect(header().doesNotExist("Access-Control-Allow-Credentials"));
+        }
+    }
+
+    /**
+     * CT23 quiz composition, publication and reads (ADR007 §§5–7, B3-O01/O03) through the production
+     * security chain, CT03, CT18 and PostgreSQL: Learner-only list, Instructor-only authoring and owner
+     * reads, Course ownership/membership precedence, closed bodies and no-store on every outcome. The
+     * Course guard (CO14 #177) and CT40 producer (AD07 #165) are absent, so an admitted owner's write
+     * fails closed with a safe 500 and no effect; reads run against real rows seeded here.
+     */
+    @Nested
+    class QuizEndpoints {
+
+        private final List<UUID> courses = new ArrayList<>();
+        private UUID owner;
+        private UUID course;
+        private UUID hiddenCourse;
+        private UUID skill;
+        private UUID q1;
+        private UUID q2;
+        private UUID quiz;
+
+        @BeforeEach
+        void fixtures() {
+            owner = insertUser("instructor", "active");
+            course = insertCourse(owner, "published");
+            hiddenCourse = insertCourse(owner, "hidden");
+            skill = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.skills (id, course_id, name) VALUES (?, ?, 'QA01 quiz skill')", skill, course);
+            q1 = insertQuestion("Prompt one", "ARRAY[true,false]");
+            q2 = insertQuestion("Prompt two", "ARRAY[false,true]");
+            quiz = insertQuiz(course, "Loops", "hidden", q2, q1);
+        }
+
+        @AfterEach
+        void removeFixtures() {
+            // Memberships first: a quiz may reference a question of another fixture Course.
+            for (UUID id : courses) {
+                jdbc.update("DELETE FROM public.quiz_questions WHERE quiz_id IN (SELECT id FROM public.quizzes WHERE course_id = ?)", id);
+                jdbc.update("DELETE FROM public.quizzes WHERE course_id = ?", id);
+            }
+            for (UUID id : courses) {
+                jdbc.update("DELETE FROM public.questions WHERE skill_id IN (SELECT id FROM public.skills WHERE course_id = ?)", id);
+                jdbc.update("DELETE FROM public.skills WHERE course_id = ?", id);
+                jdbc.update("DELETE FROM public.enrollments WHERE course_id = ?", id);
+                jdbc.update("DELETE FROM public.courses WHERE id = ?", id);
+            }
+            courses.clear();
+        }
+
+        private UUID insertCourse(UUID instructor, String status) {
+            UUID id = UUID.randomUUID();
+            courses.add(id);
+            jdbc.update("INSERT INTO public.courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
+                    + "VALUES (?, ?, 'QA01 quizzes', 'CT23 fixture', ?, false)", id, instructor, status);
+            return id;
+        }
+
+        private UUID insertQuestion(String prompt, String key) {
+            UUID id = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.questions (id, skill_id, prompt, kind, difficulty, options, correct_options) "
+                    + "VALUES (?, ?, ?, 'single_choice', 'easy', ARRAY['A','B'], " + key + ")", id, skill, prompt);
+            return id;
+        }
+
+        private UUID insertQuiz(UUID courseId, String title, String status, UUID... members) {
+            return insertQuiz(UUID.randomUUID(), courseId, title, status, members);
+        }
+
+        private UUID insertQuiz(UUID id, UUID courseId, String title, String status, UUID... members) {
+            jdbc.update("INSERT INTO public.quizzes (id, course_id, title, kind, time_limit_seconds, publication_status) "
+                    + "VALUES (?, ?, ?, 'practice', 600, ?)", id, courseId, title, status);
+            for (int index = 0; index < members.length; index++) {
+                jdbc.update("INSERT INTO public.quiz_questions (id, quiz_id, question_id, position) VALUES (?, ?, ?, ?)",
+                        UUID.randomUUID(), id, members[index], index + 1);
+            }
+            return id;
+        }
+
+        private void enrol(UUID learner, UUID courseId, String status) {
+            jdbc.update("INSERT INTO public.enrollments (id, user_id, course_id, status) VALUES (?, ?, ?, ?)",
+                    UUID.randomUUID(), learner, courseId, status);
+        }
+
+        private String validBody() {
+            return "{\"title\":\"Loops II\",\"kind\":\"test\",\"timeLimitSeconds\":120,\"questionIds\":[\"" + q1 + "\"]}";
+        }
+
+        /** The six Instructor operations against one Course; bodies are valid. */
+        private List<org.springframework.test.web.servlet.RequestBuilder> instructorOperations(UUID courseId, String bearer) {
+            String base = "/api/courses/" + courseId;
+            return authorized(bearer, List.of(
+                    get(base + "/owned-quizzes"),
+                    get(base + "/quizzes/" + quiz),
+                    post(base + "/quizzes").contentType(MediaType.APPLICATION_JSON).content(validBody()),
+                    request(HttpMethod.PUT, base + "/quizzes/" + quiz).contentType(MediaType.APPLICATION_JSON).content(validBody()),
+                    request(HttpMethod.DELETE, base + "/quizzes/" + quiz),
+                    request(HttpMethod.PUT, base + "/quizzes/" + quiz + "/publication")
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"publicationStatus\":\"published\"}")));
+        }
+
+        private List<org.springframework.test.web.servlet.RequestBuilder> authorized(String bearer,
+                List<org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder> builders) {
+            List<org.springframework.test.web.servlet.RequestBuilder> requests = new ArrayList<>();
+            for (var builder : builders) {
+                requests.add(bearer == null ? builder : builder.header("Authorization", "Bearer " + bearer));
+            }
+            return requests;
+        }
+
+        private org.springframework.test.web.servlet.RequestBuilder learnerList(UUID courseId, String bearer) {
+            return authorized(bearer, List.of(get("/api/courses/" + courseId + "/quizzes"))).getFirst();
+        }
+
+        private String quizState() {
+            return jdbc.queryForObject("SELECT coalesce(string_agg(q.id::text || q.title || q.kind || q.time_limit_seconds "
+                    + "|| q.publication_status || coalesce(m.members, ''), ',' ORDER BY q.id), '') FROM public.quizzes q "
+                    + "LEFT JOIN (SELECT quiz_id, string_agg(question_id::text || ':' || position, ';' ORDER BY position) members "
+                    + "FROM public.quiz_questions GROUP BY quiz_id) m ON m.quiz_id = q.id WHERE q.course_id IN (?, ?)",
+                    String.class, course, hiddenCourse);
+        }
+
+        @Test
+        void unauthenticatedRequestsAre401WithNoStoreAndNoEffect() throws Exception {
+            String before = quizState();
+            List<org.springframework.test.web.servlet.RequestBuilder> requests = new ArrayList<>(instructorOperations(course, null));
+            requests.add(learnerList(course, null));
+            for (var request : requests) {
+                mvc.perform(request)
+                        .andExpect(status().isUnauthorized())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+            }
+            assertEquals(before, quizState());
+        }
+
+        @Test
+        void routesAdmitOnlyTheirRoleBeforeAnyHandler() throws Exception {
+            String before = quizState();
+            UUID enrolled = insertUser("learner", "active");
+            enrol(enrolled, course, "active");
+            String learner = sessionToken(enrolled);
+            String admin = sessionToken(insertUser("admin", "active"));
+            for (var request : instructorOperations(course, learner)) {
+                mvc.perform(request).andExpect(status().isForbidden())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            List<org.springframework.test.web.servlet.RequestBuilder> adminRequests = new ArrayList<>(instructorOperations(course, admin));
+            adminRequests.add(learnerList(course, admin));
+            for (var request : adminRequests) {
+                mvc.perform(request).andExpect(status().isForbidden())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            // The owning Instructor has no Learner list access either.
+            mvc.perform(learnerList(course, sessionToken(owner))).andExpect(status().isForbidden())
+                    .andExpect(header().string("Cache-Control", "no-store"));
+            assertEquals(before, quizState());
+        }
+
+        @Test
+        void nonOwningInstructorIs403OnAPublishedCourseAnd404OnHiddenOrMissingOnes() throws Exception {
+            String other = sessionToken(insertUser("instructor", "active"));
+            String before = quizState();
+            for (var request : instructorOperations(course, other)) {
+                mvc.perform(request).andExpect(status().isForbidden())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            for (UUID unavailable : List.of(hiddenCourse, UUID.randomUUID())) {
+                for (var request : instructorOperations(unavailable, other)) {
+                    mvc.perform(request).andExpect(status().isNotFound())
+                            .andExpect(header().string("Cache-Control", "no-store"))
+                            .andExpect(jsonPath("$.detail").value("The requested resource is unavailable."));
+                }
+            }
+            // A malformed body never overtakes CT03: the non-owner still receives 403.
+            mvc.perform(post("/api/courses/{c}/quizzes", course).header("Authorization", "Bearer " + other)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"unknown\":true}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(request(HttpMethod.PUT, "/api/courses/{c}/quizzes/{q}/publication", course, quiz)
+                            .header("Authorization", "Bearer " + other)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"published\":true}"))
+                    .andExpect(status().isForbidden());
+            // A form-encoded body is body input, not a query: it is 400 only after CT03 admits the owner.
+            String owned = sessionToken(owner);
+            for (String path : List.of("POST /api/courses/{c}/quizzes", "PUT /api/courses/{c}/quizzes/{q}",
+                    "PUT /api/courses/{c}/quizzes/{q}/publication")) {
+                String[] route = path.split(" ");
+                for (String bearer : List.of(other, owned)) {
+                    mvc.perform(request(HttpMethod.valueOf(route[0]), route[1], course, quiz)
+                                    .header("Authorization", "Bearer " + bearer)
+                                    .contentType(MediaType.APPLICATION_FORM_URLENCODED).content("publicationStatus=published"))
+                            .andExpect(bearer.equals(other) ? status().isForbidden() : status().isBadRequest())
+                            .andExpect(header().string("Cache-Control", "no-store"));
+                }
+            }
+            mvc.perform(post("/api/courses/{c}/quizzes", hiddenCourse).header("Authorization", "Bearer " + other)
+                            .contentType(MediaType.APPLICATION_FORM_URLENCODED).content("title=Draft"))
+                    .andExpect(status().isNotFound());
+            assertEquals(before, quizState());
+        }
+
+        @Test
+        void malformedPathQueryAndMediaTypeAre400ForTheOwner() throws Exception {
+            String bearer = sessionToken(owner);
+            for (String uri : List.of("/api/courses/not-a-uuid/owned-quizzes", "/api/courses/" + course + "/quizzes/1-1-1-1-1",
+                    "/api/courses/" + course + "/owned-quizzes?published=true", "/api/courses/" + course + "/owned-quizzes?page=-1",
+                    "/api/courses/" + course + "/owned-quizzes?size=101", "/api/courses/" + course + "/owned-quizzes?size=0",
+                    "/api/courses/" + course + "/owned-quizzes?page=2147483648", "/api/courses/" + course + "/owned-quizzes?page=1&page=2",
+                    "/api/courses/" + course + "/quizzes/" + quiz + "?x=1")) {
+                mvc.perform(get(uri).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            mvc.perform(post("/api/courses/{c}/quizzes", course).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.TEXT_PLAIN).content(validBody()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(header().string("Cache-Control", "no-store"));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.quizzes WHERE course_id = ?", Integer.class, course));
+        }
+
+        @Test
+        void ownerBodiesOutsideTheClosedContractAre400WithNoEffect() throws Exception {
+            String bearer = sessionToken(owner);
+            String valid = validBody();
+            List<String> invalidWrites = List.of(
+                    valid.replace("}", ",\"extra\":1}"),
+                    valid.replace("\"kind\"", "\"title\":\"dup\",\"kind\""),
+                    valid.replace("120", "\"120\""),
+                    valid.replace("120", "1.5"),
+                    valid.replace("120", "0"),
+                    valid.replace("120", "2147483648"),
+                    valid.replace("\"test\"", "\"exam\""),
+                    valid.replace("\"Loops II\"", "\"   \""),
+                    valid.replace("\"Loops II\"", "\"Loops \\ud800\""),
+                    valid.replace("\"Loops II\"", "null"),
+                    valid.replace(",\"timeLimitSeconds\":120", ""),
+                    valid.replace("[\"" + q1 + "\"]", "[\"" + q1 + "\",\"" + q1 + "\"]"),
+                    valid.replace("[\"" + q1 + "\"]", "[null]"),
+                    valid + " {}",
+                    "{",
+                    "");
+            String before = quizState();
+            for (String body : invalidWrites) {
+                for (var request : List.of(post("/api/courses/{c}/quizzes", course),
+                        request(HttpMethod.PUT, "/api/courses/{c}/quizzes/{q}", course, quiz))) {
+                    mvc.perform(request.header("Authorization", "Bearer " + bearer)
+                                    .contentType(MediaType.APPLICATION_JSON).content(body))
+                            .andExpect(status().isBadRequest())
+                            .andExpect(header().string("Cache-Control", "no-store"))
+                            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+                }
+            }
+            for (String body : List.of("{\"published\":true}", "{\"publicationStatus\":\"PUBLISHED\"}",
+                    "{\"publicationStatus\":true}", "{\"publicationStatus\":\"hidden\",\"x\":1}", "{}", "")) {
+                mvc.perform(request(HttpMethod.PUT, "/api/courses/{c}/quizzes/{q}/publication", course, quiz)
+                                .header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content(body))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            assertEquals(before, quizState());
+        }
+
+        /** AD07's CT40 producer scopes membership and publication inside CO14's guard. */
+        @Test
+        void membershipAndPublicationUseTheRealCt40ProducerAndReachTheLearner() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course;
+            String created = mvc.perform(post(base + "/quizzes").header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content(validBody()))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.questions[0].question.id").value(q1.toString()))
+                    .andReturn().getResponse().getContentAsString();
+            UUID composed = UUID.fromString(JSON.readTree(created).get("id").asString());
+            mvc.perform(request(HttpMethod.PUT, base + "/quizzes/" + composed).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\":\"Ordered\",\"kind\":\"practice\",\"timeLimitSeconds\":90,\"questionIds\":[\""
+                                    + q2 + "\",\"" + q1 + "\"]}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.questions[0].position").value(1))
+                    .andExpect(jsonPath("$.questions[0].question.id").value(q2.toString()))
+                    .andExpect(jsonPath("$.questions[1].question.id").value(q1.toString()));
+
+            // A question of another Course is the same concealed 404 and writes nothing.
+            UUID foreignSkill = UUID.randomUUID(), foreignQuestion = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.skills (id, course_id, name) VALUES (?, ?, 'Foreign skill')", foreignSkill, hiddenCourse);
+            jdbc.update("INSERT INTO public.questions (id, skill_id, prompt, kind, difficulty, options, correct_options) "
+                    + "VALUES (?, ?, 'Foreign prompt', 'single_choice', 'easy', ARRAY['A','B'], ARRAY[true,false])",
+                    foreignQuestion, foreignSkill);
+            String before = quizState();
+            mvc.perform(post(base + "/quizzes").header("Authorization", "Bearer " + bearer).contentType(MediaType.APPLICATION_JSON)
+                            .content(validBody().replace(q1.toString(), foreignQuestion.toString())))
+                    .andExpect(status().isNotFound());
+            assertEquals(before, quizState());
+
+            mvc.perform(request(HttpMethod.PUT, base + "/quizzes/" + composed + "/publication").header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"publicationStatus\":\"published\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.published").value(true));
+            mvc.perform(request(HttpMethod.PUT, base + "/quizzes/" + composed).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content(validBody()))
+                    .andExpect(status().isConflict());
+
+            UUID learner = insertUser("learner", "active");
+            enrol(learner, course, "active");
+            String page = mvc.perform(learnerList(course, sessionToken(learner)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            JsonNode listed = JSON.readTree(page).get("content");
+            assertEquals(1, listed.size());
+            assertEquals(composed.toString(), listed.get(0).get("id").asString());
+            assertEquals(2, listed.get(0).get("questionCount").asInt());
+            assertFalse(page.contains("correctOptions") || page.contains("Prompt"), page);
+            jdbc.update("DELETE FROM public.enrollments WHERE user_id = ?", learner);
+            jdbc.update("DELETE FROM public.questions WHERE id = ?", foreignQuestion);
+            jdbc.update("DELETE FROM public.skills WHERE id = ?", foreignSkill);
+        }
+
+        /** Writes that need no question scope run in CO14's Course-root unit against real rows. */
+        @Test
+        void guardOnlyWritesCommitThroughTheCourseRootUnit() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course;
+            UUID live = insertQuiz(course, "Live", "published", q1);
+
+            String created = mvc.perform(post(base + "/quizzes").header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"title\":\"Draft\",\"kind\":\"practice\",\"timeLimitSeconds\":60,\"questionIds\":[]}"))
+                    .andExpect(status().isCreated())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.published").value(false))
+                    .andExpect(jsonPath("$.questionCount").value(0))
+                    .andReturn().getResponse().getContentAsString();
+            UUID draft = UUID.fromString(JSON.readTree(created).get("id").asString());
+            assertEquals("hidden", jdbc.queryForObject("SELECT publication_status FROM public.quizzes WHERE id = ? AND course_id = ?",
+                    String.class, draft, course));
+
+            // Hiding is idempotent and never touches membership; a published quiz is frozen against deletion.
+            for (UUID target : List.of(quiz, live)) {
+                mvc.perform(request(HttpMethod.PUT, base + "/quizzes/" + target + "/publication")
+                                .header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content("{\"publicationStatus\":\"hidden\"}"))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.published").value(false));
+            }
+            assertEquals("hidden", jdbc.queryForObject("SELECT publication_status FROM public.quizzes WHERE id = ?", String.class, live));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.quiz_questions WHERE quiz_id = ?", Integer.class, live));
+            UUID frozen = insertQuiz(course, "Frozen", "published", q2);
+            mvc.perform(request(HttpMethod.DELETE, base + "/quizzes/" + frozen).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isConflict());
+
+            mvc.perform(request(HttpMethod.DELETE, base + "/quizzes/" + quiz).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(quiz.toString()))
+                    .andExpect(jsonPath("$.questions[0].question.id").value(q2.toString()));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.quizzes WHERE id = ?", Integer.class, quiz));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.quiz_questions WHERE quiz_id = ?", Integer.class, quiz));
+            assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE id IN (?, ?)", Integer.class, q1, q2));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.quiz_questions WHERE quiz_id = ?", Integer.class, frozen));
+        }
+
+        @Test
+        void ownerReadsReturnRealRowsInCollateCThenUuidOrderWithKeys() throws Exception {
+            UUID low = UUID.fromString("00000000-0000-0000-0000-000000000001");
+            UUID high = UUID.fromString("ffffffff-ffff-ffff-ffff-fffffffffffe");
+            insertQuiz(high, course, "Same", "published");
+            insertQuiz(low, course, "Same", "hidden");
+            insertQuiz(course, "😀 emoji", "hidden");
+            insertQuiz(course, "� replacement", "hidden");
+            insertQuiz(course, "apple", "published", q1);
+            insertQuiz(hiddenCourse, "Elsewhere", "published");
+            String bearer = sessionToken(owner);
+
+            String page = mvc.perform(get("/api/courses/{c}/owned-quizzes", course).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.totalElements").value(6))
+                    .andExpect(jsonPath("$.totalPages").value(1))
+                    .andReturn().getResponse().getContentAsString();
+            JsonNode content = JSON.readTree(page).get("content");
+            List<String> titles = new ArrayList<>();
+            content.forEach(item -> titles.add(item.get("title").asString()));
+            // Byte order: "L" < "S" < "a" < U+FFFD (EF BF BD) < U+1F600 (F0 9F 98 80); equal titles by UUID.
+            assertEquals(List.of("Loops", "Same", "Same", "apple", "� replacement", "😀 emoji"), titles);
+            assertEquals(low.toString(), content.get(1).get("id").asString());
+            assertEquals(high.toString(), content.get(2).get("id").asString());
+            JsonNode loops = content.get(0);
+            assertEquals(2, loops.get("questionCount").asInt());
+            assertEquals(q2.toString(), loops.get("questions").get(0).get("question").get("id").asString());
+            assertEquals(1, loops.get("questions").get(0).get("position").asInt());
+            assertEquals("[false,true]", loops.get("questions").get(0).get("question").get("correctOptions").toString());
+            assertEquals(Set.of("id", "courseId", "title", "kind", "timeLimitSeconds", "published", "questionCount", "questions"),
+                    Set.copyOf(loops.propertyNames()));
+
+            mvc.perform(get("/api/courses/{c}/owned-quizzes?page=1&size=4", course).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content.length()").value(2))
+                    .andExpect(jsonPath("$.content[0].title").value("� replacement"))
+                    .andExpect(jsonPath("$.totalElements").value(6))
+                    .andExpect(jsonPath("$.totalPages").value(2));
+            mvc.perform(get("/api/courses/{c}/owned-quizzes?page=9", course).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content.length()").value(0))
+                    .andExpect(jsonPath("$.totalElements").value(6));
+
+            mvc.perform(get("/api/courses/{c}/quizzes/{q}", course, quiz).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.published").value(false))
+                    .andExpect(jsonPath("$.questions[1].position").value(2))
+                    .andExpect(jsonPath("$.questions[1].question.id").value(q1.toString()))
+                    .andExpect(jsonPath("$.questions[1].question.correctOptions[0]").value(true));
+            // A quiz of another Course, or no quiz at all, is the same safe 404 under this Course.
+            UUID foreignQuiz = jdbc.queryForObject("SELECT id FROM public.quizzes WHERE course_id = ?", UUID.class, hiddenCourse);
+            for (UUID unavailable : List.of(foreignQuiz, UUID.randomUUID())) {
+                mvc.perform(get("/api/courses/{c}/quizzes/{q}", course, unavailable).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isNotFound())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(jsonPath("$.detail").value("The requested resource is unavailable."));
+            }
+        }
+
+        @Test
+        void learnerListShowsOnlyPublishedQuizzesOfAnAdmittedCourseWithoutKeys() throws Exception {
+            UUID published = insertQuiz(course, "Arrays", "published", q1, q2);
+            insertQuiz(course, "Zero", "published");
+            insertQuiz(hiddenCourse, "Hidden course quiz", "published");
+            UUID active = insertUser("learner", "active");
+            UUID completed = insertUser("learner", "active");
+            UUID left = insertUser("learner", "active");
+            UUID stranger = insertUser("learner", "active");
+            enrol(active, course, "active");
+            enrol(completed, course, "completed");
+            enrol(left, course, "left");
+            enrol(active, hiddenCourse, "active");
+
+            for (UUID learner : List.of(active, completed)) {
+                String body = mvc.perform(learnerList(course, sessionToken(learner)))
+                        .andExpect(status().isOk())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(jsonPath("$.totalElements").value(2))
+                        .andExpect(jsonPath("$.content[0].id").value(published.toString()))
+                        .andExpect(jsonPath("$.content[0].questionCount").value(2))
+                        .andExpect(jsonPath("$.content[0].published").value(true))
+                        .andExpect(jsonPath("$.content[1].title").value("Zero"))
+                        .andExpect(jsonPath("$.content[1].questionCount").value(0))
+                        .andReturn().getResponse().getContentAsString();
+                JsonNode first = JSON.readTree(body).get("content").get(0);
+                assertEquals(Set.of("id", "courseId", "title", "kind", "timeLimitSeconds", "published", "questionCount"),
+                        Set.copyOf(first.propertyNames()));
+                assertFalse(body.contains("Loops") || body.contains("Prompt") || body.contains("correctOptions"));
+            }
+            for (UUID denied : List.of(left, stranger)) {
+                mvc.perform(learnerList(course, sessionToken(denied)))
+                        .andExpect(status().isForbidden())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            mvc.perform(learnerList(hiddenCourse, sessionToken(active)))
+                    .andExpect(status().isNotFound())
+                    .andExpect(header().string("Cache-Control", "no-store"));
+            mvc.perform(get("/api/courses/{c}/quizzes?size=1&page=1", course).header("Authorization", "Bearer " + sessionToken(active)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].title").value("Zero"))
+                    .andExpect(jsonPath("$.totalPages").value(2));
+            mvc.perform(get("/api/courses/{c}/quizzes?sort=title", course).header("Authorization", "Bearer " + sessionToken(active)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(header().string("Cache-Control", "no-store"));
         }
     }
 

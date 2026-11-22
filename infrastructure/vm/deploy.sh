@@ -1340,7 +1340,8 @@ SQL
 # DELEGATED_APPROVED CT17-P6-PRIVILEGES-2026-11-16-r3 ADR014 refresh-session rows and the
 # CT17-P6-PRIVILEGES-2026-11-17-r4 CO08 progress/resume rows and the
 # CT17-P6-PRIVILEGES-2026-11-22-r5 AD07 skill-graph rows and the
-# CT17-P6-PRIVILEGES-2026-11-22-r6 AS05 question-bank rows (all within the ADR012 §19.2 ceiling):
+# CT17-P6-PRIVILEGES-2026-11-22-r6 AS05 question-bank rows and the
+# CT17-P6-PRIVILEGES-2026-11-22-r7 AS06 quiz-composition rows (all within the ADR012 §19.2 ceiling):
 # the complete runtime privilege matrix for the reviewed V001-V009 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
 # cannot silently widen a table-level grant. Nothing is granted to future objects.
@@ -1358,10 +1359,10 @@ lesson_progress          SELECT,INSERT  UPDATE(completed)                       
 skills                   SELECT,INSERT,DELETE UPDATE(name,description)           id,course_id,name,description
 skill_prerequisites      SELECT,INSERT,DELETE -                                  id,course_id,skill_id,prerequisite_skill_id
 lesson_skills            SELECT,INSERT,DELETE -                                  id,lesson_id,skill_id
-quizzes                  -              -                                        id,course_id,title,kind,time_limit_seconds,publication_status
+quizzes                  SELECT,INSERT,DELETE UPDATE(title,kind,time_limit_seconds,publication_status) id,course_id,title,kind,time_limit_seconds,publication_status
 questions                SELECT,INSERT,DELETE UPDATE(skill_id,prompt,kind,difficulty,options,correct_options) id,skill_id,prompt,kind,difficulty,options,correct_options
-quiz_questions           -              SELECT(id,question_id)                   id,quiz_id,question_id,position
-attempts                 -              -                                        id,user_id,quiz_id,attempt_number,started_at,expires_at,submitted_at,score_percentage
+quiz_questions           SELECT,INSERT,DELETE -                                  id,quiz_id,question_id,position
+attempts                 -              SELECT(id,quiz_id)                       id,user_id,quiz_id,attempt_number,started_at,expires_at,submitted_at,score_percentage
 attempt_answers          -              SELECT(id,question_id)                   id,attempt_id,question_id,position,selected_options,is_correct
 assignments              -              -                                        id,course_id,lesson_id,title,instructions,deadline_at,publication_status
 submissions              -              -                                        id,assignment_id,user_id,object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at
@@ -1583,10 +1584,10 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
     || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
   if [[ -n "${violations}" ]]; then
     printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
-    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph and r6 question-bank rows); reconcile explicitly. Ingress remains closed."
+    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank and r7 quiz-composition rows); reconcile explicitly. Ingress remains closed."
   fi
   if [[ "${mode}" == "complete" ]]; then
-    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph and r6 question-bank rows) verified (every public relation reviewed)"
+    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank and r7 quiz-composition rows) verified (every public relation reviewed)"
   fi
   log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
 }
@@ -1630,6 +1631,9 @@ SQL
   expect_denied  "runtime role moving a skill to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.skills SET course_id = course_id WHERE false;'
   expect_denied  "runtime role rewriting prerequisite edges in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.skill_prerequisites SET skill_id = skill_id WHERE false;'
   expect_denied  "runtime role rewriting Lesson mappings in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_skills SET lesson_id = lesson_id WHERE false;'
+  expect_denied  "runtime role moving a quiz to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.quizzes SET course_id = course_id WHERE false;'
+  expect_denied  "runtime role rewriting quiz membership in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.quiz_questions SET position = position WHERE false;'
+  expect_denied  "runtime role reading attempt owners, timing or scores" 42501 "${app}" "${app_pw}" <<<'SELECT user_id, started_at, score_percentage FROM public.attempts WHERE false;'
   expect_denied  "runtime role re-keying questions" 42501 "${app}" "${app_pw}" <<<'UPDATE public.questions SET id = id WHERE false;'
   expect_denied  "runtime role reading captured answer selections" 42501 "${app}" "${app_pw}" <<<'SELECT selected_options FROM public.attempt_answers WHERE false;'
   expect_denied  "runtime role reading protected material payloads" 42501 "${app}" "${app_pw}" <<<'SELECT object_key FROM public.learning_materials WHERE false;'

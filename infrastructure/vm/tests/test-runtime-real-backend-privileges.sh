@@ -304,6 +304,45 @@ DELETE FROM public.quizzes WHERE id='80000000-0000-0000-0000-0000000000a1';
 DELETE FROM public.skills WHERE id='70000000-0000-0000-0000-0000000000f1';
 SQL
 
+echo "== AS06 quiz composition (r7: quizzes SELECT, INSERT, DELETE, UPDATE(definition); quiz_questions SELECT, INSERT, DELETE; attempts SELECT(id, quiz_id))"
+call POST "$graph/questions" "$token_i" "$(qbody "$skill_q" 'Second question')"; question_c="$(field id)"
+quizbody() { printf '{"title":"%s","kind":"practice","timeLimitSeconds":300,"questionIds":[%s]}' "$1" "$2"; }
+call POST "$graph/quizzes" "$token_i" "$(quizbody 'Check' "\"$question_a\"")"
+check "create a hidden quiz with same-Course membership" "$STATUS/$(field published)/$(field questionCount)" "201/False/1"
+quiz_a="$(field id)"
+call PUT "$graph/quizzes/$quiz_a" "$token_i" "$(quizbody 'Check' "\"$question_c\",\"$question_a\"")"
+check "replace membership in order (targeted UPDATE, DELETE + INSERT)" "$STATUS/$(field questions.0.question.id)/$(field questions.1.position)" "200/$question_c/2"
+call POST "$graph/quizzes" "$token_i" "$(quizbody 'Foreign' '"70000000-0000-0000-0000-0000000000f2"')"
+check "a question outside the Course is concealed" "$STATUS" 404
+call POST "$graph/quizzes" "$token_i" "$(quizbody 'Draft' '')"; check "an empty draft" "$STATUS" 201
+draft="$(field id)"
+call PUT "$graph/quizzes/$draft/publication" "$token_i" '{"publicationStatus":"published"}'; check "an empty draft cannot be published" "$STATUS" 409
+call DELETE "$graph/quizzes/$draft" "$token_i"; check "delete a hidden never-attempted quiz" "$STATUS/$(field id)" "200/$draft"
+call PUT "$graph/quizzes/$quiz_a/publication" "$token_i" '{"publicationStatus":"published"}'
+check "publish (UPDATE publication_status)" "$STATUS/$(field published)" "200/True"
+call PUT "$graph/quizzes/$quiz_a/publication" "$token_i" '{"publicationStatus":"published"}'; check "publication is idempotent" "$STATUS" 200
+call PUT "$graph/quizzes/$quiz_a" "$token_i" "$(quizbody 'Edited' "\"$question_a\"")"; check "a published quiz is frozen" "$STATUS" 409
+call GET "$graph/owned-quizzes" "$token_i"; check "owner list with definitions" "$STATUS/$(field totalElements)/$(field content.0.questions.0.question.correctOptions.1)" "200/1/True"
+# CO06 publication writes need CO06's own CT17-P6 revision; the bootstrap administrator publishes the fixture Course.
+psql_admin >/dev/null <<<"UPDATE public.courses SET publication_status='published' WHERE id='20000000-0000-0000-0000-0000000000c3';"
+call PUT "$graph/membership" "$token_a"; check "the Learner joins the published Course" "$STATUS" 200
+call GET "$graph/quizzes" "$token_a"
+check "the Learner lists the published quiz" "$STATUS/$(field totalElements)/$(field content.0.id)/$(field content.0.questionCount)" "200/1/$quiz_a/2"
+check "the Learner list carries no keys or prompts" "$([[ "$BODY" == *correctOptions* || "$BODY" == *'Second question'* ]] && echo leaked || echo clean)" clean
+call GET "$graph/owned-quizzes" "$token_a"; check "a Learner cannot read owned quizzes" "$STATUS" 403
+call PUT "$graph/quizzes/$quiz_a/publication" "$token_i" '{"publicationStatus":"hidden"}'; check "hide" "$STATUS/$(field published)" "200/False"
+psql_admin >/dev/null <<<"INSERT INTO public.attempts SELECT gen_random_uuid(), id, '$quiz_a', 1, now(), now() + interval '5 minutes' FROM public.users WHERE email='learner.a@example.test';"
+call PUT "$graph/quizzes/$quiz_a" "$token_i" "$(quizbody 'Edited' "\"$question_a\"")"; check "an attempted quiz stays frozen after hiding (SELECT attempts)" "$STATUS" 409
+call DELETE "$graph/quizzes/$quiz_a" "$token_i"; check "an attempted quiz cannot be deleted" "$STATUS" 409
+check "the attempted quiz and its membership are intact" "$(psql_admin <<<"SELECT title || '/' || (SELECT count(*) FROM public.quiz_questions WHERE quiz_id='$quiz_a') FROM public.quizzes WHERE id='$quiz_a';")" "Check/2"
+psql_admin >/dev/null <<SQL
+DELETE FROM public.attempts WHERE quiz_id='$quiz_a';
+DELETE FROM public.quiz_questions WHERE quiz_id='$quiz_a';
+DELETE FROM public.quizzes WHERE id='$quiz_a';
+DELETE FROM public.enrollments WHERE course_id='20000000-0000-0000-0000-0000000000c3';
+UPDATE public.courses SET publication_status='hidden' WHERE id='20000000-0000-0000-0000-0000000000c3';
+SQL
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
@@ -368,7 +407,7 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph and the AS05 question bank under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank and AS06 quiz composition under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \

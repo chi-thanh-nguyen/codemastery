@@ -317,6 +317,10 @@ class QuestionBankServiceTest {
             return Stream.of(
                     Arguments.of("blank prompt", new QuestionInput(skill, " \t\n", "single_choice", "easy", ab, tf)),
                     Arguments.of("Unicode-space prompt", new QuestionInput(skill, "  ", "single_choice", "easy", ab, tf)),
+                    // Blank as in CO06/AD07: U+FEFF (OpenAPI's ECMA-262 \s), U+0085 (PostgreSQL), U+001C (Java).
+                    Arguments.of("U+FEFF-only prompt", new QuestionInput(skill, "\uFEFF", "single_choice", "easy", ab, tf)),
+                    Arguments.of("U+0085-only prompt", new QuestionInput(skill, "\u0085", "single_choice", "easy", ab, tf)),
+                    Arguments.of("U+FEFF and U+001C option", new QuestionInput(skill, "P", "single_choice", "easy", List.of("A", "\uFEFF\u001C"), tf)),
                     Arguments.of("NUL in prompt", new QuestionInput(skill, "a\0b", "single_choice", "easy", ab, tf)),
                     Arguments.of("unpaired high surrogate in prompt", new QuestionInput(skill, "a\uD800", "single_choice", "easy", ab, tf)),
                     Arguments.of("unpaired low surrogate option", new QuestionInput(skill, "P", "single_choice", "easy", List.of("A", "\uDC00"), tf)),
@@ -362,7 +366,8 @@ class QuestionBankServiceTest {
                     new QuestionInput(skillId, "  keep  spaces ", "single_choice", "easy", List.of(" a ", "b"), List.of(false, true)),
                     new QuestionInput(skillId, "Select all", "multiple_choice", "medium", List.of("a", "b", "c"), List.of(true, false, true)),
                     new QuestionInput(skillId, "Statement", "true_false", "hard", List.of("True", "False"), List.of(false, true)),
-                    new QuestionInput(skillId, "Emoji \uD83D\uDE00 pair", "single_choice", "easy", List.of("\uD83D\uDE00", "b"), List.of(true, false)));
+                    new QuestionInput(skillId, "Emoji \uD83D\uDE00 pair", "single_choice", "easy", List.of("\uD83D\uDE00", "b"), List.of(true, false)),
+                    new QuestionInput(skillId, "\uFEFF\u0085Kept\uFEFF", "single_choice", "easy", List.of("\uFEFFa", "b"), List.of(true, false)));
             for (QuestionInput definition : valid) {
                 QuestionView view = service.create(courseId, definition);
                 assertEquals(definition.prompt(), view.prompt());
