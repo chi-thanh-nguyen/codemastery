@@ -18,7 +18,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -46,11 +45,6 @@ public class QuestionBankService {
     private static final Set<String> DIFFICULTIES = Arrays.stream(DifficultyLevel.values())
             .map(DifficultyLevel::getCode).collect(Collectors.toUnmodifiableSet());
     private static final List<String> TRUE_FALSE_OPTIONS = List.of("True", "False");
-    /**
-     * V004 requires text matching {@code [^[:space:]]}. The Unicode White_Space class contains every
-     * character PostgreSQL may treat as space, so an accepted value always satisfies the constraint.
-     */
-    private static final Pattern NON_SPACE = Pattern.compile("\\S", Pattern.UNICODE_CHARACTER_CLASS);
 
     /** Closed question definition supplied by an authoring caller; lists are copied on entry. */
     public record QuestionInput(UUID skillId, String prompt, String kind, String difficulty,
@@ -221,8 +215,15 @@ public class QuestionBankService {
      * PgJDBC would store as '?' while the response echoed the input. Never trimmed.
      */
     private static boolean isText(String value) {
-        return value != null && NON_SPACE.matcher(value).find() && value.codePoints().noneMatch(codePoint -> codePoint == 0
-                || codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE);
+        // Nonblank as CO06 and AD07 judge it: one code point that is space under none of Java whitespace,
+        // Unicode space separators, U+0085 (PostgreSQL [:space:] in the musl image locale) and U+FEFF
+        // (OpenAPI's ECMA-262 \S). PostgreSQL text stores neither NUL nor an unpaired UTF-16 surrogate
+        // (PgJDBC would write '?').
+        return value != null
+                && value.codePoints().anyMatch(point -> !Character.isWhitespace(point) && !Character.isSpaceChar(point)
+                        && point != 0x0085 && point != 0xFEFF)
+                && value.codePoints().noneMatch(point -> point == 0
+                        || point >= Character.MIN_SURROGATE && point <= Character.MAX_SURROGATE);
     }
 
     private static Question toQuestion(UUID id, QuestionInput input) {

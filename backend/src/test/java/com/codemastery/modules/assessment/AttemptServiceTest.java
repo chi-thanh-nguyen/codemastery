@@ -200,6 +200,8 @@ class AttemptServiceTest {
             List<QuizInput> invalid = List.of(
                     new QuizInput("   ", "practice", 60, List.of()),
                     new QuizInput(" ", "practice", 60, List.of()),
+                    new QuizInput("\uFEFF", "practice", 60, List.of()),
+                    new QuizInput("\u0085 \u001C", "practice", 60, List.of()),
                     new QuizInput("Title\u0000", "practice", 60, List.of()),
                     new QuizInput("Title\uD800", "practice", 60, List.of()),
                     new QuizInput("\uDC00", "practice", 60, List.of()),
@@ -319,6 +321,11 @@ class AttemptServiceTest {
 
             stored(quiz("hidden"), new Question(Q1, SKILL, "Prompt", "true_false", "easy",
                     new String[] {"Yes", "No"}, new Boolean[] {true, false}));
+            assertThrows(IllegalStateException.class, () -> service.publish(COURSE, QUIZ, true));
+
+            // A stored prompt that is blank under the shared rule (U+FEFF only) is an integrity failure too.
+            stored(quiz("hidden"), new Question(Q1, SKILL, "\uFEFF", "true_false", "easy",
+                    new String[] {"True", "False"}, new Boolean[] {true, false}));
             assertThrows(IllegalStateException.class, () -> service.publish(COURSE, QUIZ, true));
 
             verify(quizzes, never()).save(any());

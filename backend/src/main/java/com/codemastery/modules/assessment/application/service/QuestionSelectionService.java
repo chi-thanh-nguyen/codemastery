@@ -13,7 +13,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
@@ -33,7 +32,6 @@ public class QuestionSelectionService {
     private static final Set<String> DIFFICULTIES = Arrays.stream(DifficultyLevel.values())
             .map(DifficultyLevel::getCode).collect(Collectors.toUnmodifiableSet());
     private static final List<String> TRUE_FALSE_OPTIONS = List.of("True", "False");
-    private static final Pattern NON_SPACE = Pattern.compile("\\S", Pattern.UNICODE_CHARACTER_CLASS);
 
     private final QuizRepository quizzes;
     private final SkillGraphService skillGraph;
@@ -129,9 +127,15 @@ public class QuestionSelectionService {
     }
 
     private static boolean isText(String value) {
-        // PostgreSQL text stores neither NUL nor an unpaired UTF-16 surrogate (PgJDBC would write '?').
-        return value != null && NON_SPACE.matcher(value).find() && value.codePoints().noneMatch(codePoint -> codePoint == 0
-                || codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE);
+        // Nonblank as CO06 and AD07 judge it: one code point that is space under none of Java whitespace,
+        // Unicode space separators, U+0085 (PostgreSQL [:space:] in the musl image locale) and U+FEFF
+        // (OpenAPI's ECMA-262 \S). PostgreSQL text stores neither NUL nor an unpaired UTF-16 surrogate
+        // (PgJDBC would write '?').
+        return value != null
+                && value.codePoints().anyMatch(point -> !Character.isWhitespace(point) && !Character.isSpaceChar(point)
+                        && point != 0x0085 && point != 0xFEFF)
+                && value.codePoints().noneMatch(point -> point == 0
+                        || point >= Character.MIN_SURROGATE && point <= Character.MAX_SURROGATE);
     }
 
     private static IllegalStateException invalidStoredQuestion() {

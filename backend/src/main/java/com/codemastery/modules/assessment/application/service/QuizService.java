@@ -18,7 +18,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -45,8 +44,6 @@ public class QuizService {
     static final String PUBLISHED = "published";
     private static final Set<String> KINDS = Set.of("diagnostic", "practice", "test");
     private static final Set<String> STATUSES = Set.of(HIDDEN, PUBLISHED);
-    /** V004 requires {@code [^[:space:]]}; Unicode White_Space covers every PostgreSQL space character. */
-    private static final Pattern NON_SPACE = Pattern.compile("\\S", Pattern.UNICODE_CHARACTER_CLASS);
 
     /** Closed B3QuizWrite input; the list is copied on entry and may hold nulls until validated. */
     public record QuizInput(String title, String kind, Integer timeLimitSeconds, List<UUID> questionIds) {
@@ -286,9 +283,15 @@ public class QuizService {
 
     /** Nonblank and representable in PostgreSQL text (no NUL, no unpaired surrogate); never trimmed. */
     private static boolean isText(String value) {
-        // PostgreSQL text stores neither NUL nor an unpaired UTF-16 surrogate (PgJDBC would write '?').
-        return value != null && NON_SPACE.matcher(value).find() && value.codePoints().noneMatch(codePoint -> codePoint == 0
-                || codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE);
+        // Nonblank as CO06 and AD07 judge it: one code point that is space under none of Java whitespace,
+        // Unicode space separators, U+0085 (PostgreSQL [:space:] in the musl image locale) and U+FEFF
+        // (OpenAPI's ECMA-262 \S). PostgreSQL text stores neither NUL nor an unpaired UTF-16 surrogate
+        // (PgJDBC would write '?').
+        return value != null
+                && value.codePoints().anyMatch(point -> !Character.isWhitespace(point) && !Character.isSpaceChar(point)
+                        && point != 0x0085 && point != 0xFEFF)
+                && value.codePoints().noneMatch(point -> point == 0
+                        || point >= Character.MIN_SURROGATE && point <= Character.MAX_SURROGATE);
     }
 
     private static void requireId(UUID id) {
