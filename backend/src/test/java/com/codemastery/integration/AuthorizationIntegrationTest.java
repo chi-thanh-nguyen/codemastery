@@ -39,6 +39,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -796,6 +797,332 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + sessionToken(insertUser(role, "active"))))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    /**
+     * CT23 question bank (ADR007 §§4, 7) through the production security chain, CT03 and CT18:
+     * Instructor-only routing, Course ownership, closed bodies and no-store on every outcome. An
+     * admitted owner's request runs through the real CT40 producer ({@code SkillGraphService}, AD07
+     * #165) and the CO14 Course guard (#177).
+     */
+    @Nested
+    class QuestionBankEndpoints {
+
+        private final List<UUID> courses = new ArrayList<>();
+        private UUID owner;
+        private UUID course;
+        private UUID hiddenCourse;
+        private UUID skill;
+        private UUID question;
+
+        @BeforeEach
+        void fixtures() {
+            owner = insertUser("instructor", "active");
+            course = insertCourse(owner, "published");
+            hiddenCourse = insertCourse(owner, "hidden");
+            skill = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.skills (id, course_id, name) VALUES (?, ?, 'QA01 skill')", skill, course);
+            question = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.questions (id, skill_id, prompt, kind, difficulty, options, correct_options) "
+                    + "VALUES (?, ?, 'Stored prompt', 'single_choice', 'easy', ARRAY['A','B'], ARRAY[true,false])",
+                    question, skill);
+        }
+
+        @AfterEach
+        void removeFixtures() {
+            for (UUID id : courses) {
+                jdbc.update("DELETE FROM public.questions WHERE skill_id IN (SELECT id FROM public.skills WHERE course_id = ?)", id);
+                jdbc.update("DELETE FROM public.skills WHERE course_id = ?", id);
+                jdbc.update("DELETE FROM public.courses WHERE id = ?", id);
+            }
+            courses.clear();
+        }
+
+        private UUID insertCourse(UUID instructor, String status) {
+            UUID id = UUID.randomUUID();
+            courses.add(id);
+            jdbc.update("INSERT INTO public.courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
+                    + "VALUES (?, ?, 'QA01 question bank', 'CT23 fixture', ?, false)", id, instructor, status);
+            return id;
+        }
+
+        private String validBody() {
+            return "{\"skillId\":\"" + skill + "\",\"prompt\":\"Predict the output\",\"kind\":\"single_choice\","
+                    + "\"difficulty\":\"easy\",\"options\":[\"1\",\"2\"],\"correctOptions\":[true,false]}";
+        }
+
+        /** The five operations against one Course; bodies are valid unless the caller replaces them. */
+        private List<org.springframework.test.web.servlet.RequestBuilder> operations(UUID courseId, String bearer) {
+            List<org.springframework.test.web.servlet.RequestBuilder> requests = new ArrayList<>();
+            String base = "/api/courses/" + courseId + "/questions";
+            for (var builder : List.of(
+                    get(base),
+                    get(base + "/" + question),
+                    post(base).contentType(MediaType.APPLICATION_JSON).content(validBody()),
+                    request(HttpMethod.PUT, base + "/" + question).contentType(MediaType.APPLICATION_JSON).content(validBody()),
+                    request(HttpMethod.DELETE, base + "/" + question))) {
+                requests.add(bearer == null ? builder : builder.header("Authorization", "Bearer " + bearer));
+            }
+            return requests;
+        }
+
+        private String bank() {
+            return jdbc.queryForObject("SELECT string_agg(id::text || prompt || kind, ',' ORDER BY id) FROM public.questions "
+                    + "WHERE skill_id = ?", String.class, skill);
+        }
+
+        @Test
+        void unauthenticatedRequestsAre401WithNoStoreAndNoEffect() throws Exception {
+            String before = bank();
+            for (var request : operations(course, null)) {
+                mvc.perform(request)
+                        .andExpect(status().isUnauthorized())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+            }
+            assertEquals(before, bank());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"learner", "admin"})
+        void learnersAndAdministratorsAre403BeforeAnyHandler(String role) throws Exception {
+            String bearer = sessionToken(insertUser(role, "active"));
+            String before = bank();
+            for (var request : operations(course, bearer)) {
+                mvc.perform(request)
+                        .andExpect(status().isForbidden())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+            }
+            assertEquals(before, bank());
+        }
+
+        @Test
+        void nonOwningInstructorIs403OnAPublishedCourseAnd404OnHiddenOrMissingOnes() throws Exception {
+            String other = sessionToken(insertUser("instructor", "active"));
+            String before = bank();
+            for (var request : operations(course, other)) {
+                mvc.perform(request).andExpect(status().isForbidden())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            for (UUID unavailable : List.of(hiddenCourse, UUID.randomUUID())) {
+                for (var request : operations(unavailable, other)) {
+                    mvc.perform(request).andExpect(status().isNotFound())
+                            .andExpect(header().string("Cache-Control", "no-store"))
+                            .andExpect(jsonPath("$.detail").value("The requested resource is unavailable."));
+                }
+            }
+            // A malformed body never overtakes CT03: the non-owner still receives 403.
+            mvc.perform(post("/api/courses/{c}/questions", course).header("Authorization", "Bearer " + other)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"unknown\":true}"))
+                    .andExpect(status().isForbidden());
+            assertEquals(before, bank());
+        }
+
+        @Test
+        void malformedPathQueryAndMediaTypeAre400ForTheOwner() throws Exception {
+            String bearer = sessionToken(owner);
+            for (String uri : List.of("/api/courses/not-a-uuid/questions", "/api/courses/" + course + "/questions/1-1-1-1-1",
+                    "/api/courses/" + course + "/questions?skillId=" + skill, "/api/courses/" + course + "/questions?difficulty=easy",
+                    "/api/courses/" + course + "/questions?page=-1", "/api/courses/" + course + "/questions?size=101",
+                    "/api/courses/" + course + "/questions?page=2147483648", "/api/courses/" + course + "/questions/" + question + "?x=1")) {
+                mvc.perform(get(uri).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            mvc.perform(post("/api/courses/{c}/questions", course).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.TEXT_PLAIN).content(validBody()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(header().string("Cache-Control", "no-store"));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE skill_id = ?", Integer.class, skill));
+        }
+
+        @Test
+        void ownerBodiesOutsideTheClosedContractAre400WithNoEffect() throws Exception {
+            String bearer = sessionToken(owner);
+            String valid = validBody();
+            List<String> invalid = List.of(
+                    valid.replace("}", ",\"extra\":1}"),
+                    valid.replace("\"kind\"", "\"prompt\":\"dup\",\"kind\""),
+                    valid.replace("\"Predict the output\"", "123"),
+                    valid.replace("[true,false]", "[\"true\",\"false\"]"),
+                    valid.replace("[true,false]", "[1,0]"),
+                    valid.replace("[\"1\",\"2\"]", "[1,2]"),
+                    valid.replace("\"Predict the output\"", "null"),
+                    valid.replace(",\"difficulty\":\"easy\"", ""),
+                    valid.replace("\"single_choice\"", "\"essay\""),
+                    valid.replace("\"easy\"", "\"Easy\""),
+                    valid.replace("[true,false]", "[true,true]"),
+                    valid.replace("[true,false]", "[true]"),
+                    valid.replace("\"Predict the output\"", "\"   \""),
+                    valid.replace("\"Predict the output\"", "\"Predict \\ud800\""),
+                    valid.replace("\"single_choice\"", "\"true_false\""),
+                    valid + " {}",
+                    "{",
+                    "");
+            String before = bank();
+            for (String body : invalid) {
+                for (var request : List.of(post("/api/courses/{c}/questions", course),
+                        request(HttpMethod.PUT, "/api/courses/{c}/questions/{q}", course, question))) {
+                    mvc.perform(request.header("Authorization", "Bearer " + bearer)
+                                    .contentType(MediaType.APPLICATION_JSON).content(body))
+                            .andExpect(status().isBadRequest())
+                            .andExpect(header().string("Cache-Control", "no-store"))
+                            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+                }
+            }
+            assertEquals(before, bank());
+        }
+
+        /**
+         * Text PostgreSQL cannot store faithfully is 400 (NUL, an unpaired surrogate in the prompt or an
+         * option); a supplementary character round-trips exactly. Raw bytes that are not UTF-8 are never a
+         * 5xx and never store a value other than the one echoed to the caller.
+         */
+        @Test
+        void unicodeBodiesAreStoredExactlyAsEchoedOrRejected() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course + "/questions";
+            String before = bank();
+            for (String body : List.of(validBody().replace("Predict the output", "Predict \\u0000"),
+                    validBody().replace("[\"1\",\"2\"]", "[\"1\",\"\\udc00\"]"),
+                    validBody().replace("[\"1\",\"2\"]", "[\"1\",\"\\ud83d\\ud83d\"]"))) {
+                mvc.perform(post(base).header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content(body))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            assertEquals(before, bank());
+
+            String supplementary = "x \u2265 1 \uD83D\uDE42";
+            String created = mvc.perform(post(base).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(validBody().replace("Predict the output", supplementary).replace("\"2\"]", "\"\uD835\uDC65\"]")
+                                    .getBytes(StandardCharsets.UTF_8)))
+                    .andExpect(status().isCreated())
+                    .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+            JsonNode echoed = JSON.readTree(created);
+            UUID createdId = UUID.fromString(echoed.get("id").asString());
+            assertEquals(supplementary, echoed.get("prompt").asString());
+            assertEquals(supplementary, jdbc.queryForObject("SELECT prompt FROM public.questions WHERE id = ?", String.class, createdId));
+            assertEquals("\uD835\uDC65", jdbc.queryForObject("SELECT options[2] FROM public.questions WHERE id = ?", String.class, createdId));
+
+            byte[] prefix = "{\"skillId\":\"".concat(skill.toString()).concat("\",\"prompt\":\"P ").getBytes(StandardCharsets.UTF_8);
+            byte[] suffix = "\",\"kind\":\"single_choice\",\"difficulty\":\"easy\",\"options\":[\"1\",\"2\"],\"correctOptions\":[true,false]}"
+                    .getBytes(StandardCharsets.UTF_8);
+            for (byte[] raw : List.of(new byte[] {(byte) 0xC3, 0x28}, new byte[] {(byte) 0xED, (byte) 0xA0, (byte) 0x80},
+                    new byte[] {(byte) 0xF4, (byte) 0x90, (byte) 0x80, (byte) 0x80}, new byte[] {(byte) 0xFF})) {
+                byte[] body = new byte[prefix.length + raw.length + suffix.length];
+                System.arraycopy(prefix, 0, body, 0, prefix.length);
+                System.arraycopy(raw, 0, body, prefix.length, raw.length);
+                System.arraycopy(suffix, 0, body, prefix.length + raw.length, suffix.length);
+                var response = mvc.perform(post(base).header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content(body))
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andReturn().getResponse();
+                int status = response.getStatus();
+                assertTrue(status == 201 || status == 400, "raw bytes " + HexFormat.of().formatHex(raw) + " gave " + status);
+                if (status == 201) {
+                    JsonNode stored = JSON.readTree(response.getContentAsString(StandardCharsets.UTF_8));
+                    String prompt = stored.get("prompt").asString();
+                    assertTrue(prompt.codePoints().noneMatch(c -> c >= Character.MIN_SURROGATE && c <= Character.MAX_SURROGATE), prompt);
+                    assertEquals(prompt, jdbc.queryForObject("SELECT prompt FROM public.questions WHERE id = ?", String.class,
+                            UUID.fromString(stored.get("id").asString())));
+                }
+            }
+        }
+
+        /** CT23.questions: a QuizQuestion or AttemptAnswer reference freezes and protects the definition. */
+        @Test
+        void referencedQuestionsConflictOverHttpAndKeepTheirDefinition() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course + "/questions/" + question;
+            UUID quiz = UUID.randomUUID(), attempt = UUID.randomUUID(), learner = insertUser("learner", "active");
+            try {
+                jdbc.update("INSERT INTO public.quizzes (id, course_id, title, kind, time_limit_seconds, publication_status) "
+                        + "VALUES (?, ?, 'Referencing quiz', 'practice', 60, 'hidden')", quiz, course);
+                jdbc.update("INSERT INTO public.quiz_questions (id, quiz_id, question_id, position) VALUES (?, ?, ?, 1)",
+                        UUID.randomUUID(), quiz, question);
+                String before = bank();
+                // Membership alone: the unused definition may still be replaced, but not deleted.
+                mvc.perform(request(HttpMethod.DELETE, base).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isConflict())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+                assertEquals(before, bank());
+                mvc.perform(request(HttpMethod.PUT, base).header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content(validBody()))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.prompt").value("Predict the output"));
+
+                // An AttemptAnswer makes every definition field immutable, and the delete stays refused.
+                jdbc.update("INSERT INTO public.attempts (id, user_id, quiz_id, attempt_number, started_at, expires_at) "
+                        + "VALUES (?, ?, ?, 1, now(), now() + interval '5 minutes')", attempt, learner, quiz);
+                jdbc.update("INSERT INTO public.attempt_answers (id, attempt_id, question_id, position, selected_options) "
+                        + "VALUES (?, ?, ?, 1, ARRAY[false,false])", UUID.randomUUID(), attempt, question);
+                String used = bank();
+                mvc.perform(request(HttpMethod.PUT, base).header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content(validBody().replace("Predict the output", "Changed")))
+                        .andExpect(status().isConflict());
+                mvc.perform(request(HttpMethod.DELETE, base).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isConflict());
+                assertEquals(used, bank());
+                // The used definition stays readable by its owner, key included.
+                mvc.perform(get(base).header("Authorization", "Bearer " + bearer))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.correctOptions[0]").value(true));
+            } finally {
+                jdbc.update("DELETE FROM public.attempt_answers WHERE attempt_id = ?", attempt);
+                jdbc.update("DELETE FROM public.attempts WHERE id = ?", attempt);
+                jdbc.update("DELETE FROM public.quiz_questions WHERE quiz_id = ?", quiz);
+                jdbc.update("DELETE FROM public.quizzes WHERE id = ?", quiz);
+            }
+        }
+
+        /** AD07's CT40 producer and CO14's guard are integrated: the owner's operations reach real rows. */
+        @Test
+        void admittedOwnerOperationsUseTheRealCt40ProducerAndCourseGuard() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course + "/questions";
+            mvc.perform(get(base).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].id").value(question.toString()));
+            mvc.perform(get(base + "/" + question).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.correctOptions[0]").value(true));
+
+            String created = mvc.perform(post(base).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content(validBody()))
+                    .andExpect(status().isCreated())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.skillId").value(skill.toString()))
+                    .andReturn().getResponse().getContentAsString();
+            UUID createdId = UUID.fromString(JSON.readTree(created).get("id").asString());
+            assertEquals(skill, jdbc.queryForObject("SELECT skill_id FROM public.questions WHERE id = ?", UUID.class, createdId));
+
+            // A skill of another Course (even the same owner's) is the producer's concealed 404 and writes nothing.
+            UUID foreignSkill = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.skills (id, course_id, name) VALUES (?, ?, 'Foreign skill')", foreignSkill, hiddenCourse);
+            String before = bank();
+            for (var request : List.of(post(base), request(HttpMethod.PUT, base + "/" + createdId))) {
+                mvc.perform(request.header("Authorization", "Bearer " + bearer).contentType(MediaType.APPLICATION_JSON)
+                                .content(validBody().replace(skill.toString(), foreignSkill.toString())))
+                        .andExpect(status().isNotFound())
+                        .andExpect(jsonPath("$.detail").value("The requested resource is unavailable."));
+            }
+            assertEquals(before, bank());
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE skill_id = ?", Integer.class, foreignSkill));
+
+            mvc.perform(request(HttpMethod.PUT, base + "/" + createdId).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content(validBody().replace("Predict the output", "Replaced")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.prompt").value("Replaced"));
+            mvc.perform(request(HttpMethod.DELETE, base + "/" + createdId).header("Authorization", "Bearer " + bearer))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(createdId.toString()));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM public.questions WHERE id = ?", Integer.class, createdId));
+            jdbc.update("DELETE FROM public.skills WHERE id = ?", foreignSkill);
+        }
     }
 
     /** Unconfigured delivery: the rest of the backend runs; recovery acknowledges but never issues. */

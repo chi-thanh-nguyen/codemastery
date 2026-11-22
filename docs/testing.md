@@ -161,8 +161,8 @@ tests. Surefire uses its standard `Test*`, `*Test`, `*Tests`, and `*TestCase`
 naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
 Current unit suites are under `modules/auth/`, `modules/course/` (including
-`application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest`
-and `QuizGradingServiceTest`), `modules/adaptive/mastery/` and the shared
+`application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest`,
+`QuestionBankServiceTest` and `QuizGradingServiceTest`), `modules/adaptive/mastery/` and the shared
 `support/` package. The other module test files are empty scaffolds. The integration base
 class is compiled but is not initialized by this unit-test lifecycle, so
 `./mvnw test` needs no Docker.
@@ -4367,6 +4367,103 @@ remediated on PR #261 under the Leader's FE03 authorization of 20 November 2026.
 Report results per layer and only after the checks actually run. Unit results do not
 establish browser, assistive-technology, backend or deployment behavior, and a design
 preview is never integration evidence.
+
+## AS05 question bank remediation (PR #259) — 20 November 2026
+
+AS05 ([#156](https://github.com/chi-thanh-nguyen/codemastery/issues/156),
+[PR #259](https://github.com/chi-thanh-nguyen/codemastery/pull/259)) implements the CT23.questions
+and CT23.bindings question-bank slice of ADR007 §§4 and 7: the five Instructor operations
+`b3CreateQuestion`, `b3ListQuestions`, `b3ReadQuestion`, `b3ReplaceUnusedQuestion` and
+`b3DeleteUnusedQuestion`, the `QuestionBankService` callables with nested `QuestionInput` and
+`QuestionView` records, and the Assessment question, quiz and attempt repositories. The change
+corrects findings F1–F14 of the independent review of `ee177bd`. The Project Leader authorized
+the bounded `SecurityConfig` change and the test placement below on 20 November 2026.
+
+**Upstream producers.** `QuestionBankService` reaches the two approved producers through three
+protected methods that mirror their signatures, each now a single delegation:
+`SkillGraphService.requireSkillInCourse` and `readSkillIds` (ADR005 §3.2, AD07
+[#165](https://github.com/chi-thanh-nguyen/codemastery/issues/165)) and
+`CourseManagementService.withCourseConfigurationWrite` (ADR005 §§5 and 13.3, CO14
+[#177](https://github.com/chi-thanh-nguyen/codemastery/issues/177)). On 20 November neither
+existed and the methods failed closed; the integration of 22 November is recorded below.
+
+**Placement.** `modules/assessment/QuestionBankServiceTest.java` is a bounded placement
+exception: ADR008's CT14 table records a dedicated question-bank unit suite as a gap, and the
+Leader's 20 November authorization covers it for this PR. Recording it in
+`repository-structure.md` needs a separate governance change. The integration cases extend the
+approved `integration/AuthorizationIntegrationTest.java` (real endpoint authorization, no denied
+effects) and `integration/repository/AssessmentPersistenceIntegrationTest.java`.
+
+| Obligation | Covered by |
+| --- | --- |
+| Closed body: unknown, duplicate, missing or null members, wrong scalar or element types, trailing tokens, non-canonical UUIDs and non-JSON media types are 400 | `QuestionBankServiceTest$ClosedRequestBody`, `$Controller`; `AuthorizationIntegrationTest$QuestionBankEndpoints.ownerBodiesOutsideTheClosedContractAre400WithNoEffect` |
+| V004 validity: kinds, difficulties, `True`/`False` labels, key counts, nonblank text without trimming, no NUL and no unpaired surrogate | `QuestionBankServiceTest$Validation` |
+| CT03 admission before validation, scope and writes; Learner and Administrator 403; non-owner 403 or 404; unauthenticated 401 | `$Admission`, `$Controller`; `QuestionBankEndpoints` (production security chain) |
+| PUT frozen only by an AttemptAnswer reference; DELETE refused by either reference | `$Replace`, `$Delete`; adapter references in `AssessmentPersistenceIntegrationTest.questionAdapterReplacesDeletesAndReportsQuizAndAttemptReferencesSeparately` |
+| Course-wide list: PostgreSQL UUID order, filtering before count and paging, empty pages past the end, no int overflow, one REPEATABLE READ snapshot | `$Reads`, `$ProducerDelegation`; `questionAdapterScopesPagesInPostgresUuidOrderAndCountsBeforePaging` |
+| Lifecycle row lock conflicts with new QuizQuestion and AttemptAnswer references (native `FOR UPDATE`; `FOR NO KEY UPDATE` does not conflict) | `lifecycleRowLockBlocksNewQuizAndAttemptReferencesUntilItsTransactionEnds` |
+| Quiz and attempt adapters round-trip V004 rows without swapping references | `quizAndAttemptAdaptersRoundTripV004RowsWithoutSwappingReferences` |
+| `Cache-Control: no-store` on success and on 400, 401, 403, 404, 409 and 500 | `$Controller`; `QuestionBankEndpoints` |
+| Integrated producers: each seam delegates, inside the guard, and an invalid projection never widens scope | `$ProducerDelegation`; `QuestionBankEndpoints.admittedOwnerOperationsUseTheRealCt40ProducerAndCourseGuard` |
+
+The other unit cases emulate the producers in a test subclass; real-producer evidence is the
+PostgreSQL suites listed under the 22 November integration.
+
+Executed locally on 20 November 2026 (macOS host):
+
+- `cd backend && ./mvnw test -Dtest=QuestionBankServiceTest`: 79 tests, 0 failures.
+- `cd backend && ./mvnw test`: 792 tests, 0 failures, BUILD SUCCESS.
+- The integration suites did not run locally. The Docker Desktop engine returned
+  `InternalServerErrorException (Status 500)` and Testcontainers found no valid Docker
+  environment. Their results come only from the PR's CI `Backend` job (`./mvnw verify`).
+
+The integrated operations, their concurrency cases and the CT17 runtime privileges were added on
+22 November (below).
+
+### Producer integration and runtime privileges — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, with @minhtan29042006's agreement to
+Leader-assisted commits on this branch:
+
+- **CO14.** `withCourseConfigurationWrite` delegates to `CourseManagementService` (on `main` since
+  `b506500`); create, replace and delete run in the Course-root READ COMMITTED unit.
+- **AD07.** `requireSkillInCourse` and `readSkillIds` delegate to `SkillGraphService` (PR #264, on
+  `main` since `dfd816c`).
+  Both join the caller's unit: under the held root for writes, in the REPEATABLE READ snapshot for
+  reads. No AS05 seam fails closed any more.
+- **Text.** A prompt or option with an unpaired UTF-16 surrogate is 400 (PgJDBC would store `?`),
+  matching CO06's `isStorable` rule.
+- **CT17.** `CT17-P6-PRIVILEGES-2026-11-22-r6` in [deployment.md](deployment.md) grants exactly the
+  SQL above: `questions` SELECT, INSERT, DELETE and UPDATE of the six definition columns, and
+  column-level SELECT (id, question_id) on `quiz_questions` and `attempt_answers` for the reference
+  checks. Nothing was provisioned on any real database.
+
+| Obligation | Covered by (PostgreSQL unless noted) |
+| --- | --- |
+| Delegation, order inside the guard, invalid projection never widens scope | `QuestionBankServiceTest$ProducerDelegation` (unit) |
+| Create, list, read, replace, delete through the real producer; foreign skill 404 with no effect | `AuthorizationIntegrationTest$QuestionBankEndpoints.admittedOwnerOperationsUseTheRealCt40ProducerAndCourseGuard` |
+| QuizQuestion reference: replace allowed, delete 409; AttemptAnswer reference: replace and delete 409, definition kept and readable | `referencedQuestionsConflictOverHttpAndKeepTheirDefinition` |
+| Skill deletion racing question tagging on the Course root (commit and rollback) | `AdaptiveLearningFlowIntegrationTest.taggingAQuestionWithASkillBeingDeletedWaitsAndRereadsTheCommittedGraph` |
+| A QuizQuestion or AttemptAnswer reference racing a replace or delete (commit and rollback): an AttemptAnswer freezes both, a QuizQuestion refuses only the delete | `aConcurrentQuizOrAttemptReferenceDecidesAWaitingReplaceOrDelete` |
+| One REPEATABLE READ list snapshot while another connection commits between the count and the page (the same test fails with READ COMMITTED) | `aQuestionListIsOneSnapshotEvenWhenAWriterCommitsBetweenItsCountAndItsPage` |
+| Cross-Course question scopes | `questionScopesOfIndependentCoursesStayApart` |
+| NUL or an unpaired surrogate in a prompt or option is 400; supplementary characters are stored exactly; raw bytes that are not UTF-8 never give a 5xx or a stored value different from the echo | `AuthorizationIntegrationTest$QuestionBankEndpoints.unicodeBodiesAreStoredExactlyAsEchoedOrRejected` |
+| Runtime role: allowed AS05 SQL, 23503 on a referenced delete, re-key/TRUNCATE/membership/selection denials | `test-postgres-privilege-matrix-containment.sh` |
+| Runtime role: the five operations over HTTP, used 409, referenced 409, Learner 403, no 42501 | `test-runtime-real-backend-privileges.sh` |
+
+Executed locally on 22 November 2026 on the PR branch after `main` `dfd816c` (AD07 PR #264) was
+merged in and the three prepared commits were applied (macOS host, Docker Desktop):
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='QuestionBankServiceTest*'` | 85 tests, 0 failures |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 893, Failsafe 360, 0 failures, errors or skips. Among them `QuestionBankServiceTest` 85, `SkillGraphTest` 56, `AuthorizationIntegrationTest` 70, `AdaptiveLearningFlowIntegrationTest` 79, `AssessmentPersistenceIntegrationTest` 9 |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r6 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | AS05 SQL allowed; referenced delete 23503; re-key, TRUNCATE, membership-order write/read and captured-selection read 42501; `MATRIX_TESTS_PASS`, `UPGRADE_TESTS_PASS`, `CONTAINMENT_TEST_PASS` |
+| `docker build -t codemastery-backend:privilege-test backend`, then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` including the AS05 section (create 201, list, keyed read, replace 200, Learner 403, foreign skill 404, referenced delete 409, used replace 409, unreferenced delete 200); 0 `permission denied`/42501 backend log entries; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+These are local developer runs, not CI, independent review or QA evidence. The PR's CI on its
+head is recorded in the PR.
 
 ## FE34 theme system verification — 20 November 2026
 
