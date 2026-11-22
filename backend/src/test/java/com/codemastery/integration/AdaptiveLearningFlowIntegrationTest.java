@@ -140,6 +140,8 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     private static final ThreadLocal<Runnable> BEFORE_PREREQUISITES = new ThreadLocal<>();
     /** Runs once on the listing thread immediately before its ordered question page query is prepared. */
     private static final ThreadLocal<Runnable> BEFORE_QUESTION_PAGE = new ThreadLocal<>();
+    /** Runs once on the listing thread immediately before its ordered quiz page query is prepared. */
+    private static final ThreadLocal<Runnable> BEFORE_QUIZ_PAGE = new ThreadLocal<>();
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Autowired CourseManagementService service;
@@ -185,6 +187,11 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
                 BEFORE_QUESTION_PAGE.remove();
                 pageChange.run();
             }
+            Runnable quizPageChange = BEFORE_QUIZ_PAGE.get();
+            if (quizPageChange != null && sql.contains("FROM public.quizzes") && sql.contains("ORDER BY title COLLATE")) {
+                BEFORE_QUIZ_PAGE.remove();
+                quizPageChange.run();
+            }
             return sql;
         }
     }
@@ -210,6 +217,7 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         assertTrue(workers.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS));
         BEFORE_PREREQUISITES.remove();
         BEFORE_QUESTION_PAGE.remove();
+        BEFORE_QUIZ_PAGE.remove();
         for (UUID course : jdbc.queryForList("SELECT id FROM public.courses WHERE instructor_id IN (?,?)", UUID.class, OWNER, OTHER)) {
             purgeAssessmentAndGraph(course);
         }
@@ -944,6 +952,117 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         assertEquals("Draft|practice|60|hidden|" + COURSE, quizStateElsewhere(quiz));
         unit.execute(status -> quizRepository.save(new Quiz(quiz, COURSE, "Renamed", "test", 90, "published")));
         assertEquals("Renamed|test|90|published|" + COURSE, quizStateElsewhere(quiz));
+    }
+
+    /**
+     * B3-O04 fault injection on the real schema, over HTTP: a test-only trigger fails each quiz write
+     * part-way through. Create and replace fail on the second new member, after the old membership was
+     * deleted and the first new row written; delete fails on the quiz row after its membership rows
+     * were deleted; publication fails on the quiz row update. Each is a safe 500 that names no
+     * internal detail, and the whole unit rolls back: no new quiz, the stored definition, membership
+     * and positions exactly as before, and the Course root released.
+     */
+    @ParameterizedTest @ValueSource(strings = {"create", "update", "delete", "publish"})
+    void aFaultPartWayThroughAQuizWriteRestoresTheQuizAndItsMembership(String operation) throws Exception {
+        UUID skill = skillRow(COURSE, "Tagged");
+        UUID first = questionRow(skill), second = questionRow(skill), third = questionRow(skill);
+        UUID quiz = quizRow(COURSE);
+        memberRow(quiz, first, 1);
+        memberRow(quiz, second, 2);
+        String before = quizStateElsewhere(quiz) + " " + membersElsewhere(quiz);
+        assertEquals("Draft|practice|60|hidden|" + COURSE + " " + first + "@1," + second + "@2", before);
+
+        String table = operation.equals("create") || operation.equals("update") ? "quiz_questions" : "quizzes";
+        String when = switch (operation) {
+            case "create", "update" -> "BEFORE INSERT ON public.quiz_questions FOR EACH ROW WHEN (NEW.question_id = '" + first + "'::uuid)";
+            case "delete" -> "BEFORE DELETE ON public.quizzes FOR EACH ROW WHEN (OLD.id = '" + quiz + "'::uuid)";
+            default -> "BEFORE UPDATE ON public.quizzes FOR EACH ROW WHEN (OLD.id = '" + quiz + "'::uuid)";
+        };
+        String base = "/api/courses/" + COURSE;
+        String replacement = "{\"title\":\"Edited\",\"kind\":\"test\",\"timeLimitSeconds\":90,\"questionIds\":[\""
+                + third + "\",\"" + first + "\"]}";
+        Operation write = switch (operation) {
+            case "create" -> new Operation(HttpMethod.POST, base + "/quizzes", replacement);
+            case "update" -> new Operation(HttpMethod.PUT, base + "/quizzes/" + quiz, replacement);
+            case "delete" -> new Operation(HttpMethod.DELETE, base + "/quizzes/" + quiz, null);
+            default -> new Operation(HttpMethod.PUT, base + "/quizzes/" + quiz + "/publication", "{\"publicationStatus\":\"published\"}");
+        };
+        String owner = bearer(OWNER);
+        jdbc.execute("CREATE FUNCTION public.as06_injected_fault() RETURNS trigger LANGUAGE plpgsql AS "
+                + "$$ BEGIN RAISE EXCEPTION 'as06 injected fault'; END $$");
+        try {
+            jdbc.execute("CREATE TRIGGER as06_injected_fault " + when + " EXECUTE FUNCTION public.as06_injected_fault()");
+            MvcResult failed = call(write, owner);
+            assertProblem(failed, 500, null);
+            assertEquals("no-store", failed.getResponse().getHeader("Cache-Control"));
+            assertFalse(failed.getResponse().getContentAsString().contains("injected"), failed.getResponse().getContentAsString());
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS as06_injected_fault ON public." + table);
+            jdbc.execute("DROP FUNCTION IF EXISTS public.as06_injected_fault()");
+        }
+
+        assertEquals(before, quizStateElsewhere(quiz) + " " + membersElsewhere(quiz), "the stored quiz and membership are restored");
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.quizzes WHERE course_id = ?", Integer.class, COURSE));
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM public.quiz_questions WHERE question_id IN (?,?,?)",
+                Integer.class, first, second, third));
+        assertFalse(rootLockedElsewhere(COURSE));
+        // Without the fault the same request commits, so the rollback above came from the injected failure.
+        json(call(write, owner), operation.equals("create") ? 201 : 200);
+    }
+
+    /**
+     * ADR007 §7: admission, count, rows and membership counts of a quiz list come from one REPEATABLE
+     * READ snapshot. Between the count and the ordered page query another connection commits a new
+     * quiz that sorts first, publishes a hidden quiz and adds a member to the listed quiz; the page
+     * shows none of it and agrees with its count, for the owner's list and the Learner's list.
+     */
+    @ParameterizedTest @ValueSource(strings = {"owner", "learner"})
+    void aQuizListIsOneSnapshotEvenWhenAWriterCommitsBetweenItsCountAndItsPage(String audience) {
+        UUID skill = skillRow(COURSE, "Listed"), first = questionRow(skill), second = questionRow(skill);
+        UUID listed = quizRow(COURSE), hidden = quizRow(COURSE), late = UUID.randomUUID();
+        jdbc.update("UPDATE public.quizzes SET title = 'B listed', publication_status = 'published' WHERE id = ?", listed);
+        jdbc.update("UPDATE public.quizzes SET title = 'C hidden' WHERE id = ?", hidden);
+        memberRow(listed, first, 1);
+        jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,'active')",
+                UUID.randomUUID(), LEARNER, COURSE);
+        BEFORE_QUIZ_PAGE.set(() -> {
+            commitSqlElsewhere("INSERT INTO public.quizzes (id,course_id,title,kind,time_limit_seconds,publication_status) "
+                    + "VALUES (?,?,'A late','practice',60,'published')", late, COURSE);
+            commitSqlElsewhere("UPDATE public.quizzes SET publication_status = 'published' WHERE id = ?", hidden);
+            commitSqlElsewhere("INSERT INTO public.quiz_questions (id,quiz_id,question_id,position) VALUES (?,?,?,2)",
+                    UUID.randomUUID(), listed, second);
+        });
+        Supplier<List<String>> list = () -> audience.equals("owner")
+                ? rows(as(OWNER, Role.INSTRUCTOR, () -> quizService.listOwned(COURSE, 0, 20)),
+                        quiz -> quiz.title() + ":" + quiz.questionCount() + ":" + quiz.questions().size())
+                : rows(as(LEARNER, Role.LEARNER, () -> quizService.listForLearner(COURSE, 0, 20)),
+                        quiz -> quiz.title() + ":" + quiz.questionCount());
+        List<String> during = list.get();
+        assertNull(BEFORE_QUIZ_PAGE.get(), "the concurrent commits ran between the list's count and page");
+        // Owner rows are title:questionCount:questions, Learner rows title:questionCount (no definitions).
+        assertEquals(audience.equals("owner") ? List.of("total=2", "B listed:1:1", "C hidden:0:0") : List.of("total=1", "B listed:1"),
+                during);
+        assertEquals(audience.equals("owner") ? List.of("total=3", "A late:0:0", "B listed:2:2", "C hidden:0:0")
+                : List.of("total=3", "A late:0", "B listed:2", "C hidden:0"), list.get());
+    }
+
+    /** The page's total, then one formatted row per element in page order. */
+    private static <T> List<String> rows(PageResponse<T> page, java.util.function.Function<T, String> row) {
+        List<String> rows = new ArrayList<>();
+        rows.add("total=" + page.totalElements());
+        page.content().forEach(element -> rows.add(row.apply(element)));
+        return rows;
+    }
+
+    private void memberRow(UUID quiz, UUID question, int position) {
+        jdbc.update("INSERT INTO public.quiz_questions (id,quiz_id,question_id,position) VALUES (?,?,?,?)",
+                UUID.randomUUID(), quiz, question, position);
+    }
+
+    /** Committed membership as {@code question@position} in position order, on a separate connection. */
+    private String membersElsewhere(UUID quiz) {
+        return queryElsewhere("SELECT string_agg(question_id::text || '@' || position, ',' ORDER BY position) "
+                + "FROM public.quiz_questions WHERE quiz_id = ?", quiz).getFirst();
     }
 
     @ParameterizedTest
