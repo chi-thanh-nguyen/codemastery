@@ -5,6 +5,30 @@ import com.codemastery.modules.adaptive.domain.model.RecommendationType;
 import com.codemastery.modules.adaptive.infrastructure.persistence.entity.PathRecommendationEntity;
 import org.springframework.stereotype.Component;
 
+/**
+ * Scalar mapping between {@link PathRecommendation} and its V005 row.
+ *
+ * <p>
+ * AD06.mapping checkpoint. ADR011 §9 requires every persisted row to keep its
+ * type,
+ * target Lesson, reason and time, so all five ADR03 fields are carried
+ * unchanged and
+ * nothing is collapsed. The type is persisted by
+ * {@link RecommendationType#getCode()},
+ * so exactly {@code continue}, {@code skip} and {@code remedial} are stored,
+ * matching
+ * the V005 {@code ck_path_recommendations_type} check. An unrecognised stored
+ * code is a
+ * failure, never a fallback.
+ *
+ * <p>
+ * Reason templates, name ordering and the single per-run instant are the
+ * caller's
+ * obligations under ADR011 §§7 and 9 (CT07.routing and CT07.reasons). This
+ * mapper never
+ * samples a clock.
+ */
+
 @Component
 public class RecommendationMapper {
 
