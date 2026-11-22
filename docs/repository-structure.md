@@ -2265,3 +2265,23 @@ integration test matches no rule, and adding one is outside this record. No prod
 dependency, directory or other test path is approved. `InteractionAdminIntegrationTest.java`
 keeps its §19.3 scope and is not created by this addition. The canonical tree above is
 unchanged; this is an explicit addition.
+
+### AD06 test placement — 23 November 2026
+
+`CT14-AD06-PLACEMENT-2026-11-23-r1` is **DELEGATED_APPROVED** under the Project Leader's
+explicit instruction of 23 November 2026, “CodeMastery — PR #263 Full AD06 Completion,
+Comprehensive Technical Audit, Remediation & Git Attribution”, which delegated the bounded
+AD06 test-placement decision ([ADR016 §4](decisions/016-ad06-mastery-history-persistence.md#4-d2--ct14-ad06-placement-2026-11-23-r1-test-placement)).
+ADR008 §5 lists no standalone Adaptive repository placement, and the two existing Adaptive
+integration suites cover the AD13 flow and atomicity, not isolated repository behaviour.
+Exactly these two test files are added inside existing directories:
+
+| File | Responsibility |
+| --- | --- |
+| `backend/src/test/java/com/codemastery/modules/adaptive/AdaptivePersistenceMapperTest.java` | Unit tests of `MasteryMapper` and `RecommendationMapper`: exact V005 state and type codes, field-for-field round trips, rejection of other spellings |
+| `backend/src/test/java/com/codemastery/integration/repository/AdaptivePersistenceIntegrationTest.java` | Real-PostgreSQL AD06.database-verification: mastery upsert branches and row identity, append-only history, exact SQL issued, V005 constraints, concurrent first write, caller-transaction participation and rollback, and execution under a transaction-scoped role holding exactly the CT17-P6 r8 rows; extends `AbstractIntegrationTest` |
+
+CODEOWNERS is unchanged: the existing Adaptive test rule (@thanhtran0311, @chi-thanh-nguyen)
+covers the unit test; like the other `integration/repository/` suites, the integration test
+matches no rule. No production file, dependency, directory or other test path is approved.
+The canonical tree above is unchanged; this is an explicit addition.
