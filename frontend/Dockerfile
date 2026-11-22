@@ -183,16 +183,27 @@ RUN set -eu; \
 # The non-slim variant of the same Nginx image supplies curl, which can probe
 # the listener by hostname over loopback with full certificate verification.
 # Pinned by digest to the Nginx 1.30.6 Alpine index (linux/amd64 is deployed).
-# Nginx and its modules are pinned by the image. The Alpine runtime packages
-# are raised to exactly the reviewed 3.24 security updates (2 November 2026:
-# they clear the base's CRITICAL brotli and HIGH curl findings; 3 November:
-# libexpat 2.10.0 for two further HIGH findings; 7 November: the v3.24 index
-# replaced alpine-release 3.24.3-r0 and zlib 1.3.2-r1 with 3.24.4-r0 and 1.4-r0,
-# which also fixes CVE-2026-4738, so the old pins no longer resolved), which apk
-# verifies against the signing keys in the pinned base. Unlike an unbounded
+# The Alpine runtime packages are raised to exactly the reviewed 3.24 security
+# updates (2 November 2026: they clear the base's CRITICAL brotli and HIGH curl
+# findings; 3 November: libexpat 2.10.0 for two further HIGH findings;
+# 7 November: the v3.24 index replaced alpine-release 3.24.3-r0 and zlib
+# 1.3.2-r1 with 3.24.4-r0 and 1.4-r0, which also fixes CVE-2026-4738, so the old
+# pins no longer resolved; 23 November: libxml2 2.13.9-r3 and libxslt 1.1.43-r4
+# for HIGH findings, libcrypto3/libssl3 3.5.9-r1 for MEDIUM/LOW findings), which
+# apk verifies against the signing keys in the pinned base. Unlike an unbounded
 # `apk upgrade`, the build fails if the index no longer offers one of these
 # versions; re-scan and update the list instead (docs/deployment.md, "DP01
 # pre-release security hardening").
+# Nginx 1.30.7 fixes the base's four CRITICAL and two HIGH Nginx findings, and
+# no nginx-unprivileged 1.30.7 image was published (23 November 2026). The base
+# installed Nginx and its four dynamic modules from nginx.org's signed Alpine
+# repository, so they are raised there, together and to exact versions: the
+# packages upstream's 1.30.7 Dockerfiles install. apk verifies them against
+# nginx.org's signing key, which the base already trusts and whose SHA-512 is
+# checked first (upstream's pin). Only that repository is consulted for them,
+# so Alpine's differently built nginx package can never be selected. The base's
+# unprivileged nginx.conf and default.conf are kept; apk writes the stock
+# privileged ones beside them as *.apk-new, which are removed.
 # The base leaves /etc/nginx owned by UID 101 and group-writable, so the
 # runtime user could rewrite nginx.conf or replace conf.d entries. Nginx only
 # writes /var/cache/nginx and /tmp, which stay as the base sets them. The
@@ -204,8 +215,17 @@ RUN set -eu; \
     apk add --no-cache \
         alpine-release=3.24.4-r0 brotli-libs=1.2.1-r0 c-ares=1.34.9-r0 \
         ca-certificates=20261020-r0 ca-certificates-bundle=20261020-r0 \
-        curl=8.23.0-r0 libcurl=8.23.0-r0 libexpat=2.10.0-r0 musl=1.2.6-r3 \
+        curl=8.23.0-r0 libcrypto3=3.5.9-r1 libcurl=8.23.0-r0 libexpat=2.10.0-r0 \
+        libssl3=3.5.9-r1 libxml2=2.13.9-r3 libxslt=1.1.43-r4 musl=1.2.6-r3 \
         musl-utils=1.2.6-r3 zlib=1.4-r0; \
+    echo 'e09fa32f0a0eab2b879ccbbc4d0e4fb9751486eedda75e35fac65802cc9faa266425edf83e261137a2f4d16281ce2c1a5f4502930fe75154723da014214f0655  /etc/apk/keys/nginx_signing.rsa.pub' \
+        | sha512sum -c -; \
+    apk add --no-cache --repositories-file /dev/null \
+        -X https://nginx.org/packages/alpine/v3.24/main \
+        nginx=1.30.7-r1 nginx-module-geoip=1.30.7-r1 nginx-module-image-filter=1.30.7-r1 \
+        nginx-module-njs=1.30.7.1.0.2-r1 nginx-module-xslt=1.30.7-r1; \
+    rm /etc/nginx/nginx.conf.apk-new /etc/nginx/conf.d/default.conf.apk-new; \
+    [ "$(nginx -v 2>&1)" = 'nginx version: nginx/1.30.7' ]; \
     chown -R -h root:root /etc/nginx; \
     chmod -R go-w /etc/nginx
 USER 101
@@ -235,13 +255,21 @@ RUN if [ -n "${VITE_API_BASE_URL:-}" ]; then \
 
 FROM nginxinc/nginx-unprivileged:1.30.6-alpine-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6 AS runtime
 
-# Apply the same reviewed Alpine fixes and configuration ownership as the
-# release target, limited to packages present in the slim HTTP runtime.
+# Apply the same reviewed Alpine fixes, Nginx 1.30.7 from nginx.org and
+# configuration ownership as the release target, limited to packages present
+# in the slim HTTP runtime (it has no dynamic modules).
 USER root
 RUN set -eu; \
     apk add --no-cache \
         alpine-release=3.24.4-r0 ca-certificates-bundle=20261020-r0 \
+        libcrypto3=3.5.9-r1 libssl3=3.5.9-r1 \
         musl=1.2.6-r3 musl-utils=1.2.6-r3 zlib=1.4-r0; \
+    echo 'e09fa32f0a0eab2b879ccbbc4d0e4fb9751486eedda75e35fac65802cc9faa266425edf83e261137a2f4d16281ce2c1a5f4502930fe75154723da014214f0655  /etc/apk/keys/nginx_signing.rsa.pub' \
+        | sha512sum -c -; \
+    apk add --no-cache --repositories-file /dev/null \
+        -X https://nginx.org/packages/alpine/v3.24/main nginx=1.30.7-r1; \
+    rm /etc/nginx/nginx.conf.apk-new /etc/nginx/conf.d/default.conf.apk-new; \
+    [ "$(nginx -v 2>&1)" = 'nginx version: nginx/1.30.7' ]; \
     chown -R -h root:root /etc/nginx; \
     chmod -R go-w /etc/nginx
 USER 101

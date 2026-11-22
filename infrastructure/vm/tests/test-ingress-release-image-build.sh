@@ -28,7 +28,15 @@ docker image inspect --format 'release frontend: user {{.Config.User}}, healthch
 for image in "$FRONTEND_RELEASE_IMAGE" "$FRONTEND_LOCAL_IMAGE"; do
   docker run --rm --entrypoint sh "$image" -ec '
     [ "$(id -u)" = 101 ]
-    [ "$(nginx -v 2>&1)" = "nginx version: nginx/1.30.6" ]
+    [ "$(nginx -v 2>&1)" = "nginx version: nginx/1.30.7" ]
+    # Nginx 1.30.7 (nginx.org r1) fixes the 1.30.6 base findings; every Nginx
+    # package, including each dynamic module, must be on that release, so no
+    # module of the old build is left beside the new binary.
+    pkgs="$(apk info -v 2>/dev/null | grep "^nginx")"
+    printf "%s\n" "$pkgs" | grep -qx "nginx-1.30.7-r1"
+    stale="$(printf "%s\n" "$pkgs" | grep -v -E -e "^nginx-1\.30\.7-r1$" -e "^nginx-module-[a-z-]+-1\.30\.7(\.[0-9.]+)?-r1$" || true)"
+    [ -z "$stale" ] || { echo "Nginx packages not on 1.30.7-r1: $stale" >&2; exit 1; }
+    [ -z "$(find /etc/nginx -name "*.apk-new")" ] || { echo "stock Nginx configuration left in /etc/nginx" >&2; exit 1; }
     bad="$(find /etc/nginx ! -type l \( ! -user root -o ! -group root -o -perm -g+w -o -perm -o+w \))"
     [ -z "$bad" ] || { echo "Nginx configuration not root-owned and read-only: $bad" >&2; exit 1; }
     for target in /etc/nginx/nginx.conf /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/probe.conf /etc/nginx/probe; do
