@@ -2008,6 +2008,22 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                             .header("Authorization", "Bearer " + other)
                             .contentType(MediaType.APPLICATION_JSON).content("{\"published\":true}"))
                     .andExpect(status().isForbidden());
+            // A form-encoded body is body input, not a query: it is 400 only after CT03 admits the owner.
+            String owned = sessionToken(owner);
+            for (String path : List.of("POST /api/courses/{c}/quizzes", "PUT /api/courses/{c}/quizzes/{q}",
+                    "PUT /api/courses/{c}/quizzes/{q}/publication")) {
+                String[] route = path.split(" ");
+                for (String bearer : List.of(other, owned)) {
+                    mvc.perform(request(HttpMethod.valueOf(route[0]), route[1], course, quiz)
+                                    .header("Authorization", "Bearer " + bearer)
+                                    .contentType(MediaType.APPLICATION_FORM_URLENCODED).content("publicationStatus=published"))
+                            .andExpect(bearer.equals(other) ? status().isForbidden() : status().isBadRequest())
+                            .andExpect(header().string("Cache-Control", "no-store"));
+                }
+            }
+            mvc.perform(post("/api/courses/{c}/quizzes", hiddenCourse).header("Authorization", "Bearer " + other)
+                            .contentType(MediaType.APPLICATION_FORM_URLENCODED).content("title=Draft"))
+                    .andExpect(status().isNotFound());
             assertEquals(before, quizState());
         }
 

@@ -8,6 +8,7 @@ import com.codemastery.modules.assessment.api.dto.QuizResponses.OwnedQuizRespons
 import com.codemastery.modules.assessment.api.dto.QuizResponses.QuizSummaryResponse;
 import com.codemastery.modules.assessment.application.service.QuizService;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -62,10 +63,10 @@ public class QuizController {
 
     @PostMapping("/quizzes")
     public ResponseEntity<OwnedQuizResponse> create(@PathVariable String courseId,
-            @RequestParam MultiValueMap<String, String> params,
+            HttpServletRequest http,
             @RequestHeader(name = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestBody(required = false) String body) {
-        noQuery(params);
+        noQuery(http);
         UUID course = id(courseId);
         WriteQuizRequest request = body(course, contentType, body, WriteQuizRequest::parse);
         return response(HttpStatus.CREATED, OwnedQuizResponse.from(quizService.create(course, request.toInput())));
@@ -95,17 +96,17 @@ public class QuizController {
 
     @GetMapping("/quizzes/{quizId}")
     public ResponseEntity<OwnedQuizResponse> readOwned(@PathVariable String courseId, @PathVariable String quizId,
-            @RequestParam MultiValueMap<String, String> params) {
-        noQuery(params);
+            HttpServletRequest http) {
+        noQuery(http);
         return response(HttpStatus.OK, OwnedQuizResponse.from(quizService.readOwned(id(courseId), id(quizId))));
     }
 
     @PutMapping("/quizzes/{quizId}")
     public ResponseEntity<OwnedQuizResponse> update(@PathVariable String courseId, @PathVariable String quizId,
-            @RequestParam MultiValueMap<String, String> params,
+            HttpServletRequest http,
             @RequestHeader(name = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestBody(required = false) String body) {
-        noQuery(params);
+        noQuery(http);
         UUID course = id(courseId);
         UUID quiz = id(quizId);
         WriteQuizRequest request = body(course, contentType, body, WriteQuizRequest::parse);
@@ -114,17 +115,17 @@ public class QuizController {
 
     @DeleteMapping("/quizzes/{quizId}")
     public ResponseEntity<OwnedQuizResponse> delete(@PathVariable String courseId, @PathVariable String quizId,
-            @RequestParam MultiValueMap<String, String> params) {
-        noQuery(params);
+            HttpServletRequest http) {
+        noQuery(http);
         return response(HttpStatus.OK, OwnedQuizResponse.from(quizService.delete(id(courseId), id(quizId))));
     }
 
     @PutMapping("/quizzes/{quizId}/publication")
     public ResponseEntity<OwnedQuizResponse> publish(@PathVariable String courseId, @PathVariable String quizId,
-            @RequestParam MultiValueMap<String, String> params,
+            HttpServletRequest http,
             @RequestHeader(name = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestBody(required = false) String body) {
-        noQuery(params);
+        noQuery(http);
         UUID course = id(courseId);
         UUID quiz = id(quizId);
         PublicationRequest request = body(course, contentType, body, PublicationRequest::parse);
@@ -183,8 +184,13 @@ public class QuizController {
         }
     }
 
-    private static void noQuery(MultiValueMap<String, String> params) {
-        if (!params.isEmpty()) {
+    /**
+     * The URI query only: a form-encoded body also becomes servlet parameters, but it is body input,
+     * reported as 400 only after CT03 admission by {@link #body}.
+     */
+    private static void noQuery(HttpServletRequest http) {
+        String query = http.getQueryString();
+        if (query != null && !query.isEmpty()) {
             throw invalid();
         }
     }
