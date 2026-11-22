@@ -916,6 +916,26 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             mvc.perform(post("/api/courses/{c}/questions", course).header("Authorization", "Bearer " + other)
                             .contentType(MediaType.APPLICATION_JSON).content("{\"unknown\":true}"))
                     .andExpect(status().isForbidden());
+            // A form-encoded body is body input, not a query: it is 400 only after CT03 admits the owner,
+            // while a genuine URI query stays 400 before CT03, even for a non-owner.
+            String owned = sessionToken(owner);
+            for (String path : List.of("POST /api/courses/{c}/questions", "PUT /api/courses/{c}/questions/{q}")) {
+                String[] route = path.split(" ");
+                for (String bearer : List.of(other, owned)) {
+                    mvc.perform(request(HttpMethod.valueOf(route[0]), route[1], course, question)
+                                    .header("Authorization", "Bearer " + bearer)
+                                    .contentType(MediaType.APPLICATION_FORM_URLENCODED).content("prompt=Pick"))
+                            .andExpect(bearer.equals(other) ? status().isForbidden() : status().isBadRequest())
+                            .andExpect(header().string("Cache-Control", "no-store"));
+                }
+                mvc.perform(request(HttpMethod.valueOf(route[0]), route[1] + "?x=1", course, question)
+                                .header("Authorization", "Bearer " + other)
+                                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .andExpect(status().isBadRequest());
+            }
+            mvc.perform(post("/api/courses/{c}/questions", hiddenCourse).header("Authorization", "Bearer " + other)
+                            .contentType(MediaType.APPLICATION_FORM_URLENCODED).content("prompt=Pick"))
+                    .andExpect(status().isNotFound());
             assertEquals(before, bank());
         }
 

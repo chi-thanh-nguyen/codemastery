@@ -6,6 +6,7 @@ import com.codemastery.modules.assessment.api.dto.QuestionRequest;
 import com.codemastery.modules.assessment.api.dto.QuestionResponse;
 import com.codemastery.modules.assessment.application.service.QuestionBankService;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -56,10 +57,10 @@ public class QuestionBankController {
 
     @PostMapping
     public ResponseEntity<QuestionResponse> create(@PathVariable String courseId,
-            @RequestParam MultiValueMap<String, String> params,
+            HttpServletRequest http,
             @RequestHeader(name = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestBody(required = false) String body) {
-        noQuery(params);
+        noQuery(http);
         UUID course = id(courseId);
         QuestionRequest request = body(course, contentType, body);
         return response(HttpStatus.CREATED, QuestionResponse.from(questionBank.create(course, request.toInput())));
@@ -84,17 +85,17 @@ public class QuestionBankController {
 
     @GetMapping("/{questionId}")
     public ResponseEntity<QuestionResponse> read(@PathVariable String courseId, @PathVariable String questionId,
-            @RequestParam MultiValueMap<String, String> params) {
-        noQuery(params);
+            HttpServletRequest http) {
+        noQuery(http);
         return response(HttpStatus.OK, QuestionResponse.from(questionBank.read(id(courseId), id(questionId))));
     }
 
     @PutMapping("/{questionId}")
     public ResponseEntity<QuestionResponse> update(@PathVariable String courseId, @PathVariable String questionId,
-            @RequestParam MultiValueMap<String, String> params,
+            HttpServletRequest http,
             @RequestHeader(name = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestBody(required = false) String body) {
-        noQuery(params);
+        noQuery(http);
         UUID course = id(courseId);
         UUID question = id(questionId);
         QuestionRequest request = body(course, contentType, body);
@@ -103,8 +104,8 @@ public class QuestionBankController {
 
     @DeleteMapping("/{questionId}")
     public ResponseEntity<QuestionResponse> delete(@PathVariable String courseId, @PathVariable String questionId,
-            @RequestParam MultiValueMap<String, String> params) {
-        noQuery(params);
+            HttpServletRequest http) {
+        noQuery(http);
         return response(HttpStatus.OK, QuestionResponse.from(questionBank.delete(id(courseId), id(questionId))));
     }
 
@@ -149,8 +150,13 @@ public class QuestionBankController {
         }
     }
 
-    private static void noQuery(MultiValueMap<String, String> params) {
-        if (!params.isEmpty()) {
+    /**
+     * The URI query only: a form-encoded body also becomes servlet parameters, but it is body input,
+     * reported as 400 only after CT03 admission by {@link #body}.
+     */
+    private static void noQuery(HttpServletRequest http) {
+        String query = http.getQueryString();
+        if (query != null && !query.isEmpty()) {
             throw invalid();
         }
     }
