@@ -5253,6 +5253,42 @@ the runtime-role verification on this head.
 
 These are local developer runs, not independent review, QA or CI evidence.
 
+### AS05/AS06 P3 follow-up: question-bank body precedence, OpenAPI status and the shared nonblank rule — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, on PR #260:
+
+- **AS05 body precedence.** `QuestionBankController` had the defect fixed above for quizzes: the
+  parameters of a form-encoded body counted as a query, so a non-owner's create or replace was 400
+  before CT03's 403/404. Its no-query check now reads the URI query only; a genuine query is still
+  400 before CT03 and a form body is 400 for the owner after admission.
+- **AS05 OpenAPI.** The five question-bank success responses no longer say "specification only,
+  NOT IMPLEMENTED" (descriptions only; the contract is unchanged).
+- **Shared nonblank rule.** CO06 (`CourseManagementService.isSpace`) and AD07
+  (`SkillGraphService.storableText`) already count a code point as space when Java whitespace,
+  a Unicode space separator, U+0085 (PostgreSQL `[:space:]` in the musl image locale) or U+FEFF
+  (OpenAPI's ECMA-262 `\S`) says so. The three Assessment predicates (`QuestionBankService`,
+  `QuizService`, `QuestionSelectionService`) used Java `White_Space` only and accepted text made
+  only of U+FEFF (or U+001C–U+001F), which breaks the OpenAPI `\S` pattern of the request and
+  response. They now use the CO06/AD07 rule; text is still never trimmed. U+0085-only text stays
+  400 in every module because the V002–V004 checks reject it; OpenAPI's pattern alone would allow it,
+  and that gap needs no change while the server is the stricter side.
+
+| Obligation | Covered by |
+| --- | --- |
+| A non-owner's form-encoded question body is 403/404, the owner's 400, a genuine query 400 before CT03; fails without the fix | `AuthorizationIntegrationTest$QuestionBankEndpoints.nonOwningInstructorIs403OnAPublishedCourseAnd404OnHiddenOrMissingOnes` (PostgreSQL) |
+| U+FEFF-, U+0085- and U+001C-only prompts, options and titles are 400; leading and trailing U+FEFF/U+0085 inside nonblank text are kept verbatim | `QuestionBankServiceTest$Validation`, `AttemptServiceTest` (unit) |
+| A stored U+FEFF-only prompt is an integrity failure at publication | `AttemptServiceTest.aMemberOutsideTheCourseOrAnInvalidStoredMemberIsAnIntegrityFailure` (unit) |
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -q -Djacoco.skip=true test '-Dtest=QuestionBankServiceTest*,AttemptServiceTest*'` | 88 + 44 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B -q -Dtest=NoSuch -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AuthorizationIntegrationTest$QuestionBankEndpoints' -Djacoco.skip=true verify` | 9 tests, 0 failures, errors or skips |
+| OpenAPI parsed as JSON; structural diff against the previous head; every `$ref` resolved | only the five descriptions differ; 164 references, none dangling |
+
+The full `verify`, other integration suites, E2E, frontend and VM tests were not rerun: no
+persistence, transaction, security-chain, schema or privilege behavior changed. These are local
+developer runs, not independent review, QA or CI evidence.
+
 ## CO03 and CO14 Course persistence and configuration guard verification — 21 November 2026
 
 [PR #262](https://github.com/chi-thanh-nguyen/codemastery/pull/262) completes the
