@@ -1847,6 +1847,70 @@ Course itself on a deployed VM also needs CO06's own CT17-P6 revision (`courses`
 `lessons` writes), which is not part of this record. This revision executes no provisioning on any
 real database.
 
+### CT17-P6-PRIVILEGES-2026-11-23-r8 — AD06 mastery and history writes (within the ADR012 §19.2 ceiling, 23 November 2026)
+
+Prepared for AD06 ([#42](https://github.com/chi-thanh-nguyen/codemastery/issues/42),
+[PR #263](https://github.com/chi-thanh-nguyen/codemastery/pull/263)) under the Project Leader's
+explicit instruction of 23 November 2026 to complete AD06 together with the runtime privileges its
+implemented SQL needs, inside the approved ceiling. It follows the extension procedure above and
+stays inside the DELEGATED_APPROVED `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)):
+the implemented consumer (`LearnerSkillMasteryRepositoryImpl`, `LearnerSkillMasteryJpaRepository`,
+`PathRecommendationRepositoryImpl` and `PathRecommendationJpaRepository`, mechanism
+[`AD06-PERSISTENCE-2026-11-23-r1`](decisions/016-ad06-mastery-history-persistence.md)),
+`RUNTIME_PRIVILEGE_MATRIX` and the CI tests change together, and every privilege below is exercised
+by that consumer's SQL. No migration is involved. No approval beyond that ceiling is claimed; this is
+not personal Leader review.
+
+The r1–r7 records above are unchanged history. The effective matrix is r1 plus r2–r7, with the two
+rows below replacing the named relations; no other privilege, role elevation or change is
+introduced. Both rows are narrower than their ceiling rows: the table-level `SELECT` of the ceiling
+is not granted, because AD06 issues no read. AD16's reads add it in their own revision.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `learner_skill_masteries` (adaptive) | INSERT; SELECT (user_id, skill_id, state); UPDATE (state) | `storeState`: insert or state update of one (learner, skill) row | r8 within ceiling (CT08.execution, ADR011 §4 step 5; ADR005 §6.1) |
+| `path_recommendations` (adaptive) | INSERT | `append`: one immutable history row | r8 within ceiling (CT07, ADR011 §9: history is append-only) |
+
+Least privilege exercised by the consumer:
+
+| Operation | SQL | Privilege |
+| --- | --- | --- |
+| Store a mastery state | `INSERT INTO public.learner_skill_masteries (id, user_id, skill_id, state) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, skill_id) DO UPDATE SET state = EXCLUDED.state` | INSERT; UPDATE (state); PostgreSQL also requires SELECT on the conflict-target columns and on the `EXCLUDED` column the update reads, so SELECT (user_id, skill_id, state). Measured on PostgreSQL 17.11: without SELECT (state), or with only SELECT (user_id, skill_id), the statement fails with 42501 |
+| Append history | `INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES (?, ?, ?, ?, ?, ?)` | INSERT; a reused identifier fails with 23505 |
+| Foreign keys to `users`, `skills`, `enrollments` and `lessons` | checked by PostgreSQL with the table owner's rights | none |
+
+The runtime role still cannot do any of the following:
+
+- re-key a mastery row or move it to another learner or skill (no UPDATE on `id`, `user_id` or
+  `skill_id`), or read mastery row identifiers;
+- delete or truncate mastery rows;
+- read, update, delete or truncate recommendation history.
+
+A compromised runtime role could set any learner's state for any skill and append history rows for
+any Enrollment, which the approved writes inherently require; Course scoping, calculation and the
+strictly-later recommendation instant stay application invariants (ADR011 §§4 and 9), and V005's
+foreign keys, check constraints and keys stay authoritative.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009), with
+  `verify_role_separation` probing the mastery re-key and delete and the history rewrite and erase
+  denials;
+- `test-deploy-privilege-matrix-contract.sh`, which pins r1 history and the r2–r8 rows;
+- `test-postgres-privilege-matrix-containment.sh`: the exact AD06 SQL under the provisioned runtime
+  role on the real schema, the reused-identifier refusal (23505) and the denials above;
+- `AdaptivePersistenceIntegrationTest` runs the adapters themselves under a transaction-scoped role
+  holding exactly these rows.
+
+`test-runtime-real-backend-privileges.sh` gains no AD06 case: no HTTP operation reaches these
+adapters yet. Their first HTTP path is the quiz submission orchestrated by AD13 (ADR011 §4), which
+must add its real-backend case when it wires them.
+
+Remaining gates: owning-module (Adaptive @thanhtran0311), `@tihh647-ui` infrastructure and
+independent Leader CODEOWNER review; protected integration of PR #263; these grants on any shared or
+production database (Leader-reserved). This revision executes no provisioning on any real database.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4397,7 +4461,8 @@ ADR014 r3 rows for two new V008 relations outside this ceiling; since 17 Novembe
 the CO08 r4 rows for `enrollments` and `lesson_progress` inside it; since 22 November 2026, the
 AD07 r5 rows for `skills`, `skill_prerequisites` and `lesson_skills` inside it; since 22 November 2026,
 the AS05 r6 rows for `questions`, `quiz_questions` and `attempt_answers` inside it, and the AS06 r7 rows
-for `quizzes`, `quiz_questions` and `attempts` inside it), and the extension procedure above
+for `quizzes`, `quiz_questions` and `attempts` inside it; since 23 November 2026, the AD06 r8 rows for
+`learner_skill_masteries` and `path_recommendations` inside it), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.
