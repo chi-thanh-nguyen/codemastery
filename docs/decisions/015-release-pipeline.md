@@ -76,7 +76,8 @@ Rejected: a tag-push trigger (tags are unprotected and can point at unmerged
 commits); automatic promotion (admission is a Leader act); separate jobs passing
 the archive through workflow artifacts (they are downloadable by any signed-in user
 of a public repository, see D9). Each stage is one job, so no artifact leaves the
-runner except through D9. Dispatched stages are serialized and never cancelled.
+runner except through D9. Dispatched stages run one at a time and a running stage is
+never cancelled; GitHub keeps one pending dispatch, which a newer dispatch replaces.
 
 ### D2 — A valid source revision
 
@@ -89,7 +90,9 @@ automatically. GitHub reports the `CodeQL` code-scanning check (app 57789) only 
 pull requests; on `main` pushes only the `Analyze (…)` jobs appear (observed on
 `257a915`). So a context with **no run at all** on the revision may be satisfied on
 the head of the single merged pull request whose merge commit is the revision, where
-the ruleset enforced it at merge time; a failed or pending run on the revision is never
+the ruleset enforced it at merge time, **provided the head's tree equals the
+revision's tree** (squash-only merges of up-to-date branches make them equal; observed
+for PRs #252, #260 and #261); a failed or pending run on the revision is never
 overridden, and without such a pull request there is no fallback. Checked read-only
 against the live API on 23 November 2026: all ten contexts pass for `257a915` (nine
 on the revision, `CodeQL` on PR #260's head `cd9d43d`). The workflow itself always runs from `main`. Release tooling comes
@@ -107,6 +110,14 @@ workflow's GitHub OIDC identity (`release.yml` at `refs/heads/main`) and logged 
 the public-good Rekor transparency log; GitHub stores it with the repository. The
 Sigstore bundle is shipped beside each package (`*.sigstore.json`) for offline
 verification.
+
+Verification policy (promotion and D12): the certificate identity must equal
+`https://github.com/<repo>/.github/workflows/release.yml@refs/heads/main` exactly
+(`--cert-identity`, rather than the `--signer-workflow` pattern), the source ref must
+be `refs/heads/main`, the source digest must equal the `tooling.sha` the attested
+manifest records, and self-hosted runners are refused. Exercised with `gh` 2.102.0
+against a real public attestation (online, and offline with `--bundle` and
+`--custom-trusted-root`): a different ref or source digest is refused.
 
 | Option | Assessment |
 | --- | --- |
@@ -181,14 +192,27 @@ toolchain per binary and is not included (Trivy reads Go module versions).
 The pipeline **records** findings and never judges them: no severity threshold
 passes or fails a candidate, because accepting risk is reserved to the Leader.
 Instead every finding must be explicitly accepted in the admission record (D7), and
-promotion rescans with a fresh database and **fails on any finding the record does
-not accept**, whatever its severity.
+promotion rescans with a fresh database and **fails on any finding the admission does
+not cover**, whatever its severity. A rescan row is covered only when its
+`{service, id, package}` is accepted **and** the admitted candidate reported the same
+row (same installed version) at the same or a higher severity: a new advisory, a newly
+matched installed version, or a severity raised since the candidate scan (including any
+reclassification of `UNKNOWN`) needs a new admission. Each manifest also records the
+scan coverage per image (detected operating system, end-of-support flag, scanned
+targets), because an operating system the scanner does not detect yields fewer findings
+without failing the scan; the job summary shows it to the Leader.
 
 ### D7 — The admission record
 
 A Leader decision committed through the protected review path at
 `docs/decisions/release-admissions/<record_id>.json` (covered by the existing
-`/docs/decisions/` CODEOWNERS rule). Schema `codemastery.release-admission/v1`, no
+`/docs/decisions/` CODEOWNERS rule). `decided_by` is only text that anyone with write
+access can type, so the promote job also requires **GitHub's merge record**: the
+commit that last changed the record on `main` must be the squash merge of a pull
+request into `main` that changed **only that record**, whose head held the same blob,
+and that the `decided_by` account **merged** (`merged_by`), an authenticated act on
+exactly that content. Under the current rules only repository administrators can merge
+into `main`, so this also holds if those rules later loosen. Schema `codemastery.release-admission/v1`, no
 unknown fields:
 
 | Field | Rule |
@@ -199,12 +223,13 @@ unknown fields:
 | `source_revision`, `public_origin` | Equal to the candidate's |
 | `candidate` | Exactly `release_tag` (the candidate draft), `manifest_sha256` (of `release-candidate.json`) and `archive_sha256` |
 | `images` | Exactly the five services, each with its `containerd` and `graphdriver` identity, equal to the candidate's |
-| `accepted_findings` | `{service, id, package}` entries; every candidate finding must be listed |
+| `accepted_findings` | `{service, id, package}` entries, each once; exactly the candidate's findings (none missing, none the candidate did not report) |
 | `release.version` | `v<major>.<minor>.<patch>[-pre]`, the release tag |
 | `not_granted` | Must include `deployment`, `public-exposure` and `existing-vm-update` |
 
 The promote job reads it only from the checked-out `main`, requires it to be tracked
-and unmodified, and records its commit. `release.py admission-template` prints a
+and unmodified, verifies the merge record above (`release.py admission-provenance`), and
+records the commit, pull request and merger in `release.json`. `release.py admission-template` prints a
 `PENDING` template from a candidate manifest. Rejected: a GitHub Environment
 approval (an environment that does not exist is created unprotected, so a typo fails
 open; the approval is a click, not a durable record of exact identities; it needs a
@@ -214,8 +239,8 @@ settings change); a workflow input (self-declared); a key-signed file (key custo
 
 Download the one workflow-created candidate draft named by the record; verify
 `SHA256SUMS` and the manifest's file map; verify the candidate manifest, archive and
-`mc` source attestations (online and with the shipped bundle; signer `release.yml`,
-source ref `refs/heads/main`, no self-hosted runner); verify the admission (D7);
+`mc` source attestations (online and with the shipped bundle; D3 policy); verify the
+admission and its merge record (D7);
 run `deploy.sh`'s own `verify_archive` on the candidate archive for both stores;
 `docker load`, check every identity, `docker tag` to `codemastery.invalid/*:release`,
 check the identity is unchanged, `docker save --platform linux/amd64`; recompute all
@@ -293,8 +318,11 @@ update or deployment authority.
 [--trusted-root FILE]` (bash 3.2-compatible, no Docker) checks the package files,
 the consistency of release, admission and candidate records, the attestation of
 `release.json`, the archive, `mc-source.tar.gz` and `admission.json` (online, or
-offline against a previously fetched Sigstore trusted root), and with `--source` the
-`deploy.sh`/Compose hashes and `deploy.sh`'s own archive verifier. It prints the
+offline against a previously fetched Sigstore trusted root; D3 policy), that
+`release.json` records the decider's merge of the admission, and with `--source` the
+`deploy.sh`/Compose hashes and the source revision's `deploy.sh` archive verifier (run
+through the verifier's own `release.sh`, so a source revision older than
+`infrastructure/release/` works). It prints the
 `deploy.sh` archive, identity and revision arguments. It grants nothing.
 
 ### D13 — Cost and checks
@@ -310,7 +338,9 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
 | Artifact substitution (archive, image, SBOM, report) | Every package file is an attestation subject; manifests hash every file; `deploy.sh` verifies the archive SHA-256 and all identities |
 | Mutable tags or self-declared inputs | Identities are digests recomputed from archive bytes; the admission is a reviewed file on `main`; the source revision must be on `main` with green required checks |
 | Promotion before admission | The promote job refuses without an `ADMITTED`, committed, code-owner record matching the attested candidate exactly |
-| Security gate bypass | Every candidate finding must be accepted; promotion rescans and fails on any unaccepted finding |
+| Forged admission authority | `decided_by` must be the account that merged a pull request changing only the record (GitHub's `merged_by`), not just a typed login |
+| Security gate bypass | Exactly the candidate's findings must be accepted; promotion rescans and fails on any row not admitted at that installed version and severity |
+| Token exposure to build or test code | Checkouts do not persist the token; `GH_TOKEN` is set only on the steps that call the API; Docker builds receive no runner environment |
 | Rerun or tag replacement | Unique candidate names, refusal of existing tags/releases, asset read-back, attestations |
 | Rehearsal leakage into a real release | Rehearsal records need `REHEARSAL-` and `rehearsal: true`; real promotion refuses both and any rehearsal candidate; rehearsals have read-only tokens |
 | Secrets exposure | No secret is used; smoke credentials are generated and discarded; no logs, traces or env files are packaged |
@@ -320,9 +350,12 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
 
 1. Trust in GitHub Actions, the GitHub OIDC issuer, Sigstore and the runner image;
    a compromise of `main` or of the workflow could produce valid attestations.
-2. The admission's authenticity rests on protected `main`; the
-   `main-merge-authority` bypass and the sole-Leader CODEOWNER paths are governance
-   facts this pipeline cannot change.
+2. The admission's authenticity rests on GitHub's account authentication and merge
+   record and on protected `main`; the `main-merge-authority` bypass and the
+   sole-Leader CODEOWNER paths are governance facts this pipeline cannot change.
+   The required-check evaluation trusts check runs from the required app; any
+   workflow with `checks: write` in this repository can create such runs on any
+   commit, as it can for the ruleset itself.
 3. Scanner false negatives and database lag; the rescan narrows, not closes, the
    window between admission and promotion.
 4. Images are not reproducible; a rebuilt candidate is a new artifact needing new
@@ -330,8 +363,19 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
 5. `deploy.sh deploy`, public TLS and anything on the real VM are not exercised.
 6. Draft assets are mutable by writers (detected, not prevented).
 7. Licensing of any public conveyance (F1/F5) is undetermined.
+8. The candidate and promote jobs hold `id-token: write` for their whole run; the
+   host steps that run there are the tooling from `main` and the source revision's
+   suites (both protected code), while third-party build code runs inside Docker
+   builds without the runner environment. Splitting signing into a separate job would
+   need workflow artifacts, which a public repository exposes (D9).
 
 ## 7. Supersession and amendments
+
+- **Focused review, 23 November 2026 (same session, not independent):** D2 tree
+  binding, D3 exact signer identity and source digest, D6 row-and-severity-bound rescan
+  and scan coverage, D7 merge-record verification and exact acceptance set, D12
+  verifier fixes, and token hardening. Same delegation and authority; recorded in
+  [testing.md](../testing.md#focused-review-remediation--23-november-2026).
 
 - **F3:** implemented as a pipeline; the procedure is unchanged.
 - **F6:** the technical selection of signing/attestation and trust policy for project

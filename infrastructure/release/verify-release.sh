@@ -46,8 +46,12 @@ command -v gh >/dev/null 2>&1 || fail "gh (GitHub CLI) is required to verify the
 python3 "$HERE/release.py" verify-release-chain "$PACKAGE" --repository "$REPOSITORY" || fail "Package records are inconsistent."
 archive="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"]["name"])' "$PACKAGE/release.json")"
 
-attest=(--repo "$REPOSITORY" --signer-workflow "$REPOSITORY/.github/workflows/release.yml"
-        --source-ref refs/heads/main --deny-self-hosted-runners)
+# Exact signer: release.yml run for refs/heads/main, at the main commit that
+# release.json names as its tooling.
+tooling_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tooling"]["sha"])' "$PACKAGE/release.json")"
+[[ "$tooling_sha" =~ ^[0-9a-f]{40}$ ]] || fail "release.json names no tooling commit."
+attest=(--repo "$REPOSITORY" --cert-identity "https://github.com/$REPOSITORY/.github/workflows/release.yml@refs/heads/main"
+        --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners)
 if [[ -n "$TRUSTED_ROOT" ]]; then
   [[ -f "$PACKAGE/release.sigstore.json" ]] || fail "Offline mode needs release.sigstore.json in the package."
   attest+=(--bundle "$PACKAGE/release.sigstore.json" --custom-trusted-root "$TRUSTED_ROOT")
@@ -71,7 +75,9 @@ for key, path in (("deploy_sh_sha256", "infrastructure/vm/deploy.sh"),
     if hashlib.sha256(open(os.path.join(sys.argv[2], path), "rb").read()).hexdigest() != c[key]:
         sys.exit(1)
 PY
-  bash "$SOURCE/infrastructure/release/release.sh" verify-archive "$SOURCE" "$PACKAGE/$archive" "$PACKAGE/release.json" --release-names \
+  # This verifier's own release.sh, with the source revision's deploy.sh (which may
+  # predate infrastructure/release/).
+  bash "$HERE/release.sh" verify-archive "$SOURCE" "$PACKAGE/$archive" "$PACKAGE/release.json" --release-names \
     || fail "deploy.sh rejects the archive."
 fi
 

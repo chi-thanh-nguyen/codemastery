@@ -14,7 +14,8 @@ Subcommands
   candidate-manifest  write release-candidate.json for a candidate package
   admission-template  print a PENDING admission record for a candidate
   verify-admission    validate an admission record against a candidate manifest
-  check-rescan        fail on any promotion-time finding the admission did not accept
+  admission-provenance  GitHub evidence that decided_by merged exactly the admission record
+  check-rescan        fail on any promotion-time finding the admission does not cover
   release-manifest    write release.json for a promoted release package
   verify-package      check a package directory against its manifest and SHA256SUMS
   verify-release-chain  offline check that release, admission and candidate records agree
@@ -42,6 +43,7 @@ ADMISSION_DIR = "docs/decisions/release-admissions"
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")
+HEX40 = REVISION
 VERSION = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$")
 RECORD_ID = re.compile(r"^[A-Z0-9][A-Z0-9-]{7,79}$")
 CANDIDATE_TAG = re.compile(r"^candidate-[0-9a-f]{12}-[0-9]+-[0-9]+$")
@@ -301,6 +303,28 @@ def normalize_findings(service, reports):
     return sorted(rows.values(), key=lambda r: (r["service"], SEVERITIES.index(r["severity"]), r["id"], r["package"]))
 
 
+def scan_coverage(reports):
+    """What the scanner analysed in one service's reports: detected OS and result targets.
+
+    Recorded as admission evidence: an image whose OS the scanner did not detect or
+    no longer supports yields fewer findings without failing the scan.
+    """
+    os_names, eosl, targets = set(), False, set()
+    for path in reports:
+        report = load_json(path, "scanner report")
+        detected = (report.get("Metadata") or {}).get("OS") or {}
+        if detected.get("Family"):
+            os_names.add("%s %s" % (detected.get("Family"), detected.get("Name") or ""))
+        eosl = eosl or detected.get("EOSL") is True
+        for result in report.get("Results") or []:
+            targets.add("%s [%s/%s]" % (os.path.basename(result.get("Target") or ""), result.get("Class") or "",
+                                        result.get("Type") or ""))
+    if len(os_names) > 1:
+        refuse("scanner reports of one image disagree on its operating system")
+    return {"os": os_names.pop().strip() if os_names else None, "os_end_of_support": eosl,
+            "targets": sorted(targets)}
+
+
 def count_findings(findings):
     counts = {s: {sev: 0 for sev in SEVERITIES} for s in SERVICES}
     for f in findings:
@@ -540,11 +564,18 @@ def verify_admission(admission, admission_path, candidate, candidate_sha256, cod
     for item in accepted:
         if not isinstance(item, dict) or set(item) != {"service", "id", "package"} or item["service"] not in SERVICES:
             refuse("admission accepted_findings entries need exactly service, id and package")
-        keys.add((item["service"], item["id"], item["package"]))
+        key = (item["service"], item["id"], item["package"])
+        if key in keys:
+            refuse("admission accepted_findings lists an entry twice")
+        keys.add(key)
     candidate_keys = {(f["service"], f["id"], f["package"]) for f in candidate.get("security", {}).get("findings", [])}
     unaccepted = candidate_keys - keys
     if unaccepted:
         refuse("admission does not accept %d finding(s) reported for the candidate" % len(unaccepted))
+    # An acceptance is a decision about evidence the Leader saw: an entry for a
+    # finding the candidate did not report would pre-accept a future one unseen.
+    if keys - candidate_keys:
+        refuse("admission accepts %d finding(s) the candidate did not report" % len(keys - candidate_keys))
     release = admission["release"]
     if not isinstance(release, dict) or set(release) != {"version"} or not VERSION.match(str(release["version"])):
         refuse("admission release.version must be a v<major>.<minor>.<patch>[-pre] tag")
@@ -568,9 +599,58 @@ def _check_tracked(path, repo_root):
         refuse("admission record differs from the committed revision")
 
 
-def check_rescan(accepted_keys, findings):
-    unaccepted = sorted({(f["service"], f["id"], f["package"]) for f in findings} - set(accepted_keys))
-    return unaccepted
+def admission_provenance(admission, rel_path, commit, blob, pulls, pull, files):
+    """GitHub evidence that the decider, not only the file, admitted the record.
+
+    `decided_by` is text anyone with write access can type. The record counts only
+    when the commit that last changed it on main is the squash merge of a pull
+    request into main that changed nothing but that record, whose head held the
+    same blob, and that `decided_by` merged: an authenticated act by that account
+    on exactly this content.
+    """
+    if not REVISION.match(str(commit)) or not HEX40.match(str(blob)):
+        refuse("admission commit and blob must be full SHAs")
+    pr = merged_pull_request(pulls if isinstance(pulls, list) else [], commit)
+    if pr is None:
+        refuse("the admission record did not reach main through a merged pull request")
+    if not isinstance(pull, dict) or pull.get("number") != pr.get("number") or pull.get("merged") is not True \
+            or pull.get("merge_commit_sha") != commit or (pull.get("base") or {}).get("ref") != "main":
+        refuse("the admission pull request details do not match its merge commit")
+    merged_by = (pull.get("merged_by") or {}).get("login")
+    if not merged_by or merged_by != admission.get("decided_by"):
+        refuse("the admission pull request was not merged by decided_by")
+    changed = [f for page in (files if isinstance(files, list) else []) for f in (page if isinstance(page, list) else [page])]
+    if len(changed) != 1 or not isinstance(changed[0], dict) or changed[0].get("filename") != rel_path \
+            or changed[0].get("status") not in ("added", "modified"):
+        refuse("the admission pull request must change only the admission record")
+    if changed[0].get("sha") != blob:
+        refuse("the merged admission record differs from the pull request's reviewed content")
+    return {"pull_request": pull["number"], "merged_by": merged_by, "merged_at": pull.get("merged_at"),
+            "head_sha": (pull.get("head") or {}).get("sha"), "merge_commit": commit, "record_blob": blob}
+
+
+def check_rescan(accepted_keys, candidate_findings, findings):
+    """Promotion-time findings the admission does not cover, with the reason.
+
+    A rescan row is covered only when its {service, id, package} is accepted and
+    the admitted candidate reported the same row (same installed version) at the
+    same or a higher severity. A new advisory, a newly matched installed version or
+    a severity raised since the candidate scan needs a new admission.
+    """
+    admitted = {}
+    for f in candidate_findings:
+        admitted[(f["service"], f["id"], f["package"], f.get("installed") or "")] = SEVERITIES.index(f["severity"])
+    problems = set()
+    for f in findings:
+        key = (f["service"], f["id"], f["package"])
+        row = key + (f.get("installed") or "",)
+        if key not in accepted_keys:
+            problems.add(key + ("not accepted",))
+        elif row not in admitted:
+            problems.add(key + ("installed version %s was not in the admitted candidate scan" % (row[3] or "(none)"),))
+        elif SEVERITIES.index(f["severity"]) < admitted[row]:
+            problems.add(key + ("severity raised to %s since the admitted candidate scan" % f["severity"],))
+    return sorted(problems)
 
 
 # --------------------------------------------------------------------------
@@ -596,18 +676,27 @@ def cmd_evaluate_checks(a):
     if pr is not None:
         if not a.pr_check_runs or (pr.get("head") or {}).get("sha") != a.pr_head:
             refuse("the merged pull request's head check runs are required and must match its head")
+        # Evidence from the head counts only for the same content: with squash merges
+        # and up-to-date branches the head's tree is the revision's tree.
+        if not (a.revision_tree and a.pr_head_tree and HEX40.match(a.revision_tree) and a.pr_head_tree == a.revision_tree):
+            refuse("the merged pull request's head tree differs from the revision's tree")
         pr_runs = _check_run_pages(a.pr_check_runs, "pull request check runs")
     results = evaluate_checks(rules, _check_run_pages(a.check_runs, "check runs"), pr_runs, pr)
     print(json.dumps(results, indent=2, sort_keys=True))
 
 
 def cmd_findings(a):
-    findings = []
+    findings, by_service = [], {}
     for spec in a.report:
         service, _, path = spec.partition("=")
         if service not in SERVICES or not path:
             refuse("--report must be SERVICE=PATH for a known service")
         findings.extend(normalize_findings(service, [path]))
+        by_service.setdefault(service, []).append(path)
+    if set(by_service) != set(SERVICES):
+        refuse("every service needs scanner reports")
+    if a.coverage_output:
+        write_json(a.coverage_output, {s: scan_coverage(by_service[s]) for s in SERVICES})
     merged = {}
     for f in findings:
         key = (f["service"], f["id"], f["package"], f["installed"])
@@ -640,6 +729,7 @@ def cmd_candidate_manifest(a):
     migrations = load_json(a.migrations, "migrations")
     qualification = load_json(a.qualification, "qualification results")
     scanner = load_json(a.scanner, "scanner metadata")
+    coverage = load_json(a.coverage, "scan coverage")
     checks = load_json(a.source_checks, "source checks") if a.source_checks else None
     images = {}
     for s in SERVICES:
@@ -666,7 +756,7 @@ def cmd_candidate_manifest(a):
         "archive": {"name": a.archive_name, "sha256": sha256_file(os.path.join(a.package, a.archive_name)),
                     "size": os.path.getsize(os.path.join(a.package, a.archive_name))},
         "mc_source": ctx["mc_source"],
-        "security": {"scanner": scanner, "findings": findings, "counts": count_findings(findings),
+        "security": {"scanner": scanner, "findings": findings, "counts": count_findings(findings), "coverage": coverage,
                      "policy": "Findings are recorded, not accepted. Only a Leader admission record may accept them."},
         "qualification": qualification,
         "source_qualification": {"verified": checks is not None, "required_checks": checks or []},
@@ -698,16 +788,24 @@ def cmd_verify_admission(a):
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
+def cmd_admission_provenance(a):
+    admission = load_json(a.admission, "admission record")
+    result = admission_provenance(admission, a.path, a.commit, a.blob, load_json(a.pulls, "commit pull requests"),
+                                  load_json(a.pull, "pull request"), load_json(a.files, "pull request files"))
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
 def cmd_check_rescan(a):
     admission = load_json(a.admission, "admission record")
+    candidate = load_json(a.candidate_manifest, "candidate manifest")
     findings = load_json(a.findings, "rescan findings")
     accepted = {(i["service"], i["id"], i["package"]) for i in admission.get("accepted_findings") or []}
-    unaccepted = check_rescan(accepted, findings)
+    unaccepted = check_rescan(accepted, candidate["security"]["findings"], findings)
     if unaccepted:
-        for service, vid, pkg in unaccepted:
-            print("NOT ACCEPTED: %s %s %s" % (service, vid, pkg), file=sys.stderr)
-        refuse("%d promotion-time finding(s) are not accepted by the admission record; a new admission is required" % len(unaccepted))
-    print("Every promotion-time finding is accepted by the admission record.")
+        for service, vid, pkg, reason in unaccepted:
+            print("NOT ACCEPTED: %s %s %s (%s)" % (service, vid, pkg, reason), file=sys.stderr)
+        refuse("%d promotion-time finding(s) are not covered by the admission record; a new admission is required" % len(unaccepted))
+    print("Every promotion-time finding is covered by the admission record.")
 
 
 def cmd_release_manifest(a):
@@ -744,7 +842,8 @@ def cmd_release_manifest(a):
         "admission": {"record_id": admission["record_id"], "decided_by": admission["decided_by"],
                       "decided_on": admission["decided_on"], "scope": admission["scope"],
                       "file": "admission.json", "sha256": sha256_file(os.path.join(a.package, "admission.json")),
-                      "recorded_at": ctx.get("admission_commit")},
+                      "recorded_at": ctx.get("admission_commit"),
+                      "provenance": ctx.get("admission_provenance")},
         "images": images,
         "archive": {"name": a.archive_name, "sha256": sha256_file(os.path.join(a.package, a.archive_name)),
                     "size": os.path.getsize(os.path.join(a.package, a.archive_name))},
@@ -752,7 +851,7 @@ def cmd_release_manifest(a):
                             "graphdriver": "expected-images.graphdriver.txt"},
         "mc_source": candidate["mc_source"],
         "security": {"rescan_scanner": scanner, "rescan_findings": rescan,
-                     "rescan_counts": count_findings(rescan),
+                     "rescan_counts": count_findings(rescan), "rescan_coverage": load_json(a.coverage, "scan coverage"),
                      "candidate_scanner": candidate["security"]["scanner"]},
         "verification": ctx["verification"],
         "compatibility": candidate["compatibility"],
@@ -808,6 +907,10 @@ def verify_release_chain(directory, repository):
             refuse("%s differs between release, admission and candidate" % key)
     if manifest["version"] != admission["release"]["version"]:
         refuse("release version differs from the admission record")
+    provenance = manifest["admission"].get("provenance") or {}
+    if provenance.get("merged_by") != admission.get("decided_by") \
+            or provenance.get("merge_commit") != manifest["admission"].get("recorded_at"):
+        refuse("release.json does not record that decided_by merged the admission record")
     for s in SERVICES:
         for store in ("containerd", "graphdriver"):
             if not (manifest["images"][s][store] == admission["images"][s][store] == candidate["images"][s][store]):
@@ -861,6 +964,13 @@ def cmd_summary(a):
                 for svc in SERVICES:
                     out.append("| %s | " % svc + " | ".join(str(counts.get(svc, {}).get(sev, 0)) for sev in SEVERITIES) + " |")
             sec = m.get("security") or {}
+            coverage = sec.get("coverage") or sec.get("rescan_coverage") or {}
+            if coverage:
+                out += ["", "| Scan coverage | Detected OS | Scanned targets |", "| --- | --- | --- |"]
+                for svc in SERVICES:
+                    c = coverage.get(svc) or {}
+                    detected = (c.get("os") or "none detected") + (" (end of support)" if c.get("os_end_of_support") else "")
+                    out.append("| %s | %s | %d |" % (svc, detected.replace("|", "/")[:60], len(c.get("targets") or [])))
             rows = [f for f in (sec.get("findings") or sec.get("rescan_findings") or [])
                     if f.get("severity") in ("CRITICAL", "HIGH")]
             if rows:
@@ -904,11 +1014,14 @@ def main(argv=None):
     s.add_argument("--pulls", help="GET .../commits/REV/pulls")
     s.add_argument("--pr-head", help="head SHA of the merged pull request")
     s.add_argument("--pr-check-runs", help="slurped check-run pages of that head")
+    s.add_argument("--revision-tree", help="tree SHA of the revision")
+    s.add_argument("--pr-head-tree", help="tree SHA of the merged pull request's head")
     s.set_defaults(func=cmd_evaluate_checks)
 
     s = sub.add_parser("findings")
     s.add_argument("--report", action="append", required=True, help="SERVICE=PATH; repeatable")
     s.add_argument("--output", required=True)
+    s.add_argument("--coverage-output", help="per-service detected OS and scanned targets")
     s.set_defaults(func=cmd_findings)
 
     s = sub.add_parser("migrations")
@@ -920,7 +1033,7 @@ def main(argv=None):
 
     s = sub.add_parser("candidate-manifest")
     for name in ("package", "archive-name", "context", "identities", "findings", "migrations",
-                 "qualification", "scanner"):
+                 "qualification", "scanner", "coverage"):
         s.add_argument("--" + name, required=True)
     s.add_argument("--source-checks")
     s.set_defaults(func=cmd_candidate_manifest)
@@ -940,13 +1053,24 @@ def main(argv=None):
     s.add_argument("--rehearsal", action="store_true")
     s.set_defaults(func=cmd_verify_admission)
 
+    s = sub.add_parser("admission-provenance")
+    s.add_argument("--admission", required=True)
+    s.add_argument("--path", required=True, help="repository-relative path of the record")
+    s.add_argument("--commit", required=True, help="the commit that last changed the record on main")
+    s.add_argument("--blob", required=True, help="git blob SHA of the record at that commit")
+    s.add_argument("--pulls", required=True, help="GET .../commits/COMMIT/pulls")
+    s.add_argument("--pull", required=True, help="GET .../pulls/NUMBER")
+    s.add_argument("--files", required=True, help="slurped pages of GET .../pulls/NUMBER/files")
+    s.set_defaults(func=cmd_admission_provenance)
+
     s = sub.add_parser("check-rescan")
     s.add_argument("--admission", required=True)
+    s.add_argument("--candidate-manifest", required=True)
     s.add_argument("--findings", required=True)
     s.set_defaults(func=cmd_check_rescan)
 
     s = sub.add_parser("release-manifest")
-    for name in ("package", "archive-name", "context", "identities", "findings", "scanner"):
+    for name in ("package", "archive-name", "context", "identities", "findings", "scanner", "coverage"):
         s.add_argument("--" + name, required=True)
     s.set_defaults(func=cmd_release_manifest)
 

@@ -192,6 +192,20 @@ class CheckTests(unittest.TestCase):
         with self.assertRaises(release.Refused):
             release.evaluate_checks(self.rules, [backend], [self.run_("CodeQL", 57789, "neutral")], pr)
 
+    def test_fallback_requires_the_same_tree(self):
+        pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
+        with tempfile.TemporaryDirectory() as d:
+            paths = {n: os.path.join(d, n + ".json") for n in ("rules", "runs", "pulls", "pr_runs")}
+            dump(self.rules, paths["rules"])
+            dump([{"check_runs": [self.run_("Backend", 15368, "success")]}], paths["runs"])
+            dump([pr], paths["pulls"])
+            dump([{"check_runs": [self.run_("CodeQL", 57789, "success")]}], paths["pr_runs"])
+            base = ["evaluate-checks", "--revision", REV, "--rules", paths["rules"], "--check-runs", paths["runs"],
+                    "--pulls", paths["pulls"], "--pr-head", "b" * 40, "--pr-check-runs", paths["pr_runs"]]
+            self.assertEqual(release.main(base + ["--revision-tree", "1" * 40, "--pr-head-tree", "1" * 40]), 0)
+            self.assertEqual(release.main(base + ["--revision-tree", "1" * 40, "--pr-head-tree", "2" * 40]), 3)
+            self.assertEqual(release.main(base), 3)
+
 
 def trivy_report(rows):
     return {"SchemaVersion": 2, "Results": [{"Target": "t", "Vulnerabilities": [
@@ -206,12 +220,50 @@ class FindingsAndMigrationTests(unittest.TestCase):
             dump(trivy_report([("CVE-1", "libc6", "HIGH"), ("GO-2", "x/crypto", "UNKNOWN")]), b)
             f = release.normalize_findings("backend", [a, b])
             self.assertEqual([(x["id"], x["severity"]) for x in f], [("CVE-1", "HIGH"), ("GO-2", "UNKNOWN")])
-            accepted = {("backend", "CVE-1", "libc6")}
-            self.assertEqual(release.check_rescan(accepted, f), [("backend", "GO-2", "x/crypto")])
-            self.assertEqual(release.check_rescan(accepted | {("backend", "GO-2", "x/crypto")}, f), [])
+            accepted = {("backend", "CVE-1", "libc6"), ("backend", "GO-2", "x/crypto")}
+            self.assertEqual(release.check_rescan(accepted, f, f), [])
+            reasons = [r[3] for r in release.check_rescan(accepted - {("backend", "GO-2", "x/crypto")}, f, f)]
+            self.assertEqual(reasons, ["not accepted"])
             dump({"SchemaVersion": 1}, a)
             with self.assertRaises(release.Refused):
                 release.normalize_findings("backend", [a])
+
+    def test_rescan_is_bound_to_the_admitted_rows(self):
+        candidate = [{"service": "backend", "id": "CVE-1", "package": "libc6", "installed": "1", "severity": "MEDIUM"}]
+        accepted = {("backend", "CVE-1", "libc6")}
+        same = [dict(candidate[0])]
+        lower = [dict(candidate[0], severity="LOW")]
+        raised = [dict(candidate[0], severity="CRITICAL")]
+        other_version = [dict(candidate[0], installed="2")]
+        new_advisory = [dict(candidate[0], id="CVE-2")]
+        self.assertEqual(release.check_rescan(accepted, candidate, same + lower), [])
+        self.assertEqual(release.check_rescan(accepted, candidate, []), [])
+        for label, rows in (("raised", raised), ("other version", other_version), ("new advisory", new_advisory)):
+            with self.subTest(label):
+                self.assertEqual(len(release.check_rescan(accepted, candidate, rows)), 1)
+        unknown = [dict(candidate[0], severity="UNKNOWN")]
+        self.assertEqual(len(release.check_rescan(accepted, unknown, same)), 1)  # any reclassification of UNKNOWN
+
+    def test_scan_coverage(self):
+        with tempfile.TemporaryDirectory() as d:
+            a, b = os.path.join(d, "a.json"), os.path.join(d, "b.json")
+            dump(dict(trivy_report([]), Metadata={"OS": {"Family": "alpine", "Name": "3.24.3"}}), a)
+            dump(dict(trivy_report([]), Metadata={"OS": {"Family": "alpine", "Name": "3.24.3", "EOSL": True}}), b)
+            c = release.scan_coverage([a, b])
+            self.assertEqual((c["os"], c["os_end_of_support"], c["targets"]), ("alpine 3.24.3", True, ["t [/]"]))
+            dump(trivy_report([]), a)
+            self.assertIsNone(release.scan_coverage([a])["os"])
+            dump(dict(trivy_report([]), Metadata={"OS": {"Family": "debian", "Name": "12"}}), a)
+            with self.assertRaises(release.Refused):
+                release.scan_coverage([a, b])
+        with tempfile.TemporaryDirectory() as d:
+            dump(trivy_report([]), os.path.join(d, "r.json"))
+            args = ["findings", "--output", os.path.join(d, "f.json"), "--coverage-output", os.path.join(d, "c.json")]
+            self.assertEqual(release.main(args + ["--report", "backend=" + os.path.join(d, "r.json")]), 3)  # services missing
+            for s in SERVICES:
+                args += ["--report", "%s=%s" % (s, os.path.join(d, "r.json"))]
+            self.assertEqual(release.main(args), 0)
+            self.assertEqual(set(read_json(os.path.join(d, "c.json"))), set(SERVICES))
 
     def test_migrations(self):
         base = [{"version": 1, "file": "V001__a.sql", "sha256": "1"}, {"version": 2, "file": "V002__b.sql", "sha256": "2"}]
@@ -301,6 +353,9 @@ class AdmissionTests(unittest.TestCase):
             "swapped identity": lambda a: a["images"]["backend"].update(containerd=a["images"]["frontend"]["containerd"]),
             "missing service": lambda a: a["images"].pop("minio"),
             "finding not accepted": lambda a: a.update(accepted_findings=[]),
+            "finding the candidate did not report": lambda a: a["accepted_findings"].append(
+                {"service": "backend", "id": "CVE-9", "package": "libc6"}),
+            "finding listed twice": lambda a: a["accepted_findings"].append(dict(a["accepted_findings"][0])),
             "bad version": lambda a: a["release"].update(version="0.2.0"),
             "not_granted incomplete": lambda a: a.update(not_granted=["deployment"]),
             "empty scope": lambda a: a.update(scope=" "),
@@ -333,6 +388,48 @@ class AdmissionTests(unittest.TestCase):
             self.verify(self.admission, candidate=cand, rehearsal=True)
         with self.assertRaises(release.Refused):  # a rehearsal record cannot promote for real
             self.verify(data, candidate=cand, rehearsal=False, path=path)
+
+
+class AdmissionProvenanceTests(unittest.TestCase):
+    PATH = release.ADMISSION_DIR + "/CM-REL-ADMISSION-TEST-0001.json"
+    COMMIT, BLOB, HEAD = "c" * 40, "b" * 40, "e" * 40
+
+    def evidence(self):
+        pulls = [{"number": 300, "merged_at": "2026-11-25T01:00:00Z", "merge_commit_sha": self.COMMIT,
+                  "base": {"ref": "main"}, "head": {"sha": self.HEAD}}]
+        pull = dict(pulls[0], merged=True, merged_by={"login": "leader"})
+        files = [[{"filename": self.PATH, "status": "added", "sha": self.BLOB}]]
+        return pulls, pull, files
+
+    def check(self, pulls, pull, files, admission=None):
+        return release.admission_provenance(admission or {"decided_by": "leader"}, self.PATH, self.COMMIT, self.BLOB,
+                                            pulls, pull, files)
+
+    def test_merged_by_the_decider(self):
+        result = self.check(*self.evidence())
+        self.assertEqual((result["pull_request"], result["merged_by"], result["head_sha"]), (300, "leader", self.HEAD))
+
+    def test_refusals(self):
+        def other_merger(p, q, f): q["merged_by"] = {"login": "contributor"}
+        def not_merged(p, q, f): q["merged"] = False
+        def no_pull_request(p, q, f): p.clear()
+        def other_base(p, q, f): p[0]["base"]["ref"] = "release"
+        def other_merge_commit(p, q, f): q["merge_commit_sha"] = "d" * 40
+        def two_pull_requests(p, q, f): p.append(dict(p[0], number=301))
+        def other_number(p, q, f): q["number"] = 301
+        def extra_file(p, q, f): f[0].append({"filename": "deploy.sh", "status": "modified", "sha": "1" * 40})
+        def other_file(p, q, f): f[0][0]["filename"] = release.ADMISSION_DIR + "/OTHER-RECORD-0001.json"
+        def removed(p, q, f): f[0][0]["status"] = "removed"
+        def other_content(p, q, f): f[0][0]["sha"] = "2" * 40
+        for mutate in (other_merger, not_merged, no_pull_request, other_base, other_merge_commit, two_pull_requests,
+                       other_number, extra_file, other_file, removed, other_content):
+            with self.subTest(mutate.__name__):
+                pulls, pull, files = self.evidence()
+                mutate(pulls, pull, files)
+                with self.assertRaises(release.Refused):
+                    self.check(pulls, pull, files)
+        with self.subTest("decided_by names someone else"), self.assertRaises(release.Refused):
+            self.check(*self.evidence(), admission={"decided_by": "someone"})
 
 
 class PackageTests(unittest.TestCase):
@@ -394,10 +491,14 @@ class ReleaseChainTests(unittest.TestCase):
         dump(ids, os.path.join(d, "ids.json"))
         dump([], os.path.join(d, "rescan.json"))
         dump({"tool": "trivy"}, os.path.join(d, "scanner.json"))
-        dump({"tooling": {}, "run": {"rehearsal": False}, "verification": {}, "admission_commit": "c" * 40}, os.path.join(d, "ctx.json"))
+        dump({s: {"os": None, "os_end_of_support": False, "targets": []} for s in SERVICES}, os.path.join(d, "coverage.json"))
+        dump({"tooling": {}, "run": {"rehearsal": False}, "verification": {}, "admission_commit": "c" * 40,
+              "admission_provenance": {"merged_by": "leader", "merge_commit": "c" * 40, "pull_request": 300}},
+             os.path.join(d, "ctx.json"))
         rc = release.main(["release-manifest", "--package", pkg, "--archive-name", "codemastery-release-v0.2.0-linux-amd64.tar",
                            "--context", os.path.join(d, "ctx.json"), "--identities", os.path.join(d, "ids.json"),
-                           "--findings", os.path.join(d, "rescan.json"), "--scanner", os.path.join(d, "scanner.json")])
+                           "--findings", os.path.join(d, "rescan.json"), "--scanner", os.path.join(d, "scanner.json"),
+                           "--coverage", os.path.join(d, "coverage.json")])
         self.assertEqual(rc, 0)
         return pkg
 
@@ -419,6 +520,18 @@ class ReleaseChainTests(unittest.TestCase):
             release.write_sha256sums(pkg)   # even with consistent sums, release.json's file map and identities disagree
             with self.assertRaises(release.Refused):
                 release.verify_release_chain(pkg, repo)
+
+    def test_release_without_decider_merge_evidence_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            pkg = self.build(d)
+            manifest = read_json(os.path.join(pkg, "release.json"))
+            for provenance in (None, {"merged_by": "contributor", "merge_commit": "c" * 40}):
+                with self.subTest(provenance):
+                    manifest["admission"]["provenance"] = provenance
+                    dump(manifest, os.path.join(pkg, "release.json"))
+                    release.write_sha256sums(pkg)
+                    with self.assertRaises(release.Refused):
+                        release.verify_release_chain(pkg, "chi-thanh-nguyen/codemastery")
 
     def test_admission_swap_is_refused(self):
         with tempfile.TemporaryDirectory() as d:

@@ -442,7 +442,7 @@ candidate_package() {
   qualify "$source" "$TOOLING_DIR" "$out" "$revision" "$origin"
   scan "$out" candidate "${refs[@]}"
   local reports=(); for s in "${SERVICES[@]}"; do reports+=(--report "$s=$out/$s.trivy.json" --report "$s=$out/$s.trivy-comprehensive.json"); done
-  python3 "$RELEASE_PY" findings "${reports[@]}" --output "$out.findings.json"
+  python3 "$RELEASE_PY" findings "${reports[@]}" --output "$out.findings.json" --coverage-output "$out.coverage.json"
 
   local baseline_args=() bdir
   if [[ -n "$baseline" ]]; then
@@ -489,7 +489,8 @@ PY
   local check_args=(); [[ -z "$checks" ]] || check_args=(--source-checks "$checks")
   python3 "$RELEASE_PY" candidate-manifest --package "$out" --archive-name "$archive" --context "$out.context.json" \
     --identities "$out.identities.json" --findings "$out.findings.json" --migrations "$out.migrations.json" \
-    --qualification "$out.qualification.json" --scanner "$out.scanner-candidate.json" "${check_args[@]}"
+    --qualification "$out.qualification.json" --scanner "$out.scanner-candidate.json" --coverage "$out.coverage.json" \
+    "${check_args[@]}"
   python3 "$RELEASE_PY" verify-package "$out" --kind candidate
   verify_archive "$source" "$out/$archive" "$out/release-candidate.json"
 
@@ -508,12 +509,14 @@ PY
   log "Candidate package complete: $out"
 }
 
-# release-package CANDIDATE_DIR SOURCE OUT ADMISSION REHEARSAL REPO_ROOT [ADMISSION_COMMIT]
+# release-package CANDIDATE_DIR SOURCE OUT ADMISSION REHEARSAL REPO_ROOT [ADMISSION_COMMIT ADMISSION_PROVENANCE_JSON]
 release_package() {
-  local candidate="$1" source="$2" out="$3" admission="$4" rehearsal="$5" repo_root="$6" commit="${7:-}"
+  local candidate="$1" source="$2" out="$3" admission="$4" rehearsal="$5" repo_root="$6" commit="${7:-}" provenance="${8:-}"
   local flag=() version refs=() s archive
   [[ "$rehearsal" == true || "$rehearsal" == false ]] || fail "REHEARSAL must be true or false."
   [[ "$rehearsal" == false ]] || flag=(--rehearsal)
+  # A real promotion needs the admission's merge evidence (release.py admission-provenance).
+  [[ "$rehearsal" == true || ( -n "$commit" && -s "$provenance" ) ]] || fail "A real promotion needs the admission commit and its provenance."
   [[ ! -e "$out" ]] || fail "Output directory already exists."
   python3 "$RELEASE_PY" verify-package "$candidate" --kind candidate --allow-extra release-candidate.sigstore.json
   python3 "$RELEASE_PY" verify-admission --admission "$admission" --candidate-manifest "$candidate/release-candidate.json" \
@@ -529,31 +532,35 @@ release_package() {
   for s in "${SERVICES[@]}"; do refs+=("$(release_ref "$s")"); done
   scan "$out" rescan "${refs[@]}"
   local reports=(); for s in "${SERVICES[@]}"; do reports+=(--report "$s=$out/$s.trivy-rescan.json" --report "$s=$out/$s.trivy-rescan-comprehensive.json"); done
-  python3 "$RELEASE_PY" findings "${reports[@]}" --output "$out.rescan-findings.json"
-  python3 "$RELEASE_PY" check-rescan --admission "$admission" --findings "$out.rescan-findings.json"
+  python3 "$RELEASE_PY" findings "${reports[@]}" --output "$out.rescan-findings.json" --coverage-output "$out.rescan-coverage.json"
+  python3 "$RELEASE_PY" check-rescan --admission "$admission" --candidate-manifest "$candidate/release-candidate.json" \
+    --findings "$out.rescan-findings.json"
 
   install -m 0644 "$admission" "$out/admission.json"
   install -m 0644 "$candidate/release-candidate.json" "$out/release-candidate.json"
   install -m 0644 "$candidate/mc-source.tar.gz" "$out/mc-source.tar.gz"
   for s in "${SERVICES[@]}"; do install -m 0644 "$candidate/$s.spdx.json" "$out/$s.spdx.json"; done
   install -m 0644 "$out.rescan-findings.json" "$out/rescan-findings.json"
-  python3 - "$(run_context "$rehearsal")" "$commit" > "$out.context.json" <<'PY'
+  python3 - "$(run_context "$rehearsal")" "$commit" "$provenance" > "$out.context.json" <<'PY'
 import json, sys
 ctx = json.loads(sys.argv[1])
 ctx["admission_commit"] = sys.argv[2] or None
+ctx["admission_provenance"] = json.load(open(sys.argv[3])) if sys.argv[3] else None
 ctx["verification"] = {
     "candidate_package": "SHA256SUMS and release-candidate.json file hashes verified",
     "candidate_attestation": "verified by the promote job before this stage" if not ctx["run"]["rehearsal"] else "REHEARSAL: no attestation",
-    "admission": "schema, identities, candidate manifest/archive digests, accepted findings and code-owner decider verified",
+    "admission": "schema, identities, candidate manifest/archive digests, accepted findings and code-owner decider verified"
+                 + ("" if ctx["run"]["rehearsal"] else "; merged into main by decided_by in a pull request changing only the record"),
     "deploy_sh_verify_archive": "candidate and release archives accepted for the containerd and graph-driver stores",
-    "rescan": "every promotion-time finding is accepted by the admission record",
+    "rescan": "every promotion-time finding is an admitted candidate row (same installed version, severity not raised)",
     "stack_smoke": "deploy.sh preflight, load and provision on the release archive; update guard refuses existing state",
     "not_run": "deploy.sh deploy (needs a publicly trusted certificate for the origin), any VM operation",
 }
 print(json.dumps(ctx, indent=2, sort_keys=True))
 PY
   python3 "$RELEASE_PY" release-manifest --package "$out" --archive-name "$archive" --context "$out.context.json" \
-    --identities "$out.identities.json" --findings "$out.rescan-findings.json" --scanner "$out.scanner-rescan.json"
+    --identities "$out.identities.json" --findings "$out.rescan-findings.json" --scanner "$out.scanner-rescan.json" \
+    --coverage "$out.rescan-coverage.json"
   python3 "$RELEASE_PY" verify-package "$out" --kind release
   verify_archive "$source" "$out/$archive" "$out/release.json" --release-names
   smoke "$source" "$out/$archive" "$out/release.json"
@@ -585,7 +592,7 @@ PY
 rehearsal_admission() {
   local mode="$1" candidate="$2" arg="$3" manifest id
   manifest="$candidate/release-candidate.json"
-  id="REHEARSAL-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+  id="REHEARSAL-${GITHUB_RUN_ID:-LOCAL}-${GITHUB_RUN_ATTEMPT:-1}"
   [[ "$mode" == create || "$mode" == refusals ]] || fail "rehearsal-admission create|refusals"
   local work; work="$(mktemp -d)"
   python3 "$RELEASE_PY" admission-template --candidate-manifest "$manifest" \
@@ -628,16 +635,29 @@ PY
   refused 'different source revision' 'a["source_revision"]="0"*40'
   refused 'non-REHEARSAL record ID in a rehearsal' 'a["record_id"]="CM-REL-ADMISSION-NOT-REHEARSAL"'
   refused 'unknown field' 'a["approved_by_ci"]=True'
+  refused 'acceptance of a finding the candidate did not report' 'a["accepted_findings"].append({"service":"backend","id":"CVE-0000-00000","package":"injected"})'
   if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["accepted_findings"] else 1)' "$work/$id.json"; then
     refused 'a candidate finding left unaccepted' 'a["accepted_findings"]=a["accepted_findings"][1:]'
   else
     log "The candidate has no findings; the unaccepted-finding case is covered by the unit tests."
   fi
   printf '[{"service":"backend","id":"CVE-0000-00000","package":"injected","installed":"1","fixed":"","severity":"CRITICAL","target":"t"}]\n' > "$work/injected.json"
-  if python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --findings "$work/injected.json" >/dev/null 2>&1; then
+  if python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
+       --findings "$work/injected.json" >/dev/null 2>&1; then
     fail "A promotion-time finding outside the admission was accepted."
   fi
   n=$((n + 1)); log "refused as required: promotion-time finding outside the admission"
+  python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
+    --findings "$candidate/findings.json" >/dev/null || fail "The candidate's own findings must be covered by its admission."
+  if python3 -c 'import json,sys; f=json.load(open(sys.argv[1])); sys.exit(0 if any(x["severity"] != "CRITICAL" for x in f) else 1)' "$candidate/findings.json"; then
+    python3 -c 'import json,sys; f=json.load(open(sys.argv[1])); x=next(x for x in f if x["severity"] != "CRITICAL"); x["severity"]="CRITICAL"; print(json.dumps([x]))' \
+      "$candidate/findings.json" > "$work/raised.json"
+    if python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
+         --findings "$work/raised.json" >/dev/null 2>&1; then
+      fail "A promotion-time severity increase was accepted."
+    fi
+    n=$((n + 1)); log "refused as required: a finding whose severity rose after the candidate scan"
+  fi
   rm -rf "$work"
   log "$n admission refusals verified against the real candidate manifest."
 }

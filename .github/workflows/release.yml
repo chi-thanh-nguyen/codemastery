@@ -8,7 +8,8 @@ name: Release
 #   images, scans them, packages the evidence, attests the package (GitHub
 #   artifact attestation, Sigstore) and stores it in a DRAFT release.
 # - stage=promote (manual, from main): requires a Leader admission record
-#   committed under docs/decisions/release-admissions/. It verifies the
+#   committed under docs/decisions/release-admissions/ by a pull request that
+#   changes only the record and that its decided_by merged. It verifies the
 #   candidate's attestation and every admitted identity, rescans, promotes the
 #   admitted images to the codemastery.invalid/*:release names, runs deploy.sh
 #   on the release archive and stores the attested package in a DRAFT release.
@@ -58,8 +59,9 @@ permissions:
   contents: read
 
 concurrency:
-  # Dispatched stages are serialized and never cancelled; a newer push cancels
-  # an older rehearsal of the same pull request.
+  # Dispatched stages run one at a time and a running stage is never cancelled
+  # (GitHub keeps one pending dispatch; a newer one replaces it). A newer push
+  # cancels an older rehearsal of the same pull request.
   group: ${{ github.event_name == 'pull_request' && format('release-rehearsal-{0}', github.event.pull_request.number) || 'release-dispatch' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -70,6 +72,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Check script syntax and run the release tooling unit tests
         shell: bash
         run: |
@@ -85,6 +89,8 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Enable the containerd image store
         shell: bash
         run: bash infrastructure/release/release.sh enable-containerd-store
@@ -118,6 +124,7 @@ jobs:
     permissions:
       contents: write        # draft release only
       checks: read           # required checks of the source revision
+      pull-requests: read    # the merged pull request of the source revision
       id-token: write        # Sigstore signing identity for the attestation
       attestations: write
     steps:
@@ -130,6 +137,7 @@ jobs:
         with:
           path: tooling
           fetch-depth: 0
+          persist-credentials: false   # the token is passed only to the steps that call the API
       - name: Resolve and verify the source revision
         id: source
         shell: bash
@@ -155,7 +163,9 @@ jobs:
           pr_args=()
           if [[ -n "$head" ]]; then
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100" > "$RUNNER_TEMP/pr-check-runs.json"
-            pr_args=(--pulls "$RUNNER_TEMP/pulls.json" --pr-head "$head" --pr-check-runs "$RUNNER_TEMP/pr-check-runs.json")
+            pr_args=(--pulls "$RUNNER_TEMP/pulls.json" --pr-head "$head" --pr-check-runs "$RUNNER_TEMP/pr-check-runs.json"
+                     --revision-tree "$(git rev-parse "$rev^{tree}")"
+                     --pr-head-tree "$(gh api "repos/$GITHUB_REPOSITORY/commits/$head" --jq .commit.tree.sha)")
           fi
           python3 infrastructure/release/release.py evaluate-checks --revision "$rev" --rules "$RUNNER_TEMP/rules.json" \
             --check-runs "$RUNNER_TEMP/check-runs.json" "${pr_args[@]}" > "$RUNNER_TEMP/source-checks.json"
@@ -206,6 +216,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: write        # read the candidate draft; create the release draft
+      pull-requests: read    # merge evidence of the admission record
       id-token: write
       attestations: write
     steps:
@@ -218,6 +229,7 @@ jobs:
         with:
           path: tooling
           fetch-depth: 0
+          persist-credentials: false   # the token is passed only to the steps that call the API
       - name: Locate the admission record and download the admitted candidate
         id: admission
         shell: bash
@@ -232,12 +244,26 @@ jobs:
           file="docs/decisions/release-admissions/${INPUT_ADMISSION}.json"
           git ls-files --error-unmatch -- "$file" >/dev/null || { echo "The admission record is not committed on main." >&2; exit 1; }
           read -r tag rev version < <(python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); print(a["candidate"]["release_tag"], a["source_revision"], a["release"]["version"])' "$file")
+          [[ "$tag" =~ ^candidate-[0-9a-f]{12}-[0-9]+-[0-9]+$ && "$rev" =~ ^[0-9a-f]{40}$ \
+             && "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] \
+            || { echo "The admission record's candidate tag, revision or version is malformed." >&2; exit 1; }
           git merge-base --is-ancestor "$rev" origin/main || { echo "The admitted revision is not on main." >&2; exit 1; }
+          # decided_by is only text: require GitHub's record that decided_by merged a
+          # pull request into main that changed only this record (ADR015 D7).
+          commit="$(git log -n 1 --format=%H -- "$file")"
+          blob="$(git rev-parse "$commit:$file")"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$commit/pulls" > "$RUNNER_TEMP/admission-pulls.json"
+          number="$(python3 -c 'import json,sys; p=[x["number"] for x in json.load(open(sys.argv[1])) if x.get("merged_at") and x.get("merge_commit_sha")==sys.argv[2] and x["base"]["ref"]=="main"]; print(p[0] if len(p)==1 else "")' "$RUNNER_TEMP/admission-pulls.json" "$commit")"
+          [[ "$number" =~ ^[0-9]+$ ]] || { echo "The admission record did not reach main through one merged pull request." >&2; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$number" > "$RUNNER_TEMP/admission-pull.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$number/files?per_page=100" > "$RUNNER_TEMP/admission-files.json"
+          python3 infrastructure/release/release.py admission-provenance --admission "$file" --path "$file" \
+            --commit "$commit" --blob "$blob" --pulls "$RUNNER_TEMP/admission-pulls.json" \
+            --pull "$RUNNER_TEMP/admission-pull.json" --files "$RUNNER_TEMP/admission-files.json" > "$RUNNER_TEMP/admission-provenance.json"
           bash infrastructure/release/release.sh draft-download "$tag" "$RUNNER_TEMP/candidate"
           git worktree add --detach "$GITHUB_WORKSPACE/source" "$rev"
           {
-            echo "file=$file"; echo "version=$version"; echo "revision=$rev"
-            echo "commit=$(git log -n 1 --format=%H -- "$file")"
+            echo "file=$file"; echo "version=$version"; echo "revision=$rev"; echo "commit=$commit"
           } >> "$GITHUB_OUTPUT"
       - name: Verify the candidate attestation
         shell: bash
@@ -248,8 +274,12 @@ jobs:
           cd "$RUNNER_TEMP/candidate"
           python3 "$GITHUB_WORKSPACE/tooling/infrastructure/release/release.py" verify-package . --kind candidate \
             --allow-extra release-candidate.sigstore.json
-          attest=(--repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
-                  --source-ref refs/heads/main --deny-self-hosted-runners)
+          # Exact signer identity (release.yml run for refs/heads/main) and the main
+          # commit the candidate manifest names as its tooling.
+          tooling_sha="$(python3 -c 'import json; print(json.load(open("release-candidate.json"))["tooling"]["sha"])')"
+          [[ "$tooling_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "The candidate manifest names no tooling commit." >&2; exit 1; }
+          attest=(--repo "$GITHUB_REPOSITORY" --cert-identity "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/heads/main"
+                  --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners)
           for file in release-candidate.json "$(python3 -c 'import json; print(json.load(open("release-candidate.json"))["archive"]["name"])')" mc-source.tar.gz; do
             gh attestation verify "$file" "${attest[@]}" >/dev/null
             gh attestation verify "$file" "${attest[@]}" --bundle release-candidate.sigstore.json >/dev/null
@@ -266,7 +296,8 @@ jobs:
         run: |
           set -euo pipefail
           bash tooling/infrastructure/release/release.sh release-package "$RUNNER_TEMP/candidate" "$GITHUB_WORKSPACE/source" \
-            "$RUNNER_TEMP/release" "$GITHUB_WORKSPACE/tooling/$ADMISSION_FILE" false "$GITHUB_WORKSPACE/tooling" "$ADMISSION_COMMIT"
+            "$RUNNER_TEMP/release" "$GITHUB_WORKSPACE/tooling/$ADMISSION_FILE" false "$GITHUB_WORKSPACE/tooling" "$ADMISSION_COMMIT" \
+            "$RUNNER_TEMP/admission-provenance.json"
       - name: Attest the release package
         id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2

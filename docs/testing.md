@@ -5783,3 +5783,40 @@ outside this change; nothing was suppressed.
 - `verify-release.sh` end to end on a real package (none exists yet); its chain logic
   is unit-tested.
 - `deploy.sh deploy`, public TLS, and anything on the Azure VM.
+
+### Focused review remediation — 23 November 2026
+
+A focused code and security review of PR #267 at `bc9db20`, by the same Claude Code
+session that wrote the pipeline (**not an independent review**; one review agent with a
+separate context was also used). Confirmed defects were fixed in the same pull request;
+[ADR015](decisions/015-release-pipeline.md#7-supersession-and-amendments) records the
+amended decisions.
+
+| ID | Severity | Defect at `bc9db20` | Fix |
+| --- | --- | --- | --- |
+| R1 | P2 | Promotion accepted any admission record tracked on `main`; `decided_by` was a typed login, so authenticity rested only on repository rules the pipeline did not check | `release.py admission-provenance`: the last commit changing the record must be the squash merge of a pull request into `main` that changed only the record, with the same blob at its head, merged by `decided_by`; recorded in `release.json` and required by `verify-release-chain` |
+| R2 | P2 | Rescan matched `{service, id, package}` only, and the admission could accept findings the candidate never reported: a severity raised after the candidate scan (MEDIUM → CRITICAL) or a newly matched installed version passed promotion | The accepted set must equal the candidate's findings; a rescan row must be an admitted candidate row at the same installed version and no higher severity |
+| R3 | P3 | `verify-release.sh --source` ran the source revision's `release.sh`, absent from revisions older than `infrastructure/release/` | Runs its own `release.sh` with the source revision's `deploy.sh` |
+| R4 | P3 | Attestation policy used the `--signer-workflow` pattern | Exact `--cert-identity …/release.yml@refs/heads/main` plus `--source-digest` of the recorded tooling commit |
+| R5 | P3 | The merged-PR `CodeQL` fallback did not check that the head held the revision's content | Requires equal tree SHAs |
+| R6 | P3 | Checkouts persisted the job token in `.git/config` | `persist-credentials: false`; `pull-requests: read` granted explicitly where pull requests are read |
+| R7 | P3 | Promotion used the admission's tag, revision and version before validating them | Validated first |
+| R8 | P3 | No record of what the scanner analysed (an undetected operating system yields fewer findings silently) | Per-image scan coverage in the manifests and the job summary |
+
+Rejected hypotheses: main has no merge commits (linear history), so "ancestor of
+`main`" equals first-parent membership; `gh` 2.102.0 anchors `--signer-workflow`
+(`…/workflows/deploy` does not match `deployment.yml`); draft asset download through
+`gh api` with `Accept: application/octet-stream` returns the exact bytes (checked on a
+public `cli/cli` asset).
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, Python 3.9.6 | Unit tests (new: admission provenance with 12 refusals, rescan bound to admitted rows and severity, exact acceptance set, scan coverage, release chain without merge evidence, tree-bound fallback through the CLI) | 27/27 PASS; the new R1, R2 and coverage tests fail against `bc9db20`'s `release.py` |
+| Local | actionlint 1.7.8; ShellCheck 0.11.0 on `release.sh` and `verify-release.sh` | Clean |
+| Local, bash 5.2 container | `rehearsal-admission refusals` on a synthetic candidate | 12 refusals, including the new acceptance and severity cases |
+| Live GitHub API, read-only | `evaluate-checks` for `257a915` with tree binding (PR #260 head tree equals the revision's) | 10/10 PASS |
+| Live GitHub API, read-only | `admission-provenance` on merged single-file PR #252 (`DESIGN.md`, merge `a7883e3`): accepted with the real merger; refused for another `decided_by` and for the parent blob | PASS |
+| `gh` 2.102.0, public `cli/cli` attestation | `--cert-identity` with `--source-ref`, `--source-digest` and `--deny-self-hosted-runners`, online and offline (`--bundle`, `--custom-trusted-root`); wrong ref or digest refused | PASS |
+
+The rehearsal and required checks for the remediation head are reported on the pull
+request. The dispatched stages remain unexecuted for the reasons above.

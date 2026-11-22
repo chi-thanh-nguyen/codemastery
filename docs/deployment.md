@@ -4414,8 +4414,8 @@ the operator's view. It approves nothing beyond ADR015 and changes no earlier re
 | Stage | How | Result |
 | --- | --- | --- |
 | 1. Candidate | Actions → **Release** → *Run workflow* on `main`, `stage=candidate`; optional `revision` (full SHA on `main`, default the dispatched commit), `public_origin` (default `https://codemastery.app`) and `compatibility_baseline` | Every required check of `main` must be green on the revision. Five linux/amd64 candidates are built, reloaded from their archive, qualified (MinIO initializer suite with the minimal server, backend trust store and runtime privileges, byte-clean PostgreSQL, image hardening, `deploy.sh` preflight/load/provision smoke and update-guard refusals), scanned (Trivy default and comprehensive, SPDX SBOMs), packaged, attested and stored as the draft release `candidate-<12-hex>-<run>-<attempt>`, titled “NOT ADMITTED” |
-| 2. Security admission | The Leader reviews the candidate draft and commits `docs/decisions/release-admissions/<record_id>.json` through a pull request. `python3 infrastructure/release/release.py admission-template --candidate-manifest release-candidate.json --release-tag <candidate tag> --version v<x.y.z>` prints a `PENDING` template with the exact identities and every finding | Only `decision: "ADMITTED"` by a code owner of `/docs/decisions/`, naming that candidate's manifest and archive digests, all ten identities, the origin, the revision and every finding, permits promotion ([fields](decisions/015-release-pipeline.md#d7--the-admission-record)) |
-| 3. Promotion | `stage=promote`, `admission=<record_id>` | Candidate attestation, package and admission are verified; images are retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; a fresh rescan must hold no finding the record does not accept; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
+| 2. Security admission | The Leader reviews the candidate draft and commits `docs/decisions/release-admissions/<record_id>.json` through a pull request. `python3 infrastructure/release/release.py admission-template --candidate-manifest release-candidate.json --release-tag <candidate tag> --version v<x.y.z>` prints a `PENDING` template with the exact identities and every finding | Only `decision: "ADMITTED"` by a code owner of `/docs/decisions/`, naming that candidate's manifest and archive digests, all ten identities, the origin, the revision and exactly the candidate's findings, permits promotion ([fields](decisions/015-release-pipeline.md#d7--the-admission-record)). The pull request must change **only** the record, and the account named in `decided_by` must **merge** it: the promote job checks GitHub's merge record, not the typed login |
+| 3. Promotion | `stage=promote`, `admission=<record_id>` | Candidate attestation, package, admission and its merge record are verified; images are retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; every row of a fresh rescan must be an admitted candidate finding at the same installed version and no higher severity; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
 | 4. Publication | Not automated | Un-drafting, tagging or making binaries public is a Leader decision that first needs the F1/F5 licensing determination ([D9](decisions/015-release-pipeline.md#d9--storage-retention-and-publication)) |
 
 A failure at any step stops the stage without a draft. Nothing is retried, and no
@@ -4429,8 +4429,10 @@ draft, tag or release is ever overwritten: a rerun is a new candidate.
    `infrastructure/release/verify-release.sh <dir> --source . --store <containerd|graphdriver>`.
    Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand and
    add `--trusted-root trusted_root.jsonl`. The script verifies the attestation of
-   `release.json`, the archive, `mc-source.tar.gz` and `admission.json`, the
-   agreement of release, admission and candidate records, the `deploy.sh`/Compose
+   `release.json`, the archive, `mc-source.tar.gz` and `admission.json` (signer
+   `release.yml` on `refs/heads/main` exactly, at the recorded tooling commit), the
+   agreement of release, admission and candidate records, the recorded merge of the
+   admission by its decider, the `deploy.sh`/Compose
    hashes and `deploy.sh`'s own archive verifier, then prints `--archive`,
    `--archive-sha256`, the five `--expect-image` values and `--source-revision`.
    `deploy.sh preflight` reports which image store the VM uses.
