@@ -5725,3 +5725,61 @@ unchanged.
 | `test-runtime-real-backend-privileges.sh` (run with a locally built image under a private tag) | `RUNTIME_CONSUMER_TESTS_PASS`; no `42501` in the backend log |
 
 Local developer runs, not independent review, QA or CI evidence. Nothing was granted on any real database.
+
+## Phase 4 release pipeline verification — 23 November 2026
+
+Verification of [ADR015](decisions/015-release-pipeline.md) on branch
+`feature/phase4-release-pipeline` ([PR #267](https://github.com/chi-thanh-nguyen/codemastery/pull/267)),
+starting `main` `257a9152e16c8ba4fae467242ccad964e1d899b4`. Results belong to the
+named commits; the final head's checks are reported on the pull request.
+
+### Executed and passed
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, macOS arm64, Python 3.9.6 | `python3 -m unittest discover -s infrastructure/release/tests` (archive identities and refusals, required checks with the merged-PR fallback, findings and rescan, migrations, admission records in real and rehearsal mode with a committed and an uncommitted record, package and release-chain verification through the real `release-manifest` command, CLI refusal exit code) | 21/21 PASS, with `ResourceWarning` as an error |
+| Local | actionlint 1.7.8 on `release.yml`; ShellCheck 0.11.0 (`-S warning`) on `release.sh`, `verify-release.sh` and the changed PostgreSQL test | Clean |
+| Local, Docker 29.8.1, containerd store | Five scratch images saved with `docker save --platform linux/amd64`, removed and reloaded: `release.py archive-identities` equals `docker image inspect .Id` for all five; `release.sh verify-archive` (sourcing `deploy.sh`) accepts the archive for both stores and rejects swapped identities | PASS |
+| Local | `release.sh scan` with the pinned Trivy 0.76.2 image: JSON in both modes, SPDX SBOMs and database metadata (vulnerability database updated 2026-11-22 12:38 UTC) | PASS |
+| Local | `release.sh promote` on a host that already holds `codemastery.invalid/*:release` images | Refused before tagging, as designed; the existing images were not changed |
+| Live GitHub API, read-only | `evaluate-checks` for `main` `257a915`: all ten required contexts successful (nine on the revision; `CodeQL` on merged PR #260's head `cd9d43d`, because GitHub reports that check only on pull requests). For the unchecked branch head it refuses (`Backend` in progress) | PASS |
+| CI run [45049370417](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45049370417), head `3decdc3` (merge `dbf93b1`) | `Release tooling` (18 tests at that head) and `Release rehearsal` on `ubuntu-24.04`, Docker Engine 28.0.4 with the containerd store, 12 minutes: five candidates built; `mc` Corresponding Source `a42400d4…` equal to the suite record and the image's `SOURCE`; reload from the archive with equal identities; Q01 MinIO initializer suite 28/28 against the exact minimal server; Q02 trust store 13/13; Q03 runtime consumers and V008→V009 upgrade; Q04 byte-clean PostgreSQL (3,888 entries); Q05 hardening; Trivy in both modes; `deploy.sh verify_archive` for both stores; smoke on the release-named copy (preflight, refused wrong SHA-256, swapped identities and a missing identity, real `load` and `provision`, three `guard_update()` refusals over the created state, stack removed); ten admission refusals against the real manifest; promotion with a `REHEARSAL-` record; rescan accepted; release package of 23 files verified; `verify_archive` and the smoke again on the release archive | PASS |
+
+| CI run [45050651836](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45050651836), head `fd90609` | The same rehearsal with the merged-PR check fallback and the CRITICAL/HIGH summary table; `Release tooling` 19 tests | PASS (14.5 minutes) |
+
+### Executed and failed, then fixed
+
+CI run [45048852193](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45048852193),
+head `3a4158e`: the build stage passed, Q01 failed at its third check because the
+suite captured Docker's on-demand pull progress for the `mc` test-client image. The
+CI job already pre-pulls those pins; `3decdc3` makes the release stage do the same.
+
+### Findings recorded, not accepted
+
+Trivy 0.76.2 with the 22 November database reports for the rehearsal images built
+from this branch (same Dockerfiles as `main`), in counts of distinct rows:
+
+| Image | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| postgres | 0 | 20 | 13 | 4 | 0 |
+| minio (minimal server) | 0 | 0 | 3 | 0 | 1 |
+| minio-init | 0 | 0 | 4 | 0 | 0 |
+| backend | 0 | 2 | 50 | 5 | 0 |
+| frontend (release target) | 4 | 6 | 10 | 4 | 0 |
+
+The earlier dated records reported zero CRITICAL/HIGH for these images; the new rows
+come from advisories published since. They are recorded and gate promotion: a real
+candidate built today could be promoted only if the Leader's admission accepted every
+row or the images were remediated and rebuilt. Remediation is DP01 security work
+outside this change; nothing was suppressed.
+
+### Not run
+
+- The dispatched `Release candidate` and `Release promotion` jobs: `workflow_dispatch`
+  needs the workflow on the default branch, and both jobs refuse any ref but `main`.
+  Attestation creation and verification for this repository, draft-release creation,
+  read-back and download, and the live required-check step are therefore unexecuted;
+  their logic is covered by the unit tests and the read-only API check above.
+- `verify-release.sh` end to end on a real package (none exists yet); its chain logic
+  is unit-tested.
+- `deploy.sh deploy`, public TLS, and anything on the Azure VM.

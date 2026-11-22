@@ -107,7 +107,7 @@ jobs:
       - name: Summarize the rehearsal
         if: ${{ !cancelled() }}
         shell: bash
-        run: python3 infrastructure/release/release.py summary "$RUNNER_TEMP" REHEARSAL >> "$GITHUB_STEP_SUMMARY" || true
+        run: python3 infrastructure/release/release.py summary "$RUNNER_TEMP" REHEARSAL | tee -a "$GITHUB_STEP_SUMMARY" || true
 
   candidate:
     name: Release candidate
@@ -196,7 +196,7 @@ jobs:
       - name: Summarize the candidate
         if: ${{ !cancelled() }}
         shell: bash
-        run: python3 tooling/infrastructure/release/release.py summary "$RUNNER_TEMP" CANDIDATE >> "$GITHUB_STEP_SUMMARY" || true
+        run: python3 tooling/infrastructure/release/release.py summary "$RUNNER_TEMP" CANDIDATE | tee -a "$GITHUB_STEP_SUMMARY" || true
 
   promote:
     name: Release promotion
@@ -288,4 +288,4 @@ jobs:
       - name: Summarize the promotion
         if: ${{ !cancelled() }}
         shell: bash
-        run: python3 tooling/infrastructure/release/release.py summary "$RUNNER_TEMP" RELEASE >> "$GITHUB_STEP_SUMMARY" || true
+        run: python3 tooling/infrastructure/release/release.py summary "$RUNNER_TEMP" RELEASE | tee -a "$GITHUB_STEP_SUMMARY" || true

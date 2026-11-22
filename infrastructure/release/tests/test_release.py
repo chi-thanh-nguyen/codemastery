@@ -369,6 +369,68 @@ class PackageTests(unittest.TestCase):
                 release.verify_package(d, "candidate")
 
 
+class ReleaseChainTests(unittest.TestCase):
+    """A release package built by the real release-manifest command, then verified."""
+
+    def build(self, d):
+        pkg = os.path.join(d, "release")
+        os.makedirs(pkg)
+        cand = candidate_manifest()
+        cand["schema"] = release.CANDIDATE_SCHEMA
+        cand.update(source_tree="t" * 40, mc_source={"name": "mc-source.tar.gz", "sha256": hashlib.sha256(b"src").hexdigest()},
+                    compatibility={"deploy_sh_sha256": "0" * 64}, run={"rehearsal": False, "id": "1"},
+                    security={"findings": cand["security"]["findings"], "scanner": {"tool": "trivy"}})
+        dump(cand, os.path.join(pkg, "release-candidate.json"))
+        adm = release.admission_template(cand, "candidate-%s-1-1" % REV[:12], "v0.2.0")
+        adm["candidate"]["manifest_sha256"] = release.sha256_file(os.path.join(pkg, "release-candidate.json"))
+        adm.update(decision="ADMITTED", decided_by="leader", decided_on="2026-11-25", scope="preview", record_id="CM-REL-ADMISSION-TEST-0001")
+        dump(adm, os.path.join(pkg, "admission.json"))
+        put(os.path.join(pkg, "codemastery-release-v0.2.0-linux-amd64.tar"), b"archive", "wb")
+        put(os.path.join(pkg, "mc-source.tar.gz"), b"src", "wb")
+        for store in ("containerd", "graphdriver"):
+            put(os.path.join(pkg, "expected-images.%s.txt" % store),
+                "".join("%s=%s\n" % (release.RELEASE_REFS[s], cand["images"][s][store]) for s in SERVICES))
+        ids = {release.RELEASE_REFS[s]: {"containerd": cand["images"][s]["containerd"], "graphdriver": cand["images"][s]["graphdriver"]} for s in SERVICES}
+        dump(ids, os.path.join(d, "ids.json"))
+        dump([], os.path.join(d, "rescan.json"))
+        dump({"tool": "trivy"}, os.path.join(d, "scanner.json"))
+        dump({"tooling": {}, "run": {"rehearsal": False}, "verification": {}, "admission_commit": "c" * 40}, os.path.join(d, "ctx.json"))
+        rc = release.main(["release-manifest", "--package", pkg, "--archive-name", "codemastery-release-v0.2.0-linux-amd64.tar",
+                           "--context", os.path.join(d, "ctx.json"), "--identities", os.path.join(d, "ids.json"),
+                           "--findings", os.path.join(d, "rescan.json"), "--scanner", os.path.join(d, "scanner.json")])
+        self.assertEqual(rc, 0)
+        return pkg
+
+    def test_valid_chain_and_tampering(self):
+        repo = "chi-thanh-nguyen/codemastery"
+        with tempfile.TemporaryDirectory() as d:
+            pkg = self.build(d)
+            self.assertEqual(release.verify_release_chain(pkg, repo)["version"], "v0.2.0")
+            with self.assertRaises(release.Refused):
+                release.verify_release_chain(pkg, "someone/else")
+            put(os.path.join(pkg, "release.sigstore.json"), "{}")   # the bundle sits outside SHA256SUMS
+            release.verify_release_chain(pkg, repo)
+            path = os.path.join(pkg, "expected-images.containerd.txt")
+            with open(path) as f:
+                original = f.read()
+            lines = original.splitlines()
+            lines[0], lines[1] = lines[0].split("=")[0] + "=" + lines[1].split("=")[1], lines[1].split("=")[0] + "=" + lines[0].split("=")[1]
+            put(path, "\n".join(lines) + "\n")
+            release.write_sha256sums(pkg)   # even with consistent sums, release.json's file map and identities disagree
+            with self.assertRaises(release.Refused):
+                release.verify_release_chain(pkg, repo)
+
+    def test_admission_swap_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            pkg = self.build(d)
+            adm = read_json(os.path.join(pkg, "admission.json"))
+            adm["decision"] = "PENDING"
+            dump(adm, os.path.join(pkg, "admission.json"))
+            release.write_sha256sums(pkg)
+            with self.assertRaises(release.Refused):
+                release.verify_release_chain(pkg, "chi-thanh-nguyen/codemastery")
+
+
 class CliTests(unittest.TestCase):
     def test_refusal_exit_code_and_no_traceback(self):
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "release.py")
