@@ -161,9 +161,18 @@ qualify() {
 
   # MinIO: the source revision's initializer suite on the exact initializer and
   # the exact minimal server (aliased to the tag the suite expects).
-  pin="$(sed -n "s/^CHAINGUARD_SERVER_IMAGE='\(cgr\.dev\/chainguard\/minio@sha256:[0-9a-f]\{64\}\)'$/\1/p" "$source/infrastructure/minio/test-minio-init.sh")"
-  [[ -n "$pin" ]] || fail "Cannot read the Chainguard server pin from the suite."
-  docker pull -q --platform linux/amd64 "$pin" >/dev/null
+  # Pre-pull the suite's digest pins, as the CI job does: an on-demand pull would
+  # mix Docker's progress output into the suite's captured results.
+  local pins=()
+  while IFS= read -r pin; do pins+=("$pin"); done < <(sed -n 's/^    image: \(ghcr\.io\/golithus\/.*\)$/\1/p' "$source/infrastructure/docker-compose.yml")
+  [[ ${#pins[@]} -eq 2 ]] || fail "Unexpected local MinIO image pins."
+  for pin in CHAINGUARD_SERVER_IMAGE INIT_BASE_IMAGE; do
+    pins+=("$(sed -n "s/^${pin}='\(cgr\.dev\/chainguard\/[a-z-]*@sha256:[0-9a-f]\{64\}\)'$/\1/p" "$source/infrastructure/minio/test-minio-init.sh")")
+  done
+  for pin in "${pins[@]}"; do
+    [[ "$pin" == *@sha256:* ]] || fail "Cannot read a digest pin from the suite."
+    docker pull -q --platform linux/amd64 "$pin" >/dev/null
+  done
   docker tag "$(candidate_ref minio "$revision")" codemastery-test/minio-server:qualification
   MINIO_INIT_TEST_SERVER=minimal bash "$source/infrastructure/minio/test-minio-init.sh" "$(candidate_ref minio-init "$revision")"
   docker image rm codemastery-test/minio-server:qualification >/dev/null
