@@ -432,7 +432,9 @@ codemastery/
 
     │   ├── ci-frontend.yml
 
-    │   └── ci-vm.yml
+    │   ├── ci-vm.yml
+
+    │   └── release.yml
 
     ├── ISSUE_TEMPLATE/
 
@@ -1964,6 +1966,18 @@ codemastery/
 
 │   │   └── test-minio-init.sh
 
+│   ├── release/
+
+│   │   ├── release.py
+
+│   │   ├── release.sh
+
+│   │   ├── verify-release.sh
+
+│   │   └── tests/
+
+│   │       └── test_release.py
+
 │   └── vm/
 
 │       ├── deploy.sh
@@ -2086,6 +2100,34 @@ codemastery/
 
 └── CONTRIBUTING.md
 ```
+
+## Bounded Phase 4 release pipeline additions — 23 November 2026
+
+On 2026-11-23 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen authorized, in the instruction “CodeMastery — Phase 4: Full Release
+Pipeline Implementation with Delegated Technical Decisions”, the bounded repository
+additions Phase 4 needs. [ADR015](decisions/015-release-pipeline.md) records the
+decisions. This record adds exactly these files and one reserved directory:
+
+| Path | Responsibility |
+| --- | --- |
+| `.github/workflows/release.yml` | Workflow `Release`: jobs `Release tooling`, `Release rehearsal` (pull requests), `Release candidate` and `Release promotion` (manual dispatch from `main`) |
+| `infrastructure/release/release.sh` | Stage orchestration: candidate build, exact-artifact qualification, Trivy scans, promotion, `deploy.sh` archive verification, the disposable-runner `deploy.sh` smoke, draft-release storage and read-back |
+| `infrastructure/release/release.py` | Standard-library tooling: archive identities, required-check evaluation, findings, migration inventory, manifests, admission verification, package and release-chain verification, summaries |
+| `infrastructure/release/verify-release.sh` | Operator verification of a downloaded release package (attestation, records, `deploy.sh` verifier) before transfer |
+| `infrastructure/release/tests/test_release.py` | Unit tests of `release.py` (stdlib `unittest`) |
+| `docs/decisions/015-release-pipeline.md` | ADR015 |
+| `docs/decisions/release-admissions/` | Reserved for Leader admission records (`<record_id>.json`); not created until the first record. The existing `/docs/decisions/` CODEOWNERS rule (@chi-thanh-nguyen) covers it |
+
+`infrastructure/vm/tests/test-postgres-image-layer-equivalence.sh` gains an optional
+`POSTGRES_FLAT_IMAGE` input; unset, it behaves as before. The existing
+`/.github/workflows/`, `/infrastructure/` and `/docs/decisions/` CODEOWNERS rules cover
+every addition and are unchanged. No existing job, check name, ruleset, application
+dependency, module or directory outside these paths changes. The tree below shows the
+workflow and `infrastructure/release/` entries; its `docs/decisions/` listing predates
+ADR006 and is not reconciled by this record. The immutable canonical tree remains
+unchanged; this is an explicit addition, not a reinterpretation of its original
+inventory.
 
 ## ADR014 hybrid-authentication file additions — 16 November 2026
 
