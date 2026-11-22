@@ -670,9 +670,14 @@ draft_create() {
   [[ "$tag" =~ ^candidate-[0-9a-f]{12}-[0-9]+-[0-9]+$ || "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] \
     || fail "Malformed release tag."
   require_revision "$target"
-  if release_api "repos/$repo/git/ref/tags/$tag" >/dev/null 2>&1; then fail "Tag $tag already exists; a release is never replaced."; fi
-  [[ -z "$(release_api --paginate "repos/$repo/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | .id")" ]] \
-    || fail "A release or draft named $tag already exists; a release is never replaced."
+  # Both probes fail closed: an API error stops the stage instead of reading as "absent".
+  local tags existing
+  tags="$(release_api "repos/$repo/git/matching-refs/tags/$tag" --jq "[.[] | select(.ref == \"refs/tags/$tag\")] | length")" \
+    || fail "Cannot read the repository's tags."
+  [[ "$tags" == 0 ]] || fail "Tag $tag already exists; a release is never replaced."
+  existing="$(release_api --paginate "repos/$repo/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | .id")" \
+    || fail "Cannot list the repository's releases."
+  [[ -z "$existing" ]] || fail "A release or draft named $tag already exists; a release is never replaced."
   for f in "$dir"/*; do files+=("$f"); done
   files+=("$bundle")
   local marker="<!-- codemastery-release-run: ${GITHUB_RUN_ID:-}-${GITHUB_RUN_ATTEMPT:-} -->"

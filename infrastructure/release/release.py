@@ -244,7 +244,8 @@ def evaluate_checks(rules, runs, pr_runs=None, pr=None):
     """rules: GET /repos/{o}/{r}/rules/branches/main; runs: check runs of the revision.
 
     Every required context needs a completed, successful check run from the
-    required app (when the rule names one); the newest run per context decides.
+    required app (when the rule names one); the newest run per context must have
+    succeeded and no completed run of it may have any other conclusion.
     A context with no run at all on the revision (GitHub reports the CodeQL
     code-scanning check only on pull requests) may instead be satisfied on the
     head of the merged pull request whose merge commit is the revision, which is
@@ -269,6 +270,13 @@ def evaluate_checks(rules, runs, pr_runs=None, pr=None):
             candidates, evidence = matching(pr_runs or [], context, app), "merged pull request #%s head %s" % (pr.get("number"), (pr.get("head") or {}).get("sha"))
         if not candidates:
             refuse("required check '%s' has no check run on the revision or its merged pull request" % context)
+        # Every run is read (filter=all). Any workflow with checks: write can add a
+        # run under the required app's identity, so a later success never outweighs
+        # a completed run that did not succeed: such a revision is refused.
+        unsuccessful = [r for r in candidates if r.get("status") == "completed" and r.get("conclusion") != "success"]
+        if unsuccessful:
+            refuse("required check '%s' has a completed run that did not succeed (%s, %s); a later run never overrides it"
+                   % (context, unsuccessful[0].get("conclusion"), evidence))
         newest = max(candidates, key=lambda r: (r.get("started_at") or "", r.get("id") or 0))
         if newest.get("status") != "completed" or newest.get("conclusion") != "success":
             refuse("required check '%s' is %s/%s (%s)" % (context, newest.get("status"), newest.get("conclusion"), evidence))

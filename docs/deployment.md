@@ -4426,13 +4426,15 @@ draft, tag or release is ever overwritten: a rerun is a new candidate.
 1. Download every asset of the release draft into one directory (write access is
    needed to see drafts).
 2. On a workstation, from a clean checkout of the release's `source_revision`:
-   `infrastructure/release/verify-release.sh <dir> --source . --store <containerd|graphdriver>`.
+   `infrastructure/release/verify-release.sh <dir> --version v<x.y.z> --source . --store <containerd|graphdriver>`
+   (`--version` names the release you intend to transfer; another release is refused).
    Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand and
    add `--trusted-root trusted_root.jsonl`. The script verifies the attestation of
    `release.json`, the archive, `mc-source.tar.gz` and `admission.json` (signer
    `release.yml` on `refs/heads/main` exactly, at the recorded tooling commit), the
    agreement of release, admission and candidate records, the recorded merge of the
-   admission by its decider, the `deploy.sh`/Compose
+   admission by its decider, online that the admission record is still on `main`
+   unchanged (offline: check it on a connected host), the `deploy.sh`/Compose
    hashes and `deploy.sh`'s own archive verifier, then prints `--archive`,
    `--archive-sha256`, the five `--expect-image` values and `--source-revision`.
    `deploy.sh preflight` reports which image store the VM uses.

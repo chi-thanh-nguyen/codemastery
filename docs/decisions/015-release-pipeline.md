@@ -84,7 +84,11 @@ never cancelled; GitHub keeps one pending dispatch, which a newer dispatch repla
 A full 40-character SHA that is an ancestor of `origin/main` (default: the
 dispatched `main` commit), on which **every** required status check of the live
 `main` rules (`GET /repos/{owner}/{repo}/rules/branches/main`) has a completed,
-successful check run from the required app; the newest run per context decides.
+successful check run from the required app. All runs are read (`filter=all`): the
+newest run per context must have succeeded **and no completed run of that context may
+have any other conclusion**, because any workflow with `checks: write` in the repository
+can add a run under the required app's identity on any commit. A revision whose
+required check failed once and was re-run is therefore refused; pick a later revision.
 The list is read at run time, never hard-coded, so later ruleset changes apply
 automatically. GitHub reports the `CodeQL` code-scanning check (app 57789) only on
 pull requests; on `main` pushes only the `Analyze (…)` jobs appear (observed on
@@ -319,10 +323,13 @@ update or deployment authority.
 the consistency of release, admission and candidate records, the attestation of
 `release.json`, the archive, `mc-source.tar.gz` and `admission.json` (online, or
 offline against a previously fetched Sigstore trusted root; D3 policy), that
-`release.json` records the decider's merge of the admission, and with `--source` the
+`release.json` records the decider's merge of the admission, that the package is the
+release the operator names (`--version`, required), online that the admission record
+is still on `main` unchanged, and with `--source` the
 `deploy.sh`/Compose hashes and the source revision's `deploy.sh` archive verifier (run
 through the verifier's own `release.sh`, so a source revision older than
-`infrastructure/release/` works). It prints the
+`infrastructure/release/` works). The repository, the trust anchor, is fixed in the
+script. It prints the
 `deploy.sh` archive, identity and revision arguments. It grants nothing.
 
 ### D13 — Cost and checks
@@ -355,7 +362,8 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
    sole-Leader CODEOWNER paths are governance facts this pipeline cannot change.
    The required-check evaluation trusts check runs from the required app; any
    workflow with `checks: write` in this repository can create such runs on any
-   commit, as it can for the ruleset itself.
+   commit, as it can for the ruleset itself. A forged success cannot hide a failed
+   run (D2), but it can stand in for a context that has no run at all.
 3. Scanner false negatives and database lag; the rescan narrows, not closes, the
    window between admission and promotion.
 4. Images are not reproducible; a rebuilt candidate is a new artifact needing new
@@ -366,15 +374,26 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
 8. The candidate and promote jobs hold `id-token: write` for their whole run; the
    host steps that run there are the tooling from `main` and the source revision's
    suites (both protected code), while third-party build code runs inside Docker
-   builds without the runner environment. Splitting signing into a separate job would
-   need workflow artifacts, which a public repository exposes (D9).
+   builds without the runner environment. A separate signing job (attesting digests
+   passed as job outputs) was considered and not adopted: it would sign whatever
+   digests the building job reports, so a compromised building job would still obtain
+   valid attestations; malicious code on `main` is residual risk 1.
+9. Writers can cancel a running stage through a pull request whose own `release.yml`
+   uses the same concurrency group with cancellation, leave a partial draft when a
+   stage is cancelled or times out (it blocks that name until removed), re-run an old
+   `release.yml` run (old tooling, still signed as `main`), or publish a draft
+   (making the binaries public before the F1/F5 determination). All fail closed or are
+   visible in the repository; enabling immutable releases and keeping write access
+   narrow are the mitigations, both Leader decisions.
 
 ## 7. Supersession and amendments
 
 - **Focused review, 23 November 2026 (same session, not independent):** D2 tree
-  binding, D3 exact signer identity and source digest, D6 row-and-severity-bound rescan
-  and scan coverage, D7 merge-record verification and exact acceptance set, D12
-  verifier fixes, and token hardening. Same delegation and authority; recorded in
+  binding and refusal of any unsuccessful run, D3 exact signer identity and source
+  digest, D6 row-and-severity-bound rescan and scan coverage, D7 merge-record
+  verification and exact acceptance set, D12 verifier fixes (own `release.sh`, fixed
+  repository, required `--version`, admission still on `main`), fail-closed draft
+  probes, and token hardening. Same delegation and authority; recorded in
   [testing.md](../testing.md#focused-review-remediation--23-november-2026).
 
 - **F3:** implemented as a pipeline; the procedure is unchanged.

@@ -155,14 +155,14 @@ jobs:
           [[ "$INPUT_ORIGIN" =~ ^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] || { echo "public_origin is malformed." >&2; exit 1; }
           git merge-base --is-ancestor "$rev" origin/main || { echo "The revision is not on main." >&2; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/rules/branches/main" > "$RUNNER_TEMP/rules.json"
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$rev/check-runs?per_page=100" > "$RUNNER_TEMP/check-runs.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$rev/check-runs?per_page=100&filter=all" > "$RUNNER_TEMP/check-runs.json"
           # GitHub reports the CodeQL code-scanning check only on pull requests:
           # also read the merged pull request whose merge commit is the revision.
           gh api "repos/$GITHUB_REPOSITORY/commits/$rev/pulls" > "$RUNNER_TEMP/pulls.json"
           head="$(python3 -c 'import json,sys; p=[x for x in json.load(open(sys.argv[1])) if x.get("merged_at") and x.get("merge_commit_sha")==sys.argv[2] and x["base"]["ref"]=="main"]; print(p[0]["head"]["sha"] if len(p)==1 else "")' "$RUNNER_TEMP/pulls.json" "$rev")"
           pr_args=()
           if [[ -n "$head" ]]; then
-            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100" > "$RUNNER_TEMP/pr-check-runs.json"
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100&filter=all" > "$RUNNER_TEMP/pr-check-runs.json"
             pr_args=(--pulls "$RUNNER_TEMP/pulls.json" --pr-head "$head" --pr-check-runs "$RUNNER_TEMP/pr-check-runs.json"
                      --revision-tree "$(git rev-parse "$rev^{tree}")"
                      --pr-head-tree "$(gh api "repos/$GITHUB_REPOSITORY/commits/$head" --jq .commit.tree.sha)")

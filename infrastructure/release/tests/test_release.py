@@ -192,6 +192,19 @@ class CheckTests(unittest.TestCase):
         with self.assertRaises(release.Refused):
             release.evaluate_checks(self.rules, [backend], [self.run_("CodeQL", 57789, "neutral")], pr)
 
+    def test_a_later_success_never_overrides_a_failure(self):
+        failed = self.run_("Backend", 15368, "failure", started="2026-11-22T00:00:00Z", rid=1)
+        forged = self.run_("Backend", 15368, "success", started="2099-01-01T00:00:00Z", rid=2)
+        codeql = self.run_("CodeQL", 57789, "success")
+        with self.assertRaises(release.Refused):
+            release.evaluate_checks(self.rules, [failed, forged, codeql])
+        rerun_cancelled = self.run_("Backend", 15368, "cancelled", rid=3)
+        with self.assertRaises(release.Refused):
+            release.evaluate_checks(self.rules, [rerun_cancelled, forged, codeql])
+        pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
+        with self.assertRaises(release.Refused):  # the same rule on the merged pull request's head
+            release.evaluate_checks(self.rules, [forged], [self.run_("CodeQL", 57789, "failure"), codeql], pr)
+
     def test_fallback_requires_the_same_tree(self):
         pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
         with tempfile.TemporaryDirectory() as d:

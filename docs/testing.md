@@ -5802,6 +5802,16 @@ amended decisions.
 | R6 | P3 | Checkouts persisted the job token in `.git/config` | `persist-credentials: false`; `pull-requests: read` granted explicitly where pull requests are read |
 | R7 | P3 | Promotion used the admission's tag, revision and version before validating them | Validated first |
 | R8 | P3 | No record of what the scanner analysed (an undetected operating system yields fewer findings silently) | Per-image scan coverage in the manifests and the job summary |
+| R9 | P2 | The newest check run per context decided, so a later success created by any workflow with `checks: write` (same app identity) could override a failed required check; ADR015 D2 said a failure is never overridden | All runs are read (`filter=all`); any completed run of a required context that did not succeed refuses the revision |
+| R10 | P3 | `verify-release.sh --repository` moved the trust anchor (certificate identity and repository check together) | Removed; the repository is fixed |
+| R11 | P3 | `verify-release.sh` could not tell which release the operator meant: a validly attested other release passed | Required `--version`; online, the admission record must still be on `main` with the same blob |
+| R12 | P3 | Draft tag and release probes treated an API error as "absent" | Both fail closed |
+
+R9–R12 came from the separate-context review agent and were reproduced or checked
+before fixing. Its proposal to sign in a separate job was not adopted (that job would
+sign the digests the building job reports); this and its other P3 notes (concurrency
+cancellation by a pull request's own workflow, partial drafts after cancellation,
+re-runs of old runs, publication by writers) are recorded as ADR015 residual risks.
 
 Rejected hypotheses: main has no merge commits (linear history), so "ancestor of
 `main`" equals first-parent membership; `gh` 2.102.0 anchors `--signer-workflow`
@@ -5811,12 +5821,19 @@ public `cli/cli` asset).
 
 | Where | Check | Result |
 | --- | --- | --- |
-| Local, Python 3.9.6 | Unit tests (new: admission provenance with 12 refusals, rescan bound to admitted rows and severity, exact acceptance set, scan coverage, release chain without merge evidence, tree-bound fallback through the CLI) | 27/27 PASS; the new R1, R2 and coverage tests fail against `bc9db20`'s `release.py` |
+| Local, Python 3.9.6 | Unit tests (new: admission provenance with 12 refusals, rescan bound to admitted rows and severity, exact acceptance set, scan coverage, release chain without merge evidence, tree-bound fallback through the CLI) | 28/28 PASS; the new R1, R2, R9 and coverage tests fail against `bc9db20`'s `release.py` |
 | Local | actionlint 1.7.8; ShellCheck 0.11.0 on `release.sh` and `verify-release.sh` | Clean |
 | Local, bash 5.2 container | `rehearsal-admission refusals` on a synthetic candidate | 12 refusals, including the new acceptance and severity cases |
-| Live GitHub API, read-only | `evaluate-checks` for `257a915` with tree binding (PR #260 head tree equals the revision's) | 10/10 PASS |
+| Live GitHub API, read-only | `evaluate-checks` for `257a915` with `filter=all` and tree binding (every run on the revision and on PR #260's head succeeded; head tree equals the revision's) | 10/10 PASS |
+| Local | `verify-release.sh` on a synthetic package: wrong `--version` refused; unknown `--repository` refused; chain verified, then refused at the attestation gate (no attestation) | PASS |
 | Live GitHub API, read-only | `admission-provenance` on merged single-file PR #252 (`DESIGN.md`, merge `a7883e3`): accepted with the real merger; refused for another `decided_by` and for the parent blob | PASS |
 | `gh` 2.102.0, public `cli/cli` attestation | `--cert-identity` with `--source-ref`, `--source-digest` and `--deny-self-hosted-runners`, online and offline (`--bundle`, `--custom-trusted-root`); wrong ref or digest refused | PASS |
 
-The rehearsal and required checks for the remediation head are reported on the pull
-request. The dispatched stages remain unexecuted for the reasons above.
+CI run [45058829044](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45058829044)
+on the first remediation commit `4733f10` (R1–R8): `Release tooling` (27 tests) and
+`Release rehearsal` PASS in 15 minutes, including the 12 admission refusals (new:
+acceptance of an unreported finding, severity raised after the candidate scan), the
+candidate's own findings covered by its admission, and the recorded scan coverage
+(postgres alpine 3.24.3, minio none detected, minio-init wolfi, backend ubuntu 24.04,
+frontend alpine 3.24.2), equal between candidate scan and rescan. The rehearsal and
+required checks for the final remediation head are reported on the pull request. The dispatched stages remain unexecuted for the reasons above.
