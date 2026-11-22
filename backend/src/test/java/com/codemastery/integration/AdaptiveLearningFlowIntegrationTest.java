@@ -15,6 +15,8 @@ import com.codemastery.modules.course.application.service.CourseManagementServic
 import com.codemastery.modules.course.application.service.CourseManagementService.ConfigurationBusy;
 import com.codemastery.modules.assessment.application.service.QuestionBankService;
 import com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionInput;
+import com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionView;
+import com.codemastery.common.api.PageResponse;
 import com.codemastery.modules.course.application.service.CourseStructureService;
 import com.codemastery.modules.course.application.service.EnrollmentService;
 import com.codemastery.modules.course.domain.model.LearningMaterial;
@@ -78,6 +80,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -88,6 +91,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import java.util.UUID;
 
@@ -130,6 +134,8 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
 
     /** Runs once on the reading thread immediately before its prerequisite query is prepared. */
     private static final ThreadLocal<Runnable> BEFORE_PREREQUISITES = new ThreadLocal<>();
+    /** Runs once on the listing thread immediately before its ordered question page query is prepared. */
+    private static final ThreadLocal<Runnable> BEFORE_QUESTION_PAGE = new ThreadLocal<>();
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Autowired CourseManagementService service;
@@ -168,6 +174,11 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
                 BEFORE_PREREQUISITES.remove();
                 concurrentChange.run();
             }
+            Runnable pageChange = BEFORE_QUESTION_PAGE.get();
+            if (pageChange != null && sql.contains("from questions") && sql.contains("order by")) {
+                BEFORE_QUESTION_PAGE.remove();
+                pageChange.run();
+            }
             return sql;
         }
     }
@@ -192,6 +203,7 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         workers.shutdownNow();
         assertTrue(workers.awaitTermination(WAIT_SECONDS, TimeUnit.SECONDS));
         BEFORE_PREREQUISITES.remove();
+        BEFORE_QUESTION_PAGE.remove();
         String courseQuizzes = "(SELECT id FROM public.quizzes WHERE course_id IN (?,?,?))";
         jdbc.update("DELETE FROM public.attempt_answers WHERE attempt_id IN (SELECT id FROM public.attempts WHERE quiz_id IN "
                 + courseQuizzes + ")", COURSE, SECOND, HIDDEN);
@@ -1260,19 +1272,27 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         }
     }
 
-    /** AS08 capture is not implemented; a separate connection inserts the AttemptAnswer reference. */
+    /**
+     * AS06 composition and AS08 capture are not implemented; a separate connection inserts the
+     * QuizQuestion or AttemptAnswer reference and holds it uncommitted while the writer waits on the
+     * question row. An AttemptAnswer freezes both operations; a QuizQuestion refuses only DELETE.
+     */
     @ParameterizedTest
-    @CsvSource({"delete,true", "delete,false", "update,true", "update,false"})
-    void anAttemptCaptureReferencingAQuestionFreezesItBeforeAWaitingReplaceOrDelete(String operation, boolean captureCommits)
-            throws Exception {
-        UUID skill = skillRow(COURSE, "Tagged"), question = questionRow(skill), attempt = attemptRow(quizRow(COURSE));
+    @CsvSource({"attempt,delete,true", "attempt,delete,false", "attempt,update,true", "attempt,update,false",
+            "quiz,delete,true", "quiz,delete,false", "quiz,update,true", "quiz,update,false"})
+    void aConcurrentQuizOrAttemptReferenceDecidesAWaitingReplaceOrDelete(String reference, String operation,
+            boolean captureCommits) throws Exception {
+        UUID skill = skillRow(COURSE, "Tagged"), question = questionRow(skill), quiz = quizRow(COURSE);
+        UUID attempt = attemptRow(quiz);
         Connection capture = dataSource.getConnection();
         held.add(capture);
         capture.setAutoCommit(false);
-        try (PreparedStatement insert = capture.prepareStatement("INSERT INTO public.attempt_answers "
-                + "(id,attempt_id,question_id,position,selected_options) VALUES (?,?,?,1,ARRAY[false,false])")) {
+        try (PreparedStatement insert = capture.prepareStatement(reference.equals("attempt")
+                ? "INSERT INTO public.attempt_answers (id,attempt_id,question_id,position,selected_options) "
+                        + "VALUES (?,?,?,1,ARRAY[false,false])"
+                : "INSERT INTO public.quiz_questions (id,quiz_id,question_id,position) VALUES (?,?,?,1)")) {
             insert.setObject(1, UUID.randomUUID());
-            insert.setObject(2, attempt);
+            insert.setObject(2, reference.equals("attempt") ? attempt : quiz);
             insert.setObject(3, question);
             insert.executeUpdate();
         }
@@ -1283,14 +1303,40 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         awaitLockWaiters(1);
         assertFalse(writer.isDone(), "the question row lock waits for the uncommitted reference");
         if (captureCommits) capture.commit(); else capture.rollback();
-        if (captureCommits) {
-            BusinessRuleException frozen = assertInstanceOf(BusinessRuleException.class, failureOf(writer));
-            assertEquals(409, frozen.getStatus().value());
+        boolean refused = captureCommits && (reference.equals("attempt") || operation.equals("delete"));
+        if (refused) {
+            BusinessRuleException conflict = assertInstanceOf(BusinessRuleException.class, failureOf(writer));
+            assertEquals(409, conflict.getStatus().value());
             assertEquals("Pick one|easy", questionElsewhere(question));
         } else {
             writer.get(WAIT_SECONDS, TimeUnit.SECONDS);
             assertEquals(operation.equals("delete") ? "none" : "Changed|hard", questionElsewhere(question));
         }
+        assertFalse(rootLockedElsewhere(COURSE));
+    }
+
+    /**
+     * ADR007 §7: scope, count and rows of one list come from one REPEATABLE READ snapshot. Between
+     * the count and the ordered page query another connection commits a question of a Course skill
+     * and a new skill with its own question; the page shows neither and agrees with its count.
+     */
+    @Test void aQuestionListIsOneSnapshotEvenWhenAWriterCommitsBetweenItsCountAndItsPage() {
+        UUID skill = skillRow(COURSE, "Listed"), first = questionRow(skill);
+        UUID late = UUID.randomUUID(), lateSkill = UUID.randomUUID(), lateSkillQuestion = UUID.randomUUID();
+        String insertQuestion = "INSERT INTO public.questions (id,skill_id,prompt,kind,difficulty,options,correct_options) "
+                + "VALUES (?,?,'Late','true_false','easy',ARRAY['True','False'],ARRAY[true,false])";
+        BEFORE_QUESTION_PAGE.set(() -> {
+            commitSqlElsewhere(insertQuestion, late, skill);
+            commitSqlElsewhere("INSERT INTO public.skills (id,course_id,name) VALUES (?,?,'Late skill')", lateSkill, COURSE);
+            commitSqlElsewhere(insertQuestion, lateSkillQuestion, lateSkill);
+        });
+        PageResponse<QuestionView> during = as(OWNER, Role.INSTRUCTOR, () -> questionBank.list(COURSE, 0, 20));
+        assertNull(BEFORE_QUESTION_PAGE.get(), "the concurrent commits ran between the list's count and page");
+        assertEquals(1L, during.totalElements());
+        assertEquals(List.of(first), during.content().stream().map(QuestionView::id).toList());
+        PageResponse<QuestionView> after = as(OWNER, Role.INSTRUCTOR, () -> questionBank.list(COURSE, 0, 20));
+        assertEquals(3L, after.totalElements());
+        assertEquals(Set.of(first, late, lateSkillQuestion), after.content().stream().map(QuestionView::id).collect(Collectors.toSet()));
     }
 
     @Test void questionScopesOfIndependentCoursesStayApart() {

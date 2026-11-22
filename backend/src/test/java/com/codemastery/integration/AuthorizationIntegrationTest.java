@@ -39,6 +39,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -800,9 +801,9 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
 
     /**
      * CT23 question bank (ADR007 §§4, 7) through the production security chain, CT03 and CT18:
-     * Instructor-only routing, Course ownership, closed bodies and no-store on every outcome. The
-     * CT40 producer (AD07 #165) and Course guard (CO14 #177) are absent, so an admitted owner's valid
-     * request fails closed with a safe 500 and no effect until they are integrated.
+     * Instructor-only routing, Course ownership, closed bodies and no-store on every outcome. An
+     * admitted owner's request runs through the real CT40 producer ({@code SkillGraphService}, AD07
+     * #165) and the CO14 Course guard (#177).
      */
     @Nested
     class QuestionBankEndpoints {
@@ -971,6 +972,64 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                 }
             }
             assertEquals(before, bank());
+        }
+
+        /**
+         * Text PostgreSQL cannot store faithfully is 400 (NUL, an unpaired surrogate in the prompt or an
+         * option); a supplementary character round-trips exactly. Raw bytes that are not UTF-8 are never a
+         * 5xx and never store a value other than the one echoed to the caller.
+         */
+        @Test
+        void unicodeBodiesAreStoredExactlyAsEchoedOrRejected() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course + "/questions";
+            String before = bank();
+            for (String body : List.of(validBody().replace("Predict the output", "Predict \\u0000"),
+                    validBody().replace("[\"1\",\"2\"]", "[\"1\",\"\\udc00\"]"),
+                    validBody().replace("[\"1\",\"2\"]", "[\"1\",\"\\ud83d\\ud83d\"]"))) {
+                mvc.perform(post(base).header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content(body))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            assertEquals(before, bank());
+
+            String supplementary = "x \u2265 1 \uD83D\uDE42";
+            String created = mvc.perform(post(base).header("Authorization", "Bearer " + bearer)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(validBody().replace("Predict the output", supplementary).replace("\"2\"]", "\"\uD835\uDC65\"]")
+                                    .getBytes(StandardCharsets.UTF_8)))
+                    .andExpect(status().isCreated())
+                    .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+            JsonNode echoed = JSON.readTree(created);
+            UUID createdId = UUID.fromString(echoed.get("id").asString());
+            assertEquals(supplementary, echoed.get("prompt").asString());
+            assertEquals(supplementary, jdbc.queryForObject("SELECT prompt FROM public.questions WHERE id = ?", String.class, createdId));
+            assertEquals("\uD835\uDC65", jdbc.queryForObject("SELECT options[2] FROM public.questions WHERE id = ?", String.class, createdId));
+
+            byte[] prefix = "{\"skillId\":\"".concat(skill.toString()).concat("\",\"prompt\":\"P ").getBytes(StandardCharsets.UTF_8);
+            byte[] suffix = "\",\"kind\":\"single_choice\",\"difficulty\":\"easy\",\"options\":[\"1\",\"2\"],\"correctOptions\":[true,false]}"
+                    .getBytes(StandardCharsets.UTF_8);
+            for (byte[] raw : List.of(new byte[] {(byte) 0xC3, 0x28}, new byte[] {(byte) 0xED, (byte) 0xA0, (byte) 0x80},
+                    new byte[] {(byte) 0xF4, (byte) 0x90, (byte) 0x80, (byte) 0x80}, new byte[] {(byte) 0xFF})) {
+                byte[] body = new byte[prefix.length + raw.length + suffix.length];
+                System.arraycopy(prefix, 0, body, 0, prefix.length);
+                System.arraycopy(raw, 0, body, prefix.length, raw.length);
+                System.arraycopy(suffix, 0, body, prefix.length + raw.length, suffix.length);
+                var response = mvc.perform(post(base).header("Authorization", "Bearer " + bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content(body))
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andReturn().getResponse();
+                int status = response.getStatus();
+                assertTrue(status == 201 || status == 400, "raw bytes " + HexFormat.of().formatHex(raw) + " gave " + status);
+                if (status == 201) {
+                    JsonNode stored = JSON.readTree(response.getContentAsString(StandardCharsets.UTF_8));
+                    String prompt = stored.get("prompt").asString();
+                    assertTrue(prompt.codePoints().noneMatch(c -> c >= Character.MIN_SURROGATE && c <= Character.MAX_SURROGATE), prompt);
+                    assertEquals(prompt, jdbc.queryForObject("SELECT prompt FROM public.questions WHERE id = ?", String.class,
+                            UUID.fromString(stored.get("id").asString())));
+                }
+            }
         }
 
         /** CT23.questions: a QuizQuestion or AttemptAnswer reference freezes and protects the definition. */
