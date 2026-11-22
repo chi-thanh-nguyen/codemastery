@@ -1774,9 +1774,9 @@ The following stay synchronized with this record:
   role, including the used-definition and referenced-delete 409s.
 
 Remaining gates: owning-module (Assessment @minhtan29042006), `@tihh647-ui` infrastructure and
-independent Leader CODEOWNER review; protected integration after r5 (PR #264); these grants on any
-shared or production database (Leader-reserved). This revision executes no provisioning on any real
-database.
+independent Leader CODEOWNER review; protected integration (r5 is on `main` since PR #264,
+`dfd816c`); these grants on any shared or production database (Leader-reserved). This revision
+executes no provisioning on any real database.
 
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
