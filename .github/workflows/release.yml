@@ -1,0 +1,282 @@
+name: Release
+
+# Phase 4 release pipeline (ADR015): candidate -> qualification -> security
+# admission -> release promotion. Implementation: infrastructure/release/.
+#
+# - stage=candidate (manual, from main): builds the five linux/amd64 candidates
+#   from a revision on main whose required checks passed, qualifies the exact
+#   images, scans them, packages the evidence, attests the package (GitHub
+#   artifact attestation, Sigstore) and stores it in a DRAFT release.
+# - stage=promote (manual, from main): requires a Leader admission record
+#   committed under docs/decisions/release-admissions/. It verifies the
+#   candidate's attestation and every admitted identity, rescans, promotes the
+#   admitted images to the codemastery.invalid/*:release names, runs deploy.sh
+#   on the release archive and stores the attested package in a DRAFT release.
+# - pull_request: an unprivileged rehearsal of both stages with a synthetic
+#   REHEARSAL admission; no attestation, upload or release.
+#
+# The workflow never publishes a release, creates a tag, pushes an image,
+# uploads a workflow artifact (the repository is public) or contacts a VM.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'candidate or promote'
+        type: choice
+        options: [candidate, promote]
+        required: true
+      revision:
+        description: 'candidate: full commit SHA on main (empty = the dispatched main commit)'
+        required: false
+        default: ''
+      public_origin:
+        description: 'candidate: the single HTTPS origin baked into the frontend (ADR009 L2)'
+        required: false
+        default: 'https://codemastery.app'
+      compatibility_baseline:
+        description: 'candidate (optional): full SHA whose Flyway migrations a target may already hold'
+        required: false
+        default: ''
+      admission:
+        description: 'promote: admission record ID (docs/decisions/release-admissions/<ID>.json)'
+        required: false
+        default: ''
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - 'infrastructure/release/**'
+      - 'infrastructure/vm/**'
+      - 'infrastructure/minio/**'
+      - 'infrastructure/postgres/**'
+      - 'infrastructure/docker-compose.yml'
+      - 'backend/Dockerfile'
+      - 'frontend/Dockerfile'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Dispatched stages are serialized and never cancelled; a newer push cancels
+  # an older rehearsal of the same pull request.
+  group: ${{ github.event_name == 'pull_request' && format('release-rehearsal-{0}', github.event.pull_request.number) || 'release-dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tooling:
+    name: Release tooling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check script syntax and run the release tooling unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in infrastructure/release/*.sh; do bash -n "$script"; done
+          python3 -m unittest discover -s infrastructure/release/tests -v
+
+  rehearsal:
+    name: Release rehearsal
+    if: github.event_name == 'pull_request'
+    needs: tooling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable the containerd image store
+        shell: bash
+        run: bash infrastructure/release/release.sh enable-containerd-store
+      - name: Build, qualify, scan and package a rehearsal candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash infrastructure/release/release.sh candidate-package "$PWD" "$RUNNER_TEMP/candidate" \
+            "$(git rev-parse HEAD)" https://codemastery.app true
+      - name: Admission refusals against the real candidate manifest
+        shell: bash
+        run: bash infrastructure/release/release.sh rehearsal-admission refusals "$RUNNER_TEMP/candidate" "$PWD"
+      - name: Promote with a synthetic REHEARSAL admission and run deploy.sh on the release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          admission="$(bash infrastructure/release/release.sh rehearsal-admission create "$RUNNER_TEMP/candidate" "$RUNNER_TEMP")"
+          bash infrastructure/release/release.sh release-package "$RUNNER_TEMP/candidate" "$PWD" \
+            "$RUNNER_TEMP/release" "$admission" true "$PWD"
+      - name: Summarize the rehearsal
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: python3 infrastructure/release/release.py summary "$RUNNER_TEMP" REHEARSAL >> "$GITHUB_STEP_SUMMARY" || true
+
+  candidate:
+    name: Release candidate
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'candidate'
+    needs: tooling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: write        # draft release only
+      checks: read           # required checks of the source revision
+      id-token: write        # Sigstore signing identity for the attestation
+      attestations: write
+    steps:
+      - name: Require the main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Release stages run only from main." >&2
+          exit 1
+      - uses: actions/checkout@v7
+        with:
+          path: tooling
+          fetch-depth: 0
+      - name: Resolve and verify the source revision
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_REVISION: ${{ inputs.revision }}
+          INPUT_BASELINE: ${{ inputs.compatibility_baseline }}
+          INPUT_ORIGIN: ${{ inputs.public_origin }}
+        working-directory: tooling
+        run: |
+          set -euo pipefail
+          rev="${INPUT_REVISION:-$GITHUB_SHA}"
+          [[ "$rev" =~ ^[0-9a-f]{40}$ ]] || { echo "revision must be a full lowercase commit SHA." >&2; exit 1; }
+          [[ -z "$INPUT_BASELINE" || "$INPUT_BASELINE" =~ ^[0-9a-f]{40}$ ]] || { echo "compatibility_baseline must be a full SHA." >&2; exit 1; }
+          [[ "$INPUT_ORIGIN" =~ ^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] || { echo "public_origin is malformed." >&2; exit 1; }
+          git merge-base --is-ancestor "$rev" origin/main || { echo "The revision is not on main." >&2; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/rules/branches/main" > "$RUNNER_TEMP/rules.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$rev/check-runs?per_page=100" > "$RUNNER_TEMP/check-runs.json"
+          python3 infrastructure/release/release.py evaluate-checks --rules "$RUNNER_TEMP/rules.json" \
+            --check-runs "$RUNNER_TEMP/check-runs.json" > "$RUNNER_TEMP/source-checks.json"
+          echo "revision=$rev" >> "$GITHUB_OUTPUT"
+          echo "tag=candidate-${rev:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          git worktree add --detach "$GITHUB_WORKSPACE/source" "$rev"
+      - name: Enable the containerd image store
+        shell: bash
+        run: bash tooling/infrastructure/release/release.sh enable-containerd-store
+      - name: Build, qualify, scan and package the candidate
+        shell: bash
+        env:
+          REV: ${{ steps.source.outputs.revision }}
+          INPUT_ORIGIN: ${{ inputs.public_origin }}
+          INPUT_BASELINE: ${{ inputs.compatibility_baseline }}
+        run: |
+          set -euo pipefail
+          bash tooling/infrastructure/release/release.sh candidate-package "$GITHUB_WORKSPACE/source" \
+            "$RUNNER_TEMP/candidate" "$REV" "$INPUT_ORIGIN" false "$RUNNER_TEMP/source-checks.json" "$INPUT_BASELINE"
+      - name: Attest the candidate package
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/candidate/SHA256SUMS
+      - name: Store the candidate in a draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.source.outputs.tag }}
+          REV: ${{ steps.source.outputs.revision }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          install -m 0644 "$BUNDLE" "$RUNNER_TEMP/release-candidate.sigstore.json"
+          python3 tooling/infrastructure/release/release.py summary "$RUNNER_TEMP" CANDIDATE > "$RUNNER_TEMP/notes.md"
+          bash tooling/infrastructure/release/release.sh draft-create "$TAG" "$REV" "Candidate ${REV:0:12} (run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}) - NOT ADMITTED" \
+            "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/release-candidate.sigstore.json"
+      - name: Summarize the candidate
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: python3 tooling/infrastructure/release/release.py summary "$RUNNER_TEMP" CANDIDATE >> "$GITHUB_STEP_SUMMARY" || true
+
+  promote:
+    name: Release promotion
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'promote'
+    needs: tooling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write        # read the candidate draft; create the release draft
+      id-token: write
+      attestations: write
+    steps:
+      - name: Require the main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Release stages run only from main." >&2
+          exit 1
+      - uses: actions/checkout@v7
+        with:
+          path: tooling
+          fetch-depth: 0
+      - name: Locate the admission record and download the admitted candidate
+        id: admission
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_ADMISSION: ${{ inputs.admission }}
+        working-directory: tooling
+        run: |
+          set -euo pipefail
+          [[ "$INPUT_ADMISSION" =~ ^[A-Z0-9][A-Z0-9-]{7,79}$ && "$INPUT_ADMISSION" != REHEARSAL-* ]] \
+            || { echo "admission must be a record ID." >&2; exit 1; }
+          file="docs/decisions/release-admissions/${INPUT_ADMISSION}.json"
+          git ls-files --error-unmatch -- "$file" >/dev/null || { echo "The admission record is not committed on main." >&2; exit 1; }
+          read -r tag rev version < <(python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); print(a["candidate"]["release_tag"], a["source_revision"], a["release"]["version"])' "$file")
+          git merge-base --is-ancestor "$rev" origin/main || { echo "The admitted revision is not on main." >&2; exit 1; }
+          bash infrastructure/release/release.sh draft-download "$tag" "$RUNNER_TEMP/candidate"
+          git worktree add --detach "$GITHUB_WORKSPACE/source" "$rev"
+          {
+            echo "file=$file"; echo "version=$version"; echo "revision=$rev"
+            echo "commit=$(git log -n 1 --format=%H -- "$file")"
+          } >> "$GITHUB_OUTPUT"
+      - name: Verify the candidate attestation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/candidate"
+          python3 "$GITHUB_WORKSPACE/tooling/infrastructure/release/release.py" verify-package . --kind candidate \
+            --allow-extra release-candidate.sigstore.json
+          attest=(--repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+                  --source-ref refs/heads/main --deny-self-hosted-runners)
+          for file in release-candidate.json "$(python3 -c 'import json; print(json.load(open("release-candidate.json"))["archive"]["name"])')" mc-source.tar.gz; do
+            gh attestation verify "$file" "${attest[@]}" >/dev/null
+            gh attestation verify "$file" "${attest[@]}" --bundle release-candidate.sigstore.json >/dev/null
+          done
+          echo "Candidate manifest, archive and mc source carry a valid release.yml attestation from main."
+      - name: Enable the containerd image store
+        shell: bash
+        run: bash tooling/infrastructure/release/release.sh enable-containerd-store
+      - name: Verify the admission, rescan, promote and run deploy.sh on the release archive
+        shell: bash
+        env:
+          ADMISSION_FILE: ${{ steps.admission.outputs.file }}
+          ADMISSION_COMMIT: ${{ steps.admission.outputs.commit }}
+        run: |
+          set -euo pipefail
+          bash tooling/infrastructure/release/release.sh release-package "$RUNNER_TEMP/candidate" "$GITHUB_WORKSPACE/source" \
+            "$RUNNER_TEMP/release" "$GITHUB_WORKSPACE/tooling/$ADMISSION_FILE" false "$GITHUB_WORKSPACE/tooling" "$ADMISSION_COMMIT"
+      - name: Attest the release package
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/release/SHA256SUMS
+      - name: Store the release in a draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.admission.outputs.version }}
+          REV: ${{ steps.admission.outputs.revision }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          install -m 0644 "$BUNDLE" "$RUNNER_TEMP/release.sigstore.json"
+          python3 tooling/infrastructure/release/release.py summary "$RUNNER_TEMP" RELEASE > "$RUNNER_TEMP/notes.md"
+          bash tooling/infrastructure/release/release.sh draft-create "$VERSION" "$REV" "CodeMastery $VERSION (draft; not deployed)" \
+            "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/release" "$RUNNER_TEMP/release.sigstore.json"
+      - name: Summarize the promotion
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: python3 tooling/infrastructure/release/release.py summary "$RUNNER_TEMP" RELEASE >> "$GITHUB_STEP_SUMMARY" || true
