@@ -6,29 +6,20 @@ import com.codemastery.modules.adaptive.infrastructure.persistence.entity.PathRe
 import org.springframework.stereotype.Component;
 
 /**
- * Scalar mapping between {@link PathRecommendation} and its V005 row.
+ * Scalar mapping between the AD03 {@link PathRecommendation} record and its V005 row
+ * (AD06.mapping).
  *
- * <p>
- * AD06.mapping checkpoint. ADR011 §9 requires every persisted row to keep its
- * type,
- * target Lesson, reason and time, so all five ADR03 fields are carried
- * unchanged and
- * nothing is collapsed. The type is persisted by
- * {@link RecommendationType#getCode()},
- * so exactly {@code continue}, {@code skip} and {@code remedial} are stored,
- * matching
- * the V005 {@code ck_path_recommendations_type} check. An unrecognised stored
- * code is a
- * failure, never a fallback.
+ * <p>ADR011 §9 requires every persisted row to keep its type, target Lesson, reason and time, so
+ * the identifier, Enrollment, Lesson, type, reason and instant are carried unchanged and nothing
+ * is collapsed, trimmed or re-timed. The type is persisted by {@link RecommendationType#getCode()},
+ * so exactly {@code continue}, {@code skip} and {@code remedial} are stored, matching the V005
+ * {@code ck_path_recommendations_type} check. An unrecognised stored code is a failure, never a
+ * fallback. A {@code null} input maps to {@code null}; V005's {@code NOT NULL} columns stay the
+ * authority on missing values.
  *
- * <p>
- * Reason templates, name ordering and the single per-run instant are the
- * caller's
- * obligations under ADR011 §§7 and 9 (CT07.routing and CT07.reasons). This
- * mapper never
- * samples a clock.
+ * <p>Reason templates, name ordering and the single per-run instant are the caller's obligations
+ * under ADR011 §§7 and 9. This mapper never samples a clock.
  */
-
 @Component
 public class RecommendationMapper {
 
@@ -58,11 +49,13 @@ public class RecommendationMapper {
                 entity.getRecommendedAt());
     }
 
-    public static String toCode(RecommendationType type) {
+    /** The exact V005 stored code of a recommendation type. */
+    public String toCode(RecommendationType type) {
         return type == null ? null : type.getCode();
     }
 
-    public static RecommendationType toType(String code) {
+    /** The type whose V005 code is exactly {@code code}; any other spelling is rejected. */
+    public RecommendationType toType(String code) {
         if (code == null) {
             return null;
         }
@@ -71,6 +64,6 @@ public class RecommendationMapper {
                 return type;
             }
         }
-        throw new IllegalArgumentException("Unknown recommendation type code");
+        throw new IllegalArgumentException("Unknown recommendation type code: '" + code + "'");
     }
 }
