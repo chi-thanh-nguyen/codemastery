@@ -710,6 +710,31 @@ material. Raw reports are not uploaded. `E2E` is a required check of the `main-q
 (see above). A green run is infrastructure evidence, not CT19/CT35/CT20.F Final coverage
 acceptance.
 
+A fifth workflow, `Release` ([release.yml](../.github/workflows/release.yml)), is the
+Phase 4 release pipeline ([ADR015](decisions/015-release-pipeline.md),
+[operator view](deployment.md#phase-4-release-pipeline--23-november-2026)). It is not a
+required check and changes no job above. `Release tooling` runs `bash -n` on
+`infrastructure/release/*.sh` and the `release.py` unit tests
+(`python3 -m unittest discover -s infrastructure/release/tests -v`; standard library
+only). On pull requests that change release inputs (the workflow,
+`infrastructure/release/`, `infrastructure/vm/`, `infrastructure/minio/`,
+`infrastructure/postgres/`, the base Compose file, `backend/Dockerfile` or
+`frontend/Dockerfile`), `Release rehearsal` runs both stages with `contents: read`: it
+enables the containerd image store, builds the five linux/amd64 candidates, reloads
+them from their archive, runs the exact-candidate qualification (the MinIO initializer
+suite against the minimal server, `test-java-truststore.sh`,
+`test-runtime-real-backend-privileges.sh`, `test-postgres-image-layer-equivalence.sh`
+with `POSTGRES_FLAT_IMAGE`, image hardening), scans with Trivy, packages, runs a
+`deploy.sh` preflight/load/provision smoke with refusal cases on a release-named copy,
+checks admission refusals against the real candidate manifest, then promotes with a
+synthetic `REHEARSAL-` admission, rescans, verifies the release archive with
+`deploy.sh` for both image stores and repeats the smoke on it. It attests, uploads and
+publishes nothing. `Release candidate` and `Release promotion` run only by manual
+dispatch from `main` with the permissions ADR015 lists; they store attested packages in
+draft releases and never publish. The smoke creates `/etc/codemastery` and a Compose
+project named `codemastery` and therefore refuses to run anywhere but a fresh
+GitHub-hosted runner.
+
 The Backend and Frontend jobs end with an informational evidence step that writes
 to the run's job summary unless the run was cancelled, including after a failed
 step. Both record the checked-out commit (the tested merge commit on pull

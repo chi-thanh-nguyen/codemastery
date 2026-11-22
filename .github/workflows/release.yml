@@ -148,8 +148,17 @@ jobs:
           git merge-base --is-ancestor "$rev" origin/main || { echo "The revision is not on main." >&2; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/rules/branches/main" > "$RUNNER_TEMP/rules.json"
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$rev/check-runs?per_page=100" > "$RUNNER_TEMP/check-runs.json"
-          python3 infrastructure/release/release.py evaluate-checks --rules "$RUNNER_TEMP/rules.json" \
-            --check-runs "$RUNNER_TEMP/check-runs.json" > "$RUNNER_TEMP/source-checks.json"
+          # GitHub reports the CodeQL code-scanning check only on pull requests:
+          # also read the merged pull request whose merge commit is the revision.
+          gh api "repos/$GITHUB_REPOSITORY/commits/$rev/pulls" > "$RUNNER_TEMP/pulls.json"
+          head="$(python3 -c 'import json,sys; p=[x for x in json.load(open(sys.argv[1])) if x.get("merged_at") and x.get("merge_commit_sha")==sys.argv[2] and x["base"]["ref"]=="main"]; print(p[0]["head"]["sha"] if len(p)==1 else "")' "$RUNNER_TEMP/pulls.json" "$rev")"
+          pr_args=()
+          if [[ -n "$head" ]]; then
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100" > "$RUNNER_TEMP/pr-check-runs.json"
+            pr_args=(--pulls "$RUNNER_TEMP/pulls.json" --pr-head "$head" --pr-check-runs "$RUNNER_TEMP/pr-check-runs.json")
+          fi
+          python3 infrastructure/release/release.py evaluate-checks --revision "$rev" --rules "$RUNNER_TEMP/rules.json" \
+            --check-runs "$RUNNER_TEMP/check-runs.json" "${pr_args[@]}" > "$RUNNER_TEMP/source-checks.json"
           echo "revision=$rev" >> "$GITHUB_OUTPUT"
           echo "tag=candidate-${rev:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
           git worktree add --detach "$GITHUB_WORKSPACE/source" "$rev"

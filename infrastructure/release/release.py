@@ -229,11 +229,25 @@ def archive_identities(archive, refs):
 # --------------------------------------------------------------------------
 # Required status checks of the source revision
 
-def evaluate_checks(rules, runs):
-    """rules: GET /repos/{o}/{r}/rules/branches/main; runs: list of check runs.
+def merged_pull_request(pulls, revision):
+    """The single PR merged into main whose merge commit is the revision, or None."""
+    merged = [p for p in pulls if isinstance(p, dict) and p.get("merged_at") and p.get("merge_commit_sha") == revision
+              and (p.get("base") or {}).get("ref") == "main"]
+    if len(merged) > 1:
+        refuse("more than one merged pull request claims the revision")
+    return merged[0] if merged else None
 
-    Every required context must have a completed, successful check run from the
-    required app (when the rule names one). The newest run per context decides.
+
+def evaluate_checks(rules, runs, pr_runs=None, pr=None):
+    """rules: GET /repos/{o}/{r}/rules/branches/main; runs: check runs of the revision.
+
+    Every required context needs a completed, successful check run from the
+    required app (when the rule names one); the newest run per context decides.
+    A context with no run at all on the revision (GitHub reports the CodeQL
+    code-scanning check only on pull requests) may instead be satisfied on the
+    head of the merged pull request whose merge commit is the revision, which is
+    where the ruleset enforced it. A failed or pending run on the revision is
+    never overridden.
     """
     required = []
     for rule in rules if isinstance(rules, list) else []:
@@ -242,17 +256,21 @@ def evaluate_checks(rules, runs):
                 required.append((item.get("context"), item.get("integration_id")))
     if not required:
         refuse("no required status checks were found for the default branch; refusing to treat the revision as qualified")
+
+    def matching(pool, context, app):
+        return [r for r in pool if r.get("name") == context and (app is None or (r.get("app") or {}).get("id") == app)]
+
     results = []
     for context, app in sorted(set(required), key=lambda x: (x[0] or "", x[1] or 0)):
-        candidates = [r for r in runs if r.get("name") == context
-                      and (app is None or (r.get("app") or {}).get("id") == app)]
+        candidates, evidence = matching(runs, context, app), "revision"
+        if not candidates and pr is not None:
+            candidates, evidence = matching(pr_runs or [], context, app), "merged pull request #%s head %s" % (pr.get("number"), (pr.get("head") or {}).get("sha"))
         if not candidates:
-            refuse("required check '%s' has no check run on the revision" % context)
+            refuse("required check '%s' has no check run on the revision or its merged pull request" % context)
         newest = max(candidates, key=lambda r: (r.get("started_at") or "", r.get("id") or 0))
         if newest.get("status") != "completed" or newest.get("conclusion") != "success":
-            refuse("required check '%s' is %s/%s on the revision"
-                   % (context, newest.get("status"), newest.get("conclusion")))
-        results.append({"context": context, "app_id": app, "conclusion": "success",
+            refuse("required check '%s' is %s/%s (%s)" % (context, newest.get("status"), newest.get("conclusion"), evidence))
+        results.append({"context": context, "app_id": app, "conclusion": "success", "evidence": evidence,
                         "check_run_id": newest.get("id"), "url": newest.get("html_url")})
     return results
 
@@ -562,12 +580,24 @@ def cmd_archive_identities(a):
     print(json.dumps(archive_identities(a.archive, a.ref), indent=2, sort_keys=True))
 
 
-def cmd_evaluate_checks(a):
-    rules = load_json(a.rules, "branch rules")
+def _check_run_pages(path, what):
     runs = []
-    for page in load_json(a.check_runs, "check runs") or []:
+    for page in load_json(path, what) or []:
         runs.extend(page.get("check_runs") or [] if isinstance(page, dict) else [])
-    results = evaluate_checks(rules, runs)
+    return runs
+
+
+def cmd_evaluate_checks(a):
+    if not REVISION.match(a.revision):
+        refuse("--revision must be a full commit SHA")
+    rules = load_json(a.rules, "branch rules")
+    pr = merged_pull_request(load_json(a.pulls, "pull requests"), a.revision) if a.pulls else None
+    pr_runs = None
+    if pr is not None:
+        if not a.pr_check_runs or (pr.get("head") or {}).get("sha") != a.pr_head:
+            refuse("the merged pull request's head check runs are required and must match its head")
+        pr_runs = _check_run_pages(a.pr_check_runs, "pull request check runs")
+    results = evaluate_checks(rules, _check_run_pages(a.check_runs, "check runs"), pr_runs, pr)
     print(json.dumps(results, indent=2, sort_keys=True))
 
 
@@ -830,6 +860,16 @@ def cmd_summary(a):
                 out += ["", "| Findings | " + " | ".join(SEVERITIES) + " |", "| --- |" + " --- |" * len(SEVERITIES)]
                 for svc in SERVICES:
                     out.append("| %s | " % svc + " | ".join(str(counts.get(svc, {}).get(sev, 0)) for sev in SEVERITIES) + " |")
+            sec = m.get("security") or {}
+            rows = [f for f in (sec.get("findings") or sec.get("rescan_findings") or [])
+                    if f.get("severity") in ("CRITICAL", "HIGH")]
+            if rows:
+                out += ["", "<details><summary>%d CRITICAL/HIGH findings (public advisories)</summary>" % len(rows), "",
+                        "| Service | Severity | Advisory | Package | Installed | Fixed |", "| --- | --- | --- | --- | --- | --- |"]
+                for f in rows:
+                    out.append("| %s | %s | `%s` | `%s` | `%s` | `%s` |" % tuple(
+                        str(f.get(k, "")).replace("|", "/")[:80] for k in ("service", "severity", "id", "package", "installed", "fixed")))
+                out += ["", "</details>"]
             out += ["", "Status: " + "; ".join("%s=%s" % kv for kv in sorted(m.get("status", {}).items())), ""]
         except (Refused, KeyError, TypeError):
             out += ["**%s:** manifest present but unreadable." % title, ""]
@@ -860,6 +900,10 @@ def main(argv=None):
     s = sub.add_parser("evaluate-checks")
     s.add_argument("--rules", required=True)
     s.add_argument("--check-runs", required=True, help="slurped pages of GET .../commits/REV/check-runs")
+    s.add_argument("--revision", required=True)
+    s.add_argument("--pulls", help="GET .../commits/REV/pulls")
+    s.add_argument("--pr-head", help="head SHA of the merged pull request")
+    s.add_argument("--pr-check-runs", help="slurped check-run pages of that head")
     s.set_defaults(func=cmd_evaluate_checks)
 
     s = sub.add_parser("findings")

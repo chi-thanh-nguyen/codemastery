@@ -2025,6 +2025,12 @@ entrypoint/command. Merging alone would not remove them.
 
 ### Release build outside the VM
 
+**Superseded as the supported path, 23 November 2026:** the
+[Phase 4 release pipeline](#phase-4-release-pipeline--23-november-2026)
+([ADR015](decisions/015-release-pipeline.md)) builds, qualifies, attests and packages
+the five images in GitHub Actions. The manual recipe below is kept as the dated
+historical procedure.
+
 The required tags are fixed by the override. Every image must be linux/amd64 (B1),
 whatever the build host's own architecture. The recipe needs Docker Engine 28 or
 later on the build host, for `docker save --platform`. It follows the archive flow
@@ -4395,3 +4401,64 @@ for `quizzes`, `quiz_questions` and `attempts` inside it), and the extension pro
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.
+
+## Phase 4 release pipeline — 23 November 2026
+
+[ADR015](decisions/015-release-pipeline.md) records the authority (the Leader's
+Phase 4 delegation), every technical decision and its alternatives. This section is
+the operator's view. It approves nothing beyond ADR015 and changes no earlier record.
+`deploy.sh`, the Compose files and the Dockerfiles are unchanged.
+
+### Stages
+
+| Stage | How | Result |
+| --- | --- | --- |
+| 1. Candidate | Actions → **Release** → *Run workflow* on `main`, `stage=candidate`; optional `revision` (full SHA on `main`, default the dispatched commit), `public_origin` (default `https://codemastery.app`) and `compatibility_baseline` | Every required check of `main` must be green on the revision. Five linux/amd64 candidates are built, reloaded from their archive, qualified (MinIO initializer suite with the minimal server, backend trust store and runtime privileges, byte-clean PostgreSQL, image hardening, `deploy.sh` preflight/load/provision smoke and update-guard refusals), scanned (Trivy default and comprehensive, SPDX SBOMs), packaged, attested and stored as the draft release `candidate-<12-hex>-<run>-<attempt>`, titled “NOT ADMITTED” |
+| 2. Security admission | The Leader reviews the candidate draft and commits `docs/decisions/release-admissions/<record_id>.json` through a pull request. `python3 infrastructure/release/release.py admission-template --candidate-manifest release-candidate.json --release-tag <candidate tag> --version v<x.y.z>` prints a `PENDING` template with the exact identities and every finding | Only `decision: "ADMITTED"` by a code owner of `/docs/decisions/`, naming that candidate's manifest and archive digests, all ten identities, the origin, the revision and every finding, permits promotion ([fields](decisions/015-release-pipeline.md#d7--the-admission-record)) |
+| 3. Promotion | `stage=promote`, `admission=<record_id>` | Candidate attestation, package and admission are verified; images are retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; a fresh rescan must hold no finding the record does not accept; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
+| 4. Publication | Not automated | Un-drafting, tagging or making binaries public is a Leader decision that first needs the F1/F5 licensing determination ([D9](decisions/015-release-pipeline.md#d9--storage-retention-and-publication)) |
+
+A failure at any step stops the stage without a draft. Nothing is retried, and no
+draft, tag or release is ever overwritten: a rerun is a new candidate.
+
+### Using a release package with `deploy.sh`
+
+1. Download every asset of the release draft into one directory (write access is
+   needed to see drafts).
+2. On a workstation, from a clean checkout of the release's `source_revision`:
+   `infrastructure/release/verify-release.sh <dir> --source . --store <containerd|graphdriver>`.
+   Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand and
+   add `--trusted-root trusted_root.jsonl`. The script verifies the attestation of
+   `release.json`, the archive, `mc-source.tar.gz` and `admission.json`, the
+   agreement of release, admission and candidate records, the `deploy.sh`/Compose
+   hashes and `deploy.sh`'s own archive verifier, then prints `--archive`,
+   `--archive-sha256`, the five `--expect-image` values and `--source-revision`.
+   `deploy.sh preflight` reports which image store the VM uses.
+3. Transfer the archive with `mc-source.tar.gz` (the AGPL Corresponding Source of the
+   initializer's `mc`). The channel and custody remain P8 inputs; nothing here selects
+   them.
+4. Use the `deploy.sh` checkout of the same `source_revision` (ADR009 §9.3). On a host
+   with existing containers or volumes, `deploy.sh` still requires the four P9 update
+   attestations (`--recovery-artifact-verified`, `--schema-image-compatibility-verified`,
+   `--persistent-state-preserved`, `--update-authorization`). `release.json` lists the
+   Flyway migration inventory to compare with the target's `flyway_schema_history`,
+   and what the release does not verify.
+
+### What this does not establish
+
+No candidate has been built from `main` by this pipeline, admitted or promoted, and no
+artifact has been published, transferred or loaded on the Azure VM. The deployed
+preview's revision, image identities, volumes and Flyway state are not verified by
+any repository evidence; the GitHub pre-release `v0.1.0-preview.1` (source
+`061102e3…`, no assets) and the local preview package of
+[ADR009 §2.3](decisions/009-ct17-final-runtime-recovery.md#23-exact-local-historical-release-identities)
+remain historical records, not a verified VM state. Release blockers 2–7 above keep
+their status, except that blocker 3's artifact admission review and package custody
+now have an implemented mechanism; the VM transfer channel and custody remain open.
+Pipeline verification is recorded in
+[testing.md](testing.md#phase-4-release-pipeline-verification--23-november-2026).
+
+This record, the pipeline and its tests were produced through AI-assisted development
+(Anthropic Claude Code) under the Leader's task. Trivy, Sigstore (through GitHub
+artifact attestations) and GitHub Actions are used by the pipeline; no AI service or
+runtime technology is added to CodeMastery.

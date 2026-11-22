@@ -173,6 +173,25 @@ class CheckTests(unittest.TestCase):
         with self.assertRaises(release.Refused):
             release.evaluate_checks([{"type": "pull_request"}], [ok])
 
+    def test_merged_pull_request_fallback(self):
+        pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
+        self.assertIs(release.merged_pull_request([pr, dict(pr, merge_commit_sha="c" * 40)], REV), pr)
+        self.assertIsNone(release.merged_pull_request([dict(pr, merged_at=None)], REV))
+        self.assertIsNone(release.merged_pull_request([dict(pr, base={"ref": "other"})], REV))
+        with self.assertRaises(release.Refused):
+            release.merged_pull_request([pr, dict(pr, number=8)], REV)
+        backend = self.run_("Backend", 15368, "success")
+        codeql_on_pr = self.run_("CodeQL", 57789, "success")
+        result = release.evaluate_checks(self.rules, [backend], [codeql_on_pr], pr)
+        self.assertEqual([r["evidence"].split()[0] for r in result], ["revision", "merged"])
+        # The pull request never overrides a run that exists on the revision.
+        with self.assertRaises(release.Refused):
+            release.evaluate_checks(self.rules, [backend, self.run_("CodeQL", 57789, "failure")], [codeql_on_pr], pr)
+        with self.assertRaises(release.Refused):  # no merged PR: no fallback
+            release.evaluate_checks(self.rules, [backend], [codeql_on_pr], None)
+        with self.assertRaises(release.Refused):
+            release.evaluate_checks(self.rules, [backend], [self.run_("CodeQL", 57789, "neutral")], pr)
+
 
 def trivy_report(rows):
     return {"SchemaVersion": 2, "Results": [{"Target": "t", "Vulnerabilities": [
