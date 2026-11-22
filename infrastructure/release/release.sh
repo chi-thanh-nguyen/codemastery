@@ -534,7 +534,7 @@ release_package() {
   local reports=(); for s in "${SERVICES[@]}"; do reports+=(--report "$s=$out/$s.trivy-rescan.json" --report "$s=$out/$s.trivy-rescan-comprehensive.json"); done
   python3 "$RELEASE_PY" findings "${reports[@]}" --output "$out.rescan-findings.json" --coverage-output "$out.rescan-coverage.json"
   python3 "$RELEASE_PY" check-rescan --admission "$admission" --candidate-manifest "$candidate/release-candidate.json" \
-    --findings "$out.rescan-findings.json"
+    --findings "$out.rescan-findings.json" --rescan-coverage "$out.rescan-coverage.json"
 
   install -m 0644 "$admission" "$out/admission.json"
   install -m 0644 "$candidate/release-candidate.json" "$out/release-candidate.json"
@@ -641,19 +641,37 @@ PY
   else
     log "The candidate has no findings; the unaccepted-finding case is covered by the unit tests."
   fi
+  # The candidate's own coverage stands in for a full rescan's coverage.
+  python3 -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["security"]["coverage"], open(sys.argv[2], "w"))' \
+    "$manifest" "$work/coverage.json"
+  local cov=(--rescan-coverage "$work/coverage.json")
   printf '[{"service":"backend","id":"CVE-0000-00000","package":"injected","installed":"1","fixed":"","severity":"CRITICAL","target":"t"}]\n' > "$work/injected.json"
   if python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
-       --findings "$work/injected.json" >/dev/null 2>&1; then
+       --findings "$work/injected.json" "${cov[@]}" >/dev/null 2>&1; then
     fail "A promotion-time finding outside the admission was accepted."
   fi
   n=$((n + 1)); log "refused as required: promotion-time finding outside the admission"
   python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
-    --findings "$candidate/findings.json" >/dev/null || fail "The candidate's own findings must be covered by its admission."
+    --findings "$candidate/findings.json" "${cov[@]}" >/dev/null || fail "The candidate's own findings must be covered by its admission."
+  # Promotion-time scan coverage below the candidate scan's (a lost OS, a missing target).
+  python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); s=next(s for s in c if c[s]["os"]); c[s]["os"]=None; json.dump(c, open(sys.argv[2], "w"))' \
+    "$work/coverage.json" "$work/coverage-os-lost.json"
+  python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); s=next(s for s in c if c[s]["targets"]); c[s]["targets"]=c[s]["targets"][1:]; json.dump(c, open(sys.argv[2], "w"))' \
+    "$work/coverage.json" "$work/coverage-target-lost.json"
+  local lost err
+  for lost in os-lost target-lost; do
+    if err="$(python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
+         --findings "$candidate/findings.json" --rescan-coverage "$work/coverage-$lost.json" 2>&1 >/dev/null)"; then
+      fail "A promotion rescan with lower scan coverage ($lost) was accepted."
+    fi
+    [[ "$err" == *"COVERAGE LOST"* ]] || fail "A promotion rescan with lower scan coverage ($lost) was refused for another reason."
+    n=$((n + 1)); log "refused as required: promotion rescan coverage below the candidate scan ($lost)"
+  done
   if python3 -c 'import json,sys; f=json.load(open(sys.argv[1])); sys.exit(0 if any(x["severity"] != "CRITICAL" for x in f) else 1)' "$candidate/findings.json"; then
     python3 -c 'import json,sys; f=json.load(open(sys.argv[1])); x=next(x for x in f if x["severity"] != "CRITICAL"); x["severity"]="CRITICAL"; print(json.dumps([x]))' \
       "$candidate/findings.json" > "$work/raised.json"
     if python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
-         --findings "$work/raised.json" >/dev/null 2>&1; then
+         --findings "$work/raised.json" "${cov[@]}" >/dev/null 2>&1; then
       fail "A promotion-time severity increase was accepted."
     fi
     n=$((n + 1)); log "refused as required: a finding whose severity rose after the candidate scan"

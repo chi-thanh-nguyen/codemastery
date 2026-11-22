@@ -244,8 +244,10 @@ def evaluate_checks(rules, runs, pr_runs=None, pr=None):
     """rules: GET /repos/{o}/{r}/rules/branches/main; runs: check runs of the revision.
 
     Every required context needs a completed, successful check run from the
-    required app (when the rule names one); the newest run per context must have
-    succeeded and no completed run of it may have any other conclusion.
+    required app (when the rule names one), and every run of it must be completed
+    and successful: a queued, in-progress or otherwise unfinished run, or a
+    completed run with any other conclusion, refuses the revision whatever else
+    succeeded.
     A context with no run at all on the revision (GitHub reports the CodeQL
     code-scanning check only on pull requests) may instead be satisfied on the
     head of the merged pull request whose merge commit is the revision, which is
@@ -271,15 +273,18 @@ def evaluate_checks(rules, runs, pr_runs=None, pr=None):
         if not candidates:
             refuse("required check '%s' has no check run on the revision or its merged pull request" % context)
         # Every run is read (filter=all). Any workflow with checks: write can add a
-        # run under the required app's identity, so a later success never outweighs
-        # a completed run that did not succeed: such a revision is refused.
-        unsuccessful = [r for r in candidates if r.get("status") == "completed" and r.get("conclusion") != "success"]
+        # run under the required app's identity, so no success, however recent,
+        # outweighs a run that is unfinished or did not succeed: such a revision is
+        # refused until every run of the context has completed successfully.
+        unfinished = [r for r in candidates if r.get("status") != "completed"]
+        if unfinished:
+            refuse("required check '%s' has a run that has not completed (%s, %s); wait for it, a later success never overrides it"
+                   % (context, unfinished[0].get("status"), evidence))
+        unsuccessful = [r for r in candidates if r.get("conclusion") != "success"]
         if unsuccessful:
             refuse("required check '%s' has a completed run that did not succeed (%s, %s); a later run never overrides it"
                    % (context, unsuccessful[0].get("conclusion"), evidence))
         newest = max(candidates, key=lambda r: (r.get("started_at") or "", r.get("id") or 0))
-        if newest.get("status") != "completed" or newest.get("conclusion") != "success":
-            refuse("required check '%s' is %s/%s (%s)" % (context, newest.get("status"), newest.get("conclusion"), evidence))
         results.append({"context": context, "app_id": app, "conclusion": "success", "evidence": evidence,
                         "check_run_id": newest.get("id"), "url": newest.get("html_url")})
     return results
@@ -311,11 +316,25 @@ def normalize_findings(service, reports):
     return sorted(rows.values(), key=lambda r: (r["service"], SEVERITIES.index(r["severity"]), r["id"], r["package"]))
 
 
+def coverage_target(result):
+    """A scanned target in a form that depends only on the image's contents.
+
+    Trivy names the operating-system result after the scanned input (the archive
+    path, which holds the image name), so that result is identified by its class
+    and OS type alone. Package results keep their path inside the image.
+    """
+    klass, kind = result.get("Class") or "", result.get("Type") or ""
+    if klass == "os-pkgs":
+        return "os-pkgs/%s" % kind
+    return "%s/%s:%s" % (klass, kind, (result.get("Target") or "").lstrip("/"))
+
+
 def scan_coverage(reports):
     """What the scanner analysed in one service's reports: detected OS and result targets.
 
-    Recorded as admission evidence: an image whose OS the scanner did not detect or
-    no longer supports yields fewer findings without failing the scan.
+    An image whose OS the scanner did not detect or no longer supports yields fewer
+    findings without failing the scan: recorded as admission evidence, and the
+    promotion rescan must cover at least as much (check_coverage).
     """
     os_names, eosl, targets = set(), False, set()
     for path in reports:
@@ -325,12 +344,44 @@ def scan_coverage(reports):
             os_names.add("%s %s" % (detected.get("Family"), detected.get("Name") or ""))
         eosl = eosl or detected.get("EOSL") is True
         for result in report.get("Results") or []:
-            targets.add("%s [%s/%s]" % (os.path.basename(result.get("Target") or ""), result.get("Class") or "",
-                                        result.get("Type") or ""))
+            targets.add(coverage_target(result))
     if len(os_names) > 1:
         refuse("scanner reports of one image disagree on its operating system")
     return {"os": os_names.pop().strip() if os_names else None, "os_end_of_support": eosl,
             "targets": sorted(targets)}
+
+
+def _os_name(value):
+    return " ".join(value.split()).lower() if isinstance(value, str) and value.strip() else None
+
+
+def check_coverage(candidate_coverage, rescan_coverage):
+    """Per service, what the promotion rescan analysed less than the candidate scan.
+
+    A rescan that no longer detects the candidate's operating system (or detects
+    another), newly reports it as end of support, or lacks any target the
+    candidate scan analysed would report fewer findings without failing; each is
+    refused. Targets are compared in their image-independent form.
+    """
+    problems = []
+    for service in SERVICES:
+        cand = (candidate_coverage if isinstance(candidate_coverage, dict) else {}).get(service)
+        rescan = (rescan_coverage if isinstance(rescan_coverage, dict) else {}).get(service)
+        if not isinstance(cand, dict) or not isinstance(rescan, dict) \
+                or not isinstance(cand.get("targets"), list) or not isinstance(rescan.get("targets"), list):
+            problems.append((service, "scan coverage is missing or malformed"))
+            continue
+        cand_os, rescan_os = _os_name(cand.get("os")), _os_name(rescan.get("os"))
+        if cand_os and rescan_os != cand_os:
+            problems.append((service, "operating system %s detected by the candidate scan, %s by the rescan"
+                             % (cand_os, rescan_os or "none")))
+        if rescan.get("os_end_of_support") is True and cand.get("os_end_of_support") is not True:
+            problems.append((service, "the rescan reports the operating system as end of support"))
+        missing = set(cand["targets"]) - set(rescan["targets"])
+        if missing:
+            problems.append((service, "%d target(s) of the candidate scan were not scanned: %s"
+                             % (len(missing), ", ".join(sorted(missing))[:300])))
+    return problems
 
 
 def count_findings(findings):
@@ -642,8 +693,10 @@ def check_rescan(accepted_keys, candidate_findings, findings):
 
     A rescan row is covered only when its {service, id, package} is accepted and
     the admitted candidate reported the same row (same installed version) at the
-    same or a higher severity. A new advisory, a newly matched installed version or
-    a severity raised since the candidate scan needs a new admission.
+    same or a higher severity. An admission accepts exactly its candidate's
+    findings and has no other way to accept a row, so a new advisory, a newly
+    matched installed version or a severity raised since the candidate scan makes
+    this candidate unpromotable: a new candidate, then a new admission, is needed.
     """
     admitted = {}
     for f in candidate_findings:
@@ -809,11 +862,18 @@ def cmd_check_rescan(a):
     findings = load_json(a.findings, "rescan findings")
     accepted = {(i["service"], i["id"], i["package"]) for i in admission.get("accepted_findings") or []}
     unaccepted = check_rescan(accepted, candidate["security"]["findings"], findings)
+    lost = check_coverage(candidate["security"].get("coverage"), load_json(a.rescan_coverage, "rescan coverage"))
+    for service, vid, pkg, reason in unaccepted:
+        print("NOT ACCEPTED: %s %s %s (%s)" % (service, vid, pkg, reason), file=sys.stderr)
+    for service, reason in lost:
+        print("COVERAGE LOST: %s (%s)" % (service, reason), file=sys.stderr)
+    if lost:
+        refuse("the promotion rescan analysed less than the candidate scan for %d image(s); its findings cannot show "
+               "the admission still holds: resolve the scanner change, then build a new candidate and admit it" % len(lost))
     if unaccepted:
-        for service, vid, pkg, reason in unaccepted:
-            print("NOT ACCEPTED: %s %s %s (%s)" % (service, vid, pkg, reason), file=sys.stderr)
-        refuse("%d promotion-time finding(s) are not covered by the admission record; a new admission is required" % len(unaccepted))
-    print("Every promotion-time finding is covered by the admission record.")
+        refuse("%d promotion-time finding(s) are not covered by the admission record; this candidate cannot be promoted: "
+               "build a new candidate and admit it with a new admission record" % len(unaccepted))
+    print("Every promotion-time finding is covered by the admission record; the rescan covered every target the candidate scan did.")
 
 
 def cmd_release_manifest(a):
@@ -1075,6 +1135,7 @@ def main(argv=None):
     s.add_argument("--admission", required=True)
     s.add_argument("--candidate-manifest", required=True)
     s.add_argument("--findings", required=True)
+    s.add_argument("--rescan-coverage", required=True, help="findings --coverage-output of the rescan")
     s.set_defaults(func=cmd_check_rescan)
 
     s = sub.add_parser("release-manifest")

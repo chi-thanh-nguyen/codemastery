@@ -5837,3 +5837,22 @@ candidate's own findings covered by its admission, and the recorded scan coverag
 (postgres alpine 3.24.3, minio none detected, minio-init wolfi, backend ubuntu 24.04,
 frontend alpine 3.24.2), equal between candidate scan and rescan. The rehearsal and
 required checks for the final remediation head are reported on the pull request. The dispatched stages remain unexecuted for the reasons above.
+
+### Independent review remediation — 23 November 2026
+
+A separate-session review of PR #267 at `18d6ec0` (verdict: technically sound with three
+P3 notes, no P0–P2) was followed, at the Leader's request, by these fixes:
+
+| ID | Severity | Defect at `18d6ec0` | Fix |
+| --- | --- | --- | --- |
+| F1 | P3 | A queued or running run of a required context was overridden by a newer completed success, which any workflow with `checks: write` can create (R9 covered completed failures only) | Every run of a required context must be completed and successful; an unfinished run refuses the revision |
+| F2 | P3 | An uncovered promotion-time finding was refused with "a new admission is required", but an admission can accept only its candidate's findings | The refusal, `check_rescan` and ADR015 D6 name the actual remedy: a new candidate, then a new admission; the fail-closed exact-set policy is unchanged |
+| F3 | P3 | The rescan's scan coverage was recorded but not compared with the candidate scan's | `check-rescan --rescan-coverage` (required) refuses a lost or different OS, a newly reported end of support, or a missing candidate target; targets are recorded by content (`os-pkgs/<type>`, `<class>/<type>:<path in image>`), independent of the scanned archive's name |
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, Python 3.9.6 | Unit tests (new: unfinished runs beside a newer success, on the revision and the merged pull request's head; coverage equal under different archive names and paths, more coverage accepted; lost, changed or end-of-support OS, missing or moved target, missing or malformed coverage refused; `check-rescan` CLI names the new-candidate remedy and requires the coverage argument) | 32/32 PASS; the new tests fail against `18d6ec0`'s `release.py` (9 failures, 8 errors) |
+| Local, bash 5.2 container | `rehearsal-admission refusals` on a synthetic candidate | 14 refusals, including the two new coverage-loss cases |
+
+The pull request's `Release rehearsal` compares the real candidate scan's coverage with
+the real rescan's. The dispatched stages remain unexecuted.

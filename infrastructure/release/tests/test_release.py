@@ -205,6 +205,30 @@ class CheckTests(unittest.TestCase):
         with self.assertRaises(release.Refused):  # the same rule on the merged pull request's head
             release.evaluate_checks(self.rules, [forged], [self.run_("CodeQL", 57789, "failure"), codeql], pr)
 
+    def test_an_unfinished_run_is_never_overridden(self):
+        # F1: a queued or running real run, with a newer success beside it (for example a
+        # run forged by a workflow with checks: write), still refuses the revision.
+        codeql = self.run_("CodeQL", 57789, "success")
+        forged = self.run_("Backend", 15368, "success", started="2099-01-01T00:00:00Z", rid=9)
+        for status in ("queued", "in_progress", "waiting", "requested", "pending", None):
+            real = self.run_("Backend", 15368, None, started=None if status in ("queued", None) else "2026-11-22T00:00:00Z",
+                             status=status, rid=1)
+            with self.subTest(status=status):
+                with self.assertRaises(release.Refused) as raised:
+                    release.evaluate_checks(self.rules, [real, forged, codeql])
+                self.assertIn("has not completed", str(raised.exception))
+                with self.assertRaises(release.Refused):   # order of the API listing does not matter
+                    release.evaluate_checks(self.rules, [forged, real, codeql])
+        # The same rule on the merged pull request's head.
+        pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
+        backend = self.run_("Backend", 15368, "success")
+        with self.assertRaises(release.Refused):
+            release.evaluate_checks(self.rules, [backend],
+                                    [self.run_("CodeQL", 57789, None, status="in_progress", rid=3), codeql], pr)
+        # Several completed successful runs (re-runs that all passed) still qualify.
+        again = self.run_("Backend", 15368, "success", started="2026-11-22T02:00:00Z", rid=4)
+        self.assertEqual(release.evaluate_checks(self.rules, [backend, again, codeql])[0]["check_run_id"], 4)
+
     def test_fallback_requires_the_same_tree(self):
         pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
         with tempfile.TemporaryDirectory() as d:
@@ -263,7 +287,7 @@ class FindingsAndMigrationTests(unittest.TestCase):
             dump(dict(trivy_report([]), Metadata={"OS": {"Family": "alpine", "Name": "3.24.3"}}), a)
             dump(dict(trivy_report([]), Metadata={"OS": {"Family": "alpine", "Name": "3.24.3", "EOSL": True}}), b)
             c = release.scan_coverage([a, b])
-            self.assertEqual((c["os"], c["os_end_of_support"], c["targets"]), ("alpine 3.24.3", True, ["t [/]"]))
+            self.assertEqual((c["os"], c["os_end_of_support"], c["targets"]), ("alpine 3.24.3", True, ["/:t"]))
             dump(trivy_report([]), a)
             self.assertIsNone(release.scan_coverage([a])["os"])
             dump(dict(trivy_report([]), Metadata={"OS": {"Family": "debian", "Name": "12"}}), a)
@@ -304,6 +328,102 @@ def candidate_manifest(rehearsal=False, verified=True):
             "archive": {"name": "a.tar", "sha256": "b" * 64},
             "security": {"findings": [{"service": "backend", "id": "CVE-1", "package": "libc6", "severity": "MEDIUM"}]},
             "source_qualification": {"verified": verified}}
+
+
+def coverage_report(archive, os_family="alpine", os_name="3.24.3", eosl=False, jar="app/app.jar"):
+    """A Trivy report as `trivy image --input ARCHIVE` writes it: the OS result is named after the archive."""
+    results = []
+    meta = {}
+    if os_family:
+        meta = {"OS": {"Family": os_family, "Name": os_name, "EOSL": eosl}}
+        results.append({"Target": "%s (%s %s)" % (archive, os_family, os_name), "Class": "os-pkgs", "Type": os_family})
+    if jar:
+        results.append({"Target": jar, "Class": "lang-pkgs", "Type": "jar"})
+    return dict({"SchemaVersion": 2, "Results": results}, Metadata=meta)
+
+
+class CoverageGateTests(unittest.TestCase):
+    """F3: the promotion rescan must analyse at least what the candidate scan analysed."""
+
+    def coverage(self, d, name, **variants):
+        """Coverage of all five services; variants[service] overrides that service's report."""
+        out = {}
+        for s in SERVICES:
+            path = os.path.join(d, "%s-%s.json" % (name, s))
+            dump(coverage_report(**dict({"archive": "/work/%s.tar" % s}, **variants.get(s, {}))), path)
+            out[s] = release.scan_coverage([path])
+        return out
+
+    def test_equal_coverage_with_different_image_names_and_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            cand = self.coverage(d, "cand", backend={"archive": "/work/codemastery-candidate-backend-abc.tar"})
+            rescan = self.coverage(d, "rescan", backend={"archive": "/tmp/scan/codemastery.invalid_backend_release.tar"})
+            self.assertEqual(cand["backend"]["targets"], ["lang-pkgs/jar:app/app.jar", "os-pkgs/alpine"])
+            self.assertEqual(release.check_coverage(cand, rescan), [])
+            # More coverage at promotion is not a loss; OS names compare without case or spacing noise.
+            more = copy.deepcopy(cand)
+            more["minio"]["targets"].append("gobinary/gobinary:usr/bin/extra")
+            self.assertEqual(release.check_coverage(cand, more), [])
+            rescan["postgres"]["os"] = "  Alpine   3.24.3 "
+            self.assertEqual(release.check_coverage(cand, rescan), [])
+            no_os = self.coverage(d, "noos", minio={"os_family": None})
+            self.assertEqual(release.check_coverage(no_os, cand), [])   # an OS newly detected is more coverage
+
+    def test_lost_coverage_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            cand = self.coverage(d, "cand")
+            cases = {
+                "os no longer detected": {"backend": {"os_family": None}},
+                "another os": {"backend": {"os_family": "debian", "os_name": "12"}},
+                "newly end of support": {"backend": {"eosl": True}},
+                "missing target": {"backend": {"jar": None}},
+                "moved target": {"backend": {"jar": "app/other.jar"}},
+            }
+            for label, variants in cases.items():
+                with self.subTest(label):
+                    problems = release.check_coverage(cand, self.coverage(d, label.replace(" ", "-"), **variants))
+                    self.assertTrue(problems)
+                    self.assertEqual({p[0] for p in problems}, {"backend"})
+            for label, rescan in (("missing", None), ("service missing", {s: cand[s] for s in SERVICES[1:]}),
+                                  ("malformed", dict(cand, backend={"os": None, "targets": "x"}))):
+                with self.subTest(label):
+                    self.assertTrue(release.check_coverage(cand, rescan))
+                    self.assertTrue(release.check_coverage(rescan, cand))
+
+    def test_check_rescan_cli(self):
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "release.py")
+        with tempfile.TemporaryDirectory() as d:
+            cand = candidate_manifest()
+            cand["security"]["coverage"] = self.coverage(d, "cand")
+            cand["security"]["findings"][0]["installed"] = "1"
+            paths = {n: os.path.join(d, n + ".json") for n in ("cand", "adm", "same", "new", "cov", "lost")}
+            dump(cand, paths["cand"])
+            dump({"accepted_findings": [{"service": "backend", "id": "CVE-1", "package": "libc6"}]}, paths["adm"])
+            dump(cand["security"]["findings"], paths["same"])
+            dump(cand["security"]["findings"] + [dict(cand["security"]["findings"][0], id="CVE-2")], paths["new"])
+            dump(self.coverage(d, "rescan", frontend={"archive": "/elsewhere/frontend.tar"}), paths["cov"])
+            dump(self.coverage(d, "lost", frontend={"os_family": None}), paths["lost"])
+
+            def run(findings, coverage):
+                return subprocess.run([sys.executable, script, "check-rescan", "--admission", paths["adm"],
+                                       "--candidate-manifest", paths["cand"], "--findings", paths[findings],
+                                       "--rescan-coverage", paths[coverage]], capture_output=True, text=True)
+            self.assertEqual(run("same", "cov").returncode, 0)
+            p = run("new", "cov")   # F2: the remedy named is a new candidate, then a new admission
+            self.assertEqual(p.returncode, 3)
+            self.assertIn("cannot be promoted", p.stderr)
+            self.assertIn("new candidate", p.stderr)
+            p = run("same", "lost")
+            self.assertEqual(p.returncode, 3)
+            self.assertIn("COVERAGE LOST: frontend", p.stderr)
+            self.assertNotIn("Traceback", p.stderr)
+            del cand["security"]["coverage"]   # a candidate without recorded coverage cannot be promoted
+            dump(cand, paths["cand"])
+            self.assertEqual(run("same", "cov").returncode, 3)
+            p = subprocess.run([sys.executable, script, "check-rescan", "--admission", paths["adm"],
+                                "--candidate-manifest", paths["cand"], "--findings", paths["same"]],
+                               capture_output=True, text=True)
+            self.assertNotEqual(p.returncode, 0)   # the coverage argument is required
 
 
 class AdmissionTests(unittest.TestCase):

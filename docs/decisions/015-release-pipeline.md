@@ -85,10 +85,12 @@ A full 40-character SHA that is an ancestor of `origin/main` (default: the
 dispatched `main` commit), on which **every** required status check of the live
 `main` rules (`GET /repos/{owner}/{repo}/rules/branches/main`) has a completed,
 successful check run from the required app. All runs are read (`filter=all`): the
-newest run per context must have succeeded **and no completed run of that context may
-have any other conclusion**, because any workflow with `checks: write` in the repository
-can add a run under the required app's identity on any commit. A revision whose
-required check failed once and was re-run is therefore refused; pick a later revision.
+newest run per context must have succeeded, **every run of that context must have
+completed, and no completed run may have any other conclusion**, because any workflow
+with `checks: write` in the repository can add a run under the required app's identity
+on any commit. A revision whose required check failed once and was re-run is therefore
+refused; pick a later revision. A queued or running run also refuses it, however
+recent a success beside it; dispatch again once it has finished.
 The list is read at run time, never hard-coded, so later ruleset changes apply
 automatically. GitHub reports the `CodeQL` code-scanning check (app 57789) only on
 pull requests; on `main` pushes only the `Analyze (…)` jobs appear (observed on
@@ -201,10 +203,16 @@ not cover**, whatever its severity. A rescan row is covered only when its
 `{service, id, package}` is accepted **and** the admitted candidate reported the same
 row (same installed version) at the same or a higher severity: a new advisory, a newly
 matched installed version, or a severity raised since the candidate scan (including any
-reclassification of `UNKNOWN`) needs a new admission. Each manifest also records the
-scan coverage per image (detected operating system, end-of-support flag, scanned
-targets), because an operating system the scanner does not detect yields fewer findings
-without failing the scan; the job summary shows it to the Leader.
+reclassification of `UNKNOWN`) makes the candidate unpromotable: an admission accepts
+exactly its candidate's findings, so the remedy is **a new candidate and a new admission
+for it**. Each manifest also records the scan coverage per image (detected operating
+system, end-of-support flag, scanned targets), because an operating system the scanner
+does not detect yields fewer findings without failing the scan; the job summary shows it
+to the Leader. Promotion **refuses a rescan that covers less** than the candidate scan:
+the candidate's operating system no longer (or differently) detected, newly reported as
+end of support, or any candidate target not scanned. Targets are compared by content
+(the OS result by its type, package results by their path in the image), not by the
+scanned archive's name.
 
 ### D7 — The admission record
 
@@ -346,7 +354,7 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
 | Mutable tags or self-declared inputs | Identities are digests recomputed from archive bytes; the admission is a reviewed file on `main`; the source revision must be on `main` with green required checks |
 | Promotion before admission | The promote job refuses without an `ADMITTED`, committed, code-owner record matching the attested candidate exactly |
 | Forged admission authority | `decided_by` must be the account that merged a pull request changing only the record (GitHub's `merged_by`), not just a typed login |
-| Security gate bypass | Exactly the candidate's findings must be accepted; promotion rescans and fails on any row not admitted at that installed version and severity |
+| Security gate bypass | Exactly the candidate's findings must be accepted; promotion rescans and fails on any row not admitted at that installed version and severity, and on any loss of scan coverage |
 | Token exposure to build or test code | Checkouts do not persist the token; `GH_TOKEN` is set only on the steps that call the API; Docker builds receive no runner environment |
 | Rerun or tag replacement | Unique candidate names, refusal of existing tags/releases, asset read-back, attestations |
 | Rehearsal leakage into a real release | Rehearsal records need `REHEARSAL-` and `rehearsal: true`; real promotion refuses both and any rehearsal candidate; rehearsals have read-only tokens |
@@ -362,8 +370,8 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
    sole-Leader CODEOWNER paths are governance facts this pipeline cannot change.
    The required-check evaluation trusts check runs from the required app; any
    workflow with `checks: write` in this repository can create such runs on any
-   commit, as it can for the ruleset itself. A forged success cannot hide a failed
-   run (D2), but it can stand in for a context that has no run at all.
+   commit, as it can for the ruleset itself. A forged success cannot hide a failed or
+   unfinished run (D2), but it can stand in for a context that has no run at all.
 3. Scanner false negatives and database lag; the rescan narrows, not closes, the
    window between admission and promotion.
 4. Images are not reproducible; a rebuilt candidate is a new artifact needing new
@@ -395,6 +403,11 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
   repository, required `--version`, admission still on `main`), fail-closed draft
   probes, and token hardening. Same delegation and authority; recorded in
   [testing.md](../testing.md#focused-review-remediation--23-november-2026).
+- **Independent review remediation, 23 November 2026 (separate session):** D2 also
+  refuses any unfinished run of a required context; D6 names the remedy for an
+  uncovered promotion-time finding (a new candidate, then a new admission) and adds the
+  scan-coverage gate. Same delegation and authority; recorded in
+  [testing.md](../testing.md#independent-review-remediation--23-november-2026).
 
 - **F3:** implemented as a pipeline; the procedure is unchanged.
 - **F6:** the technical selection of signing/attestation and trust policy for project
