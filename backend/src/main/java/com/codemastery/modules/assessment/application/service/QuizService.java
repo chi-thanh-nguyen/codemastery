@@ -34,7 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
  * and the attempt-existence probe share one serialization point with attempt start.
  * {@link #withCourseConfigurationWrite(UUID, Supplier)} mirrors the approved producer signature and
  * delegates to CO14's (#177) guard. Question scope comes from {@link QuestionSelectionService},
- * whose CT40 seam fails closed until AD07 (#165) is on {@code main}.
+ * which reads AD07's (#165) CT40 {@code SkillGraphService.readSkillIds} under the held root.
  *
  * <p>Reads run in one read-only REPEATABLE READ snapshot covering admission, rows and count.
  */

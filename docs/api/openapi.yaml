@@ -3876,7 +3876,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3961,7 +3961,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4038,7 +4038,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4105,7 +4105,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4170,7 +4170,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4248,7 +4248,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4318,7 +4318,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"

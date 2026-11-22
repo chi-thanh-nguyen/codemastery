@@ -5211,6 +5211,48 @@ SHARE` on the quiz row).
 
 These are local developer runs, not independent review, QA or CI evidence.
 
+### Integration on `main`, fault injection, list snapshots and body precedence — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, with @minhtan29042006's agreement to
+Leader-assisted commits on this branch, PR #260 was brought onto `main` after AD07 (#264,
+`dfd816c`) and AS05 (#259, `03b2a45`) merged:
+
+- **Integration.** `main` `03b2a45` was merged into the branch. `QuizRepository` keeps the AS06
+  surface plus AS05's `findById`; `SecurityConfig` keeps the CT05, CT23.questions and CT23 quiz
+  matcher blocks. The four AS06 commits of `stack/as06-on-as05` (`1edea48`, `6e3ca92`, `519a4e0`,
+  `22c4253`) were cherry-picked; the stack's own historical merges of pre-merge AD07 and AS05 were
+  not. Every file AS06 does not change is identical to `main`, including AD07's unpaired-surrogate
+  rejection in `SkillGraphService`.
+- **Duplicate fixture.** AS05 and AS06 had each added the same `quizRow(UUID)` helper to
+  `AdaptiveLearningFlowIntegrationTest`; the merge kept both and the test sources did not compile.
+  AS05's copy is kept.
+- **Body precedence.** The create, replace and publication handlers treated the parameters of a
+  form-encoded body as a query and answered a non-owner 400 before CT03's 403/404. The no-query
+  check now reads the URI query only; a form body stays 400 for the owner, after admission.
+- **OpenAPI.** The seven AS06 success responses no longer say "specification only, NOT
+  IMPLEMENTED".
+
+| Obligation | Covered by (PostgreSQL) |
+| --- | --- |
+| B3-O04 fault injection: a test-only trigger fails create and replace on the second new member (after the old membership was deleted), delete on the quiz row (after its membership was deleted) and publication on the row update; each is a safe no-store 500 and the quiz, membership and positions are restored, with the Course root released | `AdaptiveLearningFlowIntegrationTest.aFaultPartWayThroughAQuizWriteRestoresTheQuizAndItsMembership` |
+| ADR007 §7: owner and Learner quiz lists are one REPEATABLE READ snapshot when another connection commits a new quiz, a publication and a member between the count and the page (fails under READ COMMITTED, mutation-checked) | `aQuizListIsOneSnapshotEvenWhenAWriterCommitsBetweenItsCountAndItsPage` |
+| A non-owner's form-encoded body is 403 (published Course) or 404 (hidden Course), the owner's is 400, with no effect | `AuthorizationIntegrationTest$QuizEndpoints.nonOwningInstructorIs403OnAPublishedCourseAnd404OnHiddenOrMissingOnes` |
+
+| Command (macOS host, Docker Desktop) | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 937, Failsafe 388, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r7 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | `MATRIX_TESTS_PASS`, `UPGRADE_TESTS_PASS`, both `CONTAINMENT_TEST_PASS` lines |
+| `docker build -t codemastery-backend:privilege-test backend`, then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` including the AS06 section (create, ordered replacement, foreign 404, empty draft and its 409, delete, publish, idempotent publish, published 409, owner list, Learner keyless list, Learner 403 on owner reads, hide, attempted 409s); no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+The CI job "VM runtime privileges with the real backend" failed on the stack head `22c4253` while
+the Docker build bootstrapped the Maven Wrapper: Maven Central answered 404 for
+`apache-maven-3.9.16-bin.tar.gz`. The same wrapper passed that job on `main` `03b2a45`, and the
+artifact resolves again, so the failure was external to the source; the local run above executed
+the runtime-role verification on this head.
+
+These are local developer runs, not independent review, QA or CI evidence.
+
 ## CO03 and CO14 Course persistence and configuration guard verification — 21 November 2026
 
 [PR #262](https://github.com/chi-thanh-nguyen/codemastery/pull/262) completes the
