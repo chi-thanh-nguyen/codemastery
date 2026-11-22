@@ -1019,13 +1019,6 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         }
     }
 
-    private UUID quizRow(UUID course) {
-        UUID id = UUID.randomUUID();
-        jdbc.update("INSERT INTO public.quizzes (id,course_id,title,kind,time_limit_seconds,publication_status) "
-                + "VALUES (?,?,'Draft','practice',60,'hidden')", id, course);
-        return id;
-    }
-
     private static void insertAttempt(Connection connection, UUID quiz) throws SQLException {
         try (PreparedStatement insert = connection.prepareStatement("INSERT INTO public.attempts "
                 + "(id,user_id,quiz_id,attempt_number,started_at,expires_at) VALUES (?,?,?,1,now(),now() + interval '5 minutes')")) {
