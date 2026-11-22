@@ -110,6 +110,23 @@ public class SecurityConfig {
                                 "/api/instructor/courses/{courseId}/lessons/{lessonId}",
                                 "/api/instructor/courses/{courseId}/lessons/{lessonId}/publication").hasRole("INSTRUCTOR")
                         .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/lessons/{lessonId}").hasRole("LEARNER")
+                        // CT05.bindings (ADR005 §8.1): Instructor only, including the graph read; Course
+                        // ownership is CT03's decision in the handler. Administrator has no Instructor inheritance.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/skill-graph").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/skills").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/skills/{skillId}",
+                                "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}",
+                                "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/skills/{skillId}",
+                                "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}",
+                                "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}").hasRole("INSTRUCTOR")
+                        // CT23.questions/bindings (ADR007 §§4, 7): Instructor only; Course ownership is
+                        // CT03's decision in the handler. Administrator has no Instructor inheritance.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/questions",
+                                "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/questions").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
                         // CT23.composition/publication/bindings (ADR007 §§5–7): the quiz list is self Learner
                         // only; authoring and owner reads are Instructor only, with Course ownership decided by
                         // CT03 in the handler. Administrator has no Instructor inheritance.

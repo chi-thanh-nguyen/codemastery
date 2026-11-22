@@ -124,6 +124,17 @@ probe "enrollments/lesson_progress: CO08 r4 completion and visit" ok "INSERT INT
 # initializes mastery_skipped; the V002 check still forbids a skip without completion.
 probe "lesson_progress: INSERT may set completed+skipped (accepted)" ok "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c2','active',NULL,NULL); INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000e1',true,true);"
 probe "lesson_progress: skip without completion (check constraint)" 23514 "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c2','active',NULL,NULL); INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000e1',false,true);"
+probe "skills/skill_prerequisites/lesson_skills: AD07 r5 graph commands" ok "SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE; INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000000c1','A',NULL),('00000000-0000-0000-0000-0000000005a2','00000000-0000-0000-0000-0000000000c1','B','d'); UPDATE public.skills SET name='A2', description=NULL WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id='00000000-0000-0000-0000-0000000005a1'; INSERT INTO public.skill_prerequisites VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000005a2'); INSERT INTO public.lesson_skills VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000005a1'); SELECT id, course_id, name, description FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1'; SELECT id, skill_id, prerequisite_skill_id FROM public.skill_prerequisites WHERE course_id='00000000-0000-0000-0000-0000000000c1'; SELECT id, lesson_id, skill_id FROM public.lesson_skills WHERE skill_id IN ('00000000-0000-0000-0000-0000000005a1'); DELETE FROM public.lesson_skills WHERE lesson_id='00000000-0000-0000-0000-0000000000e1' AND skill_id='00000000-0000-0000-0000-0000000005a1'; DELETE FROM public.skill_prerequisites WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND skill_id='00000000-0000-0000-0000-0000000005a1' AND prerequisite_skill_id='00000000-0000-0000-0000-0000000005a2'; DELETE FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id IN ('00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000005a2');"
+probe "lesson_skills: mapping a missing Lesson (FK)"           23503 "INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005a3','00000000-0000-0000-0000-0000000000c1','C',NULL); INSERT INTO public.lesson_skills VALUES (gen_random_uuid(),gen_random_uuid(),'00000000-0000-0000-0000-0000000005a3');"
+admin <<'SQL'
+INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005b1','00000000-0000-0000-0000-0000000000c1','Questioned',NULL);
+INSERT INTO public.questions (id,skill_id,prompt,kind,difficulty,options,correct_options) VALUES ('00000000-0000-0000-0000-0000000005b2','00000000-0000-0000-0000-0000000005b1','P','true_false','easy',ARRAY['True','False'],ARRAY[true,false]);
+INSERT INTO public.quizzes VALUES ('00000000-0000-0000-0000-0000000005b3','00000000-0000-0000-0000-0000000000c1','Q','practice',60,'hidden');
+INSERT INTO public.quiz_questions VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000005b3','00000000-0000-0000-0000-0000000005b2',1);
+SQL
+probe "skills: deleting a skill a Question references (FK)"   23503 "DELETE FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id='00000000-0000-0000-0000-0000000005b1';"
+probe "questions/quiz_questions/attempt_answers: AS05 r6 question bank" ok "SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE; INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005c1','00000000-0000-0000-0000-0000000000c1','Tag',NULL); SELECT id FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1'; INSERT INTO public.questions VALUES ('00000000-0000-0000-0000-0000000005d1','00000000-0000-0000-0000-0000000005c1','P','single_choice','easy',ARRAY['A','B'],ARRAY[true,false]); SELECT id, skill_id, prompt, kind, difficulty, options, correct_options FROM public.questions WHERE skill_id IN ('00000000-0000-0000-0000-0000000005c1') ORDER BY id LIMIT 20; SELECT count(id) FROM public.questions WHERE skill_id IN ('00000000-0000-0000-0000-0000000005c1'); SELECT * FROM public.questions WHERE id='00000000-0000-0000-0000-0000000005d1' AND skill_id IN ('00000000-0000-0000-0000-0000000005c1') FOR UPDATE; SELECT count(qq.id) FROM public.quiz_questions qq WHERE qq.question_id='00000000-0000-0000-0000-0000000005d1'; SELECT count(aa.id) FROM public.attempt_answers aa WHERE aa.question_id='00000000-0000-0000-0000-0000000005d1'; UPDATE public.questions SET correct_options=ARRAY[false,true], difficulty='hard', kind='multiple_choice', options=ARRAY['A','B'], prompt='P2', skill_id='00000000-0000-0000-0000-0000000005c1' WHERE id='00000000-0000-0000-0000-0000000005d1'; DELETE FROM public.questions WHERE id='00000000-0000-0000-0000-0000000005d1';"
+probe "questions: deleting a question a Quiz references (FK)" 23503 "DELETE FROM public.questions WHERE id='00000000-0000-0000-0000-0000000005b2';"
 echo "== everything else is denied"
 probe "users: change role"                                   42501 "UPDATE public.users SET role='admin';"
 probe "users: change email"                                  42501 "UPDATE public.users SET email='x@example.test';"
@@ -151,7 +162,15 @@ probe "lesson_progress: update mastery-skip flag (CT22.atomic)" 42501 "UPDATE pu
 probe "lesson_progress: re-target a progress row"            42501 "UPDATE public.lesson_progress SET enrollment_id=enrollment_id, lesson_id=lesson_id;"
 probe "lesson_progress: delete history"                      42501 "DELETE FROM public.lesson_progress;"
 probe "lesson_progress: TRUNCATE"                            42501 "TRUNCATE public.lesson_progress;"
-probe "questions: read answer keys"                          42501 "SELECT correct_options FROM public.questions;"
+probe "skills: move a skill to another Course"               42501 "UPDATE public.skills SET course_id=course_id;"
+probe "skill_prerequisites: rewrite an edge in place"         42501 "UPDATE public.skill_prerequisites SET skill_id=skill_id, prerequisite_skill_id=prerequisite_skill_id;"
+probe "lesson_skills: rewrite a mapping in place"             42501 "UPDATE public.lesson_skills SET lesson_id=lesson_id, skill_id=skill_id;"
+probe "skills/skill_prerequisites/lesson_skills: TRUNCATE"    42501 "TRUNCATE public.lesson_skills, public.skill_prerequisites, public.skills;"
+probe "questions: re-key a question"                         42501 "UPDATE public.questions SET id=id;"
+probe "questions: TRUNCATE"                                   42501 "TRUNCATE public.questions;"
+probe "quiz_questions: read membership order"                 42501 "SELECT position FROM public.quiz_questions;"
+probe "quiz_questions: write membership (r6)"                 42501 "INSERT INTO public.quiz_questions SELECT * FROM public.quiz_questions WHERE false;"
+probe "attempt_answers: read captured selections"             42501 "SELECT selected_options, is_correct FROM public.attempt_answers;"
 probe "attempts: rewrite scores"                             42501 "UPDATE public.attempts SET score_percentage=100;"
 probe "attempt_answers: delete"                              42501 "DELETE FROM public.attempt_answers;"
 probe "submissions: self-grade"                              42501 "UPDATE public.submissions SET grade_percentage=100;"
@@ -171,17 +190,18 @@ provision_db_roles >/dev/null; harden_after_migration; verify_role_separation >/
 echo "  ACLs identical after a second provision + harden + verify"
 
 echo "== drift and escalation fail closed"
-admin <<<"GRANT UPDATE, DELETE ON public.users TO $APP; GRANT UPDATE (title) ON public.courses TO $APP; GRANT SELECT ON public.questions TO $APP;"
+admin <<<"GRANT UPDATE, DELETE ON public.users TO $APP; GRANT UPDATE (title) ON public.courses TO $APP; GRANT SELECT ON public.submissions TO $APP;"
 expect_failure "owner-granted excess before reconciliation" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
 drift="$(harden_after_migration)"
 [[ "$drift" == *"excess: column privilege UPDATE on public.courses.title: expected false"* && "$drift" == *"excess: table privilege DELETE on public.users: expected false"* ]] \
   || { echo "drift was not reported: $drift" >&2; exit 1; }
 verify_runtime_privileges complete >/dev/null
 echo "  owner-granted excess (table and column level) reported, revoked and re-verified"
-admin <<<"GRANT SELECT ON public.questions TO PUBLIC;"
+# r6 grants SELECT on questions (CT23 owner reads include keys); submissions stay unreadable.
+admin <<<"GRANT SELECT ON public.submissions TO PUBLIC;"
 harden_after_migration >/dev/null
-expect_failure "SELECT on answer keys through PUBLIC" "table privilege SELECT on public.questions: expected false" verify_runtime_privileges complete
-admin <<<"REVOKE SELECT ON public.questions FROM PUBLIC;"
+expect_failure "SELECT on submissions through PUBLIC" "table privilege SELECT on public.submissions: expected false" verify_runtime_privileges complete
+admin <<<"REVOKE SELECT ON public.submissions FROM PUBLIC;"
 admin <<<"CREATE ROLE cm_grantor NOLOGIN; GRANT UPDATE ON public.users TO cm_grantor WITH GRANT OPTION; SET ROLE cm_grantor; GRANT UPDATE ON public.users TO $APP; RESET ROLE;"
 harden_after_migration >/dev/null
 expect_failure "UPDATE users from another grantor survives reset" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
@@ -368,9 +388,9 @@ admin <<<"ALTER TABLE public.flyway_history_moved RENAME TO flyway_schema_histor
 as_mig <<<"ALTER TABLE public.enrollments ADD COLUMN unexpected_column integer;"
 expect_failure "unreviewed column on the predecessor" "columns differ from the reviewed matrix on public.enrollments" provision_db_roles
 as_mig <<<"ALTER TABLE public.enrollments DROP COLUMN unexpected_column;"
-admin <<<"GRANT SELECT ON public.questions TO PUBLIC;"
-expect_failure "excess privilege through PUBLIC on the predecessor" "table privilege SELECT on public.questions: expected false" provision_db_roles
-admin <<<"REVOKE SELECT ON public.questions FROM PUBLIC;"
+admin <<<"GRANT SELECT ON public.submissions TO PUBLIC;"
+expect_failure "excess privilege through PUBLIC on the predecessor" "table privilege SELECT on public.submissions: expected false" provision_db_roles
+admin <<<"REVOKE SELECT ON public.submissions FROM PUBLIC;"
 admin <<<"GRANT UPDATE (last_visited_at) ON public.enrollments TO \"$APP\";" 2>/dev/null \
   && { echo "Granted a privilege on a column that does not exist" >&2; exit 1; }
 provision_db_roles >/dev/null

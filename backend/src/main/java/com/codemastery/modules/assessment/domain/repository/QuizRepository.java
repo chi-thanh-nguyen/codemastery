@@ -25,6 +25,9 @@ public interface QuizRepository {
      */
     Quiz save(Quiz quiz);
 
+    /** Unscoped adapter lookup by ID (AS05.repo); Course-scoped reads use {@link #findInCourse}. */
+    Optional<Quiz> findById(UUID id);
+
     /**
      * Replaces the quiz's complete membership with {@code orderedQuestionIds} at positions 1..N in
      * the same transaction; an empty list leaves no rows.

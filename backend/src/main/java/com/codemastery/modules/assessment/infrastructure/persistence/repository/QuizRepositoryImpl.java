@@ -73,6 +73,11 @@ public class QuizRepositoryImpl implements QuizRepository {
     }
 
     @Override
+    public Optional<Quiz> findById(UUID id) {
+        return jpaRepository.findById(id).map(QuizRepositoryImpl::toDomain);
+    }
+
+    @Override
     public Optional<Quiz> findInCourse(UUID quizId, UUID courseId) {
         return jpaRepository.findInCourse(quizId, courseId).map(QuizRepositoryImpl::toDomain);
     }
