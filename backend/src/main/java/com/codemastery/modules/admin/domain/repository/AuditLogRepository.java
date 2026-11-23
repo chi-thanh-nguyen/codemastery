@@ -7,13 +7,8 @@ import org.springframework.data.domain.Pageable;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Admin-internal persistence port for the append-only audit log (IN10). */
 public interface AuditLogRepository {
 
-    /**
-     * Inserts one new audit row. Append-only: this never updates an existing row, and
-     * no update or delete operation exists. It joins the caller's transaction.
-     */
     AuditLog append(AuditLog auditLog);
 
     /**

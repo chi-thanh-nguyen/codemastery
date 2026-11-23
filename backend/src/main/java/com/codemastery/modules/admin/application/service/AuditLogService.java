@@ -30,11 +30,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/**
- * CT31 audit recording (IN10.record) and filterable read (IN10.read). A row is written only inside
- * the transaction of the Admin application service that performs the audited action, so a failure
- * rolls back both the action and its audit row; there is no audit-only or action-only outcome.
- */
 @Service
 public class AuditLogService {
 

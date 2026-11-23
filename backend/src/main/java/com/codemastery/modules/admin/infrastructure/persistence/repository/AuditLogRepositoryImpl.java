@@ -37,7 +37,6 @@ public class AuditLogRepositoryImpl implements AuditLogRepository {
     @Override
     public AuditLog append(AuditLog auditLog) {
         Objects.requireNonNull(auditLog, "auditLog");
-        // persist never issues an UPDATE (merge could); a duplicate id fails instead of overwriting.
         entityManager.persist(mapper.toEntity(auditLog));
         return auditLog;
     }
@@ -51,7 +50,6 @@ public class AuditLogRepositoryImpl implements AuditLogRepository {
                 Sort.by(Sort.Order.desc("occurredAt"), Sort.Order.desc("id")));
         Specification<AuditLogEntity> matching = matching(filter);
         if (pagination.getOffset() > Integer.MAX_VALUE) {
-            // Beyond any addressable row: an empty page with the true total.
             return new PageImpl<>(List.of(), pagination, jpaRepository.count(matching));
         }
         return jpaRepository.findAll(matching, pagination).map(mapper::toDomain);
