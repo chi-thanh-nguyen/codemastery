@@ -6182,6 +6182,12 @@ separately executed in a network-isolated container using a harmless marker scri
 Original failure logs and subsequent runs are under the task's private temporary
 evidence directory; no exploit ran against the Azure VM.
 
+Final rereview of the first remediation commit also tightened F07/F10: reject a signed
+future cut before publication, preserve manifest-bound full restore evidence when an
+additional destination is populated, and count upgraded ledger records as one point.
+The 45-test suite was rerun successfully with explicit future-cut refusal and
+PG-only → full independent → full Azure publication/deduplicated status assertions.
+
 ### Readiness limits and release compatibility
 
 Code and disposable testing do not establish operational configuration or production

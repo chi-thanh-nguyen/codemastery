@@ -430,8 +430,10 @@ Publication/prune share an exclusive workstation lock. An interrupted copy/uploa
 reuse only byte-identical readback, never overwrite. Completion markers are deterministic
 and written last. A ledger-committed point retries its acknowledgement after verifying
 the independent/cloud copies. Adding full restore evidence may append a stronger record
-for the same point without inventing a newer cut. Qualified ages use signed `t_cut`,
-reject future cuts as clock errors and exclude partial restore results. Pruning considers
+for the same point without inventing a newer cut. A byte-verified additional destination
+retains an existing full restore result. Ledger upgrades count as one point; a future
+signed cut is rejected before publication. Qualified ages use signed `t_cut`, report
+future cuts as clock errors and exclude partial restore results. Pruning considers
 qualified points and verifies the newest independent copy and cloud components/marker
 before deleting older eligible points; incomplete or untested newer points cannot evict
 the last qualified point. Existing 3/7/4 classes and protected pre-update/manual points

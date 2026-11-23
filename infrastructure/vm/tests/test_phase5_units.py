@@ -747,6 +747,19 @@ class Crypto(unittest.TestCase):
                                           restore=lambda *a: {"postgres": "PASS", "minio_boot": "NOT_RUN"}, log=lambda *a: None)
             self.assertNotIn("+RESTORE_TESTED", record["level"])
             self.assertEqual(record["level"], "VERIFIED_INDEPENDENT+PG_RESTORE_TESTED")
+            complete = {k: "PASS" for k in ("postgres", "minio_boot", "minio_objects", "minio_iam")}
+            entry = recovery.list_staged(vm)[0]
+            recovery.publish_set(ws, cfg, Remote(), entry, restore=lambda *a: complete, log=lambda *a: None)
+            class Blob:
+                def __init__(self): self.files = {}
+                def create(self, name, path):
+                    with open(path, "rb") as f: self.files[name] = f.read()
+                def sha256(self, name):
+                    data = self.files[name]
+                    return len(data), hashlib.sha256(data).hexdigest()
+            copied = recovery.publish_set(ws, cfg, Remote(), entry, blob=Blob(), log=lambda *a: None)
+            self.assertEqual(copied["level"], "VERIFIED_INDEPENDENT_AZURE+RESTORE_TESTED")
+            self.assertEqual(recovery.workstation_status(ws)["independent"]["points"], 1)
 
     def encrypt(self, data, out):
         src = out + ".plain"
@@ -875,7 +888,8 @@ class Crypto(unittest.TestCase):
         with self.assertRaises(recovery.RecoveryError):
             recovery.staged_file(ids[1], "../../etc/passwd", root)
 
-    def test_publish_to_independent_custody_and_blob_with_faults(self):
+    @mock.patch.object(recovery, "utc_now", return_value=datetime.datetime(2026, 11, 24, tzinfo=datetime.timezone.utc))
+    def test_publish_to_independent_custody_and_blob_with_faults(self, _clock):
         vm = self.p("pub-vm")
         set_id = "CMRS-20261123T100000Z-pre-update-0a1b2c3d"
         self.build_set(os.path.join(vm, "sets", set_id))
@@ -947,6 +961,19 @@ class Crypto(unittest.TestCase):
             count = len(acks)
             recovery.publish_set(ws, cfg, FakeRemote(), entry2, blob=blob)
             self.assertEqual(len(acks), count + 1)
+            self.assertEqual(len(ws.ledger()), 2)
+            # A signed producer with a bad clock cannot publish a future cut.
+            future = "CMRS-20501123T180000Z-pre-update-0a1b2c3e"
+            shutil.copytree(os.path.join(vm, "sets", second), os.path.join(vm, "sets", future))
+            m = json.load(open(os.path.join(vm, "sets", future, recovery.MANIFEST)))
+            m["set_id"], m["t_cut"] = future, "2050-11-23T18:00:01Z"
+            m["times"] = {"writers_stopped_at": "2050-11-23T18:00:00Z", "capture_finished_at": "2050-11-23T18:00:30Z"}
+            recovery.write_private(os.path.join(vm, "sets", future, recovery.MANIFEST), recovery.dump_json(m))
+            recovery.sign_file(os.path.join(vm, "sets", future, recovery.MANIFEST), self.p("producer.key"),
+                               os.path.join(vm, "sets", future, recovery.SIGNATURE))
+            entry_future = [e for e in recovery.list_staged(vm) if e["set_id"] == future][0]
+            with self.assertRaisesRegex(recovery.RecoveryError, "future"):
+                recovery.publish_set(ws, cfg, FakeRemote(), entry_future, blob=blob)
             self.assertEqual(len(ws.ledger()), 2)
             # An older cut than the ledger's newest is refused as rollback/replay.
             older = "CMRS-20261123T050000Z-pre-update-0a1b2c3f"

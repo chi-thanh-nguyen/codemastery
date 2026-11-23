@@ -1318,12 +1318,16 @@ def _publish_set(ws, cfg, remote, entry, blob=None, restore=None, allow_older=Fa
                               expected_manifest_sha256=manifest_sha)
         if manifest["set_id"] != set_id:
             refuse("the manifest names another set")
+        _require(parse_iso(manifest["t_cut"], "t_cut") <= utc_now(),
+                 "the recovery cut is in the future (clock disagreement)")
         newest = max([e["t_cut"] for e in ledger] or [""])
         if not done and manifest["t_cut"] <= newest and not allow_older:
             refuse("set %s is not newer than the ledger's newest cut %s (rollback or replay)" % (set_id, newest))
-        restore_result = None
+        restore_result = done[-1].get("restore_test") if done else None
         if restore is not None:
-            restore_result = restore(incoming, manifest)
+            attempted = restore(incoming, manifest)
+            if not restore_qualified(restore_result) or restore_qualified(attempted):
+                restore_result = attempted
         target = ws.path("sets", set_id)
         _copy_verified(incoming, target, SET_FILES)
         azure_state = "NOT_CONFIGURED"
@@ -1579,12 +1583,12 @@ def cmd_publish(args):
             print("PUBLISH FAILED %s: %s" % (entry["set_id"], exc), file=sys.stderr)
     status = workstation_status(ws, blob)
     print(json.dumps({"published": published, "failures": failures, "status": status}, indent=2, sort_keys=True))
-    return 1 if failures or status["independent"]["state"] in ("MISSING", "BREACH") else 0
+    return 1 if failures or status["independent"]["state"] in ("MISSING", "BREACH", "CLOCK_ERROR") else 0
 
 
 def workstation_status(ws, blob=None, now=None):
     now = now or utc_now()
-    ledger = ws.ledger()
+    ledger = list({e["set_id"]: e for e in ws.ledger()}.values())
     independent = [e for e in ledger if e.get("independent") == "VERIFIED" and restore_qualified(e.get("restore_test"))
                    and os.path.isdir(ws.path("sets", e["set_id"]))]
     azure = [e for e in independent if e.get("azure") == "PUBLISHED"]
