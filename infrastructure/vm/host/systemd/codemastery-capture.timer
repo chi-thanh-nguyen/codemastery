@@ -1,0 +1,13 @@
+# Every 8 hours at 00:00, 08:00 and 16:00 UTC; a missed run (VM off) runs once at boot,
+# never as a catch-up burst (ADR009 section 9.4). Installed disabled.
+[Unit]
+Description=CodeMastery recovery capture every 8 hours (UTC)
+
+[Timer]
+OnCalendar=*-*-* 00,08,16:00:00 UTC
+Persistent=true
+RandomizedDelaySec=0
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

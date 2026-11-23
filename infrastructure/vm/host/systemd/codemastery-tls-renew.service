@@ -1,0 +1,13 @@
+# CodeMastery certificate renewal check (ADR009 section 9.3; ADR017).
+# Renews through the existing acme.sh TLS-ALPN-01 configuration only when the installed
+# certificate has 30 days or less left; otherwise it records the status and warns at
+# 30/14/7 days. A due renewal stops only the frontend for the challenge.
+[Unit]
+Description=CodeMastery TLS certificate renewal check
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/codemastery-ops tls-renew
+TimeoutStartSec=1200

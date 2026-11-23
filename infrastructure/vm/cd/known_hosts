@@ -1,0 +1,4 @@
+# CodeMastery VM SSH host key pin (ADR017). vm-codemastery, 20.205.56.236, ED25519
+# SHA256:1KMq6OQqC/oTFS0P/wn0rxnM/RqRxawQYV0SXmqxKoU - matched the host's own /etc/ssh/ssh_host_ed25519_key.pub on 2026-11-23.
+# A changed host key fails every connection; replace this pin only through a reviewed pull request.
+20.205.56.236 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII66ic3VVOLW8UBvhJ/tnUTHux+x0FnXsmVsvQoL3XwZ

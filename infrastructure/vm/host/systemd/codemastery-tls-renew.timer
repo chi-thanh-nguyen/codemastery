@@ -1,0 +1,12 @@
+# Daily at 03:30 UTC with missed-run handling (ADR009 section 9.3). Installed disabled;
+# enable only after `codemastery-ops tls-renew --staging` has passed on this host.
+[Unit]
+Description=CodeMastery daily TLS renewal check (03:30 UTC)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

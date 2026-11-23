@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# CodeMastery - /usr/local/sbin/codemastery-ops   (ADR017; installed once by bootstrap.sh)
+#
+# The only root entry point of the SSH continuous deployment. Run through sudo:
+#   - by the restricted deployment identity `cmdeploy` (GitHub Actions, protected
+#     environment), whose authorized key is forced to codemastery-ssh-gate: deploy role;
+#   - by the operator (azureuser, the Leader's own key): operator role.
+# The role comes from SUDO_USER, which sudo sets and the caller cannot choose.
+#
+#   receive NAME SHA256 SIZE     store stdin as /var/lib/codemastery/incoming/NAME after
+#                                checking its exact size and SHA-256 (an interrupted or
+#                                altered transfer never becomes a file)
+#   install-tooling SHA TREE     install incoming/tooling-SHA.tar as the immutable tooling
+#                                /opt/codemastery/tooling/SHA after checking its git tree
+#   anything else                ops.py of the current tooling (see ops.py --help)
+#
+# Authorization fetches only GitHub's public OIDC keys and commit metadata.
+set -Eeuo pipefail
+umask 077
+export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+fail() { printf 'REFUSED: %s\n' "$*" >&2; exit 2; }
+
+TOOLING_ROOT="${CODEMASTERY_TOOLING_ROOT:-/opt/codemastery/tooling}"
+INCOMING="${CODEMASTERY_STATE_DIR:-/var/lib/codemastery}/incoming"
+MAX_UPLOAD=$(( 2 * 1024 * 1024 * 1024 ))
+
+[[ "${EUID}" -eq 0 || -n "${CODEMASTERY_TEST_UNPRIVILEGED:-}" ]] || fail "run through sudo."
+case "${SUDO_USER:-root}" in
+  (cmdeploy) role=deploy ;;
+  (*)        role=operator ;;
+esac
+[[ $# -ge 1 ]] || fail "no operation."
+op="$1"; shift
+
+# The deployment identity may run exactly the operations of the deployment workflow.
+# Acknowledging recovery points, sending recovery sets, renewing certificates, managing
+# timers and scheduled captures stay with the operator (ADR017 section 4).
+if [[ "${role}" == deploy ]]; then
+  case "${op}" in
+    (receive|install-tooling|plan|prepare|deploy|verify|resume|status|inventory|tls-check) ;;
+    (*) fail "operation '${op}' is not permitted for the deployment identity." ;;
+  esac
+fi
+
+for arg in "$@"; do
+  [[ "${arg}" =~ ^[A-Za-z0-9._:/=@+_-]+$ && ${#arg} -le 4096 ]] || fail "argument contains unsupported characters."
+done
+
+# A restricted SSH key is transport authentication, not production authority. This
+# verifier is installed by the operator, outside the caller-selectable tooling tree.
+if [[ "${role}" == deploy ]]; then
+  token=""
+  IFS= read -r -n 16385 token || fail "missing GitHub OIDC command authorization."
+  (( ${#token} <= 16384 )) || fail "OIDC token too long."
+  printf '%s' "${token}" | /usr/bin/python3 -I /usr/local/lib/codemastery/authorize.py verify "${op}" "$@" \
+    || fail "GitHub command authorization failed."
+  unset token
+fi
+
+# receive/install and the Python staging consumer share a lock. No upload can
+# replace bytes between a hash check, extraction and execution.
+install -d -m 0700 "${INCOMING%/incoming}"
+exec 9>"${INCOMING%/incoming}/transport.lock"
+flock -n 9 || fail "another transport operation is active."
+
+sha256_of() { sha256sum -- "$1" | awk '{print $1}'; }
+
+tree_of() {  # the git tree ID of a directory, offline
+  local dir="$1" gitdir
+  gitdir="$(mktemp -d)"
+  git init -q --bare "${gitdir}"
+  GIT_DIR="${gitdir}" GIT_WORK_TREE="${dir}" GIT_INDEX_FILE="${gitdir}/index" GIT_CONFIG_NOSYSTEM=1 HOME="${gitdir}" \
+    git -c core.bare=false -c core.autocrlf=false -c core.filemode=true -c core.symlinks=true -C "${dir}" add -A -f . >/dev/null
+  GIT_DIR="${gitdir}" GIT_WORK_TREE="${dir}" GIT_INDEX_FILE="${gitdir}/index" GIT_CONFIG_NOSYSTEM=1 HOME="${gitdir}" \
+    git -c core.bare=false -C "${dir}" write-tree
+  rm -rf "${gitdir}"
+}
+
+case "${op}" in
+  (receive)
+    [[ $# -eq 3 ]] || fail "receive NAME SHA256 SIZE"
+    name="$1"; want="$2"; size="$3"
+    [[ "${name}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || fail "unsafe file name."
+    [[ "${want}" =~ ^[0-9a-f]{64}$ ]] || fail "SHA256 must be 64 lowercase hex."
+    [[ "${size}" =~ ^[0-9]{1,11}$ ]] && (( size <= MAX_UPLOAD )) || fail "size out of range."
+    install -d -m 0700 "${INCOMING}"
+    [[ ! -L "${INCOMING}" ]] || fail "incoming directory is a symlink."
+    tmp="$(mktemp "${INCOMING}/.receive.XXXXXXXX")"
+    trap 'rm -f "${tmp}"' EXIT
+    head -c "${size}" > "${tmp}"
+    got_size="$(stat -c %s "${tmp}")"
+    [[ "${got_size}" == "${size}" ]] || fail "transfer of ${name} was interrupted (${got_size} of ${size} bytes)."
+    [[ "$(sha256_of "${tmp}")" == "${want}" ]] || fail "transfer of ${name} does not match its SHA-256."
+    chmod 0600 "${tmp}"
+    mv -f -T "${tmp}" "${INCOMING}/${name}"
+    trap - EXIT
+    printf '{"operation":"receive","name":"%s","sha256":"%s","size":%s}\n' "${name}" "${want}" "${size}"
+    ;;
+  (install-tooling)
+    [[ $# -eq 2 ]] || fail "install-tooling SHA TREE"
+    sha="$1"; tree="$2"
+    [[ "${sha}" =~ ^[0-9a-f]{40}$ && "${tree}" =~ ^[0-9a-f]{40}$ ]] || fail "SHA and TREE must be full hex IDs."
+    archive="${INCOMING}/tooling-${sha}.tar"
+    [[ -f "${archive}" && ! -L "${archive}" ]] || fail "tooling-${sha}.tar was not received."
+    install -d -m 0755 "${TOOLING_ROOT}"
+    target="${TOOLING_ROOT}/${sha}"
+    if [[ ! -d "${target}" ]]; then
+      # No repository file currently needs a link. Refuse links before extraction,
+      # including chains whose individually relative targets escape the tree.
+      while IFS= read -r line; do
+        type="${line:0:1}"
+        [[ "${type}" == "-" || "${type}" == "d" ]] || fail "tooling archive holds a link or special file."
+      done < <(tar -tvf "${archive}")
+      while IFS= read -r entry; do
+        [[ "${entry}" != /* && "/${entry}/" != */../* && "/${entry}/" != */.git/* ]] || fail "tooling archive holds an unsafe path."
+      done < <(tar -tf "${archive}")
+      work="$(mktemp -d "${TOOLING_ROOT}/.install.XXXXXXXX")"
+      trap 'rm -rf "${work}"' EXIT
+      tar -x --no-same-owner --no-same-permissions -C "${work}" -f "${archive}"
+      if find "${work}" -type l -lname '/*' | grep -q .; then fail "tooling archive holds an absolute symlink."; fi
+      chmod -R u=rwX,go=rX "${work}"
+      [[ "$(tree_of "${work}")" == "${tree}" ]] || fail "tooling archive does not have git tree ${tree}."
+      chown -R root:root "${work}" 2>/dev/null || [[ -n "${CODEMASTERY_TEST_UNPRIVILEGED:-}" ]]
+      chmod 0755 "${work}"
+      mv -T "${work}" "${target}"
+      trap - EXIT
+    elif [[ "$(tree_of "${target}")" != "${tree}" ]]; then
+      fail "installed tooling ${sha} was modified."
+    fi
+    ln -sfn "${sha}" "${TOOLING_ROOT}/.current.new"
+    mv -T "${TOOLING_ROOT}/.current.new" "${TOOLING_ROOT}/current"
+    printf '{"operation":"install-tooling","sha":"%s","tree":"%s"}\n' "${sha}" "${tree}"
+    ;;
+  (*)
+    ops="${TOOLING_ROOT}/current/infrastructure/vm/host/ops.py"
+    [[ -f "${ops}" ]] || fail "no tooling is installed; run install-tooling first."
+    exec /usr/bin/python3 -I "${ops}" "${op}" "$@"
+    ;;
+esac
