@@ -489,6 +489,11 @@ class AdmissionTests(unittest.TestCase):
             "finding the candidate did not report": lambda a: a["accepted_findings"].append(
                 {"service": "backend", "id": "CVE-9", "package": "libc6"}),
             "finding listed twice": lambda a: a["accepted_findings"].append(dict(a["accepted_findings"][0])),
+            # A candidate finding accepted under another service (one with no findings
+            # of its own), or with a changed advisory or package, is not that finding.
+            "finding moved to another service": lambda a: a["accepted_findings"][0].update(service="frontend"),
+            "finding with a modified advisory": lambda a: a["accepted_findings"][0].update(id="CVE-2"),
+            "finding with a modified package": lambda a: a["accepted_findings"][0].update(package="libc6-modified"),
             "bad version": lambda a: a["release"].update(version="0.2.0"),
             "not_granted incomplete": lambda a: a.update(not_granted=["deployment"]),
             "empty scope": lambda a: a.update(scope=" "),

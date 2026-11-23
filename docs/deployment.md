@@ -4531,3 +4531,114 @@ This record, the pipeline and its tests were produced through AI-assisted develo
 (Anthropic Claude Code) under the Leader's task. Trivy, Sigstore (through GitHub
 artifact attestations) and GitHub Actions are used by the pipeline; no AI service or
 runtime technology is added to CodeMastery.
+
+## DP01 release image security remediation — 23 November 2026
+
+**Authority.** The Project Leader's instruction of 23 November 2026 (ICT), “CodeMastery —
+DP01 Full Security Remediation & Release Candidate Pre-Merge Qualification”, authorizes
+remediating the CRITICAL/HIGH findings of the first pipeline candidate in one pull request.
+It does not grant security admission, deployment or publication, and this record grants
+none. No decision record changes: the ADR003 decision (pinned `postgres:17.11-alpine3.24`
+base, `su-exec`, data-volume boundary, byte-clean single layer), the ADR009 runtime
+policies and every ADR015 release decision stay as they are. Package updates inside the
+images follow the existing pinned-update practice of
+[Frontend Alpine package pins refreshed](#frontend-alpine-package-pins-refreshed--7-november-2026).
+
+### Baseline
+
+The first candidate of the [Phase 4 pipeline](#phase-4-release-pipeline--23-november-2026):
+run [45073820127](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45073820127)
+on `main` `cc86c0803aa1ad9428f8511c6ba0f6669829814d`, draft release
+`candidate-cc86c0803aa1-45073820127-1` (ID 454779483, 23 assets, origin
+`https://codemastery.app`), status QUALIFIED and NOT ADMITTED. Its `findings.json` (hash
+checked against the draft's `SHA256SUMS`; Trivy 0.76.2, vulnerability database updated
+2026-11-22T19:00:46Z) holds 126 rows, 32 of them CRITICAL or HIGH:
+
+| Image | CRITICAL | HIGH | Packages (installed → fixed) |
+| --- | ---: | ---: | --- |
+| frontend | 4 | 6 | `nginx` 1.30.6-r1 → 1.30.7-r0 (4 CRITICAL, 2 HIGH); `libxslt` 1.1.43-r3 → 1.1.43-r4 (3 HIGH); `libxml2` 2.13.9-r2 → 2.13.9-r3 (1 HIGH) |
+| postgres | 0 | 20 | `krb5-libs` 1.22.2-r1 → 1.22.3-r0 (16 HIGH); `libxslt` (3 HIGH); `libxml2` (1 HIGH) |
+| backend | 0 | 2 | `apt`, `libapt-pkg6.0t64` 2.8.3 → 2.8.4ubuntu0.1 (CVE-2026-109518) |
+| minio, minio-init | 0 | 0 | — |
+
+### Changes
+
+Each fixed version was confirmed against the live package source on 23 November 2026,
+not taken from the candidate report alone.
+
+| Image | Change | Why this route |
+| --- | --- | --- |
+| frontend, both targets | Same base digests. Nginx and, in the release target, its four dynamic modules (`geoip`, `image-filter`, `njs`, `xslt`) raised together to nginx.org `1.30.7-r1` (`njs` `1.30.7.1.0.2-r1`) from nginx.org's signed Alpine v3.24 repository; Alpine pins added for `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4 (release target) and `libcrypto3`/`libssl3` 3.5.9-r1 (both) | The base installed Nginx from nginx.org, not from Alpine. No `nginx-unprivileged` 1.30.7 image was published (Docker Hub answers 404 for `1.30.7-alpine`, `-alpine-slim` and `-alpine3.24`), while upstream's generator Dockerfiles already install exactly these nginx.org packages. apk verifies them against nginx.org's key, which the base already trusts and whose SHA-512 (`e09fa32f…0655`, upstream's pin) the build checks first; only that repository is consulted for them. apk keeps the base's unprivileged `nginx.conf` and `default.conf` and writes the stock privileged files as `*.apk-new`, which the build removes. The build fails unless `nginx -v` reports 1.30.7 |
+| postgres | Same base digest; one added `RUN` in the `layered` stage pins Alpine v3.24/main `krb5-libs` 1.22.3-r0, `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4, `libcrypto3`/`libssl3` 3.5.9-r1, `zlib` 1.4-r0 and `alpine-release` 3.24.4-r0 | Same-ABI library updates. PostgreSQL 17.11 binaries, musl 1.2.6-r3, ICU 78.1, `su-exec`, the entrypoint boundary and the data directory are unchanged; the final stage still copies the merged filesystem into one layer |
+| backend | Runtime base re-pinned to the same tag's current index, `eclipse-temurin:25.0.5_8-jre-noble@sha256:23481dc33a759b79d62814ceb1ec27a0d1a84da9d7aab0609577427176fbb1b7` (Docker Hub, updated 20 November 2026); build stage unchanged | Same Temurin 25.0.5+8 (`java -version`); the JRE's `cacerts` file is byte-identical in both bases (SHA-256 `628b436e…a7ef`), so the existing eMudhra removal and the build-time trust-store verification apply unchanged. Refreshed Ubuntu 24.04 packages: `apt`/`libapt-pkg6.0t64` 2.8.4ubuntu0.1, `libc6` 2.39-0ubuntu8.12, `libpcre2-8-0` 10.42-4ubuntu2.2, `perl-base` 5.38.2-3.2ubuntu0.7 |
+| minio, minio-init | None | See "Remaining findings" |
+
+Alternatives not adopted:
+
+- Frontend: the official `nginx:1.30.7-alpine` image (the unprivileged changes would have
+  to be re-derived by hand); Alpine's own `nginx` 1.30.7-r0 (a differently built package
+  that cannot replace nginx.org's modules); removing the unused dynamic modules (would
+  also drop `libxml2`/`libxslt`, but changes image content beyond the fix; a possible
+  later hardening).
+- PostgreSQL: the 11 November rebuild of the same tag (`sha256:e5d2edd2…`) still carries
+  every vulnerable package; `postgres:17.12` (21 November) is a PostgreSQL version
+  change not needed for these findings.
+- Backend: `apt-get` upgrades in the runtime stage (the official rebuild carries the same
+  fixes and more, without adding package-manager operations to the runtime stage).
+
+The release tooling gains two rehearsal refusal cases (a candidate finding accepted under
+another service, and one with a modified package) and three unit-test mutations; no
+release decision, gate or workflow changes.
+
+### Results
+
+Local rescan of the five rebuilt linux/amd64 images with the pipeline's pinned Trivy
+0.76.2 image, `--scanners vuln`, default and comprehensive modes, nothing ignored, and
+the **same vulnerability database** as the candidate (updated 2026-11-22T19:00:46Z), so
+the comparison is like for like. Distinct rows, both modes merged:
+
+| Image | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN |
+| --- | --- | --- | --- | --- | --- |
+| postgres | 0 → 0 | 20 → 0 | 13 → 0 | 4 → 0 | 0 → 0 |
+| minio | 0 → 0 | 0 → 0 | 3 → 3 | 0 → 0 | 1 → 1 |
+| minio-init | 0 → 0 | 0 → 0 | 4 → 4 | 0 → 0 | 0 → 0 |
+| backend | 0 → 0 | 2 → 0 | 50 → 24 | 5 → 5 | 0 → 0 |
+| frontend (release target) | 4 → 0 | 6 → 0 | 10 → 0 | 4 → 0 | 0 → 0 |
+| **Total** | **4 → 0** | **28 → 0** | 80 → 31 | 13 → 5 | 1 → 1 |
+
+None of the 32 original CRITICAL/HIGH rows is reported at any installed version, and no
+row appeared that the candidate did not report. Scan coverage is unchanged for every
+image: the same detected operating system family, no end-of-support flag, and the same
+target classes (frontend `os-pkgs/alpine`; postgres `os-pkgs/alpine`, now detected as
+3.24.4; backend Ubuntu 24.04 and the JAR; minio-init Wolfi and its Go binary; minio its Go
+binary, without an OS, as in the candidate). Trivy still names the multi-layer frontend
+“alpine 3.24.2”, as it did for the candidate, although `/etc/os-release` in the image is
+owned by `alpine-release-3.24.4-r0` and reads 3.24.4.
+
+### Remaining findings
+
+37 rows, none CRITICAL or HIGH. All remain subject to the Leader's admission of a future
+candidate; none is accepted here.
+
+| Image | Rows | Status | Reason not fixed here |
+| --- | --- | --- | --- |
+| backend | 24 MEDIUM, 5 LOW (`libexpat1`, `dash`, `tar`, `libgnutls30t64`, util-linux family, `libsystemd0`/`libudev1`, `login`/`passwd`, `gpgv`) | No fixed version published by Ubuntu for any row | Nothing to install. `libsystemd0`/`libudev1` 255.4-1ubuntu8.19 exist in noble-updates, but Trivy lists no fix for their rows |
+| minio | 3 MEDIUM (`otel/sdk`, `otel/trace` v1.45.0 → 1.47.0; Go stdlib 1.27.3 → 1.27.4), 1 UNKNOWN (GO-2026-5932, `x/crypto` v0.58.0) | Fixed versions exist | Needs a new MinIO server binary (a new Chainguard digest): a server artifact change, which this remediation does not make |
+| minio-init | 3 MEDIUM (`glibc-2.44`, `glibc-2.44-locale-posix`, `ld-linux-2.44` 2.44-r11 → 2.44-r16), 1 MEDIUM (Go stdlib 1.27.3 → 1.27.4 in `mc`) | Fixed versions exist | Needs a new Chainguard `minio-client` base digest, and a Go toolchain change rebuilds the AGPL `mc` and changes its Corresponding Source archive and recorded hash (F1); both are separate changes |
+
+### What this does not establish
+
+The images measured above were built locally (macOS arm64 host, builds forced to
+linux/amd64); image builds are not reproducible, so they are not the images a candidate
+will contain. Their identities are recorded in
+[testing.md](testing.md#dp01-release-image-security-remediation-verification--23-november-2026)
+only to tie the evidence to the bytes that were scanned. No candidate has been built from
+a `main` revision that contains this change, nothing was admitted, promoted, published,
+transferred or deployed, and nothing on the Azure VM was contacted. The pull request's
+`Release rehearsal` uses a synthetic `REHEARSAL-` admission, which is not a security
+admission. After integration, a new `stage=candidate` run from the new `main` revision
+must produce the candidate that the Leader may admit with a separate admission record
+(ADR015 D7).
+
+Anthropic's Claude Code (Claude Opus 5.5) investigated the findings, made the change and
+ran the checks recorded in testing.md.
