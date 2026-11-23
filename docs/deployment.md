@@ -4506,25 +4506,60 @@ draft, tag or release is ever overwritten: a rerun is a new candidate.
    set -euo pipefail
    pkg=<directory holding the downloaded assets>; version=v<x.y.z>; store=<containerd|graphdriver>
    repo=https://github.com/chi-thanh-nguyen/codemastery.git
-   tooling_sha="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["tooling"]["sha"])' "$pkg/release.json")"
-   source_revision="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_revision"])' "$pkg/release.json")"
-   [[ "$tooling_sha" =~ ^[0-9a-f]{40}$ && "$source_revision" =~ ^[0-9a-f]{40}$ ]]
+   # Validate JSON strings before command substitution can strip trailing newlines.
+   revisions="$(python3 -I -c '
+   import json, re, sys
+   with open(sys.argv[1]) as f:
+       manifest = json.load(f)
+   revisions = (manifest["tooling"]["sha"], manifest["source_revision"])
+   if not all(isinstance(value, str) and re.fullmatch("[0-9a-f]{40}", value) for value in revisions):
+       sys.exit("Invalid tooling or source revision SHA.")
+   print(*revisions)
+   ' "$pkg/release.json")" || {
+     printf '%s\n' 'Invalid release manifest or revision SHA.' >&2
+     exit 1
+   }
+   read -r tooling_sha source_revision <<< "$revisions"
+   if ! [[ "$tooling_sha" =~ ^[0-9a-f]{40}$ && "$source_revision" =~ ^[0-9a-f]{40}$ ]]; then
+     printf '%s\n' 'Invalid tooling or source revision SHA.' >&2
+     exit 1
+   fi
    gh attestation verify "$pkg/release.json" --repo chi-thanh-nguyen/codemastery \
      --cert-identity https://github.com/chi-thanh-nguyen/codemastery/.github/workflows/release.yml@refs/heads/main \
-     --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners
-   git clone --quiet "$repo" tooling && git -C tooling checkout --quiet --detach "$tooling_sha"
-   git clone --quiet "$repo" source && git -C source checkout --quiet --detach "$source_revision"
+     --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners || {
+     printf '%s\n' 'Release manifest attestation verification failed.' >&2
+     exit 1
+   }
+   git clone --quiet "$repo" tooling || {
+     printf '%s\n' 'Failed to clone release tooling; existing directories are not reused.' >&2
+     exit 1
+   }
+   git -C tooling checkout --quiet --detach "$tooling_sha" || {
+     printf '%s\n' 'Failed to check out attested release tooling.' >&2
+     exit 1
+   }
+   git clone --quiet "$repo" source || {
+     printf '%s\n' 'Failed to clone application source; existing directories are not reused.' >&2
+     exit 1
+   }
+   git -C source checkout --quiet --detach "$source_revision" || {
+     printf '%s\n' 'Failed to check out the release source revision.' >&2
+     exit 1
+   }
    bash tooling/infrastructure/release/verify-release.sh "$pkg" --version "$version" --source source --store "$store"
    ```
 
    (`--version` names the release you intend to transfer; another release is refused.)
+   Run in a directory with no `tooling` or `source` destination. A failed clone or
+   checkout stops the procedure; it never removes or reuses an occupied destination.
    The verifier refuses to run from any commit other than `tooling.sha` or from a
    modified checkout, and refuses a `--source` checkout that is not exactly
    `source_revision`; the two are the same directory only when the two commits are
    equal. Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand,
    add `--bundle "$pkg/release.sigstore.json" --custom-trusted-root trusted_root.jsonl`
    to the `gh attestation verify` line and `--trusted-root trusted_root.jsonl` to the
-   verifier, and use clones already holding both commits. The script verifies the attestation of
+   verifier, and set `repo` to a local repository already holding both commits; keep
+   fresh `tooling` and `source` destinations. The script verifies the attestation of
    `release.json`, the archive, `mc-source.tar.gz` and `admission.json` (signer
    `release.yml` on `refs/heads/main` exactly, at the recorded tooling commit), the
    agreement of release, admission and candidate records (the admission re-derived from

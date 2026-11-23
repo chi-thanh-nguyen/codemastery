@@ -6014,3 +6014,45 @@ row, and the environment is read by the same name in the same repository.
 
 Not repeated: the candidate build, archive verification, Q00–Q05, Trivy rescans and
 the 410 MB package checks (unchanged code paths). `release.yml` is unchanged.
+
+### Bootstrap trust-boundary remediation (R-01 and R-02) — 23 November 2026
+
+The delta-focused independent review of PR #269 at `dee517c` found that the
+documented bootstrap could run an existing verifier after a failed clone (R-01,
+P2), and that its standalone SHA condition did not stop Bash 3.2 on failure
+(R-02, P3). The operator procedure now explicitly exits on attestation, clone or
+checkout failure. Occupied destinations are not removed or reused. Both SHAs
+are validated as exactly 40 lowercase hexadecimal characters in their original
+JSON string form before command substitution can discard trailing newlines;
+JSON parsing/type failures and the subsequent Bash SHA condition explicitly exit.
+Offline operators clone from a local repository holding both commits into fresh
+destinations; the attestation policy and exact tooling/source revisions are unchanged.
+
+`VerifyReleaseProcedureTests` extracts the actual Bash block from
+`deployment.md`, preserving its embedded Python indentation and replacing only
+the operator's package, version, store and repository inputs. Real local Git
+operations use a synthetic repository; wrappers log calls, inject selected
+failures and mark verifier invocation. Harmless marker scripts detect execution
+of pre-existing, unattested tooling.
+
+| Regression | Evidence |
+| --- | --- |
+| Occupied destinations | Non-Git tooling with an executable marker, clean Git tooling at another commit with a marker verifier, and an existing source checkout are refused. No verifier marker is created; existing contents and source/tooling HEADs are preserved |
+| Git failures | Tooling clone, tooling checkout, source clone after tooling preparation, and source checkout each refuse with a diagnostic. The Git call count stops at the failed operation; no verifier or application code runs |
+| Invalid manifest inputs | 43 subcases cover both SHAs: empty, truncated, too long, invalid hex, uppercase, embedded newline, leading/trailing whitespace, trailing newline/CRLF, shell-looking text, null, number, boolean, array and object; plus missing fields, invalid structures and malformed JSON. Every case exits nonzero before any `gh` or Git call or verifier invocation |
+| Attestation refusal | Exits before any Git call or repository-code execution |
+| Positive separation | Fresh destinations check out exact tooling and historical source commits and run the A1 verifier with the separate `--source`; package/repository paths containing spaces also pass |
+
+| Environment | Validation | Result |
+| --- | --- | --- |
+| macOS, Python 3.9.6, Bash 3.2.57 | Full release-tooling suite with `-W error::ResourceWarning` | 59/59 PASS, including all 16 procedure tests and the existing F-01/F-02/F-03 regressions |
+| Cached `python:3.12-bookworm`, Python 3.12.16, Bash 5.2.15, network disabled, read-only source mount | Same full suite | 59/59 PASS |
+| Bash 3.2 and Bash 5.2 | `bash -n` of `release.sh`, `verify-release.sh` and the actual documented bootstrap with concrete operator inputs | PASS |
+| Cached `koalaman/shellcheck:v0.11.0`, network disabled, read-only mounts | `-S warning` on the same three shell inputs | No findings |
+
+OpenAI Codex implemented this focused remediation and ran the checks above.
+The GitHub and Sigstore responses in these tests are synthetic: they establish
+bootstrap control flow, not real signature verification or a real admission.
+No workflow, release verifier implementation, admission policy, environment,
+candidate artifact or VM was changed. Candidate builds, Q00–Q05, Trivy scans,
+the 410 MB candidate verification and real admission/promotion were not run.

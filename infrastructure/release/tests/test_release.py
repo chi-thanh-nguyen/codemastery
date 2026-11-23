@@ -13,10 +13,13 @@ import hashlib
 import io
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import textwrap
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -1196,6 +1199,7 @@ class VerifyReleaseProcedureTests(unittest.TestCase):
         put(os.path.join(self.stub, "gh"),
             "#!/bin/sh\n"
             "printf '%s\\n' \"$*\" >> \"$STUB_DIR/gh.log\"\n"
+            "[ \"${FAIL_ATTESTATION:-}\" != 1 ] || exit 42\n"
             "case \"$*\" in\n"
             "  'attestation verify '*'--format json'*) cat \"$STUB_DIR/seal.json\" ;;\n"
             "  'attestation verify '*) case \"$*\" in *\"--source-digest $SIGNED_TOOLING \"*) exit 0 ;; *) exit 1 ;; esac ;;\n"
@@ -1204,9 +1208,36 @@ class VerifyReleaseProcedureTests(unittest.TestCase):
             "  *) exit 1 ;;\n"
             "esac\n")
         os.chmod(os.path.join(self.stub, "gh"), 0o755)
+        # Observe the actual documented commands; only explicitly selected Git
+        # failures are simulated. Every other operation uses the real local Git.
+        put(os.path.join(self.stub, "git"),
+            "#!/bin/sh\n"
+            "printf '%%s\\n' \"$*\" >> \"$STUB_DIR/git.log\"\n"
+            "operation=''\n"
+            "case \"$*\" in\n"
+            "  'clone --quiet '*' tooling') operation=tooling-clone ;;\n"
+            "  '-C tooling checkout --quiet --detach '*) operation=tooling-checkout ;;\n"
+            "  'clone --quiet '*' source') operation=source-clone ;;\n"
+            "  '-C source checkout --quiet --detach '*) operation=source-checkout ;;\n"
+            "esac\n"
+            "if [ -n \"$operation\" ] && [ \"$operation\" = \"${FAIL_GIT_OPERATION:-}\" ]; then\n"
+            "  printf 'Simulated %%s failure\\n' \"$operation\" >&2\n"
+            "  exit 42\n"
+            "fi\n"
+            "exec %s \"$@\"\n" % shlex.quote(shutil.which("git")))
+        put(os.path.join(self.stub, "bash"),
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = tooling/infrastructure/release/verify-release.sh ]; then\n"
+            "  : > \"$VERIFIER_MARKER\"\n"
+            "fi\n"
+            "exec %s \"$@\"\n" % shlex.quote(shutil.which("bash")))
+        for name in ("git", "bash"):
+            os.chmod(os.path.join(self.stub, name), 0o755)
         self.env = dict(self.genv, PATH=self.stub + os.pathsep + os.environ["PATH"], STUB_DIR=self.stub,
                         SIGNED_TOOLING=self.tooling, DEPLOY_MARKER=os.path.join(d, "deploy.log"),
-                        HISTORICAL_MARKER=os.path.join(d, "historical-verifier-ran"))
+                        HISTORICAL_MARKER=os.path.join(d, "historical-verifier-ran"),
+                        VERIFIER_MARKER=os.path.join(d, "verifier-invoked"),
+                        UNATTESTED_MARKER=os.path.join(d, "unattested-tooling-ran"))
 
     def checkout(self, name, revision):
         path = os.path.join(self.d, name)
@@ -1226,6 +1257,36 @@ class VerifyReleaseProcedureTests(unittest.TestCase):
         with open(path) as f:
             return f.read().splitlines()
 
+    def git_log(self):
+        path = os.path.join(self.stub, "git.log")
+        if not os.path.exists(path):
+            return []
+        with open(path) as f:
+            return f.read().splitlines()
+
+    def documented_procedure(self, **env):
+        with open(os.path.join(self.HERE, "..", "..", "..", "docs", "deployment.md"), encoding="utf-8") as f:
+            doc = f.read()
+        section = doc.split("### Using a release package with `deploy.sh`", 1)[1].split("\n### ", 1)[0]
+        self.assertNotIn("--source .", section)
+        # Remove only Markdown indentation and the operator's placeholder inputs;
+        # preserve Python indentation and execute the actual remaining Bash block.
+        block = textwrap.dedent(section.split("```bash\n", 1)[1].split("```", 1)[0])
+        lines = block.splitlines()
+        self.assertIn('bash tooling/infrastructure/release/verify-release.sh "$pkg" --version "$version" '
+                      '--source source --store "$store"', lines)
+        script = "\n".join(line for line in lines if not line.startswith(("pkg=", "repo=")))
+        self.assertIn('--source-digest "$tooling_sha"', script)
+        path = os.path.join(self.d, "procedure.sh")
+        put(path, 'pkg=%s; version=v0.1.0-rc.1; store=containerd\nrepo=%s\n' %
+            (shlex.quote(self.pkg), shlex.quote(self.repo)) + script + "\n")
+        return subprocess.run(["bash", path], capture_output=True, text=True, env=dict(self.env, **env), cwd=self.d)
+
+    def assert_bootstrap_refused(self, p):
+        self.assertNotEqual(p.returncode, 0, p.stdout + p.stderr)
+        for key in ("UNATTESTED_MARKER", "VERIFIER_MARKER", "HISTORICAL_MARKER", "DEPLOY_MARKER"):
+            self.assertFalse(os.path.exists(self.env[key]), key + ": " + p.stdout + p.stderr)
+
     def assert_verified(self, p):
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn("Verifier: release tooling commit %s" % self.tooling, p.stdout)
@@ -1240,25 +1301,135 @@ class VerifyReleaseProcedureTests(unittest.TestCase):
         self.assertFalse(os.path.exists(self.env["HISTORICAL_MARKER"]))
 
     def test_documented_procedure_uses_the_tooling_and_source_revisions(self):
-        with open(os.path.join(self.HERE, "..", "..", "..", "docs", "deployment.md"), encoding="utf-8") as f:
-            doc = f.read()
-        section = doc.split("### Using a release package with `deploy.sh`", 1)[1].split("\n### ", 1)[0]
-        self.assertNotIn("--source .", section)
-        block = section.split("```bash\n", 1)[1].split("```", 1)[0]
-        lines = [line.strip() for line in block.splitlines()]
-        self.assertIn("bash tooling/infrastructure/release/verify-release.sh \"$pkg\" --version \"$version\" "
-                      "--source source --store \"$store\"", lines)
-        script = "\n".join(line for line in lines if not line.startswith(("pkg=", "repo=")))
-        self.assertIn('--source-digest "$tooling_sha"', script)
-        with open(os.path.join(self.d, "procedure.sh"), "w") as f:
-            f.write('pkg=%s; version=v0.1.0-rc.1; store=containerd\nrepo=%s\n' % (self.pkg, self.repo) + script + "\n")
-        p = subprocess.run(["bash", os.path.join(self.d, "procedure.sh")], capture_output=True, text=True, env=self.env,
-                           cwd=self.d)
+        p = self.documented_procedure()
         self.assert_verified(p)
+        self.assertTrue(os.path.exists(self.env["VERIFIER_MARKER"]))
         self.assertEqual(self.git(os.path.join(self.d, "tooling"), "rev-parse", "HEAD"), self.tooling)
         self.assertEqual(self.git(os.path.join(self.d, "source"), "rev-parse", "HEAD"), self.source)
         bootstrap = self.gh_log()[0]   # the operator's own gh runs first, before any checked-out code
         self.assertTrue(bootstrap.startswith("attestation verify %s/release.json " % self.pkg), bootstrap)
+
+    def test_documented_procedure_handles_paths_with_spaces(self):
+        pkg, repo = os.path.join(self.d, "assets with spaces"), os.path.join(self.d, "upstream with spaces")
+        os.rename(self.pkg, pkg)
+        os.rename(self.repo, repo)
+        self.pkg, self.repo = pkg, repo
+        self.assert_verified(self.documented_procedure())
+
+    def test_bootstrap_refuses_existing_non_git_tooling(self):
+        directory = os.path.join(self.d, "tooling", "infrastructure", "release")
+        os.makedirs(directory)
+        path = os.path.join(directory, "verify-release.sh")
+        marker = '#!/bin/sh\n: > "$UNATTESTED_MARKER"\nexit 0\n'
+        put(path, marker)
+        os.chmod(path, 0o755)
+        p = self.documented_procedure()
+        self.assert_bootstrap_refused(p)
+        self.assertIn("Failed to clone release tooling", p.stderr)
+        self.assertEqual(len(self.git_log()), 1)
+        self.assertFalse(os.path.exists(os.path.join(self.d, "source")))
+        with open(path) as f:
+            self.assertEqual(f.read(), marker)  # the occupied destination was not removed or overwritten
+
+    def test_bootstrap_refuses_existing_git_tooling_at_another_commit(self):
+        tooling = self.checkout("tooling", self.later)
+        wrong = self.commit(tooling, {"infrastructure/release/verify-release.sh":
+                                     '#!/bin/sh\n: > "$UNATTESTED_MARKER"\nexit 0\n'}, "unattested verifier")
+        self.assertNotEqual(wrong, self.tooling)
+        self.assertEqual(self.git(tooling, "status", "--porcelain"), "")
+        p = self.documented_procedure()
+        self.assert_bootstrap_refused(p)
+        self.assertIn("Failed to clone release tooling", p.stderr)
+        self.assertEqual(len(self.git_log()), 1)
+        self.assertEqual(self.git(tooling, "rev-parse", "HEAD"), wrong)
+
+    def test_bootstrap_refuses_existing_source(self):
+        source = self.checkout("source", self.later)
+        sentinel = os.path.join(source, "keep-me")
+        put(sentinel, "preserve existing source\n")
+        p = self.documented_procedure()
+        self.assert_bootstrap_refused(p)
+        self.assertIn("Failed to clone application source", p.stderr)
+        self.assertEqual(len(self.git_log()), 3)
+        self.assertEqual(self.git(source, "rev-parse", "HEAD"), self.later)
+        with open(sentinel) as f:
+            self.assertEqual(f.read(), "preserve existing source\n")
+
+    def assert_git_failure_stops_bootstrap(self, operation, diagnostic, expected_calls):
+        p = self.documented_procedure(FAIL_GIT_OPERATION=operation)
+        self.assert_bootstrap_refused(p)
+        self.assertIn("Simulated %s failure" % operation, p.stderr)
+        self.assertIn(diagnostic, p.stderr)
+        self.assertEqual(len(self.git_log()), expected_calls)
+        self.assertEqual(len(self.gh_log()), 1)  # only the operator's bootstrap attestation
+
+    def test_bootstrap_tooling_clone_failure(self):
+        self.assert_git_failure_stops_bootstrap("tooling-clone", "Failed to clone release tooling", 1)
+
+    def test_bootstrap_tooling_checkout_failure(self):
+        self.assert_git_failure_stops_bootstrap("tooling-checkout", "Failed to check out attested release tooling", 2)
+        self.assertFalse(os.path.exists(os.path.join(self.d, "source")))
+
+    def test_bootstrap_source_clone_failure(self):
+        self.assert_git_failure_stops_bootstrap("source-clone", "Failed to clone application source", 3)
+        self.assertEqual(self.git(os.path.join(self.d, "tooling"), "rev-parse", "HEAD"), self.tooling)
+
+    def test_bootstrap_source_checkout_failure(self):
+        self.assert_git_failure_stops_bootstrap("source-checkout", "Failed to check out the release source revision", 4)
+
+    def test_bootstrap_attestation_failure_precedes_git_and_repository_code(self):
+        p = self.documented_procedure(FAIL_ATTESTATION="1")
+        self.assert_bootstrap_refused(p)
+        self.assertIn("Release manifest attestation verification failed", p.stderr)
+        self.assertEqual(len(self.gh_log()), 1)
+        self.assertEqual(self.git_log(), [])
+
+    def assert_invalid_manifest_stops_bootstrap(self, contents):
+        path = os.path.join(self.pkg, "release.json")
+        put(path, contents)
+        p = self.documented_procedure()
+        self.assert_bootstrap_refused(p)
+        self.assertIn("Invalid release manifest or revision SHA", p.stderr)
+        self.assertEqual(self.gh_log(), [])
+        self.assertEqual(self.git_log(), [])
+        self.assertFalse(os.path.exists(os.path.join(self.d, "tooling")))
+        self.assertFalse(os.path.exists(os.path.join(self.d, "source")))
+
+    def test_bootstrap_rejects_invalid_sha_strings_and_types_before_external_commands(self):
+        manifest = read_json(os.path.join(self.pkg, "release.json"))
+        cases = {"empty": "", "truncated": "a" * 39, "too long": "a" * 41,
+                 "non-hex": "g" * 40, "uppercase": "A" * 40, "newline": "a" * 20 + "\n" + "a" * 20,
+                 "leading space": " " + "a" * 40, "trailing space": "a" * 40 + " ",
+                 "leading tab": "\t" + "a" * 40, "trailing newline": "a" * 40 + "\n",
+                 "trailing CRLF": "a" * 40 + "\r\n",
+                 "shell text": '$(touch "%s"); `id`' % self.env["UNATTESTED_MARKER"],
+                 "null": None, "number resembling SHA": int("1" * 40), "boolean": True,
+                 "array": ["a" * 40], "object": {"sha": "a" * 40}}
+        for field in ("tooling", "source"):
+            for label, value in cases.items():
+                with self.subTest(field=field, value=label):
+                    data = copy.deepcopy(manifest)
+                    if field == "tooling":
+                        data["tooling"]["sha"] = value
+                    else:
+                        data["source_revision"] = value
+                    self.assert_invalid_manifest_stops_bootstrap(json.dumps(data))
+
+    def test_bootstrap_rejects_missing_fields_and_malformed_json_before_external_commands(self):
+        manifest = read_json(os.path.join(self.pkg, "release.json"))
+        missing_tooling, missing_source, missing_sha = (copy.deepcopy(manifest) for _ in range(3))
+        del missing_tooling["tooling"]
+        del missing_source["source_revision"]
+        del missing_sha["tooling"]["sha"]
+        cases = {"missing tooling": missing_tooling, "missing source SHA": missing_source,
+                 "missing tooling SHA": missing_sha, "null tooling": dict(manifest, tooling=None),
+                 "array tooling": dict(manifest, tooling=[]), "wrong root type": []}
+        for label, value in cases.items():
+            with self.subTest(value=label):
+                self.assert_invalid_manifest_stops_bootstrap(json.dumps(value))
+        for contents in ("{", "", '{"tooling":'):
+            with self.subTest(malformed=contents):
+                self.assert_invalid_manifest_stops_bootstrap(contents)
 
     def test_historical_source_verifier_is_the_failure_the_procedure_avoids(self):
         source = self.checkout("source", self.source)
