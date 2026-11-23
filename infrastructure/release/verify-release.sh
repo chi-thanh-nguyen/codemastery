@@ -15,18 +15,26 @@
 #                  deploy.sh archive verifier and the deploy.sh/Compose hash checks
 #   --store        print the --expect-image values for this image store (deploy.sh
 #                  preflight reports which one the VM uses); default containerd
-#   --trusted-root offline mode: verify the bundled attestation against this
+#   --trusted-root offline mode: verify the bundled attestations against this
 #                  Sigstore trusted root (`gh attestation trusted-root > FILE`,
 #                  fetched earlier on a connected host) instead of GitHub's API;
-#                  the online check that the admission record is still on main
-#                  is then skipped and must be done on a connected host
+#                  the online checks of GitHub's run and approval records are then
+#                  skipped and must be done on a connected host
 #
 # The repository (trust anchor) is fixed: chi-thanh-nguyen/codemastery.
 #
-# Passing verification proves that the package was produced by this repository's
-# release workflow from main, that its admission record, candidate and release
-# identities agree, and that deploy.sh accepts the archive. It does not authorize
-# loading, deploying or updating anything (deploy.sh's own authority gates stay).
+# What each check establishes (ADR015 A1):
+#   integrity         SHA256SUMS, release.json file map, archive and identities
+#   signing identity  Sigstore attestations by release.yml on refs/heads/main at
+#                     the recorded tooling commit (offline-capable)
+#   admission         admission.json re-derived from its evidence and the candidate,
+#                     the decision of the pinned admission authority, sealed by the
+#                     same dispatch run that promoted the package (offline-capable,
+#                     as a statement of the attested workflow)
+#   authority         online only: GitHub's own run record (dispatcher) and
+#                     approval record (approver) for that run match admission.json
+# It does not authorize loading, deploying or updating anything (deploy.sh's own
+# authority gates stay), and it is not publication.
 set -Eeuo pipefail
 umask 077
 
@@ -61,8 +69,9 @@ archive="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["arch
 # release.json names as its tooling.
 tooling_sha="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("tooling") or {}).get("sha") or "")' "$PACKAGE/release.json")"
 [[ "$tooling_sha" =~ ^[0-9a-f]{40}$ ]] || fail "release.json names no tooling commit."
-attest=(--repo "$REPOSITORY" --cert-identity "https://github.com/$REPOSITORY/.github/workflows/release.yml@refs/heads/main"
+policy=(--repo "$REPOSITORY" --cert-identity "https://github.com/$REPOSITORY/.github/workflows/release.yml@refs/heads/main"
         --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners)
+attest=("${policy[@]}")
 if [[ -n "$TRUSTED_ROOT" ]]; then
   [[ -f "$PACKAGE/release.sigstore.json" ]] || fail "Offline mode needs release.sigstore.json in the package."
   attest+=(--bundle "$PACKAGE/release.sigstore.json" --custom-trusted-root "$TRUSTED_ROOT")
@@ -73,18 +82,29 @@ for file in release.json "$archive" mc-source.tar.gz admission.json; do
 done
 echo "Attestation verified for release.json, the archive, mc-source.tar.gz and admission.json (signer: release.yml on main)."
 
-# Independent of the promote job: the admission record must still be on main,
-# unchanged (a later revocation or edit of the record fails this check).
+# The admission's own seal: attested by the dispatch run named inside admission.json
+# (Sigstore certificate: run invocation, workflow_dispatch trigger, repository ID).
+admission_run="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["authorization"]["run_url"])' "$PACKAGE/admission.json")"
+[[ "$admission_run" =~ ^https://github\.com/chi-thanh-nguyen/codemastery/actions/runs/[0-9]+/attempts/1$ ]] \
+  || fail "admission.json names a malformed admission run."
+seal=(--bundle "$PACKAGE/admission.sigstore.json")
+[[ -z "$TRUSTED_ROOT" ]] || seal+=(--custom-trusted-root "$TRUSTED_ROOT")
+work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
+gh attestation verify "$PACKAGE/admission.json" "${policy[@]}" "${seal[@]}" --format json > "$work/seal.json" 2>/dev/null \
+  || fail "admission.sigstore.json is not a valid release-workflow attestation of admission.json."
+python3 "$HERE/release.py" check-attestation-run --verification "$work/seal.json" --run-url "$admission_run" >/dev/null \
+  || fail "The admission was not sealed by its own dispatch run."
+echo "Admission sealed by its own dispatch run: $admission_run."
+
+# Authority, online only: GitHub's record of who dispatched and who approved that run.
 if [[ -z "$TRUSTED_ROOT" ]]; then
-  record="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["record_id"])' "$PACKAGE/admission.json")"
-  [[ "$record" =~ ^[A-Z0-9][A-Z0-9-]{7,79}$ ]] || fail "admission.json has a malformed record_id."
-  main_blob="$(gh api "repos/$REPOSITORY/contents/docs/decisions/release-admissions/$record.json?ref=main" --jq .sha 2>/dev/null)" \
-    || fail "The admission record $record is not on main."
-  local_blob="$(python3 -c 'import hashlib,sys; d=open(sys.argv[1],"rb").read(); print(hashlib.sha1(b"blob %d\0" % len(d) + d).hexdigest())' "$PACKAGE/admission.json")"
-  [[ "$main_blob" == "$local_blob" ]] || fail "The admission record on main differs from the package's admission.json."
-  echo "Admission record $record is on main, unchanged."
+  run_api="repos/$REPOSITORY/actions/runs/$(printf '%s' "$admission_run" | sed -E 's#^.*/runs/([0-9]+)/attempts/1$#\1#')"
+  gh api "$run_api/attempts/1" > "$work/run.json" 2>/dev/null || fail "GitHub no longer has the admission run's record."
+  gh api "$run_api/approvals" > "$work/approvals.json" 2>/dev/null || fail "GitHub's approval record of the admission run is unavailable."
+  python3 "$HERE/release.py" check-run-record --admission "$PACKAGE/admission.json" --run-record "$work/run.json" \
+    --approvals "$work/approvals.json" || fail "GitHub's run or approval record contradicts admission.json."
 else
-  echo "Offline: check on a connected host that docs/decisions/release-admissions/<record_id>.json on main equals admission.json."
+  echo "Offline: GitHub's record of the dispatching and approving account was not checked; run without --trusted-root on a connected host to check it."
 fi
 
 if [[ -n "$SOURCE" ]]; then

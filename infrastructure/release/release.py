@@ -12,9 +12,13 @@ Subcommands
   findings            normalize Trivy JSON reports into one findings list
   migrations          Flyway migration inventory and baseline compatibility
   candidate-manifest  write release-candidate.json for a candidate package
-  admission-template  print a PENDING admission record for a candidate
-  verify-admission    validate an admission record against a candidate manifest
-  admission-provenance  GitHub evidence that decided_by merged exactly the admission record
+  admission-request   authenticate the dispatching account and read the Leader's request
+  admission-approval  check the protected environment and the authority's approval of the run
+  admission-preview   Markdown preview of what an approval of this request admits
+  admission-decide    write the admission record of this run from its evidence
+  verify-admission    re-derive an admission record from its evidence and the candidate
+  check-attestation-run  a verified attestation was signed by exactly the expected run
+  check-run-record    online: GitHub still records the admission's dispatch and approval
   check-rescan        fail on any promotion-time finding the admission does not cover
   release-manifest    write release.json for a promoted release package
   verify-package      check a package directory against its manifest and SHA256SUMS
@@ -29,7 +33,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
 import tarfile
 
@@ -38,8 +41,16 @@ RELEASE_REFS = {s: "codemastery.invalid/%s:release" % s for s in SERVICES}
 PLATFORM = ("linux", "amd64")
 CANDIDATE_SCHEMA = "codemastery.release-candidate/v1"
 RELEASE_SCHEMA = "codemastery.release/v1"
-ADMISSION_SCHEMA = "codemastery.release-admission/v1"
-ADMISSION_DIR = "docs/decisions/release-admissions"
+ADMISSION_SCHEMA = "codemastery.release-admission/v2"
+# Trust anchors (ADR015 A1). Changing any of them is a reviewed change of this file.
+REPOSITORY = "chi-thanh-nguyen/codemastery"
+REPOSITORY_ID = "1391772534"
+WORKFLOW_PATH = ".github/workflows/release.yml"
+WORKFLOW_REF = REPOSITORY + "/" + WORKFLOW_PATH + "@refs/heads/main"
+ADMISSION_ENVIRONMENT = "release-admission"
+# The release admission authority: GitHub login -> numeric account ID (the ID survives
+# a rename and cannot be taken over by another account that later claims the login).
+ADMISSION_AUTHORITY = {"chi-thanh-nguyen": 212181152}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")
@@ -48,7 +59,6 @@ VERSION = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9
 RECORD_ID = re.compile(r"^[A-Z0-9][A-Z0-9-]{7,79}$")
 CANDIDATE_TAG = re.compile(r"^candidate-[0-9a-f]{12}-[0-9]+-[0-9]+$")
 LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
-DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 ORIGIN = re.compile(r"^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 MIGRATION = re.compile(r"^V([0-9]+)__[A-Za-z0-9_]+\.sql$")
@@ -506,12 +516,26 @@ def verify_package(directory, kind, allow_extra=()):
 
 
 # --------------------------------------------------------------------------
-# Admission
+# Admission (ADR015 D7 as amended by A1)
+#
+# A security admission is a Leader decision made inside the promote run itself:
+# the pinned admission authority dispatches release.yml on main naming the exact
+# candidate manifest digest it reviewed, and approves that run in the protected
+# `release-admission` environment. The record is derived from GitHub's own views
+# of the run (runner environment, event payload, run record, environment rules and
+# approval record), never from a file or a typed login, and it is attested before
+# any candidate image runs. A record is valid only for the run that made it.
 
-ADMISSION_KEYS = {"schema", "record_id", "decision", "decided_by", "decided_on", "scope",
-                  "source_revision", "public_origin", "candidate", "images",
-                  "accepted_findings", "release", "not_granted", "notes", "rehearsal"}
-REQUIRED_NOT_GRANTED = {"deployment", "public-exposure", "existing-vm-update"}
+ADMISSION_KEYS = {"schema", "record_id", "decision", "decided_by", "decided_at", "scope", "statement",
+                  "source_revision", "public_origin", "candidate", "images", "accepted_findings",
+                  "accepted_counts", "release", "not_granted", "authorization", "rehearsal"}
+REQUIRED_NOT_GRANTED = ("deployment", "existing-vm-update", "licensing-determination",
+                        "production-secrets", "public-exposure", "public-publication")
+REHEARSAL_VERSION = "v0.0.0-rehearsal"
+MECHANISM = "workflow_dispatch+environment-approval"
+TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+COUNT = re.compile(r"^(0|[1-9][0-9]{0,5})$")
+RUN_ID = re.compile(r"^[1-9][0-9]{0,19}$")
 
 
 def codeowners_for(codeowners_path, pattern):
@@ -527,189 +551,416 @@ def codeowners_for(codeowners_path, pattern):
     return owners
 
 
-def admission_template(candidate, candidate_tag, version):
-    return {
+def _text(value, what, limit=1000):
+    if value is None:
+        return ""
+    if not isinstance(value, str) or len(value) > limit or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        refuse("%s must be at most %d printable characters on one line" % (what, limit))
+    return value.strip()
+
+
+def _account(value, what, user_only=True):
+    """{login, id} of a GitHub account as GitHub reported it; ids are compared, not only logins."""
+    if not isinstance(value, dict):
+        refuse("%s is missing" % what)
+    login, uid = value.get("login"), value.get("id")
+    if not isinstance(login, str) or not LOGIN.match(login) or not isinstance(uid, int) or isinstance(uid, bool) or uid <= 0:
+        refuse("%s is malformed" % what)
+    if user_only and value.get("type") not in (None, "User"):
+        refuse("%s is not a user account (%s)" % (what, value.get("type")))
+    return {"login": login, "id": uid}
+
+
+def is_authority(account, owners=None):
+    """The pinned admission authority (login and numeric account ID), and, when CODEOWNERS
+    is given, also a code owner of /docs/decisions/ in the dispatched revision."""
+    ok = isinstance(account, dict) and ADMISSION_AUTHORITY.get(account.get("login")) == account.get("id") \
+        and not isinstance(account.get("id"), bool)
+    return ok and (owners is None or account["login"] in owners)
+
+
+def run_url(run_id, attempt):
+    return "https://github.com/%s/actions/runs/%s/attempts/%s" % (REPOSITORY, run_id, attempt)
+
+
+def parse_request(inputs):
+    """The Leader's request, exactly as GitHub recorded the dispatch inputs (untrusted text)."""
+    if not isinstance(inputs, dict):
+        refuse("the dispatch carries no inputs")
+    tag, sha, version = inputs.get("candidate"), inputs.get("candidate_manifest_sha256"), inputs.get("version")
+    count, flag = inputs.get("accepted_findings"), inputs.get("accept_critical_or_high")
+    if not isinstance(tag, str) or not CANDIDATE_TAG.match(tag):
+        refuse("candidate must be a candidate draft tag (candidate-<12 hex>-<run>-<attempt>)")
+    if not isinstance(sha, str) or not HEX64.match(sha):
+        refuse("candidate_manifest_sha256 must be the 64-hex SHA-256 of the reviewed release-candidate.json")
+    if not isinstance(version, str) or not VERSION.match(version):
+        refuse("version must be a v<major>.<minor>.<patch>[-pre] tag")
+    if not isinstance(count, (str, int)) or isinstance(count, bool) or not COUNT.match(str(count)):
+        refuse("accepted_findings must be the number of candidate findings being accepted")
+    if flag in (True, "true"):
+        flag = True
+    elif flag in (None, False, "false"):   # an omitted input accepts nothing more
+        flag = False
+    else:
+        refuse("accept_critical_or_high must be true or false")
+    return {"candidate": tag, "candidate_manifest_sha256": sha, "version": version,
+            "accepted_findings": int(count), "accept_critical_or_high": flag,
+            "note": _text(inputs.get("note"), "note")}
+
+
+def authenticate_dispatch(env, event, run_record):
+    """Who started this run, from three GitHub views that must agree.
+
+    The run must be the first attempt of a workflow_dispatch of release.yml on main in
+    this repository: a re-run replays the original dispatch event (and runs with the
+    original actor's privileges) and can never make a new decision. The account that
+    dispatched it (actor, triggering actor, event sender and the run record's actor
+    and triggering actor; login and numeric ID) must be the admission authority.
+    """
+    env = env if isinstance(env, dict) else {}
+    checks = (
+        ("GITHUB_REPOSITORY", REPOSITORY, "the run is not in %s" % REPOSITORY),
+        ("GITHUB_REPOSITORY_ID", REPOSITORY_ID, "the run's repository ID is not %s's" % REPOSITORY),
+        ("GITHUB_EVENT_NAME", "workflow_dispatch", "an admission is made only by a workflow_dispatch of release.yml"),
+        ("GITHUB_REF", "refs/heads/main", "an admission is made only from main"),
+        ("GITHUB_WORKFLOW_REF", WORKFLOW_REF, "the run is not release.yml on refs/heads/main"),
+        ("GITHUB_RUN_ATTEMPT", "1", "a re-run replays an earlier dispatch and cannot admit; dispatch the promote stage again"),
+    )
+    for key, want, message in checks:
+        if env.get(key) != want:
+            refuse(message)
+    sha, rid = env.get("GITHUB_SHA") or "", env.get("GITHUB_RUN_ID") or ""
+    if not REVISION.match(sha) or not RUN_ID.match(rid):
+        refuse("the run's commit or run ID is malformed")
+    if not isinstance(event, dict) or event.get("ref") != "refs/heads/main" \
+            or (event.get("repository") or {}).get("full_name") != REPOSITORY \
+            or str((event.get("repository") or {}).get("id")) != REPOSITORY_ID:
+        refuse("the event payload does not describe a dispatch on main of this repository")
+    sender = _account(event.get("sender"), "the event sender")
+    if not isinstance(run_record, dict):
+        refuse("the run record is missing")
+    actor = _account(run_record.get("actor"), "the run record's actor")
+    triggering = _account(run_record.get("triggering_actor"), "the run record's triggering actor")
+    repo = run_record.get("repository") or {}
+    if run_record.get("id") != int(rid) or run_record.get("run_attempt") != 1 \
+            or run_record.get("event") != "workflow_dispatch" or run_record.get("head_branch") != "main" \
+            or run_record.get("head_sha") != sha or run_record.get("path") != WORKFLOW_PATH \
+            or repo.get("full_name") != REPOSITORY or str(repo.get("id")) != REPOSITORY_ID:
+        refuse("GitHub's run record does not match this run (id, attempt, event, branch, commit, workflow or repository)")
+    logins = {env.get("GITHUB_ACTOR"), env.get("GITHUB_TRIGGERING_ACTOR"), sender["login"], actor["login"], triggering["login"]}
+    ids = {str(env.get("GITHUB_ACTOR_ID")), str(sender["id"]), str(actor["id"]), str(triggering["id"])}
+    if len(logins) != 1 or len(ids) != 1:
+        refuse("the run's actor, triggering actor and event sender are not one account")
+    if not is_authority(sender):
+        refuse("only the release admission authority may dispatch an admission; %s is not it" % sender["login"])
+    request = parse_request(event.get("inputs"))
+    if request["version"] == REHEARSAL_VERSION:
+        refuse("the rehearsal version cannot be released")
+    return {"request": request, "dispatched_by": sender, "run_id": rid, "run_attempt": "1", "tooling_sha": sha,
+            "run_url": run_url(rid, 1)}
+
+
+def authority_approval(approvals):
+    """The admission authority's approval of this run in the admission environment."""
+    entries = [a for a in (approvals if isinstance(approvals, list) else [])
+               if isinstance(a, dict) and any(isinstance(e, dict) and e.get("name") == ADMISSION_ENVIRONMENT
+                                              for e in a.get("environments") or [])]
+    if any(a.get("state") != "approved" for a in entries):
+        refuse("the run has a review for %s that is not an approval" % ADMISSION_ENVIRONMENT)
+    approvers = [_account(a.get("user"), "the approving account") for a in entries]
+    if not approvers:
+        refuse("GitHub records no approval of this run in the %s environment" % ADMISSION_ENVIRONMENT)
+    if not all(is_authority(u) for u in approvers):
+        refuse("the run was approved by an account that is not the admission authority")
+    return approvers[0], _text(entries[0].get("comment"), "approval comment")
+
+
+def check_environment(environment, branch_policies, approvals):
+    """The environment gate is real: protected for the authority, main only, no bypass, approved.
+
+    A job that names an environment that does not exist creates it unprotected, and an
+    unprotected environment lets the job run without anyone's approval. So the rules
+    are read back and must hold, and an approval record must exist; otherwise the
+    admission fails closed.
+    """
+    if not isinstance(environment, dict) or environment.get("name") != ADMISSION_ENVIRONMENT:
+        refuse("the %s environment does not exist" % ADMISSION_ENVIRONMENT)
+    reviewer_ids = sorted({(r.get("reviewer") or {}).get("id")
+                           for rule in environment.get("protection_rules") or [] if isinstance(rule, dict)
+                           and rule.get("type") == "required_reviewers"
+                           for r in rule.get("reviewers") or [] if isinstance(r, dict) and r.get("type") == "User"} - {None})
+    if not set(reviewer_ids) & set(ADMISSION_AUTHORITY.values()):
+        refuse("the %s environment does not require the admission authority's review; an unprotected "
+               "environment is not an approval gate" % ADMISSION_ENVIRONMENT)
+    if environment.get("can_admins_bypass") is not False:
+        refuse("administrators can bypass the %s environment's protection" % ADMISSION_ENVIRONMENT)
+    policy = environment.get("deployment_branch_policy")
+    names = sorted((p.get("name"), p.get("type", "branch")) for p in (branch_policies or {}).get("branch_policies") or []
+                   if isinstance(p, dict))
+    if not isinstance(policy, dict) or policy.get("protected_branches") is not False \
+            or policy.get("custom_branch_policies") is not True or names != [("main", "branch")]:
+        refuse("the %s environment must accept deployments from the main branch only" % ADMISSION_ENVIRONMENT)
+    approver, comment = authority_approval(approvals)
+    return {"name": ADMISSION_ENVIRONMENT, "id": environment.get("id"), "required_reviewer_ids": reviewer_ids,
+            "branch_policy": "main", "admins_can_bypass": False, "approved_by": approver, "approval_comment": comment}
+
+
+def rehearsal_dispatch(env, candidate, candidate_sha256):
+    """A synthetic request for the pull-request rehearsal: it authenticates nobody."""
+    run = candidate.get("run") or {}
+    findings = (candidate.get("security") or {}).get("findings") or []
+    request = {"candidate": "candidate-%s-%s-%s" % (str(candidate.get("source_revision"))[:12], run.get("id") or 0,
+                                                    run.get("attempt") or 1),
+               "candidate_manifest_sha256": candidate_sha256, "version": REHEARSAL_VERSION,
+               "accepted_findings": len(findings),
+               "accept_critical_or_high": any(f.get("severity") in ("CRITICAL", "HIGH") for f in findings), "note": ""}
+    rid, attempt = env.get("GITHUB_RUN_ID") or "0", env.get("GITHUB_RUN_ATTEMPT") or "1"
+    return {"request": request, "dispatched_by": {"login": env.get("GITHUB_ACTOR") or "local", "id": 0},
+            "run_id": rid, "run_attempt": attempt, "tooling_sha": env.get("GITHUB_SHA") or "0" * 40,
+            "run_url": run_url(rid, attempt)}
+
+
+def _candidate_rows(candidate):
+    rows = []
+    for f in (candidate.get("security") or {}).get("findings") or []:
+        if not isinstance(f, dict) or f.get("service") not in SERVICES or f.get("severity") not in SEVERITIES \
+                or not isinstance(f.get("id"), str) or not isinstance(f.get("package"), str):
+            refuse("the candidate manifest holds a malformed finding")
+        rows.append({"service": f["service"], "id": f["id"], "package": f["package"],
+                     "installed": f.get("installed") or "", "severity": f["severity"]})
+    keys = [(r["service"], r["id"], r["package"], r["installed"]) for r in rows]
+    if len(set(keys)) != len(keys):
+        refuse("the candidate manifest lists a finding twice")
+    return sorted(rows, key=lambda r: (r["service"], SEVERITIES.index(r["severity"]), r["id"], r["package"], r["installed"]))
+
+
+def bind_candidate(candidate, candidate_sha256, request, rehearsal):
+    """Check the Leader's request against the attested candidate; return what is admitted."""
+    if not isinstance(candidate, dict) or candidate.get("schema") != CANDIDATE_SCHEMA:
+        refuse("the candidate manifest has an unexpected schema")
+    run = candidate.get("run") or {}
+    if rehearsal:
+        if run.get("rehearsal") is not True:
+            refuse("a rehearsal admission cannot promote a non-rehearsal candidate")
+        if request["version"] != REHEARSAL_VERSION:
+            refuse("a rehearsal admission promotes only %s" % REHEARSAL_VERSION)
+    else:
+        if run.get("rehearsal") is not False or candidate.get("repository") != REPOSITORY:
+            refuse("only a candidate from a dispatched release run of %s can be promoted" % REPOSITORY)
+        if (candidate.get("source_qualification") or {}).get("verified") is not True:
+            refuse("the candidate's source revision checks were not verified")
+        if request["version"] == REHEARSAL_VERSION:
+            refuse("the rehearsal version cannot be released")
+    if request["candidate_manifest_sha256"] != candidate_sha256:
+        refuse("the candidate manifest is not the one the Leader reviewed (candidate_manifest_sha256 differs)")
+    revision = candidate.get("source_revision")
+    if not isinstance(revision, str) or not REVISION.match(revision):
+        refuse("the candidate's source revision is malformed")
+    if request["candidate"] != "candidate-%s-%s-%s" % (revision[:12], run.get("id"), run.get("attempt")):
+        refuse("the candidate tag does not name the run and revision recorded in the candidate manifest")
+    if not isinstance(candidate.get("public_origin"), str) or not ORIGIN.match(candidate["public_origin"]):
+        refuse("the candidate's public origin is malformed")
+    archive = (candidate.get("archive") or {}).get("sha256")
+    if not isinstance(archive, str) or not HEX64.match(archive):
+        refuse("the candidate's archive digest is malformed")
+    images = {}
+    for s in SERVICES:
+        entry = (candidate.get("images") or {}).get(s) or {}
+        if not all(isinstance(entry.get(k), str) and DIGEST.match(entry[k]) for k in ("containerd", "graphdriver")):
+            refuse("the candidate's %s identities are malformed" % s)
+        images[s] = {"containerd": entry["containerd"], "graphdriver": entry["graphdriver"]}
+    coverage = (candidate.get("security") or {}).get("coverage")
+    if not isinstance(coverage, dict) or set(coverage) != set(SERVICES):
+        refuse("the candidate records no scan coverage for every image; promotion could not compare its rescan")
+    rows = _candidate_rows(candidate)
+    if request["accepted_findings"] != len(rows):
+        refuse("the Leader acknowledged %d finding(s); the candidate reports %d" % (request["accepted_findings"], len(rows)))
+    severe = [r for r in rows if r["severity"] in ("CRITICAL", "HIGH")]
+    if severe and request["accept_critical_or_high"] is not True:
+        refuse("the candidate reports %d CRITICAL/HIGH finding(s) and accept_critical_or_high is false" % len(severe))
+    return {"revision": revision, "archive": archive, "images": images, "rows": rows}
+
+
+def decide_admission(candidate, candidate_sha256, dispatch, approval, owners, rehearsal, decided_at):
+    """The admission record for this run: the Leader's request bound to the attested candidate."""
+    request = dispatch["request"]
+    bound = bind_candidate(candidate, candidate_sha256, request, rehearsal)
+    if rehearsal:
+        decided_by = {"login": "rehearsal-ci", "id": 0}
+        authorization = {"mechanism": "rehearsal", "repository": candidate.get("repository"),
+                         "run_id": dispatch["run_id"], "run_attempt": dispatch["run_attempt"],
+                         "run_url": dispatch["run_url"], "tooling_sha": dispatch["tooling_sha"],
+                         "dispatched_by": dispatch["dispatched_by"], "approved_by": decided_by, "request": request}
+        record_id = "REHEARSAL-%s-%s" % (dispatch["run_id"], dispatch["run_attempt"])
+    else:
+        if not is_authority(dispatch["dispatched_by"], owners):
+            refuse("the dispatching account is not the admission authority and a code owner of /docs/decisions/")
+        decided_by = (approval or {}).get("approved_by")
+        if not is_authority(decided_by, owners):
+            refuse("the approving account is not the admission authority and a code owner of /docs/decisions/")
+        authorization = {"mechanism": MECHANISM, "repository": REPOSITORY, "repository_id": REPOSITORY_ID,
+                         "workflow_ref": WORKFLOW_REF, "event": "workflow_dispatch",
+                         "run_id": dispatch["run_id"], "run_attempt": dispatch["run_attempt"],
+                         "run_url": dispatch["run_url"], "tooling_sha": dispatch["tooling_sha"],
+                         "dispatched_by": dispatch["dispatched_by"], "approved_by": decided_by,
+                         "environment": {k: approval[k] for k in ("name", "id", "required_reviewer_ids",
+                                                                  "branch_policy", "admins_can_bypass")},
+                         "approval_comment": approval["approval_comment"], "request": request}
+        record_id = "CM-REL-ADMISSION-%s-%s" % (dispatch["run_id"], dispatch["run_attempt"])
+    counts = count_findings(bound["rows"])
+    record = {
         "schema": ADMISSION_SCHEMA,
-        "record_id": "CM-REL-ADMISSION-%s-%s" % (datetime.date.today().isoformat(), candidate["source_revision"][:8].upper()),
-        "decision": "PENDING",
-        "decided_by": "",
-        "decided_on": "",
-        "scope": "",
-        "source_revision": candidate["source_revision"],
+        "record_id": record_id,
+        "decision": "ADMITTED",
+        "decided_by": decided_by,
+        "decided_at": decided_at,
+        "scope": ("Security admission of exactly the five linux/amd64 image identities of candidate %s (source "
+                  "revision %s, candidate manifest SHA-256 %s, archive SHA-256 %s), accepting exactly the %d listed "
+                  "findings of that candidate at their installed versions and severities, and its promotion to the "
+                  "draft release %s. No other candidate, image identity or finding is admitted."
+                  % (request["candidate"], bound["revision"], candidate_sha256, bound["archive"], len(bound["rows"]),
+                     request["version"])),
+        "statement": request["note"],
+        "source_revision": bound["revision"],
         "public_origin": candidate["public_origin"],
-        "candidate": {"release_tag": candidate_tag,
-                      "manifest_sha256": "<sha256 of release-candidate.json>",
-                      "archive_sha256": candidate["archive"]["sha256"]},
-        "images": {s: {"containerd": candidate["images"][s]["containerd"],
-                       "graphdriver": candidate["images"][s]["graphdriver"]} for s in SERVICES},
-        "accepted_findings": [{"service": f["service"], "id": f["id"], "package": f["package"]}
-                              for f in candidate.get("security", {}).get("findings", [])],
-        "release": {"version": version},
-        "not_granted": sorted(REQUIRED_NOT_GRANTED),
-        "notes": "",
+        "candidate": {"release_tag": request["candidate"], "manifest_sha256": candidate_sha256,
+                      "archive_sha256": bound["archive"],
+                      "run": {"id": str((candidate.get("run") or {}).get("id")),
+                              "attempt": str((candidate.get("run") or {}).get("attempt"))}},
+        "images": bound["images"],
+        "accepted_findings": bound["rows"],
+        "accepted_counts": counts,
+        "release": {"version": request["version"]},
+        "not_granted": list(REQUIRED_NOT_GRANTED),
+        "authorization": authorization,
     }
+    if rehearsal:
+        record["rehearsal"] = True
+    return record
 
 
-def verify_admission(admission, admission_path, candidate, candidate_sha256, codeowners, rehearsal, repo_root):
+def verify_admission(admission, candidate, candidate_sha256, owners=None, rehearsal=False, expected_run=None):
+    """Re-derive the admission from its own recorded evidence and the candidate; any difference refuses.
+
+    expected_run ({run_id, run_attempt, tooling_sha}) binds the record to the run that
+    uses it: promotion accepts only the admission its own run made, and a release
+    package only the admission of the run that promoted it, so a record never carries
+    over to another run, candidate or version.
+    """
     if not isinstance(admission, dict) or set(admission) - ADMISSION_KEYS:
         refuse("admission record has unknown fields")
-    missing = (ADMISSION_KEYS - {"notes", "rehearsal"}) - set(admission)
+    missing = (ADMISSION_KEYS - {"rehearsal"}) - set(admission)
     if missing:
         refuse("admission record lacks: %s" % ", ".join(sorted(missing)))
     if admission["schema"] != ADMISSION_SCHEMA:
         refuse("admission record has an unexpected schema")
+    if admission["decision"] != "ADMITTED":
+        refuse("admission decision is %r; only ADMITTED permits promotion" % (admission["decision"],))
     record_id = admission["record_id"]
     if not isinstance(record_id, str) or not RECORD_ID.match(record_id):
         refuse("admission record_id is malformed")
-    if os.path.basename(admission_path) != record_id + ".json":
-        refuse("admission file name must be <record_id>.json")
-    is_rehearsal = admission.get("rehearsal") is True or record_id.startswith("REHEARSAL-")
     if rehearsal:
-        if not (admission.get("rehearsal") is True and record_id.startswith("REHEARSAL-")):
+        if admission.get("rehearsal") is not True or not record_id.startswith("REHEARSAL-"):
             refuse("a rehearsal accepts only a REHEARSAL- record marked rehearsal: true")
-        if candidate.get("run", {}).get("rehearsal") is not True:
-            refuse("a rehearsal admission cannot promote a non-rehearsal candidate")
-    else:
-        if is_rehearsal or "rehearsal" in admission:
-            refuse("rehearsal records cannot promote a release")
-        if candidate.get("run", {}).get("rehearsal") is not False:
-            refuse("only a candidate from a dispatched release run can be promoted")
-        if (candidate.get("source_qualification") or {}).get("verified") is not True:
-            refuse("the candidate's source revision checks were not verified")
-        _check_tracked(admission_path, repo_root)
-    if admission["decision"] != "ADMITTED":
-        refuse("admission decision is %r; only ADMITTED permits promotion" % (admission["decision"],))
-    login = admission["decided_by"]
-    if not isinstance(login, str) or not LOGIN.match(login):
-        refuse("admission decided_by must be a GitHub login")
-    owners = codeowners_for(codeowners, "/docs/decisions/")
-    if not rehearsal and login not in owners:
-        refuse("admission decided_by is not a code owner of /docs/decisions/")
-    if not isinstance(admission["decided_on"], str) or not DATE.match(admission["decided_on"]):
-        refuse("admission decided_on must be YYYY-MM-DD")
-    if not isinstance(admission["scope"], str) or not admission["scope"].strip() or len(admission["scope"]) > 2000:
-        refuse("admission scope must be a non-empty statement")
-    not_granted = admission["not_granted"]
-    if not isinstance(not_granted, list) or not REQUIRED_NOT_GRANTED.issubset(set(not_granted)):
-        refuse("admission not_granted must name deployment, public-exposure and existing-vm-update")
-    if admission["source_revision"] != candidate.get("source_revision") or not REVISION.match(str(admission["source_revision"])):
-        refuse("admission source_revision does not match the candidate")
-    if admission["public_origin"] != candidate.get("public_origin") or not ORIGIN.match(str(admission["public_origin"])):
-        refuse("admission public_origin does not match the candidate")
-    c = admission["candidate"]
-    if not isinstance(c, dict) or set(c) != {"release_tag", "manifest_sha256", "archive_sha256"}:
-        refuse("admission candidate must hold exactly release_tag, manifest_sha256 and archive_sha256")
-    if not isinstance(c["release_tag"], str) or not CANDIDATE_TAG.match(c["release_tag"]):
-        refuse("admission candidate release_tag is malformed")
-    if c["manifest_sha256"] != candidate_sha256:
-        refuse("admission names a different candidate manifest")
-    if c["archive_sha256"] != (candidate.get("archive") or {}).get("sha256"):
-        refuse("admission names a different candidate archive")
-    images = admission["images"]
-    if not isinstance(images, dict) or set(images) != set(SERVICES):
-        refuse("admission must name exactly the five service images")
-    for service in SERVICES:
-        entry = images[service]
-        want = candidate["images"][service]
-        if not isinstance(entry, dict) or set(entry) != {"containerd", "graphdriver"}:
-            refuse("admission image entry for %s is malformed" % service)
-        for store in ("containerd", "graphdriver"):
-            if not DIGEST.match(str(entry[store])) or entry[store] != want.get(store):
-                refuse("admission %s identity for %s does not match the candidate" % (store, service))
-    accepted = admission["accepted_findings"]
-    if not isinstance(accepted, list):
-        refuse("admission accepted_findings must be a list")
-    keys = set()
-    for item in accepted:
-        if not isinstance(item, dict) or set(item) != {"service", "id", "package"} or item["service"] not in SERVICES:
-            refuse("admission accepted_findings entries need exactly service, id and package")
-        key = (item["service"], item["id"], item["package"])
-        if key in keys:
-            refuse("admission accepted_findings lists an entry twice")
-        keys.add(key)
-    candidate_keys = {(f["service"], f["id"], f["package"]) for f in candidate.get("security", {}).get("findings", [])}
-    unaccepted = candidate_keys - keys
-    if unaccepted:
-        refuse("admission does not accept %d finding(s) reported for the candidate" % len(unaccepted))
-    # An acceptance is a decision about evidence the Leader saw: an entry for a
-    # finding the candidate did not report would pre-accept a future one unseen.
-    if keys - candidate_keys:
-        refuse("admission accepts %d finding(s) the candidate did not report" % len(keys - candidate_keys))
-    release = admission["release"]
-    if not isinstance(release, dict) or set(release) != {"version"} or not VERSION.match(str(release["version"])):
-        refuse("admission release.version must be a v<major>.<minor>.<patch>[-pre] tag")
-    return {"record_id": record_id, "version": release["version"], "accepted": sorted(keys)}
+    elif "rehearsal" in admission or record_id.startswith("REHEARSAL-"):
+        refuse("rehearsal records cannot promote a release")
+    if not isinstance(admission["decided_at"], str) or not TIMESTAMP.match(admission["decided_at"]):
+        refuse("admission decided_at must be a UTC timestamp")
+    auth = admission["authorization"]
+    if not isinstance(auth, dict):
+        refuse("admission authorization is malformed")
+    if not isinstance(admission["not_granted"], list) or not set(REQUIRED_NOT_GRANTED).issubset(admission["not_granted"]):
+        refuse("admission not_granted must name %s" % ", ".join(REQUIRED_NOT_GRANTED))
+    dispatch = {k: auth.get(k) for k in ("request", "dispatched_by", "run_id", "run_attempt", "tooling_sha", "run_url")}
+    if not isinstance(dispatch["request"], dict):
+        refuse("admission request is malformed")
+    request = parse_request(dispatch["request"])
+    if request != dispatch["request"]:
+        refuse("admission request is not in its normalized form")
+    if not isinstance(dispatch["run_id"], str) or not RUN_ID.match(dispatch["run_id"]) \
+            or not isinstance(dispatch["tooling_sha"], str) or not REVISION.match(dispatch["tooling_sha"]) \
+            or dispatch["run_url"] != run_url(dispatch["run_id"], dispatch["run_attempt"]):
+        refuse("admission run identity is malformed")
+    approval = None
+    if not rehearsal:
+        if auth.get("mechanism") != MECHANISM or auth.get("repository") != REPOSITORY \
+                or auth.get("repository_id") != REPOSITORY_ID or auth.get("workflow_ref") != WORKFLOW_REF \
+                or auth.get("event") != "workflow_dispatch" or dispatch["run_attempt"] != "1":
+            refuse("admission was not made by a first-attempt dispatch of release.yml on main of %s" % REPOSITORY)
+        env = auth.get("environment")
+        if not isinstance(env, dict) or env.get("name") != ADMISSION_ENVIRONMENT or env.get("branch_policy") != "main" \
+                or env.get("admins_can_bypass") is not False \
+                or not set(env.get("required_reviewer_ids") or []) & set(ADMISSION_AUTHORITY.values()):
+            refuse("admission was not approved through the protected %s environment" % ADMISSION_ENVIRONMENT)
+        if not is_authority(auth.get("approved_by")) or admission["decided_by"] != auth.get("approved_by"):
+            refuse("admission decided_by is not the admission authority that approved the run")
+        approval = dict(env, approved_by=auth.get("approved_by"), approval_comment=auth.get("approval_comment"))
+    if expected_run is not None:
+        for key in ("run_id", "run_attempt", "tooling_sha"):
+            if str(expected_run.get(key)) != dispatch[key]:
+                refuse("the admission was made by another run (%s differs); an admission is valid only for its own run" % key)
+    rebuilt = decide_admission(candidate, candidate_sha256, dispatch, approval, owners, rehearsal, admission["decided_at"])
+    for key in sorted(ADMISSION_KEYS):
+        if rebuilt.get(key) != admission.get(key):
+            refuse("admission %s does not match the candidate and the recorded decision" % key)
+    return {"record_id": record_id, "version": request["version"], "decided_by": admission["decided_by"],
+            "accepted": len(admission["accepted_findings"])}
 
 
-def _check_tracked(path, repo_root):
-    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(repo_root))
-    if os.path.dirname(rel) != ADMISSION_DIR:
-        refuse("admission records must live in %s/" % ADMISSION_DIR)
-    if os.path.islink(path):
-        refuse("admission record must be a regular file")
-    try:
-        subprocess.run(["git", "-C", repo_root, "ls-files", "--error-unmatch", "--", rel],
-                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        diff = subprocess.run(["git", "-C", repo_root, "status", "--porcelain", "--", rel],
-                              check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
-    except (OSError, subprocess.CalledProcessError):
-        refuse("admission record is not committed in the checked-out revision")
-    if diff.strip():
-        refuse("admission record differs from the committed revision")
+def check_attestation_run(results, expected_url, trigger="workflow_dispatch"):
+    """At least one verified attestation was signed by exactly the expected run of release.yml on main."""
+    for r in results if isinstance(results, list) else []:
+        cert = (((r or {}).get("verificationResult") or {}).get("signature") or {}).get("certificate") or {}
+        if cert.get("runInvocationURI") == expected_url and cert.get("buildTrigger") == trigger \
+                and cert.get("buildSignerURI") == "https://github.com/" + WORKFLOW_REF \
+                and cert.get("sourceRepositoryIdentifier") == REPOSITORY_ID \
+                and cert.get("runnerEnvironment") == "github-hosted":
+            return cert
+    refuse("no verified attestation was signed by run %s (%s of release.yml on main)" % (expected_url, trigger))
 
 
-def admission_provenance(admission, rel_path, commit, blob, pulls, pull, files):
-    """GitHub evidence that the decider, not only the file, admitted the record.
-
-    `decided_by` is text anyone with write access can type. The record counts only
-    when the commit that last changed it on main is the squash merge of a pull
-    request into main that changed nothing but that record, whose head held the
-    same blob, and that `decided_by` merged: an authenticated act by that account
-    on exactly this content.
-    """
-    if not REVISION.match(str(commit)) or not HEX40.match(str(blob)):
-        refuse("admission commit and blob must be full SHAs")
-    pr = merged_pull_request(pulls if isinstance(pulls, list) else [], commit)
-    if pr is None:
-        refuse("the admission record did not reach main through a merged pull request")
-    if not isinstance(pull, dict) or pull.get("number") != pr.get("number") or pull.get("merged") is not True \
-            or pull.get("merge_commit_sha") != commit or (pull.get("base") or {}).get("ref") != "main":
-        refuse("the admission pull request details do not match its merge commit")
-    merged_by = (pull.get("merged_by") or {}).get("login")
-    if not merged_by or merged_by != admission.get("decided_by"):
-        refuse("the admission pull request was not merged by decided_by")
-    changed = [f for page in (files if isinstance(files, list) else []) for f in (page if isinstance(page, list) else [page])]
-    if len(changed) != 1 or not isinstance(changed[0], dict) or changed[0].get("filename") != rel_path \
-            or changed[0].get("status") not in ("added", "modified"):
-        refuse("the admission pull request must change only the admission record")
-    if changed[0].get("sha") != blob:
-        refuse("the merged admission record differs from the pull request's reviewed content")
-    return {"pull_request": pull["number"], "merged_by": merged_by, "merged_at": pull.get("merged_at"),
-            "head_sha": (pull.get("head") or {}).get("sha"), "merge_commit": commit, "record_blob": blob}
+def check_run_record(admission, run_record, approvals):
+    """Online: GitHub still records the dispatch and approval the admission claims."""
+    auth = admission.get("authorization") or {}
+    if not isinstance(run_record, dict) or str(run_record.get("id")) != auth.get("run_id") \
+            or run_record.get("run_attempt") != 1 or run_record.get("event") != "workflow_dispatch" \
+            or run_record.get("head_branch") != "main" or run_record.get("head_sha") != auth.get("tooling_sha") \
+            or run_record.get("path") != WORKFLOW_PATH \
+            or str((run_record.get("repository") or {}).get("id")) != REPOSITORY_ID:
+        refuse("GitHub's record of the admission run differs from the admission")
+    for key in ("actor", "triggering_actor"):
+        if _account(run_record.get(key), "the run's " + key) != auth.get("dispatched_by"):
+            refuse("GitHub records another account as the run's %s" % key)
+    approver, _ = authority_approval(approvals)
+    if approver != admission.get("decided_by"):
+        refuse("GitHub records another approver of the admission run")
+    return {"run": auth.get("run_url"), "dispatched_by": auth.get("dispatched_by"), "approved_by": approver}
 
 
-def check_rescan(accepted_keys, candidate_findings, findings):
+def check_rescan(admitted, findings):
     """Promotion-time findings the admission does not cover, with the reason.
 
-    A rescan row is covered only when its {service, id, package} is accepted and
-    the admitted candidate reported the same row (same installed version) at the
-    same or a higher severity. An admission accepts exactly its candidate's
+    A rescan row is covered only when the admission accepted the same
+    {service, id, package} at the same installed version, and the rescan reports it
+    at the same or a lower severity. An admission accepts exactly its candidate's
     findings and has no other way to accept a row, so a new advisory, a newly
-    matched installed version or a severity raised since the candidate scan makes
-    this candidate unpromotable: a new candidate, then a new admission, is needed.
+    matched installed version or a severity raised since the candidate scan
+    (including any reclassification of UNKNOWN) makes this candidate unpromotable:
+    a new candidate, then a new admission, is needed.
     """
-    admitted = {}
-    for f in candidate_findings:
-        admitted[(f["service"], f["id"], f["package"], f.get("installed") or "")] = SEVERITIES.index(f["severity"])
+    rows = {}
+    for f in admitted:
+        rows[(f["service"], f["id"], f["package"], f.get("installed") or "")] = SEVERITIES.index(f["severity"])
+    keys = {k[:3] for k in rows}
     problems = set()
     for f in findings:
         key = (f["service"], f["id"], f["package"])
         row = key + (f.get("installed") or "",)
-        if key not in accepted_keys:
+        if key not in keys:
             problems.add(key + ("not accepted",))
-        elif row not in admitted:
+        elif row not in rows:
             problems.add(key + ("installed version %s was not in the admitted candidate scan" % (row[3] or "(none)"),))
-        elif SEVERITIES.index(f["severity"]) < admitted[row]:
+        elif SEVERITIES.index(f["severity"]) < rows[row]:
             problems.add(key + ("severity raised to %s since the admitted candidate scan" % f["severity"],))
     return sorted(problems)
 
@@ -832,36 +1083,130 @@ def cmd_candidate_manifest(a):
     write_sha256sums(a.package)
 
 
-def cmd_admission_template(a):
+RUNNER_ENV = ("GITHUB_REPOSITORY", "GITHUB_REPOSITORY_ID", "GITHUB_EVENT_NAME", "GITHUB_REF", "GITHUB_WORKFLOW_REF",
+              "GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_ACTOR", "GITHUB_ACTOR_ID",
+              "GITHUB_TRIGGERING_ACTOR")
+
+
+def runner_env():
+    """The run's identity as the GitHub runner sets it (one of three views compared)."""
+    return {k: os.environ.get(k) for k in RUNNER_ENV}
+
+
+def cmd_admission_request(a):
+    if a.rehearsal:
+        if not a.candidate_manifest:
+            refuse("a rehearsal request is derived from --candidate-manifest")
+        result = rehearsal_dispatch(runner_env(), load_json(a.candidate_manifest, "candidate manifest"),
+                                    sha256_file(a.candidate_manifest))
+    else:
+        if not (a.event and a.run_record):
+            refuse("--event and --run-record are required")
+        result = authenticate_dispatch(runner_env(), load_json(a.event, "event payload"),
+                                       load_json(a.run_record, "run record"))
+    write_json(a.output, result)
+    r = result["request"]
+    print("Admission request by %s: candidate %s, manifest %s, version %s, %d finding(s) acknowledged%s."
+          % (result["dispatched_by"]["login"], r["candidate"], r["candidate_manifest_sha256"], r["version"],
+             r["accepted_findings"], ", CRITICAL/HIGH accepted" if r["accept_critical_or_high"] else ""))
+
+
+def cmd_admission_approval(a):
+    result = check_environment(load_json(a.environment, "environment"), load_json(a.branch_policies, "branch policies"),
+                               load_json(a.approvals, "run approvals"))
+    write_json(a.output, result)
+    print("Run approved in the protected %s environment by %s (account %d)."
+          % (result["name"], result["approved_by"]["login"], result["approved_by"]["id"]))
+
+
+def cmd_admission_preview(a):
+    dispatch = load_json(a.dispatch, "admission request")
     candidate = load_json(a.candidate_manifest, "candidate manifest")
-    template = admission_template(candidate, a.release_tag, a.version)
-    template["candidate"]["manifest_sha256"] = sha256_file(a.candidate_manifest)
-    print(json.dumps(template, indent=2, sort_keys=True))
+    request = dispatch["request"]
+    bound = bind_candidate(candidate, sha256_file(a.candidate_manifest), request, False)
+    counts = count_findings(bound["rows"])
+    out = ["## Security admission request: %s -> %s" % (request["candidate"], request["version"]), "",
+           "Requested by **%s**. Approving the pending `%s` deployment of this run is the security admission of "
+           "exactly the following; rejecting it, or letting it expire, admits nothing." % (
+               dispatch["dispatched_by"]["login"], ADMISSION_ENVIRONMENT), "",
+           "| Field | Value |", "| --- | --- |",
+           "| Candidate draft | `%s` |" % request["candidate"],
+           "| Candidate manifest SHA-256 | `%s` (verified against the request) |" % request["candidate_manifest_sha256"],
+           "| Candidate archive SHA-256 | `%s` |" % bound["archive"],
+           "| Source revision | `%s` |" % bound["revision"],
+           "| Public origin | `%s` |" % candidate["public_origin"],
+           "| Release version | `%s` (not yet used) |" % request["version"],
+           "| Findings accepted | %d (CRITICAL/HIGH %s) |" % (len(bound["rows"]),
+                                                            "accepted" if request["accept_critical_or_high"] else "none allowed"),
+           "| Leader note | %s |" % (request["note"].replace("|", "/") or "(none)"), "",
+           "| Service | containerd identity | graph-driver identity |", "| --- | --- | --- |"]
+    for s in SERVICES:
+        out.append("| %s | `%s` | `%s` |" % (s, bound["images"][s]["containerd"], bound["images"][s]["graphdriver"]))
+    out += ["", "| Findings | " + " | ".join(SEVERITIES) + " |", "| --- |" + " --- |" * len(SEVERITIES)]
+    for s in SERVICES:
+        out.append("| %s | " % s + " | ".join(str(counts[s][sev]) for sev in SEVERITIES) + " |")
+    out += ["", "<details><summary>All %d findings to be accepted</summary>" % len(bound["rows"]), "",
+            "| Service | Severity | Advisory | Package | Installed |", "| --- | --- | --- | --- | --- |"]
+    for r in bound["rows"]:
+        out.append("| %s | %s | `%s` | `%s` | `%s` |" % tuple(str(r[k]).replace("|", "/")[:80]
+                                                         for k in ("service", "severity", "id", "package", "installed")))
+    out += ["", "</details>", "",
+            "The candidate's attestation, package files and source qualification were verified by this job. "
+            "Promotion re-verifies everything after approval and still fails on any new, re-versioned or "
+            "escalated finding and on any loss of scan coverage. Not granted: %s." % ", ".join(REQUIRED_NOT_GRANTED)]
+    print("\n".join(out))
+
+
+def cmd_admission_decide(a):
+    dispatch = load_json(a.dispatch, "admission request")
+    candidate = load_json(a.candidate_manifest, "candidate manifest")
+    candidate_sha256 = sha256_file(a.candidate_manifest)
+    if a.rehearsal:
+        approval, owners = None, None
+    else:
+        if not (a.approval and a.codeowners):
+            refuse("--approval and --codeowners are required")
+        approval, owners = load_json(a.approval, "approval"), codeowners_for(a.codeowners, "/docs/decisions/")
+    record = decide_admission(candidate, candidate_sha256, dispatch, approval, owners, a.rehearsal, utc_now())
+    verify_admission(record, candidate, candidate_sha256, owners, a.rehearsal,
+                     {k: dispatch[k] for k in ("run_id", "run_attempt", "tooling_sha")})
+    write_json(a.output, record)
+    print("Admission %s: %s admitted candidate %s for %s, accepting %d finding(s)."
+          % (record["record_id"], record["decided_by"]["login"], record["candidate"]["release_tag"],
+             record["release"]["version"], len(record["accepted_findings"])))
 
 
 def cmd_verify_admission(a):
     admission = load_json(a.admission, "admission record")
     candidate = load_json(a.candidate_manifest, "candidate manifest")
-    result = verify_admission(admission, a.admission, candidate, sha256_file(a.candidate_manifest),
-                              a.codeowners, a.rehearsal, a.repo_root)
-    if a.release_tag and admission["candidate"]["release_tag"] != a.release_tag:
-        refuse("admission names a different candidate release")
+    owners = codeowners_for(a.codeowners, "/docs/decisions/") if a.codeowners else None
+    run = (a.run_id, a.run_attempt, a.tooling_sha)
+    if any(run) and not all(run):
+        refuse("--run-id, --run-attempt and --tooling-sha go together")
+    expected = dict(zip(("run_id", "run_attempt", "tooling_sha"), run)) if all(run) else None
+    if not a.rehearsal and expected is None:
+        refuse("a real admission is verified against the run that uses it (--run-id, --run-attempt, --tooling-sha)")
+    result = verify_admission(admission, candidate, sha256_file(a.candidate_manifest), owners, a.rehearsal, expected)
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
-def cmd_admission_provenance(a):
-    admission = load_json(a.admission, "admission record")
-    result = admission_provenance(admission, a.path, a.commit, a.blob, load_json(a.pulls, "commit pull requests"),
-                                  load_json(a.pull, "pull request"), load_json(a.files, "pull request files"))
-    print(json.dumps(result, indent=2, sort_keys=True))
+def cmd_check_attestation_run(a):
+    cert = check_attestation_run(load_json(a.verification, "attestation verification"), a.run_url, a.trigger)
+    print("Signed by %s (%s)." % (cert["runInvocationURI"], cert["buildTrigger"]))
+
+
+def cmd_check_run_record(a):
+    result = check_run_record(load_json(a.admission, "admission record"), load_json(a.run_record, "run record"),
+                              load_json(a.approvals, "run approvals"))
+    print("GitHub records run %s dispatched by %s and approved by %s."
+          % (result["run"], result["dispatched_by"]["login"], result["approved_by"]["login"]))
 
 
 def cmd_check_rescan(a):
     admission = load_json(a.admission, "admission record")
     candidate = load_json(a.candidate_manifest, "candidate manifest")
     findings = load_json(a.findings, "rescan findings")
-    accepted = {(i["service"], i["id"], i["package"]) for i in admission.get("accepted_findings") or []}
-    unaccepted = check_rescan(accepted, candidate["security"]["findings"], findings)
+    unaccepted = check_rescan(admission["accepted_findings"], findings)
     lost = check_coverage(candidate["security"].get("coverage"), load_json(a.rescan_coverage, "rescan coverage"))
     for service, vid, pkg, reason in unaccepted:
         print("NOT ACCEPTED: %s %s %s (%s)" % (service, vid, pkg, reason), file=sys.stderr)
@@ -908,10 +1253,12 @@ def cmd_release_manifest(a):
                       "archive_sha256": candidate["archive"]["sha256"],
                       "run": candidate["run"]},
         "admission": {"record_id": admission["record_id"], "decided_by": admission["decided_by"],
-                      "decided_on": admission["decided_on"], "scope": admission["scope"],
+                      "decided_at": admission["decided_at"], "scope": admission["scope"],
+                      "mechanism": admission["authorization"]["mechanism"],
+                      "dispatched_by": admission["authorization"]["dispatched_by"],
+                      "run_url": admission["authorization"]["run_url"],
                       "file": "admission.json", "sha256": sha256_file(os.path.join(a.package, "admission.json")),
-                      "recorded_at": ctx.get("admission_commit"),
-                      "provenance": ctx.get("admission_provenance")},
+                      "seal": "admission.sigstore.json" if os.path.isfile(os.path.join(a.package, "admission.sigstore.json")) else None},
         "images": images,
         "archive": {"name": a.archive_name, "sha256": sha256_file(os.path.join(a.package, a.archive_name)),
                     "size": os.path.getsize(os.path.join(a.package, a.archive_name))},
@@ -937,7 +1284,7 @@ def cmd_release_manifest(a):
                 "VM capacity, TLS, packet filtering and operator custody",
             ],
         },
-        "status": {"candidate": "QUALIFIED", "security_admission": "ADMITTED (%s)" % admission["record_id"],
+        "status": {"candidate": "QUALIFIED", "security_admission": "ADMITTED (%s by %s)" % (admission["record_id"], admission["decided_by"]["login"]),
                    "promotion": "PROMOTED_TO_DRAFT_RELEASE", "publication": "DRAFT_ONLY",
                    "deployment": "NOT_AUTHORIZED_BY_THIS_PIPELINE"},
     }
@@ -954,31 +1301,46 @@ def cmd_verify_package(a):
 
 
 def verify_release_chain(directory, repository):
-    """Offline consistency of a release package: manifest, admission and candidate agree."""
+    """Offline consistency of a release package: manifest, admission and candidate agree.
+
+    The admission is re-derived from its own evidence and the bundled candidate
+    manifest, must be the decision of the pinned admission authority made through the
+    protected environment, and must have been made by the run that promoted the
+    package (so it never carries over from another run, candidate or version).
+    GitHub's account authentication itself is not checkable offline: the online
+    checks are verify-release.sh's run-record and approval checks.
+    """
     manifest = verify_package(directory, "release", ("release.sigstore.json",))
-    if manifest.get("repository") != repository:
+    if manifest.get("repository") != repository or repository != REPOSITORY:
         refuse("release.json names a different repository")
+    if (manifest.get("run") or {}).get("rehearsal") is not False:
+        refuse("release.json is not from a dispatched release run")
     admission = load_json(os.path.join(directory, "admission.json"), "admission.json")
     candidate_path = os.path.join(directory, "release-candidate.json")
     candidate = load_json(candidate_path, "release-candidate.json")
     if manifest["admission"]["sha256"] != sha256_file(os.path.join(directory, "admission.json")):
         refuse("admission.json does not match release.json")
-    if admission.get("decision") != "ADMITTED" or admission.get("rehearsal") is not None:
-        refuse("the bundled admission record does not admit a release")
-    if manifest["candidate"]["manifest_sha256"] != sha256_file(candidate_path) \
-            or admission["candidate"]["manifest_sha256"] != sha256_file(candidate_path):
+    if manifest["candidate"]["manifest_sha256"] != sha256_file(candidate_path):
         refuse("release-candidate.json is not the admitted candidate manifest")
-    if candidate.get("schema") != CANDIDATE_SCHEMA or candidate.get("run", {}).get("rehearsal") is not False:
-        refuse("the bundled candidate manifest is not a dispatched candidate")
+    verify_admission(admission, candidate, sha256_file(candidate_path), None, False,
+                     {"run_id": (manifest.get("run") or {}).get("id"),
+                      "run_attempt": (manifest.get("run") or {}).get("attempt"),
+                      "tooling_sha": (manifest.get("tooling") or {}).get("sha")})
+    if manifest["admission"].get("seal") != "admission.sigstore.json" or "admission.sigstore.json" not in manifest["files"]:
+        refuse("the package lacks the admission's own attestation bundle (admission.sigstore.json)")
+    for key in ("record_id", "decided_by", "decided_at", "scope"):
+        if manifest["admission"].get(key) != admission[key]:
+            refuse("release.json records a different admission %s" % key)
+    if manifest["admission"].get("run_url") != admission["authorization"]["run_url"] \
+            or manifest["admission"].get("dispatched_by") != admission["authorization"]["dispatched_by"]:
+        refuse("release.json records a different admission run")
     for key in ("source_revision", "public_origin"):
         if not (manifest[key] == admission[key] == candidate[key]):
             refuse("%s differs between release, admission and candidate" % key)
     if manifest["version"] != admission["release"]["version"]:
         refuse("release version differs from the admission record")
-    provenance = manifest["admission"].get("provenance") or {}
-    if provenance.get("merged_by") != admission.get("decided_by") \
-            or provenance.get("merge_commit") != manifest["admission"].get("recorded_at"):
-        refuse("release.json does not record that decided_by merged the admission record")
+    if manifest["candidate"]["release_tag"] != admission["candidate"]["release_tag"]:
+        refuse("release.json names another candidate than the admission")
     for s in SERVICES:
         for store in ("containerd", "graphdriver"):
             if not (manifest["images"][s][store] == admission["images"][s][store] == candidate["images"][s][store]):
@@ -1021,7 +1383,9 @@ def cmd_summary(a):
                     "| Archive SHA-256 | `%s` |" % m["archive"]["sha256"],
                     "| Manifest SHA-256 | `%s` |" % sha256_file(path)]
             if m.get("admission"):
-                out.append("| Admission | `%s` (%s, %s) |" % (m["admission"]["record_id"], m["admission"]["decided_by"], m["admission"]["decided_on"]))
+                adm = m["admission"]
+                out.append("| Admission | `%s`: approved by %s at %s in run %s |" % (
+                    adm["record_id"], (adm.get("decided_by") or {}).get("login"), adm.get("decided_at"), adm.get("run_url")))
             out += ["", "| Service | containerd identity | graph-driver identity |", "| --- | --- | --- |"]
             for svc in SERVICES:
                 i = m["images"][svc]
@@ -1106,30 +1470,56 @@ def main(argv=None):
     s.add_argument("--source-checks")
     s.set_defaults(func=cmd_candidate_manifest)
 
-    s = sub.add_parser("admission-template")
+    s = sub.add_parser("admission-request")
+    s.add_argument("--output", required=True)
+    s.add_argument("--event", help="GITHUB_EVENT_PATH of the dispatch")
+    s.add_argument("--run-record", help="GET .../actions/runs/RUN/attempts/ATTEMPT")
+    s.add_argument("--candidate-manifest", help="rehearsal only: derive the synthetic request")
+    s.add_argument("--rehearsal", action="store_true")
+    s.set_defaults(func=cmd_admission_request)
+
+    s = sub.add_parser("admission-approval")
+    s.add_argument("--environment", required=True, help="GET .../environments/release-admission")
+    s.add_argument("--branch-policies", required=True, help="GET .../environments/release-admission/deployment-branch-policies")
+    s.add_argument("--approvals", required=True, help="GET .../actions/runs/RUN/approvals")
+    s.add_argument("--output", required=True)
+    s.set_defaults(func=cmd_admission_approval)
+
+    s = sub.add_parser("admission-preview")
+    s.add_argument("--dispatch", required=True, help="admission-request output")
     s.add_argument("--candidate-manifest", required=True)
-    s.add_argument("--release-tag", required=True)
-    s.add_argument("--version", required=True)
-    s.set_defaults(func=cmd_admission_template)
+    s.set_defaults(func=cmd_admission_preview)
+
+    s = sub.add_parser("admission-decide")
+    s.add_argument("--dispatch", required=True, help="admission-request output")
+    s.add_argument("--approval", help="admission-approval output (real admissions)")
+    s.add_argument("--candidate-manifest", required=True)
+    s.add_argument("--codeowners", help="CODEOWNERS of the dispatched revision (real admissions)")
+    s.add_argument("--output", required=True)
+    s.add_argument("--rehearsal", action="store_true")
+    s.set_defaults(func=cmd_admission_decide)
 
     s = sub.add_parser("verify-admission")
     s.add_argument("--admission", required=True)
     s.add_argument("--candidate-manifest", required=True)
-    s.add_argument("--codeowners", required=True)
-    s.add_argument("--repo-root", required=True)
-    s.add_argument("--release-tag")
+    s.add_argument("--codeowners")
+    s.add_argument("--run-id")
+    s.add_argument("--run-attempt")
+    s.add_argument("--tooling-sha")
     s.add_argument("--rehearsal", action="store_true")
     s.set_defaults(func=cmd_verify_admission)
 
-    s = sub.add_parser("admission-provenance")
+    s = sub.add_parser("check-attestation-run")
+    s.add_argument("--verification", required=True, help="gh attestation verify --format json output")
+    s.add_argument("--run-url", required=True)
+    s.add_argument("--trigger", default="workflow_dispatch")
+    s.set_defaults(func=cmd_check_attestation_run)
+
+    s = sub.add_parser("check-run-record")
     s.add_argument("--admission", required=True)
-    s.add_argument("--path", required=True, help="repository-relative path of the record")
-    s.add_argument("--commit", required=True, help="the commit that last changed the record on main")
-    s.add_argument("--blob", required=True, help="git blob SHA of the record at that commit")
-    s.add_argument("--pulls", required=True, help="GET .../commits/COMMIT/pulls")
-    s.add_argument("--pull", required=True, help="GET .../pulls/NUMBER")
-    s.add_argument("--files", required=True, help="slurped pages of GET .../pulls/NUMBER/files")
-    s.set_defaults(func=cmd_admission_provenance)
+    s.add_argument("--run-record", required=True)
+    s.add_argument("--approvals", required=True)
+    s.set_defaults(func=cmd_check_run_record)
 
     s = sub.add_parser("check-rescan")
     s.add_argument("--admission", required=True)
