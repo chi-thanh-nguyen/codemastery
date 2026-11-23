@@ -434,6 +434,49 @@ start_postgres
 PGTEST_CONTAINER="$container" MIGRATIONS=backend/src/main/resources/db/migration \
   bash "$work/exercise-upgrade.sh" "$script" "$work/env/.env"
 
+# CT17-P6 r9 (ADR017) multi-version upgrade: the deployed preview holds V001-V006, so the
+# next release reaches V009 in one update. Any exact successful prefix 1..k (k < 9)
+# defers the V009 column; gaps, failures, an empty history and k >= 9 still fail closed.
+sed -n '/^set -Eeuo pipefail$/,/^r3_on_v008() {/p' "$work/exercise-upgrade.sh" | sed '$d' > "$work/exercise-multiversion.sh"
+cat >> "$work/exercise-multiversion.sh" <<'BASH'
+echo "== fresh provisioning and V001-V006, as the deployed preview holds it"
+provision_db_roles >/dev/null
+as_mig >/dev/null <<'SQL'
+CREATE TABLE public.flyway_schema_history (installed_rank integer PRIMARY KEY, version varchar(50),
+  description varchar(200) NOT NULL, type varchar(20) NOT NULL, script varchar(1000) NOT NULL,
+  checksum integer, installed_by varchar(100) NOT NULL, installed_on timestamp NOT NULL DEFAULT now(),
+  execution_time integer NOT NULL, success boolean NOT NULL);
+SQL
+migrate_to 6
+[[ "$(runtime_deferred_columns present)" == "ARRAY['enrollments:last_visited_at']::text[]" ]]
+admin <<<"CREATE SCHEMA cm_test_backup; CREATE TABLE cm_test_backup.history AS SELECT * FROM public.flyway_schema_history; DELETE FROM public.flyway_schema_history;"
+expect_failure "column absent with an empty Flyway history" "PostgreSQL role provisioning failed" provision_db_roles
+admin <<<"SET client_min_messages = warning; INSERT INTO public.flyway_schema_history SELECT * FROM cm_test_backup.history; DROP SCHEMA cm_test_backup CASCADE;"
+provision_db_roles >/dev/null
+verify_runtime_privileges present >/dev/null
+probe "r9 on V006: Enrollment resume pointer before V007-V009"   ok "SELECT id FROM public.enrollments WHERE false FOR UPDATE; UPDATE public.enrollments SET resume_lesson_id=NULL WHERE false;"
+probe "r9 on V006: mastery-skip flag stays denied"               42501 "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
+expect_failure "complete verification on V006" "missing reviewed table public.password_reset_tokens" verify_runtime_privileges complete
+admin <<<"DELETE FROM public.flyway_schema_history WHERE version='004';"
+expect_failure "V006 history with a gap (no 004)" "PostgreSQL role provisioning failed" provision_db_roles
+admin <<<"INSERT INTO public.flyway_schema_history VALUES (4,'004','m','SQL','V004__x.sql',0,'x',now(),1,true);"
+admin <<<"UPDATE public.flyway_schema_history SET success=false WHERE version='006';"
+expect_failure "V006 history with a failed migration" "PostgreSQL role provisioning failed" provision_db_roles
+admin <<<"UPDATE public.flyway_schema_history SET success=true WHERE version='006';"
+provision_db_roles >/dev/null
+echo "== Flyway V007-V009 in one update, then hardening and complete verification"
+migrate_to 9
+harden_after_migration
+verify_role_separation >/dev/null
+verify_runtime_privileges complete >/dev/null
+[[ "$(runtime_deferred_columns present)" == "ARRAY[]::text[]" ]]
+probe "r9 after V009: visit writes pointer and server time"      ok "UPDATE public.enrollments SET resume_lesson_id=NULL, last_visited_at=clock_timestamp() WHERE false;"
+echo 'MULTIVERSION_TESTS_PASS: V006 -> pre-migration provisioning -> V007-V009 -> exact matrix; drift fails closed.'
+BASH
+start_postgres
+PGTEST_CONTAINER="$container" MIGRATIONS=backend/src/main/resources/db/migration \
+  bash "$work/exercise-multiversion.sh" "$script" "$work/env/.env"
+
 cat > "$work/exercise-containment.sh" <<'BASH'
 set -Eeuo pipefail
 source "$1"
