@@ -8,7 +8,7 @@ echoes untrusted archive content or any secret.
 
 Subcommands
   archive-identities  image identities a `docker save --platform` archive yields
-  evaluate-checks     required status checks of a source revision
+  evaluate-checks     latest authenticated evaluation of a source revision's required checks
   findings            normalize Trivy JSON reports into one findings list
   migrations          Flyway migration inventory and baseline compatibility
   candidate-manifest  write release-candidate.json for a candidate package
@@ -239,65 +239,288 @@ def archive_identities(archive, refs):
 
 
 # --------------------------------------------------------------------------
-# Required status checks of the source revision
+# Required status checks of the source revision (ADR015 D2 as amended by A2)
+
+SOURCE_CHECKS_SCHEMA = "codemastery.source-checks/v2"
+SOURCE_CHECKS_POLICY = (
+    "ADR015 D2 (amendment A2): for every required status check of the live main rules, the latest valid "
+    "evaluation of the exact source revision has completed and succeeded. GitHub Actions checks are bound to "
+    "GitHub's own job records of a trusted workflow run (push or workflow_dispatch on main, a workflow file of "
+    "the revision), and the newest run attempt of that workflow decides; checks of other apps are accepted only "
+    "from GitHub-operated apps whose check runs no workflow can create. Superseded results are kept as evidence.")
+# Any workflow token with checks: write creates check runs under this app's identity,
+# so its check runs count only through GitHub's job record of a trusted run.
+ACTIONS_APP_ID = 15368
+# GitHub-operated apps whose check runs no workflow token, user or other app can create:
+# the app identity authenticates the check run itself. Any other app fails closed.
+AUTHENTICATED_APPS = {57789: "GitHub code scanning"}
+TRUSTED_EVENTS = ("push", "workflow_dispatch")
+WORKFLOW_FILE = re.compile(r"^\.github/workflows/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$")
+API_BASE = "https://api.github.com/repos/" + REPOSITORY
+WEB_BASE = "https://github.com/" + REPOSITORY
+RERUN_ALL = "re-run all jobs of that workflow run (or start a new run of the workflow on main) and dispatch again"
+
+
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def api_items(pages, key, what):
+    """Items of slurped REST pages (`gh api --paginate --slurp`); fails closed on a short or malformed listing."""
+    if not isinstance(pages, list) or not pages:
+        refuse("%s: no API page was read" % what)
+    items, totals = [], set()
+    for page in pages:
+        if not isinstance(page, dict) or not isinstance(page.get(key), list) or not _is_int(page.get("total_count")):
+            refuse("%s: malformed API page" % what)
+        items.extend(page[key])
+        totals.add(page["total_count"])
+    if len(totals) != 1 or totals.pop() != len(items):
+        refuse("%s: the pages hold %d item(s), not the total GitHub reports; the listing is incomplete "
+               "or changed while it was read" % (what, len(items)))
+    ids = [i.get("id") if isinstance(i, dict) else None for i in items]
+    if not all(_is_int(i) for i in ids) or len(set(ids)) != len(ids):
+        refuse("%s: an item has a missing, malformed or repeated id" % what)
+    return items
+
 
 def merged_pull_request(pulls, revision):
-    """The single PR merged into main whose merge commit is the revision, or None."""
+    """The single PR of this repository merged into main whose merge commit is the revision, or None."""
     merged = [p for p in pulls if isinstance(p, dict) and p.get("merged_at") and p.get("merge_commit_sha") == revision
               and (p.get("base") or {}).get("ref") == "main"]
     if len(merged) > 1:
         refuse("more than one merged pull request claims the revision")
+    if merged and str(((merged[0].get("base") or {}).get("repo") or {}).get("id")) != REPOSITORY_ID:
+        refuse("the merged pull request does not belong to %s" % REPOSITORY)
     return merged[0] if merged else None
 
 
-def evaluate_checks(rules, runs, pr_runs=None, pr=None):
-    """rules: GET /repos/{o}/{r}/rules/branches/main; runs: check runs of the revision.
-
-    Every required context needs a completed, successful check run from the
-    required app (when the rule names one), and every run of it must be completed
-    and successful: a queued, in-progress or otherwise unfinished run, or a
-    completed run with any other conclusion, refuses the revision whatever else
-    succeeded.
-    A context with no run at all on the revision (GitHub reports the CodeQL
-    code-scanning check only on pull requests) may instead be satisfied on the
-    head of the merged pull request whose merge commit is the revision, which is
-    where the ruleset enforced it. A failed or pending run on the revision is
-    never overridden.
-    """
-    required = []
+def required_contexts(rules):
+    """(context, app) pairs of the live main rules; a check this module cannot authenticate fails closed."""
+    required = set()
     for rule in rules if isinstance(rules, list) else []:
-        if rule.get("type") == "required_status_checks":
-            for item in (rule.get("parameters") or {}).get("required_status_checks") or []:
-                required.append((item.get("context"), item.get("integration_id")))
+        if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+            continue
+        for item in (rule.get("parameters") or {}).get("required_status_checks") or []:
+            context = item.get("context") if isinstance(item, dict) else None
+            app = item.get("integration_id") if isinstance(item, dict) else None
+            if not isinstance(context, str) or not context:
+                refuse("a required status check of the default branch has no context")
+            if not _is_int(app):
+                refuse("required check '%s' names no app, so any app could satisfy it; it cannot be authenticated" % context)
+            if app != ACTIONS_APP_ID and app not in AUTHENTICATED_APPS:
+                refuse("required check '%s' comes from app %d, whose check runs this pipeline cannot authenticate; "
+                       "ADR015 D2 must be extended before such a revision can be released" % (context, app))
+            required.add((context, app))
     if not required:
         refuse("no required status checks were found for the default branch; refusing to treat the revision as qualified")
+    return sorted(required)
 
-    def matching(pool, context, app):
-        return [r for r in pool if r.get("name") == context and (app is None or (r.get("app") or {}).get("id") == app)]
 
-    results = []
-    for context, app in sorted(set(required), key=lambda x: (x[0] or "", x[1] or 0)):
-        candidates, evidence = matching(runs, context, app), "revision"
-        if not candidates and pr is not None:
-            candidates, evidence = matching(pr_runs or [], context, app), "merged pull request #%s head %s" % (pr.get("number"), (pr.get("head") or {}).get("sha"))
-        if not candidates:
-            refuse("required check '%s' has no check run on the revision or its merged pull request" % context)
-        # Every run is read (filter=all). Any workflow with checks: write can add a
-        # run under the required app's identity, so no success, however recent,
-        # outweighs a run that is unfinished or did not succeed: such a revision is
-        # refused until every run of the context has completed successfully.
-        unfinished = [r for r in candidates if r.get("status") != "completed"]
-        if unfinished:
-            refuse("required check '%s' has a run that has not completed (%s, %s); wait for it, a later success never overrides it"
-                   % (context, unfinished[0].get("status"), evidence))
-        unsuccessful = [r for r in candidates if r.get("conclusion") != "success"]
-        if unsuccessful:
-            refuse("required check '%s' has a completed run that did not succeed (%s, %s); a later run never overrides it"
-                   % (context, unsuccessful[0].get("conclusion"), evidence))
-        newest = max(candidates, key=lambda r: (r.get("started_at") or "", r.get("id") or 0))
-        results.append({"context": context, "app_id": app, "conclusion": "success", "evidence": evidence,
-                        "check_run_id": newest.get("id"), "url": newest.get("html_url")})
-    return results
+def _untrusted_run(run, revision, workflow_files):
+    """None when the run is a trusted evaluation of the revision, otherwise the reason it is not."""
+    if str((run.get("repository") or {}).get("id")) != REPOSITORY_ID \
+            or str((run.get("head_repository") or {}).get("id")) != REPOSITORY_ID:
+        return "run of another repository"
+    if run.get("head_sha") != revision:
+        return "run of another commit"
+    if run.get("event") not in TRUSTED_EVENTS:
+        return "event %r" % (run.get("event"),)
+    if run.get("head_branch") != "main":
+        return "ref %r" % (run.get("head_branch"),)
+    path = run.get("path")
+    if not isinstance(path, str) or not WORKFLOW_FILE.match(path) or path not in workflow_files:
+        return "workflow %r is not a workflow file of the revision" % (path,)
+    if path == WORKFLOW_PATH:
+        return "release stages are not CI evaluations (the candidate run itself is one of them)"
+    if not _is_int(run.get("run_attempt")) or run["run_attempt"] < 1 or not _is_int(run.get("check_suite_id")) \
+            or not _is_int(run.get("workflow_id")):
+        return "malformed run record"
+    return None
+
+
+def _run_jobs(run, jobs, latest_only):
+    """GitHub's job records of one trusted run, each checked to belong to it."""
+    if not isinstance(jobs, list):
+        refuse("GitHub's job records of workflow run %d were not read; its checks cannot be verified" % run["id"])
+    for job in jobs:
+        attempt = job.get("run_attempt")
+        if job.get("run_id") != run["id"] or job.get("head_sha") != run["head_sha"] or not isinstance(job.get("name"), str) \
+                or not _is_int(attempt) or not 1 <= attempt <= run["run_attempt"] \
+                or (latest_only and attempt != run["run_attempt"]) \
+                or job.get("check_run_url") != "%s/check-runs/%d" % (API_BASE, job["id"]) \
+                or job.get("html_url") != "%s/actions/runs/%d/job/%d" % (WEB_BASE, run["id"], job["id"]):
+            refuse("a job record of workflow run %d does not belong to that run and attempt (job %s)" % (run["id"], job.get("id")))
+    return jobs
+
+
+def _actions_check(context, revision, check_runs, eligible, attempt_jobs, all_jobs):
+    """The latest evaluation of an Actions context, bound to GitHub's job and check-run records."""
+    producers = {}
+    for rid, run in eligible.items():
+        if any(j["name"] == context for j in all_jobs[rid]):
+            producers.setdefault(run["path"], []).append(rid)
+    if not producers:
+        refuse("required check '%s' has no job in a trusted workflow run of the revision (push or workflow_dispatch "
+               "on main of a workflow file of the revision)" % context)
+    if len(producers) > 1:
+        refuse("required check '%s' is a job of more than one workflow (%s); which one is authoritative is ambiguous"
+               % (context, ", ".join(sorted(producers))))
+    path = next(iter(producers))
+    # The newest run of that workflow on the revision, and its newest attempt, decide.
+    runs = [r for r in eligible.values() if r["path"] == path]
+    run = max(runs, key=lambda r: (r.get("created_at") or "", r["id"]))
+    rid, attempt = run["id"], run["run_attempt"]
+    where = "run %d attempt %d of %s" % (rid, attempt, path)
+    if run.get("status") != "completed":
+        refuse("required check '%s': its latest evaluation (%s) has not completed (%s); wait for it and dispatch again, "
+               "an earlier result never stands in for it" % (context, where, run.get("status")))
+    named = [j for j in attempt_jobs[rid] if j["name"] == context]
+    if len(named) != 1:
+        refuse("required check '%s': GitHub's record of %s holds %d jobs of that name, so the latest evaluation "
+               "cannot be identified; %s" % (context, where, len(named), RERUN_ALL))
+    job = named[0]
+    if job.get("status") != "completed" or job.get("conclusion") != "success":
+        refuse("required check '%s': its latest evaluation (%s, job %d) is %s/%s; an earlier success never overrides it"
+               % (context, where, job["id"], job.get("status"), job.get("conclusion")))
+    check = [c for c in check_runs if c.get("id") == job["id"]]
+    c = check[0] if len(check) == 1 else {}
+    if c.get("name") != context or (c.get("app") or {}).get("id") != ACTIONS_APP_ID or c.get("head_sha") != revision \
+            or c.get("status") != "completed" or c.get("conclusion") != "success" \
+            or (c.get("check_suite") or {}).get("id") != run["check_suite_id"] \
+            or c.get("url") != job["check_run_url"] or c.get("html_url") != job["html_url"]:
+        refuse("required check '%s': the revision's check run %d does not match GitHub's job record of %s"
+               % (context, job["id"], where))
+    history = []
+    for hid in sorted(eligible):
+        for j in all_jobs[hid]:
+            if j["name"] == context and j["id"] != job["id"]:
+                history.append({"run_id": hid, "run_attempt": j["run_attempt"], "job_id": j["id"],
+                                "status": j.get("status"), "conclusion": j.get("conclusion"),
+                                "workflow_path": eligible[hid]["path"], "url": j["html_url"]})
+    history.sort(key=lambda h: (h["run_id"], h["run_attempt"], h["job_id"]))
+    reused = bool(job.get("started_at") and run.get("run_started_at") and job["started_at"] < run["run_started_at"])
+    return {"context": context, "app_id": ACTIONS_APP_ID, "provenance": "github-actions-job", "evidence": "revision",
+            "source_sha": revision, "evaluated_sha": revision,
+            "workflow": {"path": path, "id": run["workflow_id"], "name": run.get("name"), "event": run["event"],
+                         "ref": "refs/heads/main"},
+            "run_id": rid, "run_attempt": attempt, "run_url": "%s/actions/runs/%d/attempts/%d" % (WEB_BASE, rid, attempt),
+            "job_id": job["id"], "check_run_id": job["id"], "check_suite_id": run["check_suite_id"],
+            "status": "completed", "conclusion": "success", "started_at": job.get("started_at"),
+            "completed_at": job.get("completed_at"), "result_kept_from_earlier_attempt": reused,
+            "url": job["html_url"], "superseded": history}
+
+
+def _app_check(context, app, sha, pool, evidence):
+    """The latest check run of a GitHub-operated app on one commit."""
+    for c in pool:
+        if c.get("head_sha") != sha or c.get("url") != "%s/check-runs/%d" % (API_BASE, c["id"]):
+            refuse("required check '%s': check run %d does not belong to commit %s of %s" % (context, c["id"], sha, REPOSITORY))
+    unfinished = [c for c in pool if c.get("status") != "completed"]
+    if unfinished:
+        refuse("required check '%s' has a run that has not completed on %s (%s); wait for it and dispatch again"
+               % (context, evidence, unfinished[0].get("status")))
+    newest = max(pool, key=lambda c: c["id"])
+    if newest.get("conclusion") != "success":
+        refuse("required check '%s': its latest evaluation on %s concluded %s; an earlier success never overrides it"
+               % (context, evidence, newest.get("conclusion")))
+    history = [{"check_run_id": c["id"], "status": c.get("status"), "conclusion": c.get("conclusion"), "url": c.get("html_url")}
+               for c in sorted(pool, key=lambda c: c["id"]) if c is not newest]
+    return {"context": context, "app_id": app, "provenance": "github-app-check-run (%s)" % AUTHENTICATED_APPS[app],
+            "evaluated_sha": sha, "check_run_id": newest["id"],
+            "check_suite_id": (newest.get("check_suite") or {}).get("id"), "status": "completed", "conclusion": "success",
+            "started_at": newest.get("started_at"), "completed_at": newest.get("completed_at"),
+            "url": newest.get("html_url"), "superseded": history, "evidence": evidence}
+
+
+def evaluate_checks(revision, rules, check_runs, actions, pr=None, pr_runs=None):
+    """ADR015 D2 (A2): the latest valid evaluation of every required check of the revision passed.
+
+    rules: GET /repos/{o}/{r}/rules/branches/main. check_runs: every check run of the
+    revision (filter=all). actions: {"workflow_files": paths under .github/workflows/ in the
+    revision, "runs": the revision's workflow runs, "runs_after": the same listing read
+    again after everything else, "attempt_jobs": {run id: jobs of its newest attempt},
+    "all_jobs": {run id: jobs of every attempt}}.
+
+    A check from GitHub Actions counts only through GitHub's job record: the newest
+    attempt of the newest trusted run (push or workflow_dispatch on main, in this
+    repository, of a workflow file of the revision) of the single workflow that has a
+    job of that name decides, and the revision's check run with the job's ID must match
+    it. A check run without such a job (for example one created through the API by a
+    workflow with checks: write) is ignored and recorded, never evidence. A check of a
+    GitHub-operated app in AUTHENTICATED_APPS counts through its newest check run; when
+    that app has no run of the context on the revision, the head of the merged pull
+    request whose tree equals the revision's (checked by the caller) may stand in.
+    Earlier results of the same evaluation are kept under "superseded".
+    """
+    if not isinstance(revision, str) or not REVISION.match(revision):
+        refuse("the revision must be a full commit SHA")
+    required = required_contexts(rules)
+    for c in check_runs:
+        if not isinstance(c.get("name"), str):
+            refuse("a check run of the revision has no name")
+    runs, after = actions.get("runs") or [], actions.get("runs_after")
+
+    def state(listing):
+        return {r.get("id"): (r.get("run_attempt"), r.get("status"), r.get("conclusion")) for r in listing}
+    if not isinstance(after, list) or state(runs) != state(after):
+        refuse("the revision's workflow runs changed while the evidence was read (a run or re-run started or "
+               "finished); dispatch again")
+    files = set(actions.get("workflow_files") or [])
+    eligible, untrusted = {}, {}
+    for run in runs:
+        why = _untrusted_run(run, revision, files)
+        if why:
+            untrusted[run["id"]] = why
+        else:
+            eligible[run["id"]] = run
+    attempt_jobs = {rid: _run_jobs(r, (actions.get("attempt_jobs") or {}).get(rid), True) for rid, r in eligible.items()}
+    all_jobs = {rid: _run_jobs(r, (actions.get("all_jobs") or {}).get(rid), False) for rid, r in eligible.items()}
+    for rid in eligible:
+        newest = {j["id"] for j in attempt_jobs[rid]}
+        if newest != {j["id"] for j in all_jobs[rid] if j["run_attempt"] == eligible[rid]["run_attempt"]}:
+            refuse("GitHub's job records of workflow run %d disagree between its attempt and run listings" % rid)
+    genuine = {j["id"] for jobs in all_jobs.values() for j in jobs}
+
+    results, used = [], set()
+    for context, app in required:
+        if app == ACTIONS_APP_ID:
+            entry = _actions_check(context, revision, check_runs, eligible, attempt_jobs, all_jobs)
+        else:
+            on_revision = [c for c in check_runs if c["name"] == context and (c.get("app") or {}).get("id") == app]
+            if on_revision:
+                entry = _app_check(context, app, revision, on_revision, "the revision")
+            elif pr is not None:
+                head = (pr.get("head") or {}).get("sha")
+                pool = [c for c in pr_runs or [] if c.get("name") == context and (c.get("app") or {}).get("id") == app]
+                if not pool:
+                    refuse("required check '%s' has no check run on the revision or on its merged pull request's head" % context)
+                entry = _app_check(context, app, head, pool, "merged pull request #%s head %s" % (pr.get("number"), head))
+                entry["pull_request"] = {"number": pr.get("number"), "head_sha": head, "tree_equals_revision": True}
+            else:
+                refuse("required check '%s' has no check run on the revision and no merged pull request can stand in" % context)
+            entry["source_sha"] = revision
+        used.add(context)
+        results.append(entry)
+    ignored = []
+    for c in sorted(check_runs, key=lambda c: c["id"]):
+        app = (c.get("app") or {}).get("id")
+        if c["name"] not in used:
+            continue
+        if app == ACTIONS_APP_ID and (c["name"], app) in required:
+            if c["id"] in genuine:
+                continue        # the decisive job or a superseded one, recorded above
+            reason = "no job of a trusted workflow run of the revision has this ID"
+        elif (c["name"], app) in required:
+            continue            # the authenticated app's own run, recorded above
+        else:
+            reason = "check run of app %s, which the rule does not name" % (app,)
+        ignored.append({"check_run_id": c["id"], "name": c["name"], "app_id": app, "status": c.get("status"),
+                        "conclusion": c.get("conclusion"), "reason": reason})
+    return {"schema": SOURCE_CHECKS_SCHEMA, "policy": SOURCE_CHECKS_POLICY, "repository": REPOSITORY,
+            "repository_id": REPOSITORY_ID, "source_revision": revision, "required_checks": results,
+            "ignored_check_runs": ignored,
+            "untrusted_workflow_runs": [{"run_id": rid, "reason": why} for rid, why in sorted(untrusted.items())]}
 
 
 # --------------------------------------------------------------------------
@@ -995,11 +1218,20 @@ def cmd_archive_identities(a):
     print(json.dumps(archive_identities(a.archive, a.ref), indent=2, sort_keys=True))
 
 
-def _check_run_pages(path, what):
-    runs = []
-    for page in load_json(path, what) or []:
-        runs.extend(page.get("check_runs") or [] if isinstance(page, dict) else [])
-    return runs
+def _workflow_files(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            names = [line.strip() for line in f if line.strip()]
+    except (OSError, UnicodeDecodeError):
+        refuse("the revision's workflow file list is missing or unreadable")
+    if not names or not all(WORKFLOW_FILE.match(n) for n in names):
+        refuse("the revision's workflow file list is empty or malformed")
+    return names
+
+
+def _jobs_file(directory, name, what):
+    path = os.path.join(directory, name)
+    return api_items(load_json(path, what), "jobs", what) if os.path.isfile(path) else None
 
 
 def cmd_evaluate_checks(a):
@@ -1009,15 +1241,26 @@ def cmd_evaluate_checks(a):
     pr = merged_pull_request(load_json(a.pulls, "pull requests"), a.revision) if a.pulls else None
     pr_runs = None
     if pr is not None:
-        if not a.pr_check_runs or (pr.get("head") or {}).get("sha") != a.pr_head:
+        if not a.pr_check_runs or (pr.get("head") or {}).get("sha") != a.pr_head or not REVISION.match(a.pr_head or ""):
             refuse("the merged pull request's head check runs are required and must match its head")
         # Evidence from the head counts only for the same content: with squash merges
         # and up-to-date branches the head's tree is the revision's tree.
         if not (a.revision_tree and a.pr_head_tree and HEX40.match(a.revision_tree) and a.pr_head_tree == a.revision_tree):
             refuse("the merged pull request's head tree differs from the revision's tree")
-        pr_runs = _check_run_pages(a.pr_check_runs, "pull request check runs")
-    results = evaluate_checks(rules, _check_run_pages(a.check_runs, "check runs"), pr_runs, pr)
-    print(json.dumps(results, indent=2, sort_keys=True))
+        pr_runs = api_items(load_json(a.pr_check_runs, "pull request check runs"), "check_runs", "pull request check runs")
+    runs = api_items(load_json(a.workflow_runs, "workflow runs"), "workflow_runs", "workflow runs")
+    after = api_items(load_json(a.workflow_runs_after, "workflow runs (re-read)"), "workflow_runs", "workflow runs (re-read)")
+    actions = {"workflow_files": _workflow_files(a.workflow_files), "runs": runs, "runs_after": after,
+               "attempt_jobs": {}, "all_jobs": {}}
+    for run in runs:
+        actions["attempt_jobs"][run["id"]] = _jobs_file(a.jobs_dir, "%d.attempt.json" % run["id"], "jobs of run %d" % run["id"])
+        actions["all_jobs"][run["id"]] = _jobs_file(a.jobs_dir, "%d.all.json" % run["id"], "jobs of run %d" % run["id"])
+    check_runs = api_items(load_json(a.check_runs, "check runs"), "check_runs", "check runs")
+    result = evaluate_checks(a.revision, rules, check_runs, actions, pr, pr_runs)
+    for entry in result["required_checks"]:
+        if "pull_request" in entry:
+            entry["pull_request"].update(head_tree=a.pr_head_tree, revision_tree=a.revision_tree)
+    print(json.dumps(result, indent=2, sort_keys=True))
 
 
 def cmd_findings(a):
@@ -1066,6 +1309,10 @@ def cmd_candidate_manifest(a):
     scanner = load_json(a.scanner, "scanner metadata")
     coverage = load_json(a.coverage, "scan coverage")
     checks = load_json(a.source_checks, "source checks") if a.source_checks else None
+    if checks is not None and (not isinstance(checks, dict) or checks.get("schema") != SOURCE_CHECKS_SCHEMA
+                               or checks.get("source_revision") != ctx["source_revision"]
+                               or not isinstance(checks.get("required_checks"), list) or not checks["required_checks"]):
+        refuse("the source check evidence is not a %s record of this candidate's source revision" % SOURCE_CHECKS_SCHEMA)
     images = {}
     for s in SERVICES:
         ref = ctx["candidate_refs"][s]
@@ -1094,7 +1341,7 @@ def cmd_candidate_manifest(a):
         "security": {"scanner": scanner, "findings": findings, "counts": count_findings(findings), "coverage": coverage,
                      "policy": "Findings are recorded, not accepted. Only a Leader admission record may accept them."},
         "qualification": qualification,
-        "source_qualification": {"verified": checks is not None, "required_checks": checks or []},
+        "source_qualification": dict(checks, verified=True) if checks is not None else {"verified": False, "required_checks": []},
         "compatibility": dict(ctx["compatibility"], migrations=migrations),
         "status": {"candidate": "QUALIFIED", "security_admission": "PENDING_LEADER_ADMISSION",
                    "promotion": "LOCKED_UNTIL_ADMITTED", "deployment": "NOT_AUTHORIZED_BY_THIS_PIPELINE"},
@@ -1399,6 +1646,30 @@ def cmd_verify_release_chain(a):
           % (m["version"], m["source_revision"], m["admission"]["record_id"], m["archive"]["sha256"]))
 
 
+def _source_check_rows(sq):
+    """Summary rows for the source check evidence; superseded results stay visible to the admission authority."""
+    if not isinstance(sq, dict) or not sq.get("required_checks"):
+        return []
+    if sq.get("schema") != SOURCE_CHECKS_SCHEMA:
+        return ["", "Source checks: verified under the earlier D2 rule (legacy record, no job binding)."]
+    out = ["", "Source checks (ADR015 D2, amendment A2: latest authenticated evaluation):", "",
+           "| Required check | Evidence | Decisive result | Superseded results |", "| --- | --- | --- | --- |"]
+    for c in sq["required_checks"]:
+        if c.get("provenance") == "github-actions-job":
+            decisive = "[job %s](%s), run %s attempt %s of `%s`" % (
+                c.get("job_id"), c.get("url"), c.get("run_id"), c.get("run_attempt"), (c.get("workflow") or {}).get("path"))
+        else:
+            decisive = "[check run %s](%s), app %s on `%s`" % (
+                c.get("check_run_id"), c.get("url"), c.get("app_id"), str(c.get("evaluated_sha"))[:12])
+        older = [str(h.get("conclusion")) for h in c.get("superseded") or []]
+        out.append("| %s | %s | %s | %s |" % (str(c.get("context")).replace("|", "/")[:80], str(c.get("evidence"))[:80],
+                                             decisive, ", ".join(older) if older else "none"))
+    if sq.get("ignored_check_runs"):
+        out += ["", "%d check run(s) under required names were ignored as unauthenticated (listed in the manifest)."
+                % len(sq["ignored_check_runs"])]
+    return out
+
+
 def cmd_summary(a):
     """Markdown summary of the packages under DIR (job summary and draft notes). Never fails."""
     banner = {"CANDIDATE": "CANDIDATE - NOT ADMITTED - DO NOT DEPLOY",
@@ -1449,6 +1720,7 @@ def cmd_summary(a):
                     out.append("| %s | %s | `%s` | `%s` | `%s` | `%s` |" % tuple(
                         str(f.get(k, "")).replace("|", "/")[:80] for k in ("service", "severity", "id", "package", "installed", "fixed")))
                 out += ["", "</details>"]
+            out += _source_check_rows(m.get("source_qualification"))
             out += ["", "Status: " + "; ".join("%s=%s" % kv for kv in sorted(m.get("status", {}).items())), ""]
         except (Refused, KeyError, TypeError):
             out += ["**%s:** manifest present but unreadable." % title, ""]
@@ -1478,8 +1750,14 @@ def main(argv=None):
 
     s = sub.add_parser("evaluate-checks")
     s.add_argument("--rules", required=True)
-    s.add_argument("--check-runs", required=True, help="slurped pages of GET .../commits/REV/check-runs")
+    s.add_argument("--check-runs", required=True, help="slurped pages of GET .../commits/REV/check-runs?filter=all")
     s.add_argument("--revision", required=True)
+    s.add_argument("--workflow-files", required=True, help="workflow file paths of the revision, one per line")
+    s.add_argument("--workflow-runs", required=True, help="slurped pages of GET .../actions/runs?head_sha=REV")
+    s.add_argument("--workflow-runs-after", required=True, help="the same listing, read again after everything else")
+    s.add_argument("--jobs-dir", required=True,
+                   help="RUN.attempt.json (GET .../runs/RUN/attempts/N/jobs, N its run_attempt) and RUN.all.json "
+                        "(GET .../runs/RUN/jobs?filter=all), slurped pages, for each run")
     s.add_argument("--pulls", help="GET .../commits/REV/pulls")
     s.add_argument("--pr-head", help="head SHA of the merged pull request")
     s.add_argument("--pr-check-runs", help="slurped check-run pages of that head")

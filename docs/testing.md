@@ -6209,3 +6209,52 @@ The live draft `v0.1.0-rc.1` release manifest was downloaded read-only: source
 admitted new release containing r9 is required for the existing V006→V009 update.
 The draft was not repromoted, published or modified. No production secret, protection,
 environment setting, Azure resource or real certificate was changed.
+
+## Latest authenticated CI evaluation verification — 24 November 2026
+
+Scope: [ADR015 amendment A2](decisions/015-release-pipeline.md#11-amendment-a2--latest-authenticated-ci-evaluation-24-november-2026)
+in PR #275 (`release.py evaluate-checks`, `candidate-manifest` and `summary`, the
+candidate job of `release.yml`). Run on macOS arm64 with Python 3.9.6 from the PR's
+worktree; the PR's own CI runs the same suite on `ubuntu-24.04`.
+
+### Executed and passed
+
+| Check | Result |
+| --- | --- |
+| `python3 -m unittest discover -s infrastructure/release/tests -v` | 81 tests pass, 28 of them in `CheckTests` (the earlier 6 check tests encoded the superseded rule and were replaced) |
+| Accepted cases | All checks pass on the first attempt; a verified re-run supersedes a failed attempt (failure kept under `superseded`); "re-run failed jobs" with GitHub's re-recorded results of the others; several failed attempts before a passing one; a newer `workflow_dispatch` run on the same commit; `CodeQL` on the revision; the `CodeQL` fallback with equal trees; forged runs ignored and recorded |
+| Refused cases | Newest attempt failed after an earlier success; pending or queued run; `cancelled`, `skipped`, `neutral`, `timed_out`, `action_required`, `stale` or missing conclusion; forged success with the same name and app (also with a real job's URL) over a real failure or a missing job; nine check-run/job mismatches (absent, name, app, commit, status, conclusion, check suite, API URL, web URL); untrusted workflow file, dynamic workflow, a `release.yml` run (the candidate run itself), `pull_request` or `schedule` event, other branch, repository, fork head, commit or malformed attempt; job records of another commit, run or attempt, attempt zero, foreign URLs; an attempt-1 result spliced into attempt 2; attempt and all-attempt listings that disagree; results of different attempts or runs combined; a job name in two workflows; missing required check, job listings or second run listing; runs that change between the two reads; rules without an app, with an unknown app or without a context; fallback over a failed, cancelled or unfinished revision run, a failed or unfinished head run, a head run of another commit or app; a merged pull request of another repository; short or malformed API listings; candidate evidence of another revision or schema, a legacy list, or none for a dispatched candidate |
+| Mutation check (12 mutants of the decisive conditions: check-run binding, newest run, run re-read, trusted events, newest-attempt-only listing, producer ambiguity, newest code scanning run, completed run, no fallback over the revision, workflow file of the revision, listing agreement, `total_count`) | Every mutant fails at least one `CheckTests` test |
+| `bash -n` on `release.sh`, `verify-release.sh`; `py_compile` of `release.py` | Pass |
+| actionlint 1.7.12 (`rhysd/actionlint:1.7.12` image, which runs shellcheck on `run:` scripts) on `release.yml` | No findings |
+
+### Read-only evaluation of `84d10a3` against the live API
+
+The candidate job's reads were replayed with an authenticated `gh` session instead of
+the workflow's `GITHUB_TOKEN`: branch rules (ten required contexts), the
+revision's workflow runs before and after, 21 check runs, the job listings of the newest
+attempt and of all attempts of the five runs, PR #274 and its head's check runs, and both
+trees. Nothing was written to GitHub.
+
+| Required check | Decisive evidence | Superseded |
+| --- | --- | --- |
+| Backend, Frontend, E2E | Jobs `137762520593`, `137762521390`, `137762520438`, attempt 1 of their `push` runs | none |
+| Six `CI VM` checks | Attempt 2 of run 45194866405, e.g. `VM runtime privileges with the real backend` job `137775683393` | attempt-1 jobs, including the failed `137762522469` |
+| CodeQL | Check run `137717841069` (app 57789) on PR #274 head `cac03de`; tree `7c2d462…` equals the revision's | none |
+
+Result: **accepted**, with no ignored check run and the GitHub-managed CodeQL push run
+recorded as untrusted (`dynamic` event). The tooling on `main` before A2 refuses the same
+data (`a later run never overrides it`). On copies of the live data, an added forged
+success (same name, app, check suite and the real job's URL) was ignored and recorded; a
+failed decisive job with that forgery, an attempt 2 without the job, a missing attempt
+listing, a decisive check run missing from the commit's listing, and a re-run starting
+between the two run reads were each refused.
+
+### Not run
+
+- The pull-request rehearsal (`Release rehearsal`) runs only in CI and does not
+  exercise `evaluate-checks` (rehearsals skip source checks); no candidate was
+  dispatched, so the candidate job's API reads have not run on a GitHub runner.
+- No independent review. Produced through AI-assisted development (Anthropic Claude
+  Code) under the Leader's task; GitHub's REST API and documentation, `gh` and actionlint
+  are the tools used; nothing is added to CodeMastery's runtime.
