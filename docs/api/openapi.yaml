@@ -7528,7 +7528,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Optional AND filters; occurredFrom inclusive and occurredTo exclusive (RFC 3339, at most microsecond precision, from before to). Ordered occurredAt desc, then id desc. CT31-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Optional AND filters; occurredFrom inclusive and occurredTo exclusive (RFC 3339, at most microsecond precision, from before to). Ordered occurredAt desc, then id desc. CT31-READ-2026-11-15-r1. Implemented under IN10 (#184) in the Admin module; independent review, CI and protected integration remain gated. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7619,7 +7619,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7646,7 +7646,6 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },

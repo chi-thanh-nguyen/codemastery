@@ -4346,3 +4346,27 @@ Issue. Every row stays NOT_RUN until a check actually runs.
 Report results per layer and only after the checks actually run. Unit results do not
 establish browser, assistive-technology, backend or deployment behavior, and a design
 preview is never integration evidence.
+
+## IN10 audit recording and read (#184) â€” 23 November 2026
+
+IN10 (`Refs #184`) implements CT31 recording and the filterable audit read
+([ADR012 Â§7](decisions/012-batch-07-contract-approvals.md)): `AuditAction`, `AuditLogRepository`,
+`AuditLogService`, `AuditLogMapper`, `UserAccountService.userSummaries`, the `SecurityConfig` rule for
+`GET /api/admin/audit-logs` and `AdminReportingController`. This record lists the suites added and what
+they do and do not cover. It claims no execution result; the pull request records the executed
+`./mvnw verify`.
+
+| Suite | Kind | Covers |
+|---|---|---|
+| `modules/admin/application/service/AuditLogServiceTest` | Unit (Mockito, fixed `Clock`) | Row content, microsecond truncation, Administrator-only recording and reading, filter/paging hand-off, actor names including a missing account, rejection of invalid values before any query |
+| `modules/admin/AuditActionTest` | Unit | The closed nine-code catalogue with target types; exact-match `fromCode` |
+| `modules/admin/AuditLogMapperTest` | Unit | Field-for-field domain/entity mapping; null input |
+| `modules/admin/AdminRequestsTest` | Unit | Query syntax: known single-valued parameters, UUID text, RFC 3339 offsets normalised to UTC, digit-only paging, 400 for malformed input |
+| `integration/repository/AuditLogRepositoryIntegrationTest` | PostgreSQL Testcontainer | Insert and read-back, newest-first then id-descending order that ignores caller sorting, AND-combined filters with inclusive `occurredFrom` and exclusive `occurredTo`, true totals beyond the last page, no overwrite of an existing id, the ADR012 Â§19.2 `audit_logs` ceiling (SELECT and INSERT allowed; UPDATE and DELETE refused with SQLSTATE 42501), `record` refusing a call outside a caller transaction, actor attribution, non-Administrator rejection, actor display names from real accounts |
+| `integration/AuditLogReadIntegrationTest` | PostgreSQL Testcontainer, MockMvc | 401 for anonymous callers, 403 for Learner and Instructor before input validation, newest-first listing with `actorDisplayName` and `Cache-Control: no-store`, each filter and the time bounds, paging and an out-of-range page, 400 with `no-store` for malformed queries |
+
+Not covered by these suites: the audited actions themselves. The CT12 user and course services and the CT32
+moderation resolution call `AuditLogService.record`; their same-transaction and no-op oracles stay with the
+existing placements named by ADR012 Â§19.3. `UserAccountService.userSummaries` has no dedicated unit test: it
+is exercised through the audit read, and its 100-ID limit is not asserted. The placement of these suites is
+for review.
