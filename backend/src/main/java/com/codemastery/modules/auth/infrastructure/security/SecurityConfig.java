@@ -95,6 +95,8 @@ public class SecurityConfig {
                                 "/api/me/course-progress", "/api/me/resume").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/lessons/{lessonId}/completion",
                                 "/api/courses/{courseId}/resume").hasRole("LEARNER")
+                        // CT31.read (ADR012 section 7.3): Administrator only.
+                        .requestMatchers(HttpMethod.GET, "/api/admin/audit-logs").hasRole("ADMIN")
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),
