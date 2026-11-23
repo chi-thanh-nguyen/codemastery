@@ -760,6 +760,9 @@ class Crypto(unittest.TestCase):
             copied = recovery.publish_set(ws, cfg, Remote(), entry, blob=Blob(), log=lambda *a: None)
             self.assertEqual(copied["level"], "VERIFIED_INDEPENDENT_AZURE+RESTORE_TESTED")
             self.assertEqual(recovery.workstation_status(ws)["independent"]["points"], 1)
+            with mock.patch.object(recovery, "utc_now", return_value=datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)):
+                with self.assertRaisesRegex(recovery.RecoveryError, "future"):
+                    recovery.publish_set(ws, cfg, Remote(), entry)
 
     def encrypt(self, data, out):
         src = out + ".plain"

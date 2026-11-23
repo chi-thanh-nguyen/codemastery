@@ -594,6 +594,8 @@ def recovery_gate(set_id, manifest_sha, found, release_report):
     elif not ack["level"].endswith("+RESTORE_TESTED") or not recovery.restore_qualified(ack.get("restore_test")):
         problems.append("the point has no passing isolated restore test (acknowledged level %s)" % ack["level"])
     cut = recovery.parse_iso(manifest["t_cut"], "t_cut")
+    if cut > utc_now():
+        problems.append("the recovery cut is in the future (clock disagreement)")
     for service, cid in (hold.get("held") or {}).items():
         st = recovery.Docker().state(cid) if docker_text("inspect", "--format", "{{.Id}}", cid) else None
         if st is None:

@@ -1295,8 +1295,10 @@ def _publish_set(ws, cfg, remote, entry, blob=None, restore=None, allow_older=Fa
         if done[-1]["manifest_sha256"] != manifest_sha:
             refuse("set %s on the VM differs from the published one (substitution)" % set_id)
         target = ws.path("sets", set_id)
-        verify_set(target, ws.path("trust", "producer.pub.pem"), cfg["producer_key_sha256"],
-                   decrypt=ws.decrypt_args(), expected_manifest_sha256=manifest_sha)
+        verified = verify_set(target, ws.path("trust", "producer.pub.pem"), cfg["producer_key_sha256"],
+                              decrypt=ws.decrypt_args(), expected_manifest_sha256=manifest_sha)
+        _require(parse_iso(verified["t_cut"], "t_cut") <= utc_now(),
+                 "the recovery cut is in the future (clock disagreement)")
         if (blob is None or done[-1]["azure"] == "PUBLISHED") and \
                 (restore is None or restore_qualified(done[-1].get("restore_test"))):
             if blob is not None:

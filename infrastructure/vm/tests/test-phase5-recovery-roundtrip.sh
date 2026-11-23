@@ -311,12 +311,17 @@ gate() {  # python expression for the gate's problems, given set id and manifest
   "${PY}" -I -c "
 import sys, json; sys.path.insert(0, 'infrastructure/vm/host')
 import ops, recovery
+if '${3:-}' == 'past':
+    import datetime
+    ops.utc_now = lambda: datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
 found = recovery.Docker().project_containers('${project}')
 report = {'volumes': ops.volumes_report(found)}
 print(json.dumps(ops.recovery_gate('$1', '$2', found, report)['problems']))"
 }
 [[ "$(gate "${set_pre}" "${pre_sha}")" == "[]" ]] || { gate "${set_pre}" "${pre_sha}" >&2; exit 1; }
 pass "held, acknowledged, restore-tested point: no gate problem"
+[[ "$(gate "${set_pre}" "${pre_sha}" past)" == *"future"* ]]
+pass "clock disagreement refuses even an acknowledged point"
 [[ "$(gate "${set_pre}" "$(printf '%064d' 0)")" == *"not the held pre-update point"* ]]
 pass "a different manifest digest is refused"
 mv "${work}/vm/backup/acks/${set_pre}.json" "${work}/ack.bak"
