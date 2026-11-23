@@ -5857,6 +5857,64 @@ P3 notes, no P0–P2) was followed, at the Leader's request, by these fixes:
 The pull request's `Release rehearsal` compares the real candidate scan's coverage with
 the real rescan's. The dispatched stages remain unexecuted.
 
+## AD06 mastery and history write persistence verification — 23 November 2026
+
+AD06 ([#42](https://github.com/chi-thanh-nguyen/codemastery/issues/42),
+[PR #263](https://github.com/chi-thanh-nguyen/codemastery/pull/263)) implements the Adaptive
+mastery and recommendation-history write adapters. It adds no operation, service, REST endpoint
+or schema change. Mechanism: [`AD06-PERSISTENCE-2026-11-23-r1`](decisions/016-ad06-mastery-history-persistence.md#3-d1--ad06-persistence-2026-11-23-r1-write-mechanism).
+Placement: `CT14-AD06-PLACEMENT-2026-11-23-r1`
+([repository structure](repository-structure.md#ad06-test-placement--23-november-2026)).
+Runtime privileges: `CT17-P6-PRIVILEGES-2026-11-23-r8`
+([deployment](deployment.md#ct17-p6-privileges-2026-11-23-r8--ad06-mastery-and-history-writes-within-the-adr012-192-ceiling-23-november-2026)).
+
+The first PR revision used Spring Data `save()` with an assigned UUID, which takes the JPA merge
+path. The new integration suite was first run against that revision, unchanged: 14 of its 20
+tests failed (11 failures, 3 errors). Appending an existing identifier silently rewrote the
+committed history row. Both writes stayed pending until the commit flush, so same-transaction
+JDBC reads did not see them and they ran after the caller's later writes. `storeState` ran outside
+any transaction. Each write issued an extra `SELECT`. The adapters now issue one upsert and one
+plain `INSERT` at the call, inside a mandatory caller transaction (ADR016 §3).
+
+| Obligation | Covered by |
+| --- | --- |
+| Exact four state and three type codes; field-for-field round trips; other spellings rejected, never defaulted; nulls left to V005 | `AdaptivePersistenceMapperTest` (26 cases) |
+| First write inserts one row for the assessed skill only; no default row for unassessed skills or learners | `firstWriteInsertsOneCategoricalRowForTheAssessedSkillOnly`, `eachLearnerAndSkillPairIsIndependent` |
+| Later writes change only `state`; identifier, learner and skill preserved; one row per pair; explicit Unknown stored | `laterWritesUpdateOnlyTheStateAndKeepTheRowIdentity`, `everyCategoricalStateIsStoredByItsExactV005Code` |
+| One statement per write, no read, no full-row update; history never uses `ON CONFLICT` | `masteryWriteIssuesOneUpsertAndNoReadOrFullRowUpdateOnEitherBranch`, `historyWriteIssuesExactlyOneInsertAndNoReadUpdateOrDelete` (Hibernate statement inspector) |
+| Every supplied history field stored unchanged, including the microsecond instant; identical drafts with distinct identifiers stay separate rows | `appendInsertsEveryCallerSuppliedFieldUnchanged`, `identicalRecommendationsWithDistinctIdsStaySeparateHistoryRows` |
+| A reused history identifier fails with 23505 and never rewrites the committed row | `appendingAnExistingIdFailsAndNeverRewritesTheCommittedRow`, `appendingTheSameIdTwiceInOneTransactionFailsAtTheSecondCall` |
+| V005 foreign keys, checks, key and NOT NULL stay authoritative | `masteryForeignKeysAndTheV005StateCheckAreEnforcedByPostgreSql`, `historyForeignKeysNotNullAndTextChecksAreEnforcedByPostgreSql` |
+| Nulls and sub-microsecond instants rejected before any SQL | `nullMasteryArgumentsAreRejectedBeforeAnySql`, `invalidRecommendationsAreRejectedBeforeAnySql` |
+| Concurrent first writes of one pair converge on one row without 23505 | `concurrentFirstWritesOfOnePairConvergeOnOneRowWithoutAUniqueViolation` (barrier on `pg_stat_activity` lock waits) |
+| Writes join the caller's transaction, are invisible to committed readers until it commits, and roll back with it; outside a transaction they are refused | `writesJoinTheCallerTransactionAndRollBackWithIt`, `writesOutsideACallerTransactionAreRefusedAndLeaveNoRow` |
+| Adapter SQL needs exactly the r8 rows; identity rewrites, reads, deletes, truncation and history mutation are denied; a merge-style rewrite needs a forbidden UPDATE | `adapterSqlRunsUnderExactlyTheR8RuntimePrivileges`, `r8PrivilegesDenyIdentityRewritesDeletesReadsAndHistoryMutations`, `r8PrivilegesRejectTheFullRowUpdateThatAMergeBasedAppendWouldIssue` |
+
+The privilege tests create a `NOLOGIN` role inside the test transaction. The role holds exactly
+INSERT, SELECT (user_id, skill_id, state) and UPDATE (state) on `learner_skill_masteries` and INSERT
+on `path_recommendations`, and the tests run `SET LOCAL ROLE`. The rollback removes the role. The
+provisioned runtime role itself is exercised by `test-postgres-privilege-matrix-containment.sh`.
+
+Executed locally on 23 November 2026, macOS host with Docker Desktop 29.8.1, project PostgreSQL
+image (PostgreSQL 17.11), Hibernate 7.4.5:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -o -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AdaptivePersistenceIntegrationTest verify` with the original adapters | 20 run, 11 failures and 3 errors, as described above |
+| `cd backend && ./mvnw -B -o -Dtest=AdaptivePersistenceMapperTest -Dit.test=AdaptivePersistenceIntegrationTest verify` | 26 unit and 20 PostgreSQL tests, 0 failures or errors |
+| `cd backend && ./mvnw -B -o verify` | BUILD SUCCESS; Surefire 966 and Failsafe 408 tests, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r8 (r8: 2 rows) |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` (local Docker) | the exact AD06 upsert and append succeed as the provisioned runtime role; a reused history identifier fails with 23505; mastery re-key, identifier read and delete and history read, rewrite, erase and TRUNCATE fail with 42501; `verify_role_separation` passes with the four new probes; containment and upgrade suites pass |
+| Privilege requirement of the upsert, measured on the project PostgreSQL image | INSERT and UPDATE (state) alone, or with SELECT (user_id, skill_id), fail with 42501; adding SELECT (state) succeeds on both branches; INSERT alone suffices for the append |
+| `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` (local Docker) | `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS` with the r8 matrix provisioned; 0 backend log entries mentioning `permission denied`/42501 |
+| `test-deploy-syntax-and-authorization-gates.sh`, `test-deploy-offline-compose-guards.sh` | exit 0 |
+
+`test-runtime-real-backend-privileges.sh` has no AD06 case: no HTTP operation reaches these
+adapters yet. AD13 must add the quiz-submission case when it wires them.
+
+These are author-side developer runs, not independent QA or CI evidence; CI runs on the PR. Not
+claimed: calculator, routing, event-flow or end-to-end mastery/progress atomicity (AD13 and
+QA03/QA04), read capabilities (AD16), or provisioning of r8 on any real database.
 ## DP01 release image security remediation verification — 23 November 2026
 
 Verification of [DP01 release image security remediation](deployment.md#dp01-release-image-security-remediation--23-november-2026)
