@@ -4479,8 +4479,8 @@ the operator's view. It approves nothing beyond ADR015 and changes no earlier re
 | Stage | How | Result |
 | --- | --- | --- |
 | 1. Candidate | Actions → **Release** → *Run workflow* on `main`, `stage=candidate`; optional `revision` (full SHA on `main`, default the dispatched commit), `public_origin` (default `https://codemastery.app`) and `compatibility_baseline` | Every required check of `main` must be green on the revision. Five linux/amd64 candidates are built, reloaded from their archive, qualified (MinIO initializer suite with the minimal server, backend trust store and runtime privileges, byte-clean PostgreSQL, image hardening, `deploy.sh` preflight/load/provision smoke and update-guard refusals), scanned (Trivy default and comprehensive, SPDX SBOMs), packaged, attested and stored as the draft release `candidate-<12-hex>-<run>-<attempt>`, titled “NOT ADMITTED” |
-| 2. Security admission | The Leader reviews the candidate draft and commits `docs/decisions/release-admissions/<record_id>.json` through a pull request. `python3 infrastructure/release/release.py admission-template --candidate-manifest release-candidate.json --release-tag <candidate tag> --version v<x.y.z>` prints a `PENDING` template with the exact identities and every finding | Only `decision: "ADMITTED"` by a code owner of `/docs/decisions/`, naming that candidate's manifest and archive digests, all ten identities, the origin, the revision and exactly the candidate's findings, permits promotion ([fields](decisions/015-release-pipeline.md#d7--the-admission-record)). The pull request must change **only** the record, and the account named in `decided_by` must **merge** it: the promote job checks GitHub's merge record, not the typed login |
-| 3. Promotion | `stage=promote`, `admission=<record_id>` | Candidate attestation, package, admission and its merge record are verified; images are retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; every row of a fresh rescan must be an admitted candidate finding at the same installed version and no higher severity; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
+| 2. Security admission (ADR015 A1; no pull request) | The admission authority (`chi-thanh-nguyen`) dispatches **Release** on `main` with `stage=promote`, `candidate=<tag>`, `candidate_manifest_sha256=<SHA-256 of the reviewed release-candidate.json>`, `version=v<x.y.z>`, `accepted_findings=<n>` and an optional `note`; reads the `Admission request` job summary; approves the run's pending `release-admission` deployment | Only a first-attempt dispatch from `main` by the authority's account (login and ID, three GitHub views agreeing), approved by that account in the protected environment (required reviewer, `main` only, no administrator bypass; rules and approval read back, fail closed), naming the attested manifest digest and the exact finding count (CRITICAL/HIGH refused unless `accept_critical_or_high`), produces `admission.json`, attested before any candidate image runs ([A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)) |
+| 3. Promotion | Automatic in the same run after the admission | Candidate attestation and package verified; the admission re-derived and bound to this run; images retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; every row of a fresh rescan must be an admitted candidate finding at the same installed version and no higher severity, with no loss of scan coverage; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
 | 4. Publication | Not automated | Un-drafting, tagging or making binaries public is a Leader decision that first needs the F1/F5 licensing determination ([D9](decisions/015-release-pipeline.md#d9--storage-retention-and-publication)) |
 
 A failure at any step stops the stage without a draft. Nothing is retried, and no
@@ -4490,17 +4490,84 @@ draft, tag or release is ever overwritten: a rerun is a new candidate.
 
 1. Download every asset of the release draft into one directory (write access is
    needed to see drafts).
-2. On a workstation, from a clean checkout of the release's `source_revision`:
-   `infrastructure/release/verify-release.sh <dir> --version v<x.y.z> --source . --store <containerd|graphdriver>`
-   (`--version` names the release you intend to transfer; another release is refused).
-   Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand and
-   add `--trusted-root trusted_root.jsonl`. The script verifies the attestation of
+2. On a workstation, verify the package with **two separate checkouts**: the release
+   tooling at `release.json` `tooling.sha` (the `main` commit whose `release.yml`
+   promoted and attested the package, so its verifier understands the package format)
+   and the application source at `release.json` `source_revision` (its `deploy.sh`,
+   Compose files and archive check). Never run the source revision's own
+   `infrastructure/release/verify-release.sh`: it may predate the package format (the
+   first A1 release's source `1d0658a7…` still carries the pull-request admission
+   verifier, which refuses every A1 package). No code from either checkout runs before
+   your own `gh` has verified that `release.json` was attested by `release.yml` on
+   `main` at the tooling commit it names. Run as one bash script (it stops at the first
+   failure):
+
+   ```bash
+   set -euo pipefail
+   pkg=<directory holding the downloaded assets>; version=v<x.y.z>; store=<containerd|graphdriver>
+   repo=https://github.com/chi-thanh-nguyen/codemastery.git
+   # Validate JSON strings before command substitution can strip trailing newlines.
+   revisions="$(python3 -I -c '
+   import json, re, sys
+   with open(sys.argv[1]) as f:
+       manifest = json.load(f)
+   revisions = (manifest["tooling"]["sha"], manifest["source_revision"])
+   if not all(isinstance(value, str) and re.fullmatch("[0-9a-f]{40}", value) for value in revisions):
+       sys.exit("Invalid tooling or source revision SHA.")
+   print(*revisions)
+   ' "$pkg/release.json")" || {
+     printf '%s\n' 'Invalid release manifest or revision SHA.' >&2
+     exit 1
+   }
+   read -r tooling_sha source_revision <<< "$revisions"
+   if ! [[ "$tooling_sha" =~ ^[0-9a-f]{40}$ && "$source_revision" =~ ^[0-9a-f]{40}$ ]]; then
+     printf '%s\n' 'Invalid tooling or source revision SHA.' >&2
+     exit 1
+   fi
+   gh attestation verify "$pkg/release.json" --repo chi-thanh-nguyen/codemastery \
+     --cert-identity https://github.com/chi-thanh-nguyen/codemastery/.github/workflows/release.yml@refs/heads/main \
+     --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners || {
+     printf '%s\n' 'Release manifest attestation verification failed.' >&2
+     exit 1
+   }
+   git clone --quiet "$repo" tooling || {
+     printf '%s\n' 'Failed to clone release tooling; existing directories are not reused.' >&2
+     exit 1
+   }
+   git -C tooling checkout --quiet --detach "$tooling_sha" || {
+     printf '%s\n' 'Failed to check out attested release tooling.' >&2
+     exit 1
+   }
+   git clone --quiet "$repo" source || {
+     printf '%s\n' 'Failed to clone application source; existing directories are not reused.' >&2
+     exit 1
+   }
+   git -C source checkout --quiet --detach "$source_revision" || {
+     printf '%s\n' 'Failed to check out the release source revision.' >&2
+     exit 1
+   }
+   bash tooling/infrastructure/release/verify-release.sh "$pkg" --version "$version" --source source --store "$store"
+   ```
+
+   (`--version` names the release you intend to transfer; another release is refused.)
+   Run in a directory with no `tooling` or `source` destination. A failed clone or
+   checkout stops the procedure; it never removes or reuses an occupied destination.
+   The verifier refuses to run from any commit other than `tooling.sha` or from a
+   modified checkout, and refuses a `--source` checkout that is not exactly
+   `source_revision`; the two are the same directory only when the two commits are
+   equal. Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand,
+   add `--bundle "$pkg/release.sigstore.json" --custom-trusted-root trusted_root.jsonl`
+   to the `gh attestation verify` line and `--trusted-root trusted_root.jsonl` to the
+   verifier, and set `repo` to a local repository already holding both commits; keep
+   fresh `tooling` and `source` destinations. The script verifies the attestation of
    `release.json`, the archive, `mc-source.tar.gz` and `admission.json` (signer
    `release.yml` on `refs/heads/main` exactly, at the recorded tooling commit), the
-   agreement of release, admission and candidate records, the recorded merge of the
-   admission by its decider, online that the admission record is still on `main`
-   unchanged (offline: check it on a connected host), the `deploy.sh`/Compose
-   hashes and `deploy.sh`'s own archive verifier, then prints `--archive`,
+   agreement of release, admission and candidate records (the admission re-derived from
+   its evidence and bound to the promoting run), that `admission.sigstore.json` was
+   signed by the admission's own dispatch run, and online that GitHub's run and
+   approval records name the same dispatching and approving account (offline: only
+   what the attested workflow recorded; run it online on a connected host), the
+   `deploy.sh`/Compose hashes and `deploy.sh`'s own archive verifier, then prints `--archive`,
    `--archive-sha256`, the five `--expect-image` values and `--source-revision`.
    `deploy.sh preflight` reports which image store the VM uses.
 3. Transfer the archive with `mc-source.tar.gz` (the AGPL Corresponding Source of the
@@ -4642,3 +4709,65 @@ must produce the candidate that the Leader may admit with a separate admission r
 
 Anthropic's Claude Code (Claude Opus 5.5) investigated the findings, made the change and
 ran the checks recorded in testing.md.
+
+## Release admission without pull requests — 23 November 2026
+
+[ADR015 Amendment A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)
+records the authority (the Leader's instruction of 23 November 2026), the options
+compared and the design. This section is the operator's view.
+
+### What changed
+
+- The security admission is no longer a JSON record merged through a pull request. It is
+  made inside a `stage=promote` run: the admission authority dispatches the run naming
+  the candidate, the SHA-256 of the `release-candidate.json` it reviewed, the version
+  and the number of findings it accepts; the `Admission request` job shows the verified
+  candidate; the authority approves the run in the protected `release-admission`
+  environment; the run records `admission.json`, attests it and then promotes (stages 2
+  and 3 of the [table above](#stages)).
+- `release.py admission-template` and `admission-provenance` are removed; the promote
+  stage no longer reads `docs/decisions/release-admissions/`.
+- Release packages now contain `admission.sigstore.json` (the admission's own
+  attestation bundle). `verify-release.sh` checks it offline and, online, GitHub's run
+  and approval records of the admitting run.
+- Required configuration: the `release-admission` environment (required reviewer
+  `chi-thanh-nguyen`, administrator bypass disabled, deployments from `main` only). If
+  it is missing or weaker, promotion stops at its first step.
+
+### Approving a future candidate
+
+1. On the candidate draft, take the SHA-256 of `release-candidate.json` (its line in
+   `SHA256SUMS`) and the finding count from the draft summary.
+2. Dispatch, in the Actions UI (**Release** → *Run workflow*, branch `main`) or:
+
+   ```bash
+   gh workflow run release.yml -R chi-thanh-nguyen/codemastery --ref main \
+     -f stage=promote -f candidate=<candidate tag> \
+     -f candidate_manifest_sha256=<sha256> -f version=v<x.y.z> \
+     -f accepted_findings=<n> -f note='<one-line risk acceptance>'
+   ```
+
+3. Open the run, read the `Admission request` summary, then *Review deployments* →
+   `release-admission` → *Approve and deploy*. Only this approval and the dispatch are
+   manual; verification, admission record, attestation, rescan, promotion, smoke and the
+   draft release are automatic. Rejecting, cancelling or not approving admits nothing.
+   The review comment is optional free text (empty, several lines and any characters
+   are accepted); it is recorded verbatim, JSON-escaped, in `admission.json`, is never
+   printed to a log or summary, and authorizes nothing.
+4. A re-run of the run cannot admit (it replays the earlier dispatch); dispatch again.
+
+### Current state of the first candidate
+
+The candidate `candidate-1d0658a7215c-45091629955-1` (draft release ID 454878027, run
+[45091629955](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45091629955),
+source `1d0658a7215c2a3d3fed569738d522137989b666`, 23 assets, `rehearsal: false`) was
+qualified and verified in an earlier session (package, ten identities, attestations,
+Q00–Q05, smoke, 37 findings: 0 CRITICAL, 0 HIGH, 31 MEDIUM, 5 LOW, 1 UNKNOWN). The
+admission record prepared for it under D7 was never merged and is not an admission. As
+of this record the candidate is **not admitted**, nothing has been promoted, no
+`v0.1.0-rc.1` draft exists, nothing was published, and nothing on the Azure VM was
+contacted. Its admission and promotion require this change on `main` and the Leader's
+dispatch and approval as above.
+
+Anthropic's Claude Code (Claude Opus 5.5) selected and implemented the design and ran the
+checks recorded in [testing.md](testing.md#release-admission-redesign-verification--23-november-2026).
