@@ -750,7 +750,13 @@ removes the reason for the rule by authenticating each result instead of countin
   decision and the ordering use must be well formed (`head_sha`, `event`, `head_branch`,
   `path`, repository and head repository IDs, integer `run_attempt` ≥ 1, integer
   `check_suite_id` and `workflow_id`, a UTC `created_at` timestamp, string `status`,
-  string or null `conclusion`); otherwise the revision is refused. A garbled record of a
+  string or null `conclusion`). UTC timestamps must be real calendar dates in the existing
+  canonical `YYYY-MM-DDTHH:MM:SSZ` representation; alternate offsets, fractions, trailing
+  data and invalid ranges are refused. Empty, whitespace-padded, control-containing or
+  syntactically malformed trust fields cannot establish an exclusion; a different,
+  well-formed scope field can still positively establish that a run is unrelated.
+  Repository IDs are positive integers or their canonical decimal strings (not booleans
+  or floats); otherwise the revision is refused. A garbled record of a
   newer failed run can therefore never drop out of the selection and let an older
   success decide.
 
@@ -758,8 +764,8 @@ removes the reason for the rule by authenticating each result instead of countin
 
 For a GitHub Actions context:
 
-1. the newest trusted run (`created_at`, then ID) of the producer workflow on the
-   revision, and its newest attempt (`run_attempt`), are the latest evaluation; the
+1. the newest trusted run (semantically parsed UTC `created_at`, then integer ID) of the
+   producer workflow on the revision, and its newest attempt (`run_attempt`), are the latest evaluation; the
    run must be `completed`;
 2. GitHub's record of that attempt must hold exactly one job of that name; every job in
    the listing must belong to that run and attempt, the revision, this repository's
@@ -773,11 +779,14 @@ For a GitHub Actions context:
    the merged pull request's head (when a pull request is read), then the revision's
    check runs, then — last — the revision's workflow runs are read again. The check runs
    under every required name (any app) must agree in ID, name, app, commit, status,
-   conclusion, check suite and URL, and the workflow runs in ID, attempt, status,
-   conclusion, `created_at`, path, event, commit, branch, workflow and check suite; any
-   difference (a newer pending or failed CodeQL analysis, a run or re-run starting or
+   conclusion, check suite, API URL and web URL, and the workflow runs in ID, attempt, status,
+   conclusion, `created_at`, path, event, commit, branch, workflow, check suite, repository ID
+   and head repository ID; any difference (a newer pending or failed CodeQL analysis, a run or re-run starting or
    finishing) refuses the revision. The **cutoff** is the end of that last workflow-run
-   read; the evidence records this as `snapshot`.
+   read; the evidence records this as `snapshot`. Repository identities use the same
+   canonical representation as the trust decision. Other scalar comparisons preserve
+   types, so integer/boolean/float equality cannot hide malformed changes. Display names,
+   summaries, `updated_at` and other fields unused by acceptance are not compared.
 
 Every other job of that name in the trusted runs (earlier attempts, older runs) is kept
 under `superseded`. Check runs under a required name that are not jobs of a trusted run
@@ -871,8 +880,8 @@ the revision. Regression tests cover each case (A2.9).
 ### A2.9 Verification
 
 Recorded in [testing.md](../testing.md#latest-authenticated-ci-evaluation-verification--24-november-2026):
-33 source-check tests (86 release tooling tests in all; 28 and 81 before the review
-remediation of A2.11), a mutation check of the
+39 source-check evaluator tests and 3 offline workflow-shell tests (95 release tooling
+tests in all; 33 and 86 after A2.11, 28 and 81 before it), a mutation check of the
 decisive conditions, and a read-only evaluation of `84d10a3` against the live API on
 24 November 2026. That evaluation accepted the revision: nine GitHub Actions checks bound
 to their job records (the six `CI VM` checks to attempt 2 of run 45194866405, with
@@ -907,3 +916,30 @@ P2 findings, both reproduced before the fix ([testing.md](../testing.md#review-r
   compared record by record (A2.5 step 4).
 
 Same authority as A2.1; the policy is unchanged. Not yet re-reviewed.
+
+### A2.12 Second independent review remediation (N1 and N2, 24 November 2026)
+
+The focused independent Codex re-review of `a741dc6` returned CHANGES_REQUIRED: original
+F1 examples, F2 and the conflicting-job issue were corrected, but N1 (P2) demonstrated
+stale-success acceptance with impossible dates or empty trust strings. N2 (P3) found
+omitted repository IDs and check-run web URLs in the snapshot comparison.
+
+The Leader's explicit **“CodeMastery — PR #275: Second Independent Review Remediation
+(N1 + N2)”** instruction authorizes this bounded fix, tests, documentation, a follow-up
+commit/push and PR description update. It does not approve the resulting implementation,
+integration or release. A2.1's policy and all other release gates remain unchanged.
+
+- **N1:** A2.4 now requires semantic UTC date/time validation and well-formed positive
+  exclusion evidence; A2.5 orders parsed instants with ID tie-breaking. The fix covers
+  invalid dates/ranges, leap-year boundaries, alternate representations, missing/wrong
+  types, whitespace/control variants and malformed repository records.
+- **N2:** A2.5 now compares both repository IDs and check-run web URLs, canonicalizes
+  repository identities consistently and preserves scalar types in run/check/job
+  comparisons. No volatile display field is added to the acceptance decision.
+- New evaluator tests and the actual source-resolution shell, executed against offline
+  Git/API stubs, reproduce the five N1 and three N2 cases on `a741dc6` and refuse them
+  after correction. Full/partial reruns and existing F1/F2 protections remain covered.
+
+Implementation validation is recorded in [testing.md](../testing.md#second-independent-review-remediation-n1-and-n2--24-november-2026).
+The staggered reads, post-read/post-cutoff limitations and other risks in A2.8 remain.
+Independent re-review of this remediation is outstanding.

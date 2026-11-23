@@ -6326,3 +6326,51 @@ On copies of this live data, each of the following was refused:
 
 Not run: GitHub Actions CI on the new head, which the task excluded; the pull-request
 rehearsal; an independent re-review.
+
+### Second independent review remediation (N1 and N2) — 24 November 2026
+
+Scope: PR #275 at starting head `a741dc6339f4272a0f01fa9ddd6d19246b220595`, under the
+Leader's explicit N1/N2 remediation instruction ([ADR015 A2.12](decisions/015-release-pipeline.md#a212-second-independent-review-remediation-n1-and-n2-24-november-2026)).
+OpenAI Codex implemented and validated this follow-up; these are developer results,
+not an independent re-review or integration/release approval.
+
+**Before/after evidence.** The new `WorkflowSourceTests` extract and execute the actual
+`Resolve and verify the source revision` shell from `release.yml` with deterministic
+Git/API stubs and the real Python CLI. Running those tests in an isolated archive of
+`a741dc6` produces eight failing subtests: all five N1 inputs and all three N2 mutations
+are incorrectly ACCEPTED (exit 0). With the fix, each returns REFUSED (exit 3).
+
+| Coverage | Results after remediation |
+| --- | --- |
+| N1's five confirmed inputs: month 00, February 30, empty event/branch/path | REFUSED in evaluator and actual workflow shell |
+| Invalid calendar/ranges, non-leap and century leap days, year zero, hour/minute/second overflow, fractions, offsets, lowercase UTC marker, trailing newline, missing/incorrect types | REFUSED; both failed and incomplete newer runs covered |
+| Empty/missing/wrong-type trust fields; whitespace/control text, malformed commit/branch/path; malformed repository shapes and ID types | REFUSED without accidental stale selection |
+| Valid leap days (including 2000), year rollover, chronological order, equal-time ID ties and reversed response order | Correct deterministic latest-run selection |
+| N2 final-snapshot repository/head-repository ID and web-URL mutations/removals; equal-valued float substitutions and malformed nested identity shapes | REFUSED; both source and PR-head check-run web URLs covered |
+| Canonical integer/decimal-string repository IDs; changes to unused display/volatile fields | Accepted; no extra volatility in the gate |
+| Original F1 missing metadata, F2 pending/failed CodeQL race, legitimate full/partial reruns | Actual-shell cases pass; existing evaluator tests also pass |
+| Forged checks, same-ID job conflicts, attempt selection, tree-equality fallback, candidate evidence, admission and release-chain gates | Existing regression tests pass |
+
+Executed locally on macOS arm64, Python 3.9.6:
+
+- `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests -v`:
+  **95 tests PASS**, including **39 `CheckTests`** and **3 `WorkflowSourceTests`**
+  (15 deterministic shell executions).
+- `python3 -m py_compile infrastructure/release/release.py infrastructure/release/tests/test_release.py`: PASS.
+- `bash -n infrastructure/release/release.sh infrastructure/release/verify-release.sh`:
+  PASS; the extracted source-resolution shell also passes syntax validation.
+- `git diff --check`: PASS. Actionlint is unavailable locally and was not run.
+
+**Authentic read-only source replay.** With the patched evaluator, replayed the actual
+workflow's GET sequence for `84d10a3202ef96b0230eff6c22db060a08bcc02d`: live branch
+rules, workflow files, paginated runs/checks/jobs, merged PR #274 and equal Git trees,
+then PR-head checks, source checks and workflow runs again. Result: **ACCEPTED**, all
+10 required contexts qualified. Backend/Frontend/E2E use attempt 1; all six CI VM
+contexts use attempt 2 of run `45194866405` (runtime job `137775683393`, with failed
+attempt-1 job `137762522469` superseded). CodeQL remains check `137717841069` on
+`cac03de579a9e0a655737dcc573bfd8c6a809d6c`. No check runs are ignored; the dynamic
+workflow remains excluded. No SHA exception is implemented.
+
+The existing snapshot limitations in ADR015 A2.8 remain. PR #275 CI was not queried,
+waited for or rerun. No candidate, admission, promotion or deployment was performed.
+Independent re-review of this follow-up remains outstanding.

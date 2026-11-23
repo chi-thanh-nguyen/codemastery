@@ -454,10 +454,127 @@ class CheckTests(unittest.TestCase):
             with self.subTest(label):
                 self.refused(w, "malformed")
 
+    def test_invalid_calendar_and_noncanonical_run_timestamps_are_refused(self):
+        # N1: regex-shaped dates must not sort a newer failure before an older success.
+        invalid = ["2026-00-23T17:00:00Z", "2026-13-23T17:00:00Z", "2026-02-30T17:00:00Z",
+                   "2026-02-29T17:00:00Z", "2100-02-29T17:00:00Z", "2026-04-31T17:00:00Z",
+                   "2026-11-00T17:00:00Z", "0000-11-23T17:00:00Z", "2026-11-23T24:00:00Z",
+                   "2026-11-23T17:60:00Z", "2026-11-23T17:00:60Z", "2026-11-23T17:00:00Z\n",
+                   "2026-11-23T17:00:00+00:00", "2026-11-23T17:00:00-01:00", "2026-11-23T17:00:00.0Z",
+                   "2026-11-23T17:00:00z", "2026-11-23 17:00:00Z", "2026-1-23T17:00:00Z",
+                   "2026-11-23T17:00Z", "", " ", None, 0, True, [], {}]
+        for value in invalid:
+            for status in ("completed", "in_progress"):
+                w = SourceChecks()
+                w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                          event="workflow_dispatch", created="2026-11-23T17:00:00Z")
+                w.runs[201].update(created_at=value, status=status, conclusion="failure" if status == "completed" else None)
+                with self.subTest(value=value, status=status):
+                    self.refused(w, "malformed")
+
+    def test_empty_missing_and_malformed_trust_fields_cannot_exclude_a_newer_failure(self):
+        for field in ("head_sha", "event", "head_branch", "path"):
+            values = ["", " ", "\t", "\n", None, False, 0, [], {}, "main\n"]
+            values += {"head_sha": ["a" * 39, REV + "\n", "A" * 40],
+                       "event": ["push ", "workflow-dispatch", "PUSH"],
+                       "head_branch": ["main ", "/main", "main/", "main..x", "main@{x", "main~1", "main.lock"],
+                       "path": [" .github/workflows/ci-vm.yml", ".github/workflows/ci-vm.yml ",
+                                ".github/workflows/../ci-vm.yml", "/.github/workflows/ci-vm.yml"]}[field]
+            for value in values + ["MISSING"]:
+                w = SourceChecks()
+                w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                          created="2026-11-23T17:00:00Z")
+                if value == "MISSING":
+                    del w.runs[201][field]
+                else:
+                    w.runs[201][field] = value
+                with self.subTest(field=field, value=value):
+                    self.refused(w, "malformed")
+
+    def test_valid_run_dates_order_chronologically_with_deterministic_id_ties(self):
+        for older, newer in (("2024-02-28T23:59:59Z", "2024-02-29T00:00:00Z"),
+                             ("2000-02-29T23:59:59Z", "2000-03-01T00:00:00Z"),
+                             ("2026-12-31T23:59:59Z", "2027-01-01T00:00:00Z"),
+                             ("2026-11-23T17:00:00Z", "2026-11-23T17:00:00Z")):
+            w = SourceChecks()
+            w.runs[200]["created_at"] = older
+            for j in w.jobs:
+                if j["run_id"] == 200:
+                    j["conclusion"] = "failure"
+            w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], created=newer)
+            for reverse in (False, True):
+                actions = w.actions()
+                if reverse:
+                    actions["runs"].reverse()
+                    actions["runs_after"].reverse()
+                with self.subTest(older=older, newer=newer, reverse=reverse):
+                    self.assertEqual(w.by_context(actions=actions)["VM B"]["run_id"], 201)
+        # A larger ID never outranks a later valid creation time.
+        w = SourceChecks()
+        w.add_run(199, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], created="2026-11-23T17:00:00Z")
+        self.assertEqual(w.by_context()["VM B"]["run_id"], 199)
+
+    def test_malformed_repository_records_refuse_without_attribute_errors(self):
+        for field in ("repository", "head_repository"):
+            for value in (None, [], [1], "repo", True, {"id": True}, {"id": 1391772534.0}, {"id": "01391772534"}):
+                w = SourceChecks()
+                w.runs[200][field] = value
+                with self.subTest(field=field, value=value):
+                    self.refused(w, "malformed")
+
+    def test_decision_relevant_provenance_changes_between_snapshots_are_refused(self):
+        # Equal-valued floats/bools are still malformed changes, not integer identities.
+        for field in ("run_attempt", "workflow_id", "check_suite_id"):
+            w = SourceChecks()
+            actions = w.actions()
+            actions["runs_after"][0][field] = float(actions["runs_after"][0][field])
+            with self.subTest(field=field):
+                self.refused(w, "changed while the evidence was read", actions=actions)
+        for field in ("app", "check_suite"):
+            w = SourceChecks()
+            changed = w.check_runs()
+            changed[0][field]["id"] = float(changed[0][field]["id"])
+            with self.subTest(field=field):
+                self.refused(w, "changed while the evidence was read", check_runs_after=changed)
+            changed = w.check_runs()
+            changed[0][field] = changed[0][field]["id"]
+            with self.subTest(field=field, shape="scalar"):
+                self.refused(w, "changed while the evidence was read", check_runs_after=changed)
+        for field in ("repository", "head_repository"):
+            for value in ({"id": 1}, None, {}, [], "repo", {"id": True}, {"id": 1391772534.0}):
+                w = SourceChecks()
+                actions = w.actions()
+                actions["runs_after"][0][field] = value
+                with self.subTest(field=field, value=value):
+                    self.refused(w, "changed while the evidence was read", actions=actions)
+        for where in ("revision", "head"):
+            w = SourceChecks()
+            checks = copy.deepcopy(w.check_runs() if where == "revision" else w.pr_runs)
+            for value in (None, "", "https://example.invalid/changed"):
+                changed = copy.deepcopy(checks)
+                changed[0]["html_url"] = value
+                with self.subTest(where=where, value=value):
+                    self.refused(w, "changed while the evidence was read",
+                                 **({"check_runs_after": changed} if where == "revision" else {"pr_runs_after": changed}))
+
+    def test_snapshot_canonical_ids_and_unrelated_volatile_fields(self):
+        w = SourceChecks()
+        actions = w.actions()
+        for run in actions["runs_after"]:
+            for field in ("repository", "head_repository"):
+                run[field]["id"] = str(run[field]["id"])
+                run[field]["full_name"] = "display/name"
+            run["updated_at"] = "later"
+            run["display_title"] = "another display title"
+        checks = copy.deepcopy(w.check_runs())
+        checks[0]["details_url"] = "https://example.invalid/display"
+        checks[0]["output"] = {"summary": "another summary"}
+        self.assertEqual(len(w.evaluate(actions=actions, check_runs_after=checks)["required_checks"]), 4)
+
     def test_malformed_record_of_an_unrelated_run_is_still_ignored(self):
         # A run that is positively outside the trust scope stays a recorded, ignored run
         # even when its record is incomplete.
-        for change in ({"event": "pull_request"}, {"head_branch": "feature/x"},
+        for change in ({"event": "pull_request"}, {"head_branch": "feature/x"}, {"head_branch": "@"},
                        {"path": "dynamic/github-code-scanning/codeql"}, {"head_sha": "c" * 40}):
             w = SourceChecks()
             w.add_run(300, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
@@ -472,7 +589,9 @@ class CheckTests(unittest.TestCase):
         # The attempt listing and the all-attempt listing must agree on each job's record,
         # not only on the set of IDs.
         for field, value in (("conclusion", "failure"), ("status", "in_progress"), ("name", "VM B"),
-                             ("head_sha", "c" * 40)):
+                             ("head_sha", "c" * 40), ("run_id", 999), ("run_attempt", 2),
+                             ("started_at", "2026-11-23T12:00:00Z"), ("completed_at", "2026-11-23T16:00:00Z"),
+                             ("check_run_url", "https://example.invalid/check"), ("html_url", "https://example.invalid/job")):
             w = SourceChecks()
             actions = w.actions()
             actions["all_jobs"] = copy.deepcopy(actions["all_jobs"])
@@ -774,6 +893,123 @@ class CheckTests(unittest.TestCase):
 def trivy_report(rows):
     return {"SchemaVersion": 2, "Results": [{"Target": "t", "Vulnerabilities": [
         {"VulnerabilityID": i, "PkgName": p, "InstalledVersion": "1", "Severity": s} for i, p, s in rows]}]}
+
+
+class WorkflowSourceTests(unittest.TestCase):
+    """Execute the candidate's actual source-resolution shell; every Git/API call is offline."""
+
+    def run_source(self, w, actions=None, checks_after=None, pr_after=None):
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        with open(os.path.join(root, ".github/workflows/release.yml")) as f:
+            workflow = f.read()
+        shell = textwrap.dedent(workflow.split("      - name: Resolve and verify the source revision\n", 1)[1]
+                                .split("        run: |\n", 1)[1].split("\n      - ", 1)[0])
+        actions = w.actions() if actions is None else actions
+        checks = w.check_runs()
+        responses = {
+            "rules/branches/main": [w.RULES],
+            "actions/runs?head_sha=%s&per_page=100" % REV:
+                [pages("workflow_runs", actions["runs"]), pages("workflow_runs", actions["runs_after"])],
+            "commits/%s/check-runs?per_page=100&filter=all" % REV:
+                [pages("check_runs", checks), pages("check_runs", checks if checks_after is None else checks_after)],
+            "commits/%s/pulls" % REV: [[w.pr()]],
+            "commits/%s/check-runs?per_page=100&filter=all" % w.HEAD:
+                [pages("check_runs", w.pr_runs), pages("check_runs", w.pr_runs if pr_after is None else pr_after)],
+            "commits/%s" % w.HEAD: ["1" * 40],
+        }
+        for rid, run in w.runs.items():
+            responses["actions/runs/%d/attempts/%s/jobs?per_page=100" % (rid, run["run_attempt"])] = [
+                pages("jobs", actions["attempt_jobs"][rid])]
+            responses["actions/runs/%d/jobs?filter=all&per_page=100" % rid] = [pages("jobs", actions["all_jobs"][rid])]
+        with tempfile.TemporaryDirectory() as d:
+            bindir = os.path.join(d, "bin")
+            os.mkdir(bindir)
+            dump(responses, os.path.join(d, "responses.json"))
+            dump(w.FILES, os.path.join(d, "files.json"))
+            stub = "#!%s\n" % sys.executable + textwrap.dedent("""\
+                import json, os, sys
+                from pathlib import Path
+                p = Path(os.environ['RUNNER_TEMP'])
+                args = sys.argv[1:]
+                if Path(sys.argv[0]).name == 'git':
+                    if args[0] == 'ls-tree':
+                        print('\\n'.join(json.loads((p / 'files.json').read_text())))
+                    elif args[0] == 'rev-parse':
+                        print('1' * 40)
+                    elif args[0] not in ('merge-base', 'worktree'):
+                        sys.exit('unexpected git call: ' + repr(args))
+                else:
+                    endpoint = next(x for x in args if x.startswith('repos/')).split('codemastery/', 1)[1]
+                    counts = json.loads((p / 'counts.json').read_text()) if (p / 'counts.json').exists() else {}
+                    n = counts.get(endpoint, 0)
+                    counts[endpoint] = n + 1
+                    (p / 'counts.json').write_text(json.dumps(counts))
+                    replies = json.loads((p / 'responses.json').read_text())[endpoint]
+                    if n >= len(replies):
+                        sys.exit('unexpected extra API read: ' + endpoint)
+                    print(replies[n] if '--jq' in args else json.dumps(replies[n]))
+                """)
+            for name in ("git", "gh"):
+                path = os.path.join(bindir, name)
+                put(path, stub)
+                os.chmod(path, 0o755)
+            env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"], RUNNER_TEMP=d,
+                       INPUT_REVISION=REV, INPUT_BASELINE="", INPUT_ORIGIN="https://example.invalid",
+                       GITHUB_REPOSITORY=release.REPOSITORY, GITHUB_SHA=REV, GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="1",
+                       GITHUB_OUTPUT=os.path.join(d, "outputs"), GITHUB_WORKSPACE=d)
+            proc = subprocess.run(["bash", "-c", shell], cwd=root, env=env, capture_output=True, text=True)
+            evidence = read_json(os.path.join(d, "source-checks.json")) if proc.returncode == 0 else None
+            counts = read_json(os.path.join(d, "counts.json"))
+        return proc, evidence, counts
+
+    def test_n1_and_original_f1_refuse_through_the_workflow_shell(self):
+        cases = [("created_at", "2026-00-23T17:00:00Z"), ("created_at", "2026-02-30T17:00:00Z"),
+                 ("event", ""), ("head_branch", ""), ("path", ""),
+                 ("workflow_id", None), ("check_suite_id", None), ("created_at", None)]
+        for field, value in cases:
+            w = SourceChecks()
+            w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                      created="2026-11-23T17:00:00Z")
+            if value is None:
+                del w.runs[201][field]
+            else:
+                w.runs[201][field] = value
+            with self.subTest(field=field, value=value):
+                proc, _, _ = self.run_source(w)
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                self.assertIn("REFUSED:", proc.stderr)
+
+    def test_n2_and_original_f2_refuse_through_the_workflow_shell(self):
+        for field in ("repository", "head_repository", "html_url", "CodeQL pending", "CodeQL failed"):
+            w = SourceChecks()
+            actions = w.actions()
+            checks, head = w.check_runs(), copy.deepcopy(w.pr_runs)
+            if field in ("repository", "head_repository"):
+                actions["runs_after"][0][field]["id"] = 1
+            elif field == "html_url":
+                checks[0][field] = "https://example.invalid/changed"
+            else:
+                head.append(w.app_run("CodeQL", None if field.endswith("pending") else "failure", sha=w.HEAD,
+                                      status="in_progress" if field.endswith("pending") else "completed"))
+            with self.subTest(field=field):
+                proc, _, counts = self.run_source(w, actions=actions, checks_after=checks, pr_after=head)
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                self.assertIn("changed while the evidence was read", proc.stderr)
+                self.assertEqual(counts["commits/%s/check-runs?per_page=100&filter=all" % w.HEAD], 2)
+
+    def test_complete_and_partial_reruns_remain_accepted_by_the_workflow_shell(self):
+        for kept in ((), ("VM A",)):
+            w = SourceChecks()
+            [j for j in w.jobs if j["name"] == "VM B"][0]["conclusion"] = "failure"
+            w.rerun(200, {"VM A": "success", "VM B": "success"}, kept=kept)
+            with self.subTest(kept=kept):
+                proc, evidence, counts = self.run_source(w)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                checks = {c["context"]: c for c in evidence["required_checks"]}
+                self.assertEqual(checks["VM B"]["run_attempt"], 2)
+                self.assertEqual(checks["VM A"]["result_kept_from_earlier_attempt"], bool(kept))
+                self.assertEqual(counts["actions/runs?head_sha=%s&per_page=100" % REV], 2)
+                self.assertEqual(counts["commits/%s/check-runs?per_page=100&filter=all" % REV], 2)
 
 
 class FindingsAndMigrationTests(unittest.TestCase):

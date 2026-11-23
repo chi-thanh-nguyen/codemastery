@@ -317,38 +317,71 @@ def required_contexts(rules):
     return sorted(required)
 
 
+def _run_timestamp(value):
+    """A real UTC instant in GitHub's canonical, second-resolution representation, or None."""
+    if not isinstance(value, str) or not TIMESTAMP.fullmatch(value):
+        return None
+    try:
+        return datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return None
+
+
+def _evidence_text(value):
+    return (isinstance(value, str) and bool(value) and value == value.strip()
+            and not any(ord(c) < 32 or ord(c) == 127 for c in value))
+
+
+def _run_branch(value):
+    """A syntactically valid refs/heads suffix; malformed text cannot prove another ref."""
+    return (_evidence_text(value) and not value.endswith(("/", "."))
+            and not re.search(r"[ ~^:?*\[\\]", value) and not any(s in value for s in ("..", "@{", "//"))
+            and all(part and not part.startswith(".") and not part.endswith(".lock") for part in value.split("/")))
+
+
+def _repository_id(record):
+    """Canonical numeric identity, preserving the existing integer/decimal-string support."""
+    value = record.get("id") if isinstance(record, dict) else None
+    if _is_int(value) and value > 0:
+        return str(value)
+    if isinstance(value, str) and re.fullmatch(r"[1-9][0-9]*", value):
+        return value
+    return None
+
+
 def _untrusted_run(run, revision, workflow_files):
     """None when the run is a trusted evaluation of the revision; the reason when its record
     shows positively that it is not one. A record that may be a trusted evaluation but lacks,
     or garbles, a field the trust decision or the ordering uses refuses the revision: dropping
     it could let an older success stand in for a newer failure."""
-    def text(key):
-        value = run.get(key)
-        return value if isinstance(value, str) else None
-    head_sha, event, branch, path = text("head_sha"), text("event"), text("head_branch"), text("path")
-    if head_sha is not None and REVISION.match(head_sha) and head_sha != revision:
+    head_sha, event, branch, path = (run.get(k) for k in ("head_sha", "event", "head_branch", "path"))
+    valid = {"head_sha": isinstance(head_sha, str) and bool(REVISION.fullmatch(head_sha)),
+             "event": isinstance(event, str) and bool(re.fullmatch(r"[a-z][a-z0-9_]*", event)),
+             "head_branch": _run_branch(branch),
+             "path": (_evidence_text(path) and not path.startswith("/") and "\\" not in path
+                      and all(part not in ("", ".", "..") for part in path.split("/")))}
+    if valid["head_sha"] and head_sha != revision:
         return "run of another commit"
-    if event is not None and event not in TRUSTED_EVENTS:
+    if valid["event"] and event not in TRUSTED_EVENTS:
         return "event %r" % (event,)
-    if branch is not None and branch != "main":
+    if valid["head_branch"] and branch != "main":
         return "ref %r" % (branch,)
-    if path is not None and (not WORKFLOW_FILE.match(path) or path not in workflow_files):
+    if valid["path"] and (not WORKFLOW_FILE.fullmatch(path) or path not in workflow_files):
         return "workflow %r is not a workflow file of the revision" % (path,)
     if path == WORKFLOW_PATH:
         return "release stages are not CI evaluations (the candidate run itself is one of them)"
-    problems = [k for k, v in (("head_sha", head_sha), ("event", event), ("head_branch", branch), ("path", path))
-                if v is None]
-    if str((run.get("repository") or {}).get("id")) != REPOSITORY_ID \
-            or str((run.get("head_repository") or {}).get("id")) != REPOSITORY_ID:
+    problems = [k for k, well_formed in valid.items() if not well_formed]
+    if _repository_id(run.get("repository")) != REPOSITORY_ID \
+            or _repository_id(run.get("head_repository")) != REPOSITORY_ID:
         problems.append("repository")
     if not _is_int(run.get("run_attempt")) or run["run_attempt"] < 1:
         problems.append("run_attempt")
-    problems += [k for k in ("check_suite_id", "workflow_id") if not _is_int(run.get(k))]
-    if not isinstance(run.get("created_at"), str) or not TIMESTAMP.match(run["created_at"]):
+    problems += [k for k in ("check_suite_id", "workflow_id") if not _is_int(run.get(k)) or run[k] < 1]
+    if _run_timestamp(run.get("created_at")) is None:
         problems.append("created_at")
-    if not isinstance(run.get("status"), str):
+    if not _evidence_text(run.get("status")):
         problems.append("status")
-    if run.get("conclusion") is not None and not isinstance(run.get("conclusion"), str):
+    if run.get("conclusion") is not None and not _evidence_text(run.get("conclusion")):
         problems.append("conclusion")
     if problems:
         refuse("workflow run %d may be an evaluation of the revision, but its record is malformed or inconsistent "
@@ -359,7 +392,7 @@ def _untrusted_run(run, revision, workflow_files):
 JOB_FIELDS = ("name", "run_id", "run_attempt", "head_sha", "status", "conclusion", "started_at", "completed_at",
               "check_run_url", "html_url")
 RUN_FIELDS = ("run_attempt", "status", "conclusion", "created_at", "path", "event", "head_sha", "head_branch",
-              "workflow_id", "check_suite_id")
+              "workflow_id", "check_suite_id", "repository", "head_repository")
 SNAPSHOT_CUTOFF = ("first reads decide; the revision's workflow runs and the check runs under required names on the "
                    "revision and on the merged pull request's head were read again afterwards and agreed; the "
                    "cutoff is the end of the second read of the workflow runs")
@@ -367,9 +400,24 @@ SNAPSHOT_CUTOFF = ("first reads decide; the revision's workflow runs and the che
 
 def _check_run_state(listing, names):
     """Decision-relevant fields of the check runs under required names, by ID."""
-    return {c["id"]: (c.get("name"), (c.get("app") or {}).get("id"), c.get("head_sha"), c.get("status"),
-                      c.get("conclusion"), (c.get("check_suite") or {}).get("id"), c.get("url"))
-            for c in listing if c.get("name") in names}
+    state = {}
+    for c in listing:
+        if c.get("name") not in names:
+            continue
+        ids = []
+        for field in ("app", "check_suite"):
+            record = c.get(field)
+            ids.append(("dict", _snapshot_value(record.get("id"))) if isinstance(record, dict)
+                       else _snapshot_value(record))
+        state[c["id"]] = tuple(_snapshot_value(v) for v in
+                                (c.get("name"), *ids, c.get("head_sha"), c.get("status"), c.get("conclusion"),
+                                 c.get("url"), c.get("html_url")))
+    return state
+
+
+def _snapshot_value(value):
+    # Python otherwise equates 1, True and 1.0; malformed types must not hide a change.
+    return type(value).__name__, value
 
 
 def _run_jobs(run, jobs, latest_only):
@@ -402,7 +450,7 @@ def _actions_check(context, revision, check_runs, eligible, attempt_jobs, all_jo
     path = next(iter(producers))
     # The newest run of that workflow on the revision, and its newest attempt, decide.
     runs = [r for r in eligible.values() if r["path"] == path]
-    run = max(runs, key=lambda r: (r.get("created_at") or "", r["id"]))
+    run = max(runs, key=lambda r: (_run_timestamp(r["created_at"]), r["id"]))
     rid, attempt = run["id"], run["run_attempt"]
     where = "run %d attempt %d of %s" % (rid, attempt, path)
     if run.get("status") != "completed":
@@ -503,7 +551,9 @@ def evaluate_checks(revision, rules, check_runs, actions, pr=None, pr_runs=None,
     runs, after = actions.get("runs") or [], actions.get("runs_after")
 
     def state(listing):
-        return {r.get("id"): tuple(r.get(k) for k in RUN_FIELDS) for r in listing}
+        return {r.get("id"): tuple(_repository_id(r.get(k)) if k in ("repository", "head_repository")
+                                   else _snapshot_value(r.get(k))
+                                   for k in RUN_FIELDS) for r in listing}
     if not isinstance(after, list) or state(runs) != state(after):
         refuse("the revision's workflow runs changed while the evidence was read (a run or re-run started or "
                "finished); dispatch again")
@@ -526,7 +576,7 @@ def evaluate_checks(revision, rules, check_runs, actions, pr=None, pr_runs=None,
     all_jobs = {rid: _run_jobs(r, (actions.get("all_jobs") or {}).get(rid), False) for rid, r in eligible.items()}
     for rid in eligible:
         def records(jobs):
-            return {j["id"]: tuple(j.get(k) for k in JOB_FIELDS) for j in jobs}
+            return {j["id"]: tuple(_snapshot_value(j.get(k)) for k in JOB_FIELDS) for j in jobs}
         if records(attempt_jobs[rid]) != records(j for j in all_jobs[rid] if j["run_attempt"] == eligible[rid]["run_attempt"]):
             refuse("GitHub's job records of workflow run %d disagree between its attempt and run listings" % rid)
     genuine = {j["id"] for jobs in all_jobs.values() for j in jobs}
