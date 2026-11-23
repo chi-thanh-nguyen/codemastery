@@ -1,9 +1,10 @@
-import { Box, ButtonBase, Typography } from '@mui/material';
+import { Box, Button, ButtonBase, Typography } from '@mui/material';
 import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import type { PresentationIconName } from '../../../shared/components/PresentationIcon';
 import type { NotificationKind, NotificationView } from '../types/interactionTypes';
 import { tones, roles } from '../../../app/theme/theme';
 import type { Tone } from '../../../app/theme/theme';
+import type { NotificationItemModel } from '../api/notificationApi';
 
 export const notificationMeta: Record<NotificationKind, { label: string; icon: PresentationIconName; tone: Tone }> = {
     content: { label: 'New content', icon: 'book', tone: 'sky' },
@@ -29,4 +30,83 @@ export function NotificationItem({ notification, onOpen }: { notification: Notif
             <Box aria-hidden sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: roles.accent.link }} /><span className="cm-visually-hidden">Unread</span>
         </Box>}
     </ButtonBase>;
+}
+
+export interface LiveNotificationItemProps {
+    notification: NotificationItemModel;
+    onMarkRead: (id: string) => void | Promise<void>;
+}
+
+export function LiveNotificationItem({ notification, onMarkRead }: LiveNotificationItemProps) {
+    const timeLabel = new Date(notification.createdAt).toLocaleString('en-US', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+    });
+
+    return (
+        <Box
+            sx={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'flex-start',
+                textAlign: 'left',
+                gap: 2,
+                px: { xs: 2, sm: 3 },
+                py: 2,
+                '&:hover': { bgcolor: roles.bg.rowHover },
+            }}
+        >
+            <Box
+                aria-hidden
+                sx={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: '50%',
+                    bgcolor: roles.bg.fill,
+                    color: roles.text.primary,
+                    display: 'grid',
+                    placeItems: 'center',
+                    flexShrink: 0,
+                    '& svg': { fontSize: 20 },
+                }}
+            >
+                <PresentationIcon name="bell" />
+            </Box>
+
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography
+                    component="span"
+                    sx={{
+                        display: 'block',
+                        fontWeight: notification.read ? 400 : 600,
+                        overflowWrap: 'anywhere',
+                    }}
+                >
+                    {notification.message}
+                </Typography>
+                <Typography component="span" variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary' }}>
+                    {timeLabel}
+                </Typography>
+            </Box>
+
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
+                {!notification.read && (
+                    <>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                            <Box aria-hidden sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: roles.accent.link }} />
+                            <span className="cm-visually-hidden">Unread</span>
+                        </Box>
+                        <Button
+                            variant="text"
+                            size="small"
+                            onClick={() => onMarkRead(notification.id)}
+                        >
+                            Mark as read
+                        </Button>
+                    </>
+                )}
+            </Box>
+        </Box>
+    );
 }
