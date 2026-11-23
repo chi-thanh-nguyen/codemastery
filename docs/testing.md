@@ -5856,3 +5856,49 @@ P3 notes, no P0–P2) was followed, at the Leader's request, by these fixes:
 
 The pull request's `Release rehearsal` compares the real candidate scan's coverage with
 the real rescan's. The dispatched stages remain unexecuted.
+
+## DP01 release image security remediation verification — 23 November 2026
+
+Verification of [DP01 release image security remediation](deployment.md#dp01-release-image-security-remediation--23-november-2026)
+on branch `fix/release-image-security-remediation`, starting `main`
+`cc86c0803aa1ad9428f8511c6ba0f6669829814d`. Local results belong to the working tree
+recorded in the pull request; the checks of its final head, including `Release tooling`
+and `Release rehearsal`, are reported on the pull request.
+
+### Executed and passed
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, macOS arm64, Docker 29.8.1 (containerd store), builds forced to linux/amd64 | Five images built from the branch: postgres `sha256:6edc3700…`, minio `sha256:cb39f9a7…`, minio-init `sha256:d9d08204…`, backend `sha256:324206a1…`, frontend release target (`PUBLIC_ORIGIN=https://codemastery.app`) `sha256:0441fe61…`; local HTTP frontend target `sha256:79293994…` | PASS |
+| Local, inside the images | Installed versions: frontend `nginx` and all four modules 1.30.7-r1 (`njs` 1.30.7.1.0.2-r1), built with OpenSSL 3.5.9, `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4, `libcrypto3`/`libssl3` 3.5.9-r1; HTTP target `nginx` 1.30.7-r1; postgres `krb5-libs` 1.22.3-r0, `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4, `libcrypto3`/`libssl3` 3.5.9-r1, `zlib` 1.4-r0, PostgreSQL 17.11, `gosu` → `/sbin/su-exec`, one layer; backend `apt`/`libapt-pkg6.0t64` 2.8.4ubuntu0.1, Java 25.0.5, user `codemastery` (UID 999) | As targeted; no other base substitution |
+| Local | The changed `test-ingress-release-image-build.sh` in-image assertions on both frontend targets: UID 101, `nginx/1.30.7`, every `nginx*` package on 1.30.7-r1, no `*.apk-new` left, root-owned non-writable `/etc/nginx`, writable cache; the stale-module check also run on a crafted package list holding `nginx-module-xslt-1.30.6-r1` | PASS; the crafted stale module is reported |
+| Local | `test-postgres-foreign-volume-guard.sh` (linux/amd64) | PASS: Bookworm volume refused with exit 78 and unchanged; client tools still run; fresh volume initialized, marked, restarted with its data |
+| Local | `test-postgres-image-layer-equivalence.sh` with `POSTGRES_FLAT_IMAGE` set to the exact amd64 image, and in its default (fresh build) mode | PASS in both: configuration equal except `GOSU_VERSION`/`DOCKER_PG_LLVM_DEPS`; merged filesystem equal (3,890 entries); one layer, no whiteout, no upstream `gosu` bytes |
+| Local | `test-java-truststore.sh` on the exact backend | 13/13 PASS (`TRUSTSTORE_REGRESSIONS_PASS`); the re-pinned published Temurin base still contains the prohibited G1 root and is refused; the final image holds 117 verified entries |
+| Local | Trivy 0.76.2 (the pipeline's digest-pinned image), `--scanners vuln`, default and comprehensive, nothing ignored, vulnerability database updated 2026-11-22T19:00:46Z (the candidate's database) | CRITICAL 4 → 0, HIGH 28 → 0, MEDIUM 80 → 31, LOW 13 → 5, UNKNOWN 1 → 1; none of the 32 original CRITICAL/HIGH rows remains; no new row; scan coverage unchanged for all five images ([details](deployment.md#results)) |
+| Local, Python 3.9.6 and Python 3.12.16 (bash 5.2 container) | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests`, including the new admission mutations (finding moved to another service, modified advisory, modified package) | 32/32 PASS on both |
+| Local, bash 5.2 container | The repository's `release.py` (`findings`, `migrations`, `candidate-manifest`, `verify-package`) and `release.sh rehearsal-admission refusals`/`create` on a synthetic rehearsal candidate whose findings and coverage are the real remediated Trivy reports (identities and archive synthetic): five services in the manifest; postgres and frontend with zero findings | PASS: package verified (21 files); 16 refusals including the two new ones; the synthetic admission accepts exactly the 37 remaining rows and `check-rescan` covers them; lost scan coverage of the zero-finding frontend and a new LOW advisory on the zero-finding postgres image are both refused |
+| Local | `bash -n` on every `infrastructure/vm/tests`, `infrastructure/release`, `infrastructure/minio` script and `deploy.sh`; ShellCheck 0.11.0 (`-S warning`) on `release.sh`, `verify-release.sh`, the changed ingress test, the PostgreSQL equivalence and trust-store suites; `docker build --check` on the three changed Dockerfiles | Clean; no BuildKit lint warning (as on `main`) |
+| Live GitHub API, read-only | `main-quality-gates` now requires 11 contexts (ADR015's ten plus `Release tooling`), strict up-to-date branches, squash only. `release.py evaluate-checks` for `main` `cc86c08`, as the candidate job calls it | PASS: all 11 successful (`CodeQL` on merged PR #267's head `53953fd`, equal tree) |
+
+### Not run locally
+
+- `test-ingress-stub-backend.sh`, `test-ingress-real-backend.sh`,
+  `test-ingress-release-ca-store.sh`, `test-ingress-dp01-preflight.sh` (needs root on the
+  host), `test-runtime-real-backend-privileges.sh`, the containerd round-trip suite and
+  `test-minio-init.sh`: they run in the pull request's required `CI VM` jobs on
+  linux/amd64 runners, and Q01–Q05 and the `deploy.sh` smoke run on the exact rehearsal
+  candidates in `Release rehearsal`.
+- `actionlint`: no workflow file changed.
+- The dispatched `Release candidate` job: it accepts only a `main` revision. Candidate
+  run 45073820127 already exercised dispatch, attestation and draft storage on `main`,
+  and no workflow, attestation or draft logic changed, so no new candidate was dispatched.
+
+### Observation for the Leader
+
+`Release tooling` is a required context, but `release.yml` runs on pull requests only when
+release inputs change (ADR015 D13 described it as not required). A pull request that
+touches none of them gets no `Release tooling` run, so its required check stays expected
+and it cannot satisfy the ruleset (seen on open PRs #263 and #266, both behind `main` and
+touching no release path). Resolving it is a ruleset or workflow decision outside this
+change.

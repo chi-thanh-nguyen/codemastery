@@ -85,7 +85,13 @@ public final class VerifyTrustStore {
 JAVA
 RUN javac -d /truststore-verifier /truststore-verifier/VerifyTrustStore.java
 
-FROM eclipse-temurin:25.0.5_8-jre-noble@sha256:a98128a57de944a72bd31fbc79b898edd5a5864d3652071d5bbd2160ab7d7dce AS runtime
+# The runtime base was re-pinned on 23 November 2026 to the same tag's
+# 20 November index: the same Temurin 25.0.5+8 JRE (identical cacerts file) on
+# refreshed Ubuntu 24.04 packages, which fix the previous base's two HIGH APT
+# findings (apt and libapt-pkg6.0t64 2.8.4ubuntu0.1) and its libc6, libpcre2
+# and perl-base MEDIUM findings (docs/deployment.md, "DP01 release image
+# security remediation"). The build stage does not ship and keeps its pin.
+FROM eclipse-temurin:25.0.5_8-jre-noble@sha256:23481dc33a759b79d62814ceb1ec27a0d1a84da9d7aab0609577427176fbb1b7 AS runtime
 
 # The non-root runtime needs no setuid/setgid program, so the base's su, mount,
 # passwd and similar binaries lose those bits.

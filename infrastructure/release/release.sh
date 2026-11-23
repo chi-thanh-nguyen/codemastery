@@ -638,6 +638,8 @@ PY
   refused 'acceptance of a finding the candidate did not report' 'a["accepted_findings"].append({"service":"backend","id":"CVE-0000-00000","package":"injected"})'
   if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["accepted_findings"] else 1)' "$work/$id.json"; then
     refused 'a candidate finding left unaccepted' 'a["accepted_findings"]=a["accepted_findings"][1:]'
+    refused 'a candidate finding accepted under another service' 'f=a["accepted_findings"][0]; f["service"]="frontend" if f["service"]!="frontend" else "postgres"'
+    refused 'a candidate finding accepted with a modified package' 'a["accepted_findings"][0]["package"]+="-modified"'
   else
     log "The candidate has no findings; the unaccepted-finding case is covered by the unit tests."
   fi
