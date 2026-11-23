@@ -4894,7 +4894,60 @@ with single-line references to your own records. Interactive inspection:
 `ssh -i ~/.ssh/vm-codemastery_key.pem azureuser@20.205.56.236` then
 `sudo codemastery-ops status`, `inventory` or `tls-check`.
 
-### State on 23 November 2026 (read-only)
+### PR #274 remediation: authorization and recovery setup
+
+[ADR017 §11](decisions/017-ssh-continuous-deployment.md#11-pr-274-review-remediation--23-november-2026)
+refines the original Phase 5 implementation. The following applies to the remediated
+revision; earlier test/VM observations retain their historical limits.
+
+- `cmdeploy` requires a short-lived GitHub-signed command token as well as the SSH key.
+  Each command, upload hash/size and deployment context is bound to its audience.
+  Outside the approved `Deploy` job, use the separately privileged operator fallback.
+  Bootstrap installs the verifier under `/usr/local/lib/codemastery`, outside selectable
+  tooling. Updating that verifier requires operator bootstrap. Public GitHub OIDC JWKS
+  and commit-metadata HTTPS endpoints must be reachable; an outage refuses execution.
+- The capture's HBA fence rejects PostgreSQL network writers throughout the cut/hold;
+  container-local bootstrap access remains reserved for trusted maintenance. Restart
+  policies stay disabled during a hold. Root/Docker operators must not write to either
+  store during maintenance. A durable `backup/capture-intent.json` after interruption
+  requires inspection of recorded containers/policies, encrypted partial evidence and
+  the PostgreSQL `pg_hba.conf.cm-recovery-original` file. Do not delete the intent or
+  restart the application blindly. Reconcile the original HBA/restart policies and
+  exact prior running services under operator authority; retain failed-set evidence.
+- `resume` is a cancellation **before** a deployment attempt. After an attempt, old
+  container IDs do not establish schema/data compatibility; inspect containment and
+  obtain the Leader's recovery decision. `FAILED_CONTAINMENT_INCOMPLETE` is distinct
+  from `FAILED_CONTAINED`; post-deployment verification findings keep the hold record.
+- Configure `restore_test.postgres_image` with the **captured server image identity**,
+  not merely any PostgreSQL 17 tag. Make that image, the captured MinIO/server client
+  images and a GNU-tar helper image available on the workstation beforehand. Restore
+  never pulls or builds them. Add `restore_test.minio_escrow` (absolute owner-only JSON
+  file from authorized custody) and optionally `restore_test.helper_image` (default
+  `ubuntu:24.04`). The escrow fields are `root_user`, `root_password`, `app_user`,
+  `app_password`, `bucket`; use the actual deployment identities, never invented
+  credentials. Do not commit the escrow or print it. For example, the non-secret config
+  shape is `"restore_test": {"postgres_image": "<captured image ID>", "minio_escrow": "<absolute escrow path>", "helper_image": "<locally available GNU-tar image>"}`.
+- Full qualification restores into isolated tmpfs, boots the identical captured MinIO
+  image and checks version payloads, metadata/tags, configuration/IAM inventory and
+  authorized bucket versus denied administration. Missing escrow produces at most
+  `+PG_RESTORE_TESTED`, which **cannot** satisfy P9, qualified RPO status or retention
+  advancement. Active external MinIO integrations/replication require separate affected
+  qualification; do not configure them into this bounded recovery topology silently.
+- Publisher retries authenticate existing byte-identical copies and resend a lost
+  acknowledgement. The workstation lock excludes simultaneous publication/pruning.
+  Partial ciphertext and interrupted state stay for inspection. Qualified ages use
+  the signed cut; future cuts are clock errors. Pruning verifies the newest eligible
+  independent/cloud point before deleting older eligible history.
+- TLS staging and failed challenges both verify recovered frontend health, Nginx
+  configuration and served certificate before returning. Timers still require actual
+  VM staging/capture qualification and remain disabled by default. No production
+  bootstrap, capture, restart, renewal, deployment or cloud mutation ran in this review.
+
+OpenAI Codex performed this authorized review/remediation and disposable verification.
+This adds no AI service to the application or deployment runtime. The earlier Claude
+Code disclosure and historical VM/release evidence remain intact.
+
+### Historical VM observation on 23 November 2026 (read-only)
 
 The VM runs the 4 November preview (source `061102e3`, the ADR009 §2.3 image identities)
 from an extracted tree in `/home/azureuser`, Flyway V001–V006, containerd image store,

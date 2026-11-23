@@ -21,6 +21,8 @@ import tarfile
 import tempfile
 import threading
 import unittest
+from unittest import mock
+from types import SimpleNamespace
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "infrastructure", "vm", "host"))
@@ -28,6 +30,7 @@ sys.path.insert(0, os.path.join(ROOT, "infrastructure", "vm", "cd"))
 import cd  # noqa: E402
 import ops  # noqa: E402
 import recovery  # noqa: E402
+import authorize  # noqa: E402
 import release as rel  # noqa: E402  (cd.py puts infrastructure/release on the path)
 
 MIGRATIONS = os.path.join(ROOT, "backend", "src", "main", "resources", "db", "migration")
@@ -154,6 +157,20 @@ class FlywayAndCompatibility(unittest.TestCase):
 
 
 class Staging(unittest.TestCase):
+    def test_relative_symlink_chain_cannot_escape_before_tree_check(self):
+        a, b, c = tarfile.TarInfo("a"), tarfile.TarInfo("b"), tarfile.TarInfo("b/escaped")
+        a.type, a.linkname = tarfile.SYMTYPE, "."
+        b.type, b.linkname = tarfile.SYMTYPE, "a/.."
+        c.size = 1
+        with tempfile.TemporaryDirectory() as d:
+            dest, archive = os.path.join(d, "tree"), os.path.join(d, "archive.tar")
+            os.mkdir(dest)
+            with open(archive, "wb") as f:
+                f.write(self._tar([(a, None), (b, None), (c, b"x")]))
+            with self.assertRaises(recovery.RecoveryError):
+                ops.safe_extract(archive, dest)
+            self.assertFalse(os.path.exists(os.path.join(d, "escaped")))
+
     def test_git_tree_matches_git_for_an_archive_of_head(self):
         try:
             head_tree = subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD^{tree}"], check=True,
@@ -216,6 +233,247 @@ class Staging(unittest.TestCase):
             ops.decode_context(bad)
 
 
+class TLSRenewalRegression(unittest.TestCase):
+    def test_real_pair_replacement_and_partial_rename_rollback(self):
+        for fail_chain_rename in (False, True):
+            with self.subTest(fail_chain_rename=fail_chain_rename), tempfile.TemporaryDirectory() as d:
+                cfg = {"acme_home": d, "origin": "https://codemastery.app", "stop_timeout": 1,
+                       "wait_timeout": 1, "tls_backup_root": d, "tls_dir": d}
+                for name, value in (("acme.sh", ""), ("fullchain.pem", "old-chain"), ("privkey.pem", "old-key"),
+                                    ("issued-chain", "new-chain"), ("issued-key", "new-key")):
+                    with open(os.path.join(d, name), "w") as f:
+                        f.write(value)
+                copyfile, rename = shutil.copyfile, os.rename
+                def copy(src, dst, **kw):
+                    if src == "/etc/codemastery/renewal-staging/fullchain.pem": src = os.path.join(d, "issued-chain")
+                    if src == "/etc/codemastery/renewal-staging/privkey.pem": src = os.path.join(d, "issued-key")
+                    return copyfile(src, dst, **kw)
+                def replace(src, dst):
+                    if fail_chain_rename and src == os.path.join(d, "fullchain.pem.new"):
+                        raise OSError("injected pair-replacement interruption")
+                    return rename(src, dst)
+                def leaf(path):
+                    with open(path) as f: return {"sha256": f.read()}
+                with mock.patch.object(ops, "config", return_value=cfg), \
+                        mock.patch.object(ops, "tls_status", return_value={"renewal_due": True}), \
+                        mock.patch.object(ops, "Lock"), mock.patch.object(ops.recovery, "Docker") as docker, \
+                        mock.patch.object(ops, "run"), mock.patch.object(ops.subprocess, "run") as acme, \
+                        mock.patch.object(ops, "validate_pair"), mock.patch.object(ops.recovery, "_wait"), \
+                        mock.patch.object(ops, "frontend_exec", return_value=(0, "")), \
+                        mock.patch.object(ops, "served_certificate", side_effect=lambda *a: leaf(os.path.join(d, "fullchain.pem"))), \
+                        mock.patch.object(ops, "file_leaf", side_effect=leaf), mock.patch.object(ops.os, "chown"), \
+                        mock.patch.object(ops.shutil, "copyfile", side_effect=copy), \
+                        mock.patch.object(ops.os, "rename", side_effect=replace), \
+                        mock.patch.object(ops, "emit", side_effect=lambda x: x):
+                    docker.return_value.project_containers.return_value = {"frontend": "fe"}
+                    docker.return_value.state.return_value = {"Running": True}
+                    acme.return_value.returncode = 0
+                    if fail_chain_rename:
+                        with self.assertRaises(recovery.RecoveryError):
+                            ops.op_tls_renew(SimpleNamespace(staging=False, force=True))
+                    else:
+                        self.assertEqual(ops.op_tls_renew(SimpleNamespace(staging=False, force=True))["result"], "RENEWED")
+                for name, suffix in (("fullchain.pem", "chain"), ("privkey.pem", "key")):
+                    with open(os.path.join(d, name)) as f:
+                        self.assertEqual(f.read(), ("old-" if fail_chain_rename else "new-") + suffix)
+
+    def test_staging_must_verify_restarted_frontend(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = {"acme_home": d, "origin": "https://codemastery.app", "stop_timeout": 1,
+                   "wait_timeout": 1, "tls_backup_root": d, "tls_dir": d}
+            open(os.path.join(d, "acme.sh"), "w").close()
+            with mock.patch.object(ops, "config", return_value=cfg), \
+                    mock.patch.object(ops, "tls_status", return_value={"renewal_due": True}), \
+                    mock.patch.object(ops, "Lock"), mock.patch.object(ops.recovery, "Docker") as docker, \
+                    mock.patch.object(ops, "run"), mock.patch.object(ops.subprocess, "run") as acme, \
+                    mock.patch.object(ops, "validate_pair"), mock.patch.object(ops, "emit"), \
+                    mock.patch.object(ops.recovery, "_wait", side_effect=recovery.RecoveryError("frontend not healthy")):
+                docker.return_value.project_containers.return_value = {"frontend": "fe"}
+                docker.return_value.state.return_value = {"Running": True}
+                acme.return_value.returncode = 0
+                with self.assertRaises(recovery.RecoveryError):
+                    ops.op_tls_renew(SimpleNamespace(staging=True, force=False))
+
+    def test_staging_success_requires_health_nginx_and_served_readback(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = {"acme_home": d, "origin": "https://codemastery.app", "stop_timeout": 1,
+                   "wait_timeout": 1, "tls_backup_root": d, "tls_dir": d}
+            open(os.path.join(d, "acme.sh"), "w").close()
+            with mock.patch.object(ops, "config", return_value=cfg), \
+                    mock.patch.object(ops, "tls_status", return_value={"renewal_due": True}), \
+                    mock.patch.object(ops, "Lock"), mock.patch.object(ops.recovery, "Docker") as docker, \
+                    mock.patch.object(ops, "run"), mock.patch.object(ops.subprocess, "run") as acme, \
+                    mock.patch.object(ops, "validate_pair"), mock.patch.object(ops.recovery, "_wait") as health, \
+                    mock.patch.object(ops, "frontend_exec", return_value=(0, "")) as nginx, \
+                    mock.patch.object(ops, "served_certificate", return_value={"sha256": "old"}) as served, \
+                    mock.patch.object(ops, "file_leaf", return_value={"sha256": "old"}), \
+                    mock.patch.object(ops, "emit", side_effect=lambda x: x):
+                docker.return_value.project_containers.return_value = {"frontend": "fe"}
+                docker.return_value.state.return_value = {"Running": True}
+                acme.return_value.returncode = 0
+                result = ops.op_tls_renew(SimpleNamespace(staging=True, force=False))
+                self.assertEqual(result["result"], "STAGING_CHALLENGE_PASS")
+                health.assert_called_once()
+                nginx.assert_called_once()
+                served.assert_called_once()
+                acme.return_value.returncode = 1
+                with self.assertRaises(recovery.RecoveryError):
+                    ops.op_tls_renew(SimpleNamespace(staging=True, force=False))
+                self.assertEqual(health.call_count, 2)  # challenge failure still restores/verifies ingress
+
+
+class VerificationRegression(unittest.TestCase):
+    def test_nsg_cleanup_does_not_turn_lookup_failure_into_success(self):
+        with tempfile.TemporaryDirectory() as d:
+            for command, script in (("curl", '#!/bin/sh\necho \'{"value":"synthetic-oidc"}\'\n'),
+                                    ("az", '#!/bin/sh\ncase "$*" in\n*"rule list"*) if [ "$TEST_LOOKUP_FAILURE" = yes ]; then exit 1; fi; echo "[]";;\nesac\n')):
+                path = os.path.join(d, command)
+                with open(path, "w") as f: f.write(script)
+                os.chmod(path, 0o700)
+            env = dict(os.environ, PATH=d + ":" + os.environ["PATH"], AZURE_CLIENT_ID="synthetic", AZURE_TENANT_ID="synthetic",
+                       AZURE_SUBSCRIPTION_ID="synthetic", NSG_RESOURCE_GROUP="fixture", NSG_NAME="fixture",
+                       NSG_RULE_PRIORITY="100", GITHUB_RUN_ID="77", ACTIONS_ID_TOKEN_REQUEST_URL="https://fixture.invalid/?x=1",
+                       ACTIONS_ID_TOKEN_REQUEST_TOKEN="synthetic", TEST_LOOKUP_FAILURE="yes")
+            command = ["bash", os.path.join(ROOT, "infrastructure/vm/cd/nsg-gate.sh"), "close"]
+            result = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"cannot inspect", result.stderr)
+            env["TEST_LOOKUP_FAILURE"] = "no"
+            self.assertEqual(subprocess.run(command, env=env, stdout=subprocess.PIPE).returncode, 0)
+            env["NSG_RULE_PRIORITY"] = "5000"
+            self.assertNotEqual(subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode, 0)
+
+    def verify(self, health, port="443", restart="unless-stopped"):
+        with tempfile.TemporaryDirectory() as d:
+            source = os.path.join(d, "a" * 40, "infrastructure", "vm")
+            os.makedirs(source)
+            open(os.path.join(source, "deploy.sh"), "w").close()
+            def text(*args):
+                template = args[2]
+                return "sha256:" + "1" * 64 if template == "{{.Image}}" else \
+                    restart if template == "{{.HostConfig.RestartPolicy.Name}}" else \
+                    json.dumps({"8080/tcp": [{"HostPort": port}]})
+            with mock.patch.object(ops, "SOURCE_ROOT", d), mock.patch.object(ops, "SERVICES", ("frontend",)), \
+                    mock.patch.object(ops, "expected_images", return_value={"codemastery.invalid/frontend:release": "sha256:" + "1" * 64}), \
+                    mock.patch.object(ops.recovery, "Docker") as docker, mock.patch.object(ops, "docker_text", side_effect=text), \
+                    mock.patch.object(ops, "release_migrations", return_value=[]), mock.patch.object(ops, "target_schema", return_value=([], {}, True, {})), \
+                    mock.patch.object(ops, "compatibility", return_value={"state": "CURRENT", "applied": 9}), \
+                    mock.patch.object(ops, "frontend_exec", return_value=(0, health)), \
+                    mock.patch.object(ops, "served_certificate", return_value={"sha256": "x", "san": ["codemastery.app"]}), \
+                    mock.patch.object(ops, "file_leaf", return_value={"sha256": "x"}):
+                docker.return_value.project_containers.return_value = {"frontend": "fe"}
+                docker.return_value.state.return_value = {"Running": True, "Health": {"Status": "healthy"}}
+                return ops.verify_state({"origin": "https://codemastery.app", "tls_dir": d}, {"source_revision": "a" * 40}, d, "graphdriver")
+
+    def test_nested_component_up_does_not_override_overall_down(self):
+        result = self.verify('{"status":"DOWN","components":{"db":{"status":"UP"}}}')
+        self.assertEqual(result["readiness"], "NOT_UP")
+        self.assertTrue(result["problems"])
+
+    def test_wrong_host_port_and_restart_policy_refuse(self):
+        result = self.verify('{"status":"UP"}', port="80", restart="always")
+        self.assertTrue(any("host port 443" in p for p in result["problems"]))
+        self.assertTrue(any("restart policy" in p for p in result["problems"]))
+        self.assertEqual(self.verify('{"status":"UP"}')["problems"], [])
+
+    def test_resume_after_any_deployment_attempt_refuses_before_start(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "backup"))
+            recovery.write_private(os.path.join(d, "backup", "hold.json"), recovery.dump_json(
+                {"deployment_attempt": "now", "set_id": "CMRS-test", "held": {"backend": "be"}}))
+            with mock.patch.object(ops, "STATE", d), mock.patch.object(ops, "Lock"), mock.patch.object(ops, "run") as run, \
+                    mock.patch.object(ops, "docker_text", return_value="be"):
+                with self.assertRaises(recovery.RecoveryError):
+                    ops.op_resume(SimpleNamespace())
+                run.assert_not_called()
+
+    def test_failed_store_discovery_refuses(self):
+        with mock.patch.object(ops, "docker_text", return_value=None), self.assertRaises(recovery.RecoveryError):
+            ops.image_store()
+
+    def test_workstation_lock_excludes_prune_and_second_publisher(self):
+        with tempfile.TemporaryDirectory() as d:
+            ws = recovery.Workstation(d)
+            with recovery.WorkstationLock(ws):
+                with self.assertRaises(recovery.RecoveryError):
+                    with recovery.WorkstationLock(ws):
+                        self.fail("second publisher entered")
+
+
+@unittest.skipUnless(OPENSSL3, "OpenSSL 3 required for signed OIDC fixtures")
+class OIDCAuthorization(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.key = os.path.join(cls.directory.name, "issuer.key")
+        cls.binary = recovery.openssl_bin()[0]
+        subprocess.run([cls.binary, "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", cls.key],
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        modulus = subprocess.check_output([cls.binary, "rsa", "-in", cls.key, "-modulus", "-noout"],
+                                          stdin=subprocess.DEVNULL).decode().strip().split("=")[1]
+        cls.jwk = {"kid": "fixture", "kty": "RSA", "alg": "RS256", "use": "sig",
+                   "n": cls.enc(bytes.fromhex(modulus)), "e": cls.enc(b"\x01\x00\x01")}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.directory.cleanup()
+
+    @staticmethod
+    def enc(data):
+        return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+    def token(self, argv, **changes):
+        claims = {"iss": authorize.ISSUER, "aud": authorize.audience(argv), "repository": authorize.REPOSITORY,
+                  "repository_id": authorize.REPOSITORY_ID, "repository_owner_id": authorize.OWNER_ID,
+                  "actor": "chi-thanh-nguyen", "actor_id": authorize.OWNER_ID, "environment": "production",
+                  "event_name": "workflow_dispatch", "ref": "refs/heads/main", "ref_type": "branch",
+                  "workflow_ref": authorize.WORKFLOW, "workflow_sha": "a" * 40, "sha": "a" * 40,
+                  "run_attempt": "1", "runner_environment": "github-hosted", "run_id": "77",
+                  "jti": "fixture-id", "iat": 1000, "nbf": 1000, "exp": 1300}
+        claims.update(changes)
+        message = self.enc(json.dumps({"alg": "RS256", "typ": "JWT", "kid": "fixture"}).encode()) + "." + \
+            self.enc(json.dumps(claims).encode())
+        signature = subprocess.check_output([self.binary, "dgst", "-sha256", "-sign", self.key], input=message.encode())
+        return message + "." + self.enc(signature)
+
+    def fetch(self, url):
+        if url == authorize.ISSUER + "/.well-known/jwks":
+            return {"keys": [self.jwk]}
+        self.assertEqual(url, "https://api.github.com/repos/" + authorize.REPOSITORY + "/git/commits/" + "a" * 40)
+        return {"sha": "a" * 40, "tree": {"sha": "b" * 40}}
+
+    def test_signed_commands_and_exact_trusted_tooling_tree(self):
+        for argv in (["status"], ["receive", "package.tar", "0" * 64, "10"],
+                     ["install-tooling", "a" * 40, "b" * 40], ["deploy", "--context", "bound-reference"]):
+            self.assertEqual(authorize.verify(self.token(argv), argv, self.fetch, 1100)["run_id"], "77")
+
+    def test_rejects_forgery_changed_arguments_and_untrusted_tooling(self):
+        argv = ["status"]
+        token = self.token(argv)
+        for value, args in ((token[:-30] + "A" * 30, argv), (token, ["install-tooling", "a" * 40, "b" * 40]),
+                            ("eyJhbGciOiJub25lIn0.e30.eA", argv), ("", argv)):
+            with self.assertRaises(authorize.Refused):
+                authorize.verify(value, args, self.fetch, 1100)
+        for args in (["install-tooling", "c" * 40, "b" * 40], ["install-tooling", "a" * 40, "c" * 40]):
+            with self.assertRaises(authorize.Refused):
+                authorize.verify(self.token(args), args, self.fetch, 1100)
+
+    def test_wrong_run_repository_actor_environment_time_and_workflow_refuse(self):
+        for changes in ({"exp": 1099}, {"nbf": 1101}, {"iat": 1101}, {"exp": 1800}, {"repository_id": "1"},
+                        {"repository_owner_id": "1"}, {"actor_id": "1"}, {"actor": "someone"}, {"run_attempt": "2"},
+                        {"event_name": "pull_request"}, {"environment": "other"}, {"ref": "refs/heads/feature"},
+                        {"workflow_ref": "other"}, {"workflow_sha": "b" * 40}, {"runner_environment": "self-hosted"}):
+            with self.subTest(changes=changes), self.assertRaises(authorize.Refused):
+                authorize.verify(self.token(["status"], **changes), ["status"], self.fetch, 1100)
+
+    def test_single_use_replay_barrier(self):
+        with tempfile.TemporaryDirectory() as d:
+            claims = authorize.verify(self.token(["status"]), ["status"], self.fetch, 1100)
+            authorize.consume(claims, d)
+            with self.assertRaises(authorize.Refused):
+                authorize.consume(claims, d)
+
+
 def env_ok(**over):
     env = {"GITHUB_REPOSITORY": rel.REPOSITORY, "GITHUB_REPOSITORY_ID": rel.REPOSITORY_ID,
            "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main",
@@ -249,6 +507,8 @@ class Authentication(unittest.TestCase):
         out = cd.authenticate(env_ok(), event_ok(), run_ok())
         self.assertEqual(out["request"]["operation"], "plan")
         self.assertEqual(out["run_url"], "https://github.com/%s/actions/runs/77" % rel.REPOSITORY)
+        current = cd.authenticate(env_ok(), event_ok(operation="verify", version=""), run_ok())
+        self.assertEqual(current["request"]["version"], "")
 
     def test_refusals(self):
         other = {"login": "someone", "id": 5, "type": "User"}
@@ -362,6 +622,29 @@ class Retention(unittest.TestCase):
         self.assertEqual(recovery.point_age_status(now() - datetime.timedelta(hours=15), now())[0], "OK")
         self.assertEqual(recovery.point_age_status(now() - datetime.timedelta(hours=16), now())[0], "WARNING")
         self.assertEqual(recovery.point_age_status(now() - datetime.timedelta(hours=24, minutes=1), now())[0], "BREACH")
+        self.assertEqual(recovery.point_age_status(now() + datetime.timedelta(seconds=1), now())[0], "CLOCK_ERROR")
+        with tempfile.TemporaryDirectory() as d:
+            ws = recovery.Workstation(d)
+            good = dict(pt("20260101T000000Z"), schema=recovery.LEDGER_SCHEMA, independent="VERIFIED",
+                        azure="NOT_CONFIGURED", manifest_sha256="0" * 64,
+                        restore_test={k: "PASS" for k in ("postgres", "minio_boot", "minio_objects", "minio_iam")})
+            entries = [good] + [dict(pt("20261123T%02d0000Z" % hour), schema=recovery.LEDGER_SCHEMA,
+                                    independent="VERIFIED", azure="NOT_CONFIGURED", manifest_sha256="1" * 64,
+                                    restore_test={"postgres": "PASS", "minio_boot": "NOT_RUN"}) for hour in (1, 2, 3)]
+            for e in entries:
+                os.makedirs(ws.path("sets", e["set_id"]))
+                ws.append_ledger(e)
+            status = recovery.workstation_status(ws, now=now())
+            self.assertEqual(status["independent"]["newest_cut"], good["t_cut"])
+            self.assertEqual(status["independent"]["state"], "BREACH")
+            with mock.patch.object(recovery, "Workstation", return_value=ws), \
+                    mock.patch.object(ws, "config", return_value={"producer_key_sha256": "0" * 64}), \
+                    mock.patch.object(ws, "decrypt_args", return_value=None), \
+                    mock.patch.object(recovery, "verify_set"), mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+                recovery.cmd_prune(SimpleNamespace(home=d, release=[], confirm=False))
+            plan = json.loads(output.getvalue())
+            self.assertIn(good["set_id"], plan["keep"])
+            self.assertEqual(plan["delete"], [])
 
 
 def synthetic_manifest(components):
@@ -442,6 +725,28 @@ class Crypto(unittest.TestCase):
 
     def p(self, name):
         return os.path.join(self.dir, name)
+
+    def test_pg_only_restore_cannot_be_acknowledged_as_full_restore(self):
+        with tempfile.TemporaryDirectory() as d:
+            vm, home = os.path.join(d, "vm"), os.path.join(d, "ws")
+            sid = "CMRS-20261123T100000Z-pre-update-0a1b2c3d"
+            self.build_set(os.path.join(vm, "sets", sid))
+            for sub in ("keys", "sets", "ledger", "trust", "incoming"):
+                os.makedirs(os.path.join(home, sub))
+            shutil.copy(self.p("rcpt.key"), os.path.join(home, "keys", "recipient.encrypted.pem"))
+            shutil.copy(self.p("rcpt.crt"), os.path.join(home, "keys", "recipient.crt"))
+            shutil.copy(self.p("producer.pub"), os.path.join(home, "trust", "producer.pub.pem"))
+            ws = recovery.Workstation(home)
+            ws.passphrase = lambda: self.passphrase
+            class Remote:
+                def fetch(self, set_id, name, dest):
+                    shutil.copyfile(recovery.staged_file(set_id, name, vm), dest)
+                def ops(self, *a): return b"{}"
+            cfg = {"vm": {}, "producer_key_sha256": recovery.public_key_fingerprint(self.p("producer.pub"))}
+            record = recovery.publish_set(ws, cfg, Remote(), recovery.list_staged(vm)[0],
+                                          restore=lambda *a: {"postgres": "PASS", "minio_boot": "NOT_RUN"}, log=lambda *a: None)
+            self.assertNotIn("+RESTORE_TESTED", record["level"])
+            self.assertEqual(record["level"], "VERIFIED_INDEPENDENT+PG_RESTORE_TESTED")
 
     def encrypt(self, data, out):
         src = out + ".plain"
@@ -556,13 +861,17 @@ class Crypto(unittest.TestCase):
             recovery.acknowledge(ids[0], "0" * 64, "VERIFIED_INDEPENDENT", "op", root)
         with self.assertRaises(recovery.RecoveryError):
             recovery.acknowledge(ids[0], staged[0]["manifest_sha256"], "TRUST_ME", "op", root)
-        recovery.acknowledge(ids[0], staged[0]["manifest_sha256"], "VERIFIED_INDEPENDENT+RESTORE_TESTED", "op", root)
+        with self.assertRaises(recovery.RecoveryError):
+            recovery.acknowledge(ids[0], staged[0]["manifest_sha256"], "VERIFIED_INDEPENDENT+RESTORE_TESTED", "op", root,
+                                 {"postgres": "PASS", "minio_boot": "NOT_RUN"})
+        recovery.acknowledge(ids[0], staged[0]["manifest_sha256"], "VERIFIED_INDEPENDENT+RESTORE_TESTED", "op", root,
+                             {k: "PASS" for k in ("postgres", "minio_boot", "minio_objects", "minio_iam")})
         recovery.acknowledge(ids[1], staged[1]["manifest_sha256"], "VERIFIED_INDEPENDENT", "op", root)
         removed = recovery.prune_staged(root, log=lambda m: None)
         self.assertEqual(removed, [ids[0]])
         self.assertTrue(os.path.isdir(os.path.join(sets, ids[1])))     # newest acknowledged stays
         self.assertTrue(os.path.isdir(os.path.join(sets, ids[2])))     # unacknowledged stays
-        self.assertFalse(os.path.exists(os.path.join(sets, "CMRS-x.partial")))
+        self.assertTrue(os.path.exists(os.path.join(sets, "CMRS-x.partial")))
         with self.assertRaises(recovery.RecoveryError):
             recovery.staged_file(ids[1], "../../etc/passwd", root)
 
@@ -627,6 +936,18 @@ class Crypto(unittest.TestCase):
             self.assertNotIn("sets/%s/%s" % (second, recovery.COMPLETE_MARKER), server.store)
             self.assertEqual(len(ws.ledger()), 1)
             server.corrupt_reads = False
+            # Retry the interrupted publication using identical already-created
+            # bytes. Neither cloud objects nor the independent copy are replaced.
+            second_record = recovery.publish_set(ws, cfg, FakeRemote(), entry2, blob=blob,
+                                                 restore=lambda d, m: {"postgres": "PASS", "minio_boot": "NOT_RUN"})
+            self.assertEqual(second_record["level"], "VERIFIED_INDEPENDENT_AZURE+PG_RESTORE_TESTED")
+            self.assertFalse(recovery.restore_qualified(second_record["restore_test"]))
+            # The ledger may have committed before an SSH acknowledgement failed.
+            # A retry authenticates existing copies and sends the receipt again.
+            count = len(acks)
+            recovery.publish_set(ws, cfg, FakeRemote(), entry2, blob=blob)
+            self.assertEqual(len(acks), count + 1)
+            self.assertEqual(len(ws.ledger()), 2)
             # An older cut than the ledger's newest is refused as rollback/replay.
             older = "CMRS-20261123T050000Z-pre-update-0a1b2c3f"
             shutil.copytree(os.path.join(vm, "sets", set_id), os.path.join(vm, "sets", older))

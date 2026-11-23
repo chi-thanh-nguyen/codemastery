@@ -133,7 +133,7 @@ jobs:
       contents: write        # read the release draft; nothing is written
       actions: read          # run record, environment rules and approval record
       attestations: read     # gh attestation verify
-      id-token: write        # optional Azure NSG gate (federated login); no other use
+      id-token: write        # per-command SSH authorization and optional Azure NSG gate
     steps:
       - name: Require the main branch
         if: github.ref != 'refs/heads/main'

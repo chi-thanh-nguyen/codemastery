@@ -2149,6 +2149,7 @@ adds exactly these files and two directories under the existing `infrastructure/
 | `infrastructure/vm/cd/known_hosts` | The VM's ED25519 host-key pin |
 | `infrastructure/vm/host/codemastery-ops`, `infrastructure/vm/host/codemastery-ssh-gate` | Root entry point and forced command installed on the VM |
 | `infrastructure/vm/host/ops.py`, `infrastructure/vm/host/recovery.py` | VM operations; recovery capture and workstation publication (stdlib Python) |
+| `infrastructure/vm/host/authorize.py` | Fixed operator-installed GitHub OIDC command verifier, outside uploaded tooling; added under the Leader's explicit PR #274 review/remediation authorization (ADR017 §11) |
 | `infrastructure/vm/host/systemd/codemastery-capture.service`, `.timer`, `codemastery-tls-renew.service`, `.timer` | Timers installed disabled |
 | `infrastructure/vm/host/launchd/app.codemastery.recovery-publisher.plist` | Workstation publisher template |
 | `infrastructure/vm/tests/test_phase5_units.py`, `test-phase5-ssh-gates.sh`, `test-phase5-recovery-roundtrip.sh` | Tests (one new job in `ci-vm.yml`: `VM continuous deployment and recovery`) |

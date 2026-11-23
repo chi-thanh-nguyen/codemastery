@@ -39,6 +39,8 @@ fi
 cur="/opt/codemastery/tooling/current"
 install -m 0755 -o root -g root "${cur}/infrastructure/vm/host/codemastery-ops" /usr/local/sbin/codemastery-ops
 install -m 0755 -o root -g root "${cur}/infrastructure/vm/host/codemastery-ssh-gate" /usr/local/sbin/codemastery-ssh-gate
+install -d -m 0755 -o root -g root /usr/local/lib/codemastery
+install -m 0644 -o root -g root "${cur}/infrastructure/vm/host/authorize.py" /usr/local/lib/codemastery/authorize.py
 say "/usr/local/sbin/codemastery-ops, /usr/local/sbin/codemastery-ssh-gate"
 
 echo "== restricted deployment identity cmdeploy"

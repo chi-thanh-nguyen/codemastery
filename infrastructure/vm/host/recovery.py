@@ -24,6 +24,7 @@ here prints a secret, a passphrase, a token or decrypted content.
 import argparse
 import base64
 import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -139,6 +140,11 @@ def write_private(path, data, mode=0o600):
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
+        directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -286,21 +292,26 @@ def decrypt_stream(path, key, passphrase, recipient_cert, consume=None):
     finally:
         os.close(read_fd)
     digest, length, head = hashlib.sha256(), 0, b""
-    for block in iter(lambda: proc.stdout.read(CHUNK), b""):
-        if len(head) < len(FRAME):
-            need = len(FRAME) - len(head)
-            head += block[:need]
-            block = block[need:]
-        if block:
-            digest.update(block)
-            length += len(block)
-            if consume is not None:
-                consume(block)
-    proc.stdout.close()
-    rc = proc.wait()
-    err.seek(0)
-    diagnostic = _diagnostic(err.read())
-    err.close()
+    try:
+        for block in iter(lambda: proc.stdout.read(CHUNK), b""):
+            if len(head) < len(FRAME):
+                need = len(FRAME) - len(head)
+                head += block[:need]
+                block = block[need:]
+            if block:
+                digest.update(block)
+                length += len(block)
+                if consume is not None:
+                    consume(block)
+        rc = proc.wait()
+        err.seek(0)
+        diagnostic = _diagnostic(err.read())
+    finally:
+        proc.stdout.close()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        err.close()
     if rc != 0:
         refuse("component %s failed authenticated decryption (wrong key, corruption or truncation; %s)"
                % (os.path.basename(path), diagnostic))
@@ -413,7 +424,8 @@ class Docker(object):
     def run(self, *args, **kw):
         data = kw.get("data")
         result = subprocess.run([self.binary] + list(args), input=data, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, **({} if data is not None else {"stdin": subprocess.DEVNULL}))
+                                stderr=subprocess.PIPE, env=kw.get("env"),
+                                **({} if data is not None else {"stdin": subprocess.DEVNULL}))
         if result.returncode != 0 and not kw.get("ok_fail"):
             refuse("docker %s failed (exit %d)" % (args[0], result.returncode))
         return result.stdout.decode("utf-8", "replace").strip() if result.returncode == 0 else None
@@ -478,15 +490,136 @@ def pg_inventory(docker, cid):
 def pg_other_clients(docker, cid):
     """Client sessions other than the inspecting one: any is a potential writer.
 
-    The container healthcheck (pg_isready) opens a momentary connection; it is excluded
-    by name and a non-zero count must persist across a second sample to count."""
+    The healthcheck may open a momentary connection, so a non-zero count is sampled
+    again. No caller-controlled application name is exempt. Continuous exclusion
+    comes from pg_fence, not these samples."""
     sql = ("SELECT count(*) FROM pg_stat_activity WHERE backend_type='client backend' "
-           "AND pid <> pg_backend_pid() AND coalesce(application_name, '') <> 'pg_isready';")
+           "AND pid <> pg_backend_pid();")
     first = int(pg_query(docker, cid, sql))
     if not first:
         return 0
     time.sleep(1)
     return int(pg_query(docker, cid, sql))
+
+
+def pg_fence(docker, cid, restore=False):
+    """Reject all network logins for the complete cut/hold, not sampled writer activity.
+
+    Only the existing bootstrap identity on the container-local socket can capture
+    or inspect. Host root/Docker administrators remain trusted and must not write
+    during maintenance; they can otherwise replace any protection on this VM.
+    The original HBA is retained in the PG volume across host/process interruption.
+    """
+    script = '''set -eu
+unset PGHOST PGHOSTADDR PGPORT PGSERVICE PGOPTIONS
+hba=$(psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SHOW hba_file')
+old="$hba.cm-recovery-original"
+'''
+    if restore:
+        script += '''test -f "$old"
+cp -p "$old" "$hba"
+psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT pg_reload_conf()' >/dev/null
+sleep 1
+rm "$old"
+'''
+    else:
+        script += '''test ! -e "$old"
+test "$POSTGRES_USER" = cm_bootstrap
+cp -p "$hba" "$old"
+trap 'cp -p "$old" "$hba"; psql -X -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_reload_conf()" >/dev/null; rm -f "$old"' EXIT
+printf 'local all cm_bootstrap trust\\nlocal all all reject\\nhost all all 0.0.0.0/0 reject\\nhost all all ::/0 reject\\n' > "$hba"
+psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT pg_reload_conf(); SELECT pg_sleep(1);' >/dev/null
+if psql -X -q -w -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT 1' >/dev/null 2>&1; then exit 1; fi
+trap - EXIT
+'''
+    docker.run("exec", cid, "sh", "-c", script)
+
+
+def restart_policies(docker, found):
+    return {cid: docker.inspect(cid, "{{.HostConfig.RestartPolicy.Name}}") or "no" for cid in found.values()}
+
+
+def restore_policies(docker, policies):
+    for cid, policy in policies.items():
+        docker.run("update", "--restart", policy, cid)
+
+
+def restore_qualified(result):
+    return isinstance(result, dict) and all(result.get(k) == "PASS" for k in
+                                            ("postgres", "minio_boot", "minio_objects", "minio_iam"))
+
+
+def mc_read(docker, image, network, endpoint, credentials, *args, ok_fail=False):
+    user, secret = credentials
+    authority = urllib.parse.quote(user, safe="") + ":" + urllib.parse.quote(secret, safe="")
+    host = endpoint.replace("://", "://" + authority + "@", 1)
+    return docker.run("run", "--rm", "-i", "--pull", "never", "--network", network, "--read-only",
+                      "--tmpfs", "/tmp:rw,mode=1777", "--entrypoint", "/bin/sh", image, "-c",
+                      'IFS= read -r MC_HOST_cm; export MC_HOST_cm MC_CONFIG_DIR=/tmp/mc; exec mc "$@"', "mc", *args,
+                      data=(host + "\n").encode("utf-8"), ok_fail=ok_fail)
+
+
+def mc_payload_hash(docker, image, network, endpoint, credentials, *args):
+    user, secret = credentials
+    host = endpoint.replace("://", "://" + urllib.parse.quote(user, safe="") + ":" +
+                            urllib.parse.quote(secret, safe="") + "@", 1)
+    argv = [docker.binary, "run", "--rm", "-i", "--pull", "never", "--network", network, "--read-only",
+            "--tmpfs", "/tmp:rw,mode=1777", "--entrypoint", "/bin/sh", image, "-c",
+            'IFS= read -r MC_HOST_cm; export MC_HOST_cm MC_CONFIG_DIR=/tmp/mc; exec mc "$@"', "mc"] + list(args)
+    proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        proc.stdin.write((host + "\n").encode())
+        proc.stdin.close()
+        digest, size = hashlib.sha256(), 0
+        for data in iter(lambda: proc.stdout.read(CHUNK), b""):
+            digest.update(data)
+            size += len(data)
+        _require(proc.wait() == 0, "MinIO object version could not be read")
+        return {"length": size, "sha256": digest.hexdigest()}
+    finally:
+        proc.stdout.close()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def minio_inventory(docker, image, network, endpoint, credentials):
+    """Read-only S3 versions and IAM inventory; only digests enter the public manifest.
+
+    Cold volume bytes preserve complete metadata. These readbacks additionally prove
+    the identical server can interpret the restored namespace and IAM configuration.
+    """
+    result = {}
+    config = mc_read(docker, image, network, endpoint, credentials, "admin", "config", "export", "cm")
+    for line in config.splitlines():
+        words = shlex.split(line, comments=True)
+        if not words or not words[0].startswith(("identity_", "kms_", "notify_", "policy_")):
+            continue
+        values = dict(w.split("=", 1) for w in words[1:] if "=" in w)
+        endpoints = ("url", "config_url", "server_addr", "endpoint", "endpoints", "brokers", "address")
+        _require(values.get("enable") != "on" and not any(values.get(k) for k in endpoints),
+                 "external MinIO configuration is outside the qualified recovery topology")
+    result["config_sha256"] = hashlib.sha256(config.encode()).hexdigest()
+    for label, args in (("objects", ("ls", "--json", "--recursive", "--versions", "cm")),
+                        ("iam", ("admin", "user", "list", "--json", "cm"))):
+        raw = mc_read(docker, image, network, endpoint, credentials, *args)
+        rows = [load_json_bytes(line.encode(), "MinIO inventory") for line in raw.splitlines() if line.strip()]
+        if any(r.get("status") == "error" for r in rows):
+            refuse("MinIO %s inventory failed" % label)
+        if label == "objects":
+            for row in rows:
+                if row.get("type") != "file" or row.get("isDeleteMarker"):
+                    continue
+                target = "cm/" + row["key"]
+                version = ["--version-id", row["versionId"]] if row.get("versionId") else []
+                row["content"] = mc_payload_hash(docker, image, network, endpoint, credentials,
+                                                 "cat", *version, target)
+                for operation in ("stat", "tag"):
+                    args = ["stat", "--json"] if operation == "stat" else ["tag", "list", "--json"]
+                    data = mc_read(docker, image, network, endpoint, credentials, *args, *version, target)
+                    row[operation] = [load_json_bytes(line.encode(), "object metadata") for line in data.splitlines() if line.strip()]
+        result[label + "_sha256"] = hashlib.sha256(dump_json(sorted(rows, key=lambda r: json.dumps(r, sort_keys=True)))).hexdigest()
+    return result
 
 
 def volume_inventory(docker, name):
@@ -533,6 +666,9 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
             refuse("%s is missing: recovery custody is not provisioned" % path)
     sets_dir = private_dir(os.path.join(backup_root, "sets"))
     hold_path = os.path.join(backup_root, "hold.json")
+    intent_path = os.path.join(backup_root, "capture-intent.json")
+    if os.path.exists(intent_path):
+        refuse("an interrupted capture requires operator recovery of capture-intent.json before another capture")
     if os.path.exists(hold_path):
         refuse("an application hold is active; deploy, resume or release it before another capture")
     binary, openssl_version = openssl_bin()
@@ -544,6 +680,11 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
     if unknown:
         refuse("unexpected services in project %s: %s" % (project, ", ".join(sorted(unknown))))
     pg, mi = found["postgres"], found["minio"]
+    for cid in (pg, mi):
+        ports = json.loads(docker.inspect(cid, "{{json .HostConfig.PortBindings}}")) or {}
+        networks = json.loads(docker.inspect(cid, "{{json .NetworkSettings.Networks}}"))
+        _require(not any(ports.values()) and set(networks) == {project + "_default"},
+                 "data services must be private on the single inventoried network")
     if not docker.state(pg).get("Running") or (docker.state(pg).get("Health") or {}).get("Status") != "healthy":
         refuse("PostgreSQL is not running and healthy")
     if not docker.state(mi).get("Running"):
@@ -553,6 +694,10 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
     pg_volume = container_mount(docker, pg, "/var/lib/postgresql/data")
     mi_volume = container_mount(docker, mi, "/data")
     volumes = [volume_inventory(docker, pg_volume), volume_inventory(docker, mi_volume)]
+    for volume, service in ((pg_volume, "postgres"), (mi_volume, "minio")):
+        users = set((docker.run("ps", "--no-trunc", "--filter", "volume=" + volume, "--format", "{{.ID}}") or "").split())
+        if users - {found[service]}:
+            refuse("another running container mounts a captured volume")
     images = {s: docker.inspect(cid, "{{.Image}}") for s, cid in sorted(found.items())}
     writers = [found[s] for s in ("frontend", "backend") if s in found and docker.state(found[s]).get("Running")]
     set_id = "CMRS-%s-%s-%s" % (utc_now().strftime("%Y%m%dT%H%M%SZ"), kind, secrets.token_hex(4))
@@ -560,8 +705,16 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
     os.mkdir(partial, 0o700)
     times = {"capture_started_at": iso(utc_now())}
     stopped_minio = False
+    fenced = False
     started = {}
+    policies = restart_policies(docker, found)
+    write_private(intent_path, dump_json({"set_id": set_id, "containers": found, "restart_policies": policies,
+                                        "writers": writers, "phase": "CAPTURING"}))
     try:
+        # A daemon/host restart cannot restart a writer while the persistent intent
+        # or application hold is pending. Restore original policies only on success.
+        for cid in found.values():
+            docker.run("update", "--restart", "no", cid)
         log("capture %s: stopping application writers (frontend, backend)" % set_id)
         for cid in writers:
             docker.run("stop", "--time", str(stop_timeout), cid)
@@ -579,6 +732,22 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
             refuse("containers other than PostgreSQL and MinIO are attached to the project network")
         if pg_other_clients(docker, pg):
             refuse("PostgreSQL has client sessions after writer exclusion")
+        pg_fence(docker, pg)
+        fenced = True
+        if pg_other_clients(docker, pg):
+            refuse("PostgreSQL has client sessions after installing the connection fence")
+        if "minio-init" not in images:
+            refuse("the exact MinIO client image is required for the recovery inventory")
+        environment = dict(item.split("=", 1) for item in json.loads(docker.inspect(mi, "{{json .Config.Env}}")))
+        credentials = (environment["MINIO_ROOT_USER"], environment["MINIO_ROOT_PASSWORD"])
+        mi_state = minio_inventory(docker, images["minio-init"], project + "_default", "http://minio:9000", credentials)
+        del environment, credentials
+        # Stop MinIO before the PG snapshot so its state cannot advance beyond the
+        # common cut. It stays stopped until both encrypted captures are complete.
+        stopped_minio = True
+        docker.run("stop", "--time", str(stop_timeout), mi)
+        if docker.state(mi).get("Running"):
+            refuse("MinIO is still running after stop")
         cut = utc_now()
         time.sleep(1)  # the cut is strictly after exclusion and before both snapshots
         pg_info = pg_inventory(docker, pg)
@@ -586,30 +755,29 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
         log("capture %s: PostgreSQL custom-format dump" % set_id)
         components = []
         meta = encrypt_stream([docker.binary, "exec", pg, "sh", "-c",
-                               'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-password'],
+                               'unset PGHOST PGHOSTADDR PGPORT PGSERVICE PGOPTIONS; exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-password'],
                               recipient_cert, os.path.join(partial, COMPONENTS[0]), "PostgreSQL dump")
         components.append(dict(meta, name=COMPONENTS[0]))
         if pg_other_clients(docker, pg):
             refuse("a PostgreSQL client connected during the dump; the cut is not consistent")
         if pg_inventory(docker, pg) != pg_info:
             refuse("PostgreSQL content changed during the dump; the cut is not consistent")
-        minio_version = docker.run("exec", mi, "/usr/bin/minio", "--version", ok_fail=True) or "unavailable"
+        minio_version = docker.run("run", "--rm", "--pull", "never", "--network", "none",
+                                   "--entrypoint", "/usr/bin/minio", images["minio"], "--version")
         minio_env_keys = sorted(k.split("=", 1)[0] for k in json.loads(docker.inspect(mi, "{{json .Config.Env}}")))
         external = sorted(k for k in minio_env_keys if k.startswith("MINIO_") and k not in
                           ("MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_BROWSER"))
         if external:
             refuse("MinIO has configuration outside the inventoried set: %s" % ", ".join(external))
         log("capture %s: stopping MinIO for the cold volume copy" % set_id)
-        docker.run("stop", "--time", str(stop_timeout), mi)
-        stopped_minio = True
-        if docker.state(mi).get("Running"):
-            refuse("MinIO is still running after stop")
         tar_version = (subprocess.run(["tar", "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
                        .stdout.decode("ascii", "replace").splitlines() or ["unavailable"])[0] if tar_mode == "host" \
             else "GNU tar in %s" % tar_mode
         meta = encrypt_stream(tar_producer(docker, mi_volume, volumes[1]["mountpoint"], tar_mode), recipient_cert,
                               os.path.join(partial, COMPONENTS[1]), "MinIO cold copy")
         components.append(dict(meta, name=COMPONENTS[1]))
+        if docker.state(mi).get("Running"):
+            refuse("MinIO restarted during the cold capture")
         for s, cid in found.items():
             if s in ("frontend", "backend") and docker.state(cid).get("StartedAt") != started[s]:
                 refuse("%s was restarted during the capture; the cut is not consistent" % s)
@@ -626,6 +794,7 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
                       "minio": minio_version.splitlines()[0] if minio_version else "unavailable"},
             "postgres": dict(pg_info, container_image=images["postgres"]),
             "minio": {"container_image": images["minio"], "volume": mi_volume, "env_keys": minio_env_keys,
+                      "inventory": mi_state, "client_image": images["minio-init"],
                       "mechanism": "opaque cold copy of the whole /data volume (ADR009 section 9.5)"},
             "components": [dict(c, format="CMREC1", encryption=ENCRYPTION) for c in components],
             "custody": {"recipient_key_sha256": certificate_key_fingerprint(recipient_cert),
@@ -633,6 +802,8 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
                         "signing": SIGNING},
             "writer_exclusion": {"stopped": sorted(s for s in ("frontend", "backend") if s in found),
                                  "network_members": ["minio", "postgres"], "postgres_other_clients": 0,
+                                 "postgres_fence": "network reject; bootstrap local socket only",
+                                 "restart_policies_disabled": True,
                                  "minio": "server stopped for the copy", "images": images},
             "qualification": "CAPTURED_UNPUBLISHED",
             "external_dependencies": {"minio_kms": "none configured (no MINIO_KMS_* keys)",
@@ -649,9 +820,14 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
         if hold:
             write_private(hold_path, dump_json({"set_id": set_id, "manifest_sha256": manifest_sha, "t_cut": iso(cut),
                                                 "held": {s: found[s] for s in ("frontend", "backend") if s in found},
-                                                "started_at": started, "created_at": iso(utc_now())}))
+                                                "started_at": started, "created_at": iso(utc_now()),
+                                                "postgres": pg, "restart_policies": policies,
+                                                "postgres_fenced": True}))
             log("capture %s: application held stopped for the update (maintenance window open)" % set_id)
         else:
+            pg_fence(docker, pg, restore=True)
+            fenced = False
+            restore_policies(docker, policies)
             for s in ("backend", "frontend"):
                 if s in found and found[s] in writers:
                     docker.run("start", found[s])
@@ -659,20 +835,34 @@ def capture(kind, hold, backup_root=VM_BACKUP_ROOT, recipient_cert=VM_RECIPIENT_
         status = {"last_capture": {"set_id": set_id, "kind": kind, "t_cut": iso(cut), "manifest_sha256": manifest_sha,
                                    "result": "CAPTURED", "at": iso(utc_now())}}
         write_private(os.path.join(backup_root, "status.json"), dump_json(status))
+        os.unlink(intent_path)
         return {"set_id": set_id, "manifest_sha256": manifest_sha, "t_cut": iso(cut), "hold": bool(hold),
                 "components": manifest["components"]}
     except BaseException as exc:
-        shutil.rmtree(partial, ignore_errors=True)
-        if stopped_minio:
-            docker.run("start", mi, ok_fail=True)
-        for s in ("backend", "frontend"):
-            if s in found and found[s] in writers:
-                docker.run("start", found[s], ok_fail=True)
+        # Preserve encrypted partial evidence and the persistent intent on any
+        # cleanup failure. A process/host kill leaves restart=no and the HBA fence.
+        cleanup = []
         try:
-            write_private(os.path.join(backup_root, "status.json"), dump_json(
-                {"last_capture": {"kind": kind, "result": "FAILED", "reason": str(exc)[:300], "at": iso(utc_now())}}))
-        except OSError:
-            pass
+            if os.path.isfile(hold_path):
+                refuse("the pre-update hold is durable; operator inspection is required after capture failure")
+            if fenced:
+                pg_fence(docker, pg, restore=True)
+            if stopped_minio:
+                docker.run("start", mi)
+                _wait(lambda: docker.state(mi).get("Running"), stop_timeout, "MinIO recovery")
+            restore_policies(docker, policies)
+            if not os.path.isfile(hold_path):
+                for s in ("backend", "frontend"):
+                    if s in found and found[s] in writers:
+                        docker.run("start", found[s])
+            os.unlink(intent_path)
+        except (RecoveryError, OSError) as recovery_exc:
+            cleanup.append(str(recovery_exc))
+        write_private(os.path.join(backup_root, "status.json"), dump_json(
+            {"last_capture": {"kind": kind, "result": "FAILED", "reason": str(exc)[:300],
+                              "cleanup_failures": cleanup, "partial": partial, "at": iso(utc_now())}}))
+        if cleanup:
+            refuse("capture failed and service recovery is incomplete; inspect capture-intent.json")
         raise
 
 
@@ -706,11 +896,13 @@ def staged_file(set_id, name, backup_root=VM_BACKUP_ROOT):
     return path
 
 
-def acknowledge(set_id, manifest_sha256, level, by, backup_root=VM_BACKUP_ROOT):
+def acknowledge(set_id, manifest_sha256, level, by, backup_root=VM_BACKUP_ROOT, restore_result=None):
     """The publisher's receipt: the set was verified off the VM and is in independent custody."""
     base, _, extra = level.partition("+")
-    if base not in LEVELS or extra not in ("", "RESTORE_TESTED"):
+    if base not in LEVELS or extra not in ("", "PG_RESTORE_TESTED", "RESTORE_TESTED"):
         refuse("unknown acknowledgement level")
+    if extra == "RESTORE_TESTED" and not restore_qualified(restore_result):
+        refuse("full restore qualification requires PostgreSQL, MinIO boot, objects and IAM evidence")
     path = os.path.join(backup_root, "sets", set_id)
     if not SET_ID.match(set_id) or not os.path.isdir(path):
         refuse("no such staged set")
@@ -718,7 +910,7 @@ def acknowledge(set_id, manifest_sha256, level, by, backup_root=VM_BACKUP_ROOT):
         refuse("the acknowledged manifest is not the staged one")
     acks = private_dir(os.path.join(backup_root, "acks"))
     record = {"schema": ACK_SCHEMA, "set_id": set_id, "manifest_sha256": manifest_sha256, "level": level,
-              "acknowledged_by": by, "acknowledged_at": iso(utc_now())}
+              "acknowledged_by": by, "acknowledged_at": iso(utc_now()), "restore_test": restore_result}
     write_private(os.path.join(acks, set_id + ".json"), dump_json(record))
     return record
 
@@ -740,10 +932,8 @@ def prune_staged(backup_root=VM_BACKUP_ROOT, log=print):
             shutil.rmtree(os.path.join(backup_root, "sets", s["set_id"]))
             removed.append(s["set_id"])
             log("pruned staged set %s (acknowledged, superseded)" % s["set_id"])
-    for name in os.listdir(os.path.join(backup_root, "sets")):
-        if name.endswith(".partial"):
-            shutil.rmtree(os.path.join(backup_root, "sets", name), ignore_errors=True)
-            log("removed interrupted capture %s" % name)
+    # Interrupted encrypted captures are incident evidence, never successful sets.
+    # Removal requires a deliberate operator decision after inspecting the intent.
     return removed
 
 
@@ -782,6 +972,8 @@ def point_age_status(newest_cut, now):
     if newest_cut is None:
         return "MISSING", None
     hours = (now - newest_cut).total_seconds() / 3600.0
+    if hours < 0:
+        return "CLOCK_ERROR", hours
     if hours > BREACH_AGE_HOURS:
         return "BREACH", hours
     if hours >= WARN_AGE_HOURS:
@@ -848,6 +1040,23 @@ class Workstation(object):
             os.fsync(fd)
         finally:
             os.close(fd)
+
+
+class WorkstationLock(object):
+    def __init__(self, ws):
+        self.path = ws.path("operations.lock")
+
+    def __enter__(self):
+        self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(self.fd)
+            refuse("another workstation publication or prune is active")
+        return self
+
+    def __exit__(self, *exc):
+        os.close(self.fd)
 
 
 def init_workstation(home, log=print):
@@ -1029,7 +1238,35 @@ class Blob(object):
         self.request("DELETE", self.url(name), ok=(202,))
 
 
+def create_or_verify(blob, name, path):
+    try:
+        blob.create(name, path)
+    except RecoveryError:
+        # Retries never overwrite. A previous interrupted publication may have
+        # created this exact object; only a full equal readback permits reuse.
+        size, digest = blob.sha256(name)
+        _require((size, digest) == (os.path.getsize(path), sha256_file(path)),
+                 "existing Azure object differs; publication remains incomplete")
+
+
+def verify_blob_copy(blob, directory, set_id, manifest_sha):
+    prefix = "sets/%s/" % set_id
+    files = {name: sha256_file(os.path.join(directory, name)) for name in SET_FILES}
+    for name in SET_FILES:
+        _require(blob.sha256(prefix + name) == (os.path.getsize(os.path.join(directory, name)), files[name]),
+                 "Azure point readback differs")
+    marker = dump_json({"set_id": set_id, "manifest_sha256": manifest_sha, "files": files})
+    _require(blob.sha256(prefix + COMPLETE_MARKER) == (len(marker), hashlib.sha256(marker).hexdigest()),
+             "Azure completion marker is missing or differs")
+
+
 def _copy_verified(src_dir, dst_dir, files):
+    if os.path.exists(dst_dir):
+        _check_set_listing(dst_dir)
+        for name in files:
+            _require(sha256_file(os.path.join(dst_dir, name)) == sha256_file(os.path.join(src_dir, name)),
+                     "existing independent copy differs from the received set")
+        return
     tmp = dst_dir + ".partial"
     shutil.rmtree(tmp, ignore_errors=True)
     os.mkdir(tmp, 0o700)
@@ -1044,13 +1281,28 @@ def _copy_verified(src_dir, dst_dir, files):
 
 
 def publish_set(ws, cfg, remote, entry, blob=None, restore=None, allow_older=False, log=print):
+    with WorkstationLock(ws):
+        return _publish_set(ws, cfg, remote, entry, blob, restore, allow_older, log)
+
+
+def _publish_set(ws, cfg, remote, entry, blob=None, restore=None, allow_older=False, log=print):
     set_id, manifest_sha = entry["set_id"], entry["manifest_sha256"]
+    _require(isinstance(set_id, str) and SET_ID.fullmatch(set_id) and HEX64.fullmatch(manifest_sha or ""),
+             "invalid staged recovery identity")
     ledger = ws.ledger()
     done = [e for e in ledger if e["set_id"] == set_id]
     if done:
         if done[-1]["manifest_sha256"] != manifest_sha:
             refuse("set %s on the VM differs from the published one (substitution)" % set_id)
-        return done[-1]
+        target = ws.path("sets", set_id)
+        verify_set(target, ws.path("trust", "producer.pub.pem"), cfg["producer_key_sha256"],
+                   decrypt=ws.decrypt_args(), expected_manifest_sha256=manifest_sha)
+        if (blob is None or done[-1]["azure"] == "PUBLISHED") and \
+                (restore is None or restore_qualified(done[-1].get("restore_test"))):
+            if blob is not None:
+                verify_blob_copy(blob, target, set_id, manifest_sha)
+            send_ack(remote, done[-1])
+            return done[-1]
     if not entry.get("complete"):
         refuse("set %s is incomplete on the VM" % set_id)
     incoming = ws.path("incoming", set_id)
@@ -1067,7 +1319,7 @@ def publish_set(ws, cfg, remote, entry, blob=None, restore=None, allow_older=Fal
         if manifest["set_id"] != set_id:
             refuse("the manifest names another set")
         newest = max([e["t_cut"] for e in ledger] or [""])
-        if manifest["t_cut"] <= newest and not allow_older:
+        if not done and manifest["t_cut"] <= newest and not allow_older:
             refuse("set %s is not newer than the ledger's newest cut %s (rollback or replay)" % (set_id, newest))
         restore_result = None
         if restore is not None:
@@ -1078,28 +1330,30 @@ def publish_set(ws, cfg, remote, entry, blob=None, restore=None, allow_older=Fal
         if blob is not None:
             prefix = "sets/%s/" % set_id
             for name in SET_FILES:
-                blob.create(prefix + name, os.path.join(target, name))
+                create_or_verify(blob, prefix + name, os.path.join(target, name))
             for name in SET_FILES:
                 n, digest = blob.sha256(prefix + name)
                 if n != os.path.getsize(os.path.join(target, name)) or digest != sha256_file(os.path.join(target, name)):
                     refuse("Azure readback of %s differs" % name)
             marker = dump_json({"set_id": set_id, "manifest_sha256": manifest_sha, "files": {
-                n: sha256_file(os.path.join(target, n)) for n in SET_FILES}, "completed_at": iso(utc_now())})
+                n: sha256_file(os.path.join(target, n)) for n in SET_FILES}})
             mpath = os.path.join(incoming, COMPLETE_MARKER)
             write_private(mpath, marker)
-            blob.create(prefix + COMPLETE_MARKER, mpath)
+            create_or_verify(blob, prefix + COMPLETE_MARKER, mpath)
             n, digest = blob.sha256(prefix + COMPLETE_MARKER)
             if digest != hashlib.sha256(marker).hexdigest():
                 refuse("Azure completion marker readback differs")
             azure_state = "PUBLISHED"
         level = "VERIFIED_INDEPENDENT_AZURE" if blob is not None else "VERIFIED_INDEPENDENT"
-        if restore_result and restore_result.get("postgres") == "PASS":
+        if restore_qualified(restore_result):
             level += "+RESTORE_TESTED"
+        elif restore_result and restore_result.get("postgres") == "PASS":
+            level += "+PG_RESTORE_TESTED"
         record = {"schema": LEDGER_SCHEMA, "set_id": set_id, "manifest_sha256": manifest_sha, "kind": manifest["kind"],
                   "t_cut": manifest["t_cut"], "independent": "VERIFIED", "azure": azure_state,
                   "restore_test": restore_result or "NOT_RUN", "level": level, "published_at": iso(utc_now())}
         ws.append_ledger(record)
-        remote.ops("recovery-ack", set_id, manifest_sha, level)
+        send_ack(remote, record)
         log("published %s (%s, cut %s)" % (set_id, level, manifest["t_cut"]))
         return record
     finally:
@@ -1108,16 +1362,90 @@ def publish_set(ws, cfg, remote, entry, blob=None, restore=None, allow_older=Fal
 
 # --------------------------------------------------------------------------- restore test
 
-def restore_test(set_dir, manifest, ws, postgres_image, minio_image=None, docker=None, log=print):
+def send_ack(remote, record):
+    evidence = base64.urlsafe_b64encode(dump_json(record.get("restore_test"))).decode("ascii").rstrip("=")
+    remote.ops("recovery-ack", record["set_id"], record["manifest_sha256"], record["level"], evidence)
+
+
+def restore_minio(set_dir, manifest, ws, docker, escrow_path, helper_image):
+    """Boot the identical captured image over authenticated tmpfs state on an internal network.
+
+    Escrow stays on the workstation. The identical server gets its required runtime
+    environment via the private Docker client environment (names only in argv).
+    No credential enters a log/ledger; the disposable engine is trusted. No initializer runs.
+    """
+    st = os.lstat(escrow_path)
+    _require(stat.S_ISREG(st.st_mode) and st.st_uid == os.geteuid() and not st.st_mode & 0o077,
+             "MinIO escrow must be an owner-only regular file")
+    escrow = load_json(escrow_path, "MinIO escrow")
+    _require(set(escrow) == {"root_user", "root_password", "app_user", "app_password", "bucket"},
+             "MinIO escrow fields are incomplete")
+    _require(all(isinstance(v, str) and v and "\n" not in v and "\r" not in v for v in escrow.values()),
+             "MinIO escrow contains malformed fields")
+    image, client = manifest["minio"]["container_image"], manifest["minio"]["client_image"]
+    _require(DIGEST.fullmatch(image) and DIGEST.fullmatch(client), "MinIO restore needs exact captured image IDs")
+    for ref in (image, client):
+        _require(docker.inspect(ref, "{{.Id}}") == ref, "a captured MinIO image is not available locally")
+    key, passphrase, cert = ws.decrypt_args()
+    component = next(c for c in manifest["components"] if c["name"] == COMPONENTS[1])
+    payload, _ = minio_tar_payload(os.path.join(set_dir, COMPONENTS[1]), component, key, passphrase, cert)
+    name = "cm-minio-restore-" + secrets.token_hex(8)
+    helper, network, volume = name + "-helper", name + "-net", name + "-data"
+    size = max(64 << 20, len(payload) * 3)
+    root = (escrow["root_user"], escrow["root_password"])
+    try:
+        docker.run("network", "create", "--internal", network)
+        # A local-driver tmpfs volume can be shared without plaintext disk spill.
+        # Keep the helper mounted until the server starts: unmounting the last user
+        # of a tmpfs volume would discard its authenticated restored contents.
+        docker.run("volume", "create", "--driver", "local", "--opt", "type=tmpfs", "--opt", "device=tmpfs",
+                   "--opt", "o=size=%d,uid=65532,gid=65532,mode=0700" % size, volume)
+        docker.run("run", "-d", "--pull", "never", "--name", helper, "--network", "none",
+                   "--read-only", "-v", volume + ":/data",
+                   "--entrypoint", "sleep", helper_image, "infinity")
+        docker.run("exec", "-i", helper, "tar", "--same-owner", "--numeric-owner", "--xattrs", "--acls",
+                   "-xpf", "-", "-C", "/data", data=payload)
+        del payload
+        server_env = dict(os.environ, MINIO_ROOT_USER=root[0], MINIO_ROOT_PASSWORD=root[1], MINIO_BROWSER="off")
+        docker.run("run", "-d", "--pull", "never", "--name", name, "--network", network,
+                   "--network-alias", "minio", "--read-only", "--user", "65532:65532", "--cap-drop", "ALL",
+                   "-v", volume + ":/data", "--tmpfs", "/tmp:rw,uid=65532,gid=65532,mode=0700",
+                   "-e", "MINIO_ROOT_USER", "-e", "MINIO_ROOT_PASSWORD", "-e", "MINIO_BROWSER",
+                   image, "server", "/data", env=server_env)
+        del server_env
+        _wait(lambda: mc_read(docker, client, network, "http://minio:9000", root, "ls", "cm", ok_fail=True)
+              is not None, 120, "restored MinIO authenticated readiness")
+        actual = minio_inventory(docker, client, network, "http://minio:9000", root)
+        _require(actual == manifest["minio"].get("inventory"), "restored MinIO versions or IAM inventory differs")
+        app = (escrow["app_user"], escrow["app_password"])
+        mc_read(docker, client, network, "http://minio:9000", app, "ls", "cm/" + escrow["bucket"])
+        _require(mc_read(docker, client, network, "http://minio:9000", app, "admin", "info", "cm", ok_fail=True)
+                 is None, "restored application identity unexpectedly has admin authority")
+        return {"minio_boot": "PASS", "minio_objects": "PASS", "minio_iam": "PASS"}
+    finally:
+        docker.run("rm", "-f", "-v", name, ok_fail=True)
+        docker.run("rm", "-f", "-v", helper, ok_fail=True)
+        docker.run("volume", "rm", volume, ok_fail=True)
+        docker.run("network", "rm", network, ok_fail=True)
+        remaining = docker.run("ps", "-aq", "--filter", "name=^/" + name + "$", "--filter", "name=^/" + helper + "$")
+        volumes = docker.run("volume", "ls", "--format", "{{.Name}}")
+        networks = docker.run("network", "ls", "--format", "{{.Name}}")
+        _require(not remaining and volume not in volumes.splitlines() and network not in networks.splitlines(),
+                 "MinIO restore cleanup is incomplete; inspect disposable resources")
+
+
+def restore_test(set_dir, manifest, ws, postgres_image, minio_image=None, docker=None, log=print,
+                 minio_escrow=None, helper_image="ubuntu:24.04"):
     """Isolated restore qualification on the workstation (ADR009 section 5, Q03/Q04 scope):
 
     * PostgreSQL: decrypted only into a tmpfs inside a disposable --network none container,
       used only after authentication and hash checks, restored under F1 (--no-owner --no-acl
       --exit-on-error) as a non-superuser migrator; Flyway history and every table's row
       count must equal the manifest.
-    * MinIO: the decrypted tar is inspected in memory (paths, numeric owner 65532, hidden
-      .minio.sys tree, format.json); a server boot needs the runtime root credentials from the
-      Leader's escrow and is reported NOT_RUN without them."""
+    * MinIO: inspect the authenticated tar, and with minio_escrow restore to tmpfs,
+      boot the identical captured image, compare version payload/metadata/config/IAM
+      inventories and check application credentials. Without escrow, boot stays NOT_RUN
+      and cannot produce full restore qualification."""
     docker = docker or Docker()
     key, passphrase, cert = ws.decrypt_args()
     result = {"postgres": "NOT_RUN", "minio": "NOT_RUN"}
@@ -1126,7 +1454,9 @@ def restore_test(set_dir, manifest, ws, postgres_image, minio_image=None, docker
     name = "cm-restore-%s" % secrets.token_hex(4)
     bootstrap = secrets.token_hex(24)
     migrator = secrets.token_hex(24)
-    docker.run("run", "-d", "--name", name, "--network", "none", "--tmpfs", "/stage:rw,size=%dm,mode=0700" % size_mb,
+    if docker.inspect(postgres_image, "{{.Id}}") != manifest["postgres"]["container_image"]:
+        refuse("restore PostgreSQL image differs from the captured server")
+    docker.run("run", "-d", "--pull", "never", "--name", name, "--network", "none", "--tmpfs", "/stage:rw,size=%dm,mode=0700" % size_mb,
                "--tmpfs", "/var/lib/postgresql/data:rw,size=%dm" % (size_mb * 4), "-e", "POSTGRES_USER=cm_bootstrap",
                "-e", "POSTGRES_PASSWORD=" + bootstrap, "-e", "POSTGRES_DB=codemastery", postgres_image)
     try:
@@ -1145,7 +1475,8 @@ def restore_test(set_dir, manifest, ws, postgres_image, minio_image=None, docker
         if staged != digest:
             refuse("the staged dump differs from the authenticated payload")
         sql = ("CREATE ROLE cm_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '%s';"
-               "REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT CONNECT ON DATABASE codemastery TO cm_migrator;"
+               "REVOKE ALL ON DATABASE codemastery FROM PUBLIC; REVOKE ALL ON SCHEMA public FROM PUBLIC;"
+               "GRANT CONNECT ON DATABASE codemastery TO cm_migrator;"
                "GRANT USAGE, CREATE ON SCHEMA public TO cm_migrator;" % migrator)
         pg_query(docker, name, sql)
         restore = subprocess.run([docker.binary, "exec", "-i", name, "sh", "-c",
@@ -1164,9 +1495,13 @@ def restore_test(set_dir, manifest, ws, postgres_image, minio_image=None, docker
         result["postgres_tables"] = len(restored["row_counts"])
     finally:
         docker.run("rm", "-f", "-v", name, ok_fail=True)
+        _require(not docker.run("ps", "-aq", "--filter", "name=^/" + name + "$"),
+                 "PostgreSQL restore cleanup is incomplete")
     result["minio"] = inspect_minio_tar(os.path.join(set_dir, COMPONENTS[1]), comp[COMPONENTS[1]], key, passphrase,
                                         cert)
-    result["minio_boot"] = "NOT_RUN (needs the runtime root credentials from Leader escrow)"
+    result["minio_boot"] = "NOT_RUN (needs runtime credentials from Leader escrow)"
+    if minio_escrow:
+        result.update(restore_minio(set_dir, manifest, ws, docker, minio_escrow, helper_image))
     log("restore test %s: postgres %s, minio %s" % (manifest["set_id"], result["postgres"], result["minio"]))
     return result
 
@@ -1174,17 +1509,20 @@ def restore_test(set_dir, manifest, ws, postgres_image, minio_image=None, docker
 class _Pipe(object):
     """Collects an authenticated payload in memory for inspection (bounded by the caller)."""
 
-    def __init__(self):
+    def __init__(self, limit):
         self.buf = bytearray()
+        self.limit = limit
 
     def write(self, data):
+        if len(self.buf) + len(data) > self.limit:
+            refuse("decrypted component exceeds its declared memory bound")
         self.buf += data
 
 
-def inspect_minio_tar(path, component, key, passphrase, cert):
+def minio_tar_payload(path, component, key, passphrase, cert):
     if component["payload_length"] > (2 << 30):
-        return "NOT_RUN (larger than the 2 GiB in-memory inspection bound)"
-    collected = _Pipe()
+        refuse("MinIO restore exceeds the qualified 2 GiB memory bound")
+    collected = _Pipe(component["payload_length"])
     length, digest = decrypt_stream(path, key, passphrase, cert, consume=collected.write)
     if length != component["payload_length"] or digest != component["payload_sha256"]:
         refuse("the decrypted MinIO copy differs from the manifest")
@@ -1193,18 +1531,27 @@ def inspect_minio_tar(path, component, key, passphrase, cert):
     with tarfile.open(fileobj=io.BytesIO(bytes(collected.buf)), mode="r:") as tf:
         for member in tf:
             norm = os.path.normpath(member.name)
-            if member.name.startswith("/") or norm.startswith("..") or member.issym() and \
-                    os.path.isabs(member.linkname):
+            if member.name.startswith("/") or ".." in member.name.split("/") or \
+                    not (member.isfile() or member.isdir()) or norm in names:
                 refuse("the MinIO copy contains an unsafe path")
-            if member.uid != 65532 and member.name not in (".", "./"):
+            if (member.uid != 65532 or member.gid != 65532) and member.name not in (".", "./"):
                 refuse("the MinIO copy has an unexpected numeric owner")
             names.add(norm)
+            if norm.endswith("/replication.xml") or norm.endswith("/replication.json"):
+                refuse("MinIO bucket replication has external dependencies outside the qualified recovery topology")
             if norm == ".minio.sys/format.json":
                 load_json_bytes(tf.extractfile(member).read(), "format.json")
+    payload = bytes(collected.buf)
     del collected
     if ".minio.sys" not in names or ".minio.sys/format.json" not in names:
         refuse("the MinIO copy lacks the hidden .minio.sys state")
-    return "STRUCTURE_PASS (%d entries)" % len(names)
+    return payload, len(names)
+
+
+def inspect_minio_tar(path, component, key, passphrase, cert):
+    payload, count = minio_tar_payload(path, component, key, passphrase, cert)
+    del payload
+    return "STRUCTURE_PASS (%d entries)" % count
 
 
 # --------------------------------------------------------------------------- CLI (workstation)
@@ -1218,11 +1565,10 @@ def cmd_publish(args):
     restore = None
     if cfg.get("restore_test", {}).get("postgres_image"):
         image = cfg["restore_test"]["postgres_image"]
-        restore = lambda d, m: restore_test(d, m, ws, image)  # noqa: E731
+        restore = lambda d, m: restore_test(d, m, ws, image, minio_escrow=cfg["restore_test"].get("minio_escrow"),
+                                           helper_image=cfg["restore_test"].get("helper_image", "ubuntu:24.04"))  # noqa: E731
     published, failures = [], []
     for entry in sorted(staged, key=lambda e: e["set_id"]):
-        if entry.get("acknowledged") and any(e["set_id"] == entry["set_id"] for e in ws.ledger()):
-            continue
         if args.set and entry["set_id"] != args.set:
             continue
         try:
@@ -1239,9 +1585,9 @@ def cmd_publish(args):
 def workstation_status(ws, blob=None, now=None):
     now = now or utc_now()
     ledger = ws.ledger()
-    independent = [e for e in ledger if e.get("independent") == "VERIFIED"
+    independent = [e for e in ledger if e.get("independent") == "VERIFIED" and restore_qualified(e.get("restore_test"))
                    and os.path.isdir(ws.path("sets", e["set_id"]))]
-    azure = [e for e in ledger if e.get("azure") == "PUBLISHED"]
+    azure = [e for e in independent if e.get("azure") == "PUBLISHED"]
     out = {}
     for label, entries in (("independent", independent), ("azure", azure)):
         newest = max([parse_iso(e["t_cut"], "t_cut") for e in entries] or [None]) if entries else None
@@ -1254,8 +1600,9 @@ def workstation_status(ws, blob=None, now=None):
 
 def cmd_status(args):
     ws = Workstation(args.home)
-    print(json.dumps(workstation_status(ws), indent=2, sort_keys=True))
-    return 0
+    result = workstation_status(ws)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 1 if result["independent"]["state"] in ("MISSING", "BREACH", "CLOCK_ERROR") else 0
 
 
 def cmd_verify(args):
@@ -1273,7 +1620,8 @@ def cmd_restore_test(args):
     cfg = ws.config()
     manifest = verify_set(args.directory, ws.path("trust", "producer.pub.pem"), cfg["producer_key_sha256"],
                           decrypt=ws.decrypt_args())
-    print(json.dumps(restore_test(args.directory, manifest, ws, args.postgres_image), indent=2, sort_keys=True))
+    print(json.dumps(restore_test(args.directory, manifest, ws, args.postgres_image,
+                                  minio_escrow=args.minio_escrow, helper_image=args.helper_image), indent=2, sort_keys=True))
     return 0
 
 
@@ -1281,15 +1629,21 @@ def cmd_prune(args):
     ws = Workstation(args.home)
     cfg = ws.config()
     ledger = ws.ledger()
-    points = [{"set_id": e["set_id"], "t_cut": e["t_cut"], "kind": e["kind"]} for e in ledger
-              if os.path.isdir(ws.path("sets", e["set_id"]))]
+    effective = {e["set_id"]: e for e in ledger}
+    points = [{"set_id": e["set_id"], "t_cut": e["t_cut"], "kind": e["kind"]} for e in effective.values()
+              if restore_qualified(e.get("restore_test")) and os.path.isdir(ws.path("sets", e["set_id"]))]
+    if points:
+        newest = max(points, key=lambda p: p["t_cut"])["set_id"]
+        verify_set(ws.path("sets", newest), ws.path("trust", "producer.pub.pem"), cfg["producer_key_sha256"],
+                   decrypt=ws.decrypt_args(), expected_manifest_sha256=effective[newest]["manifest_sha256"])
     keep = retention_keep(points, utc_now(), holds=args.release or ())
     delete = sorted(p["set_id"] for p in points if p["set_id"] not in keep)
     blob = Blob(cfg["azure"]) if cfg.get("azure") else None
     if blob is not None:
         newest = max(points, key=lambda p: p["t_cut"])["set_id"] if points else None
-        if newest and not blob.exists("sets/%s/%s" % (newest, COMPLETE_MARKER)):
-            refuse("the newest point is not complete in Azure; pruning is refused")
+        if newest:
+            latest = next(e for e in reversed(ledger) if e["set_id"] == newest)
+            verify_blob_copy(blob, ws.path("sets", newest), newest, latest["manifest_sha256"])
     print(json.dumps({"keep": sorted(keep), "delete": delete, "confirmed": bool(args.confirm)}, indent=2))
     if not args.confirm:
         return 0
@@ -1320,6 +1674,8 @@ def main(argv=None):
     s = sub.add_parser("restore-test")
     s.add_argument("directory")
     s.add_argument("--postgres-image", required=True)
+    s.add_argument("--minio-escrow")
+    s.add_argument("--helper-image", default="ubuntu:24.04")
     s = sub.add_parser("prune")
     s.add_argument("--release", action="append", help="release a pre-update/manual point from retention")
     s.add_argument("--confirm", action="store_true")
@@ -1331,6 +1687,9 @@ def main(argv=None):
         if args.command == "trust-producer":
             print("trusted producer key: %s" % trust_producer(args.home, args.pem, args.fingerprint))
             return 0
+        if args.command == "prune":
+            with WorkstationLock(Workstation(args.home)):
+                return cmd_prune(args)
         return {"publish": cmd_publish, "status": cmd_status, "verify": cmd_verify,
                 "restore-test": cmd_restore_test, "prune": cmd_prune}[args.command](args)
     except RecoveryError as exc:

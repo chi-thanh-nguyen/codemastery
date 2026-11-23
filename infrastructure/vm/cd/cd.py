@@ -57,10 +57,12 @@ def parse_request(inputs):
     rset, rsha = inputs.get("recovery_set") or "", inputs.get("recovery_manifest_sha256") or ""
     if op not in OPERATIONS:
         refuse("operation must be one of %s" % ", ".join(OPERATIONS))
-    if op != "resume" and (not isinstance(version, str) or not rel.VERSION.match(version)):
+    if op not in ("resume", "verify") and (not isinstance(version, str) or not rel.VERSION.match(version)):
         refuse("version must be a v<major>.<minor>.<patch>[-pre] release tag")
-    if op == "resume":
-        version = version if isinstance(version, str) and rel.VERSION.match(version) else ""
+    if op in ("resume", "verify"):
+        if version and (not isinstance(version, str) or not rel.VERSION.match(version)):
+            refuse("an optional version must be a v<major>.<minor>.<patch>[-pre] release tag")
+        version = version or ""
     if op == "deploy":
         if rset or rsha:
             if not SET_ID.match(rset) or not HEX64.match(rsha):
@@ -322,8 +324,11 @@ def main(argv=None):
             print(json.dumps(out, indent=2))
         elif a.cmd == "report":
             load = lambda path, what: rel.load_json(path, what) if path and os.path.exists(path) else None  # noqa
-            sys.stdout.write(render_report(load(a.dispatch, "dispatch"), load(a.result, "result"),
-                                           load(a.external, "external")))
+            dispatch, result, external = load(a.dispatch, "dispatch"), load(a.result, "result"), load(a.external, "external")
+            sys.stdout.write(render_report(dispatch, result, external))
+            if (dispatch or {}).get("request", {}).get("operation") in ("deploy", "verify") and \
+                    (not external or external.get("problems")):
+                return 1
     except rel.Refused as exc:
         print("REFUSED: %s" % exc, file=sys.stderr)
         return 2

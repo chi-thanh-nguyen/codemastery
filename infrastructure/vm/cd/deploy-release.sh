@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "${OPERATION}" in (plan|prepare|deploy|verify|resume|status) ;; (*) fail "--operation is required." ;; esac
-if [[ "${OPERATION}" != resume && "${OPERATION}" != status ]]; then
+if [[ "${OPERATION}" != resume && "${OPERATION}" != status && "${OPERATION}" != verify ]]; then
   [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] || fail "--version vX.Y.Z is required."
 fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/cm-deploy.XXXXXXXX")"

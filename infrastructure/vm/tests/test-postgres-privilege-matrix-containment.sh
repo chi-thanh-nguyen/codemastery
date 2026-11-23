@@ -463,6 +463,9 @@ admin <<<"INSERT INTO public.flyway_schema_history VALUES (4,'004','m','SQL','V0
 admin <<<"UPDATE public.flyway_schema_history SET success=false WHERE version='006';"
 expect_failure "V006 history with a failed migration" "PostgreSQL role provisioning failed" provision_db_roles
 admin <<<"UPDATE public.flyway_schema_history SET success=true WHERE version='006';"
+admin <<<"INSERT INTO public.flyway_schema_history VALUES (99,'006','m','SQL','V006__duplicate.sql',0,'x',now(),1,true);"
+expect_failure "V006 history with a duplicate version" "PostgreSQL role provisioning failed" provision_db_roles
+admin <<<"DELETE FROM public.flyway_schema_history WHERE installed_rank=99;"
 provision_db_roles >/dev/null
 echo "== Flyway V007-V009 in one update, then hardening and complete verification"
 migrate_to 9

@@ -14,7 +14,7 @@
 #                                /opt/codemastery/tooling/SHA after checking its git tree
 #   anything else                ops.py of the current tooling (see ops.py --help)
 #
-# Nothing here reads the runtime env file, prints a secret or contacts a network.
+# Authorization fetches only GitHub's public OIDC keys and commit metadata.
 set -Eeuo pipefail
 umask 077
 export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -46,6 +46,23 @@ fi
 for arg in "$@"; do
   [[ "${arg}" =~ ^[A-Za-z0-9._:/=@+_-]+$ && ${#arg} -le 4096 ]] || fail "argument contains unsupported characters."
 done
+
+# A restricted SSH key is transport authentication, not production authority. This
+# verifier is installed by the operator, outside the caller-selectable tooling tree.
+if [[ "${role}" == deploy ]]; then
+  token=""
+  IFS= read -r -n 16385 token || fail "missing GitHub OIDC command authorization."
+  (( ${#token} <= 16384 )) || fail "OIDC token too long."
+  printf '%s' "${token}" | /usr/bin/python3 -I /usr/local/lib/codemastery/authorize.py verify "${op}" "$@" \
+    || fail "GitHub command authorization failed."
+  unset token
+fi
+
+# receive/install and the Python staging consumer share a lock. No upload can
+# replace bytes between a hash check, extraction and execution.
+install -d -m 0700 "${INCOMING%/incoming}"
+exec 9>"${INCOMING%/incoming}/transport.lock"
+flock -n 9 || fail "another transport operation is active."
 
 sha256_of() { sha256sum -- "$1" | awk '{print $1}'; }
 
@@ -89,13 +106,14 @@ case "${op}" in
     install -d -m 0755 "${TOOLING_ROOT}"
     target="${TOOLING_ROOT}/${sha}"
     if [[ ! -d "${target}" ]]; then
-      # git archive output: regular files, directories and in-tree symlinks only.
+      # No repository file currently needs a link. Refuse links before extraction,
+      # including chains whose individually relative targets escape the tree.
       while IFS= read -r line; do
         type="${line:0:1}"
-        [[ "${type}" == "-" || "${type}" == "d" || "${type}" == "l" ]] || fail "tooling archive holds a special file."
+        [[ "${type}" == "-" || "${type}" == "d" ]] || fail "tooling archive holds a link or special file."
       done < <(tar -tvf "${archive}")
       while IFS= read -r entry; do
-        [[ "${entry}" != /* && "/${entry}/" != */../* ]] || fail "tooling archive holds an unsafe path."
+        [[ "${entry}" != /* && "/${entry}/" != */../* && "/${entry}/" != */.git/* ]] || fail "tooling archive holds an unsafe path."
       done < <(tar -tf "${archive}")
       work="$(mktemp -d "${TOOLING_ROOT}/.install.XXXXXXXX")"
       trap 'rm -rf "${work}"' EXIT

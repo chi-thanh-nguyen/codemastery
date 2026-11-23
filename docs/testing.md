@@ -6101,3 +6101,101 @@ temporary directory was removed; no container, volume, file under `/etc`, `/opt`
 The `Deploy` workflow against GitHub's `production` environment and the VM (no key,
 environment or bootstrap exists); the NSG gate (no Azure identity); Azure Blob (no
 account); acme.sh staging/renewal; systemd timers; real capture duration; RPO/RTO drills.
+
+## PR #274 author-side remediation verification — 23 November 2026
+
+This is the post-remediation record for the Leader-authorized comprehensive review,
+direct fixes and push on `feature/phase5-ssh-deployment`. Initial HEAD was
+`ba2d7dcc9ca894606ceb454fb4031fd095e8db19`; base/merge-base was
+`e9d6da15b3fe4d581765d1c733abb70698dac779` (28 original changed files).
+Read the final commit/CI snapshot from PR #274; this record does not freeze a later
+concurrent head or claim human approval. Earlier counts in the section above are
+historical. Decisions and operational changes are in [ADR017 §11](decisions/017-ssh-continuous-deployment.md#11-pr-274-review-remediation--23-november-2026).
+
+OpenAI Codex both reviewed and modified the code. Verification below is **author-side
+verification of remediation**, not a separate independent second review. A focused
+independent rereview of SSH/root authority, recovery and interruption handling is
+recommended before protected integration. No review approval or merge was submitted.
+
+### Confirmed findings and disposition
+
+All items below were corrected in the same PR. Source references identify the original
+defective paths at the initial HEAD; the named functions retain the corrected paths.
+`FIXED_AND_VERIFIED` is bounded to the local synthetic/disposable evidence below,
+not real VM/GitHub-environment/Azure qualification.
+
+| ID / severity | Original path and defect; impact | Remediation and evidence |
+| --- | --- | --- |
+| F01 / P1 | `host/codemastery-ops` install-tooling and `ops.py` decode_context: caller-selected tree/hash and approval-looking strings established no trusted provenance. A deployment key holder could install arbitrary root-executed tooling or forge deployment context. | Fixed operator-installed OIDC verifier, exact-command audiences, signed workflow/actor/repository/environment/run claims, GitHub commit-tree check and replay barrier. Original disposable container printed `ARBITRARY_TOOLING_EXECUTED`; final SSH suite rejects key-only calls and untrusted trees, accepts real RSA-signed fixture commands. **FIXED_AND_VERIFIED**. |
+| F02 / P1 | `ops.py` safe_extract and shell tooling extraction: individually relative symlinks could form an escaping chain before a subsequent tree check; concurrent receives could also replace verified inputs before use. | Reject all links/special files/`.git` entries before extraction; serialize transfers/install/consumers. The relative-chain test fails on the original source and passes after correction. Archive-of-HEAD tree equality and valid install still pass. **FIXED_AND_VERIFIED**. |
+| F03 / P1 | `recovery.py` pg_other_clients/capture: samples, an exemptible application name and row counts did not enforce continuous writer exclusion; restart could violate capture/hold. Interrupted evidence was deleted. | Persistent intent, HBA network rejection, local bootstrap-only socket, disabled restart policies, private topology/volume checks, MinIO stop before cut, preserved partials and visible cleanup failures. Real direct TCP writer refused throughout hold; producer failure and abrupt exit tested; explicit fixture reconciliation succeeds. **FIXED_AND_VERIFIED**. |
+| F04 / P1 | `recovery.py` publish_set/restore_test: PG PASS alone minted `+RESTORE_TESTED` while MinIO boot was `NOT_RUN`; P9 accepted the suffix. | Full PG + identical-image MinIO boot, version payload/stat/tag/config/IAM readback and application allowed/denied checks; evidence-bound receipt required at both gates. PG-only regression fails against original source; full disposable path passes; PG-only receipt rejected by P9. **FIXED_AND_VERIFIED**. |
+| F05 / P1 | `ops.py` op_resume/op_deploy: unchanged old container IDs could authorize resume after provisioning/migration already modified state. | Persist attempt before mutation; refuse resume/replay after any attempt; retain evidence and independently check containment. Original source returns RESUMED in the new negative test; corrected source refuses before start. **FIXED_AND_VERIFIED**. |
+| F06 / P2 | `ops.py` op_tls_renew: staging returned from inside try before post-finally health/readback; a partial key/chain rename was not considered replaced. | Shared restart/health/Nginx/served-leaf checks for staging, real and failed challenge paths; rollback both files even between renames. Original staging regression fails; staging positive/negative, real-pair replacement and partial-rename rollback pass. No real ACME operation. **FIXED_AND_VERIFIED**. |
+| F07 / P2 | `recovery.py` publication/prune: an interrupted copy/cloud write could make retries permanently conflict; ledger success skipped a lost acknowledgement; workstation publication/pruning lacked mutual exclusion. | Exclusive lock, authenticated byte-identical reuse, deterministic marker last, existing-copy readback and acknowledgement retry. Local HTTPS conflict/corrupt-read/retry tests and lock exclusion pass. **FIXED_AND_VERIFIED**. |
+| F08 / P2 | `ops.py` verify_state/image_store and `cd.py` report: nested component UP could override overall DOWN; wrong host port/restart policy went unchecked; external failures did not fail reporting; failed discovery guessed graphdriver. | Parse top-level health, enforce 443 and restart policy, refuse failed discovery and fail external deploy/verify reports. Original readiness/port tests fail; corrected positive/negative verification tests pass. **FIXED_AND_VERIFIED**. |
+| F09 / P2 | `cd/nsg-gate.sh` close: failed lookup, including authentication/network failure, was reported as rule absence; priority validation admitted >4096. | Successful list plus final absence readback, explicit unknown/removal failure and numeric bounds. Synthetic CLI tests reject failed lookup/invalid priority and accept verified absence. No Azure API mutation. **FIXED_AND_VERIFIED**. |
+| F10 / P2 | Recovery status/retention counted independently copied but untested points as qualified; VM age used capture-start ID rather than signed cut. New unqualified points could displace qualified retention selections. | Qualified-only ages/retention; signed cut; clock-error state; newest eligible independent/cloud readback before prune; retain partial evidence. 3/7/4, holds, age boundaries, incomplete qualification and cloud fault tests pass. **FIXED_AND_VERIFIED**. |
+| F11 / P3 | `cd.py` parse_request and `deploy-release.sh`: workflow advertised verify's version as optional but required one. | Verify without a version delegates to the current deployment; plan/prepare/deploy still require a version. **FIXED_AND_VERIFIED**. |
+
+### Executed local checks
+
+Environment: macOS arm64, Python 3.9, Docker Engine 29.8.1, OpenSSL 3.6.5;
+synthetic keys/credentials only, task-owned disposable containers/networks/volumes.
+SSH binds only loopback; recovery exposes zero ports. The production VM was never
+contacted. MinIO restore uses the identical captured image and a local-driver tmpfs
+volume; credentials are never printed or committed. OIDC uses real RSA signature
+verification against a root-installed synthetic issuer fixture; it is not a token
+issued by an actual approved GitHub deployment job.
+
+```bash
+CODEMASTERY_OPENSSL=/opt/homebrew/opt/openssl@3/bin/openssl \
+  python3 -m unittest -v infrastructure/vm/tests/test_phase5_units.py
+python3 -m unittest -v infrastructure/release/tests/test_release.py
+bash infrastructure/vm/tests/test-phase5-ssh-gates.sh
+CODEMASTERY_OPENSSL=/opt/homebrew/opt/openssl@3/bin/openssl \
+  MINIO_IMAGE=cmtest/minio-server:local \
+  bash infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+bash infrastructure/vm/tests/test-deploy-syntax-and-authorization-gates.sh
+bash infrastructure/vm/tests/test-deploy-offline-compose-guards.sh
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+actionlint .github/workflows/deploy.yml .github/workflows/ci-vm.yml
+git diff --check
+```
+
+The Phase 5 unit suite has **45 tests** (15 added), including cryptography; no crypto
+skip with the selected OpenSSL. SSH prints `PHASE5_SSH_GATES_PASS`. Recovery prints
+`PHASE5_RECOVERY_ROUNDTRIP_PASS`, including producer failure, abrupt-process intent,
+held network-writer rejection, full restore publication, PG-only P9 rejection and
+resume. PostgreSQL exercises the unchanged complete privilege matrix, V006→V009,
+empty/gapped/failed/duplicate/repeatable history refusals, column/privilege drift and
+both containment outcomes. Python compilation, shell syntax and actionlint v1.7.12 pass.
+All **59 release verification tests pass**, covering the existing attestation bootstrap and source/tooling
+separation. The full backend/frontend/E2E builds are delegated to the final PR's CI;
+their application source was not changed by this remediation.
+
+Before/fixed-after evidence: six new tests were run against initial-HEAD modules and
+failed (TLS staging, source link-chain escape, overall readiness, port/restart drift,
+post-attempt resume and PG-only full qualification). The root-tooling bypass was
+separately executed in a network-isolated container using a harmless marker script.
+Original failure logs and subsequent runs are under the task's private temporary
+evidence directory; no exploit ran against the Azure VM.
+
+### Readiness limits and release compatibility
+
+Code and disposable testing do not establish operational configuration or production
+qualification. The actual `production` Environment lookup returned HTTP 404; missing
+configuration or insufficient endpoint access cannot authorize deployment. Real
+GitHub-issued SSH command tokens, VM bootstrap/credentials, Azure Blob/RBAC and NSG
+operation, Keychain/scheduler binding, ACME staging/renewal, actual capture/restore
+capacity, reboot/power-loss behavior, measured RPO/RTO and full-product F2/Q08 remain
+unexecuted. External resources/cost, exposure and actual restore/deployment authority
+remain Leader-reserved. Targets are not guarantees.
+
+The live draft `v0.1.0-rc.1` release manifest was downloaded read-only: source
+`1d0658a7215c2a3d3fed569738d522137989b666`, tooling
+`e9d6da15b3fe4d581765d1c733abb70698dac779`. Its source's deploy.sh lacks r9; a separately
+admitted new release containing r9 is required for the existing V006→V009 update.
+The draft was not repromoted, published or modified. No production secret, protection,
+environment setting, Azure resource or real certificate was changed.

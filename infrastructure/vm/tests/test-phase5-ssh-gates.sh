@@ -26,7 +26,7 @@ echo "== disposable SSH host"
 docker build -q -t "${image}" - >/dev/null <<'DOCKERFILE'
 FROM ubuntu:24.04
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-      openssh-server sudo python3 git ca-certificates >/dev/null && rm -rf /var/lib/apt/lists/* \
+      openssh-server sudo python3 git ca-certificates openssl >/dev/null && rm -rf /var/lib/apt/lists/* \
  && useradd --system --create-home --home-dir /var/lib/cmdeploy --shell /bin/sh cmdeploy && passwd -l cmdeploy \
  && useradd --create-home --shell /bin/bash opsuser && passwd -l opsuser \
  && printf 'opsuser ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/opsuser && chmod 0440 /etc/sudoers.d/opsuser \
@@ -61,29 +61,100 @@ raw=(ssh -p "${port}" -i "${work}/deploy" -o BatchMode=yes -o IdentitiesOnly=yes
 
 echo "== host authenticity and authentication"
 refused "a host key that differs from the pin" "Host key verification failed" \
-  "${T[@]}" --user cmdeploy --identity "${work}/deploy" --known-hosts "${work}/wrong_known_hosts" check
+  "${T[@]}" --user opsuser --identity "${work}/operator" --known-hosts "${work}/wrong_known_hosts" check
 refused "a host with no pin (never trust on first use)" "Host key verification failed" \
-  "${T[@]}" --user cmdeploy --identity "${work}/deploy" --known-hosts "${work}/empty_known_hosts" check
+  "${T[@]}" --user opsuser --identity "${work}/operator" --known-hosts "${work}/empty_known_hosts" check
 refused "an unauthorized key" "Permission denied" \
-  "${T[@]}" --user cmdeploy --identity "${work}/stranger" --known-hosts "${work}/known_hosts" check
+  "${T[@]}" --user opsuser --identity "${work}/stranger" --known-hosts "${work}/known_hosts" check
 chmod 644 "${work}/deploy"
 refused "an identity file readable by others" "mode 0600" "${deploy[@]}" ops status
 chmod 600 "${work}/deploy"
 
-echo "== tooling installation bound to its git tree"
+echo "== GitHub OIDC authorization (synthetic issuer keys in this disposable host only)"
+refused "a stolen SSH key without OIDC" "missing GitHub OIDC" "${raw[@]}" status </dev/null
+refused "a local deployment-key call cannot mint GitHub authority" "authorization unavailable" "${deploy[@]}" ops status
+# The production verifier is unchanged. Only the public-metadata fetch is replaced
+# by root-installed fixture JSON, so real RSA verification and replay checks run.
+docker exec "${name}" mkdir -p /usr/local/lib/codemastery /etc/cm-test
+docker cp infrastructure/vm/host/authorize.py "${name}:/usr/local/lib/codemastery/authorize_impl.py"
+cat > "${work}/verifier.py" <<'PYVERIFY'
+import json, sys
+sys.path.insert(0, '/usr/local/lib/codemastery')
+import authorize_impl as a
+def fetch(url):
+    with open('/etc/cm-test/' + ('jwks.json' if url.endswith('/jwks') else 'commit.json')) as f:
+        return json.load(f)
+try:
+    a.consume(a.verify(sys.stdin.read(16385).strip(), sys.argv[2:], fetch))
+except Exception as exc:
+    print('AUTHORIZATION REFUSED: ' + str(exc), file=sys.stderr)
+    sys.exit(2)
+PYVERIFY
+docker cp "${work}/verifier.py" "${name}:/usr/local/lib/codemastery/authorize.py"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "${work}/issuer.key" 2>/dev/null
+cat > "${work}/mint.py" <<'PYMINT'
+import base64, json, os, subprocess, sys, time, uuid
+sys.path.insert(0, 'infrastructure/vm/host')
+import authorize as a
+def enc(v): return base64.urlsafe_b64encode(v).decode().rstrip('=')
+d = sys.argv[1]
+mod = subprocess.check_output(['openssl','rsa','-in',d+'/issuer.key','-modulus','-noout']).decode().strip().split('=')[1]
+jwk = {'kid':'fixture','kty':'RSA','alg':'RS256','use':'sig','n':enc(bytes.fromhex(mod)),'e':enc(b'\x01\x00\x01')}
+with open(d+'/jwks.json','w') as f: json.dump({'keys':[jwk]},f)
+if len(sys.argv) == 2: sys.exit(0)
+sha = open(d+'/sha').read().strip()
+now = int(time.time())
+c = dict(iss=a.ISSUER,aud=a.audience(sys.argv[2:]),repository=a.REPOSITORY,repository_id=a.REPOSITORY_ID,
+         repository_owner_id=a.OWNER_ID,actor='chi-thanh-nguyen',actor_id=a.OWNER_ID,environment='production',
+         event_name='workflow_dispatch',ref='refs/heads/main',ref_type='branch',workflow_ref=a.WORKFLOW,
+         workflow_sha=sha,sha=sha,run_attempt='1',runner_environment='github-hosted',run_id='77',
+         jti=str(uuid.uuid4()),iat=now,nbf=now,exp=now+300)
+m = enc(json.dumps({'alg':'RS256','typ':'JWT','kid':'fixture'}).encode())+'.'+enc(json.dumps(c).encode())
+sig = subprocess.check_output(['openssl','dgst','-sha256','-sign',d+'/issuer.key'],input=m.encode())
+print(m+'.'+enc(sig))
+PYMINT
+python3 "${work}/mint.py" "${work}"
+docker cp "${work}/jwks.json" "${name}:/etc/cm-test/jwks.json"
+authorized_ops() {
+  local token
+  token="$(python3 "${work}/mint.py" "${work}" "$@")"
+  { printf '%s\n' "${token}"; cat; } | "${raw[@]}" "$*"
+}
+# Exercise the production transport/header path. Only token issuance is replaced
+# by this synthetic signing service; SSH, framing and VM verification are real.
+mkdir "${work}/bin"
+export CM_TEST_REAL_PYTHON="$(command -v python3)" CM_TEST_WORK="${work}"
+cat > "${work}/bin/python3" <<'PYSHIM'
+#!/usr/bin/env bash
+if [[ "${1:-}" == -I && "${2:-}" == */host/authorize.py && "${3:-}" == request ]]; then
+  shift 3
+  exec "${CM_TEST_REAL_PYTHON}" "${CM_TEST_WORK}/mint.py" "${CM_TEST_WORK}" "$@"
+fi
+exec "${CM_TEST_REAL_PYTHON}" "$@"
+PYSHIM
+chmod 700 "${work}/bin/python3"
+deploy=(env "PATH=${work}/bin:${PATH}" "${T[@]}" --user cmdeploy --identity "${work}/deploy" --known-hosts "${work}/known_hosts")
+echo "== tooling installation bound to its trusted commit tree"
 export GIT_INDEX_FILE="${work}/index"
 git read-tree HEAD && git add -A . >/dev/null
 tree="$(git write-tree)"; unset GIT_INDEX_FILE
+printf '%s\n' "${tree}" > "${work}/sha"
+printf '{"sha":"%s","tree":{"sha":"%s"}}\n' "${tree}" "${tree}" > "${work}/commit.json"
+docker cp "${work}/commit.json" "${name}:/etc/cm-test/commit.json"
 git archive --format=tar -o "${work}/tooling-${tree}.tar" "${tree}"
 refused "operations before any tooling is installed" "no tooling is installed" "${deploy[@]}" ops status
 "${deploy[@]}" upload "${work}/tooling-${tree}.tar" >/dev/null
-refused "tooling whose git tree differs" "does not have git tree" "${deploy[@]}" ops install-tooling "${tree}" "$(printf '%040d' 0)"
+refused "tooling whose git tree differs" "not GitHub's authorized commit tree" "${deploy[@]}" ops install-tooling "${tree}" "$(printf '%040d' 0)"
 mkdir -p "${work}/evil"; ln -s /etc/shadow "${work}/evil/link"; tar -C "${work}/evil" -cf "${work}/tooling-$(printf 'e%.0s' {1..40}).tar" link
-"${deploy[@]}" upload "${work}/tooling-$(printf 'e%.0s' {1..40}).tar" >/dev/null
-refused "tooling holding an absolute symlink" "absolute symlink" "${deploy[@]}" ops install-tooling "$(printf 'e%.0s' {1..40})" "${tree}"
+"${operator[@]}" upload "${work}/tooling-$(printf 'e%.0s' {1..40}).tar" >/dev/null
+refused "tooling holding an absolute symlink" "link or special file" "${operator[@]}" ops install-tooling "$(printf 'e%.0s' {1..40})" "${tree}"
 "${deploy[@]}" ops install-tooling "${tree}" "${tree}" | grep -q '"operation":"install-tooling"'
 "${deploy[@]}" check >/dev/null
 pass "exact tree installed; transport check (pinned key, forced command, sudo, ops status) succeeds"
+replayed_token="$(python3 "${work}/mint.py" "${work}" status)"
+replay() { printf '%s\n' "${replayed_token}" | "${raw[@]}" status; }
+replay >/dev/null
+refused "an already consumed command token" "already consumed" replay
 
 echo "== deploy-role allowlist, injection and interactive refusal"
 for op in recovery-list recovery-send recovery-ack capture tls-renew timers; do
@@ -99,9 +170,10 @@ pass "the operator role may list recovery sets"
 echo "== uploads: exact size and hash, safe names only"
 head -c 100000 /dev/urandom > "${work}/blob.bin"
 sum="$( (sha256sum "${work}/blob.bin" 2>/dev/null || shasum -a 256 "${work}/blob.bin") | awk '{print $1}')"
-refused "an interrupted transfer" "was interrupted" sh -c "head -c 5000 '${work}/blob.bin' | ${raw[*]} 'receive blob.bin ${sum} 100000'"
-refused "an altered transfer" "does not match its SHA-256" sh -c "${raw[*]} 'receive blob.bin $(printf '%064d' 0) 100000' < '${work}/blob.bin'"
-refused "a path-traversal file name" "unsafe file name" sh -c "${raw[*]} 'receive ../../etc/x ${sum} 100000' < '${work}/blob.bin'"
+head -c 5000 "${work}/blob.bin" > "${work}/truncated"
+refused "an interrupted transfer" "was interrupted" authorized_ops receive blob.bin "${sum}" 100000 < "${work}/truncated"
+refused "an altered transfer" "does not match its SHA-256" authorized_ops receive blob.bin "$(printf '%064d' 0)" 100000 < "${work}/blob.bin"
+refused "a path-traversal file name" "unsafe file name" authorized_ops receive ../../etc/x "${sum}" 100000 < "${work}/blob.bin"
 docker exec "${name}" test ! -e /var/lib/codemastery/incoming/blob.bin
 "${deploy[@]}" upload "${work}/blob.bin" >/dev/null
 [[ "$(docker exec "${name}" sha256sum /var/lib/codemastery/incoming/blob.bin | awk '{print $1}')" == "${sum}" ]]

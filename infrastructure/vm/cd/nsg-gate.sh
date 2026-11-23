@@ -23,6 +23,7 @@ for v in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID NSG_RESOURCE_GROU
   [[ -n "${!v:-}" ]] || fail "${v} is not set."
 done
 [[ "${NSG_RULE_PRIORITY}" =~ ^[1-9][0-9]{2,3}$ ]] || fail "NSG_RULE_PRIORITY must be 100-4096."
+(( NSG_RULE_PRIORITY >= 100 && NSG_RULE_PRIORITY <= 4096 )) || fail "NSG_RULE_PRIORITY must be 100-4096."
 [[ "${GITHUB_RUN_ID}" =~ ^[0-9]+$ ]] || fail "malformed run ID."
 rule="cm-deploy-run-${GITHUB_RUN_ID}"
 command -v az >/dev/null || fail "the Azure CLI is required."
@@ -54,10 +55,18 @@ case "${action}" in
     ;;
   (close)
     login
-    if az network nsg rule show --resource-group "${NSG_RESOURCE_GROUP}" --nsg-name "${NSG_NAME}" --name "${rule}" --output none 2>/dev/null; then
+    # A failed lookup is not evidence of absence (auth/network errors previously
+    # left a rule open while reporting success). List and verify the final state.
+    rules="$(az network nsg rule list --resource-group "${NSG_RESOURCE_GROUP}" --nsg-name "${NSG_NAME}" --output json)" \
+      || fail "cannot inspect temporary rules; remove ${rule} manually."
+    if printf '%s' "${rules}" | python3 -I -c 'import json,sys; sys.exit(0 if any(x["name"]==sys.argv[1] for x in json.load(sys.stdin)) else 1)' "${rule}"; then
       az network nsg rule delete --resource-group "${NSG_RESOURCE_GROUP}" --nsg-name "${NSG_NAME}" --name "${rule}" --output none \
         || fail "could not delete ${rule}; remove it manually."
     fi
+    rules="$(az network nsg rule list --resource-group "${NSG_RESOURCE_GROUP}" --nsg-name "${NSG_NAME}" --output json)" \
+      || fail "cannot verify rule removal; inspect ${rule} manually."
+    printf '%s' "${rules}" | python3 -I -c 'import json,sys; sys.exit(1 if any(x["name"]==sys.argv[1] for x in json.load(sys.stdin)) else 0)' "${rule}" \
+      || fail "${rule} is still present or removal cannot be verified."
     echo "NSG gate closed: ${rule} absent."
     ;;
   (*) fail "usage: nsg-gate.sh open|close" ;;

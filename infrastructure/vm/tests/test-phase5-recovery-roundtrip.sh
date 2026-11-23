@@ -105,6 +105,15 @@ docker run --rm --network "${network}" -e "MC_HOST_t=http://${minio_user}:${mini
   printf gone > /tmp/d; mc cp -q /tmp/d t/recovery/deleted.bin >/dev/null; mc rm -q t/recovery/deleted.bin >/dev/null'
 app_secret="$(secret)"
 mc admin user add t cmapp "${app_secret}" >/dev/null
+# A second, bucket-authorized identity exercises positive S3 and negative admin recovery.
+reader_secret="$(secret)"
+mc admin user add t cmreader "${reader_secret}" >/dev/null
+printf '%s' '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:ListBucket","s3:GetBucketLocation"],"Resource":["arn:aws:s3:::recovery"]},{"Effect":"Allow","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::recovery/*"]}]}' \
+  | docker run --rm -i --network "${network}" -e "MC_HOST_t=http://${minio_user}:${minio_pw}@minio:9000" \
+    "${MC_IMAGE}" admin policy create t cmrestorepolicy /dev/stdin >/dev/null
+mc admin policy attach t cmrestorepolicy --user cmreader >/dev/null
+docker create --name "${project}-minio-init" $(labels minio-init) --network "${network}" \
+  --entrypoint sleep "${MC_IMAGE}" 600 >/dev/null
 before="$(mc ls --versions --recursive t/recovery | awk '{print $NF, $(NF-1)}' | sort)"
 
 driver() {  # python snippet with recovery/ops importable and the run's paths
@@ -149,15 +158,45 @@ expect_refusal "an unknown container on the project network" "attached to the pr
 recovery.capture('scheduled', False, **CAP)"
 docker rm -f "${intruder}" >/dev/null
 init="${project}-minio-init"; containers+=("${init}")
-docker run -d --init --name "${init}" $(labels minio-init) --network "${network}" "${STANDIN_IMAGE}" sleep 600 >/dev/null
+docker start "${init}" >/dev/null
 expect_refusal "a running MinIO initializer" "initializer is running" "$(driver)
 recovery.capture('scheduled', False, **CAP)"
-docker rm -f "${init}" >/dev/null
+docker stop -t 1 "${init}" >/dev/null
 expect_refusal "a missing recipient certificate" "custody is not provisioned" "$(driver)
 CAP['recipient_cert'] = W + '/absent.crt'; recovery.capture('scheduled', False, **CAP)"
 expect_refusal "a hold requested by a scheduled capture" "only a pre-update capture" "$(driver)
 recovery.capture('scheduled', True, **CAP)"
 running backend && running frontend && running minio
+
+echo "== failed capture and abrupt process interruption"
+expect_refusal "producer failure preserves encrypted evidence and resumes safely" "injected producer failure" "$(driver)
+def fail(*a, **k): raise recovery.RecoveryError('injected producer failure')
+recovery.encrypt_stream = fail
+recovery.capture('scheduled', False, **CAP)"
+running backend && running frontend && running minio
+[[ ! -e "${work}/vm/backup/capture-intent.json" ]]
+[[ -n "$(find "${work}/vm/backup/sets" -name '*.partial' -type d -print)" ]]
+pass "failure evidence retained, connection fence and original services restored"
+if "${PY}" -I -c "$(driver)
+recovery.encrypt_stream = lambda *a, **k: os._exit(91)
+recovery.capture('scheduled', False, **CAP)"; then
+  echo "interruption injection did not exit" >&2; exit 1
+fi
+[[ -f "${work}/vm/backup/capture-intent.json" ]]
+! running backend && ! running frontend && ! running minio
+[[ "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "${project}-backend")" == no ]]
+expect_refusal "interrupted capture cannot be silently retried" "interrupted capture" "$(driver)
+recovery.capture('scheduled', False, **CAP)"
+# Deliberate operator reconciliation on this disposable fixture only, from the
+# persistent intent. Production requires inspection/authority, never auto-resume.
+"${PY}" -I -c "$(driver)
+i = json.load(open(W + '/vm/backup/capture-intent.json')); d = recovery.Docker()
+recovery.pg_fence(d, i['containers']['postgres'], restore=True)
+d.run('start', i['containers']['minio'])
+recovery.restore_policies(d, i['restart_policies'])
+for c in i['writers']: d.run('start', c)
+os.unlink(W + '/vm/backup/capture-intent.json')"
+pass "abrupt interruption leaves durable intent and restart disabled; explicit reconciliation succeeds"
 
 echo "== operations lock contention (ops.py)"
 cat > "${work}/ops.conf" <<JSON
@@ -192,8 +231,18 @@ recovery.capture('scheduled', False, **CAP)"
 status="$("${PY}" -I infrastructure/vm/host/ops.py status)"
 printf '%s' "$status" | "${PY}" -I -c 'import json,sys; d=json.load(sys.stdin); assert d["hold"]["set_id"]=="'"${set_pre}"'", d'
 pass "ops.py status reports the hold"
+if docker run --rm --network "${network}" -e "PGPASSWORD=${pg_pw}" "${PG_IMAGE}" \
+    psql -h postgres -U cm_bootstrap -d codemastery -c 'UPDATE public.users SET display_name=display_name' >/dev/null 2>&1; then
+  echo "a network writer crossed the PostgreSQL hold fence" >&2; exit 1
+fi
+[[ "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "${project}-backend")" == no ]]
+pass "direct database writers rejected for the whole hold; automatic writer restart disabled"
 
 echo "== workstation publication: verify, decrypt, isolated restore, independent copy, ledger, acknowledgement"
+# Synthetic escrow is owner-only; it is never echoed or included in result logs.
+printf '{"root_user":"%s","root_password":"%s","app_user":"cmreader","app_password":"%s","bucket":"recovery"}\n' \
+  "${minio_user}" "${minio_pw}" "${reader_secret}" > "${work}/keys/minio-escrow.json"
+chmod 600 "${work}/keys/minio-escrow.json"
 mkdir -p "${work}/ws/keys" "${work}/ws/trust" "${work}/ws/sets" "${work}/ws/ledger" "${work}/ws/incoming"
 cp "${work}/keys/recipient.encrypted.pem" "${work}/keys/recipient.crt" "${work}/ws/keys/"
 cp "${work}/keys/producer.pub" "${work}/ws/trust/producer.pub.pem"
@@ -207,14 +256,14 @@ class Remote(object):
     def fetch(self, s, n, dest):
         import shutil; shutil.copyfile(recovery.staged_file(s, n, root), dest)
     def ops(self, *a, **k):
-        assert a[0] == 'recovery-ack'; recovery.acknowledge(a[1], a[2], a[3], 'operator', root); return b'{}'
+        assert a[0] == 'recovery-ack'; recovery.acknowledge(a[1], a[2], a[3], 'operator', root, json.loads(__import__('base64').urlsafe_b64decode(a[4]+'=='))); return b'{}'
 entry = [e for e in recovery.list_staged(root) if e['set_id'] == '$1'][0]
-restore = lambda d, m: recovery.restore_test(d, m, ws, '${PG_IMAGE}', log=lambda x: None)
+restore = lambda d, m: recovery.restore_test(d, m, ws, '${PG_IMAGE}', log=lambda x: None, minio_escrow=K + '/minio-escrow.json', helper_image='${HELPER_IMAGE}')
 print(json.dumps(recovery.publish_set(ws, cfg, Remote(), entry, restore=restore, log=lambda x: None)))"
 }
 rec="$(publish "${set_scheduled}")"
-printf '%s' "$rec" | "${PY}" -I -c 'import json,sys; r=json.load(sys.stdin); assert r["level"]=="VERIFIED_INDEPENDENT+RESTORE_TESTED", r; assert r["restore_test"]["postgres"]=="PASS" and r["restore_test"]["minio"].startswith("STRUCTURE_PASS"), r'
-pass "scheduled set published: PostgreSQL restored under F1 with equal history and row counts; MinIO structure verified"
+printf '%s' "$rec" | "${PY}" -I -c 'import json,sys; r=json.load(sys.stdin); assert r["level"]=="VERIFIED_INDEPENDENT+RESTORE_TESTED", r; assert all(r["restore_test"][k]=="PASS" for k in ("postgres", "minio_boot", "minio_objects", "minio_iam")), r'
+pass "scheduled set published: F1 PostgreSQL plus identical MinIO binary boot, versions, IAM and credential checks"
 rec="$(publish "${set_pre}")"
 [[ -f "${work}/vm/backup/acks/${set_pre}.json" ]]
 grep -q '"level": "VERIFIED_INDEPENDENT+RESTORE_TESTED"' "${work}/vm/backup/acks/${set_pre}.json"
@@ -237,14 +286,13 @@ echo "== MinIO restore into a fresh volume with the identical server and identit
 d = W + '/ws/sets/${set_scheduled}'
 m = json.load(open(d + '/manifest.json'))
 c = [x for x in m['components'] if x['name'] == 'minio-data.tar.cms'][0]
-out = open(W + '/minio.tar', 'wb')
-n, h = recovery.decrypt_stream(d + '/minio-data.tar.cms', K + '/recipient.encrypted.pem', open(K + '/passphrase','rb').read(),
-                               K + '/recipient.crt', consume=out.write)
-out.close(); assert (n, h) == (c['payload_length'], c['payload_sha256'])"
-docker volume create "${project}_restored-minio" >/dev/null
-docker run --rm -i --network none -v "${project}_restored-minio:/data" --entrypoint tar "${HELPER_IMAGE}" \
-  --same-owner --numeric-owner --xattrs --acls -xpf - -C /data < "${work}/minio.tar"
-rm -f "${work}/minio.tar"
+payload, _ = recovery.minio_tar_payload(d + '/minio-data.tar.cms', c, K + '/recipient.encrypted.pem',
+                                      open(K + '/passphrase','rb').read(), K + '/recipient.crt')
+import subprocess
+subprocess.run(['docker', 'volume', 'create', '${project}_restored-minio'], check=True, stdout=subprocess.DEVNULL)
+subprocess.run(['docker', 'run', '--rm', '-i', '--network', 'none', '-v', '${project}_restored-minio:/data',
+                '--entrypoint', 'tar', '${HELPER_IMAGE}', '--same-owner', '--numeric-owner', '--xattrs', '--acls',
+                '-xpf', '-', '-C', '/data'], input=payload, check=True)"
 restored="${project}-minio-restored"; containers+=("${restored}")
 docker run -d --name "${restored}" --label "cmrt.project=${project}" --network "${network}" --network-alias minio-restored \
   --user 65532:65532 -v "${project}_restored-minio:/data" -e "MINIO_ROOT_USER=${minio_user}" -e "MINIO_ROOT_PASSWORD=${minio_pw}" \
@@ -275,6 +323,12 @@ mv "${work}/vm/backup/acks/${set_pre}.json" "${work}/ack.bak"
 [[ "$(gate "${set_pre}" "${pre_sha}")" == *"has not acknowledged"* ]]
 mv "${work}/ack.bak" "${work}/vm/backup/acks/${set_pre}.json"
 pass "an unacknowledged point is refused"
+cp "${work}/vm/backup/acks/${set_pre}.json" "${work}/ack.full"
+"${PY}" -I -c "import json; p='${work}/vm/backup/acks/${set_pre}.json'; a=json.load(open(p)); a['restore_test']={'postgres':'PASS','minio_boot':'NOT_RUN'}; json.dump(a,open(p,'w'))"
+[[ "$(gate "${set_pre}" "${pre_sha}")" == *"no passing isolated restore test"* ]]
+mv "${work}/ack.full" "${work}/vm/backup/acks/${set_pre}.json"
+pass "a PostgreSQL-only receipt cannot satisfy the MinIO recovery gate"
+
 docker start "${project}-backend" >/dev/null; docker stop -t 2 "${project}-backend" >/dev/null
 [[ "$(gate "${set_pre}" "${pre_sha}")" == *"ran after the recovery cut"* ]]
 pass "a writer that ran after the cut is refused (writes could be missing from the point)"

@@ -1,5 +1,10 @@
 # ADR017: SSH Continuous Deployment, Recovery Execution and TLS Renewal for the Azure VM (Phase 5)
 
+**PR #274 remediation addendum:** §11 refines the original implementation decisions
+below under the Leader's explicit review-and-remediation instruction. Earlier executed
+records remain historical evidence; their test counts and qualification limits are not
+retroactively changed.
+
 ## 1. Authority, provenance and scope
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED**, 23 November 2026
@@ -312,3 +317,141 @@ otherwise the observed location; moving it is an operator choice, not a precondi
 ## 10. Verification
 
 Recorded in [testing.md](../testing.md#phase-5-ssh-deployment-verification--23-november-2026).
+
+## 11. PR #274 review remediation — 23 November 2026
+
+### 11.1 Authority and trust boundary
+
+The Project Leader/Owner @chi-thanh-nguyen explicitly authorized **“CodeMastery —
+PR #274 Comprehensive Independent Review, Direct Remediation & Verification”**:
+confirmed security/correctness fixes, regression tests, necessary documentation and
+technical-decision updates, commit and push on this PR's existing branch. OpenAI Codex
+performed this review and remediation. These bounded choices remain subject to
+independent review and protected integration. No production, cloud, credential,
+spending, publication, exposure or restore authority is granted.
+
+**Refinement of D2–D3:** possessing the deployment SSH key does not authenticate a
+GitHub approval or authorize root tooling. A caller-supplied Git tree is integrity,
+not provenance. Each `cmdeploy` command now requires a GitHub-signed RS256 OIDC token
+on an stdin header. Its audience is `codemastery:ssh:` plus SHA-256 of canonical JSON
+argv; this covers upload names/hashes/lengths, tooling SHA/tree, release digest and
+the entire deployment context. Validate issuer, repository and immutable repository/
+owner IDs, pinned actor/login ID, `production`, `workflow_dispatch`, exact `deploy.yml`
+on `main`, equal workflow/source SHA, GitHub-hosted runner, first attempt and token
+lifetime. A persistent exclusive-create JTI record rejects replay. No JWT or bearer
+is printed, passed in argv, or stored. Tokens are not recovery acknowledgements.
+
+The verifier `host/authorize.py` is installed by operator bootstrap as root-owned
+`/usr/local/lib/codemastery/authorize.py`, outside the uploaded tooling tree; approved
+workflow tooling cannot silently replace that fixed boundary. Changing it requires
+operator bootstrap. For installation, the requested SHA must equal the signed workflow
+SHA and the requested tree must equal GitHub's public commit record. HTTPS access to
+`token.actions.githubusercontent.com/.well-known/jwks` and the repository's Git commit
+API is required; outage fails closed. These are authentication metadata, not executable
+or image downloads. No permanent service, cloud role, signing secret or library is added.
+The runner still reads environment protection/approval records before requesting tokens.
+OIDC establishes the executing job identity; it is not a separate independent approval
+review. A compromised trusted `main` workflow remains a root-authority compromise.
+The authenticated operator fallback remains separately privileged and does not use OIDC.
+
+Alternatives rejected: trusting caller hashes/context, restricting command names alone,
+or a new permanent authorization service. A stored VM GitHub API token or broad cloud
+credentials would add custody without improving this boundary. Claims and key format
+follow [GitHub's OIDC reference](https://docs.github.com/en/actions/reference/security/oidc).
+
+### 11.2 Transfers, capture, holds and interrupted deployments
+
+Uploads, tooling installation and staging consumers share an exclusive transport lock,
+preventing replacement between verification and use. Source/tooling archives reject
+links, special files and `.git` paths before extraction; no approved current repository
+file requires a symlink. Individually relative links are insufficient protection against
+an escaping link chain.
+
+**Refinement of D7:** capture requires private data services on the single project
+network and rejects another running container mounting either volume. Disable restart
+policies and persist original policies/container identities in `capture-intent.json`
+before stopping services. Replace PostgreSQL HBA temporarily with network rejection
+and only the container-local `cm_bootstrap` socket login; retain the original file in
+the PG volume, reload and exercise TCP rejection. Existing client sessions refuse the
+cut; do not exempt a caller-controlled `application_name`. Stop MinIO before the common
+cut and PG dump, keep it stopped throughout both captures, and preserve encrypted
+partial evidence on failure. Intent/hold writes sync both file and parent directory.
+An interrupted process leaves the intent/fence/restart-disabled state for explicit
+operator inspection, not automatic restart or a silent second capture.
+
+Root/Docker administrators remain trusted: they can bypass HBA, edit tooling or write
+the volumes directly and must not write during maintenance. No sample of sessions or
+row counts is claimed to exclude a malicious host administrator. A successful ordinary
+capture restores the connection policy and original restart policies; a pre-update hold
+retains the fence and disables writer restart until authorized deploy or cancellation.
+Failures of cleanup remain visible and preserve the intent. Partial evidence is never
+deleted by acknowledgement pruning.
+
+**Refinement of D4/D8:** persist a deployment-attempt marker before releasing the fence
+or invoking `deploy.sh`. Any such attempt can change schema/data even if old container
+IDs survive; subsequent resume/replay is refused and needs a Leader recovery decision.
+A failed deployment independently checks containment. Verification findings retain the
+hold; success archives it. A cancellation before any attempt restores policies, starts
+the exact held containers and checks that they run.
+
+### 11.3 Actual restore qualification and publication
+
+**Refinement of D7/D10:** PostgreSQL PASS alone yields `+PG_RESTORE_TESTED`, which cannot
+satisfy P9 or the qualified-point age/retention calculation. `+RESTORE_TESTED` requires
+all four evidence fields PASS: PostgreSQL, MinIO boot, object recovery and IAM recovery.
+The operator-authenticated receipt carries those results and the exact set/manifest
+digest; both acknowledgement and deployment gates check them. An old suffix alone is
+insufficient. Mechanism restore testing does not establish full-product F2/Q08 feature
+acceptance, measured RPO/RTO or production readiness.
+
+Capture records hashes of MinIO versions/delete markers, every readable object version's
+payload, stat/metadata/tags, IAM user listing and server configuration. No object names,
+content, credentials or exported configuration are added to the public manifest.
+Active external identity/KMS/notification/policy endpoints are outside this qualified
+topology and refused; bucket replication metadata is refused during archive validation.
+MinIO's required runtime credentials are read only into private process memory for these
+operations. Extra environment configuration remains a capture refusal.
+
+The workstation restores PG with the captured image and F1 flags as a bounded migrator
+(PUBLIC database rights revoked). With owner-only `minio_escrow` configured, authenticate
+and inspect the complete tar in bounded memory (maximum 2 GiB, no links/special files),
+restore numeric ownership/modes/ACLs/xattrs into a Docker local-driver **tmpfs** volume,
+and boot the **identical captured MinIO image** as UID/GID 65532 on an internal network,
+with no published port, initializer, pull or build. A helper holds the tmpfs mount until
+the server mounts it, preventing unmount-induced loss. Compare the signed inventories;
+prove the escrow application identity can list its approved bucket and cannot administer
+the server. Required root credentials enter the Docker client environment by name-only
+`-e` arguments; private container metadata is within the trusted local engine boundary.
+Client credentials use stdin. Containers and tmpfs volume are removed afterwards.
+Missing escrow never becomes full qualification. Actual memory/capacity/escrow custody
+and separate external-dependency qualification remain production setup obligations.
+
+Publication/prune share an exclusive workstation lock. An interrupted copy/upload can
+reuse only byte-identical readback, never overwrite. Completion markers are deterministic
+and written last. A ledger-committed point retries its acknowledgement after verifying
+the independent/cloud copies. Adding full restore evidence may append a stronger record
+for the same point without inventing a newer cut. Qualified ages use signed `t_cut`,
+reject future cuts as clock errors and exclude partial restore results. Pruning considers
+qualified points and verifies the newest independent copy and cloud components/marker
+before deleting older eligible points; incomplete or untested newer points cannot evict
+the last qualified point. Existing 3/7/4 classes and protected pre-update/manual points
+remain unchanged.
+
+### 11.4 TLS, verification and network cleanup
+
+**Refinement of D11:** staging returns only after frontend restart, health, `nginx -t`
+and served-leaf readback. The same checks run after challenge failure. Mark replacement
+before the first pair rename so an interruption between key/chain renames restores both;
+verify recovery and report recovery failure separately. SAN comparison is exact.
+
+Post-deployment verification checks top-level readiness, exact host port 443 and restart
+policy, in addition to existing image/Flyway/TLS checks. Failed image-store discovery
+refuses rather than assuming graphdriver. External deploy/verify findings fail the
+workflow report. `verify` without a version correctly uses the current deployment.
+NSG cleanup treats a failed lookup as unknown, verifies rule absence after deletion and
+rejects priorities outside 100–4096. No real NSG rule was touched during remediation.
+
+The CT17-P6 r9 predicate and final privilege matrix remain unchanged by remediation.
+The live draft `v0.1.0-rc.1` manifest identifies source `1d0658a7215c2a3d3fed569738d522137989b666`
+and tooling `e9d6da15b3fe4d581765d1c733abb70698dac779`; its source lacks r9. A separately
+admitted new release is still required for V006→V009. No existing release was altered.

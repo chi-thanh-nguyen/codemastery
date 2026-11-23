@@ -319,22 +319,19 @@ def git_tree(directory):
 
 
 def safe_extract(tar_path, dest):
-    """Extract a git-archive tar: regular files, directories and in-tree relative symlinks only."""
+    """Extract a git archive of regular files/directories; reject links before any write."""
     import tarfile
     with tarfile.open(tar_path, "r:") as tf:
         members = []
         for m in tf.getmembers():
             name = os.path.normpath(m.name)
-            if m.name.startswith("/") or name == ".." or name.startswith("../") or "\x00" in m.name:
+            if m.name.startswith("/") or name == ".." or name.startswith("../") or "\x00" in m.name \
+                    or ".git" in m.name.split("/"):
                 refuse("the source archive contains an unsafe path")
-            if m.issym():
-                target = os.path.normpath(os.path.join(os.path.dirname(name), m.linkname))
-                if os.path.isabs(m.linkname) or target.startswith(".."):
-                    refuse("the source archive contains a symlink leaving the tree")
-            elif not (m.isfile() or m.isdir()):
+            if not (m.isfile() or m.isdir()):
                 if m.type in (b"g", b"x"):     # pax headers (git archive comment)
                     continue
-                refuse("the source archive contains a special file")
+                refuse("the source archive contains a link or special file")
             m.uid = m.gid = 0
             m.uname = m.gname = "root"
             m.mode = (m.mode & 0o111 and 0o755) or (0o755 if m.isdir() else 0o644)
@@ -427,7 +424,9 @@ def clear_incoming():
 # --------------------------------------------------------------------------- inventory and gates
 
 def image_store():
-    status = docker_text("info", "--format", "{{json .DriverStatus}}") or "[]"
+    status = docker_text("info", "--format", "{{json .DriverStatus}}")
+    if status is None:
+        refuse("Docker image-store discovery failed")
     kinds = [v for k, v in json.loads(status) if k == "driver-type"]
     if kinds == ["io.containerd.snapshotter.v1"]:
         return "containerd"
@@ -562,9 +561,17 @@ def hold_path():
 def recovery_gate(set_id, manifest_sha, found, release_report):
     """Evidence for deploy.sh's four P9 attestations; each flag is passed only if its evidence holds."""
     problems = []
+    if os.path.exists(state("backup", "capture-intent.json")):
+        problems.append("an incomplete capture intent requires operator inspection")
     if not os.path.isfile(hold_path()):
         return {"problems": ["no application hold: run the prepare operation (pre-update capture) first"]}
     hold = load_json(hold_path(), "hold")
+    if hold.get("deployment_attempt"):
+        problems.append("a deployment was already attempted after this cut; a Leader recovery decision is required")
+    if not hold.get("postgres_fenced"):
+        problems.append("the held point has no enforced PostgreSQL connection fence")
+    elif recovery.pg_other_clients(recovery.Docker(), hold["postgres"]):
+        problems.append("a PostgreSQL client is active during the hold")
     if hold["set_id"] != set_id or hold["manifest_sha256"] != manifest_sha:
         problems.append("the requested recovery point is not the held pre-update point %s" % hold["set_id"])
     set_dir = state("backup", "sets", set_id)
@@ -584,7 +591,7 @@ def recovery_gate(set_id, manifest_sha, found, release_report):
     ack = load_json(ack_path, "acknowledgement") if os.path.isfile(ack_path) else None
     if not ack or ack.get("manifest_sha256") != manifest_sha:
         problems.append("the publisher has not acknowledged independent off-VM custody of this point")
-    elif not ack["level"].endswith("+RESTORE_TESTED"):
+    elif not ack["level"].endswith("+RESTORE_TESTED") or not recovery.restore_qualified(ack.get("restore_test")):
         problems.append("the point has no passing isolated restore test (acknowledged level %s)" % ack["level"])
     cut = recovery.parse_iso(manifest["t_cut"], "t_cut")
     for service, cid in (hold.get("held") or {}).items():
@@ -594,6 +601,8 @@ def recovery_gate(set_id, manifest_sha, found, release_report):
             continue
         if st.get("Running") or st.get("StartedAt") != hold["started_at"].get(service):
             problems.append("%s ran after the recovery cut; writes may be missing from the point" % service)
+        if docker_text("inspect", "--format", "{{.HostConfig.RestartPolicy.Name}}", cid) != "no":
+            problems.append("%s can automatically restart during the hold" % service)
     for s in ("backend", "frontend"):
         if s in found and recovery.Docker().state(found[s]).get("Running"):
             problems.append("%s is running; the application must stay held from the cut to the update" % s)
@@ -741,14 +750,28 @@ def op_deploy(args):
                      "--persistent-state-preserved", "--update-authorization",
                      "%s; recovery point %s (cut %s)" % (ctx["authorization"], gate["set_id"], gate["t_cut"])]
         log("running deploy.sh all from %s (output in %s)" % (source_dir, log_path))
+        if gate:
+            hold = load_json(hold_path(), "hold")
+            # Persist BEFORE anything can migrate/provision. Old containers can
+            # survive a failed migration, so their IDs alone never authorize resume.
+            hold["deployment_attempt"] = iso(utc_now())
+            write_private(hold_path(), dump_json(hold))
+            recovery.pg_fence(recovery.Docker(), hold["postgres"], restore=True)
+            recovery.restore_policies(recovery.Docker(), hold["restart_policies"])
         rc = run_logged(argv, log_path)
         report["deploy_sh_exit"] = rc
         if rc != 0:
-            report["result"] = "FAILED_CONTAINED"
+            stopped = []
+            for service in ("frontend", "backend"):
+                cid = recovery.Docker().project_containers(PROJECT).get(service)
+                if cid:
+                    run(["docker", "stop", "--time", str(cfg["stop_timeout"]), cid], check=False)
+                    stopped.append(not recovery.Docker().state(cid).get("Running"))
+            report["result"] = "FAILED_CONTAINED" if all(stopped) else "FAILED_CONTAINMENT_INCOMPLETE"
             report["log_tail"] = tail(log_path)
-            report["next"] = ("deploy.sh stopped and contained the application. The hold and recovery point stay. "
-                              "Do not retry blindly: inspect the log, then choose resume (only if the previous "
-                              "containers are intact) or a Leader recovery decision.")
+            report["next"] = ("The hold and recovery point stay; inspect containment and the log. "
+                              "Persistent state may have changed. A Leader recovery decision is required; "
+                              "resume and automatic retry are refused after a deployment attempt.")
             record("deploy", report)
             return emit(report, 4)
         report["verification"] = verify_state(cfg, release, release_dir, store)
@@ -756,7 +779,7 @@ def op_deploy(args):
                    "archive_sha256": release["archive"]["sha256"], "deployed_at": iso(utc_now()),
                    "images": images, "recovery_point": gate and gate["set_id"], "authorization": ctx["authorization"]}
         write_private(state("deployments", "current.json"), dump_json(current))
-        if os.path.isfile(hold_path()):
+        if os.path.isfile(hold_path()) and not report["verification"]["problems"]:
             os.makedirs(state("backup", "holds"), mode=0o700, exist_ok=True)
             os.rename(hold_path(), state("backup", "holds", "%s.deployed.json" % gate["set_id"]))
         report["result"] = "DEPLOYED" if not report["verification"]["problems"] else "DEPLOYED_WITH_FINDINGS"
@@ -812,6 +835,8 @@ def verify_state(cfg, release, release_dir, store):
             else st.get("Running") is True
         checks[service] = {"image": image, "expected": want, "running": st.get("Running"), "health": health,
                            "restart": restart}
+        if restart != ("no" if service == "minio-init" else "unless-stopped"):
+            problems.append("%s has an unexpected restart policy" % service)
         if image != want:
             problems.append("%s runs %s, not the released identity" % (service, image))
         if not ok_state:
@@ -824,6 +849,8 @@ def verify_state(cfg, release, release_dir, store):
             problems.append("%s publishes host ports" % service)
         if service == "frontend" and sorted(bound) != ["8080/tcp"]:
             problems.append("frontend publishes something other than 8080/tcp")
+        if service == "frontend" and any(p.get("HostPort") != "443" for bindings in bound.values() for p in bindings):
+            problems.append("frontend ingress is not bound exclusively to host port 443")
     infra = {"containers": checks}
     with open(deploy_sh(os.path.join(SOURCE_ROOT, release["source_revision"]))) as f:
         rule, rows = deferral_rule(f.read())
@@ -836,7 +863,11 @@ def verify_state(cfg, release, release_dir, store):
     readiness = "NOT_CHECKED"
     if found.get("frontend"):
         rc, out = frontend_exec(found, "wget", "-q", "-O", "-", "http://backend:8080/actuator/health")
-        readiness = "UP" if rc == 0 and '"status":"UP"' in out.replace(" ", "") else "NOT_UP"
+        try:
+            health_body = json.loads(out) if rc == 0 else None
+        except ValueError:
+            health_body = None
+        readiness = "UP" if isinstance(health_body, dict) and health_body.get("status") == "UP" else "NOT_UP"
         if readiness != "UP":
             problems.append("backend readiness is %s" % readiness)
     tls = {}
@@ -874,6 +905,8 @@ def op_resume(args):
         if not os.path.isfile(hold_path()):
             return emit({"operation": "resume", "result": "NO_HOLD"})
         hold = load_json(hold_path(), "hold")
+        if hold.get("deployment_attempt"):
+            refuse("a deployment attempt may have modified persistent state; a Leader recovery decision is required")
         started = []
         for service in ("backend", "frontend"):
             cid = (hold.get("held") or {}).get(service)
@@ -882,10 +915,17 @@ def op_resume(args):
             if not docker_text("inspect", "--format", "{{.Id}}", cid):
                 refuse("the held %s container was replaced (a deployment attempt ran); a Leader recovery decision "
                        "is required, not a resume" % service)
+        if hold.get("postgres_fenced"):
+            recovery.pg_fence(recovery.Docker(), hold["postgres"], restore=True)
+            hold["postgres_fenced"] = False
+            write_private(hold_path(), dump_json(hold))
+        recovery.restore_policies(recovery.Docker(), hold.get("restart_policies", {}))
         for service in ("backend", "frontend"):
             cid = (hold.get("held") or {}).get(service)
             if cid:
                 run(["docker", "start", cid])
+                recovery._wait(lambda: recovery.Docker().state(cid).get("Running"), config()["wait_timeout"],
+                               "%s resume" % service)
                 started.append(service)
         os.makedirs(state("backup", "holds"), mode=0o700, exist_ok=True)
         os.rename(hold_path(), state("backup", "holds", "%s.resumed.json" % hold["set_id"]))
@@ -904,10 +944,11 @@ def op_capture(args):
 def op_status(args):
     now = utc_now()
     staged = recovery.list_staged(state("backup"))
-    acked = [s for s in staged if s["acknowledged"]]
+    acked = [s for s in staged if s["acknowledged"] and recovery.restore_qualified(s["acknowledged"].get("restore_test"))]
     newest = None
     for s in acked:
-        t = datetime.datetime.strptime(s["set_id"].split("-")[1], "%Y%m%dT%H%M%SZ").replace(tzinfo=datetime.timezone.utc)
+        manifest = load_json(state("backup", "sets", s["set_id"], "manifest.json"), "recovery manifest")
+        t = recovery.parse_iso(manifest["t_cut"], "t_cut")
         newest = t if newest is None or t > newest else newest
     age_state, hours = recovery.point_age_status(newest, now)
     out = {"operation": "status", "now": iso(now),
@@ -973,7 +1014,8 @@ def validate_pair(cfg, fullchain, key, staging=False):
     if a != b:
         refuse("the renewed private key does not match the renewed certificate")
     text = run([binary, "x509", "-in", fullchain, "-noout", "-ext", "subjectAltName"]).stdout.decode()
-    if "DNS:%s" % host not in text:
+    names = re.findall(r"DNS:([^,\s]+)", text)
+    if host not in names:
         refuse("the renewed certificate does not name %s" % host)
     if not staging:
         r = run([binary, "verify", "-purpose", "sslserver", "-verify_hostname", host, "-CAfile",
@@ -1020,51 +1062,72 @@ def op_tls_renew(args):
         log("stopping only the frontend to free TCP 443 for the TLS-ALPN-01 challenge")
         run(["docker", "stop", "--time", str(cfg["stop_timeout"]), fe])
         replaced = False
+        failure = None
+
+        def restore_previous():
+            for name in ("fullchain.pem", "privkey.pem"):
+                shutil.copy2(os.path.join(backup, name), os.path.join(cfg["tls_dir"], name + ".restore"))
+                os.rename(os.path.join(cfg["tls_dir"], name + ".restore"), os.path.join(cfg["tls_dir"], name))
+            os.chown(live_key, 101, 0)
+            os.chmod(live_key, 0o400)
+
+        def start_and_verify():
+            run(["docker", "start", fe])
+            recovery._wait(lambda: (recovery.Docker().state(fe).get("Health") or {}).get("Status") == "healthy",
+                           cfg["wait_timeout"], "frontend health after renewal")
+            rc, _ = frontend_exec(found, "nginx", "-t")
+            if rc != 0:
+                refuse("frontend nginx configuration check failed")
+            served = served_certificate("127.0.0.1", host)
+            if served["sha256"] != file_leaf(live_chain)["sha256"]:
+                refuse("the frontend does not serve the installed certificate")
+            return served
+
         try:
             r = subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
             if r.returncode != 0:
-                refuse("acme.sh renewal failed (exit %d); the previous certificate is unchanged" % r.returncode)
+                refuse("acme.sh renewal failed (exit %d)" % r.returncode)
             validate_pair(cfg, staged[0], staged[1], staging=bool(args.staging))
-            if args.staging:
-                result["result"] = "STAGING_CHALLENGE_PASS"
-                return emit(result)
-            os.makedirs(backup, mode=0o700)
-            for src in (live_chain, live_key):
-                shutil.copy2(src, os.path.join(backup, os.path.basename(src)))
-            tmp_chain, tmp_key = live_chain + ".new", live_key + ".new"
-            shutil.copyfile(staged[0], tmp_chain)
-            os.chown(tmp_chain, 0, 0)
-            os.chmod(tmp_chain, 0o644)
-            shutil.copyfile(staged[1], tmp_key)
-            os.chown(tmp_key, 101, 0)
-            os.chmod(tmp_key, 0o400)
-            os.rename(tmp_key, live_key)
-            os.rename(tmp_chain, live_chain)
-            replaced = True
-            result["previous_pair"] = backup
+            if not args.staging:
+                os.makedirs(backup, mode=0o700)
+                for src in (live_chain, live_key):
+                    shutil.copy2(src, os.path.join(backup, os.path.basename(src)))
+                tmp_chain, tmp_key = live_chain + ".new", live_key + ".new"
+                shutil.copyfile(staged[0], tmp_chain)
+                os.chown(tmp_chain, 0, 0)
+                os.chmod(tmp_chain, 0o644)
+                shutil.copyfile(staged[1], tmp_key)
+                os.chown(tmp_key, 101, 0)
+                os.chmod(tmp_key, 0o400)
+                # Both old files are backed up. Mark before the first rename so a
+                # failure between the two replacements also rolls the pair back.
+                replaced = True
+                os.rename(tmp_key, live_key)
+                os.rename(tmp_chain, live_chain)
+                result["previous_pair"] = backup
+        except (RecoveryError, OSError, subprocess.TimeoutExpired) as exc:
+            failure = exc
         finally:
             if work_home:
                 shutil.rmtree(work_home, ignore_errors=True)
-            run(["docker", "start", fe], check=False)
+        if failure is not None and replaced:
+            restore_previous()
+            replaced = False
         try:
-            recovery._wait(lambda: (recovery.Docker().state(fe).get("Health") or {}).get("Status") == "healthy",
-                           cfg["wait_timeout"], "frontend health after renewal")
-            served = served_certificate("127.0.0.1", host)
-            leaf = file_leaf(live_chain)
-            if served["sha256"] != leaf["sha256"]:
-                refuse("the frontend does not serve the renewed certificate")
-        except (RecoveryError, OSError, ssl.SSLError) as exc:
+            served = start_and_verify()
+        except (RecoveryError, OSError, ssl.SSLError, ValueError) as exc:
             if replaced:
                 log("renewed certificate failed readback; restoring the previous pair")
                 run(["docker", "stop", "--time", str(cfg["stop_timeout"]), fe], check=False)
-                for name in ("fullchain.pem", "privkey.pem"):
-                    shutil.copy2(os.path.join(backup, name), os.path.join(cfg["tls_dir"], name + ".restore"))
-                    os.rename(os.path.join(cfg["tls_dir"], name + ".restore"), os.path.join(cfg["tls_dir"], name))
-                os.chown(live_key, 101, 0)
-                os.chmod(live_key, 0o400)
-                run(["docker", "start", fe], check=False)
-            refuse("renewal readback failed (%s); previous pair restored" % exc)
-        result.update({"result": "RENEWED", "served": served})
+                restore_previous()
+                try:
+                    start_and_verify()
+                except (RecoveryError, OSError, ssl.SSLError, ValueError):
+                    refuse("renewal and previous frontend recovery both failed; operator intervention required")
+            refuse("frontend recovery/readback failed (%s); renewal is not qualified" % type(exc).__name__)
+        if failure is not None:
+            refuse("renewal failed (%s); previous frontend health and TLS verified" % type(failure).__name__)
+        result.update({"result": "STAGING_CHALLENGE_PASS" if args.staging else "RENEWED", "served": served})
         tls_status(cfg)
         return emit(result)
 
@@ -1097,8 +1160,10 @@ def op_recovery_send(args):
 
 def op_recovery_ack(args):
     by = os.environ.get("SUDO_USER") or "root"
+    evidence = recovery.load_json_bytes(base64.urlsafe_b64decode(args.evidence + "=="), "restore evidence") \
+        if args.evidence else None
     with Lock("recovery-ack"):
-        rec = recovery.acknowledge(args.set_id, args.manifest_sha256, args.level, by, state("backup"))
+        rec = recovery.acknowledge(args.set_id, args.manifest_sha256, args.level, by, state("backup"), evidence)
         removed = recovery.prune_staged(state("backup"), log=log)
     return emit({"operation": "recovery-ack", "ack": rec, "pruned_staged": removed})
 
@@ -1166,6 +1231,7 @@ def parser():
     s.add_argument("set_id")
     s.add_argument("manifest_sha256")
     s.add_argument("level")
+    s.add_argument("evidence", nargs="?", default="")
     return p
 
 

@@ -64,10 +64,14 @@ check_words() {
   done
 }
 
-remote_ops() {  # stdin and stdout pass through unchanged
+remote_ops() {
   check_words "$@"
   if [[ "${USER_NAME}" == cmdeploy ]]; then
-    "${SSH[@]}" -- "$*"                       # forced command: codemastery-ssh-gate
+    local token
+    token="$(python3 -I "${HERE}/../host/authorize.py" request "$@")" || fail "GitHub command authorization unavailable."
+    # The token is a single stdin header, never an SSH argument, environment value
+    # or file. For receive, the exact size/hash-bound upload follows it.
+    { printf '%s\n' "${token}"; cat; } | "${SSH[@]}" -- "$*"
   else
     "${SSH[@]}" -- sudo -n /usr/local/sbin/codemastery-ops "$@"
   fi
