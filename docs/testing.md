@@ -6258,3 +6258,71 @@ between the two run reads were each refused.
 - No independent review. Produced through AI-assisted development (Anthropic Claude
   Code) under the Leader's task; GitHub's REST API and documentation, `gh` and actionlint
   are the tools used; nothing is added to CodeMastery's runtime.
+
+### Review remediation (F1 and F2) — 24 November 2026
+
+An independent Codex security review of `efda42f` returned CHANGES_REQUIRED
+([ADR015 A2.11](decisions/015-release-pipeline.md#a211-independent-review-remediation-24-november-2026)).
+Run on macOS arm64, Python 3.9.6, from the PR's worktree.
+
+**Reproduced before the fix** (on `efda42f`'s `release.py`, synthetic fixtures). In each
+case a newer `workflow_dispatch` run of `ci-vm.yml` had failed `VM B`, and its record was
+garbled:
+
+| Newer run's record | `efda42f` outcome |
+| --- | --- |
+| no `workflow_id` | ACCEPTED, `VM B` taken from the older run 200 (stale success) |
+| no `check_suite_id` | ACCEPTED, stale success |
+| no `created_at` | ACCEPTED, stale success |
+| `workflow_id` `"214"`, `check_suite_id` `true`, `run_attempt` `"1"`, no `path` | ACCEPTED, stale success |
+| `created_at` `"yesterday"`; no `status` | Refused, but only by accident of ordering or status |
+
+F2: `evaluate_checks` had no input for a second read of the PR head. With the first read
+of the head (CodeQL success) the revision was ACCEPTED. A later read showing a newer
+pending or failed CodeQL analysis would have refused it, and the workflow never made that
+read.
+
+Adjacent: an all-attempt job record with the same ID as the decisive job, but conclusion
+`failure` or status `in_progress`, was ACCEPTED (only the ID sets were compared).
+
+**Regression tests.** Five new `CheckTests` tests, plus extended snapshot and CLI tests.
+All of them fail on `efda42f`: 21 failing subtests, run through a shim that passes the
+first reads and ignores the second-read inputs `efda42f` lacked. All pass after the fix:
+
+| Test | Covers |
+| --- | --- |
+| `test_malformed_newer_run_never_lets_an_older_success_decide` | The three confirmed cases (missing `workflow_id`, `check_suite_id`, `created_at`) and six more malformed fields |
+| `test_malformed_record_of_an_unrelated_run_is_still_ignored` | Runs that are positively out of scope (event, branch, path, commit) stay recorded and ignored, even when incomplete |
+| `test_conflicting_job_records_with_the_same_id_are_refused` | Same ID, different conclusion, status, name or commit |
+| `test_codeql_evaluation_appearing_between_the_reads_is_refused` | Newer pending, queued, failed or cancelled CodeQL on the PR head at the second read; decisive run changed or gone; missing second read; unrelated names may change |
+| `test_check_runs_of_the_revision_changing_between_the_reads_are_refused` | New pending or failed CodeQL on the revision, new forged run, a run gone, missing second read |
+| `test_runs_that_change_while_being_read` (extended) | Eight run fields differing between the two reads |
+| `test_cli_with_the_files_the_workflow_writes` (extended) | `--pr-check-runs-after` required; a newer queued CodeQL in it refuses (exit 3) |
+
+**Results:**
+
+- `python3 -m unittest discover -s infrastructure/release/tests -v`: **86 tests OK** (33 in `CheckTests`).
+- Mutation check: 6 new mutants (malformed records ignored, no `created_at` validation, no PR-head re-read, no revision re-read, ID-only job comparison, reduced run-field comparison) and the earlier 12 re-run. All 18 are killed.
+- `bash -n` on both scripts and `py_compile` pass.
+- actionlint 1.7.12 on `release.yml`: no findings.
+
+**Read-only re-evaluation of `84d10a3`** with the fixed tooling and the workflow's new
+read order: rules, workflow files, runs, check runs, job listings, PR #274, head check runs,
+trees, then head check runs again, revision check runs again, and runs again. Result:
+**ACCEPTED**, identical to the first evaluation:
+
+- the six `CI VM` checks come from attempt 2 of run 45194866405, with the failed
+  `137762522469` superseded;
+- `CodeQL` comes from check run `137717841069` on `cac03de`;
+- no check runs are ignored;
+- the GitHub-managed `dynamic` CodeQL run is recorded as untrusted.
+
+On copies of this live data, each of the following was refused:
+
+- a newer failed `CI VM` run without `workflow_id`;
+- the same without `check_suite_id`;
+- the same without `created_at`;
+- a newer pending or failed CodeQL check run on `cac03de` at the second read.
+
+Not run: GitHub Actions CI on the new head, which the task excluded; the pull-request
+rehearsal; an independent re-review.

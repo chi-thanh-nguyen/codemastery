@@ -190,8 +190,10 @@ jobs:
           [[ "$INPUT_ORIGIN" =~ ^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] || { echo "public_origin is malformed." >&2; exit 1; }
           git merge-base --is-ancestor "$rev" origin/main || { echo "The revision is not on main." >&2; exit 1; }
           # ADR015 D2 (A2): the latest valid evaluation of every required check must have
-          # passed, authenticated against GitHub's workflow run and job records. The runs
-          # are read before and after everything else; any change refuses the revision.
+          # passed, authenticated against GitHub's workflow run and job records. The first
+          # reads decide; the merged pull request head's and the revision's check runs and,
+          # last, the workflow runs are read again, and any change under a required name
+          # refuses the revision. The second workflow-run read is the evidence cutoff.
           gh api "repos/$GITHUB_REPOSITORY/rules/branches/main" > "$RUNNER_TEMP/rules.json"
           git ls-tree --name-only "$rev" .github/workflows/ > "$RUNNER_TEMP/workflow-files.txt"
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$rev&per_page=100" > "$RUNNER_TEMP/workflow-runs.json"
@@ -212,12 +214,16 @@ jobs:
           if [[ -n "$head" ]]; then
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100&filter=all" > "$RUNNER_TEMP/pr-check-runs.json"
             pr_args=(--pulls "$RUNNER_TEMP/pulls.json" --pr-head "$head" --pr-check-runs "$RUNNER_TEMP/pr-check-runs.json"
+                     --pr-check-runs-after "$RUNNER_TEMP/pr-check-runs-after.json"
                      --revision-tree "$(git rev-parse "$rev^{tree}")"
                      --pr-head-tree "$(gh api "repos/$GITHUB_REPOSITORY/commits/$head" --jq .commit.tree.sha)")
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100&filter=all" > "$RUNNER_TEMP/pr-check-runs-after.json"
           fi
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$rev/check-runs?per_page=100&filter=all" > "$RUNNER_TEMP/check-runs-after.json"
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$rev&per_page=100" > "$RUNNER_TEMP/workflow-runs-after.json"
           python3 infrastructure/release/release.py evaluate-checks --revision "$rev" --rules "$RUNNER_TEMP/rules.json" \
-            --check-runs "$RUNNER_TEMP/check-runs.json" --workflow-files "$RUNNER_TEMP/workflow-files.txt" \
+            --check-runs "$RUNNER_TEMP/check-runs.json" --check-runs-after "$RUNNER_TEMP/check-runs-after.json" \
+            --workflow-files "$RUNNER_TEMP/workflow-files.txt" \
             --workflow-runs "$RUNNER_TEMP/workflow-runs.json" --workflow-runs-after "$RUNNER_TEMP/workflow-runs-after.json" \
             --jobs-dir "$RUNNER_TEMP/jobs" "${pr_args[@]}" > "$RUNNER_TEMP/source-checks.json"
           echo "revision=$rev" >> "$GITHUB_OUTPUT"

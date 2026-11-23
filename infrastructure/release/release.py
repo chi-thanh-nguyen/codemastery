@@ -318,25 +318,58 @@ def required_contexts(rules):
 
 
 def _untrusted_run(run, revision, workflow_files):
-    """None when the run is a trusted evaluation of the revision, otherwise the reason it is not."""
-    if str((run.get("repository") or {}).get("id")) != REPOSITORY_ID \
-            or str((run.get("head_repository") or {}).get("id")) != REPOSITORY_ID:
-        return "run of another repository"
-    if run.get("head_sha") != revision:
+    """None when the run is a trusted evaluation of the revision; the reason when its record
+    shows positively that it is not one. A record that may be a trusted evaluation but lacks,
+    or garbles, a field the trust decision or the ordering uses refuses the revision: dropping
+    it could let an older success stand in for a newer failure."""
+    def text(key):
+        value = run.get(key)
+        return value if isinstance(value, str) else None
+    head_sha, event, branch, path = text("head_sha"), text("event"), text("head_branch"), text("path")
+    if head_sha is not None and REVISION.match(head_sha) and head_sha != revision:
         return "run of another commit"
-    if run.get("event") not in TRUSTED_EVENTS:
-        return "event %r" % (run.get("event"),)
-    if run.get("head_branch") != "main":
-        return "ref %r" % (run.get("head_branch"),)
-    path = run.get("path")
-    if not isinstance(path, str) or not WORKFLOW_FILE.match(path) or path not in workflow_files:
+    if event is not None and event not in TRUSTED_EVENTS:
+        return "event %r" % (event,)
+    if branch is not None and branch != "main":
+        return "ref %r" % (branch,)
+    if path is not None and (not WORKFLOW_FILE.match(path) or path not in workflow_files):
         return "workflow %r is not a workflow file of the revision" % (path,)
     if path == WORKFLOW_PATH:
         return "release stages are not CI evaluations (the candidate run itself is one of them)"
-    if not _is_int(run.get("run_attempt")) or run["run_attempt"] < 1 or not _is_int(run.get("check_suite_id")) \
-            or not _is_int(run.get("workflow_id")):
-        return "malformed run record"
+    problems = [k for k, v in (("head_sha", head_sha), ("event", event), ("head_branch", branch), ("path", path))
+                if v is None]
+    if str((run.get("repository") or {}).get("id")) != REPOSITORY_ID \
+            or str((run.get("head_repository") or {}).get("id")) != REPOSITORY_ID:
+        problems.append("repository")
+    if not _is_int(run.get("run_attempt")) or run["run_attempt"] < 1:
+        problems.append("run_attempt")
+    problems += [k for k in ("check_suite_id", "workflow_id") if not _is_int(run.get(k))]
+    if not isinstance(run.get("created_at"), str) or not TIMESTAMP.match(run["created_at"]):
+        problems.append("created_at")
+    if not isinstance(run.get("status"), str):
+        problems.append("status")
+    if run.get("conclusion") is not None and not isinstance(run.get("conclusion"), str):
+        problems.append("conclusion")
+    if problems:
+        refuse("workflow run %d may be an evaluation of the revision, but its record is malformed or inconsistent "
+               "(%s); it is never ignored, so the revision is refused" % (run["id"], ", ".join(problems)))
     return None
+
+
+JOB_FIELDS = ("name", "run_id", "run_attempt", "head_sha", "status", "conclusion", "started_at", "completed_at",
+              "check_run_url", "html_url")
+RUN_FIELDS = ("run_attempt", "status", "conclusion", "created_at", "path", "event", "head_sha", "head_branch",
+              "workflow_id", "check_suite_id")
+SNAPSHOT_CUTOFF = ("first reads decide; the revision's workflow runs and the check runs under required names on the "
+                   "revision and on the merged pull request's head were read again afterwards and agreed; the "
+                   "cutoff is the end of the second read of the workflow runs")
+
+
+def _check_run_state(listing, names):
+    """Decision-relevant fields of the check runs under required names, by ID."""
+    return {c["id"]: (c.get("name"), (c.get("app") or {}).get("id"), c.get("head_sha"), c.get("status"),
+                      c.get("conclusion"), (c.get("check_suite") or {}).get("id"), c.get("url"))
+            for c in listing if c.get("name") in names}
 
 
 def _run_jobs(run, jobs, latest_only):
@@ -399,7 +432,9 @@ def _actions_check(context, revision, check_runs, eligible, attempt_jobs, all_jo
                                 "status": j.get("status"), "conclusion": j.get("conclusion"),
                                 "workflow_path": eligible[hid]["path"], "url": j["html_url"]})
     history.sort(key=lambda h: (h["run_id"], h["run_attempt"], h["job_id"]))
-    reused = bool(job.get("started_at") and run.get("run_started_at") and job["started_at"] < run["run_started_at"])
+    reused = bool(isinstance(job.get("started_at"), str) and TIMESTAMP.match(job["started_at"])
+                  and isinstance(run.get("run_started_at"), str) and TIMESTAMP.match(run["run_started_at"])
+                  and job["started_at"] < run["run_started_at"])
     return {"context": context, "app_id": ACTIONS_APP_ID, "provenance": "github-actions-job", "evidence": "revision",
             "source_sha": revision, "evaluated_sha": revision,
             "workflow": {"path": path, "id": run["workflow_id"], "name": run.get("name"), "event": run["event"],
@@ -433,7 +468,8 @@ def _app_check(context, app, sha, pool, evidence):
             "url": newest.get("html_url"), "superseded": history, "evidence": evidence}
 
 
-def evaluate_checks(revision, rules, check_runs, actions, pr=None, pr_runs=None):
+def evaluate_checks(revision, rules, check_runs, actions, pr=None, pr_runs=None, check_runs_after=None,
+                    pr_runs_after=None):
     """ADR015 D2 (A2): the latest valid evaluation of every required check of the revision passed.
 
     rules: GET /repos/{o}/{r}/rules/branches/main. check_runs: every check run of the
@@ -452,6 +488,11 @@ def evaluate_checks(revision, rules, check_runs, actions, pr=None, pr_runs=None)
     that app has no run of the context on the revision, the head of the merged pull
     request whose tree equals the revision's (checked by the caller) may stand in.
     Earlier results of the same evaluation are kept under "superseded".
+
+    check_runs_after and pr_runs_after are the revision's and the merged pull request
+    head's check-run listings read again, after the first reads and before the second
+    read of the workflow runs: any difference under a required name refuses the
+    revision (SNAPSHOT_CUTOFF).
     """
     if not isinstance(revision, str) or not REVISION.match(revision):
         refuse("the revision must be a full commit SHA")
@@ -462,10 +503,17 @@ def evaluate_checks(revision, rules, check_runs, actions, pr=None, pr_runs=None)
     runs, after = actions.get("runs") or [], actions.get("runs_after")
 
     def state(listing):
-        return {r.get("id"): (r.get("run_attempt"), r.get("status"), r.get("conclusion")) for r in listing}
+        return {r.get("id"): tuple(r.get(k) for k in RUN_FIELDS) for r in listing}
     if not isinstance(after, list) or state(runs) != state(after):
         refuse("the revision's workflow runs changed while the evidence was read (a run or re-run started or "
                "finished); dispatch again")
+    names = {context for context, _ in required}
+    if not isinstance(check_runs_after, list) or _check_run_state(check_runs, names) != _check_run_state(check_runs_after, names):
+        refuse("the revision's check runs under required names changed while the evidence was read; dispatch again")
+    if pr is not None and (not isinstance(pr_runs, list) or not isinstance(pr_runs_after, list)
+                           or _check_run_state(pr_runs, names) != _check_run_state(pr_runs_after, names)):
+        refuse("the check runs of merged pull request #%s's head changed while the evidence was read (for example a "
+               "newer CodeQL analysis started or concluded); dispatch again" % pr.get("number"))
     files = set(actions.get("workflow_files") or [])
     eligible, untrusted = {}, {}
     for run in runs:
@@ -477,8 +525,9 @@ def evaluate_checks(revision, rules, check_runs, actions, pr=None, pr_runs=None)
     attempt_jobs = {rid: _run_jobs(r, (actions.get("attempt_jobs") or {}).get(rid), True) for rid, r in eligible.items()}
     all_jobs = {rid: _run_jobs(r, (actions.get("all_jobs") or {}).get(rid), False) for rid, r in eligible.items()}
     for rid in eligible:
-        newest = {j["id"] for j in attempt_jobs[rid]}
-        if newest != {j["id"] for j in all_jobs[rid] if j["run_attempt"] == eligible[rid]["run_attempt"]}:
+        def records(jobs):
+            return {j["id"]: tuple(j.get(k) for k in JOB_FIELDS) for j in jobs}
+        if records(attempt_jobs[rid]) != records(j for j in all_jobs[rid] if j["run_attempt"] == eligible[rid]["run_attempt"]):
             refuse("GitHub's job records of workflow run %d disagree between its attempt and run listings" % rid)
     genuine = {j["id"] for jobs in all_jobs.values() for j in jobs}
 
@@ -517,7 +566,8 @@ def evaluate_checks(revision, rules, check_runs, actions, pr=None, pr_runs=None)
             reason = "check run of app %s, which the rule does not name" % (app,)
         ignored.append({"check_run_id": c["id"], "name": c["name"], "app_id": app, "status": c.get("status"),
                         "conclusion": c.get("conclusion"), "reason": reason})
-    return {"schema": SOURCE_CHECKS_SCHEMA, "policy": SOURCE_CHECKS_POLICY, "repository": REPOSITORY,
+    return {"schema": SOURCE_CHECKS_SCHEMA, "policy": SOURCE_CHECKS_POLICY, "snapshot": SNAPSHOT_CUTOFF,
+            "repository": REPOSITORY,
             "repository_id": REPOSITORY_ID, "source_revision": revision, "required_checks": results,
             "ignored_check_runs": ignored,
             "untrusted_workflow_runs": [{"run_id": rid, "reason": why} for rid, why in sorted(untrusted.items())]}
@@ -1239,7 +1289,7 @@ def cmd_evaluate_checks(a):
         refuse("--revision must be a full commit SHA")
     rules = load_json(a.rules, "branch rules")
     pr = merged_pull_request(load_json(a.pulls, "pull requests"), a.revision) if a.pulls else None
-    pr_runs = None
+    pr_runs = pr_runs_after = None
     if pr is not None:
         if not a.pr_check_runs or (pr.get("head") or {}).get("sha") != a.pr_head or not REVISION.match(a.pr_head or ""):
             refuse("the merged pull request's head check runs are required and must match its head")
@@ -1248,6 +1298,10 @@ def cmd_evaluate_checks(a):
         if not (a.revision_tree and a.pr_head_tree and HEX40.match(a.revision_tree) and a.pr_head_tree == a.revision_tree):
             refuse("the merged pull request's head tree differs from the revision's tree")
         pr_runs = api_items(load_json(a.pr_check_runs, "pull request check runs"), "check_runs", "pull request check runs")
+        if not a.pr_check_runs_after:
+            refuse("the merged pull request's head check runs must be read again (--pr-check-runs-after)")
+        pr_runs_after = api_items(load_json(a.pr_check_runs_after, "pull request check runs (re-read)"), "check_runs",
+                                  "pull request check runs (re-read)")
     runs = api_items(load_json(a.workflow_runs, "workflow runs"), "workflow_runs", "workflow runs")
     after = api_items(load_json(a.workflow_runs_after, "workflow runs (re-read)"), "workflow_runs", "workflow runs (re-read)")
     actions = {"workflow_files": _workflow_files(a.workflow_files), "runs": runs, "runs_after": after,
@@ -1256,7 +1310,8 @@ def cmd_evaluate_checks(a):
         actions["attempt_jobs"][run["id"]] = _jobs_file(a.jobs_dir, "%d.attempt.json" % run["id"], "jobs of run %d" % run["id"])
         actions["all_jobs"][run["id"]] = _jobs_file(a.jobs_dir, "%d.all.json" % run["id"], "jobs of run %d" % run["id"])
     check_runs = api_items(load_json(a.check_runs, "check runs"), "check_runs", "check runs")
-    result = evaluate_checks(a.revision, rules, check_runs, actions, pr, pr_runs)
+    check_runs_after = api_items(load_json(a.check_runs_after, "check runs (re-read)"), "check_runs", "check runs (re-read)")
+    result = evaluate_checks(a.revision, rules, check_runs, actions, pr, pr_runs, check_runs_after, pr_runs_after)
     for entry in result["required_checks"]:
         if "pull_request" in entry:
             entry["pull_request"].update(head_tree=a.pr_head_tree, revision_tree=a.revision_tree)
@@ -1754,13 +1809,15 @@ def main(argv=None):
     s.add_argument("--revision", required=True)
     s.add_argument("--workflow-files", required=True, help="workflow file paths of the revision, one per line")
     s.add_argument("--workflow-runs", required=True, help="slurped pages of GET .../actions/runs?head_sha=REV")
-    s.add_argument("--workflow-runs-after", required=True, help="the same listing, read again after everything else")
+    s.add_argument("--check-runs-after", required=True, help="the revision's check runs, read again after the first reads")
+    s.add_argument("--workflow-runs-after", required=True, help="the workflow runs, read again after everything else")
     s.add_argument("--jobs-dir", required=True,
                    help="RUN.attempt.json (GET .../runs/RUN/attempts/N/jobs, N its run_attempt) and RUN.all.json "
                         "(GET .../runs/RUN/jobs?filter=all), slurped pages, for each run")
     s.add_argument("--pulls", help="GET .../commits/REV/pulls")
     s.add_argument("--pr-head", help="head SHA of the merged pull request")
     s.add_argument("--pr-check-runs", help="slurped check-run pages of that head")
+    s.add_argument("--pr-check-runs-after", help="the same listing, read again after the first reads")
     s.add_argument("--revision-tree", help="tree SHA of the revision")
     s.add_argument("--pr-head-tree", help="tree SHA of the merged pull request's head")
     s.set_defaults(func=cmd_evaluate_checks)

@@ -206,7 +206,7 @@ class SourceChecks:
     def check_run(self, job):
         rid = job["run_id"]
         return {"id": job["id"], "name": job["name"], "app": {"id": 15368, "slug": "github-actions"}, "head_sha": job["head_sha"],
-                "status": job["status"], "conclusion": job["conclusion"], "check_suite": {"id": self.runs[rid]["check_suite_id"]},
+                "status": job["status"], "conclusion": job["conclusion"], "check_suite": {"id": self.runs[rid].get("check_suite_id")},
                 "url": job["check_run_url"], "html_url": job["html_url"], "details_url": job["html_url"],
                 "started_at": job["started_at"]}
 
@@ -238,11 +238,16 @@ class SourceChecks:
     def check_runs(self):
         return [self.check_run(j) for j in self.jobs] + list(self.extra)
 
-    def evaluate(self, rules=None, check_runs=None, actions=None, pr="default", pr_runs=None):
-        return release.evaluate_checks(REV, self.RULES if rules is None else rules,
-                                       self.check_runs() if check_runs is None else check_runs,
+    def evaluate(self, rules=None, check_runs=None, actions=None, pr="default", pr_runs=None, check_runs_after="same",
+                 pr_runs_after="same"):
+        """check_runs_after / pr_runs_after: the second reads; by default identical to the first."""
+        check_runs = self.check_runs() if check_runs is None else check_runs
+        pr_runs = self.pr_runs if pr_runs is None else pr_runs
+        return release.evaluate_checks(REV, self.RULES if rules is None else rules, check_runs,
                                        self.actions() if actions is None else actions,
-                                       self.pr() if pr == "default" else pr, self.pr_runs if pr_runs is None else pr_runs)
+                                       self.pr() if pr == "default" else pr, pr_runs,
+                                       copy.deepcopy(check_runs) if check_runs_after == "same" else check_runs_after,
+                                       copy.deepcopy(pr_runs) if pr_runs_after == "same" else pr_runs_after)
 
     def by_context(self, **kw):
         return {c["context"]: c for c in self.evaluate(**kw)["required_checks"]}
@@ -426,7 +431,54 @@ class CheckTests(unittest.TestCase):
             w.runs[200].update(change)
             with self.subTest(label):
                 result = self.refused(w)
-                self.assertTrue("has no job in a trusted workflow run" in result or "does not belong" in result, result)
+                self.assertTrue("has no job in a trusted workflow run" in result or "does not belong" in result
+                                or "malformed" in result, result)
+
+    def test_malformed_newer_run_never_lets_an_older_success_decide(self):
+        # Review F1: a newer failed run of the producing workflow whose record lacks
+        # (or garbles) metadata must refuse the revision, not drop out of the selection.
+        cases = {"missing workflow_id": ("workflow_id", None), "missing check_suite_id": ("check_suite_id", None),
+                 "missing created_at": ("created_at", None), "malformed created_at": ("created_at", "yesterday"),
+                 "string workflow_id": ("workflow_id", "214"), "boolean check_suite_id": ("check_suite_id", True),
+                 "string attempt": ("run_attempt", "1"), "missing status": ("status", None),
+                 "missing path": ("path", None)}
+        for label, (field, value) in cases.items():
+            w = SourceChecks()
+            w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                      event="workflow_dispatch", created="2026-11-23T17:00:00Z")
+            w.runs[201]["conclusion"] = "failure"
+            if value is None:
+                del w.runs[201][field]
+            else:
+                w.runs[201][field] = value
+            with self.subTest(label):
+                self.refused(w, "malformed")
+
+    def test_malformed_record_of_an_unrelated_run_is_still_ignored(self):
+        # A run that is positively outside the trust scope stays a recorded, ignored run
+        # even when its record is incomplete.
+        for change in ({"event": "pull_request"}, {"head_branch": "feature/x"},
+                       {"path": "dynamic/github-code-scanning/codeql"}, {"head_sha": "c" * 40}):
+            w = SourceChecks()
+            w.add_run(300, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                      created="2026-11-23T17:00:00Z")
+            w.runs[300].update(change)
+            for field in ("workflow_id", "check_suite_id", "created_at"):
+                del w.runs[300][field]
+            with self.subTest(change=change):
+                self.assertEqual([r["run_id"] for r in w.evaluate()["untrusted_workflow_runs"]], [300])
+
+    def test_conflicting_job_records_with_the_same_id_are_refused(self):
+        # The attempt listing and the all-attempt listing must agree on each job's record,
+        # not only on the set of IDs.
+        for field, value in (("conclusion", "failure"), ("status", "in_progress"), ("name", "VM B"),
+                             ("head_sha", "c" * 40)):
+            w = SourceChecks()
+            actions = w.actions()
+            actions["all_jobs"] = copy.deepcopy(actions["all_jobs"])
+            [j for j in actions["all_jobs"][200] if j["name"] == "VM A"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(release.Refused):
+                w.evaluate(actions=actions)
 
     def test_untrusted_runs_are_recorded(self):
         w = SourceChecks()
@@ -515,6 +567,14 @@ class CheckTests(unittest.TestCase):
         actions = w.actions()
         actions["runs_after"].append(dict(actions["runs"][0], id=555))   # a new run appeared
         self.refused(w, "changed while the evidence was read", actions=actions)
+        # Any decision-relevant field of a run record differing between the two reads.
+        for field, value in (("conclusion", "failure"), ("created_at", "2026-11-23T18:00:00Z"), ("path", None),
+                             ("event", "workflow_dispatch"), ("head_sha", "c" * 40), ("head_branch", "x"),
+                             ("workflow_id", 1), ("check_suite_id", 1)):
+            actions = w.actions()
+            actions["runs_after"][1][field] = value
+            with self.subTest(field=field):
+                self.refused(w, "changed while the evidence was read", actions=actions)
 
     def test_rules_that_cannot_be_authenticated(self):
         w = SourceChecks()
@@ -547,6 +607,38 @@ class CheckTests(unittest.TestCase):
         w = SourceChecks()
         self.refused(w, "no check run", pr_runs=[w.app_run("CodeQL", "success", sha=SourceChecks.HEAD, app=15368)])
 
+    def test_codeql_evaluation_appearing_between_the_reads_is_refused(self):
+        # Review F2: the fallback's PR-head listing is read again before the cutoff; a newer
+        # pending or failed analysis seen there refuses, whatever the first read showed.
+        for label, conclusion, status in (("newer pending", None, "in_progress"), ("newer queued", None, "queued"),
+                                          ("newer failed", "failure", "completed"),
+                                          ("newer cancelled", "cancelled", "completed")):
+            w = SourceChecks()
+            later = w.pr_runs + [w.app_run("CodeQL", conclusion, sha=SourceChecks.HEAD, status=status)]
+            with self.subTest(label):
+                self.refused(w, "merged pull request #274's head changed while the evidence was read", pr_runs_after=later)
+        # The decisive run itself changing state, or disappearing, between the reads.
+        w = SourceChecks()
+        changed = copy.deepcopy(w.pr_runs)
+        changed[0]["conclusion"] = "failure"
+        self.refused(w, "changed while the evidence was read", pr_runs_after=changed)
+        self.refused(w, "changed while the evidence was read", pr_runs_after=[])
+        self.refused(w, "changed while the evidence was read", pr_runs_after=None)
+        # Unrelated check runs on the head may change; required names may not.
+        w = SourceChecks()
+        self.assertEqual(w.evaluate(pr_runs_after=w.pr_runs + [w.app_run("Analyze (python)", None, sha=SourceChecks.HEAD,
+                                                                        status="in_progress", app=15368)])["snapshot"],
+                         release.SNAPSHOT_CUTOFF)
+
+    def test_check_runs_of_the_revision_changing_between_the_reads_are_refused(self):
+        w = SourceChecks()
+        w.extra.append(w.app_run("CodeQL", "success"))                   # CodeQL on the revision, no fallback
+        runs = w.check_runs()
+        for later in (runs + [w.app_run("CodeQL", None, status="in_progress")], runs + [w.app_run("CodeQL", "failure")],
+                      runs + [w.forged("VM A", "failure")], runs[1:], None):
+            with self.subTest(n=None if later is None else len(later)):
+                self.refused(w, "check runs under required names changed", check_runs=runs, check_runs_after=later)
+
     def test_merged_pull_request(self):
         pr = SourceChecks().pr()
         self.assertIs(release.merged_pull_request([pr, dict(pr, merge_commit_sha="c" * 40)], REV), pr)
@@ -573,7 +665,8 @@ class CheckTests(unittest.TestCase):
         w.extra.append(w.forged("VM B", "success"))
         actions = w.actions()
         with tempfile.TemporaryDirectory() as d:
-            p = {n: os.path.join(d, n) for n in ("rules", "runs", "after", "files", "checks", "pulls", "pr_runs")}
+            p = {n: os.path.join(d, n) for n in ("rules", "runs", "after", "files", "checks", "checks_after", "pulls",
+                                                 "pr_runs", "pr_runs_after")}
             jobs = os.path.join(d, "jobs")
             os.mkdir(jobs)
             dump(w.RULES, p["rules"])
@@ -583,12 +676,15 @@ class CheckTests(unittest.TestCase):
             dump(pages("check_runs", w.check_runs()), p["checks"])
             dump([w.pr()], p["pulls"])
             dump(pages("check_runs", w.pr_runs), p["pr_runs"])
+            dump(pages("check_runs", w.check_runs()), p["checks_after"])
+            dump(pages("check_runs", w.pr_runs), p["pr_runs_after"])
             for rid in w.runs:
                 dump(pages("jobs", actions["attempt_jobs"][rid]), os.path.join(jobs, "%d.attempt.json" % rid))
                 dump(pages("jobs", actions["all_jobs"][rid]), os.path.join(jobs, "%d.all.json" % rid))
             base = ["evaluate-checks", "--revision", REV, "--rules", p["rules"], "--check-runs", p["checks"],
                     "--workflow-files", p["files"], "--workflow-runs", p["runs"], "--workflow-runs-after", p["after"],
-                    "--jobs-dir", jobs, "--pulls", p["pulls"], "--pr-head", SourceChecks.HEAD, "--pr-check-runs", p["pr_runs"]]
+                    "--jobs-dir", jobs, "--check-runs-after", p["checks_after"], "--pulls", p["pulls"],
+                    "--pr-head", SourceChecks.HEAD, "--pr-check-runs", p["pr_runs"], "--pr-check-runs-after", p["pr_runs_after"]]
             out = io.StringIO()
             sys_stdout, sys.stdout = sys.stdout, out
             try:
@@ -605,6 +701,15 @@ class CheckTests(unittest.TestCase):
             # CodeQL fallback with a different tree, or without trees, is refused.
             self.assertEqual(release.main(base + ["--revision-tree", "1" * 40, "--pr-head-tree", "2" * 40]), 3)
             self.assertEqual(release.main(base), 3)
+            trees = ["--revision-tree", "1" * 40, "--pr-head-tree", "1" * 40]
+            # A newer CodeQL analysis on the head between the two reads refuses (review F2).
+            dump(pages("check_runs", w.pr_runs + [w.app_run("CodeQL", None, sha=SourceChecks.HEAD, status="queued")]),
+                 p["pr_runs_after"])
+            self.assertEqual(release.main(base + trees), 3)
+            no_reread = [x for x in base if x not in ("--pr-check-runs-after", p["pr_runs_after"])]
+            self.assertEqual(release.main(no_reread + trees), 3)
+            dump(pages("check_runs", w.pr_runs), p["pr_runs_after"])
+            self.assertEqual(release.main(base + trees), 0)
             # A missing job file is missing evidence.
             os.remove(os.path.join(jobs, "200.attempt.json"))
             self.assertEqual(release.main(base + ["--revision-tree", "1" * 40, "--pr-head-tree", "1" * 40]), 3)
