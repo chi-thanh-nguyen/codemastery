@@ -33,6 +33,20 @@ LABEL org.opencontainers.image.title="CodeMastery PostgreSQL" \
 # the index no longer offers exactly this version.
 RUN apk add --no-cache su-exec=0.3-r0
 
+# Alpine v3.24/main security updates of the base's shared libraries, raised to
+# exactly the reviewed versions (23 November 2026: krb5-libs 1.22.3-r0,
+# libxml2 2.13.9-r3 and libxslt 1.1.43-r4 for 20 HIGH findings; libcrypto3 and
+# libssl3 3.5.9-r1 and zlib 1.4-r0 for MEDIUM/LOW findings; alpine-release
+# 3.24.4-r0 is the index's current release record). apk verifies them against
+# the signing keys in the pinned base. These are same-ABI library updates: the
+# PostgreSQL 17.11 binaries, musl, ICU and the data directory are unchanged.
+# Unlike an unbounded `apk upgrade`, the build fails if the index no longer
+# offers one of these versions; re-scan and update the list instead
+# (docs/deployment.md, "DP01 release image security remediation").
+RUN apk add --no-cache \
+        alpine-release=3.24.4-r0 krb5-libs=1.22.3-r0 libcrypto3=3.5.9-r1 \
+        libssl3=3.5.9-r1 libxml2=2.13.9-r3 libxslt=1.1.43-r4 zlib=1.4-r0
+
 RUN rm /usr/local/bin/gosu
 
 RUN ln -s "$(command -v su-exec)" /usr/local/bin/gosu

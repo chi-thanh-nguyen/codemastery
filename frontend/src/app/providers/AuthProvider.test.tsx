@@ -11,7 +11,8 @@ import type { AuthContextValue } from './AuthProvider';
 import { useAuth } from '../../features/auth/hooks/useAuth';
 import { LoginPage } from '../../features/auth/pages/LoginPage';
 import { RegisterPage } from '../../features/auth/pages/RegisterPage';
-import { registrationInput, canonicalEmail, decodeLoginResponse } from '../../features/auth/types/authTypes';
+import { registrationInput, canonicalEmail, decodeLoginResponse, passwordResetCompletedMessage, passwordResetRequestedMessage } from '../../features/auth/types/authTypes';
+import { confirmPasswordReset, requestPasswordReset } from '../../features/auth/api/authApi';
 import type { UserRole } from '../../features/auth/types/authTypes';
 import { request } from '../../shared/api/httpClient';
 import { appTheme } from '../theme/theme';
@@ -284,6 +285,91 @@ describe('ADR014 hybrid refresh-session lifecycle', () => {
     it('a document opened at the design preview does not restore', async () => {
         await mountHybrid(false, false); await settle();
         expect(fetcher).not.toHaveBeenCalled(); expect(auth.restoring).toBe(false);
+    });
+    // ---- A13 (DESIGN S26, ADR014 §7, CT14): a document opened at /preview stays isolated. ----
+    function previewChannels() {
+        const list: { onmessage: ((event: MessageEvent) => void) | null; posted: unknown[] }[] = [];
+        vi.stubGlobal('BroadcastChannel', class { onmessage: ((event: MessageEvent) => void) | null = null; posted: unknown[] = []; constructor() { list.push(this); } postMessage(value: unknown) { this.posted.push(value); } close() { /* test double */ } });
+        return list;
+    }
+    const tell = async (tabs: { onmessage: ((event: MessageEvent) => void) | null }[], type: string) => {
+        for (const tab of tabs) await act(async () => tab.onmessage?.({ data: { type } } as MessageEvent));
+        await settle();
+    };
+    it('A13: another tab signing in, repeatedly, sends nothing from a preview document and installs no session', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(false, false); await settle();
+        const generation = auth.generation;
+        for (let i = 0; i < 3; i++) await tell(tabs, 'signed-in');
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(auth.user).toBeNull(); expect(auth.restoring).toBe(false); expect(auth.generation).toBe(generation);
+        expect(localStorage.length + sessionStorage.length).toBe(0);
+    });
+    it('A13: another tab signing out sends nothing and changes nothing in a preview document', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(false, false); await settle();
+        const generation = auth.generation;
+        await tell(tabs, 'signed-out'); await tell(tabs, 'signed-in'); await tell(tabs, 'signed-out');
+        expect(fetcher).not.toHaveBeenCalled(); expect(auth.generation).toBe(generation); expect(auth.restoring).toBe(false);
+        expect(tabs.flatMap((tab) => tab.posted)).toEqual([]);
+    });
+    it('A13: StrictMode setup and cleanup do not bypass the isolation', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(true, false); await settle();
+        expect(tabs.length).toBeGreaterThanOrEqual(2); // the StrictMode re-run created a second channel
+        await tell(tabs, 'signed-in');
+        expect(fetcher).not.toHaveBeenCalled(); expect(auth.user).toBeNull();
+    });
+    it('A13: focus, page show, visibility changes and timers never restore in a preview document', async () => {
+        previewChannels();
+        await mountHybrid(false, false); await settle();
+        await act(async () => { window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('pageshow')); document.dispatchEvent(new Event('visibilitychange')); });
+        await act(async () => { vi.advanceTimersByTime(20 * 60_000); }); await settle();
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('A13: a later change of restoreOnLoad cannot start a restore', async () => {
+        previewChannels();
+        await mountHybrid(false, false); await settle();
+        await mountHybrid(false, true); await settle();
+        expect(fetcher).not.toHaveBeenCalled(); expect(auth.restoring).toBe(false);
+    });
+    it('A13: a failed explicit sign-in in a preview document does not restore', async () => {
+        previewChannels();
+        await mountHybrid(false, false); await settle();
+        fetcher.mockResolvedValueOnce(json(null, 401));
+        await act(async () => { await auth.login(payload).catch(() => undefined); }); await settle();
+        expect(fetcher.mock.calls.map(path)).toEqual(['/api/auth/login']);
+        expect(auth.user).toBeNull();
+    });
+    it('A13: an explicit sign-in in the document ends the isolation; the normal lifecycle follows', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(false, false); await settle();
+        await signIn('Person A');
+        expect(tabs.at(-1)!.posted).toContainEqual({ type: 'signed-in' });
+        fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+        await tell(tabs.slice(-1), 'signed-in');
+        expect(calls('/api/auth/refresh')).toHaveLength(1); expect(auth.user?.displayName).toBe('Person B');
+        await tell(tabs.slice(-1), 'signed-out');
+        expect(auth.user).toBeNull(); expect(calls('/api/auth/refresh')).toHaveLength(1);
+    });
+    it('A13: a sign-out in another tab still cancels a sign-in pending in a preview document', async () => {
+        const tabs = previewChannels();
+        await mountHybrid(false, false); await settle();
+        const work = deferred(); fetcher.mockReturnValueOnce(work.promise);
+        let outcome: unknown;
+        await act(async () => { void auth.login(payload).then(() => 'installed', (error: unknown) => error).then((value) => { outcome = value; }); });
+        await tell(tabs.slice(-1), 'signed-out');
+        await act(async () => work.resolve(json(session('Late')))); await settle();
+        expect(auth.user).toBeNull(); expect(outcome).not.toBe('installed');
+    });
+    it('normal documents still adopt another tab\'s sign-in and follow its sign-out', async () => {
+        const tabs = previewChannels();
+        fetcher.mockResolvedValueOnce(json(null, 401)); await mountHybrid(); await settle();
+        fetcher.mockResolvedValueOnce(json(session('Person B', sidB)));
+        await tell(tabs.slice(-1), 'signed-in');
+        expect(auth.user?.displayName).toBe('Person B'); expect(calls('/api/auth/refresh')).toHaveLength(2);
+        await tell(tabs.slice(-1), 'signed-out');
+        expect(auth.user).toBeNull(); expect(calls('/api/auth/refresh')).toHaveLength(2);
     });
     it('renews before expiry in place: same generation, new bearer', async () => {
         fetcher.mockResolvedValueOnce(json(session())); await mountHybrid(); await settle();
@@ -647,5 +733,119 @@ describe('ADR014 hybrid refresh-session lifecycle', () => {
         await settle();
         expect(fetcher.mock.calls.filter((call) => (call[1] as RequestInit).method === 'PUT')).toHaveLength(1);
         expect(auth.user).toBeNull();
+    });
+});
+describe('CT02 password-reset REST client (FE06 part 1)', () => {
+    const requested = passwordResetRequestedMessage, completed = passwordResetCompletedMessage;
+    const requestPath = '/api/auth/password-reset-requests', resetPath = '/api/auth/password-resets';
+    const token = `${'A'.repeat(42)}g`, exact = '  exact new password  ';
+    const problem = (status: number, title: string, instance: string) => json({
+        type: 'about:blank', title, status, detail: 'The request could not be completed.', instance,
+    }, status, 'application/problem+json');
+    const sent = (index = 0) => ({ url: fetcher.mock.calls[index][0] as string, init: fetcher.mock.calls[index][1] as RequestInit & { headers: Headers } });
+    const thrown = (run: () => unknown) => { try { run(); } catch (error) { return error; } throw new Error('Expected a synchronous rejection.'); };
+    it('requests a reset with the canonical CT01 email and returns the approved acknowledgement', async () => {
+        fetcher.mockResolvedValueOnce(json({ message: requested }, 202));
+        const result = await requestPasswordReset({ email: ' \tLEARNER+Tag@EXAMPLE.COM\n' });
+        expect(result).toEqual({ message: requested }); expect(Object.isFrozen(result)).toBe(true);
+        const { url, init } = sent();
+        expect(url).toBe(`http://localhost:8080${requestPath}`);
+        expect(init).toMatchObject({ method: 'POST', credentials: 'omit', redirect: 'error' });
+        expect(JSON.parse(init.body as string)).toEqual({ email: 'learner+tag@example.com' });
+        expect(init.headers.get('Content-Type')).toBe('application/json'); expect(init.headers.has('Authorization')).toBe(false);
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+    it.each(['\u212a@example.com', 'a@example.com\u00a0', '\ufeffa@example.com', '\u00e9@example.com', 'not-an-email', '', '   '])('rejects reset-request email %# before transport', (email) => {
+        expect(thrown(() => requestPasswordReset({ email }))).toMatchObject({ kind: 'validation', fields: { email: 'Enter a valid ASCII email address.' } });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('confirms with the exact capability and untrimmed password in the POST body only', async () => {
+        fetcher.mockResolvedValueOnce(json({ message: completed }));
+        const result = await confirmPasswordReset({ token, password: exact });
+        expect(result).toEqual({ message: completed }); expect(Object.isFrozen(result)).toBe(true);
+        const { url, init } = sent();
+        expect(url).toBe(`http://localhost:8080${resetPath}`); expect(url).not.toContain(token);
+        expect(init).toMatchObject({ method: 'POST', credentials: 'omit', redirect: 'error' });
+        expect(JSON.parse(init.body as string)).toEqual({ token, password: exact });
+        expect(init.headers.has('Authorization')).toBe(false);
+        expect(localStorage.length + sessionStorage.length).toBe(0);
+    });
+    it.each([
+        ['a'.repeat(14), false], ['a'.repeat(15), true], ['😀'.repeat(14) + 'a'.repeat(16), true], ['😀'.repeat(14) + 'a'.repeat(17), false],
+    ])('applies the CT01 password predicate %# before transport', async (password, valid) => {
+        if (valid) {
+            fetcher.mockResolvedValueOnce(json({ message: completed }));
+            await confirmPasswordReset({ token, password }); expect(JSON.parse(sent().init.body as string).password).toBe(password);
+        } else {
+            expect(thrown(() => confirmPasswordReset({ token, password }))).toMatchObject({ kind: 'validation', fields: { password: 'Use at least 15 Unicode characters and at most 72 UTF-8 bytes.' } });
+            expect(fetcher).not.toHaveBeenCalled();
+        }
+    });
+    it.each([[{}], [null], [[]], ['text'], [{ message: 1 }], [{ message: 'Something else.' }], [{ message: requested, token: 'x' }], [{ message: completed }]])(
+        'rejects acknowledgement body %# as a protocol error', async (body) => {
+            fetcher.mockResolvedValueOnce(json(body, 202));
+            await expect(requestPasswordReset({ email: 'a@example.com' })).rejects.toMatchObject({ kind: 'protocol' });
+        });
+    it.each([[{}], [null], [{ message: 'Signed in.' }], [{ message: completed, accessToken: 'x' }], [{ message: requested }]])(
+        'rejects completion body %# as a protocol error', async (body) => {
+            fetcher.mockResolvedValueOnce(json(body));
+            await expect(confirmPasswordReset({ token, password: exact })).rejects.toMatchObject({ kind: 'protocol' });
+        });
+    it.each([
+        ['request', 200, 'application/json'], ['request', 202, 'text/plain'], ['confirm', 202, 'application/json'], ['confirm', 200, 'application/problem+json'],
+    ] as const)('rejects an unexpected %s success (%i %s)', async (operation, status, media) => {
+        fetcher.mockResolvedValueOnce(json({ message: operation === 'request' ? requested : completed }, status, media));
+        const call = operation === 'request' ? requestPasswordReset({ email: 'a@example.com' }) : confirmPasswordReset({ token, password: exact });
+        await expect(call).rejects.toMatchObject({ kind: 'protocol' });
+    });
+    it('rejects malformed success JSON', async () => {
+        fetcher.mockResolvedValueOnce(new Response('{"message":', { status: 202, headers: { 'Content-Type': 'application/json' } }));
+        await expect(requestPasswordReset({ email: 'a@example.com' })).rejects.toMatchObject({ kind: 'protocol' });
+    });
+    // AU07 answers every 400 of these operations with a field-free problem (BusinessRuleException): the capability
+    // failure carries the ADR006 §9.2 detail, a refused password or closed-syntax failure the safe default detail.
+    it.each([
+        ['an invalid, used, replaced or expired capability', resetPath, 'Reset link is invalid or expired.'],
+        ['a refused password or malformed confirmation', resetPath, 'The request is invalid.'],
+        ['a malformed reset request', requestPath, 'The request is invalid.'],
+    ])('maps the producer 400 for %s to a field-free error without server text', async (_case, path, detail) => {
+        fetcher.mockResolvedValueOnce(json({ type: 'about:blank', title: 'Bad Request', status: 400, detail, instance: path }, 400, 'application/problem+json'));
+        const call = path === resetPath ? confirmPasswordReset({ token, password: exact }) : requestPasswordReset({ email: 'a@example.com' });
+        const error = await call.catch((failure) => failure);
+        expect(error).toMatchObject({ kind: 'http', status: 400, message: 'Please check the supplied information.' });
+        expect(error.fields).toEqual({}); expect(error.problem).toMatchObject({ detail: 'Please check the supplied information.', errors: [] });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+    it.each([[415, 'Unsupported Media Type'], [500, 'Internal Server Error']])('maps %i without retrying', async (status, title) => {
+        fetcher.mockResolvedValueOnce(problem(status, title, requestPath));
+        await expect(requestPasswordReset({ email: 'a@example.com' })).rejects.toMatchObject({ kind: 'http', status });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+    it('maps a network failure without retrying', async () => {
+        fetcher.mockRejectedValueOnce(new Error('private'));
+        await expect(confirmPasswordReset({ token, password: exact })).rejects.toMatchObject({ kind: 'network' });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+    it('honours abort and isCurrent before transport and after the response', async () => {
+        const aborted = new AbortController(); aborted.abort();
+        await expect(requestPasswordReset({ email: 'a@example.com' }, aborted.signal)).rejects.toMatchObject({ kind: 'cancelled' });
+        await expect(confirmPasswordReset({ token, password: exact }, undefined, () => false)).rejects.toMatchObject({ kind: 'cancelled' });
+        expect(fetcher).not.toHaveBeenCalled();
+        const late = new AbortController(), first = deferred(); fetcher.mockReturnValueOnce(first.promise);
+        const pendingAbort = requestPasswordReset({ email: 'a@example.com' }, late.signal).catch((error) => error);
+        late.abort(); first.resolve(json({ message: requested }, 202));
+        expect(await pendingAbort).toMatchObject({ kind: 'cancelled' });
+        let current = true; const second = deferred(); fetcher.mockReturnValueOnce(second.promise);
+        const pendingStale = confirmPasswordReset({ token, password: exact }, undefined, () => current).catch((error) => error);
+        current = false; second.resolve(json({ message: completed }));
+        expect(await pendingStale).toMatchObject({ kind: 'cancelled' });
+    });
+    it('neither sends nor ends the current session', async () => {
+        await mount(); await signIn(); const generation = auth.generation;
+        fetcher.mockResolvedValueOnce(json({ message: completed }));
+        await act(async () => { await confirmPasswordReset({ token, password: exact }); });
+        const [url, init] = fetcher.mock.calls.at(-1)! as [string, RequestInit & { headers: Headers }];
+        expect(url).toBe(`http://localhost:8080${resetPath}`); expect(init.credentials).toBe('omit'); expect(init.headers.has('Authorization')).toBe(false);
+        expect(auth.isAuthenticated).toBe(true); expect(auth.generation).toBe(generation);
     });
 });

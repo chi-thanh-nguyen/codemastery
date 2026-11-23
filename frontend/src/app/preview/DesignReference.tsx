@@ -14,7 +14,7 @@ import { EmptyView, ErrorView, LoadingView } from '../../shared/components/Statu
 import { ConfirmDialog } from '../../shared/components/ConfirmDialog';
 import { CodeBlock } from '../../shared/components/CodeBlock';
 import { PresentationIcon } from '../../shared/components/PresentationIcon';
-import { color, radius, tones } from '../theme/theme';
+import { radius, roles, themeRoles } from '../theme/theme';
 import { usePreview } from './previewKit';
 
 export interface DirectoryEntry { id: string; title: string; spec: string; status: 'Live' | 'Preview' | 'Proposed'; note: string; href?: string; onOpen?: () => void }
@@ -22,10 +22,26 @@ export interface DirectoryGroup { title: string; description: string; entries: D
 
 // Lilac is reserved for adaptive guidance; a proposal is "not yet", so it takes the dashed outline.
 const statusTone = { Live: 'mint', Preview: 'sky', Proposed: 'dashed' } as const;
-const swatches: { name: string; value: string; role: string; dark?: boolean }[] = [
-    { name: 'Ink', value: color.ink950, role: 'Frame, primary buttons', dark: true }, { name: 'Canvas', value: color.canvas100, role: 'Working ground' }, { name: 'Panel fill', value: color.fill150, role: 'Aside, secondary controls' },
-    { name: 'Surface', value: color.surface, role: 'Tiles, tables, forms' }, { name: 'Logo Blue', value: color.brand600, role: 'Links, focus, selection, progress', dark: true }, { name: 'Text', value: color.ink900, role: 'Primary text', dark: true },
-    { name: 'Text secondary', value: color.ink600, role: 'Descriptions, metadata', dark: true }, { name: 'Strong line', value: color.ink400, role: 'Input borders, dashed "not yet"', dark: true },
+/** Every semantic colour role (DESIGN.md › Semantic role tokens) with its light and dark value, read from the theme. */
+function roleLeaves(light: object, dark: object, prefix = ''): { name: string; light: string; dark: string }[] {
+    return Object.entries(light).flatMap(([key, value]) => {
+        const path = prefix ? `${prefix}.${key}` : key, other = (dark as Record<string, unknown>)[key];
+        if (typeof value === 'string') return [{ name: path, light: value, dark: String(other) }];
+        return value && typeof value === 'object' ? roleLeaves(value, other as object, path) : [];
+    });
+}
+// Families and data fills have their own sections below; shadows are not colour tokens.
+const swatches = roleLeaves(themeRoles.light, themeRoles.dark).filter((entry) => !/^(tone|data|shadow)\./.test(entry.name));
+const families = ['sky', 'mint', 'butter', 'lilac', 'rose'] as const;
+const familyPurpose = {
+    sky: 'Learning and information', mint: 'Mastered, completed, success', butter: 'Weak, prerequisite gap, deadline',
+    lilac: 'Recommendations and guidance', rose: 'Errors and destructive actions',
+} as const;
+const dataColors = [
+    { name: 'Mastered', light: themeRoles.light.data.mastered, dark: themeRoles.dark.data.mastered },
+    { name: 'Learning', light: themeRoles.light.data.learning, dark: themeRoles.dark.data.learning },
+    { name: 'Weak', light: themeRoles.light.data.weak, dark: themeRoles.dark.data.weak },
+    { name: 'Unknown', light: themeRoles.light.data.unknown, dark: themeRoles.dark.data.unknown },
 ];
 
 /** S26 Living design reference + directory of every screen (DESIGN.md › S26). */
@@ -36,12 +52,12 @@ export function DesignReference({ groups }: { groups: DirectoryGroup[] }) {
         <PageHeader title="CodeMastery design preview" subtitle="The Lit Path design system and every screen in the DESIGN.md specification, with sample data. Live screens use the real API outside this preview." />
         <Section title="Screens" id="ref-screens">
             <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: 'minmax(0,1fr)', lg: 'repeat(2, minmax(0, 1fr))' } }}>
-                {groups.map((group) => <Box key={group.title} component="section" aria-labelledby={`dir-${group.title}`} sx={{ bgcolor: color.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
+                {groups.map((group) => <Box key={group.title} component="section" aria-labelledby={`dir-${group.title}`} sx={{ bgcolor: roles.bg.surface, borderRadius: `${radius.lg}px`, overflow: 'hidden' }}>
                     <Box sx={{ px: 3, pt: 3, pb: 1.5 }}><Typography id={`dir-${group.title}`} variant="h3" component="h3">{group.title}</Typography><Typography variant="body2" sx={{ color: 'text.secondary', mt: .5 }}>{group.description}</Typography></Box>
                     <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
-                        {group.entries.map((entry) => <Box component="li" key={entry.id} sx={{ borderTop: `1px solid ${color.line200}` }}>
+                        {group.entries.map((entry) => <Box component="li" key={entry.id} sx={{ borderTop: `1px solid ${roles.line.hairline}` }}>
                             <Box component="a" href={entry.href ?? '#'} onClick={(event) => { if (entry.onOpen) { event.preventDefault(); entry.onOpen(); } }}
-                                sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 3, py: 1.5, color: 'inherit', textDecoration: 'none', minHeight: 56, '&:hover': { bgcolor: color.canvas100 } }}>
+                                sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 3, py: 1.5, color: 'inherit', textDecoration: 'none', minHeight: 56, '&:hover': { bgcolor: roles.bg.rowHover } }}>
                                 <Typography component="span" className="cm-tabular" sx={{ width: 34, color: 'text.secondary', fontWeight: 600, fontSize: '0.8125rem' }}>{entry.spec}</Typography>
                                 <Box sx={{ flex: 1, minWidth: 0 }}><Typography component="span" sx={{ display: 'block', fontWeight: 600 }}>{entry.title}</Typography>
                                     <Typography component="span" variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>{entry.note}</Typography></Box>
@@ -54,16 +70,29 @@ export function DesignReference({ groups }: { groups: DirectoryGroup[] }) {
             </Box>
         </Section>
         <Section title="Colour" id="ref-colour">
+            <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>Each semantic role with its exact value in the light and dark schemes, side by side and independent of the current theme.</Typography>
             <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(4, minmax(0,1fr))' } }}>
-                {swatches.map((swatch) => <Box component="li" key={swatch.name}><Box sx={{ height: 72, borderRadius: `${radius.md}px`, bgcolor: swatch.value, border: swatch.value === color.surface || swatch.value === color.canvas100 ? `1px solid ${color.line200}` : 0 }} />
-                    <Typography sx={{ mt: 1, fontWeight: 600 }}>{swatch.name}</Typography><Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>{swatch.value} · {swatch.role}</Typography></Box>)}
+                {swatches.map((swatch) => <PairedSwatch key={swatch.name} {...swatch} role="Semantic role" />)}
             </Box>
             <Typography variant="h4" component="h3" sx={{ mt: 4, mb: 2 }}>Semantic families</Typography>
-            <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 2, gridTemplateColumns: { xs: 'minmax(0,1fr)', sm: 'repeat(2, minmax(0,1fr))', lg: 'repeat(5, minmax(0,1fr))' } }}>
-                {([['sky', 'Learning · information'], ['mint', 'Mastered · completed · success'], ['butter', 'Weak · prerequisite gap · deadline'], ['lilac', 'Recommendations · guidance'], ['rose', 'Errors · destructive']] as const).map(([tone, job]) =>
-                    <Box component="li" key={tone} sx={{ bgcolor: tones[tone].tint, borderRadius: `${radius.lg}px`, p: 2 }}>
-                        <Box sx={{ bgcolor: tones[tone].soft, borderRadius: `${radius.md}px`, p: 1.5 }}><Typography sx={{ fontWeight: 600, textTransform: 'capitalize' }}>{tone}</Typography><Typography variant="body2">{job}</Typography></Box>
-                    </Box>)}
+            <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(3, minmax(0,1fr))', lg: 'repeat(5, minmax(0,1fr))' } }}>
+                {families.flatMap((family) => (['tint', 'soft', 'strong', 'text'] as const).map((token) =>
+                    <PairedSwatch key={`${family}-${token}`} name={`${family[0].toUpperCase()}${family.slice(1)} · ${token}`}
+                        light={themeRoles.light.tone[family][token]} dark={themeRoles.dark.tone[family][token]}
+                        role={`${familyPurpose[family]} · ${token === 'tint' ? 'family background' : token === 'soft' ? 'nested background' : token === 'strong' ? 'glyphs and small text' : 'text on tint'}`} />))}
+            </Box>
+            <Typography variant="h4" component="h3" sx={{ mt: 4, mb: 2 }}>Mastery and reporting data</Typography>
+            <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 2, gridTemplateColumns: { xs: 'repeat(2, minmax(0,1fr))', md: 'repeat(4, minmax(0,1fr))' } }}>
+                {dataColors.map((entry) => <PairedSwatch key={entry.name} {...entry} role={`${entry.name} mastery state`} />)}
+            </Box>
+            <Typography variant="h4" component="h3" sx={{ mt: 4, mb: 2 }}>Mastery and guidance tags in both schemes</Typography>
+            {/* Each half re-declares one scheme's variables, so the tags render in both schemes at once. */}
+            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: 'minmax(0,1fr)', md: 'repeat(2, minmax(0,1fr))' } }}>
+                {(['light', 'dark'] as const).map((scheme) => <Box key={scheme} data-color-scheme={scheme} sx={{ bgcolor: roles.bg.surface, color: roles.text.primary, borderRadius: `${radius.lg}px`, p: 2.5, display: 'grid', gap: 1.5 }}>
+                    <Typography variant="caption" sx={{ color: roles.text.secondary }}>{scheme === 'light' ? 'Light' : 'Dark'}</Typography>
+                    <MasteryLegend />
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}><RecommendationTag type="continue" /><RecommendationTag type="remedial" /></Box>
+                </Box>)}
             </Box>
         </Section>
         <Section title="Type" id="ref-type">
@@ -141,6 +170,20 @@ export function DesignReference({ groups }: { groups: DirectoryGroup[] }) {
         </Section>
         <ConfirmDialog open={dialog} title="Leave course?" message="Your learning history will be preserved. You can re-enroll while the course is published." confirmLabel="Leave course" isDestructive onCancel={() => setDialog(false)} onConfirm={() => setDialog(false)} />
     </Page>;
+}
+
+function PairedSwatch({ name, light, dark, role }: { name: string; light: string; dark: string; role: string }) {
+    return <Box component="li">
+        <Typography sx={{ mb: .75, fontWeight: 600 }}>{name}</Typography>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: .75 }}>
+            {([['Light', light], ['Dark', dark]] as const).map(([scheme, value]) => <Box key={scheme} sx={{ minWidth: 0 }}>
+                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>{scheme}</Typography>
+                <Box aria-hidden sx={{ height: 44, borderRadius: `${radius.sm}px`, bgcolor: value, border: `1px solid ${roles.line.hairline}` }} />
+                <Typography variant="caption" sx={{ display: 'block', mt: .25, overflowWrap: 'anywhere' }}>{value}</Typography>
+            </Box>)}
+        </Box>
+        <Typography variant="caption" sx={{ display: 'block', mt: .25, color: 'text.secondary' }}>{role}</Typography>
+    </Box>;
 }
 
 function Section({ title, id, children }: { title: string; id: string; children: ReactNode }) {

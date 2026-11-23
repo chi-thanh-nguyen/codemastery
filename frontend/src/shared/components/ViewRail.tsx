@@ -1,7 +1,7 @@
 import { Box, ToggleButton, ToggleButtonGroup, Tooltip, useMediaQuery, useTheme } from '@mui/material';
 import { PresentationIcon } from './PresentationIcon';
 import type { PresentationIconName } from './PresentationIcon';
-import { color, control, radius } from '../../app/theme/theme';
+import { control, radius, roles } from '../../app/theme/theme';
 import { CircleAction } from './Tile';
 
 export interface SegmentOption<T extends string> { value: T; label: string; count?: number; icon?: PresentationIconName }
@@ -23,7 +23,7 @@ export function SegmentedControl<T extends string>({ label, value, options, onCh
             sx={{ gap: .75, '& svg': { fontSize: 18 } }}>
             {option.icon && <PresentationIcon name={option.icon} />}
             {option.label}
-            {option.count !== undefined && <Box component="span" className="cm-tabular" sx={{ ml: .25, color: color.ink600, fontWeight: 500 }}>{option.count}</Box>}
+            {option.count !== undefined && <Box component="span" className="cm-tabular" sx={{ ml: .25, color: roles.text.secondary, fontWeight: 500 }}>{option.count}</Box>}
         </ToggleButton>)}
     </ToggleButtonGroup>;
 }
@@ -51,13 +51,13 @@ export function ViewRail<T extends string>({ label, value, options, onChange, to
             sx={{ width: 52, p: '4px', gap: '4px', borderRadius: `${radius.pill}px`, flexWrap: 'nowrap' }}>
             {options.map((option) => <Tooltip key={option.value} title={option.label} placement="right">
                 <ToggleButton value={option.value} aria-label={option.label} disableRipple
-                    sx={{ width: 44, height: 44, minHeight: 44, p: 0, borderRadius: '50% !important', color: color.ink900,
-                        '&.Mui-selected, &.Mui-selected:hover': { bgcolor: control.primary, color: color.surface, boxShadow: 'none' }, '& svg': { fontSize: 20 } }}>
+                    sx={{ width: 44, height: 44, minHeight: 44, p: 0, borderRadius: '50% !important', color: roles.text.primary,
+                        '&.Mui-selected, &.Mui-selected:hover': { bgcolor: control.primary, color: roles.control.primary.text, boxShadow: 'none' }, '& svg': { fontSize: 20 } }}>
                     <PresentationIcon name={option.icon} />
                 </ToggleButton>
             </Tooltip>)}
         </ToggleButtonGroup>
-        {tools.length > 0 && <Box role="group" aria-label={`${label} tools`} sx={{ display: 'flex', flexDirection: 'column', gap: .75, p: '4px', bgcolor: color.fill150, borderRadius: `${radius.pill}px` }}>
+        {tools.length > 0 && <Box role="group" aria-label={`${label} tools`} sx={{ display: 'flex', flexDirection: 'column', gap: .75, p: '4px', bgcolor: roles.bg.fill, borderRadius: `${radius.pill}px` }}>
             {tools.map((tool) => <CircleAction key={tool.label} label={tool.label} icon={tool.icon} onClick={tool.onClick} variant="plain" />)}
         </Box>}
     </Box>;

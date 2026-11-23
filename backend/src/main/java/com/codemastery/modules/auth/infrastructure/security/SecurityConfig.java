@@ -97,6 +97,48 @@ public class SecurityConfig {
                                 "/api/courses/{courseId}/resume").hasRole("LEARNER")
                         // CT31.read (ADR012 section 7.3): Administrator only.
                         .requestMatchers(HttpMethod.GET, "/api/admin/audit-logs").hasRole("ADMIN")
+                        // CT21.authoring (ADR006 §5): self Instructor; the Learner Lesson read is self Learner.
+                        // Material, file and learner-monitoring routes under the same prefix stay denied.
+                        .requestMatchers(HttpMethod.GET, "/api/instructor/courses", "/api/instructor/courses/{courseId}",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/instructor/courses",
+                                "/api/instructor/courses/{courseId}/chapters",
+                                "/api/instructor/courses/{courseId}/chapters/{chapterId}/lessons").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/instructor/courses/{courseId}",
+                                "/api/instructor/courses/{courseId}/publication",
+                                "/api/instructor/courses/{courseId}/chapters/order",
+                                "/api/instructor/courses/{courseId}/chapters/{chapterId}",
+                                "/api/instructor/courses/{courseId}/chapters/{chapterId}/lessons/order",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/publication").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/lessons/{lessonId}").hasRole("LEARNER")
+                        // CT05.bindings (ADR005 §8.1): Instructor only, including the graph read; Course
+                        // ownership is CT03's decision in the handler. Administrator has no Instructor inheritance.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/skill-graph").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/skills").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/skills/{skillId}",
+                                "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}",
+                                "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/skills/{skillId}",
+                                "/api/courses/{courseId}/skills/{skillId}/prerequisites/{prerequisiteSkillId}",
+                                "/api/courses/{courseId}/lessons/{lessonId}/skills/{skillId}").hasRole("INSTRUCTOR")
+                        // CT23.questions/bindings (ADR007 §§4, 7): Instructor only; Course ownership is
+                        // CT03's decision in the handler. Administrator has no Instructor inheritance.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/questions",
+                                "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/questions").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/questions/{questionId}").hasRole("INSTRUCTOR")
+                        // CT23.composition/publication/bindings (ADR007 §§5–7): the quiz list is self Learner
+                        // only; authoring and owner reads are Instructor only, with Course ownership decided by
+                        // CT03 in the handler. Administrator has no Instructor inheritance.
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/quizzes").hasRole("LEARNER")
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/owned-quizzes",
+                                "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/quizzes").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/quizzes/{quizId}",
+                                "/api/courses/{courseId}/quizzes/{quizId}/publication").hasRole("INSTRUCTOR")
+                        .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),

@@ -191,3 +191,30 @@ jobs:
         env:
           MINIO_INIT_TEST_SERVER: minimal
         run: infrastructure/minio/test-minio-init.sh
+
+  continuous-deployment:
+    name: VM continuous deployment and recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Unit tests of the SSH deployment and recovery tooling (OpenSSL 3 crypto cases included)
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl version
+          for script in infrastructure/vm/cd/*.sh infrastructure/vm/host/codemastery-ops infrastructure/vm/host/codemastery-ssh-gate; do
+            bash -n "$script"
+          done
+          python3 -m unittest -v infrastructure/vm/tests/test_phase5_units.py
+      - name: SSH transport, forced-command gate and VM-side upload/tooling gates
+        shell: bash
+        run: exec bash infrastructure/vm/tests/test-phase5-ssh-gates.sh
+      - name: Recovery capture, publication, isolated restore and fault injection
+        shell: bash
+        run: exec bash infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh
+      - name: The same round trip with the VM's host GNU tar capture mode, as root
+        shell: bash
+        run: sudo env "PATH=$PATH" TAR_MODE=host bash infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh

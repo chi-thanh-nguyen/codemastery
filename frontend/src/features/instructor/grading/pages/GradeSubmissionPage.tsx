@@ -8,7 +8,7 @@ import { ConfirmDialog } from '../../../../shared/components/ConfirmDialog';
 import { FactList, Tile, StatGroup, StatTile } from '../../../../shared/components/Tile';
 import { PresentationIcon } from '../../../../shared/components/PresentationIcon';
 import type { SubmissionRow } from '../types/gradingTypes';
-import { color, radius } from '../../../../app/theme/theme';
+import { radius, roles } from '../../../../app/theme/theme';
 
 export interface GradeSubmissionPageProps { submission: SubmissionRow; onSave: (grade: number, feedback: string) => void; onDownload: () => void; back?: Crumb; notice?: ReactNode }
 
@@ -27,7 +27,7 @@ export function GradeSubmissionPage({ submission, onSave, onDownload, back, noti
         <Box sx={{ display: 'grid', gap: 3 }}>
             <Tile padding={{ xs: 3, sm: 4 }}>
                 <FactList columns={2} items={[{ label: 'Learner', value: submission.learnerName }, { label: 'Submitted', value: submission.submittedAtLabel }]} />
-                <Box sx={{ mt: 3, display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: `${radius.md}px`, bgcolor: color.canvas100, flexWrap: 'wrap' }}>
+                <Box sx={{ mt: 3, display: 'flex', alignItems: 'center', gap: 1.5, p: 1.5, borderRadius: `${radius.md}px`, bgcolor: roles.bg.canvas, flexWrap: 'wrap' }}>
                     <PresentationIcon name="file" sx={{ color: 'text.secondary' }} /><Typography sx={{ flex: 1, fontWeight: 600, overflowWrap: 'anywhere' }}>{submission.fileName}</Typography>
                     <Button variant="outlined" size="small" onClick={onDownload} startIcon={<PresentationIcon name="download" />}>Download</Button>
                 </Box>

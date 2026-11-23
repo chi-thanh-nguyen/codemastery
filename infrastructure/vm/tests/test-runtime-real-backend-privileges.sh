@@ -230,6 +230,119 @@ check "My Courses lists the Course as completed" "$STATUS/$(field totalElements)
 call GET "/api/courses/$course/resume" "$token_a"
 check "per-Course resume keeps the pointer; no next Lesson remains" "$STATUS/$(field resumeLessonId)/$(field nextLessonId)" "200/$lesson/None"
 
+echo "== AD07 skill graph (r5: skills SELECT, INSERT, DELETE, UPDATE(name, description); skill_prerequisites and lesson_skills SELECT, INSERT, DELETE)"
+# The account is registered, then promoted by the bootstrap administrator: no Instructor
+# provisioning API exists, and the role change is not a runtime-role capability.
+call POST /api/auth/register "" "{\"email\":\"instructor.ad07@example.test\",\"password\":\"$password\",\"displayName\":\"AD07 instructor\"}"
+check "register the AD07 instructor" "$STATUS" 201
+psql_admin >/dev/null <<<"UPDATE public.users SET role='instructor' WHERE email='instructor.ad07@example.test';"
+call POST /api/auth/login "" "{\"email\":\"instructor.ad07@example.test\",\"password\":\"$password\"}"
+check "login the AD07 instructor" "$STATUS" 200
+token_i="$(field accessToken)"
+psql_admin >/dev/null <<'SQL'
+INSERT INTO public.courses SELECT '20000000-0000-0000-0000-0000000000c3', id, 'Graphs', 'AD07 course', NULL, 'hidden', false, NULL
+  FROM public.users WHERE email='instructor.ad07@example.test';
+INSERT INTO public.chapters VALUES ('30000000-0000-0000-0000-0000000000d3','20000000-0000-0000-0000-0000000000c3','Basics',1);
+INSERT INTO public.lessons VALUES ('40000000-0000-0000-0000-0000000000e3','30000000-0000-0000-0000-0000000000d3','Hidden lesson','Body',1,'hidden');
+SQL
+graph=/api/courses/20000000-0000-0000-0000-0000000000c3; graph_lesson=40000000-0000-0000-0000-0000000000e3
+call POST "$graph/skills" "$token_i" '{"name":"Variables"}'
+check "create a skill (Course root lock, INSERT)" "$STATUS" 201
+skill_a="$(field id)"
+call POST "$graph/skills" "$token_i" '{"name":"Loops","description":"for and while"}'
+check "create a second skill" "$STATUS" 201
+skill_b="$(field id)"
+call PUT "$graph/skills/$skill_b" "$token_i" '{"name":"Iteration"}'
+check "replace a skill (UPDATE name, description)" "$STATUS/$(field name)/$(field description)" "200/Iteration/None"
+call PUT "$graph/skills/$skill_a/prerequisites/$skill_b" "$token_i"; check "add a prerequisite edge" "$STATUS" 204
+call PUT "$graph/skills/$skill_b/prerequisites/$skill_a" "$token_i"; check "a cycle-closing edge is refused" "$STATUS" 409
+call PUT "$graph/lessons/$graph_lesson/skills/$skill_a" "$token_i"; check "map the hidden Lesson" "$STATUS" 204
+call GET "$graph/skill-graph" "$token_i"
+check "owner graph read" "$STATUS/$(field prerequisites.0.skillId)/$(field mappings.0.lessonId)" "200/$skill_a/$graph_lesson"
+call GET "$graph/skill-graph" "$token_a"; check "a Learner cannot read the authoring graph" "$STATUS" 403
+psql_admin >/dev/null <<<"INSERT INTO public.questions (id,skill_id,prompt,kind,difficulty,options,correct_options) VALUES (gen_random_uuid(),'$skill_b','P','true_false','easy',ARRAY['True','False'],ARRAY[true,false]);"
+call DELETE "$graph/lessons/$graph_lesson/skills/$skill_a" "$token_i"; check "unmap" "$STATUS" 204
+call DELETE "$graph/skills/$skill_a/prerequisites/$skill_b" "$token_i"; check "remove the edge" "$STATUS" 204
+call DELETE "$graph/skills/$skill_b" "$token_i"; check "a skill a Question references is a 409 (FK 23503)" "$STATUS" 409
+call DELETE "$graph/skills/$skill_a" "$token_i"; check "delete an unreferenced skill" "$STATUS" 204
+check "graph rows left: the referenced skill only" "$(psql_admin <<<"SELECT (SELECT count(*) FROM public.skills WHERE course_id='20000000-0000-0000-0000-0000000000c3') || '/' || (SELECT count(*) FROM public.skill_prerequisites) || '/' || (SELECT count(*) FROM public.lesson_skills);")" "1/0/0"
+
+echo "== AS05 question bank (r6: questions SELECT, INSERT, DELETE, UPDATE(definition); quiz_questions and attempt_answers SELECT(id, question_id))"
+call POST "$graph/skills" "$token_i" '{"name":"Tagged"}'; check "create the tagging skill" "$STATUS" 201
+skill_q="$(field id)"
+qbody() { printf '{"skillId":"%s","prompt":"%s","kind":"single_choice","difficulty":"medium","options":["1","2"],"correctOptions":[false,true]}' "$1" "$2"; }
+call POST "$graph/questions" "$token_i" "$(qbody "$skill_q" 'x = 1; x += 1; x?')"
+check "create a question (CT40 tag check under the Course root)" "$STATUS/$(field skillId)/$(field difficulty)" "201/$skill_q/medium"
+question_a="$(field id)"
+call GET "$graph/questions" "$token_i"; check "owner list (both stored questions)" "$STATUS/$(field totalElements)" "200/2"
+call GET "$graph/questions/$question_a" "$token_i"; check "owner read includes the answer key" "$STATUS/$(field correctOptions.1)" "200/True"
+call PUT "$graph/questions/$question_a" "$token_i" "$(qbody "$skill_q" 'Replaced')"
+check "replace an unused definition (UPDATE six columns)" "$STATUS/$(field prompt)" "200/Replaced"
+call GET "$graph/questions" "$token_a"; check "a Learner cannot read the question bank" "$STATUS" 403
+psql_admin >/dev/null <<<"INSERT INTO public.skills VALUES ('70000000-0000-0000-0000-0000000000f1','20000000-0000-0000-0000-0000000000c1','Foreign',NULL);"
+call POST "$graph/questions" "$token_i" "$(qbody 70000000-0000-0000-0000-0000000000f1 'Foreign')"
+check "a skill of another Course is concealed" "$STATUS" 404
+psql_admin >/dev/null <<SQL
+INSERT INTO public.quizzes VALUES ('80000000-0000-0000-0000-0000000000a1','20000000-0000-0000-0000-0000000000c3','Referencing','practice',60,'hidden');
+INSERT INTO public.quiz_questions VALUES (gen_random_uuid(),'80000000-0000-0000-0000-0000000000a1','$question_a',1);
+SQL
+call DELETE "$graph/questions/$question_a" "$token_i"; check "a question a Quiz references cannot be deleted (SELECT quiz_questions)" "$STATUS" 409
+psql_admin >/dev/null <<SQL
+INSERT INTO public.attempts SELECT '80000000-0000-0000-0000-0000000000b1', id, '80000000-0000-0000-0000-0000000000a1', 1, now(), now() + interval '5 minutes' FROM public.users WHERE email='learner.a@example.test';
+INSERT INTO public.attempt_answers VALUES (gen_random_uuid(),'80000000-0000-0000-0000-0000000000b1','$question_a',1,ARRAY[false,false],NULL);
+SQL
+call PUT "$graph/questions/$question_a" "$token_i" "$(qbody "$skill_q" 'Changed')"
+check "a used definition is frozen (SELECT attempt_answers)" "$STATUS" 409
+check "the used definition is unchanged" "$(psql_admin <<<"SELECT prompt FROM public.questions WHERE id='$question_a';")" "Replaced"
+call POST "$graph/questions" "$token_i" "$(qbody "$skill_q" 'Temporary')"; question_b="$(field id)"
+call DELETE "$graph/questions/$question_b" "$token_i"; check "delete an unreferenced question" "$STATUS/$(field id)" "200/$question_b"
+psql_admin >/dev/null <<SQL
+DELETE FROM public.attempt_answers WHERE attempt_id='80000000-0000-0000-0000-0000000000b1';
+DELETE FROM public.attempts WHERE id='80000000-0000-0000-0000-0000000000b1';
+DELETE FROM public.quiz_questions WHERE quiz_id='80000000-0000-0000-0000-0000000000a1';
+DELETE FROM public.quizzes WHERE id='80000000-0000-0000-0000-0000000000a1';
+DELETE FROM public.skills WHERE id='70000000-0000-0000-0000-0000000000f1';
+SQL
+
+echo "== AS06 quiz composition (r7: quizzes SELECT, INSERT, DELETE, UPDATE(definition); quiz_questions SELECT, INSERT, DELETE; attempts SELECT(id, quiz_id))"
+call POST "$graph/questions" "$token_i" "$(qbody "$skill_q" 'Second question')"; question_c="$(field id)"
+quizbody() { printf '{"title":"%s","kind":"practice","timeLimitSeconds":300,"questionIds":[%s]}' "$1" "$2"; }
+call POST "$graph/quizzes" "$token_i" "$(quizbody 'Check' "\"$question_a\"")"
+check "create a hidden quiz with same-Course membership" "$STATUS/$(field published)/$(field questionCount)" "201/False/1"
+quiz_a="$(field id)"
+call PUT "$graph/quizzes/$quiz_a" "$token_i" "$(quizbody 'Check' "\"$question_c\",\"$question_a\"")"
+check "replace membership in order (targeted UPDATE, DELETE + INSERT)" "$STATUS/$(field questions.0.question.id)/$(field questions.1.position)" "200/$question_c/2"
+call POST "$graph/quizzes" "$token_i" "$(quizbody 'Foreign' '"70000000-0000-0000-0000-0000000000f2"')"
+check "a question outside the Course is concealed" "$STATUS" 404
+call POST "$graph/quizzes" "$token_i" "$(quizbody 'Draft' '')"; check "an empty draft" "$STATUS" 201
+draft="$(field id)"
+call PUT "$graph/quizzes/$draft/publication" "$token_i" '{"publicationStatus":"published"}'; check "an empty draft cannot be published" "$STATUS" 409
+call DELETE "$graph/quizzes/$draft" "$token_i"; check "delete a hidden never-attempted quiz" "$STATUS/$(field id)" "200/$draft"
+call PUT "$graph/quizzes/$quiz_a/publication" "$token_i" '{"publicationStatus":"published"}'
+check "publish (UPDATE publication_status)" "$STATUS/$(field published)" "200/True"
+call PUT "$graph/quizzes/$quiz_a/publication" "$token_i" '{"publicationStatus":"published"}'; check "publication is idempotent" "$STATUS" 200
+call PUT "$graph/quizzes/$quiz_a" "$token_i" "$(quizbody 'Edited' "\"$question_a\"")"; check "a published quiz is frozen" "$STATUS" 409
+call GET "$graph/owned-quizzes" "$token_i"; check "owner list with definitions" "$STATUS/$(field totalElements)/$(field content.0.questions.0.question.correctOptions.1)" "200/1/True"
+# CO06 publication writes need CO06's own CT17-P6 revision; the bootstrap administrator publishes the fixture Course.
+psql_admin >/dev/null <<<"UPDATE public.courses SET publication_status='published' WHERE id='20000000-0000-0000-0000-0000000000c3';"
+call PUT "$graph/membership" "$token_a"; check "the Learner joins the published Course" "$STATUS" 200
+call GET "$graph/quizzes" "$token_a"
+check "the Learner lists the published quiz" "$STATUS/$(field totalElements)/$(field content.0.id)/$(field content.0.questionCount)" "200/1/$quiz_a/2"
+check "the Learner list carries no keys or prompts" "$([[ "$BODY" == *correctOptions* || "$BODY" == *'Second question'* ]] && echo leaked || echo clean)" clean
+call GET "$graph/owned-quizzes" "$token_a"; check "a Learner cannot read owned quizzes" "$STATUS" 403
+call PUT "$graph/quizzes/$quiz_a/publication" "$token_i" '{"publicationStatus":"hidden"}'; check "hide" "$STATUS/$(field published)" "200/False"
+psql_admin >/dev/null <<<"INSERT INTO public.attempts SELECT gen_random_uuid(), id, '$quiz_a', 1, now(), now() + interval '5 minutes' FROM public.users WHERE email='learner.a@example.test';"
+call PUT "$graph/quizzes/$quiz_a" "$token_i" "$(quizbody 'Edited' "\"$question_a\"")"; check "an attempted quiz stays frozen after hiding (SELECT attempts)" "$STATUS" 409
+call DELETE "$graph/quizzes/$quiz_a" "$token_i"; check "an attempted quiz cannot be deleted" "$STATUS" 409
+check "the attempted quiz and its membership are intact" "$(psql_admin <<<"SELECT title || '/' || (SELECT count(*) FROM public.quiz_questions WHERE quiz_id='$quiz_a') FROM public.quizzes WHERE id='$quiz_a';")" "Check/2"
+psql_admin >/dev/null <<SQL
+DELETE FROM public.attempts WHERE quiz_id='$quiz_a';
+DELETE FROM public.quiz_questions WHERE quiz_id='$quiz_a';
+DELETE FROM public.quizzes WHERE id='$quiz_a';
+DELETE FROM public.enrollments WHERE course_id='20000000-0000-0000-0000-0000000000c3';
+UPDATE public.courses SET publication_status='hidden' WHERE id='20000000-0000-0000-0000-0000000000c3';
+SQL
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
@@ -294,7 +407,7 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership and CO08 progress/resume under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank and AS06 quiz composition under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \

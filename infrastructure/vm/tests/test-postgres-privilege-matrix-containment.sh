@@ -124,6 +124,24 @@ probe "enrollments/lesson_progress: CO08 r4 completion and visit" ok "INSERT INT
 # initializes mastery_skipped; the V002 check still forbids a skip without completion.
 probe "lesson_progress: INSERT may set completed+skipped (accepted)" ok "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c2','active',NULL,NULL); INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000e1',true,true);"
 probe "lesson_progress: skip without completion (check constraint)" 23514 "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c2','active',NULL,NULL); INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000e1',false,true);"
+probe "skills/skill_prerequisites/lesson_skills: AD07 r5 graph commands" ok "SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE; INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000000c1','A',NULL),('00000000-0000-0000-0000-0000000005a2','00000000-0000-0000-0000-0000000000c1','B','d'); UPDATE public.skills SET name='A2', description=NULL WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id='00000000-0000-0000-0000-0000000005a1'; INSERT INTO public.skill_prerequisites VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000005a2'); INSERT INTO public.lesson_skills VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000005a1'); SELECT id, course_id, name, description FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1'; SELECT id, skill_id, prerequisite_skill_id FROM public.skill_prerequisites WHERE course_id='00000000-0000-0000-0000-0000000000c1'; SELECT id, lesson_id, skill_id FROM public.lesson_skills WHERE skill_id IN ('00000000-0000-0000-0000-0000000005a1'); DELETE FROM public.lesson_skills WHERE lesson_id='00000000-0000-0000-0000-0000000000e1' AND skill_id='00000000-0000-0000-0000-0000000005a1'; DELETE FROM public.skill_prerequisites WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND skill_id='00000000-0000-0000-0000-0000000005a1' AND prerequisite_skill_id='00000000-0000-0000-0000-0000000005a2'; DELETE FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id IN ('00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000005a2');"
+probe "lesson_skills: mapping a missing Lesson (FK)"           23503 "INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005a3','00000000-0000-0000-0000-0000000000c1','C',NULL); INSERT INTO public.lesson_skills VALUES (gen_random_uuid(),gen_random_uuid(),'00000000-0000-0000-0000-0000000005a3');"
+admin <<'SQL'
+INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005b1','00000000-0000-0000-0000-0000000000c1','Questioned',NULL);
+INSERT INTO public.questions (id,skill_id,prompt,kind,difficulty,options,correct_options) VALUES ('00000000-0000-0000-0000-0000000005b2','00000000-0000-0000-0000-0000000005b1','P','true_false','easy',ARRAY['True','False'],ARRAY[true,false]);
+INSERT INTO public.quizzes VALUES ('00000000-0000-0000-0000-0000000005b3','00000000-0000-0000-0000-0000000000c1','Q','practice',60,'hidden');
+INSERT INTO public.quiz_questions VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000005b3','00000000-0000-0000-0000-0000000005b2',1);
+SQL
+probe "skills: deleting a skill a Question references (FK)"   23503 "DELETE FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id='00000000-0000-0000-0000-0000000005b1';"
+probe "questions/quiz_questions/attempt_answers: AS05 r6 question bank" ok "SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE; INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005c1','00000000-0000-0000-0000-0000000000c1','Tag',NULL); SELECT id FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1'; INSERT INTO public.questions VALUES ('00000000-0000-0000-0000-0000000005d1','00000000-0000-0000-0000-0000000005c1','P','single_choice','easy',ARRAY['A','B'],ARRAY[true,false]); SELECT id, skill_id, prompt, kind, difficulty, options, correct_options FROM public.questions WHERE skill_id IN ('00000000-0000-0000-0000-0000000005c1') ORDER BY id LIMIT 20; SELECT count(id) FROM public.questions WHERE skill_id IN ('00000000-0000-0000-0000-0000000005c1'); SELECT * FROM public.questions WHERE id='00000000-0000-0000-0000-0000000005d1' AND skill_id IN ('00000000-0000-0000-0000-0000000005c1') FOR UPDATE; SELECT count(qq.id) FROM public.quiz_questions qq WHERE qq.question_id='00000000-0000-0000-0000-0000000005d1'; SELECT count(aa.id) FROM public.attempt_answers aa WHERE aa.question_id='00000000-0000-0000-0000-0000000005d1'; UPDATE public.questions SET correct_options=ARRAY[false,true], difficulty='hard', kind='multiple_choice', options=ARRAY['A','B'], prompt='P2', skill_id='00000000-0000-0000-0000-0000000005c1' WHERE id='00000000-0000-0000-0000-0000000005d1'; DELETE FROM public.questions WHERE id='00000000-0000-0000-0000-0000000005d1';"
+probe "questions: deleting a question a Quiz references (FK)" 23503 "DELETE FROM public.questions WHERE id='00000000-0000-0000-0000-0000000005b2';"
+probe "quizzes/quiz_questions/attempts: AS06 r7 quiz composition" ok "SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE; SELECT count(*) FROM public.quizzes WHERE id='00000000-0000-0000-0000-0000000006a1'; INSERT INTO public.quizzes VALUES ('00000000-0000-0000-0000-0000000006a1','00000000-0000-0000-0000-0000000000c1','Quiz','practice',60,'hidden'); INSERT INTO public.quiz_questions VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000006a1','00000000-0000-0000-0000-0000000005b2',1); SELECT * FROM public.quizzes WHERE id='00000000-0000-0000-0000-0000000006a1' AND course_id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE; SELECT count(a.id) FROM public.attempts a WHERE a.quiz_id='00000000-0000-0000-0000-0000000006a1'; UPDATE public.quizzes SET title='Quiz 2', kind='test', time_limit_seconds=90, publication_status='published' WHERE id='00000000-0000-0000-0000-0000000006a1' AND course_id='00000000-0000-0000-0000-0000000000c1'; SELECT q.id, q.title FROM public.quizzes q WHERE q.course_id='00000000-0000-0000-0000-0000000000c1' AND q.publication_status='published' ORDER BY q.title COLLATE \"C\", q.id LIMIT 20 OFFSET 0; SELECT count(q.id) FROM public.quizzes q WHERE q.course_id='00000000-0000-0000-0000-0000000000c1'; SELECT qq.quiz_id, qq.position, qs.id, qs.prompt, qs.correct_options FROM public.quiz_questions qq, public.questions qs WHERE qs.id=qq.question_id AND qq.quiz_id IN ('00000000-0000-0000-0000-0000000006a1') ORDER BY qq.quiz_id, qq.position; SELECT qq.quiz_id, count(qq.id) FROM public.quiz_questions qq WHERE qq.quiz_id IN ('00000000-0000-0000-0000-0000000006a1') GROUP BY qq.quiz_id; DELETE FROM public.quiz_questions WHERE quiz_id='00000000-0000-0000-0000-0000000006a1'; INSERT INTO public.quiz_questions VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000006a1','00000000-0000-0000-0000-0000000005b2',1); DELETE FROM public.quiz_questions WHERE quiz_id='00000000-0000-0000-0000-0000000006a1'; DELETE FROM public.quizzes WHERE id='00000000-0000-0000-0000-0000000006a1';"
+admin <<'SQL'
+INSERT INTO public.attempts VALUES ('00000000-0000-0000-0000-0000000006b1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000005b3',1,now(),now()+interval '5 minutes',NULL,NULL);
+SQL
+probe "quizzes: deleting a quiz an attempt references (FK)"   23503 "DELETE FROM public.quiz_questions WHERE quiz_id='00000000-0000-0000-0000-0000000005b3'; DELETE FROM public.quizzes WHERE id='00000000-0000-0000-0000-0000000005b3';"
+probe "learner_skill_masteries/path_recommendations: AD06 r8 writes" ok "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c1','active',NULL,NULL); INSERT INTO public.learner_skill_masteries (id, user_id, skill_id, state) VALUES ('00000000-0000-0000-0000-0000000008b1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000005b1','learning') ON CONFLICT (user_id, skill_id) DO UPDATE SET state = EXCLUDED.state; INSERT INTO public.learner_skill_masteries (id, user_id, skill_id, state) VALUES ('00000000-0000-0000-0000-0000000008b2','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000005b1','mastered') ON CONFLICT (user_id, skill_id) DO UPDATE SET state = EXCLUDED.state; INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES ('00000000-0000-0000-0000-0000000008c1','00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000e1','continue','Continue with the next lesson in the course order.','2026-11-23T01:00:00.123456Z'); INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES ('00000000-0000-0000-0000-0000000008c2','00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000e1','skip','Tested out: you have mastered every skill in this lesson (\"Questioned\").','2026-11-23T01:00:00.123456Z');"
+probe "path_recommendations: reusing a history id (PK)"        23505 "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c1','active',NULL,NULL); INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES ('00000000-0000-0000-0000-0000000008c1','00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000e1','continue','r','2026-11-23T01:00:00Z'); INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES ('00000000-0000-0000-0000-0000000008c1','00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000e1','remedial','r2','2026-11-23T01:00:01Z');"
 echo "== everything else is denied"
 probe "users: change role"                                   42501 "UPDATE public.users SET role='admin';"
 probe "users: change email"                                  42501 "UPDATE public.users SET email='x@example.test';"
@@ -151,12 +169,28 @@ probe "lesson_progress: update mastery-skip flag (CT22.atomic)" 42501 "UPDATE pu
 probe "lesson_progress: re-target a progress row"            42501 "UPDATE public.lesson_progress SET enrollment_id=enrollment_id, lesson_id=lesson_id;"
 probe "lesson_progress: delete history"                      42501 "DELETE FROM public.lesson_progress;"
 probe "lesson_progress: TRUNCATE"                            42501 "TRUNCATE public.lesson_progress;"
-probe "questions: read answer keys"                          42501 "SELECT correct_options FROM public.questions;"
+probe "skills: move a skill to another Course"               42501 "UPDATE public.skills SET course_id=course_id;"
+probe "skill_prerequisites: rewrite an edge in place"         42501 "UPDATE public.skill_prerequisites SET skill_id=skill_id, prerequisite_skill_id=prerequisite_skill_id;"
+probe "lesson_skills: rewrite a mapping in place"             42501 "UPDATE public.lesson_skills SET lesson_id=lesson_id, skill_id=skill_id;"
+probe "skills/skill_prerequisites/lesson_skills: TRUNCATE"    42501 "TRUNCATE public.lesson_skills, public.skill_prerequisites, public.skills;"
+probe "questions: re-key a question"                         42501 "UPDATE public.questions SET id=id;"
+probe "questions: TRUNCATE"                                   42501 "TRUNCATE public.questions;"
+probe "quizzes: move a quiz to another Course"               42501 "UPDATE public.quizzes SET course_id=course_id;"
+probe "quizzes/quiz_questions: TRUNCATE"                      42501 "TRUNCATE public.quiz_questions, public.quizzes;"
+probe "quiz_questions: rewrite membership in place"           42501 "UPDATE public.quiz_questions SET position=position, quiz_id=quiz_id;"
+probe "attempts: read owners, timing or scores"               42501 "SELECT user_id, started_at, expires_at, score_percentage FROM public.attempts;"
+probe "attempts: start an attempt (AS08 not implemented)"     42501 "INSERT INTO public.attempts SELECT * FROM public.attempts WHERE false;"
+probe "attempt_answers: read captured selections"             42501 "SELECT selected_options, is_correct FROM public.attempt_answers;"
 probe "attempts: rewrite scores"                             42501 "UPDATE public.attempts SET score_percentage=100;"
 probe "attempt_answers: delete"                              42501 "DELETE FROM public.attempt_answers;"
 probe "submissions: self-grade"                              42501 "UPDATE public.submissions SET grade_percentage=100;"
-probe "learner_skill_masteries: write"                       42501 "INSERT INTO public.learner_skill_masteries SELECT * FROM public.learner_skill_masteries WHERE false;"
-probe "path_recommendations: read"                           42501 "SELECT 1 FROM public.path_recommendations;"
+probe "learner_skill_masteries: re-key or re-target a row"     42501 "UPDATE public.learner_skill_masteries SET id=id, user_id=user_id, skill_id=skill_id;"
+probe "learner_skill_masteries: read row identifiers"          42501 "SELECT id FROM public.learner_skill_masteries;"
+probe "learner_skill_masteries: delete"                        42501 "DELETE FROM public.learner_skill_masteries;"
+probe "path_recommendations: read (r8 grants INSERT only)"    42501 "SELECT 1 FROM public.path_recommendations;"
+probe "path_recommendations: rewrite history"                 42501 "UPDATE public.path_recommendations SET reason=reason, recommended_at=recommended_at;"
+probe "path_recommendations: erase history"                   42501 "DELETE FROM public.path_recommendations;"
+probe "learner_skill_masteries/path_recommendations: TRUNCATE" 42501 "TRUNCATE public.path_recommendations, public.learner_skill_masteries;"
 probe "notifications: read"                                  42501 "SELECT 1 FROM public.notifications;"
 probe "audit_logs: erase"                                    42501 "DELETE FROM public.audit_logs;"
 probe "audit_logs: forge"                                    42501 "INSERT INTO public.audit_logs VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000a1','x','x','x',now());"
@@ -171,17 +205,18 @@ provision_db_roles >/dev/null; harden_after_migration; verify_role_separation >/
 echo "  ACLs identical after a second provision + harden + verify"
 
 echo "== drift and escalation fail closed"
-admin <<<"GRANT UPDATE, DELETE ON public.users TO $APP; GRANT UPDATE (title) ON public.courses TO $APP; GRANT SELECT ON public.questions TO $APP;"
+admin <<<"GRANT UPDATE, DELETE ON public.users TO $APP; GRANT UPDATE (title) ON public.courses TO $APP; GRANT SELECT ON public.submissions TO $APP;"
 expect_failure "owner-granted excess before reconciliation" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
 drift="$(harden_after_migration)"
 [[ "$drift" == *"excess: column privilege UPDATE on public.courses.title: expected false"* && "$drift" == *"excess: table privilege DELETE on public.users: expected false"* ]] \
   || { echo "drift was not reported: $drift" >&2; exit 1; }
 verify_runtime_privileges complete >/dev/null
 echo "  owner-granted excess (table and column level) reported, revoked and re-verified"
-admin <<<"GRANT SELECT ON public.questions TO PUBLIC;"
+# r6 grants SELECT on questions (CT23 owner reads include keys); submissions stay unreadable.
+admin <<<"GRANT SELECT ON public.submissions TO PUBLIC;"
 harden_after_migration >/dev/null
-expect_failure "SELECT on answer keys through PUBLIC" "table privilege SELECT on public.questions: expected false" verify_runtime_privileges complete
-admin <<<"REVOKE SELECT ON public.questions FROM PUBLIC;"
+expect_failure "SELECT on submissions through PUBLIC" "table privilege SELECT on public.submissions: expected false" verify_runtime_privileges complete
+admin <<<"REVOKE SELECT ON public.submissions FROM PUBLIC;"
 admin <<<"CREATE ROLE cm_grantor NOLOGIN; GRANT UPDATE ON public.users TO cm_grantor WITH GRANT OPTION; SET ROLE cm_grantor; GRANT UPDATE ON public.users TO $APP; RESET ROLE;"
 harden_after_migration >/dev/null
 expect_failure "UPDATE users from another grantor survives reset" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
@@ -368,9 +403,9 @@ admin <<<"ALTER TABLE public.flyway_history_moved RENAME TO flyway_schema_histor
 as_mig <<<"ALTER TABLE public.enrollments ADD COLUMN unexpected_column integer;"
 expect_failure "unreviewed column on the predecessor" "columns differ from the reviewed matrix on public.enrollments" provision_db_roles
 as_mig <<<"ALTER TABLE public.enrollments DROP COLUMN unexpected_column;"
-admin <<<"GRANT SELECT ON public.questions TO PUBLIC;"
-expect_failure "excess privilege through PUBLIC on the predecessor" "table privilege SELECT on public.questions: expected false" provision_db_roles
-admin <<<"REVOKE SELECT ON public.questions FROM PUBLIC;"
+admin <<<"GRANT SELECT ON public.submissions TO PUBLIC;"
+expect_failure "excess privilege through PUBLIC on the predecessor" "table privilege SELECT on public.submissions: expected false" provision_db_roles
+admin <<<"REVOKE SELECT ON public.submissions FROM PUBLIC;"
 admin <<<"GRANT UPDATE (last_visited_at) ON public.enrollments TO \"$APP\";" 2>/dev/null \
   && { echo "Granted a privilege on a column that does not exist" >&2; exit 1; }
 provision_db_roles >/dev/null
@@ -398,6 +433,52 @@ BASH
 start_postgres
 PGTEST_CONTAINER="$container" MIGRATIONS=backend/src/main/resources/db/migration \
   bash "$work/exercise-upgrade.sh" "$script" "$work/env/.env"
+
+# CT17-P6 r9 (ADR017) multi-version upgrade: the deployed preview holds V001-V006, so the
+# next release reaches V009 in one update. Any exact successful prefix 1..k (k < 9)
+# defers the V009 column; gaps, failures, an empty history and k >= 9 still fail closed.
+sed -n '/^set -Eeuo pipefail$/,/^r3_on_v008() {/p' "$work/exercise-upgrade.sh" | sed '$d' > "$work/exercise-multiversion.sh"
+cat >> "$work/exercise-multiversion.sh" <<'BASH'
+echo "== fresh provisioning and V001-V006, as the deployed preview holds it"
+provision_db_roles >/dev/null
+as_mig >/dev/null <<'SQL'
+CREATE TABLE public.flyway_schema_history (installed_rank integer PRIMARY KEY, version varchar(50),
+  description varchar(200) NOT NULL, type varchar(20) NOT NULL, script varchar(1000) NOT NULL,
+  checksum integer, installed_by varchar(100) NOT NULL, installed_on timestamp NOT NULL DEFAULT now(),
+  execution_time integer NOT NULL, success boolean NOT NULL);
+SQL
+migrate_to 6
+[[ "$(runtime_deferred_columns present)" == "ARRAY['enrollments:last_visited_at']::text[]" ]]
+admin <<<"CREATE SCHEMA cm_test_backup; CREATE TABLE cm_test_backup.history AS SELECT * FROM public.flyway_schema_history; DELETE FROM public.flyway_schema_history;"
+expect_failure "column absent with an empty Flyway history" "PostgreSQL role provisioning failed" provision_db_roles
+admin <<<"SET client_min_messages = warning; INSERT INTO public.flyway_schema_history SELECT * FROM cm_test_backup.history; DROP SCHEMA cm_test_backup CASCADE;"
+provision_db_roles >/dev/null
+verify_runtime_privileges present >/dev/null
+probe "r9 on V006: Enrollment resume pointer before V007-V009"   ok "SELECT id FROM public.enrollments WHERE false FOR UPDATE; UPDATE public.enrollments SET resume_lesson_id=NULL WHERE false;"
+probe "r9 on V006: mastery-skip flag stays denied"               42501 "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
+expect_failure "complete verification on V006" "missing reviewed table public.password_reset_tokens" verify_runtime_privileges complete
+admin <<<"DELETE FROM public.flyway_schema_history WHERE version='004';"
+expect_failure "V006 history with a gap (no 004)" "PostgreSQL role provisioning failed" provision_db_roles
+admin <<<"INSERT INTO public.flyway_schema_history VALUES (4,'004','m','SQL','V004__x.sql',0,'x',now(),1,true);"
+admin <<<"UPDATE public.flyway_schema_history SET success=false WHERE version='006';"
+expect_failure "V006 history with a failed migration" "PostgreSQL role provisioning failed" provision_db_roles
+admin <<<"UPDATE public.flyway_schema_history SET success=true WHERE version='006';"
+admin <<<"INSERT INTO public.flyway_schema_history VALUES (99,'006','m','SQL','V006__duplicate.sql',0,'x',now(),1,true);"
+expect_failure "V006 history with a duplicate version" "PostgreSQL role provisioning failed" provision_db_roles
+admin <<<"DELETE FROM public.flyway_schema_history WHERE installed_rank=99;"
+provision_db_roles >/dev/null
+echo "== Flyway V007-V009 in one update, then hardening and complete verification"
+migrate_to 9
+harden_after_migration
+verify_role_separation >/dev/null
+verify_runtime_privileges complete >/dev/null
+[[ "$(runtime_deferred_columns present)" == "ARRAY[]::text[]" ]]
+probe "r9 after V009: visit writes pointer and server time"      ok "UPDATE public.enrollments SET resume_lesson_id=NULL, last_visited_at=clock_timestamp() WHERE false;"
+echo 'MULTIVERSION_TESTS_PASS: V006 -> pre-migration provisioning -> V007-V009 -> exact matrix; drift fails closed.'
+BASH
+start_postgres
+PGTEST_CONTAINER="$container" MIGRATIONS=backend/src/main/resources/db/migration \
+  bash "$work/exercise-multiversion.sh" "$script" "$work/env/.env"
 
 cat > "$work/exercise-containment.sh" <<'BASH'
 set -Eeuo pipefail

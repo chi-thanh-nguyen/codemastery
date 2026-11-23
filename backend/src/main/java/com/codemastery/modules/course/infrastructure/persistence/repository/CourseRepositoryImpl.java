@@ -6,12 +6,26 @@ import com.codemastery.modules.course.domain.model.PublishStatus;
 import com.codemastery.modules.course.domain.repository.CourseRepository;
 import com.codemastery.modules.course.infrastructure.persistence.mapper.CourseMapper;
 import com.codemastery.modules.course.infrastructure.persistence.entity.CourseEntity;
+import jakarta.persistence.EntityManager;
+import org.hibernate.Session;
+import org.hibernate.engine.spi.SessionImplementor;
+import org.hibernate.persister.entity.EntityPersister;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import java.sql.Types;
+import java.util.Collection;
+import java.util.function.Supplier;
+import java.util.Map;
 import java.util.Optional;
 import java.util.List;
 import java.util.Objects;
@@ -22,12 +36,53 @@ public class CourseRepositoryImpl implements CourseRepository {
 
     private static final String STATUS_PUBLISHED = "published";
 
+    /** Every Course column; jsonb is read as text so the mapper owns its exact parsing. */
+    private static final String COURSE_COLUMNS = "id, instructor_id, title, description, prerequisite_description, "
+            + "publication_status, adaptive_enabled, adaptive_settings::text AS adaptive_settings";
+
     private final CourseJpaRepository courseJpaRepository;
     private final CourseMapper courseMapper;
+    private final JdbcTemplate jdbc;
+    private final EntityManager entityManager;
 
-    public CourseRepositoryImpl(CourseJpaRepository courseJpaRepository, CourseMapper courseMapper) {
+    private final TransactionTemplate callerTransaction;
+
+    public CourseRepositoryImpl(CourseJpaRepository courseJpaRepository, CourseMapper courseMapper,
+                                JdbcTemplate jdbc, EntityManager entityManager,
+                                PlatformTransactionManager transactionManager) {
         this.courseJpaRepository = courseJpaRepository;
         this.courseMapper = courseMapper;
+        this.jdbc = jdbc;
+        this.entityManager = entityManager;
+        this.callerTransaction = callerTransaction(transactionManager);
+    }
+
+    /** Participates in, and requires, the caller's transaction; a failure marks it rollback-only. */
+    static TransactionTemplate callerTransaction(PlatformTransactionManager transactionManager) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_MANDATORY);
+        return template;
+    }
+
+    /**
+     * Runs one direct-SQL write in the caller's transaction. Pending JPA changes are rejected before
+     * any statement, because a direct write would otherwise be overwritten by their later flush or
+     * silently discard them; afterwards the clean managed copies of the changed rows are detached,
+     * so later JPA reads reload them. Any failure, including the rejection, marks the caller's
+     * transaction rollback-only, so a caught exception cannot commit a partial operation.
+     */
+    static <T> T directWrite(TransactionTemplate callerTransaction, EntityManager entityManager,
+                             Class<?> changedType, Collection<?> changedIds, Supplier<T> write) {
+        return callerTransaction.execute(status -> {
+            if (entityManager.unwrap(Session.class).isDirty()) {
+                throw new IllegalStateException("Pending persistence changes conflict with a direct Course write");
+            }
+            T result = write.get();
+            for (Object id : changedIds) {
+                detachManaged(entityManager, changedType, id);
+            }
+            return result;
+        });
     }
 
     @Override
@@ -114,5 +169,194 @@ public class CourseRepositoryImpl implements CourseRepository {
             case "left" -> EnrollmentStatus.LEFT;
             default -> throw new IllegalStateException("Invalid enrollment status in Course access snapshot");
         };
+    }
+
+    // CT21.authoring owner rows (CO03.content). Direct statements never return a managed entity,
+    // so a read under the Course root lock always observes committed state.
+
+    @Override
+    public Optional<Course> findById(UUID courseId) {
+        Objects.requireNonNull(courseId, "courseId");
+        return jdbc.query("SELECT " + COURSE_COLUMNS + " FROM public.courses WHERE id = ?",
+                (row, index) -> courseMapper.courseFromRow(row), courseId).stream().findFirst();
+    }
+
+    @Override
+    public Page<Course> findByInstructorId(UUID instructorId, Pageable pageable) {
+        Objects.requireNonNull(instructorId, "instructorId");
+        Objects.requireNonNull(pageable, "pageable");
+        Long total = jdbc.queryForObject("SELECT count(*) FROM public.courses WHERE instructor_id = ?",
+                Long.class, instructorId);
+        String select = "SELECT " + COURSE_COLUMNS + " FROM public.courses WHERE instructor_id = ? "
+                + "ORDER BY title COLLATE \"C\" ASC, id ASC";
+        List<Course> rows = pageable.isPaged()
+                ? jdbc.query(select + " LIMIT ? OFFSET ?", (row, index) -> courseMapper.courseFromRow(row),
+                        instructorId, pageable.getPageSize(), pageable.getOffset())
+                : jdbc.query(select, (row, index) -> courseMapper.courseFromRow(row), instructorId);
+        return new PageImpl<>(rows, pageable.isPaged() ? PageRequest.of(pageable.getPageNumber(), pageable.getPageSize())
+                : Pageable.unpaged(), total == null ? 0 : total);
+    }
+
+    @Override
+    public Page<Course> findForAdministration(String query, PublishStatus publicationStatus, Pageable pageable) {
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(pageable, "pageable");
+        String status = publicationStatus == null ? null : publicationStatus.getStatus();
+        String where = " FROM public.courses WHERE strpos(lower(title), lower(?)) > 0 "
+                + "AND (CAST(? AS text) IS NULL OR publication_status = ?)";
+        Long total = jdbc.queryForObject("SELECT count(*)" + where, Long.class, query, status, status);
+        List<Course> rows = jdbc.query("SELECT " + COURSE_COLUMNS + where
+                        + " ORDER BY title COLLATE \"C\" ASC, id ASC LIMIT ? OFFSET ?",
+                (row, index) -> courseMapper.courseFromRow(row),
+                query, status, status, pageable.getPageSize(), pageable.getOffset());
+        return new PageImpl<>(rows, PageRequest.of(pageable.getPageNumber(), pageable.getPageSize()),
+                total == null ? 0 : total);
+    }
+
+    @Override
+    public void insert(Course course) {
+        Objects.requireNonNull(course, "course");
+        String status = Objects.requireNonNull(course.publicationStatus(), "publicationStatus").getStatus();
+        String settings = CourseMapper.settingsToJson(course.adaptiveSettings());
+        directWrite(callerTransaction, entityManager, CourseEntity.class, List.of(), () -> jdbc.update(
+                "INSERT INTO public.courses (id, instructor_id, title, description, prerequisite_description, "
+                        + "publication_status, adaptive_enabled, adaptive_settings) VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))",
+                course.id(), course.instructorId(), course.title(), course.description(), course.prerequisiteDescription(),
+                status, course.adaptiveEnabled(), json(settings)));
+    }
+
+    @Override
+    public void updateMetadata(UUID courseId, String title, String description, String prerequisiteDescription) {
+        Objects.requireNonNull(courseId, "courseId");
+        directWrite(callerTransaction, entityManager, CourseEntity.class, List.of(courseId), () -> requireOneRow(jdbc.update(
+                "UPDATE public.courses SET title = ?, description = ?, prerequisite_description = ? WHERE id = ?",
+                title, description, prerequisiteDescription, courseId)));
+    }
+
+    @Override
+    public void updatePublicationStatus(UUID courseId, PublishStatus publicationStatus) {
+        Objects.requireNonNull(courseId, "courseId");
+        Objects.requireNonNull(publicationStatus, "publicationStatus");
+        directWrite(callerTransaction, entityManager, CourseEntity.class, List.of(courseId), () -> requireOneRow(jdbc.update(
+                "UPDATE public.courses SET publication_status = ? WHERE id = ?", publicationStatus.getStatus(), courseId)));
+    }
+
+    // ADR005 Course-root guard and stored adaptive configuration (CO14).
+
+    @Override
+    public boolean lockCourseRoot(UUID courseId) {
+        Objects.requireNonNull(courseId, "courseId");
+        return !jdbc.queryForList("SELECT id FROM public.courses WHERE id = ? FOR UPDATE", UUID.class, courseId).isEmpty();
+    }
+
+    @Override
+    public boolean lockCourseRootNoWait(UUID courseId) {
+        Objects.requireNonNull(courseId, "courseId");
+        return !jdbc.queryForList("SELECT id FROM public.courses WHERE id = ? FOR UPDATE NOWAIT", UUID.class, courseId)
+                .isEmpty();
+    }
+
+    @Override
+    public Optional<StoredAdaptiveConfiguration> findAdaptiveConfiguration(UUID courseId) {
+        Objects.requireNonNull(courseId, "courseId");
+        return jdbc.query("SELECT adaptive_enabled, adaptive_settings::text AS adaptive_settings "
+                        + "FROM public.courses WHERE id = ?",
+                (row, index) -> new StoredAdaptiveConfiguration(courseId, row.getBoolean("adaptive_enabled"),
+                        CourseMapper.settingsFromJson(row.getString("adaptive_settings"))), courseId)
+                .stream().findFirst();
+    }
+
+    @Override
+    public boolean replaceAdaptiveConfiguration(UUID courseId,
+            boolean expectedEnabled, Map<String, Object> expectedSettings,
+            boolean adaptiveEnabled, Map<String, Object> adaptiveSettings) {
+        Objects.requireNonNull(courseId, "courseId");
+        String settings = CourseMapper.settingsToJson(adaptiveSettings);
+        String expected = CourseMapper.settingsToJson(expectedSettings);
+        // jsonb equality is structural: key order, whitespace and duplicate formatting are irrelevant.
+        int rows = directWrite(callerTransaction, entityManager, CourseEntity.class, List.of(courseId), () -> jdbc.update(
+                "UPDATE public.courses SET adaptive_enabled = ?, adaptive_settings = CAST(? AS jsonb) "
+                        + "WHERE id = ? AND adaptive_enabled = ? AND adaptive_settings IS NOT DISTINCT FROM CAST(? AS jsonb)",
+                adaptiveEnabled, json(settings), courseId, expectedEnabled, json(expected)));
+        if (rows > 1) {
+            throw new IllegalStateException("Course configuration write matched more than one row");
+        }
+        return rows == 1;
+    }
+
+    /** Transaction-local PostgreSQL setting; reverts with commit, rollback and savepoint rollback. */
+    private static final String HELD_ROOT_SETTING = "codemastery.course_root";
+
+    @Override
+    public TransactionFacts currentTransactionFacts() {
+        return jdbc.queryForObject("SELECT current_setting('transaction_isolation') AS isolation, "
+                        + "current_setting('transaction_read_only') = 'on' AS read_only, "
+                        + "pg_current_xact_id_if_assigned() IS NOT NULL AS assigned, "
+                        + "NULLIF(current_setting(?, true), '') AS held_root",
+                (row, index) -> new TransactionFacts(row.getString("isolation"), row.getBoolean("read_only"),
+                        row.getBoolean("assigned"), heldRoot(row.getString("held_root"))), HELD_ROOT_SETTING);
+    }
+
+    @Override
+    public void markCourseRootHeld(UUID courseId) {
+        Objects.requireNonNull(courseId, "courseId");
+        jdbc.queryForObject("SELECT set_config(?, ?, true)", String.class, HELD_ROOT_SETTING, courseId.toString());
+    }
+
+    private static UUID heldRoot(String value) {
+        try {
+            return value == null ? null : UUID.fromString(value);
+        } catch (IllegalArgumentException invalid) {
+            throw new IllegalStateException("Invalid held Course root marker");
+        }
+    }
+
+    @Override
+    public boolean hasPendingPersistenceChanges() {
+        return entityManager.unwrap(Session.class).isDirty();
+    }
+
+    @Override
+    public void discardCleanPersistenceState() {
+        Session session = entityManager.unwrap(Session.class);
+        if (session.isDirty()) {
+            // Never discard another writer's queued changes to make the guard proceed.
+            throw new IllegalStateException("Pending persistence changes precede the Course root lock");
+        }
+        session.clear();
+    }
+
+    @Override
+    public void detachManagedCourse(UUID courseId) {
+        Objects.requireNonNull(courseId, "courseId");
+        detachManaged(entityManager, CourseEntity.class, courseId);
+    }
+
+    /**
+     * Detaches the managed copy of a row that a direct statement just changed, so a later JPA read
+     * in the same transaction reloads it instead of returning stale state. Course entities expose
+     * no mutators, so no pending change is discarded. Outside a transaction nothing stays managed.
+     */
+    static void detachManaged(EntityManager entityManager, Class<?> type, Object id) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            return;
+        }
+        SessionImplementor session = entityManager.unwrap(SessionImplementor.class);
+        EntityPersister persister = session.getFactory().getMappingMetamodel().getEntityDescriptor(type);
+        Object managed = session.getPersistenceContextInternal().getEntity(session.generateEntityKey(id, persister));
+        if (managed != null) {
+            session.detach(managed);
+        }
+    }
+
+    private static SqlParameterValue json(String json) {
+        return new SqlParameterValue(Types.VARCHAR, json);
+    }
+
+    private static Integer requireOneRow(int rows) {
+        if (rows != 1) {
+            throw new IllegalStateException("Course write lost its row");
+        }
+        return rows;
     }
 }

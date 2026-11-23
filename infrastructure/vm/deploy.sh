@@ -1338,7 +1338,11 @@ SQL
 # CT17-P6-PRIVILEGES-2026-10-28-r1 (docs/deployment.md) as extended by the
 # LEADER_APPROVED CT17-P6-PRIVILEGES-2026-11-13-r2 AU07 rows and the
 # DELEGATED_APPROVED CT17-P6-PRIVILEGES-2026-11-16-r3 ADR014 refresh-session rows and the
-# CT17-P6-PRIVILEGES-2026-11-17-r4 CO08 progress/resume rows (within the ADR012 §19.2 ceiling):
+# CT17-P6-PRIVILEGES-2026-11-17-r4 CO08 progress/resume rows and the
+# CT17-P6-PRIVILEGES-2026-11-22-r5 AD07 skill-graph rows and the
+# CT17-P6-PRIVILEGES-2026-11-22-r6 AS05 question-bank rows and the
+# CT17-P6-PRIVILEGES-2026-11-22-r7 AS06 quiz-composition rows and the
+# CT17-P6-PRIVILEGES-2026-11-23-r8 AD06 mastery/history-write rows (all within the ADR012 §19.2 ceiling):
 # the complete runtime privilege matrix for the reviewed V001-V009 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
 # cannot silently widen a table-level grant. Nothing is granted to future objects.
@@ -1353,18 +1357,18 @@ lessons                  SELECT         -                                       
 learning_materials       -              SELECT(id,lesson_id,publication_status)  id,lesson_id,title,material_type,publication_status,text_content,object_key,original_filename,external_video_url
 enrollments              SELECT,INSERT  UPDATE(status,resume_lesson_id,last_visited_at) id,user_id,course_id,status,resume_lesson_id,last_visited_at
 lesson_progress          SELECT,INSERT  UPDATE(completed)                        id,enrollment_id,lesson_id,completed,mastery_skipped
-skills                   -              -                                        id,course_id,name,description
-skill_prerequisites      -              -                                        id,course_id,skill_id,prerequisite_skill_id
-lesson_skills            -              -                                        id,lesson_id,skill_id
-quizzes                  -              -                                        id,course_id,title,kind,time_limit_seconds,publication_status
-questions                -              -                                        id,skill_id,prompt,kind,difficulty,options,correct_options
-quiz_questions           -              -                                        id,quiz_id,question_id,position
-attempts                 -              -                                        id,user_id,quiz_id,attempt_number,started_at,expires_at,submitted_at,score_percentage
-attempt_answers          -              -                                        id,attempt_id,question_id,position,selected_options,is_correct
+skills                   SELECT,INSERT,DELETE UPDATE(name,description)           id,course_id,name,description
+skill_prerequisites      SELECT,INSERT,DELETE -                                  id,course_id,skill_id,prerequisite_skill_id
+lesson_skills            SELECT,INSERT,DELETE -                                  id,lesson_id,skill_id
+quizzes                  SELECT,INSERT,DELETE UPDATE(title,kind,time_limit_seconds,publication_status) id,course_id,title,kind,time_limit_seconds,publication_status
+questions                SELECT,INSERT,DELETE UPDATE(skill_id,prompt,kind,difficulty,options,correct_options) id,skill_id,prompt,kind,difficulty,options,correct_options
+quiz_questions           SELECT,INSERT,DELETE -                                  id,quiz_id,question_id,position
+attempts                 -              SELECT(id,quiz_id)                       id,user_id,quiz_id,attempt_number,started_at,expires_at,submitted_at,score_percentage
+attempt_answers          -              SELECT(id,question_id)                   id,attempt_id,question_id,position,selected_options,is_correct
 assignments              -              -                                        id,course_id,lesson_id,title,instructions,deadline_at,publication_status
 submissions              -              -                                        id,assignment_id,user_id,object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at
-learner_skill_masteries  -              -                                        id,user_id,skill_id,state
-path_recommendations     -              -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
+learner_skill_masteries  INSERT         SELECT(user_id,skill_id,state)+UPDATE(state) id,user_id,skill_id,state
+path_recommendations     INSERT         -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
 discussion_posts         -              -                                        id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden
 notifications            -              -                                        id,user_id,message,is_read,created_at
 content_reports          -              -                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at
@@ -1378,8 +1382,10 @@ flyway_schema_history    -              -                                       
 # Reviewed columns that a NEW migration adds to an already reviewed table (CT17-P6 r4:
 # V009 adds enrollments.last_visited_at). The matrix above stays the single exact policy.
 # Only pre-migration provisioning may defer such a column, and only while the database
-# is exactly that migration's predecessor: the column is absent and the Flyway history
-# holds exactly the successful versioned migrations 1..(version-1), each once. Grants on
+# is a predecessor of that migration: the column is absent and the Flyway history holds
+# exactly the successful versioned migrations 1..k, each once, for some k < version
+# (CT17-P6 r9, ADR017; r4 required k = version-1, which refused a multi-version update
+# such as the deployed V006 preview to V009). Grants on
 # the deferred column are then applied by harden_after_migration, and the complete
 # verification requires the whole matrix. Any other state defers nothing, so
 # provisioning fails closed. Fields: relation, column, version of the adding migration.
@@ -1436,15 +1442,19 @@ SQL
     )" || fail "Could not inspect the migration state before provisioning."
     if [[ "${state}" == "history" ]]; then
       # Flyway records V009 as '009'; compare numerically and reject anything else.
+      # CT17-P6 r9 (ADR017): any exact successful prefix 1..k with k < version is a
+      # predecessor of the adding migration (r4 accepted only k = version - 1).
       state="$(psql_admin 2>/dev/null <<SQL
-SELECT CASE WHEN count(*) = ${version} - 1
-             AND count(*) = count(*) FILTER (WHERE success AND version ~ '^[0-9]{1,4}\$')
-             AND count(DISTINCT version) = count(*)
+WITH s AS (SELECT count(*)::int AS n,
+                  count(*) FILTER (WHERE success AND version ~ '^[0-9]{1,4}\$') AS ok,
+                  count(DISTINCT version) AS d
+             FROM public.flyway_schema_history)
+SELECT CASE WHEN s.n BETWEEN 1 AND ${version} - 1 AND s.ok = s.n AND s.d = s.n
              AND ARRAY(SELECT (h.version)::int FROM public.flyway_schema_history h
                        WHERE h.version ~ '^[0-9]{1,4}\$' ORDER BY 1)
-                 = ARRAY(SELECT generate_series(1, ${version} - 1))
+                 = ARRAY(SELECT generate_series(1, s.n))
             THEN 'predecessor' ELSE 'drift' END
-  FROM public.flyway_schema_history;
+  FROM s;
 SQL
       )" || fail "Could not inspect the Flyway history before provisioning."
     fi
@@ -1581,10 +1591,10 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
     || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
   if [[ -n "${violations}" ]]; then
     printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
-    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session and r4 progress/resume rows); reconcile explicitly. Ingress remains closed."
+    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition and r8 mastery/history-write rows); reconcile explicitly. Ingress remains closed."
   fi
   if [[ "${mode}" == "complete" ]]; then
-    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session and r4 progress/resume rows) verified (every public relation reviewed)"
+    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition and r8 mastery/history-write rows) verified (every public relation reviewed)"
   fi
   log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
 }
@@ -1625,7 +1635,18 @@ SQL
   expect_denied  "runtime role re-owning memberships" 42501 "${app}" "${app_pw}" <<<'UPDATE public.enrollments SET user_id = user_id, course_id = course_id WHERE false;'
   expect_denied  "runtime role updating mastery-skip flags" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_progress SET mastery_skipped = mastery_skipped WHERE false;'
   expect_denied  "runtime role erasing lesson progress" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.lesson_progress WHERE false;'
-  expect_denied  "runtime role reading question answer keys" 42501 "${app}" "${app_pw}" <<<'SELECT correct_options FROM public.questions WHERE false;'
+  expect_denied  "runtime role moving a skill to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.skills SET course_id = course_id WHERE false;'
+  expect_denied  "runtime role rewriting prerequisite edges in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.skill_prerequisites SET skill_id = skill_id WHERE false;'
+  expect_denied  "runtime role rewriting Lesson mappings in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_skills SET lesson_id = lesson_id WHERE false;'
+  expect_denied  "runtime role moving a quiz to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.quizzes SET course_id = course_id WHERE false;'
+  expect_denied  "runtime role rewriting quiz membership in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.quiz_questions SET position = position WHERE false;'
+  expect_denied  "runtime role reading attempt owners, timing or scores" 42501 "${app}" "${app_pw}" <<<'SELECT user_id, started_at, score_percentage FROM public.attempts WHERE false;'
+  expect_denied  "runtime role re-keying or re-targeting mastery rows" 42501 "${app}" "${app_pw}" <<<'UPDATE public.learner_skill_masteries SET id = id, user_id = user_id, skill_id = skill_id WHERE false;'
+  expect_denied  "runtime role deleting mastery rows" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.learner_skill_masteries WHERE false;'
+  expect_denied  "runtime role rewriting recommendation history" 42501 "${app}" "${app_pw}" <<<'UPDATE public.path_recommendations SET reason = reason WHERE false;'
+  expect_denied  "runtime role erasing recommendation history" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.path_recommendations WHERE false;'
+  expect_denied  "runtime role re-keying questions" 42501 "${app}" "${app_pw}" <<<'UPDATE public.questions SET id = id WHERE false;'
+  expect_denied  "runtime role reading captured answer selections" 42501 "${app}" "${app_pw}" <<<'SELECT selected_options FROM public.attempt_answers WHERE false;'
   expect_denied  "runtime role reading protected material payloads" 42501 "${app}" "${app_pw}" <<<'SELECT object_key FROM public.learning_materials WHERE false;'
   expect_denied  "runtime role erasing audit records" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.audit_logs WHERE false;'
   expect_allowed "runtime role locking a published Course root (CT22 membership)" "${app}" "${app_pw}" <<'SQL'

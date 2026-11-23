@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, and the six CO08 CT22.progress/resume operations (#174); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -1017,7 +1017,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Returns all valid Course skills, prerequisites and Lesson mappings. No pagination; empty graph valid for draft authoring. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Returns all valid Course skills, prerequisites and Lesson mappings. No pagination; empty graph valid for draft authoring. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1061,7 +1061,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md"
       }
     },
@@ -1071,7 +1070,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Creates one skill with server UUID. Nonblank name, optional null/nonblank description. Names are not unique; no invented length cap. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Creates one skill with server UUID. Nonblank name, optional null/nonblank description. Names are not unique; no invented length cap. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1115,7 +1114,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -1135,7 +1133,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Replaces name/description; omitted description becomes null. Course/identity immutable. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Replaces name/description; omitted description becomes null. Course/identity immutable. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1188,7 +1186,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -1206,7 +1203,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Rejects any prerequisite, mapping, Question or mastery reference (409); no cascade. Missing skill is 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Rejects any prerequisite, mapping, Question or mastery reference (409); no cascade. Missing skill is 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1255,7 +1252,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
@@ -1273,7 +1269,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent add after both scoped endpoints validate. Self-edge 400, new cycle 409. Full DFS reachability and Course-row serialization required. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Idempotent add after both scoped endpoints validate. Self-edge 400, new cycle 409. Full DFS reachability and Course-row serialization required. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1331,7 +1327,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
@@ -1347,7 +1342,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent remove after validating both endpoints; absent pair succeeds, missing/foreign endpoint 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Idempotent remove after validating both endpoints; absent pair succeeds, missing/foreign endpoint 404. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1402,7 +1397,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
@@ -1420,7 +1414,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent mapping under Course-owned ancestry assertion and Adaptive same-Course skill check; no extra mapping structural read. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Idempotent mapping under Course-owned ancestry assertion and Adaptive same-Course skill check; no extra mapping structural read. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1475,7 +1469,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
@@ -1491,7 +1484,7 @@
         "tags": [
           "Batch 1 contracts"
         ],
-        "description": "Idempotent unmap after validating Course Lesson/skill scope. May suspend effective readiness while preserving stored enabled intent and earned progress. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Contract approved; operation not implemented by the documentation PR.",
+        "description": "Idempotent unmap after validating Course Lesson/skill scope. May suspend effective readiness while preserving stored enabled intent and earned progress. Owning Instructor only; Course admission and concealment follow ADR001 section 12.4. Implemented under AD07 (#165) in the Adaptive module behind an Instructor-only route rule; Course ownership/ancestry (CT03) and the Course-root guard (CO14) are Course's. Malformed path/query/body and self-edge 400 follow authentication and role admission and precede Course admission. The runtime database grants are recorded as CT17-P6-PRIVILEGES-2026-11-22-r5 within the ADR012 section 19.2 ceiling (docs/deployment.md) and implemented in the VM deployment script and its CI tests; they have not been applied to any production or shared database, which remains Leader-reserved. Independent review and protected integration remain gated. ADR005 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -1546,7 +1539,6 @@
             "$ref": "#/components/responses/ProtectedForbidden"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/005-batch-01-contract-approvals.md",
         "x-frontend-transport": {
           "contractRevision": "CT16-B1-NO-CONTENT-2026-11-09-r1",
@@ -2159,7 +2151,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Self Courses including drafts; title COLLATE C/UUID order, REPEATABLE READ list/count. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Self Courses including drafts; title COLLATE C/UUID order, REPEATABLE READ list/count. Implemented under CO06 (#172) in the Course module; independent review, CI and protected integration remain gated. ADR006 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -2167,7 +2159,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Self-owned Courses, hidden and published, in title COLLATE C then UUID order.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2197,7 +2189,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2226,7 +2217,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Trusted Instructor owner, hidden, adaptive disabled and null settings; no supplied owner/adaptive fields. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Trusted Instructor owner, hidden, adaptive disabled and null settings; no supplied owner/adaptive fields. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2234,7 +2225,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Created hidden Course owned by the trusted Instructor, returned after commit.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2262,9 +2253,11 @@
           },
           "404": {
             "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -2284,7 +2277,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Coherent full owner tree; hidden descendants visible; no storage payloads or adaptive internals. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Coherent full owner tree; hidden descendants visible; no storage payloads or adaptive internals. Implemented under CO06 (#172) in the Course module; independent review, CI and protected integration remain gated. ADR006 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -2292,7 +2285,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Owner tree in canonical order, hidden descendants included.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2322,7 +2315,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2341,7 +2333,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full metadata replacement under unchanged ADR005 Course guard; serialized last commit wins; no settings precondition extension or auto-retry. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full metadata replacement under unchanged ADR005 Course guard; serialized last commit wins; no settings precondition extension or auto-retry. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2349,7 +2341,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Owner tree after the committed metadata replacement.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2377,9 +2369,11 @@
           },
           "404": {
             "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2410,7 +2404,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Explicit hidden/published, no cascade. Same B1 guard and completion reconciliation; event/notification integration remains CT26. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Explicit hidden/published, no cascade. Same B1 guard and completion reconciliation; event/notification integration remains CT26. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2418,7 +2412,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Owner tree after commit; a real change reconciled joined completion in the same unit.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2446,9 +2440,11 @@
           },
           "404": {
             "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2479,7 +2475,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Append max sibling position+1, first=1; no parent change or chapter visibility. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Append max sibling position+1, first=1; no parent change or chapter visibility. Course guard. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2487,7 +2483,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Appended Chapter, returned after commit.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2518,9 +2514,11 @@
           },
           "409": {
             "$ref": "#/components/responses/Batch2PositionConflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2551,7 +2549,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Scoped ancestry checked under guard; title only. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Scoped ancestry checked under guard; title only. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2559,7 +2557,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Chapter after the committed title replacement.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2587,9 +2585,11 @@
           },
           "404": {
             "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2629,7 +2629,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Complete sibling permutation, each UUID exactly once; duplicates/missing 400, foreign 404. Existing deferrable uniqueness; atomically assign 1..N. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Complete sibling permutation, each UUID exactly once; duplicates/missing 400, foreign 404. Existing deferrable uniqueness; atomically assign 1..N. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2637,7 +2637,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Committed Chapter order.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2665,9 +2665,11 @@
           },
           "404": {
             "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2698,7 +2700,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Scoped parent; append max+1; hidden; optional Markdown. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Scoped parent; append max+1; hidden; optional Markdown. Course guard. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2706,7 +2708,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Appended hidden Lesson, returned after commit.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2737,9 +2739,11 @@
           },
           "409": {
             "$ref": "#/components/responses/Batch2PositionConflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2779,7 +2783,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Owner preview; scoped descendants, both visibility states; coherent snapshot. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Owner preview; scoped descendants, both visibility states; coherent snapshot. Implemented under CO06 (#172) in the Course module; independent review, CI and protected integration remain gated. ADR006 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -2787,7 +2791,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Owner preview of the Lesson in either visibility state.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2817,7 +2821,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2845,7 +2848,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full title/Markdown replacement; parent/position/publication immutable here. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full title/Markdown replacement; parent/position/publication immutable here. Course guard. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2853,7 +2856,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Lesson after the committed title/Markdown replacement.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2881,9 +2884,11 @@
           },
           "404": {
             "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -2923,7 +2928,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full same-Chapter permutation, 1..N atomically; no cross-parent move. Course guard. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Full same-Chapter permutation, 1..N atomically; no cross-parent move. Course guard. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -2931,7 +2936,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Committed Lesson order within the Chapter.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -2959,9 +2964,11 @@
           },
           "404": {
             "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -3001,7 +3008,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Explicit hidden/published; Course guard, reconcile required-Lesson completion and preserve B1 effective-readiness semantics; no cascade/mapping invention/history replay. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current active Instructor only, self ownership; hidden non-owner 404, published non-owner 403, Administrator 403. Explicit hidden/published; Course guard, reconcile required-Lesson completion and preserve B1 effective-readiness semantics; no cascade/mapping invention/history replay. Implemented under CO06 (#172) in the Course module. Runtime database grants for these Course writes are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR006 is authoritative. JSON only: other request media types return 415 before admission; malformed path/query 400 precedes CT03 403/404, which precede body 400.",
         "security": [
           {
             "bearerAuth": []
@@ -3009,7 +3016,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Lesson after commit; a real change reconciled joined completion in the same unit.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3037,9 +3044,11 @@
           },
           "404": {
             "$ref": "#/components/responses/Batch2Unavailable"
+          },
+          "415": {
+            "$ref": "#/components/responses/Batch2UnsupportedMedia"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -3331,7 +3340,7 @@
         "tags": [
           "Batch 2 contracts"
         ],
-        "description": "Current self Learner ACTIVE/COMPLETED, published Course/Lesson. CT03 explicit-Course Lesson/material predicates; published materials only in UUID order. No storage payload/hidden metadata. Read-only coherent snapshot; visit is separate PUT. Contract technically approved; implementation, privileges, review, CI and protected integration remain separate. ADR006 is authoritative.",
+        "description": "Current self Learner ACTIVE/COMPLETED, published Course/Lesson. CT03 explicit-Course Lesson/material predicates; published materials only in UUID order. No storage payload/hidden metadata. Read-only coherent snapshot; visit is separate PUT. Implemented under CO06 (#172) in the Course module; independent review, CI and protected integration remain gated. ADR006 is authoritative.",
         "security": [
           {
             "bearerAuth": []
@@ -3339,7 +3348,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Published Lesson with its published relational materials.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3369,7 +3378,6 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -3493,7 +3501,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor Course owner; validate same-Course skill under original Instructor guard. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor Course owner; validate same-Course skill under original Instructor guard. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3512,7 +3520,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3542,7 +3550,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -3560,7 +3567,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner only; answer keys permitted. UUID ascending; coherent scope/count/page. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner only; answer keys permitted. UUID ascending; coherent scope/count/page. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3598,7 +3605,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3628,7 +3635,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -3638,7 +3644,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; scoped Question, includes key. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; scoped Question, includes key. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3666,7 +3672,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3696,7 +3702,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       },
       "put": {
@@ -3704,7 +3709,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; full replacement only if no AttemptAnswer references. Used definition 409; POST new replacement explicitly. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; full replacement only if no AttemptAnswer references. Used definition 409; POST new replacement explicitly. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3732,7 +3737,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3765,7 +3770,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -3783,7 +3787,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; no QuizQuestion/AttemptAnswer reference. Returns deleted definition after commit. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; no QuizQuestion/AttemptAnswer reference. Returns deleted definition after commit. Implemented under AS05 (#156) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, Course scope comes from AD07's CT40 SkillGraphService, and every write runs in CO14's Course-root READ COMMITTED unit. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3811,7 +3815,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS05 (#156).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3844,7 +3848,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -3854,7 +3857,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; hidden Quiz, exact explicit ordered same-Course membership. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; hidden Quiz, exact explicit ordered same-Course membership. Implemented under AS06 (#157) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, every write runs in CO14's Course-root READ COMMITTED unit and question scope comes from AD07's CT40 SkillGraphService. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3873,7 +3876,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3903,7 +3906,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -3921,7 +3923,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Current self Learner ACTIVE/COMPLETED membership; published Course/Quiz only. Title COLLATE C then UUID. Metadata only, no keys. Diagnostic workflow/start remains CT25 gated. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Current self Learner ACTIVE/COMPLETED membership; published Course/Quiz only. Title COLLATE C then UUID. Metadata only, no keys. Diagnostic workflow/start remains CT25 gated. Implemented under AS06 (#157) behind a Learner-only route rule: CT03 Learner Course access and one read-only REPEATABLE READ snapshot. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -3959,7 +3961,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3989,7 +3991,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -3999,7 +4000,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; hidden and published, includes question definitions/keys. Title COLLATE C then UUID. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; hidden and published, includes question definitions/keys. Title COLLATE C then UUID. Implemented under AS06 (#157) behind an Instructor-only route rule: CT03 ownership and one read-only REPEATABLE READ snapshot. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4037,7 +4038,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4067,7 +4068,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4077,7 +4077,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner only; full ordered definition including keys. Learners read metadata list and captured attempt only. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner only; full ordered definition including keys. Learners read metadata list and captured attempt only. Implemented under AS06 (#157) behind an Instructor-only route rule: CT03 ownership and one read-only REPEATABLE READ snapshot. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4105,7 +4105,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4135,7 +4135,6 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       },
       "put": {
@@ -4143,7 +4142,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; hidden and zero Attempts; replace complete title/kind/time/membership. Any Attempt freezes definitions. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; hidden and zero Attempts; replace complete title/kind/time/membership. Any Attempt freezes definitions. Implemented under AS06 (#157) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, every write runs in CO14's Course-root READ COMMITTED unit and question scope comes from AD07's CT40 SkillGraphService. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4171,7 +4170,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4204,7 +4203,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -4222,7 +4220,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; hidden and zero Attempts; deletes own membership only, returns deleted definition. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; hidden and zero Attempts; deletes own membership only, returns deleted definition. Implemented under AS06 (#157) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, every write runs in CO14's Course-root READ COMMITTED unit and question scope comes from AD07's CT40 SkillGraphService. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4250,7 +4248,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4283,7 +4281,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4293,7 +4290,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner; idempotent explicit state command; publish validates nonempty same-Course membership; hiding never cancels captured expiry. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner; idempotent explicit state command; publish validates nonempty same-Course membership; hiding never cancels captured expiry. Implemented under AS06 (#157) in the Assessment module behind an Instructor-only route rule: CT03 ownership admits first, every write runs in CO14's Course-root READ COMMITTED unit and question scope comes from AD07's CT40 SkillGraphService. ADR007 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -4321,7 +4318,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under AS06 (#157).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -4354,7 +4351,6 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,

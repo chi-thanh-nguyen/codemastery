@@ -229,6 +229,14 @@ Alpine pin refresh), the design preview, the
 browser harness and the Playwright E2E suite (including its 19 November 2026 image-build and
 sign-in failure diagnostics), using the Impeccable design skill and Playwright CLI locally; the redesign's visual reference is credited in
 [setup](docs/setup.md#frontend-setup-and-validation).
+Anthropic Claude Code also implemented the CO03 Course content-persistence
+capabilities and the CO14 Course configuration guard and adaptive-settings storage
+handoff, with their unit and PostgreSQL integration tests and testing documentation
+([PR #262](https://github.com/chi-thanh-nguyen/codemastery/pull/262), 21 November 2026).
+Anthropic Claude Code also audited and completed the AD06 Adaptive mastery and
+recommendation-history write persistence: the write mechanism, its unit and PostgreSQL
+integration tests, the CT17-P6 r8 runtime privileges and ADR016
+([PR #263](https://github.com/chi-thanh-nguyen/codemastery/pull/263), 23 November 2026).
 The team reviews this work through the normal pull-request process. This
 disclosure describes development assistance; CodeMastery's approved adaptive
 engine is rule-based and uses no AI/ML service.

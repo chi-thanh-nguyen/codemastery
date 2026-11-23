@@ -8,13 +8,25 @@ set -euo pipefail
 # infrastructure/postgres ships the layered stage's merged filesystem as one
 # layer (ADR003 amendment): same files, owners, modes and configuration, and no
 # layer that still holds the upstream gosu.
-flat=codemastery-ci/postgres:flat
+# POSTGRES_FLAT_IMAGE (optional): an existing image to check instead of a fresh
+# build, for example an exact release candidate (infrastructure/release/release.sh).
+# It is compared with the layered stage built from the checked-out source and is
+# never removed. Unset, the check builds and removes its own image as before.
+flat="${POSTGRES_FLAT_IMAGE:-codemastery-ci/postgres:flat}"
 layered=codemastery-ci/postgres:layered
 work="$(mktemp -d)"
-cleanup() { docker image rm "$flat" "$layered" >/dev/null 2>&1 || true; rm -rf "$work"; }
+cleanup() {
+  [[ -n "${POSTGRES_FLAT_IMAGE:-}" ]] || docker image rm "$flat" >/dev/null 2>&1 || true
+  docker image rm "$layered" >/dev/null 2>&1 || true
+  rm -rf "$work"
+}
 trap cleanup EXIT
-docker build -q -t "$flat" infrastructure/postgres >/dev/null
-docker build -q --target layered -t "$layered" infrastructure/postgres >/dev/null
+if [[ -n "${POSTGRES_FLAT_IMAGE:-}" ]]; then
+  docker image inspect "$flat" >/dev/null || { echo "POSTGRES_FLAT_IMAGE is not present: $flat" >&2; exit 1; }
+else
+  docker build -q -t "$flat" infrastructure/postgres >/dev/null
+fi
+docker build -q --platform "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$flat")" --target layered -t "$layered" infrastructure/postgres >/dev/null
 docker image inspect --format '{{json .Config}}' "$flat" > "$work/flat.config"
 docker image inspect --format '{{json .Config}}' "$layered" > "$work/layered.config"
 for image in flat layered; do

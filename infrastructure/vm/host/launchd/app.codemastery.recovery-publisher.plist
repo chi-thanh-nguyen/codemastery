@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  CodeMastery recovery publisher (ADR009 section 9.4; ADR017), operator workstation, every 15 minutes.
+  Template: replace CHECKOUT with the absolute path of a clean checkout of main and USER_HOME with
+  your home directory, copy to ~/Library/LaunchAgents/ and load with
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/app.codemastery.recovery-publisher.plist
+  It runs in your login session so the Keychain can supply the recipient key passphrase; a locked
+  Keychain, sleep or no network is a visible failure in the log, never a successful backup.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>app.codemastery.recovery-publisher</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-I</string>
+    <string>CHECKOUT/infrastructure/vm/host/recovery.py</string>
+    <string>publish</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CODEMASTERY_OPENSSL</key><string>/opt/homebrew/opt/openssl@3/bin/openssl</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartInterval</key><integer>900</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>USER_HOME/CodeMasteryRecovery/ledger/publisher.log</string>
+  <key>StandardErrorPath</key><string>USER_HOME/CodeMasteryRecovery/ledger/publisher.log</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>

@@ -9,6 +9,10 @@ import com.codemastery.modules.course.infrastructure.persistence.entity.Learning
 import com.codemastery.modules.course.infrastructure.persistence.entity.LessonEntity;
 import org.springframework.stereotype.Component;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.UUID;
+
 
 @Component
 public class CourseContentMapper {
@@ -83,6 +87,28 @@ public class CourseContentMapper {
                 entity.getObjectKey(),
                 entity.getOriginalFileName(),
                 entity.getExternalVideoUrl());
+    }
+
+    /** Maps one public.chapters row (id, course_id, title, position) read by private JDBC persistence. */
+    public Chapter chapterFromRow(ResultSet row) throws SQLException {
+        return new Chapter(row.getObject("id", UUID.class), row.getObject("course_id", UUID.class),
+                row.getString("title"), row.getInt("position"));
+    }
+
+    /** Maps one public.lessons row (id, chapter_id, title, content_markdown, position, publication_status). */
+    public Lesson lessonFromRow(ResultSet row) throws SQLException {
+        return new Lesson(row.getObject("id", UUID.class), row.getObject("chapter_id", UUID.class),
+                row.getString("title"), row.getString("content_markdown"), row.getInt("position"),
+                CourseMapper.publicationFromCode(row.getString("publication_status")));
+    }
+
+    /** Maps one public.learning_materials row; the exclusive payload columns are preserved verbatim. */
+    public LearningMaterial materialFromRow(ResultSet row) throws SQLException {
+        return new LearningMaterial(row.getObject("id", UUID.class), row.getObject("lesson_id", UUID.class),
+                row.getString("title"), toMaterialType(row.getString("material_type")),
+                CourseMapper.publicationFromCode(row.getString("publication_status")),
+                row.getString("text_content"), row.getString("object_key"),
+                row.getString("original_filename"), row.getString("external_video_url"));
     }
 
     // Accepts only the exact V002 codes ('text', 'file', 'external_video'). */

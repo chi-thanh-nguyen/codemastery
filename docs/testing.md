@@ -63,9 +63,10 @@ verification is separate work.
 | Suite | Added by | What it exercises |
 | --- | --- | --- |
 | `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). AU07 additions (PR #239): digest-only issuance and single-use confirmation; identical 202s for unknown/locked/repeated requests, with only eligible accounts issued; delivery after commit without a held User lock; two concurrent confirmations yield exactly one success; rollback when consumption fails; re-check after the User-lock wait; generic 400 for expired, future, locked and reused capabilities; unchanged CT01 bearer validity; a nested context with unconfigured delivery, where health, registration and login work and nothing is issued; and the production 415 for both recovery operations plus the deny-by-default 403 in the full application context (test-only controllers are `@TestComponent`s and are not component-scanned). `AuthServiceTest` adds real SMTP exchanges with an isolated loopback STARTTLS server: delivery only after STARTTLS and successful AUTH, and no message for a server that does not offer AUTH, rejected credentials, missing STARTTLS, or an untrusted or wrongly named certificate. Uses an ephemeral JWT secret. |
-| `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations |
+| `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119; CO03/CO14, PR #262; CO06 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations; CO03.content owner rows, scoped reads, appends, reorders and materials, and CO14 adaptive-field storage ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
+| `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
-| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)) |
+| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)). CO06 additions: Instructor authoring over HTTP, Course and Lesson publication reconciliation, the CT12.course Administrator handoff as a Course-root participant, and authoring, Administrator and Learner races on the Course root ([record](#co06-instructor-authoring-and-administrator-course-handoff-verification--22-november-2026)); after the independent re-review, text the database rejects or cannot store, the JSON-only 415 for empty requests, owner success paths, settings NOWAIT versus authoring, and the CT40 structure projection ([record](#pr-265-independent-re-review-remediation-and-ct40-structure-projection--22-november-2026)) |
 | `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
 | `SharedRestInfrastructureIntegrationTest` | SH01, PR #78 | Spring MVC ProblemDetail, validation and paging with test-only routes; it does not start PostgreSQL or the security chain |
 
@@ -160,8 +161,10 @@ tests. Surefire uses its standard `Test*`, `*Test`, `*Tests`, and `*TestCase`
 naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
 Current unit suites are under `modules/auth/`, `modules/course/` (including
-`application/service/`), `modules/adaptive/mastery/` and the shared `support/`
-package. The other module test files are empty scaffolds. The integration base
+`application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest`,
+`QuestionBankServiceTest`, `QuizGradingServiceTest` and the AS06 quiz authoring cases in
+`AttemptServiceTest`), `modules/adaptive/mastery/` and the shared
+`support/` package. The other module test files are empty scaffolds. The integration base
 class is compiled but is not initialized by this unit-test lifecycle, so
 `./mvnw test` needs no Docker.
 
@@ -348,7 +351,13 @@ code and wordmark text rendered without fallback glyphs (Chromium font inspectio
 and the logo's colour regions distinct on the ink frame at 16–40 px; the active-tab
 reach centred, symmetric and following clicks, child routes and history; production routes never loading the preview chunk; the
 preview sending no API request and writing no storage; computed text contrast on
-twelve screens; skip link, route focus and visible focus on every catalogue tab
+fourteen sampled screens in the light and the dark scheme; the FE34 theme checks (first
+paint before the bundle for each stored value and operating-system setting, a live
+operating-system change, Light and Dark ignoring it, another tab following, the Theme
+menu by keyboard with its status message, exactly one 44 px control per shell at 320–1440 px
+in both schemes, the Focus bar below 600 px, preview-local isolation, dark surfaces, light
+printing, `prefers-contrast: more` and, in Chromium, forced colours, with screenshots of
+each shell in both schemes); skip link, route focus and visible focus on every catalogue tab
 stop; drawer and dialog focus behavior including the full-screen sheet below
 600 px; form labels, required markers and error focus; `pagehide` input blur;
 catalogue submit-only search and error states; the 1.2 s skeleton shimmer and its
@@ -357,7 +366,17 @@ and absence of API requests; Learner home and My courses tile membership actions
 and the Mastery Map's 220 × 72 nodes, initial viewport and keyboard operation. It writes
 screenshots, accessibility snapshots and `browser-report.json` to `--out`
 (default: a new directory under the OS temporary directory), and exits non-zero
-on any failed check or browser that cannot launch. Positional FE01 arguments
+on any failed check or browser that cannot launch. A scenario that cannot run in an
+engine because of a verified browser-emulation limitation is reported as
+`NOT EXERCISED [engine] <scenario>: <reason>`, listed under `notExercised` in the
+report and counted separately in the summary (`N passed, N failed, N scenario(s) not
+exercised`); it is never counted as a pass, and the check that contains it names how
+many of its rows ran. Today that is only the first-paint row "no stored value, OS
+reports no preference" in WebKit, which reports the host appearance instead of
+`no-preference` (a host in Dark mode reports dark). The same mismatch in any other
+engine fails the check as an emulation failure. Chromium and Firefox report `light`
+under `no-preference`, so that row tests "not dark resolves System to light", not a
+state in which neither scheme matches. Positional FE01 arguments
 (`<playwright-module> <evidence-dir> <url> [engine]`) are still accepted.
 
 **E2E suite** (from `e2e/`):
@@ -691,6 +710,33 @@ material. Raw reports are not uploaded. `E2E` is a required check of the `main-q
 (see above). A green run is infrastructure evidence, not CT19/CT35/CT20.F Final coverage
 acceptance.
 
+A fifth workflow, `Release` ([release.yml](../.github/workflows/release.yml)), is the
+Phase 4 release pipeline ([ADR015](decisions/015-release-pipeline.md),
+[operator view](deployment.md#phase-4-release-pipeline--23-november-2026)). It is not a
+required check and changes no job above. `Release tooling` runs `bash -n` on
+`infrastructure/release/*.sh` and the `release.py` unit tests
+(`python3 -m unittest discover -s infrastructure/release/tests -v`; standard library
+only). On pull requests that change release inputs (the workflow,
+`infrastructure/release/`, `infrastructure/vm/`, `infrastructure/minio/`,
+`infrastructure/postgres/`, the base Compose file, `backend/Dockerfile` or
+`frontend/Dockerfile`), `Release rehearsal` runs both stages with `contents: read`: it
+enables the containerd image store, builds the five linux/amd64 candidates, reloads
+them from their archive, runs the exact-candidate qualification (the MinIO initializer
+suite against the minimal server, `test-java-truststore.sh`,
+`test-runtime-real-backend-privileges.sh`, `test-postgres-image-layer-equivalence.sh`
+with `POSTGRES_FLAT_IMAGE`, image hardening), scans with Trivy, packages, runs a
+`deploy.sh` preflight/load/provision smoke with refusal cases on a release-named copy,
+checks admission refusals against the real candidate manifest, then promotes with a
+synthetic `REHEARSAL-` admission (made by the same `admission-request`/`admission-decide`
+code as a real one, authenticating nobody), rescans, verifies the release archive with
+`deploy.sh` for both image stores and repeats the smoke on it. It attests, uploads and
+publishes nothing. `Release candidate`, `Admission request` and `Release admission and
+promotion` run only by manual dispatch from `main` with the permissions ADR015 lists
+(the last one only after approval in the protected `release-admission` environment,
+ADR015 A1); they store attested packages in draft releases and never publish. The smoke creates `/etc/codemastery` and a Compose
+project named `codemastery` and therefore refuses to run anywhere but a fresh
+GitHub-hosted runner.
+
 The Backend and Frontend jobs end with an informational evidence step that writes
 to the run's job summary unless the run was cancelled, including after a failed
 step. Both record the checked-out commit (the tested merge commit on pull
@@ -710,7 +756,9 @@ and the earlier steps remain the gate.
 The following are not covered by any executable test in the repository. No
 test-count or coverage-percentage claim is made for them.
 
-- **Empty scaffolds.** Assessment, Interaction and Admin unit tests; Adaptive
+- **Empty scaffolds.** Assessment `SubmissionServiceTest` (`AttemptServiceTest` holds
+  only the AS06 quiz authoring cases; its attempt cases wait for AS08);
+  Interaction and Admin unit tests; Adaptive
   decision, evaluation, listener, settings, mastery-update, placement and skill-graph
   tests; `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
   `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
@@ -735,13 +783,13 @@ test-count or coverage-percentage claim is made for them.
   upload or delivery (CT09).
 - **Assistive technology.** No test establishes actual screen-reader output; no
   manual VoiceOver, NVDA or TalkBack session has been recorded.
-- **DESIGN r12 behavior.** Light, Dark and System rendering, the Theme control, and
-  the r12 quiz-attempt, autosave and Instructor-management states are specified in
-  `DESIGN.md` but not implemented, so no test covers them
-  ([verification guidance](#design-r12-uiux-verification-guidance--specified-not_run)).
-  The theme system and its developer verification are assigned to FE34 #255.
-  The preview suite does not cover the recorded A13 case (a sign-in in another tab
-  makes the `/preview` document send `POST /api/auth/refresh`).
+- **DESIGN r12 behavior.** FE34 (#255, PR #261) adds unit, component and browser-harness
+  checks for the Light, Dark and System schemes and the Theme control
+  ([record](#fe34-theme-system-verification--20-november-2026)). They are developer
+  evidence: no screen-reader output, Firefox run, real backend or QA07 #63 acceptance is
+  recorded for them. The r12 quiz-attempt, autosave and Instructor-management states remain
+  specified, not implemented. The A13 preview-isolation case is covered by the provider,
+  preview and harness checks of the FE34 record.
 
 Coverage threshold enforcement is not configured; any future enforcement
 requires an approved decision.
@@ -4314,22 +4362,24 @@ E2E case, executes nothing and records no result. It does not change the CT14 co
 isolation and Profile/Auth UI contracts, the CT19 and CT35 E2E case selections, the CT34
 runner and fixture contracts, or the ADR014 `CT14-SESSION-2026-11-16-r1` obligations.
 
-**Current state.** `main` renders the light scheme only and has no Theme control. The r12
-colour schemes, the quiz-attempt entry and answer-saving states, and the Instructor
-management workflows are specified, not implemented, so no evidence exists for them.
-Nothing in the table below has passed.
+**Current state.** The colour schemes and the Theme control are implemented by FE34
+(#255, PR #261); their developer evidence is the
+[FE34 record](#fe34-theme-system-verification--20-november-2026), which covers the theme
+parts of the first three rows below. The quiz-attempt entry and answer-saving states and
+the Instructor management workflows are specified, not implemented, so no evidence exists
+for them. Rows without a recorded run stay NOT_RUN.
 
 **Theme verification handoff (19 November 2026).** FE34 #255 (assigned to `heizseung`,
-implementation authorized by the Project Leader on 19 November 2026, not implemented)
+implementation authorized by the Project Leader on 19 November 2026; implemented in PR #261)
 owns the theme system and its developer verification: the first three rows of the table
 below, with unit and component tests for the preference, storage fallbacks, other tabs,
 operating-system changes, the Theme control and the preview override, and rendered
 Light, Dark and System checks of the implemented shells and Live screens. That evidence
 is implementation evidence only. QA07 #63 keeps independent Final acceptance and runs
 its theme checks only after FE34 delivers the schemes; until then they are coverage gaps.
-FE34 adds no E2E case outside the CT19 and CT35 selections, and it excludes the A13
-preview-isolation case and the A14 response-metadata capability, which have no owning
-Issue. Every row stays NOT_RUN until a check actually runs.
+FE34 adds no E2E case outside the CT19 and CT35 selections. It excluded the A13
+preview-isolation case and the A14 response-metadata capability; both were later
+remediated on PR #261 under the Leader's FE03 authorization of 20 November 2026. Every row stays NOT_RUN until a check actually runs.
 
 | Area | What to verify once implemented | Layer |
 | --- | --- | --- |
@@ -4341,7 +4391,7 @@ Issue. Every row stays NOT_RUN until a check actually runs.
 | Server-authoritative quiz lifecycle | Only the explicit start actions send `b3StartAttempt`; Resume, Back, Forward, reload and direct links read the attempt by its identity; each start and read outcome shows its F6 state; the timer counts to the returned `expiresAt`; no request after `expiresAt`; the result read's 409 before finalization | Vitest with controlled responses; real-backend checks only within the CT19/CT35 selections |
 | Autosave reconciliation | Every F6 save-state transition, including failed and unknown saves, Checking, Reconcile, "Save my answers" and "Use saved answers", submit gating after a confirmed final save, and late responses ignored by attempt, save sequence and session generation | Vitest with controlled responses and timers |
 | Instructor management workflows | Server-decided editability (a 409 keeps the draft; "Save as a new question"; no automatic replacement), editor recovery and unknown outcomes, URL replacement after creation, regrading with the exact `submittedAt`, and the adaptive-settings snapshot with `ETag`/`If-Match` and 412/428 recovery | Vitest; the settings cases keep their existing [CT14 B1-O18/O19](decisions/005-batch-01-contract-approvals.md#163-ct14-acceptance-oracles-and-direct-consumer-traceability) allocation |
-| Data, API and preview isolation | Production screens show only decoded data from approved operations and no fixture or sample data; `/preview` sends no request, reads no session and writes no storage, including when another tab signs in or out (the A13 case, currently a known defect) | Existing preview suite, extended for A13 by its owner |
+| Data, API and preview isolation | Production screens show only decoded data from approved operations and no fixture or sample data; `/preview` sends no request, reads no session and writes no storage, including when another tab signs in or out (the A13 case, fixed and covered by PR #261) | Existing preview suite, `AuthProvider.test.tsx` and the browser harness |
 
 Report results per layer and only after the checks actually run. Unit results do not
 establish browser, assistive-technology, backend or deployment behavior, and a design
@@ -4370,3 +4420,1815 @@ moderation resolution call `AuditLogService.record`; their same-transaction and 
 existing placements named by ADR012 Â§19.3. `UserAccountService.userSummaries` has no dedicated unit test: it
 is exercised through the audit read, and its 100-ID limit is not asserted. The placement of these suites is
 for review.
+## AS05 question bank remediation (PR #259) — 20 November 2026
+
+AS05 ([#156](https://github.com/chi-thanh-nguyen/codemastery/issues/156),
+[PR #259](https://github.com/chi-thanh-nguyen/codemastery/pull/259)) implements the CT23.questions
+and CT23.bindings question-bank slice of ADR007 §§4 and 7: the five Instructor operations
+`b3CreateQuestion`, `b3ListQuestions`, `b3ReadQuestion`, `b3ReplaceUnusedQuestion` and
+`b3DeleteUnusedQuestion`, the `QuestionBankService` callables with nested `QuestionInput` and
+`QuestionView` records, and the Assessment question, quiz and attempt repositories. The change
+corrects findings F1–F14 of the independent review of `ee177bd`. The Project Leader authorized
+the bounded `SecurityConfig` change and the test placement below on 20 November 2026.
+
+**Upstream producers.** `QuestionBankService` reaches the two approved producers through three
+protected methods that mirror their signatures, each now a single delegation:
+`SkillGraphService.requireSkillInCourse` and `readSkillIds` (ADR005 §3.2, AD07
+[#165](https://github.com/chi-thanh-nguyen/codemastery/issues/165)) and
+`CourseManagementService.withCourseConfigurationWrite` (ADR005 §§5 and 13.3, CO14
+[#177](https://github.com/chi-thanh-nguyen/codemastery/issues/177)). On 20 November neither
+existed and the methods failed closed; the integration of 22 November is recorded below.
+
+**Placement.** `modules/assessment/QuestionBankServiceTest.java` is a bounded placement
+exception: ADR008's CT14 table records a dedicated question-bank unit suite as a gap, and the
+Leader's 20 November authorization covers it for this PR. Recording it in
+`repository-structure.md` needs a separate governance change. The integration cases extend the
+approved `integration/AuthorizationIntegrationTest.java` (real endpoint authorization, no denied
+effects) and `integration/repository/AssessmentPersistenceIntegrationTest.java`.
+
+| Obligation | Covered by |
+| --- | --- |
+| Closed body: unknown, duplicate, missing or null members, wrong scalar or element types, trailing tokens, non-canonical UUIDs and non-JSON media types are 400 | `QuestionBankServiceTest$ClosedRequestBody`, `$Controller`; `AuthorizationIntegrationTest$QuestionBankEndpoints.ownerBodiesOutsideTheClosedContractAre400WithNoEffect` |
+| V004 validity: kinds, difficulties, `True`/`False` labels, key counts, nonblank text without trimming, no NUL and no unpaired surrogate | `QuestionBankServiceTest$Validation` |
+| CT03 admission before validation, scope and writes; Learner and Administrator 403; non-owner 403 or 404; unauthenticated 401 | `$Admission`, `$Controller`; `QuestionBankEndpoints` (production security chain) |
+| PUT frozen only by an AttemptAnswer reference; DELETE refused by either reference | `$Replace`, `$Delete`; adapter references in `AssessmentPersistenceIntegrationTest.questionAdapterReplacesDeletesAndReportsQuizAndAttemptReferencesSeparately` |
+| Course-wide list: PostgreSQL UUID order, filtering before count and paging, empty pages past the end, no int overflow, one REPEATABLE READ snapshot | `$Reads`, `$ProducerDelegation`; `questionAdapterScopesPagesInPostgresUuidOrderAndCountsBeforePaging` |
+| Lifecycle row lock conflicts with new QuizQuestion and AttemptAnswer references (native `FOR UPDATE`; `FOR NO KEY UPDATE` does not conflict) | `lifecycleRowLockBlocksNewQuizAndAttemptReferencesUntilItsTransactionEnds` |
+| Quiz and attempt adapters round-trip V004 rows without swapping references | `quizAndAttemptAdaptersRoundTripV004RowsWithoutSwappingReferences` |
+| `Cache-Control: no-store` on success and on 400, 401, 403, 404, 409 and 500 | `$Controller`; `QuestionBankEndpoints` |
+| Integrated producers: each seam delegates, inside the guard, and an invalid projection never widens scope | `$ProducerDelegation`; `QuestionBankEndpoints.admittedOwnerOperationsUseTheRealCt40ProducerAndCourseGuard` |
+
+The other unit cases emulate the producers in a test subclass; real-producer evidence is the
+PostgreSQL suites listed under the 22 November integration.
+
+Executed locally on 20 November 2026 (macOS host):
+
+- `cd backend && ./mvnw test -Dtest=QuestionBankServiceTest`: 79 tests, 0 failures.
+- `cd backend && ./mvnw test`: 792 tests, 0 failures, BUILD SUCCESS.
+- The integration suites did not run locally. The Docker Desktop engine returned
+  `InternalServerErrorException (Status 500)` and Testcontainers found no valid Docker
+  environment. Their results come only from the PR's CI `Backend` job (`./mvnw verify`).
+
+The integrated operations, their concurrency cases and the CT17 runtime privileges were added on
+22 November (below).
+
+### Producer integration and runtime privileges — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, with @minhtan29042006's agreement to
+Leader-assisted commits on this branch:
+
+- **CO14.** `withCourseConfigurationWrite` delegates to `CourseManagementService` (on `main` since
+  `b506500`); create, replace and delete run in the Course-root READ COMMITTED unit.
+- **AD07.** `requireSkillInCourse` and `readSkillIds` delegate to `SkillGraphService` (PR #264, on
+  `main` since `dfd816c`).
+  Both join the caller's unit: under the held root for writes, in the REPEATABLE READ snapshot for
+  reads. No AS05 seam fails closed any more.
+- **Text.** A prompt or option with an unpaired UTF-16 surrogate is 400 (PgJDBC would store `?`),
+  matching CO06's `isStorable` rule.
+- **CT17.** `CT17-P6-PRIVILEGES-2026-11-22-r6` in [deployment.md](deployment.md) grants exactly the
+  SQL above: `questions` SELECT, INSERT, DELETE and UPDATE of the six definition columns, and
+  column-level SELECT (id, question_id) on `quiz_questions` and `attempt_answers` for the reference
+  checks. Nothing was provisioned on any real database.
+
+| Obligation | Covered by (PostgreSQL unless noted) |
+| --- | --- |
+| Delegation, order inside the guard, invalid projection never widens scope | `QuestionBankServiceTest$ProducerDelegation` (unit) |
+| Create, list, read, replace, delete through the real producer; foreign skill 404 with no effect | `AuthorizationIntegrationTest$QuestionBankEndpoints.admittedOwnerOperationsUseTheRealCt40ProducerAndCourseGuard` |
+| QuizQuestion reference: replace allowed, delete 409; AttemptAnswer reference: replace and delete 409, definition kept and readable | `referencedQuestionsConflictOverHttpAndKeepTheirDefinition` |
+| Skill deletion racing question tagging on the Course root (commit and rollback) | `AdaptiveLearningFlowIntegrationTest.taggingAQuestionWithASkillBeingDeletedWaitsAndRereadsTheCommittedGraph` |
+| A QuizQuestion or AttemptAnswer reference racing a replace or delete (commit and rollback): an AttemptAnswer freezes both, a QuizQuestion refuses only the delete | `aConcurrentQuizOrAttemptReferenceDecidesAWaitingReplaceOrDelete` |
+| One REPEATABLE READ list snapshot while another connection commits between the count and the page (the same test fails with READ COMMITTED) | `aQuestionListIsOneSnapshotEvenWhenAWriterCommitsBetweenItsCountAndItsPage` |
+| Cross-Course question scopes | `questionScopesOfIndependentCoursesStayApart` |
+| NUL or an unpaired surrogate in a prompt or option is 400; supplementary characters are stored exactly; raw bytes that are not UTF-8 never give a 5xx or a stored value different from the echo | `AuthorizationIntegrationTest$QuestionBankEndpoints.unicodeBodiesAreStoredExactlyAsEchoedOrRejected` |
+| Runtime role: allowed AS05 SQL, 23503 on a referenced delete, re-key/TRUNCATE/membership/selection denials | `test-postgres-privilege-matrix-containment.sh` |
+| Runtime role: the five operations over HTTP, used 409, referenced 409, Learner 403, no 42501 | `test-runtime-real-backend-privileges.sh` |
+
+Executed locally on 22 November 2026 on the PR branch after `main` `dfd816c` (AD07 PR #264) was
+merged in and the three prepared commits were applied (macOS host, Docker Desktop):
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='QuestionBankServiceTest*'` | 85 tests, 0 failures |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 893, Failsafe 360, 0 failures, errors or skips. Among them `QuestionBankServiceTest` 85, `SkillGraphTest` 56, `AuthorizationIntegrationTest` 70, `AdaptiveLearningFlowIntegrationTest` 79, `AssessmentPersistenceIntegrationTest` 9 |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r6 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | AS05 SQL allowed; referenced delete 23503; re-key, TRUNCATE, membership-order write/read and captured-selection read 42501; `MATRIX_TESTS_PASS`, `UPGRADE_TESTS_PASS`, `CONTAINMENT_TEST_PASS` |
+| `docker build -t codemastery-backend:privilege-test backend`, then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` including the AS05 section (create 201, list, keyed read, replace 200, Learner 403, foreign skill 404, referenced delete 409, used replace 409, unreferenced delete 200); 0 `permission denied`/42501 backend log entries; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+These are local developer runs, not CI, independent review or QA evidence. The PR's CI on its
+head is recorded in the PR.
+
+## FE34 theme system verification — 20 November 2026
+
+**Scope and authority.** Developer verification of FE34 #255 (Leader authorization of
+19 November 2026, recorded in the Issue) on PR #261, branch
+`255-fe34-implement-global-lightdarksystem-theme-system`, based on `main` `307e8c2`. It is
+implementation evidence only; independent Final UI acceptance stays with QA07 #63. Run on
+macOS 27.2 arm64 with Node 24 and the Playwright 1.63.0 installed in `e2e/`.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Unit and component tests | `cd frontend && npm test` | 598 tests in 16 files passed |
+| Type check and build | `cd frontend && npm run build` | Passed (the existing chunk-size warning for the main bundle is unchanged in kind) |
+| Browser harness | `cd frontend && npm run test:browser -- --engine all --playwright ../e2e/node_modules/@playwright/test` | Chromium 153: 56 passed, 0 failed. WebKit 26.6: 55 passed, 0 failed (the forced-colours check is Chromium-only). Firefox did not launch on this host (environmental, as in earlier records); the command therefore exits non-zero |
+
+**What the automated tests cover.** `presentation.test.tsx`: preference resolution,
+invalid and empty values, storage that throws on read or write, `matchMedia` missing or
+throwing, the button's accessible name, `aria-haspopup`, `aria-expanded` and
+`aria-controls`, the menu caption, labelled group and `menuitemradio` items with
+`aria-checked`, focus on the chosen item, arrows with wrap, Home, End, Enter, Escape
+returning focus, an outside click, the drawer `radiogroup` with roving tab stop and
+arrow keys, the System caption, one status message per change, 44 px targets, one control
+per workspace shell at ≥ 900 px and < 900 px with none in the account menu, the auth
+layout placement, the light values of `main` and the r12 dark values, and the suspended
+transitions of a switch. `routes/index.test.tsx`: the control and the stored scheme during
+the ADR014 restore; a visitor's choice kept through sign-in, sign-out and another account
+signing in, with no request carrying theme data and no other storage key; invalid and
+blocked storage at startup. `PreviewApp.test.tsx`: storage writes that fail, other tabs
+(new, cleared and invalid values), operating-system changes, and the preview-local
+override (memory only, not reaching other tabs, kept by "Reset sample data", dropped when
+leaving `/preview` and on reload) with no request. `assessment.test.tsx`: in the Focus bar
+the control sits right of the exit button and opening or using it does not change the
+timer or answers, open a dialog, or call navigation, answer, submit or exit handlers.
+
+**Light-scheme fidelity.** A one-off Playwright comparison (not part of the repository)
+rendered the six live routes and all 28 preview screens at 1280 and 390 px from builds of
+`main` `307e8c2` and of this branch, light operating-system setting, with the new control
+hidden. Every difference was confined to the intended changes: header utility positions
+moved by the new Theme slot, the D9-7 landing header and D10-1 Focus bar layouts below
+600 px, and the dual-scheme design reference. It also found and fixed two light
+deviations of the reused commit (the info alert glyph and a 2 px shift of the auth brand
+panel).
+
+**Limits.** No screen-reader session, Firefox run, real backend, 200% browser zoom of the
+open menu, or Windows high-contrast session was recorded; forced colours were checked only
+through Chromium emulation. Contrast was computed from rendered colours on the sampled
+screens, not across every state. The `e2e/` suites were not run locally for this change.
+
+## FE03 remediation and FE34 completion verification — 20 November 2026
+
+**Scope and authority.** The Project Leader's FE03/FE34 remediation instruction of
+20 November 2026 on PR #261 (Refs #56, #255): the A13 preview-isolation fix, the landing
+restore view, the A14 frontend transport capability and the D9-7 E2E assertion. Developer
+evidence only; QA01 and QA07 acceptance are not claimed. Same host as the FE34 record.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Unit and component tests | `cd frontend && npm test` | 638 tests in 16 files passed |
+| Type check and build | `cd frontend && npm run build` | Passed |
+| Browser harness | `npm run test:browser -- --engine all --playwright ../e2e/node_modules/@playwright/test` | Chromium 153: 60 passed. WebKit 26.6: 59 passed. Firefox did not launch (environmental) |
+| E2E on the disposable stack | `cd e2e && npm ci && npm test` | 87 passed, 6 skipped by design, 22 failed: every failure is `firefox-desktop` at browser launch. The two CI failures of run 44763711438 (`chromium-mobile` and `webkit-mobile`, landing navigation) pass |
+| E2E lifecycle | `cd e2e && node --test fixtures/*.test.mjs` | 155 passed |
+
+**A13 reproduction.** On the previous PR head (`5346144`), the new `AuthProvider.test.tsx`
+and `PreviewApp.test.tsx` A13 cases failed (seven cases). Against a real local Compose
+stack (an isolated project with its own volumes, removed afterwards) and a build of that
+head served on `localhost:5173`, a Playwright CLI run with two tabs recorded two
+`POST /api/auth/refresh` requests from the `/preview` tab while the other tab signed out
+and in twice. With the fix, the same run recorded none in Chromium and in WebKit. A third,
+normal tab still adopted the session. A Playwright trace of the fixed run was kept locally.
+
+**Real-backend browser checks (Playwright CLI 0.1.23, Chromium and WebKit; Pixel 7 and
+iPhone 14 emulation).**
+
+- Registration and sign-in: the refresh cookie is `HttpOnly` and `SameSite=Strict`, and no
+  token is written to storage.
+- Landing restore view with a held refresh: one Theme control and no sign-in actions.
+- Theme kept through sign-in, reload of `/profile` and sign-out.
+- A sign-out in another tab: this tab goes to Sign in and shows the session-ended notice once.
+- A refused refresh: Sign in, with no notice.
+- A network failure on sign-in: a safe message and exactly one request.
+- Theme menu by keyboard, with its status message.
+- No page overflow and the correct control count on `/home`, `/courses`, `/my-courses` and
+  `/profile` at 320–1440 px in both schemes.
+- The mobile landing header (D9-7) and the drawer control.
+- Printing in light, `prefers-contrast: more`, forced colours on tinted states, and a live
+  OS change under System.
+- No console errors.
+
+Firefox could not be launched by the CLI either.
+
+**Limits.** No screen-reader session and no Firefox run. The A14 capability is verified
+only at the transport level; FE18's binding and the backend CORS change it needs are not
+part of this work.
+
+## PR #261 fresh-session audit remediation — 21 November 2026
+
+**Scope and authority.** A fresh Claude Code session audited the whole of PR #261 (FE34
+#255 and the FE03 #56 remediation) at `1b3f558` on `main` `307e8c2`, under the Project
+Leader's audit-and-remediation instruction of 21 November 2026. Developer evidence only: it
+is not an independent CODEOWNER review, and QA01 and QA07 #63 acceptance are not claimed.
+Host: macOS 27.2 arm64, Node 24.21.0, Docker 29.8.1, Playwright 1.63.0 from `e2e/`,
+Playwright CLI 0.1.23.
+
+**Findings fixed.**
+
+| ID | Severity | Finding | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| R-01 | P2 | Opening the Theme menu from a button whose "Theme" tooltip was already showing (keyboard focus always shows it; so does hover) left the tooltip open above the menu (z-index 1500 over 1300), covering the menu's "Theme" caption. `disableFocusListener`/`disableHoverListener` stop new openings but never close an open tooltip | The tooltip is controlled and closed while the menu is open | Harness check (hover and keyboard paths); real-backend CLI in Chrome and WebKit |
+| R-02 | P3 | The menu's `Popper` kept MUI's default `role="tooltip"`, so the accessibility tree read `tooltip > menu "Theme"` | `role="presentation"` on the popup container | Unit test (fails before); harness check; CLI accessibility snapshot |
+| R-03 | P3 | Tab or Shift+Tab from the open Theme menu closed it without restoring focus. The menu is portalled to the end of `<body>`, so focus left the page or wrapped to its first stop ("Skip to main content") | Tab and Shift+Tab close the menu and return focus to the button before the default action, so the sequence continues from the button | Unit test (fails before); harness check for both directions; CLI in Chrome and WebKit on `/courses`, `/login` and `/` |
+| R-04 | P3 | Printing with the Dark preference kept `color-scheme: dark`: the print rule re-declared the light variables, but the inline `color-scheme` set by the first-paint script and the preference state won, so native controls and system colours stayed dark | `color-scheme: light !important` in the print rule | Harness print check now asserts the computed `color-scheme`; CLI print emulation (Chrome, WebKit) |
+| R-05 | P3 | Below 900 px the workspace drawer showed "Create account" while the ADR014 restore ran, although F2 hides sign-in actions during the restore (pre-existing on `main`) | The drawer footer omits it while `restoring` | Route test (fails before); real-backend CLI with a held refresh (Chrome, WebKit) |
+| R-07 | P3 | In forced colours, floating surfaces (the Theme menu, the account menu, popovers, dialogs) had no edge: their outline is an inset box shadow, which forced colours removes, so a menu was not separated from the page (r12 Fallbacks: shadow-drawn boundaries need a real line) | A 1 px `CanvasText` outline on popover, dialog, drawer and popper papers under `forced-colors: active` | Chromium harness forced-colours check now asserts an edge on the Theme menu and the account menu; CLI on the previous build: outline `none`, border `none`, shadow `none` |
+| R-06 | Test | The harness `prefers-contrast` check used a runtime `emulateMedia({ contrast })`. In Playwright's Firefox, `matchMedia` changes but the stylesheets are not re-evaluated, so the check failed on Firefox although the application is correct | The check uses a context created with `contrast: 'more'` | Linux Firefox: the application's values are correct with the context option |
+
+**Commands and results** (final tree).
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check | `cd frontend && npm run typecheck` | Passed |
+| Unit and component tests | `cd frontend && npm test` | 641 tests in 16 files passed (638 before, plus three regression tests) |
+| Production build | `cd frontend && npm run build` | Passed (`main`'s existing >500 kB chunk warning) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit`, then `--engine chromium` again after R-07 | Chromium 153: 62 passed; after R-07: 62 passed, including the extended forced-colours check. WebKit 26.6: 61 passed (forced colours stays Chromium-only) |
+| Browser harness, Linux Firefox | The same harness with `--url` and `--engine firefox`, run in `mcr.microsoft.com/playwright:v1.63.0-noble` (arm64, Firefox 155 from the pinned 1.63.0 build) against the harness build served on the host; a loopback forwarder inside the container keeps the page origin `http://127.0.0.1` | Firefox 155: 61 passed, 0 failed (build before R-07, whose rule only applies under forced colours). Before R-06: 59 passed, 1 failed (the contrast check only) |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed. This run predates R-07, a CSS rule that applies only under `forced-colors: active` |
+
+`firefox-desktop` was left out of the local E2E run on purpose. On this host the pinned
+Firefox build (`firefox-1543`) exits at launch with `Could not find profile folder.`, with
+the Claude Code sandbox on and off and with another temporary directory, so the failure is
+environmental. CI runs `firefox-desktop` on Linux.
+
+**Real-backend checks.** An isolated Compose project (`-p fe34audit`: PostgreSQL, MinIO and
+the backend from this checkout), with the frontend built against `http://localhost:8080` and
+served by `vite preview` on `localhost:5173`. Playwright CLI sessions: Chrome, WebKit, Pixel 7
+and iPhone 14 emulation.
+
+- **A13**, two tabs: a sign-in, a sign-out and a second sign-in in the other tab, a
+  preview-local theme change, synthetic `focus`, `pageshow` and `visibilitychange`, then
+  leaving `/preview` by SPA navigation and changing the theme there. The preview document
+  sent no `/api/auth/*` request and showed no session; its only request was the public
+  catalogue `GET` after it left the preview. Same result in Chrome and WebKit.
+- **Theme change keeps state:** the registration form keeps its values and its `main`
+  element (no remount); there is one "Theme set to Dark." message, and Escape returns focus
+  to the button.
+- **Restore views** with a held refresh: on `/` the landing header shows only the Theme
+  button; on a protected route at 390 px the drawer has the Theme control and no "Create
+  account" (R-05).
+- **Widths:** 320, 360, 390, 599, 600, 768, 899, 900, 1024, 1280 and 1440 px on `/courses`,
+  `/login`, `/`, `/register`, a missing route and two preview screens, in Pixel 7 and
+  iPhone 14 emulation: exactly one Theme control and no page overflow everywhere. The drawer
+  segments are 91 × 44 px, the drawer stays open after a selection, arrows select, and
+  Escape returns focus to the menu toggle.
+- **Before and after:** R-03, R-04 and R-05 reproduced on a build of `1b3f558`, R-01 and
+  R-02 on the build with the first three fixes, and R-07 on the build before its fix.
+  R-01 to R-05 were gone on the next builds; R-07 is covered by the Chromium harness.
+- **Console:** no errors, apart from the browser's network log of the anonymous
+  `401 /api/auth/refresh`.
+
+**Limits.** No screen-reader session. Forced colours only through Chromium emulation, not a
+Windows contrast theme. The A14 capability is verified only at the transport level; FE18's binding and the
+backend CORS change remain separate dependencies.
+
+## PR #261 FE34 UI refinement (DESIGN r13) verification — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery
+PR #261 — Final UI Refinement, Theme Interaction Fixes & Comprehensive Playwright
+Verification", for PR #261 (Refs #255): icon colour inheritance, Theme menu states, header
+order, the Theme tooltip lifecycle and `DESIGN.md` r13 (D13-1–D13-5). Developer evidence
+only; QA07 #63 and QA01 acceptance are not claimed. Same host and tools as the 21 November
+audit record above.
+
+**Findings fixed.**
+
+| ID | Severity | Finding and root cause | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| U-01 | P2 | Theme tooltip stuck after the menu closed (Leader report). R-01 controlled the tooltip, but MUI calls `onClose` only while it considers the tooltip open, and it was held closed while the menu was open, so the state stayed `true` and the tooltip reappeared after dismissal until the next hover | The state resets when the menu opens or closes; after a close it stays suppressed while the pointer still rests on the button or focus was returned to it, until the pointer enters again or the button loses focus | Harness lifecycle check (pointer and keyboard, three selections, repeated cycles, route change, normal and reduced motion); reproduced on the previous build with the CLI (`afterDismiss: 1`, `afterMoveAway: 1`), gone after |
+| U-02 | P2 | Theme menu: a hovered item looked selected (Leader report). The shared `MuiMenuItem` override used `bg.selected` for hover, focus-visible and selected | Hover and keyboard focus use the new `bg.raisedHover` role (light `fill-150`, dark `graphite-600`); selected keeps `bg.selected` + 600; selected + hover adds a 1 px inset `line.strong` ring; focus adds the 2 px ring | Harness check for System (light and dark OS), Light and Dark: every hovered item, selected + hover, keyboard focus; CLI before: hovered `rgb(227, 238, 255)` = selected, after: `rgb(238, 238, 240)` against `rgb(227, 238, 255)` (dark `rgb(54, 58, 67)` against `rgb(27, 46, 77)`) |
+| U-03 | P3 | StatusPill glyphs used the family strong colour, not the label colour (Published eye glyph green, label ink) | `currentColor` | Unit test for all eight tones, mastery and recommendation tags in both schemes (fails before); harness check on Teaching, Courses, course path and the design reference; rendered audit of 32 preview screens in both schemes found StatusPill as the only mismatch |
+| U-04 | P3 | Landing header order Catalogue → Sign in → Theme → Create account split the account actions | DOM order Catalogue → Theme → Sign in → Create account | Route test (fails before); harness; CLI at 11 widths |
+| U-05 | P3 | Workspace top bar put Theme before the notification button | `AppHeader` `utilities` (bell) → Theme → `actions` (account or sign-in actions); `DashboardLayout` `headerUtilities` | Layout test (fails before); harness; CLI at ≥ 900 px |
+| U-06 | P3 | After the menu opened, the tooltip faded out over the menu for about 290 ms | The tooltip's exit transition is 0 while the menu is open | Harness asserts no tooltip trace 50 ms after opening; CLI: 0 traces after 30 ms |
+
+Buttons needed no change: the rendered audit found no button whose glyph differed from its
+label, and sampling a primary button during its 120 ms hover transition showed the glyph
+equal to the label in every sample. No KPI component has a glyph (`StatTile` has none;
+S22/S23 exclude KPI cards), so the KPI exception has no target today. The Needs-attention
+glyphs keep their accents (harness asserts it).
+
+**Commands and results (final tree).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 643 tests in 16 files (641 + 2; the two edited tests also gained assertions) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed; WebKit 26.6: 67 passed, with the "no preference" first-paint row reported as not exercised (U-07) |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble`, as in the audit record | Firefox 155: 67 passed, 0 failed (run before U-07, which changes only a WebKit-specific row) |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed |
+
+U-07 (test). The WebKit harness first-paint row "no stored value, OS reports no preference"
+failed after the host switched macOS to Dark. Playwright's WebKit does not emulate
+`no-preference`: it reports the host appearance (`matchMedia('(prefers-color-scheme: dark)')`
+is `true` under that emulation, while Chromium reports `false`). The application correctly
+resolved System to dark. That row is now reported as not exercised when the engine reports a
+dark preference under `no-preference`, instead of failing; Chromium and Firefox still
+exercise it.
+
+**Playwright CLI (Chrome and WebKit desktop sessions; Pixel 7 and iPhone 14 emulation)**
+against a production build served by `vite preview`:
+
+- **Widths:** 320, 360, 390, 599, 600, 768, 899, 900, 1024, 1280 and 1440 px × `/`,
+  `/login`, `/courses`, a missing route, preview Learner home, Teaching, Platform overview
+  and Courses × Light and Dark, in both desktop engines (mobile emulation at 320–768 px).
+  Every combination had exactly one Theme control and no page overflow. The landing header
+  always put Theme before "Sign in". From 900 px the Learner header ended Notifications →
+  Theme → Account menu.
+- **Theme menu states**, in Chrome and WebKit: for System (light and dark OS), Light and Dark,
+  a hovered item never matched the selected fill. Selected + hover kept the fill and added the
+  ring, and keyboard focus showed the ring.
+- **Tooltip:** the Leader's sequence (hover, open, choose, outside click, move away) left no
+  tooltip, and no trace 30 ms after opening.
+- **Animation:**
+  - A primary button's 120 ms hover transition kept glyph = label in every sample.
+  - Tile hover lift (−2 px, 200 ms) caused no layout shift.
+  - The canvas reach moved 385 → 509 px in 240 ms.
+  - The drawer slide (225 ms) returned focus to the toggle.
+  - The open menu sat on top of the stacking order with no page overflow.
+  - Theme switches showed one colour per probe over 20 frames, with transitions suspended for
+    the switch and restored.
+  - With `prefers-reduced-motion: reduce`, transitions computed to 1e-5 s, the reach and
+    drawer were instant, and the Theme menu and tooltip worked unchanged.
+- **Screenshots** of the menu states and the Teaching screen were kept locally, not committed.
+
+**Limits.**
+
+- No screen-reader session.
+- The tooltip scenarios ran on the preview's Learner home, which uses the same `AppHeader` and
+  `ThemeControl` as the live `/home`; no real-backend session was used for this pass.
+- Skeleton shimmer and the Path Spine completion fill rely on the existing harness checks.
+- Touch-only tooltip behaviour was not examined.
+
+## PR #261 independent review remediation — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery PR #261 —
+Complete Remediation of Independent Codex & Claude Code Review Findings", on PR #261 (Refs #255, #56),
+based on `6cc501b`. Developer evidence only: no independent review approval, QA07 #63 or QA01
+acceptance is claimed, and no screen-reader session was run.
+
+**Findings and dispositions.**
+
+| ID | Priority | Root cause | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| AUD-01 | P2 | `App.tsx` decided "opened at the preview" with `^/preview(/\|$)`, while React Router matches the `/preview` route case-insensitively, with trailing slashes, after decoding each path segment. `/PREVIEW`, `/Preview`, `/pre%76iew`, `/%70review` rendered the isolated preview but restored the session (one `POST /api/auth/refresh` each). The pattern also isolated `/preview/<anything>`, which renders "Page not found", so that document never restored | `isPreviewPath` in `routes/index.tsx` asks `matchRoutes` with the same `PREVIEW_PATH` the route uses; the decision is still taken once per document | 18 App-level tests in `PreviewApp.test.tsx` (the refresh endpoint answers with a valid session): 9 accepted aliases send no request through other tabs' sign-in, sign-out and sign-in, focus, page show, visibility, a theme change and SPA navigation, and store nothing but the theme; 9 controls (`/`, `/courses`, `/previewish`, `/preview-x`, `/preview/extra`, `/pre%76iewish` and three malformed encodings) restore once. The 5 case or encoding aliases and `/preview/extra` fail on `6cc501b`. Real backend: see below |
+| AUD-02 / F-01 | P3 | One `suppressTooltip` flag served both stale hover and restored focus, and `onBlur` kept it while the pointer rested on the button, so a later genuine keyboard focus stayed suppressed | Separate `staleHover` (released when the pointer genuinely enters) and `restoredFocus` (released on blur); `showTooltip` checks the source of the event; the menu state is a ref, so a hover timer started before the menu opened cannot show the tooltip over it | Vitest "Theme tooltip lifecycle" (7 tests, fake timers); harness tooltip check extended; Playwright CLI and library runs below |
+| F-03 | P3 | MUI's `enterDelay` (400 ms) also applies to focus, so keyboard focus showed the tooltip after about 410–425 ms (200 ms within hysteresis) | `onFocus` shows it at once when the button matches `:focus-visible`; hover keeps the 400 ms delay; the global Tooltip delays are unchanged | Vitest (immediate on Tab, not before 400 ms on hover); harness (≤ 250 ms on refocus and cold focus); CLI 0 ms in Chrome and WebKit |
+| F-02 | P3 | `DESIGN.md` D13-5 listed "a selection" as a menu dismissal, contradicting "Behavior everywhere" (the menu stays open after a choice) | D13-5 rewritten (dismissal by outside click, second press, Escape, Tab or Shift+Tab; a choice keeps the menu open and the tooltip hidden; per-source release; immediate keyboard focus); D13-5 decision row and the r13 revision entry record the amendment | Documentation review |
+| F-04 | P3 | Tooltip lifecycle and menu-item fills were covered only by the optional harness, which CI does not run | CI-run Vitest tests: "Theme tooltip lifecycle (D13-5, AUD-02/F-01, F-03)" and "Menu item states (D13-4)" in `presentation.test.tsx` | The tooltip tests fail on `6cc501b`'s `AppHeader.tsx` (3 of the 5 scenarios); the menu-state test fails on the pre-`c2e4eaf` theme (hovered = selected) |
+| F-05 | P4 | The WebKit "no preference" first-paint row printed a note but its check still counted as a pass, and the skip applied to any engine | `notExercised` record in the harness result and `browser-report.json`, a separate count in the summary, the check name states how many rows ran; only WebKit's verified limitation is recorded as not exercised, the same mismatch elsewhere fails as an emulation failure | Harness output below |
+
+**Found during remediation: a CI timeout (fixed).** The first `CI Frontend` attempt on `a737a82` failed:
+`isolated design preview › follows global theme changes until locally overridden without writing the
+preference` timed out at 5000 ms (667 of 668 passed). The Project Leader re-ran the job and the second
+attempt passed. That failure was not dismissed:
+
+- **Evidence.** The test already took 3009 ms in CI on `6cc501b`, and 2719 ms in the passing attempt.
+  The failing attempt ran on a slower runner (54.7 s for the suite, against 30.5 s).
+- **Reproduction.** Run locally with three busy processes per CPU, the same test timed out (5146 and
+  5055 ms). So did one of the new tooltip tests (its 12 cycles took 5183 ms).
+- **Root cause.** The test opened the preview index, which renders the whole design reference
+  (about 1,900 nodes, against 140 for a workspace screen). It then re-rendered it on every scheme
+  change and mounted it twice.
+- **Fix.** The test now uses `?screen=learner-home`; its assertions and the timeout are unchanged.
+  The preview chunk is imported once in a `beforeAll`. The tooltip test is split into one test per
+  choice.
+- **Result.** Under the same stress the full suite passed 670 of 670 twice (before: 2–3 timeouts,
+  and once a cascade through the rest of the file). It also passed twice under one busy process per
+  CPU, and once unloaded.
+
+**What the CI tests prove and what stays harness-only.** The Vitest tooltip tests drive the real
+`ThemeControl` with real `mouseover`/`mouseout`, focus and `keydown` events and MUI's own timers (fake
+timers). jsdom's `:focus-visible` heuristic recognises a Tab only from a target other than the element
+losing focus, so the tests dispatch the Tab key from the document before moving focus. The menu-state
+test reads the computed styles at rest and, because jsdom never matches `:hover`, resolves the hover and
+keyboard-focus states from the rendered style sheet's cascade (specificity, then order; media blocks
+such as `hover: none` are not applied). Rendered colours, the paint of the focus ring, real pointer
+heuristics, touch, motion and Firefox remain covered by the optional browser harness and the
+Playwright runs below.
+
+**Commands and results (final tree).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 670 tests in 16 files (643 + 27 new) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed, 0 failed, 0 not exercised; WebKit 26.6: 67 passed, 0 failed, 1 not exercised (first paint "no stored value, OS no preference"; host in Dark) |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed. `firefox-desktop` was not run on macOS, where the pinned Firefox does not launch |
+
+**Real backend (review-only disposable stack).** Images built from this checkout
+(`backend/`, `infrastructure/postgres/`), a private Docker network, random credentials, free
+loopback ports and a production build with `VITE_API_BASE_URL` on that backend; a synthetic Learner
+registered through the API. After a real sign-in (refresh cookie `cm_refresh` set), each alias was
+opened in a new tab of the same browser:
+
+- `/preview`, `/PREVIEW`, `/pre%76iew`, `/%70review`, `/preview/`, `/Preview/`: preview rendered,
+  0 refresh requests, no session, nothing stored. This held after the first tab signed out and in
+  again, after focus, page-show and visibility events, after choosing Dark (memory only) and after
+  SPA navigation to `/courses`. Results were the same in Chrome 157 and WebKit 27.2 (Playwright
+  CLI) and in Linux Firefox 155 (Playwright in the pinned image).
+- Controls `/courses`, `/preview/extra`, `/previewish`: one refresh request and the signed-in
+  Learner shown.
+- `/preview%` does not reach the application: the Vite preview server rejects the malformed URL.
+  The unit tests cover the application's handling of malformed encodings.
+- On a build of `6cc501b` served at the same origin, `/PREVIEW` and `/pre%76iew` each sent one
+  refresh request, and `/preview/extra` sent none and restored no session.
+
+**Tooltip (Playwright CLI, Chrome 157 and WebKit 27.2, normal and reduced motion; library runs on
+Chromium 153, WebKit 26.6 and Linux Firefox 155).**
+
+- Hover is not shown at 250 ms and is shown at 650 ms.
+- Opening the menu hides it. After Escape with the pointer resting on the button, focus is on the
+  button and there is no tooltip, also while the pointer moves over the glyph.
+- Tab away and Shift+Tab back with the pointer still resting shows it at once (0 ms; Firefox
+  96 ms with polling). Cold keyboard focus also shows it at once (0 ms).
+- Choosing with the keyboard keeps the menu open. Tab and Shift+Tab close it and continue the tab
+  sequence.
+- Outside click, 11 rapid presses, choosing System, Light and Dark each closed by a second press,
+  and a route change: no stranded or duplicate tooltip.
+- The adversarial cases A1–A10, L1, L2 and M1 of the earlier review all pass in the three engines;
+  A4 and A6 failed before the fix.
+
+**Regression smoke (fixed build).**
+
+- Theme menu in Light and Dark, Chrome and WebKit: a hovered item never takes the selected fill;
+  selected + hover keeps it and adds the ring; keyboard focus shows the ring; `aria-checked`
+  follows the choice.
+- The landing header reads Catalogue → Theme → Sign in → Create account.
+- Teaching pills draw their glyph in the label colour, and the three Needs-attention glyphs keep
+  their accents.
+- No page overflow. The 390 px drawer control switches the theme and stores it on the device.
+- The header, responsive and menu matrices of the earlier review were repeated on Chromium and
+  WebKit: the 11-width header matrix passed 1,280 of 1,280 checks per engine; the menu and glyph checks passed except the pre-existing Select case listed under Limits.
+
+**Limits.**
+
+- No screen-reader session.
+- The Playwright CLI is not available in the Linux image, so Firefox was driven by Playwright
+  scripts there.
+- The pre-existing MUI Select behaviour remains: ArrowDown on the last, already-selected option
+  moves nothing, so no focus ring appears there; ArrowUp shows it.
+- Other tooltips (icon-only navigation, header icon buttons, view rail, pills, code copy) keep
+  MUI's delay on keyboard focus. The instruction limits F-03 to the Theme tooltip and leaves the
+  global delays unchanged.
+
+## PR #261 final focused remediation (N-01–N-03) — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery PR #261 —
+Final Focused Remediation (N-01, N-02, N-03)", on PR #261 (Refs #255), based on `e9383c9`. It addresses
+the three P3 findings of the independent re-review of `e9383c9`. Developer evidence only: no independent
+review approval, QA07 #63 or QA01 acceptance is claimed, and no screen-reader session was run.
+`DESIGN.md` is unchanged: its Tooltip rule ("dismissible with Escape") already states the required
+behaviour, so no normative inconsistency remained.
+
+**Findings and dispositions.**
+
+| ID | Root cause | Fix | Regression evidence |
+| --- | --- | --- | --- |
+| N-01 | The button's `onFocus` showed the tooltip at once, but MUI Tooltip's focus listener also started its delayed open (400 ms, 200 ms within its hysteresis). Escape closes the tooltip through MUI's document listener without cancelling that timer, so a tooltip dismissed within about 400 ms of keyboard focus reappeared (reproduced before the fix: Chrome, WebKit and Firefox reopened it 408–461 ms after focus; the new Vitest test failed with "reopened at 400 ms after focus") | `AppHeader.tsx`: MUI's focus-driven `onOpen` is ignored, since `onFocus` already handles keyboard focus; MUI's focus and blur listeners stay attached, so blur still closes through MUI and restarts its hysteresis (`disableFocusListener` was rejected after reading MUI 9.4.0's Tooltip: it removes the blur close too, and a manual close would skip the hysteresis reset). An Escape dismissal also persists (`escaped`) until the pointer genuinely enters again or focus leaves the button, so a hover timer cannot bring it back | Two Vitest tests: focus → Escape at 100 ms → beyond 400 ms and 1.4 s still hidden, refocus shows it; Escape holds against pointer movement inside the button, a genuine new hover or focus shows it. Playwright: Escape at 60, 150 and 300 ms stays dismissed in Chrome, WebKit and Firefox, normal and reduced motion |
+| N-02 | jsdom does not report the focus that closing the menu returns to the button as `:focus-visible` (the test comment said it did), so no CI test exercised the restored-focus suppression; the pending-hover-timer test never asserted the state after the menu closed with the pointer still resting | Test only: a scoped `Element.prototype.matches` spy simulates the browser's `:focus-visible` for the restored focus (Chrome and WebKit report it), and the test asserts the simulation took effect; Escape, Tab and Shift+Tab are each checked at once and after 1 s, then a genuine keyboard refocus shows the tooltip. The pending-timer test now asserts no tooltip right after, and 1 s after, an outside close with the pointer resting. Comments corrected | Mutation runs below |
+| N-03 | MUI Tooltip keeps its hysteresis flag in module state. A suppressed open (the hover timer firing over the open menu) sets it without arming its 800 ms reset, so the next test's hover opened after 200 ms and "not before 400 ms" failed in some random orders (reproduced on `e9383c9`: seeds 13 and 1234 failed at line 864) | Test only: every tooltip test starts with `start()`, which settles the hysteresis under the test's fake clock (a hover that opens, a leave that closes and arms the reset, then 1 s); the 400 ms assertions and the timeout are unchanged. MUI's internal `testReset` export was not used: it is not part of MUI's typed public API | Random-order runs below |
+
+**Mutation evidence (disposable worktree, `presentation.test.tsx` and `PreviewApp.test.tsx`, 111 tests).**
+Each row reintroduces a defect into the corrected code and records which tests fail.
+
+| Reintroduced defect | Result |
+| --- | --- |
+| `AppHeader.tsx` of `e9383c9` (N-01 present) | 2 fail: both N-01 tests |
+| Escape memory removed (focus-open filter kept) | 1 fails: the pointer-movement N-01 test |
+| Focus-open filter removed (Escape memory kept) | 0 fail: the Escape memory alone also blocks the reopening; both removed fail 2 |
+| Restored-focus check ignored for focus, or `restoredFocus` never set | 1 fails each: the N-02 restored-focus test (on `e9383c9` both passed all tests) |
+| Close reset and menu-open guard both removed | 1 fails: the pending-timer test (passed all tests on `e9383c9`); either guard alone is redundant with the other and changes no behaviour |
+| Close reset and open reset both removed | 4 fail |
+| AUD-01 old pattern; F-01 blur and single-flag variants; stale hover never set; immediate keyboard focus removed | 6, 1, 1, 1 and 6 fail |
+| Any focus (not only `:focus-visible`) shows the tooltip | 0 fail; covered by the browser check that a mouse press shows no tooltip |
+| Hysteresis settling removed from `start()` | 8 of 25 random seeds fail (the corrected file: 0 of 25) |
+
+**Random-order stability.** `npx vitest run src/shared/components/presentation.test.tsx --sequence.shuffle
+--sequence.seed=<n>` for 25 seeds: 0 failures (before the fix the same file failed for seeds 13 and 1234).
+The two tooltip-related files together, five seeds: 111 of 111 each. The file ten times in default order:
+73 of 73 each. Three full-suite shuffled runs: seeds 5 and 2026 passed 673 of 673; seed 77 failed one test
+in `routes/index.test.tsx` ("direct entry /", `ResizeObserver is not defined`). Run alone with the same seed on
+`e9383c9`, that file also fails (2 tests); this remediation does not touch it, and it is recorded
+here as a pre-existing order dependence outside this instruction's scope.
+
+**Playwright CLI and library (production build of `750aaab` on a review-only stack with a real backend).**
+
+- Chrome 157 and WebKit 27.2 (Playwright CLI), Firefox 155 (Playwright in
+  `mcr.microsoft.com/playwright:v1.63.0-noble`): the 25-scenario tooltip matrix passed in each. It covers hover
+  after the delay; menu open and close by click, Escape, Tab, Shift+Tab, outside click, a second press and 11
+  rapid presses; stale hover; restored focus; keyboard refocus under a resting pointer; choices; scheme
+  switching with the menu open; route changes; Escape within and after the delay; Escape on a hover tooltip
+  followed by pointer movement and re-entry; Escape followed by keyboard refocus; and rapid Tab/Shift+Tab. Two
+  early Chrome runs aborted after a first hover that showed no tooltip within 1.5 s and a press that did not open
+  the menu (the first ran concurrently with the harness). Four later fresh-session Chrome runs passed all 25
+  scenarios, and the cause was not identified.
+- Escape at 60, 150 and 300 ms after keyboard focus, normal and reduced motion: hidden after Escape and not
+  visible again in the following 1.2 s in all three browsers (before the fix it reappeared 408–461 ms after focus).
+- AUD-01 with a real refresh cookie: `/preview`, `/PREVIEW`, `/pre%76iew`, `/%70review`, `/preview/` and
+  `/Preview/` rendered the preview with 0 refresh requests through other tabs' sign-out and sign-in, wake-ups, a
+  preview-local theme change and SPA navigation; `/courses`, `/preview/extra` and `/previewish` restored once.
+  Chrome, WebKit and Firefox.
+
+**Commands and results (`750aaab`).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 673 tests in 16 files (670 + 3) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed; WebKit 26.6: 67 passed, 0 not exercised (the host was in Light mode, so the "no preference" first-paint row ran: 7 of 7) |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed |
+
+**Limits.**
+
+- No screen-reader session.
+- Touch long-press tooltips were not verified.
+- `firefox-desktop` E2E was not run on macOS, where the pinned Firefox still does not launch; CI runs it.
+- The remaining redundancy is deliberate: the focus-open filter and the Escape memory each block the N-01
+  reopening, and the menu-open guard and the reset on close each block a pending hover timer. CI guards
+  both pairs together, not each defence alone.
+
+## PR #261 N-04 remediation (MUI tooltip hysteresis) — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026, "CodeMastery PR #261 — Focused
+Remediation of N-04 (MUI Tooltip Hysteresis)", on PR #261 (Refs #255), based on `1f23e9b`. Developer evidence only:
+no independent review approval, QA07 #63 or QA01 acceptance is claimed, and no screen-reader session was run.
+`DESIGN.md` is unchanged: D13-5 and › Tooltip already require 400 ms for a pointer hover.
+
+**N-04 — root cause (MUI 9.4.0, `Tooltip.js`).** The button's `onFocus` shows the tooltip at once, but MUI's own focus
+listener also starts its open timer (`handleFocus` → `handleMouseOver` → `enterTimer`, 400 ms). Escape closes the tooltip
+through `handleClose`, which starts the 800 ms reset of the module-level `hystersisOpen` flag; the pending focus timer
+then fires `handleOpen` (the application ignores its `onOpen`), which calls `hystersisTimer.clear()` and sets
+`hystersisOpen = true`. Nothing resets it while focus stays on the button, so the next pointer hover uses
+`enterNextDelay` (the theme's 200 ms) instead of `enterDelay` (400 ms).
+
+**Correction.** `AppHeader.tsx`: `enterNextDelay={400}` on the Theme `Tooltip` (one prop and a comment). With
+`enterDelay` 400 the open timer is `hystersisOpen ? enterNextDelay : enterDelay`, so the hover delay is 400 ms
+whatever the flag. Rejected: `disableFocusListener` (removes MUI's blur close, which the earlier remediations keep),
+a manual reset of MUI state (not public API) and extra timers. The global `MuiTooltip` defaults are unchanged. One
+deliberate consequence: a re-entry within 800 ms of leaving the Theme button also takes 400 ms, as D13-5 specifies,
+where MUI's default would open it after 200 ms.
+
+**Timing before and after (production build, MUI opening delay measured from the pointer's first `mouseover` to the
+tooltip node's insertion; the fade follows, about 90–100 ms; milliseconds).**
+
+| Sequence | Before (`1f23e9b`) Chrome / WebKit / Firefox | After Chrome / WebKit / Firefox |
+| --- | --- | --- |
+| Keyboard focus, Escape at 100 ms, 2 s idle, pointer enters | **205 / 206 / 208** | 406 / 406 / 411 |
+| Same, 600 ms idle | **206 / 206 / 210** | 405 / 405 / 414 |
+| Escape at 500 ms, 2 s idle, pointer enters | 405 / 404 / 415 | 406 / 406 / 413 |
+| Pointer only, fresh page | 407 / 418 / 420 | 411 / 418 / 415 |
+| Repeated hover: first, 300 ms after leaving, 1.2 s after leaving | 408, **205**, 406 / 413, **207**, 406 / 452, **213**, 405 | 408, 405, 405 / 415, 408, 406 / 412, 413, 420 |
+| Pointer resting after a menu closed by Escape, then leave and re-enter 400 ms later | **203 / 206 / 410** | 405 / 404 / 409 |
+| Keyboard focus without Escape: tooltip already shown at focus (1 ms), nothing reopens | pass | pass |
+
+Bold rows are the sub-400 ms openings, the first two being N-04. Escape at 500 ms was never affected, because
+the flag was reset after the focus timer had fired. Chrome 157 and WebKit 27.2 ran through the Playwright CLI and
+Firefox 155 through Playwright in `mcr.microsoft.com/playwright:v1.63.0-noble`; the script and the unfixed build are
+not committed.
+
+**Other tooltips (unchanged, recorded).** The same stuck flag is global. With the Theme tooltip dismissed by an
+early Escape and focus still on the Theme button, an icon-only navigation tooltip ("My courses" at 1024 px) opens
+after 205–210 ms in all three browsers instead of 408–419 ms. It is the theme's `enterNextDelay` (200 ms) applied
+to the stale flag, it affects only that interval, and it clears when focus leaves the Theme button (406–418 ms after a
+Tab and 1.2 s). Escape at 500 ms leaves it at 403–412 ms. The local prop cannot influence other instances; removing
+the cause would need `disableFocusListener` on the Theme tooltip with a managed blur, a larger change that this
+remediation did not make.
+
+**Regression tests.** Three Vitest tests (`presentation.test.tsx`, `start()` settles MUI's hysteresis first):
+keyboard focus → shown at once → Escape at 100 ms → hidden → through MUI's original 400 ms timer, 1 s and 2 s more
+→ hidden, focus unchanged → pointer entry absent at 399 ms and open at 400 ms; the same for Escape at 500 ms; and a
+hover that takes 400 ms when repeated, 300 ms after leaving, after a stale hover and a menu Escape, and after a choice,
+focus restoration and six rapid open/close presses. The browser harness gains the same early-Escape step (hover
+tooltip present at 300 ms fails it, then it must open within 800 ms).
+
+**Mutation evidence (disposable worktree).**
+
+| Change | Result |
+| --- | --- |
+| Corrected code | 114 of 114 pass in `presentation.test.tsx` and `PreviewApp.test.tsx` |
+| `enterNextDelay` prop removed (the N-04 defect), or set to `200` | 2 fail: the Escape-at-100 ms test and the repeated-hover test; the Escape-at-500 ms test passes, as it did before the fix |
+| `AppHeader.tsx` of `1f23e9b` | the same 2 fail |
+| Harness on the code without the prop (Chromium) | 66 passed, 2 failed: both motion variants of the tooltip check, "the hover tooltip opened before its 400 ms delay" |
+
+**Random-order stability.** `presentation.test.tsx` with `--sequence.shuffle`, 25 seeds: 0 failures; five default-order
+repeats: 76 of 76 each. The pre-existing `routes/index.test.tsx` order dependence is not part of N-04 and is not
+changed.
+
+**Commands and results (this tree).**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Type check, unit tests, build | `cd frontend && npm run typecheck && npm test && npm run build` | Passed; 676 tests in 16 files (673 + 3) |
+| Browser harness, macOS | `npm run test:browser -- --engine chromium,webkit` | Chromium 153: 68 passed; WebKit 26.6: 67 passed; none failed or not exercised |
+| Browser harness, Linux Firefox | Harness with `--url` and `--engine firefox` in `mcr.microsoft.com/playwright:v1.63.0-noble` | Firefox 155: 67 passed, 0 failed, 0 not exercised |
+| E2E on the disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` (lifecycle coordinator) | 87 passed, 5 skipped by design, 0 failed; the run's stack was verified removed |
+| Whitespace | `git diff --check` | Clean |
+
+**Limits.** No screen-reader session; touch long-press was not verified; `firefox-desktop` E2E was not run on macOS,
+where the pinned Firefox does not launch (CI runs it); the residual hysteresis effect on other tooltips above.
+
+## PR #261 G-01/G-02 remediation — 21 November 2026
+
+**Scope and authority.** The Project Leader's instruction of 21 November 2026 to implement both remaining P3
+findings directly on PR #261 (Refs #255), based on `6ba62b4`. OpenAI Codex implemented and ran the developer
+verification below under that instruction; the commits retain the requested `heizseung` author and committer
+attribution. This record grants no independent CODEOWNER review, QA07/QA01 acceptance, merge or release approval.
+No contract, dependency, route, Auth/session behavior or production attempt lifecycle was changed.
+
+**G-01 — permanent countdown regression coverage.** Six cases in the existing CI-executed `PreviewApp.test.tsx`
+mount the real `App` and preview attempt controller: quiz and diagnostic, each selecting Light, Dark or System
+from a different stored preference. Each seeds an answer and advances the controller's real interval under fake
+timers: two seconds with the Theme menu open, one second after selecting, and one second after Escape closes it.
+The exact countdown must advance in every phase; all answer checked/disabled states, the attempt route and the
+stored global preference remain unchanged; no dialog, save/submit request or other fetch occurs. Selection keeps
+the menu open and focus on the chosen item; Escape restores focus. The countdown component and controller are real;
+only their scheduling APIs use fake timers.
+One transition per case avoids unrelated question-navigation work and keeps the default five-second timeout.
+
+**G-02 — text enlargement without clipping.** `AppHeader.tsx` keeps the normal 44 px track, three equal segments
+and 36 px selected pill. The drawer control establishes an inline-size container; at or below `14rem` of available
+space, relative to the enlarged text, its existing radios flow into full-width rows of at least 44 px. Text and
+glyphs are neither hidden nor shrunk; the labels retain their rem-based size. The same roles, DOM order, roving
+tab stop, arrow/Home/End behavior, selected colours and announcements remain. This is a CSS-only accessibility
+fallback; the Theme button/menu and all N-01–N-04 tooltip guards are unchanged. `DESIGN.md` was not edited.
+
+The existing browser harness now opens the drawer for Learner, Instructor and Administrator previews in both
+schemes at 320 and 640 px, at 100%, 120% and 200% text size: 36 configurations per engine. It checks that every
+label and glyph fits within the inset pill bounds, each target is at least 44 × 44 px, glyph and label colours
+match, text enlargement is honoured, and normal track height stays 44 px. Keyboard selection checks every
+preference, the visible focus ring, scheme resolution, the drawer staying open and Escape focus restoration.
+
+**Mutation evidence (disposable copy, restored afterwards).**
+
+| Intentional regression | Result |
+| --- | --- |
+| Pause the countdown only while Theme is open | All six G-01 cases fail on the exact countdown assertion |
+| Clear answers while Theme is open | All six fail on the answer-state assertion |
+| Send an unexpected request while Theme is open | All six fail on the fetch assertion |
+| Submit the sample attempt while Theme is open | All six fail because the answering countdown disappears |
+| Restore `AppHeader.tsx` from `6ba62b4` | The exact permanent G-02 browser check fails in Chromium and WebKit: `learner-home/light/320/120%/System: label or glyph escapes its pill` |
+
+The final G-01 mutation failures were assertion failures, not timeouts. The G-02 negative and final positive
+checks were run by disposable drivers that rebuilt the source and invoked the permanent harness check body
+without replacing its assertions. No mutation or temporary driver is a repository file.
+
+**Commands and results.** macOS arm64, Node 24.21.0, npm 11.19.0, installed Playwright 1.63.0.
+
+| Check | Command or method | Result |
+| --- | --- | --- |
+| Full frontend suite, default worker settings | `cd frontend && npm test` (JSON reporter used for the evidence) | 682 passed in 16 files; six added cases |
+| Type check and production build | `cd frontend && npm run build` | Passed, including `npm run typecheck`; existing bundle-size warning |
+| Full browser harness | `npm run test:browser -- --engine chromium,webkit --playwright ../e2e/node_modules/@playwright/test` | Chromium 153.0.8010.12: 69 passed; WebKit 26.6: 68 passed; no failures. WebKit recorded one first-paint row as not exercised |
+| Final affected browser matrix | Exact permanent G-02 check on rebuilt final source, after tightening the breakpoint and adding the 120%/font/glyph assertions | Passed all 36 configurations per engine in Chromium and WebKit; the earlier full harness covered 100%/200% before that refinement |
+| E2E lifecycle regression tests | `cd e2e && node --test fixtures/*.test.mjs` | 155 passed, zero failed |
+| E2E on the owned disposable stack | `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 87 passed, five skipped, zero failed; lifecycle inventory reports every owned resource absent |
+| Whitespace | `git diff --check` | Passed |
+
+**Execution limits and remaining gaps.** Early runs exceeded default test timeouts;
+the final cases retain all timing/answer/request assertions and the timeout, with a smaller single-question
+fixture. A one-worker full run passed all new cases but reproduced the previously documented
+`routes/index.test.tsx` direct-entry `/` failure (`ResizeObserver is not defined`): 681 passed, one failed. The
+default full run subsequently passed all 682. No routing test was changed or quarantined.
+
+The WebKit no-preference first-paint row was explicitly not exercised because that emulation reported the host's
+Dark appearance. These browser checks use controlled API responses; the E2E row uses the real disposable backend.
+There was no screen-reader or native Windows contrast-theme session, no native browser-UI zoom acceptance pass,
+and no local Firefox run. Full-page zoom and text-only enlargement remain distinct. The production quiz/diagnostic
+route and real attempt integration stay with FE09/FE10; this countdown evidence is for their existing presentation
+and preview samples. Independent QA and the wider FE34 verification gaps are not declared complete here.
+
+## AS04 quiz grading unit verification — 20 November 2026
+
+Implementation of AS04 ([#32](https://github.com/chi-thanh-nguyen/codemastery/issues/32),
+[PR #258](https://github.com/chi-thanh-nguyen/codemastery/pull/258)) in the existing
+`QuizGradingService.java`, through the module-local typed binding of
+`CT04-SUBMISSION-2026-11-09-r1` ([ADR007 §9](decisions/007-batch-03-contract-approvals.md#9-ct04submission-and-saved-answers)):
+`grade(List<GradingItem>)` returns a `Grade` holding the percentage and one
+`GradedItem` per input item, in input order. The calculation is the data-model §11
+rule: equal-weight exact selection-mask match, zero for incorrect, partial,
+extra-option and all-false (unanswered) selections, and a 0–100 percentage rounded
+`HALF_UP` to two decimals. Empty, null, duplicate and mismatched inputs are outside
+AS04 and remain unspecified; no test asserts a behavior for them.
+
+`modules/assessment/QuizGradingServiceTest.java` has 12 deterministic unit tests. Its
+fixtures are AS01 `Question` and `AttemptAnswer` records checked against the data-model
+§11 invariants (one option label per answer-key entry, at least two entries, `True`/`False`
+labels for `true_false`, answer-key cardinality per kind, matching selected-mask length
+and at most one selection for single-answer kinds) and then converted into
+`GradingItem`s.
+
+| Obligation | Covered by |
+| --- | --- |
+| All correct → `100.00`; all incorrect → `0.00` | `grade_allCorrectAnswers_returns100Point00`, `grade_allIncorrectAnswers_returns0Point00` |
+| Multiple-choice exact versus partial and extra selections | `grade_multiChoicePartialOrExtraOptions_receiveZeroCredit` |
+| All-false (unanswered) mask scores zero | `grade_unansweredMask_receivesZeroCredit` |
+| B3-O08 grading values: 1 of 3 → `33.33`, 2 of 3 → `66.67` | `grade_oneCorrectOutOfThree_roundsHalfUpTo33Point33`, `grade_twoCorrectOutOfThree_roundsHalfUpTo66Point67` |
+| `HALF_UP` rather than `HALF_EVEN` (1 of 32 = 3.125 → `3.13`) | `grade_exactHalfThousandth_roundsHalfUp` |
+| Per-item correctness in input order, keyed by question ID | `grade_itemsInNonCanonicalOrder_returnCorrectnessInInputOrderByQuestionId`, `grade_everyApprovedQuestionKind_returnsPerItemCorrectness` (all three V004 kinds) |
+| Determinism; the input list is not changed | `grade_sameItems_isDeterministicAndLeavesInputUnchanged` |
+| Nested records copy defensively (ADR007 §9) | `gradingItem_copiesMasks_soLaterSourceChangesDoNotAffectGrading`, `grade_copiesGradedItems_andReturnsAnUnmodifiableList` |
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #258
+working tree after merging `main` `e72d9fd`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest=QuizGradingServiceTest` | 12 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 725, Failsafe 240, 0 failures, errors or skips |
+
+A temporary local mutation check, reverted before commit, confirmed that the suite
+fails when `HALF_UP` is replaced by `HALF_EVEN` or when either defensive copy is
+removed.
+
+These are local developer runs, not independent QA, CI or deployment evidence. They
+do not cover AttemptService orchestration, persistence of `is_correct` or the score,
+the B3-O08 rollback case, auto-submission, REST results, the quiz-submitted event or
+any Adaptive mastery update. Those belong to AS08 and the Adaptive and QA Issues and
+remain unverified.
+
+## AS06 quiz composition and publication verification — 21 November 2026
+
+PR #260 (Refs #157) implements the CT23.composition, CT23.publication and quiz
+CT23.bindings slices of [ADR007 §§5–7](decisions/007-batch-03-contract-approvals.md#5-ct23composition).
+Every write runs inside ADR005's Course configuration guard and resolves question scope
+through the CT40 `readSkillIds` projection. On 21 November neither producer existed (CO14 #177,
+AD07 #165) and both delegation points failed closed; both are integrated since 22 November (below).
+Owner and learner reads do not depend on them.
+
+Test placement follows [ADR008 §5](decisions/008-batch-04-contract-approvals.md#5-ct14coverage):
+unit cases in `modules/assessment/AttemptServiceTest.java` (placement confirmed by the
+Project Leader on 21 November 2026 for this remediation) and real endpoint cases in
+`integration/AuthorizationIntegrationTest.java`. No new test file is added.
+
+| Obligation | Covered by |
+| --- | --- |
+| B3-O03 exact captured order, positions 1..N, empty hidden draft, duplicate/null/foreign IDs, no selection beyond the explicit list | `AttemptServiceTest$Composition`, `$ApprovedBoundaries` |
+| Hidden and never-attempted edit/delete only; published or attempted quiz 409; delete returns the definition | `AttemptServiceTest$Composition` |
+| Publication: empty draft 409, same-Course revalidation on (re)publish, invalid stored member 500, idempotent hide that cancels nothing | `AttemptServiceTest$Publication` |
+| `PublicationWrite` `publicationStatus` mapped to the `published` boolean; closed `B3QuizWrite` body | `AttemptServiceTest$Publication`, `$ApprovedBoundaries`, `AuthorizationIntegrationTest$QuizEndpoints` |
+| B3-O01 precedence: 401, role 403 (Learner-only list, Instructor-only authoring, no Administrator inheritance), CT03 403/404 before body 400, no-store on every outcome, no key leakage | `AuthorizationIntegrationTest$QuizEndpoints` |
+| Reads: title `COLLATE "C"` then UUID, filtering before count and paging, learner metadata only for ACTIVE/COMPLETED members of a published Course | `AuthorizationIntegrationTest$QuizEndpoints` (PostgreSQL), `AttemptServiceTest$Reads` |
+| Writes delegate to the real guard and CT40 producer; a refusal or provider failure writes nothing | `AttemptServiceTest$ApprovedBoundaries`, `AuthorizationIntegrationTest$QuizEndpoints` (22 November) |
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #260
+remediation working tree, based on `main` `307e8c2`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='AttemptServiceTest,QuizGradingServiceTest,AssessmentRepresentationsTest'` | 56 tests (41 AS06), 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AuthorizationIntegrationTest$QuizEndpoints'` | 8 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 766, Failsafe 248, 0 failures, errors or skips |
+
+A temporary local PostgreSQL test, not committed, exercised the write paths with
+test-only stand-ins for the guard (a Course-row `FOR UPDATE` in a READ COMMITTED
+transaction) and for the CT40 projection: ordered create and reversed replacement,
+publish/hide/delete, the empty-draft 409, the attempted-quiz 409, rollback of every
+change after an injected failure, an edit waiting on the Course root and then seeing
+the committed publication (409), and the quiz-row lock blocking a new attempt
+reference until commit. It used a 500 ms observation window, which the committed
+suites do not. It is evidence for the repositories only, not for the real guard or
+CT40 producer.
+
+The open gates recorded here on 21 November (real-PostgreSQL write and race coverage, CO14 and
+AD07 integration, CT17 grants) are closed by the 22 November sections below; attempt start itself
+(AS08), independent review, CI and delivery remain.
+These are local developer runs, not independent QA, CI or deployment evidence.
+
+### Producer integration, cross-module flow and runtime privileges — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, with @minhtan29042006's agreement to
+Leader-assisted commits on this branch:
+
+- **CO14.** `QuizService.withCourseConfigurationWrite` delegates to `CourseManagementService` (on
+  `main` since `b506500`).
+- **AD07.** `QuestionSelectionService.readSkillIds` delegates to `SkillGraphService` (PR #264);
+  membership and publication resolve question scope under the held Course root. No AS06 seam fails
+  closed any more.
+- **CT17.** `CT17-P6-PRIVILEGES-2026-11-22-r7` in [deployment.md](deployment.md) grants exactly the
+  AS06 SQL: `quizzes` SELECT, INSERT, DELETE and UPDATE of title, kind, time limit and publication;
+  `quiz_questions` SELECT, INSERT, DELETE; `attempts` SELECT (id, quiz_id) for the existence probe.
+  Nothing was provisioned on any real database.
+- **Placement.** Integrated HTTP effects stay in `AuthorizationIntegrationTest`; the cross-module
+  flow and the Course-root races are Assessment participation in the adaptive flow and go in
+  `AdaptiveLearningFlowIntegrationTest` (ADR008 §5). No test file was added.
+
+| Obligation | Covered by (PostgreSQL unless noted) |
+| --- | --- |
+| Delegation, order inside the guard, provider failure writes nothing, publication revalidates against the current skill set | `AttemptServiceTest$ApprovedBoundaries` (unit) |
+| Ordered composition and replacement, foreign-Course question 404, publication, published freeze, the Learner's keyless list | `AuthorizationIntegrationTest$QuizEndpoints.membershipAndPublicationUseTheRealCt40ProducerAndReachTheLearner` |
+| Empty draft, delete of a hidden never-attempted quiz, idempotent hide through the root | `guardOnlyWritesCommitThroughTheCourseRootUnit` |
+| CO06 Course/Chapter/Lesson → AD07 skill and mapping → AS05 question → AS06 quiz → Learner, with refusals and the attempt freeze | `AdaptiveLearningFlowIntegrationTest.anInstructorAuthorsStructureGraphQuestionsAndAQuizThatAnEnrolledLearnerSees` |
+| Question deletion racing quiz composition (commit and rollback) | `composingAQuizWithAQuestionBeingDeletedWaitsAndRereadsTheCommittedBank` |
+| A foreign question never composes | `aQuizCannotComposeAQuestionOfAnotherCourse` |
+| Runtime role: allowed AS06 SQL, 23503 on an attempted-quiz delete, re-parenting/in-place/attempt-detail/TRUNCATE denials | `test-postgres-privilege-matrix-containment.sh` |
+| Runtime role: the seven operations over HTTP, the Learner's list, published and attempted 409s, no 42501 | `test-runtime-real-backend-privileges.sh` |
+
+| Command (macOS host, Docker Desktop) | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='QuestionBankServiceTest*,AttemptServiceTest*,AuthorizationIntegrationTest*,AdaptiveLearningFlowIntegrationTest,AssessmentPersistenceIntegrationTest'` | 85 + 44 unit and 74 + 86 + 9 PostgreSQL tests, 0 failures |
+| `cd backend && ./mvnw -B verify` (with AD07 PR #264 `f83237e` and the AS05 stack merged in) | BUILD SUCCESS; Surefire 925, Failsafe 375, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r7 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | AS06 SQL allowed; attempted-quiz delete 23503; re-parenting, in-place membership, attempt-detail and TRUNCATE 42501; containment and upgrade suites pass |
+| `docker build -t codemastery-backend:privilege-test backend`, then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` including the AS05 and AS06 sections; no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+These are local developer runs on a stack that contains AD07 PR #264 and the AS05 stack, not CI,
+independent review or QA evidence. On the deployed VM, authoring the Course, Chapters and Lessons
+themselves still needs CO06's own CT17-P6 revision; the real-backend test seeds them as the
+bootstrap administrator.
+
+### Runtime-safe quiz writes, attempt-start races and text — 22 November 2026
+
+Two corrections that do not depend on AD07, under the Leader's instruction of 22 November 2026 and
+with @minhtan29042006's agreement to Leader-assisted commits:
+
+- `QuizRepositoryImpl.save` no longer merges the full row of a stored quiz. A replacement updates
+  only title, kind, time limit and publication within the same Course, and a new quiz is persisted
+  directly. ADR012 §19.2 never grants the runtime role an update of `quizzes.course_id`, so the
+  full-row merge would have failed (42501) once the CT17-P6 grants exist.
+- Quiz text with an unpaired UTF-16 surrogate is 400 (PgJDBC would store `?`), matching CO06.
+
+AS08 attempt start is not implemented; the race cases let a separate connection play it in the
+ADR007 §8 lock order (Course root, then the attempt insert whose foreign-key check takes `FOR KEY
+SHARE` on the quiz row).
+
+| Obligation | Covered by (`AdaptiveLearningFlowIntegrationTest`, PostgreSQL) |
+| --- | --- |
+| A stored quiz keeps its Course; a replacement writes only its definition | `aStoredQuizKeepsItsCourseAndAReplacementWritesOnlyItsDefinition` |
+| An attempt start holding the root freezes the quiz before a waiting edit or delete (commit 409, rollback proceeds) | `anAttemptStartHoldingTheRootFreezesTheQuizBeforeAWaitingEditOrDelete` |
+| A writer holding the root and quiz row makes an attempt start wait, with and without the root; a committed delete leaves 23503, a committed edit is what the attempt freezes | `aQuizWriterHoldingTheRootAndQuizRowMakesAnAttemptStartWaitForItsOutcome` |
+| Unpaired surrogate in a title is 400 | `AttemptServiceTest`, `AuthorizationIntegrationTest$QuizEndpoints` |
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='AdaptiveLearningFlowIntegrationTest,AuthorizationIntegrationTest*,AttemptServiceTest*'` | 57 + 70 PostgreSQL and 42 unit tests, 0 failures |
+
+These are local developer runs, not independent review, QA or CI evidence.
+
+### Integration on `main`, fault injection, list snapshots and body precedence — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, with @minhtan29042006's agreement to
+Leader-assisted commits on this branch, PR #260 was brought onto `main` after AD07 (#264,
+`dfd816c`) and AS05 (#259, `03b2a45`) merged:
+
+- **Integration.** `main` `03b2a45` was merged into the branch. `QuizRepository` keeps the AS06
+  surface plus AS05's `findById`; `SecurityConfig` keeps the CT05, CT23.questions and CT23 quiz
+  matcher blocks. The four AS06 commits of `stack/as06-on-as05` (`1edea48`, `6e3ca92`, `519a4e0`,
+  `22c4253`) were cherry-picked; the stack's own historical merges of pre-merge AD07 and AS05 were
+  not. Every file AS06 does not change is identical to `main`, including AD07's unpaired-surrogate
+  rejection in `SkillGraphService`.
+- **Duplicate fixture.** AS05 and AS06 had each added the same `quizRow(UUID)` helper to
+  `AdaptiveLearningFlowIntegrationTest`; the merge kept both and the test sources did not compile.
+  AS05's copy is kept.
+- **Body precedence.** The create, replace and publication handlers treated the parameters of a
+  form-encoded body as a query and answered a non-owner 400 before CT03's 403/404. The no-query
+  check now reads the URI query only; a form body stays 400 for the owner, after admission.
+- **OpenAPI.** The seven AS06 success responses no longer say "specification only, NOT
+  IMPLEMENTED".
+
+| Obligation | Covered by (PostgreSQL) |
+| --- | --- |
+| B3-O04 fault injection: a test-only trigger fails create and replace on the second new member (after the old membership was deleted), delete on the quiz row (after its membership was deleted) and publication on the row update; each is a safe no-store 500 and the quiz, membership and positions are restored, with the Course root released | `AdaptiveLearningFlowIntegrationTest.aFaultPartWayThroughAQuizWriteRestoresTheQuizAndItsMembership` |
+| ADR007 §7: owner and Learner quiz lists are one REPEATABLE READ snapshot when another connection commits a new quiz, a publication and a member between the count and the page (fails under READ COMMITTED, mutation-checked) | `aQuizListIsOneSnapshotEvenWhenAWriterCommitsBetweenItsCountAndItsPage` |
+| A non-owner's form-encoded body is 403 (published Course) or 404 (hidden Course), the owner's is 400, with no effect | `AuthorizationIntegrationTest$QuizEndpoints.nonOwningInstructorIs403OnAPublishedCourseAnd404OnHiddenOrMissingOnes` |
+
+| Command (macOS host, Docker Desktop) | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 937, Failsafe 388, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r7 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | `MATRIX_TESTS_PASS`, `UPGRADE_TESTS_PASS`, both `CONTAINMENT_TEST_PASS` lines |
+| `docker build -t codemastery-backend:privilege-test backend`, then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | `RUNTIME_CONSUMER_TESTS_PASS` including the AS06 section (create, ordered replacement, foreign 404, empty draft and its 409, delete, publish, idempotent publish, published 409, owner list, Learner keyless list, Learner 403 on owner reads, hide, attempted 409s); no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+The CI job "VM runtime privileges with the real backend" failed on the stack head `22c4253` while
+the Docker build bootstrapped the Maven Wrapper: Maven Central answered 404 for
+`apache-maven-3.9.16-bin.tar.gz`. The same wrapper passed that job on `main` `03b2a45`, and the
+artifact resolves again, so the failure was external to the source; the local run above executed
+the runtime-role verification on this head.
+
+These are local developer runs, not independent review, QA or CI evidence.
+
+### AS05/AS06 P3 follow-up: question-bank body precedence, OpenAPI status and the shared nonblank rule — 22 November 2026
+
+Under the Project Leader's instruction of 22 November 2026, on PR #260:
+
+- **AS05 body precedence.** `QuestionBankController` had the defect fixed above for quizzes: the
+  parameters of a form-encoded body counted as a query, so a non-owner's create or replace was 400
+  before CT03's 403/404. Its no-query check now reads the URI query only; a genuine query is still
+  400 before CT03 and a form body is 400 for the owner after admission.
+- **AS05 OpenAPI.** The five question-bank success responses no longer say "specification only,
+  NOT IMPLEMENTED" (descriptions only; the contract is unchanged).
+- **Shared nonblank rule.** CO06 (`CourseManagementService.isSpace`) and AD07
+  (`SkillGraphService.storableText`) already count a code point as space when Java whitespace,
+  a Unicode space separator, U+0085 (PostgreSQL `[:space:]` in the musl image locale) or U+FEFF
+  (OpenAPI's ECMA-262 `\S`) says so. The three Assessment predicates (`QuestionBankService`,
+  `QuizService`, `QuestionSelectionService`) used Java `White_Space` only and accepted text made
+  only of U+FEFF (or U+001C–U+001F), which breaks the OpenAPI `\S` pattern of the request and
+  response. They now use the CO06/AD07 rule; text is still never trimmed. U+0085-only text stays
+  400 in every module because the V002–V004 checks reject it; OpenAPI's pattern alone would allow it,
+  and that gap needs no change while the server is the stricter side.
+
+| Obligation | Covered by |
+| --- | --- |
+| A non-owner's form-encoded question body is 403/404, the owner's 400, a genuine query 400 before CT03; fails without the fix | `AuthorizationIntegrationTest$QuestionBankEndpoints.nonOwningInstructorIs403OnAPublishedCourseAnd404OnHiddenOrMissingOnes` (PostgreSQL) |
+| U+FEFF-, U+0085- and U+001C-only prompts, options and titles are 400; leading and trailing U+FEFF/U+0085 inside nonblank text are kept verbatim | `QuestionBankServiceTest$Validation`, `AttemptServiceTest` (unit) |
+| A stored U+FEFF-only prompt is an integrity failure at publication | `AttemptServiceTest.aMemberOutsideTheCourseOrAnInvalidStoredMemberIsAnIntegrityFailure` (unit) |
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -q -Djacoco.skip=true test '-Dtest=QuestionBankServiceTest*,AttemptServiceTest*'` | 88 + 44 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B -q -Dtest=NoSuch -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AuthorizationIntegrationTest$QuestionBankEndpoints' -Djacoco.skip=true verify` | 9 tests, 0 failures, errors or skips |
+| OpenAPI parsed as JSON; structural diff against the previous head; every `$ref` resolved | only the five descriptions differ; 164 references, none dangling |
+
+The full `verify`, other integration suites, E2E, frontend and VM tests were not rerun: no
+persistence, transaction, security-chain, schema or privilege behavior changed. These are local
+developer runs, not independent review, QA or CI evidence.
+
+## CO03 and CO14 Course persistence and configuration guard verification — 21 November 2026
+
+[PR #262](https://github.com/chi-thanh-nguyen/codemastery/pull/262) completes the
+remaining independently implementable scope of CO03
+([#41](https://github.com/chi-thanh-nguyen/codemastery/issues/41)) and CO14
+([#177](https://github.com/chi-thanh-nguyen/codemastery/issues/177)) under the Project
+Leader's 21 November 2026 instruction to finish both Issues in that PR.
+
+**CO14** implements the four approved `CourseManagementService` methods
+(ADR005 §§5, 7.1, 13.1–13.3; `CT03-B1-2026-11-08-r2`, `CT06-ENABLEMENT-2026-11-08-r2`
+with N1 and R1). Both guard entries admit the owning Instructor through CT03, lock the
+existing Course row (`FOR UPDATE`, or `FOR UPDATE NOWAIT` for the settings entry), recheck
+ownership after the lock and run the callback in one programmatic READ COMMITTED
+read-write transaction that holds the row lock until commit or rollback. A compatible
+outer transaction is joined only when PostgreSQL reports READ COMMITTED, it is not
+read-only, and it has no earlier write or row lock (no assigned transaction ID) and no
+queued persistence change; a nested call for another Course is rejected. The held root is
+recorded with a transaction-local PostgreSQL setting, which a savepoint rollback releases
+together with the row lock. Clean managed entities are discarded after the lock, so reads
+observe committed state. Only the guard's
+own SQLSTATE 55P03 becomes `ConfigurationBusy`. The settings write runs only inside the
+held guard of the same Course and replaces both stored fields only when they structurally
+equal (jsonb equality) the expected snapshot; a mismatch rolls the unit back.
+
+**CO03.content** adds Course-private persistence for CT21.authoring
+(ADR006 §5), the CT40 structure projection (ADR005 §3.1) and CT09 material rows: owner
+Course rows of any status (fixed `title COLLATE "C"`, id order), all-status lessons in
+canonical order, Course- and Lesson-scoped lookups, append-at-next-position with an
+unrepresentable-position refusal, atomic sibling reordering with deferred and then
+restored V002 uniqueness, material inserts and type/Lesson-preserving replacement, and
+publication updates. Direct statements return domain records, never managed entities.
+`Course` now copies its settings object, so a domain value never aliases persistence state.
+
+| Obligation | Covered by |
+| --- | --- |
+| Either entry starts a real READ COMMITTED unit, holds the root until commit and returns the value | `AdaptiveLearningFlowIntegrationTest.eitherEntryStartsAReadCommittedUnitHoldsTheRootUntilCommitAndReturnsTheValue` |
+| Self-invocation on the unproxied bean; nested same-Course call shares one transaction | `selfInvocationOnTheUnproxiedBeanUsesTheSameProgrammaticTransaction` |
+| Nested other-Course scope rejected; whole unit rolled back | `nestingAnotherCourseIsRejectedAndDoomsTheWholeUnit` |
+| Owner admission precedes the lock; non-owner, hidden, Learner, Administrator, missing and unauthenticated callers never run the callback | `deniedActorsFailBeforeLockingAndNeverRunTheCallback` |
+| Ownership rechecked after waiting for the root | `ownershipIsRecheckedAfterWaitingForTheRoot` |
+| Callback failure, outer failure after return and rollback-only completion commit nothing and release the root | `callbackFailureRollsBackEveryEffectAndReleasesTheRoot`, `joiningACompatibleOuterTransactionKeepsTheRootUntilOuterRollback`, `rollbackOnlyCompletionNeverReturnsTheCallbackValue` |
+| Joined unit commits only with the outer transaction | `joiningACompatibleOuterTransactionCommitsOnlyWithTheOuterUnit` |
+| Read-only, REPEATABLE READ, SERIALIZABLE, prior write, prior row lock and queued persist rejected before callback effects | `incompatibleOuterContextsAreRejectedBeforeAnyCallbackEffect` (6 cases) |
+| Pre-lock managed entity is not trusted | `entitiesLoadedBeforeTheRootAreDiscardedSoReadsObserveTheCommittedWinner` |
+| A savepoint rollback that released the root leaves no usable held marker; the unit is doomed | `aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker` |
+| A REQUIRES_NEW entry behind a suspended holder on the same thread fails instead of waiting for itself; the thread can retry afterwards | `aRequiresNewGuardBehindASuspendedHolderOnTheSameThreadFailsInsteadOfWaitingForItself` |
+| Same-Course serialization; waiter rereads the committed or rolled-back result | `sameCourseWritersSerializeAndTheWaiterRereadsCommittedState` (both outcomes) |
+| Independent Courses do not serialize | `independentCoursesDoNotSerialize` |
+| Enrollment holds root: settings NOWAIT → `ConfigurationBusy`, no change, both participants preserved | `settingsNowaitIsBusyWhileEnrollmentHoldsTheRootAndPreservesBothParticipants` |
+| Settings holds root: real `EnrollmentService.enroll` waits, then proceeds after commit or rollback | `enrollmentWaitsBehindSettingsAndProceedsAfterCommitOrRollback` |
+| A callback's own 55P03 and a default-guard `lock_timeout` are not `ConfigurationBusy` | `onlyTheGuardsOwnNowaitFailureIsReportedAsBusy` |
+| A caller deadline cancels a waiting guard (SQLSTATE 57014) with no partial effect or leftover lock | `aCallerDeadlineCancelsAWaitingGuardWithoutPartialEffectsOrLeftoverLocks` (1-second test budget) |
+| Owner-only immutable read, legacy disabled null, exact decimals | `ownersReadAnImmutableSnapshotIncludingTheLegacyDisabledNull` |
+| Structural expected-state match persists both fields | `guardedWriteComparesTheFreshStateStructurallyAndPersistsBothFields` |
+| Stale expected state rolls back the whole unit and keeps the newer writer | `staleExpectedStateRollsBackTheWholeUnitAndPreservesTheNewerWriter` |
+| Writes need the held guard of the same Course; enabled/null and non-JSON values rejected | `writesRequireTheHeldGuardOfTheSameCourseAndRejectInvalidStorageShapes` |
+| CO03 owner rows, scoped content reads, appends, reorders, materials and adaptive-field storage on PostgreSQL | `CourseRepositoryIntegrationTest` (six new tests) |
+| Local orchestration: null inputs, compatibility check before ownership or lock, snapshot read, write shape and guard checks, deep immutability | `CourseServiceTest` (seven new tests); codec and copy cases in `CourseMapperTest`; argument checks in `CourseRepositoryImplTest` and `CourseContentRepositoryImplTest` |
+
+A temporary local mutation check, reverted before commit, confirmed that the stale-entity
+test and the prior-write, prior-row-lock and queued-persist cases fail when the
+post-lock discard or the earlier-write check is removed. Concurrency tests use latches
+and observed `pg_stat_activity` lock waits, not sleeps.
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #262
+working tree, branch based on `main` `307e8c2`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -Dit.test=AdaptiveLearningFlowIntegrationTest verify` (unit tests skipped by filter) | 31 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -Dit.test=CourseRepositoryIntegrationTest verify` (unit tests skipped by filter) | 9 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw test -Dtest='com.codemastery.modules.course.**'` | 220 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 738, Failsafe 277, 0 failures, errors or skips |
+
+The first full run failed in `SampleDataSeedIntegrationTest` with PostgreSQL
+`too many clients` (SQLSTATE 53300): the new suite's cached Spring context kept one
+more connection pool open. `AdaptiveLearningFlowIntegrationTest` now closes its context
+after the class (`@DirtiesContext`, as `InteractionRepositoryIntegrationTest` does), and
+the rerun above passed. These are local developer runs, not independent QA, CI or
+deployment evidence.
+
+**Not covered and still gated.** AD08's `AdaptiveSettingsService` (ETags, If-Match/412/428,
+threshold freeze, readiness, the `hasSubmittedAttempts` and mastery-existence probes) is
+empty, so B1-O12, B1-O13, B1-O17–O19 and the Adaptive halves of O14/O15 remain unexecuted,
+and no caller uses the settings handoff yet. CO06/CO09 services, REST and OpenAPI-bound
+authoring are not implemented, so the CO03.content capabilities have no runtime consumer.
+`withLearnerAssessmentWrite`/`withAssessmentExpiryWrite` (ADR007 §3.1) are not part of
+CO14. No production statement or transaction deadline is selected; the 1-second budget is
+a test fixture (ADR005 §13.2 and §13.3 keep finite-deadline qualification open). The VM
+runtime matrix (`CT17-P6-PRIVILEGES-2026-11-17-r4` in `infrastructure/vm/deploy.sh`) grants
+`courses` only SELECT and UPDATE (id), and `learning_materials` only partial SELECT. The
+guard's row lock and the read work under it, but the settings write and the CO03.content
+writes and full material reads need a separately approved CT17 revision before any
+consumer is deployed. CI, independent CODEOWNER review and B1-O16 (CT36) are outside this
+record.
+
+### Focused self-review remediation — 21 November 2026
+
+A focused self-review by the same author (not an independent review) of PR #262 at
+`c570f76` reproduced three defects on PostgreSQL before fixing them:
+
+| Severity | Finding | Fix | Regression test |
+| --- | --- | --- | --- |
+| P2 | The held-root marker was a Spring synchronization that survived a caller-managed `ROLLBACK TO SAVEPOINT` taken before the guard. PostgreSQL had released the row lock, yet re-entry and settings writes proceeded as if it were held (ADR005 §13.3). The configured JPA transaction manager rejects Spring `NESTED`, so only a manual savepoint reaches this path. | The marker is a transaction-local PostgreSQL setting (`set_config(..., true)`) that the same savepoint rollback clears; re-entry then fails and the unit becomes rollback-only. | `aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker`; marker reversion in `CourseRepositoryIntegrationTest` |
+| P2 | A `REQUIRES_NEW` call back into the guard for the same Course waited forever on its own suspended transaction's row lock (no deadline is selected), holding a thread and two connections. | A per-thread record of held roots, cleared when the acquiring transaction completes, makes such an entry fail at once. | `aRequiresNewGuardBehindASuspendedHolderOnTheSameThreadFailsInsteadOfWaitingForItself` (including a retry on the same thread) |
+| P2 | After a direct-SQL write (reorder, title, Lesson, Course metadata or publication), a later JPA read in the same transaction returned the previously managed entity, with stale positions or titles. | Each direct write detaches the managed copies of the rows it changed. | strengthened reorder, Lesson and owner-row tests in `CourseRepositoryIntegrationTest` |
+
+The earlier fixes were rechecked on the final code: the null-safe reorder check, the
+`@DirtiesContext` connection-pool fix, the post-lock discard of stale entities, the
+earlier-write and row-lock rejection, and the NOWAIT `ConfigurationBusy` mapping.
+Re-executed locally after the remediation:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw verify -Dtest='com.codemastery.modules.course.**' -Dit.test='AdaptiveLearningFlowIntegrationTest,CourseRepositoryIntegrationTest'` | 220 unit, 33 + 9 PostgreSQL tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 738, Failsafe 279, 0 failures, errors or skips |
+
+The marker uses only the built-in `set_config` and `current_setting` functions, so it
+needs no new CT17 privilege. These are local developer runs, not independent QA or CI
+evidence.
+
+### Independent-review P2 remediation — 21 November 2026
+
+An independent Codex review of `2439f25` returned `CHANGES_REQUIRED` with two P2 findings,
+each with a failing PostgreSQL reproduction. Both were reproduced here before they were fixed.
+
+| Finding | Root cause | Fix | Regression tests |
+| --- | --- | --- | --- |
+| P2-01: guard loss after a savepoint rollback | The PostgreSQL marker was checked only at the next guard entry or settings write, so a savepoint rollback inside the callback, or after it returned, let stale writes commit over an intervening writer | The guard rechecks the marker when the callback returns and in a `beforeCommit` synchronization of the acquiring transaction; either failure rolls the unit back, including when the caller swallows the exception | `aSavepointRollbackInsideTheCallbackCannotCommitAStaleWriteOverTheWinner`, `aSavepointRollbackAfterTheCallbackReturnedFailsTheOuterCommit`, existing `aSavepointRollbackThatReleasesTheRootNeverLeavesAUsableHeldMarker` |
+| P2-02: dirty JPA entity detached after a direct write | Direct writes detached managed copies without checking pending changes, silently discarding mutable JSON edits and merged updates | Every direct Course write runs in the caller's transaction (`PROPAGATION_MANDATORY`) and rejects pending JPA changes before any statement; only then are clean copies of the changed rows detached. Any failure marks the transaction rollback-only | `pendingCourseJsonChangesAreNeverDiscardedByADirectMetadataWrite`, `aPendingChapterMergeIsNeverDiscardedByADirectReorder`, `everyDirectWriteRejectsPendingChangesOfItsRowsAndDoomsTheUnit` (10 write paths), `cleanManagedEntitiesAreInvalidatedSoTheCommittedDirectWriteIsReadBackFresh` |
+
+Spring runs `beforeCommit` before it inspects the rollback-only flag, so a refused commit
+reports either the guard's `IllegalStateException` or `UnexpectedRollbackException`; the
+tests accept either and assert the database outcome (nothing committed, the intervening
+writer preserved, no leftover lock). A temporary local mutation check, reverted before
+commit, confirmed the coverage. Removing the pre-commit check fails the after-callback
+test. Removing the post-callback and dirty-state checks fails the inside-callback test
+and all 12 dirty-state tests. The `REQUIRES_NEW` test and the clean-entity invalidation
+tests still pass.
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw verify -Dtest='com.codemastery.modules.course.**' -Dit.test='AdaptiveLearningFlowIntegrationTest,CourseRepositoryIntegrationTest'` | 221 unit, 48 + 9 PostgreSQL tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 739, Failsafe 294, 0 failures, errors or skips |
+
+These are local developer runs, not independent re-review, QA or CI evidence.
+
+## CO06 Instructor authoring and Administrator Course handoff verification — 22 November 2026
+
+CO06 ([#172](https://github.com/chi-thanh-nguyen/codemastery/issues/172)) implements
+`CT21-AUTHORING-2026-11-09-r1` (ADR006 §5) without materials, and the Course side of
+`CT12-COURSE-2026-11-15-r2` (ADR012 §10.2). Course metadata, publication and the owner view
+are in `CourseManagementService`; Chapter/Lesson operations and the Learner Lesson read are in
+`CourseStructureService`. Every existing-Course mutation runs inside CO14's
+`withCourseConfigurationWrite`, so owner admission precedes the lock, input validation and
+every effect; Course creation admits the active Instructor first and inserts a hidden Course
+with adaptive mode disabled and null settings. Bodies are strict JSON (unknown, missing or
+duplicate fields are 400 after CT03 admission). A real Course or Lesson publication change,
+and an Administrator hide, reconciles joined completion in the same unit
+(`EnrollmentRepository.reconcileCompletion`, ADR006 §§3, 5). Administrator list and hide lock
+the Course root first in a compatible READ COMMITTED unit, record it like the guard and re-read
+after it; they do not use the Instructor guard. `SecurityConfig` admits the thirteen CT21
+Instructor operations to `INSTRUCTOR` and the Learner Lesson read to `LEARNER`; material, file
+and learner-monitoring routes keep default-deny.
+
+| Obligation | Covered by |
+| --- | --- |
+| B2-O07 owner create/edit; published non-owner 403, hidden non-owner 404, Administrator and Learner 403; caller-supplied owner rejected; Learner sees only published Lessons | `EnrollmentIntegrationTest.instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion` |
+| B2-O08 append positions, full reorder, duplicate 400, foreign 404 | the same test; `CourseServiceTest.siblingOrderMustBeACompletePermutationOfCurrentSiblings` |
+| B2-O03 publishing an incomplete Lesson reopens completion, hiding it completes again, hiding every Lesson is not vacuous completion, LEFT unchanged | the same HTTP test; `CourseRepositoryIntegrationTest.completionIsReconciledToTheCurrentPublishedLessonSetAndLeftRowsKeepTheirStatus` |
+| CT12.course list: case-insensitive title match over hidden and published Courses, optional status, `COLLATE "C"`/id order and paging | `CourseRepositoryIntegrationTest.administrationListMatchesTitleCaseInsensitivelyAcrossStatusesInCollationOrder` |
+| Text rules, strict bodies, trusted creation shape, role refusal before any lookup | `CourseServiceTest` (six new tests) |
+
+Executed locally (macOS, OpenJDK 25, Docker) on branch `feat/course-content-authoring`, based on `main` `b506500`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw test` | 746 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw test -Dtest='Course*Test,EnrollmentServiceTest,LessonProgressServiceTest,CourseRepositoryIntegrationTest,CourseCatalogueIntegrationTest,AdaptiveLearningFlowIntegrationTest,EnrollmentIntegrationTest'` (before the HTTP authoring test was added) | 12 suites, 0 failures, errors or skips, including 48 + 14 + 75 + 11 PostgreSQL tests |
+| `cd backend && ./mvnw test -Dtest='EnrollmentIntegrationTest#instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion'` | 1 test, 0 failures |
+| `cd backend && ./mvnw -B verify` (on the `e69d521` code) | BUILD SUCCESS; Surefire 746, Failsafe 297, 0 failures, errors or skips |
+
+These are local developer runs, not independent review, QA or CI evidence.
+
+**Not covered and still gated.** Material authoring and file payloads (CO09/CT09) and the
+content-published event (CT26, CO12) are not implemented; Lesson responses list existing
+relational materials only. The Admin REST route `/api/admin/courses` and its audit entry are
+IN20/CT31 work, so no caller uses the Administrator handoff yet. B2-O04 and B2-O09 (barrier
+races between authoring, completion and settings) are covered for the shared guard by
+`AdaptiveLearningFlowIntegrationTest` but not re-run per authoring operation. The VM runtime
+matrix (`CT17-P6-PRIVILEGES-2026-11-17-r4`) still grants `courses` only SELECT and UPDATE (id)
+and no `chapters`/`lessons` writes, so deployed authoring needs a separately approved CT17
+revision. The B2-O04/B2-O09 sentence above and the original "OpenAPI is unchanged" statement
+are superseded by the remediation record below.
+
+### CO06 independent audit and remediation — 22 November 2026
+
+An AI-assisted audit (Claude Code, under the Project Leader's instruction for PR #265, with
+the contributor-approved commit attribution recorded in the PR) checked the PR against
+ADR006 §§3, 5 and 8, ADR005 §§5 and 13.3, ADR012 §§10.2, 10.3, 12 and 15, CT03 and OpenAPI.
+It is not a GitHub, CODEOWNER or QA review. Confirmed findings and their fixes:
+
+| ID | Severity | Finding | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| R1 | P2 | A real Course publication change (Instructor or Administrator hide) did not reconcile joined completion, although ADR006 §5 ("Course/Lesson publication/set changes … must reconcile"), the `setOwnedCoursePublication` OpenAPI description ("completion reconciliation") and ADR012 §10.2 ("exactly the effects of CT21's hidden publication change") require it. A rejoined Learner whose content was already complete stayed `active` across hide/republish | `setOwnedCoursePublication` and `hideCourseAsAdministrator` call `EnrollmentRepository.reconcileCompletion` on a real change only; idempotent repeats write nothing | `EnrollmentIntegrationTest.coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite`, `administratorHandoffListsAndHidesWithCt21EffectsIdempotentlyAndConceals` (fail on the original code: `active` instead of `completed`) |
+| R2 | P3 | The Administrator hides locked the Course root but did not record it, unlike the ADR005 guard: a second same-Course hide in one unit failed (500), a `REQUIRES_NEW` unit behind a suspended holder on the same thread would wait for its own lock, and a savepoint rollback that released the root could still commit later work | A private `participateInRoot` records the root (transaction marker, thread record, pre-commit recheck) after the ADR005 §13.3 compatibility check; the caller's JPA state is not cleared because the hides read through direct statements | `administratorHidesJoinACompatibleOuterUnitHoldTheRootUntilItCompletesAndShareItsOutcome` (fails on the original code), `aRequiresNewHideBehindASuspendedHolderFailsFastAndASavepointReleasedRootCannotCommit`, `administratorHideRejectsIncompatibleUnitsBeforeAnyEffect` |
+| R3 | P3 | NUL in authoring text, Markdown or the Administrator title query reached the PostgreSQL driver and returned 500 instead of a 400 for malformed input (CT18; same rule as the catalogue `q`) | `requiredText`, `optionalText`, `markdown` and `listCoursesForAdministration` reject NUL with 400 before any write or query | `CourseServiceTest.authoringTextIsTrimmedNonblankAndMarkdownIsVerbatim`, `administratorListRejectsAnUnknownPublicationStatus`; HTTP cases in `authoringRestKeepsNullableFieldsExplicitConcealsForeignChildrenAndRefusesInvalidInput`; the list case fails on the original code with `DataIntegrityViolationException` |
+| R4 | P3 | OpenAPI still marked the fourteen operations `APPROVED_NOT_IMPLEMENTED`, and the ten JSON-body operations did not declare their 415; this record said OpenAPI was unchanged and counted eleven Instructor operations | OpenAPI synchronized as CO08 did (implementation note, specific 2xx descriptions, `Batch2UnsupportedMedia` 415, CT17 deployment gate); no path, schema, field or status family changed. This record corrected | Documentation review; frontend and E2E suites read the file as JSON in CI |
+
+Verification gaps closed (real PostgreSQL, Spring transactions and, where a route exists, MVC
+and security; barriers on `pg_stat_activity` lock waits, never sleeps):
+
+| Obligation | Covered by |
+| --- | --- |
+| CT12.course list: Administrator only, hidden and published, case-insensitive title, status filter, `COLLATE "C"`/id order; Learner and Instructor 403 before any lookup | `administratorHandoffListsAndHidesWithCt21EffectsIdempotentlyAndConceals` |
+| CT12.course hide (Course side of B7-O09): CT21 effects, no cascade, idempotent `changed=false`, CT22 reconciliation for Lesson and Course, Learner concealment, missing 404, owner may republish | the same test |
+| Administrator admission before the root; re-read after waiting for a held root | `administratorHideAdmitsBeforeLockingAndRereadsStateAfterWaitingForTheRoot` |
+| Root lifetime, outer joining, rollback with the outer unit; read-only, REPEATABLE READ, prior write and another Course's root rejected before any effect | `administratorHidesJoinACompatibleOuterUnit…`, `administratorHideRejectsIncompatibleUnitsBeforeAnyEffect` (4 cases) |
+| Learner completion versus Administrator Lesson hide; completion versus Instructor Lesson publication (B2-O04 with the real authoring writer) | `learnerCompletionWaitsBehindAnAdministratorLessonHideAndRereadsTheReconciledState`, `learnerCompletionWaitsBehindAnInstructorLessonPublicationAndCountsTheNewRequiredSet` |
+| Instructor publication versus Administrator hide in both orders; the waiter re-reads and the last commit wins | `instructorPublicationAndAdministratorHideSerializeOnTheRootAndTheLastCommitWins` |
+| B2-O07/B2-O08 remainder: explicit nullable fields, Learner materials published-only in UUID order with no object key or filename, owner sees hidden materials, foreign child 404 with nothing moved, 415 (no-store) before admission, malformed path/query/body 400, append overflow 409 with no write, locked Instructor 401 | `authoringRestKeepsNullableFieldsExplicitConcealsForeignChildrenAndRefusesInvalidInput` |
+| B2-O09 Course part: publication never rewrites stored adaptive fields | `coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite` |
+
+Course publication is not a CT26 trigger and publishes nothing (ADR012 §9.1); no event code was added.
+
+Executed locally (macOS, OpenJDK 25.0.4.1, Docker 29.8.1) in an isolated worktree of
+`feat/course-content-authoring` at `274d196` plus these changes, `main` `b506500`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -q test -Dtest='EnrollmentIntegrationTest,CourseRepositoryIntegrationTest,CourseServiceTest'` (before the changes) | 76 + 11 + 68 tests, 0 failures |
+| The R1–R3 regression tests above against the original `CourseManagementService` | 3 of 3 failed as described |
+| `cd backend && ./mvnw -B -q test -Dtest='EnrollmentIntegrationTest'` | 89 tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B -q test -Dtest='CourseServiceTest'` | 68 tests, 0 failures |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 746, Failsafe 310 (297 before, plus 13 new), 0 failures, errors or skips |
+
+These are local developer runs, not independent review, QA or CI evidence. Still not covered
+here: the IN20 Administrator REST route, `published` 400, audit rows and the full B7-O09
+barrier set (IN20/QA06, `InteractionAdminIntegrationTest`); materials (CO09/CT09); the CT26
+event (CO12); B2-O09 readiness (Adaptive); runtime grants for the new Course writes (CT17-P6);
+deployed and browser verification.
+
+### PR #265 independent re-review remediation and CT40 structure projection — 22 November 2026
+
+An independent AI-assisted re-review of PR #265 at `8d9cbc9` (Claude Code, read-only, under the
+Project Leader's instruction) confirmed R1–R4 and reported F1–F4 below; it is not a GitHub,
+CODEOWNER or QA review. Under a further explicit Leader instruction the same PR then fixed F1–F4
+and implemented the CT40 Course structure projection. F5, that Course hide/republish keeps
+completion because the required set counts published Lessons whatever the Course status, was
+recorded as an interpretation consistent with ADR006 §3, ADR006 §5 and ADR012 §10.2, and is unchanged.
+
+| ID | Severity | Finding (reproduced on real PostgreSQL) | Fix | Regression evidence |
+| --- | --- | --- | --- | --- |
+| F1 | P2 | Java `isBlank`/`strip` and the database checks `~ '[^[:space:]]'` disagree: the image's musl `en_US.utf8` locale treats U+0085 as space, Java does not, so a Course title, a padded description, a Chapter title or Lesson Markdown made only of U+0085 returned 500 (check violation) | Blank now means every code point is space under Java whitespace, Unicode space separators and U+FEFF (OpenAPI's ECMA-262 `\S` pattern) or U+0085 (the database), so accepted text satisfies both; descriptive text is trimmed with the same rule; Markdown stays verbatim | `CourseServiceTest.blankAndUnstorableTextFollowsTheContractAndDatabaseDefinitions`; `EnrollmentIntegrationTest.textThatPostgresqlRejectsOrCannotStoreFaithfullyIs400WithoutAnyWrite` (400, no row or content change) |
+| F2 | P3 | An unpaired UTF-16 surrogate was accepted (201), stored by the driver as `?` and echoed unchanged, so response and storage differed; the Administrator query matched the replacement | `requiredText`, `optionalText`, `markdown` and `listCoursesForAdministration` reject NUL and unpaired high or low surrogates with 400 before any write or query; valid pairs are kept | the same tests: lone high/low surrogates 400; `Café 😀`, `Naïve 中文` and Markdown with a pair are stored exactly as returned; `administratorListRejectsAnUnknownPublicationStatus` |
+| F3 | P3 | An empty request with an absent or non-JSON Content-Type reached the handler (Spring matches `consumes` only when a body is present and the body parameter is optional so that CT03 admission precedes body 400), returning 400/403/404 instead of the documented 415 | `CourseRequest.requireJson`, first in each of the ten JSON-body handlers, raises Spring's own `HttpMediaTypeNotSupportedException` (same ProblemDetail, `no-store`) for an absent, unparsable or non-`application/json` type; parameters such as `charset` are accepted | `CourseServiceTest.onlyAnApplicationJsonContentTypeIsAccepted`; `EnrollmentIntegrationTest.jsonBodyOperationsReturn415ForAbsentOrNonJsonMediaTypesEvenWithAnEmptyBody` (all ten operations: `text/plain`, none, `application/xml` → 415; empty and malformed JSON → 400; 415 before path 400 and CT03 404; role 403 first) |
+| F4 | P3 | No automated success-path coverage for the owner list, metadata update, Chapter rename, Lesson edit and Chapter reorder over REST; B2-O09 settings NOWAIT versus authoring not exercised with an authoring writer | Tests only | `ownerListMetadataChapterLessonEditsAndChapterReorderSucceedOverRest`; `settingsNowaitIsBusyWhileAnAuthoringWriteHoldsTheRootAndNeitherWriteIsPartial` (`ConfigurationBusy`, settings work never runs, publication commits, stored settings unchanged, later settings write succeeds) |
+
+**CT40 structure projection.** `CourseStructureService.readStructure(UUID)` with the nested
+`StructureSnapshot(UUID courseId, List<LessonReference> lessons)` and
+`LessonReference(UUID lessonId, UUID chapterId, int chapterPosition, int lessonPosition, boolean published)`
+implements `CT40-LESSON-READ-2026-11-08-r1` (ADR005 §3.1, CT40 [#46](https://github.com/chi-thanh-nguyen/codemastery/issues/46)) in the
+file ADR005 names. It was added to PR #265 by explicit Leader authorization; it is not one of
+CO06's four checkpoints. The trusted CT01 role selects the CT03 assertion before any lookup
+(Instructor `requireCourseOwnership`, all Lessons; Learner `requireLearnerCourseAccess`, published
+Lessons only; Administrator 403). Rows are sorted by Chapter then Lesson position with stored gaps,
+an empty Course is an empty list, every row must belong to a Chapter of the requested Course, and a
+provider failure or inconsistent ancestry fails with a safe 500. Admission and both reads share one
+read-only REPEATABLE READ snapshot. No REST operation, repository method, schema or file was added,
+and no consumer calls it yet; AD07's mappings keep `requireLessonOwnership` as ADR005 §3.1 requires.
+
+| ADR005 §3.1 obligation | Covered by |
+| --- | --- |
+| Owner sees hidden and published Lessons; canonical order with gaps; no foreign rows; immutable result | `EnrollmentIntegrationTest.structureProjectionAdmitsByTrustedRoleFiltersHiddenLessonsForLearnersAndKeepsCanonicalOrderWithGaps`; `CourseServiceTest.structureProjectionSortsByChapterThenLessonPositionKeepsGapsAndFiltersHiddenForLearners` |
+| Joined (active/completed) Learner sees published Lessons only; unenrolled or left 403; hidden Course 404 even with membership; non-owner Instructor 403/404; Administrator 403 even for a missing Course; no identity is an authentication failure (401); empty Course empty; missing Course 404 | the same integration test; `CourseServiceTest.structureProjectionRefusesOtherRolesAndFailedAdmissionBeforeAnyStructureRead` (no structure read after a refusal) |
+| Provider failure, null rows, foreign or duplicate Chapter, Lesson outside the Course, duplicate Lesson, impossible position → safe 500, never partial | `CourseServiceTest.structureProjectionFailsClosedOnProviderFailureOrInconsistentAncestry` |
+| Exact signatures, nested records, read-only REPEATABLE READ | `CourseServiceTest.structureProjectionHasExactlyTheApprovedShape` |
+| One coherent snapshot: a commit that publishes Lessons, moves and appends Chapters and hides the Course after the read's snapshot began is wholly invisible, and the next read sees all of it | `EnrollmentIntegrationTest.structureProjectionReadsOneCoherentSnapshotAcrossConcurrentStructuralCommits`; with the isolation temporarily set to READ COMMITTED it failed (`ResourceNotFoundException`), so it guards the isolation choice |
+
+Executed locally (macOS, OpenJDK 25.0.4.1, Docker 29.8.1) in an isolated worktree of
+`feat/course-content-authoring` at `8d9cbc9` plus these changes, `main` `b506500`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -q test -Dtest='CourseServiceTest'` | 74 tests (68 before), 0 failures |
+| `cd backend && ./mvnw -B test -Dtest='EnrollmentIntegrationTest'` | 95 tests (89 before), 0 failures, errors or skips |
+| The snapshot test with `readStructure` at READ COMMITTED (reverted) | failed as intended |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 752 (746 before, plus 6), Failsafe 316 (310 before, plus 6), 0 failures, errors or skips |
+| AD07 PR #264 head `590a134` merged with this branch in a disposable worktree (`SecurityConfig` matcher blocks combined, docs ignored, nothing pushed): `./mvnw -B test -Dtest='SkillGraphTest,AdaptiveLearningFlowIntegrationTest,CourseServiceTest,EnrollmentIntegrationTest'` | 269 tests, 0 failures; source-compatible |
+
+These are local developer runs, not independent review, QA or CI evidence. Still gated: the IN20
+Administrator REST route and audit, materials (CO09), the CT26 event (CO12), runtime grants for the
+Course writes (CT17-P6), Adaptive consumers of the projection, deployed and browser verification.
+
+## AD07 skill graph verification — 21 November 2026
+
+Implementation of AD07 ([#165](https://github.com/chi-thanh-nguyen/codemastery/issues/165),
+[PR #264](https://github.com/chi-thanh-nguyen/codemastery/pull/264)) against
+`CT05-REPRESENTATION-2026-11-08-r1`, `CT05-MUTATION-2026-11-08-r1`,
+`CT05-MAPPING-2026-11-08-r1`, `CT05-BINDINGS-2026-11-08-r1`, `CT40-LESSON-READ-2026-11-08-r1`
+(mapping assertion only) and `CT40-SKILL-TAG-2026-11-08-r1`
+([ADR005 §§3.1, 3.2, 4, 5, 8](decisions/005-batch-01-contract-approvals.md#4-ct05-graph-behavior)),
+consuming the CO14 Course-root guard and the CT03 ownership assertions. The eight
+operations are reachable through Instructor-only route rules in Auth's `SecurityConfig`.
+A remediation pass on the PR fixed these verified defects before this evidence was recorded:
+
+| Severity | Defect | Fix | Regression evidence |
+| --- | --- | --- | --- |
+| P1 | Auth's default-deny chain returned 403 to every role on all eight operations | Instructor-only rules for the exact eight method/path pairs; Course ownership stays CT03's decision in the service | `everyGraphOperationAdmitsOnlyTheOwningInstructorBeforeAnyDescendantLookupOrWrite` and the owner HTTP lifecycle test |
+| P2 | The owner read ran three autocommit statements, so a writer committing between them made a valid graph fail as malformed (500) | One read-only REPEATABLE READ snapshot covering admission and all graph reads (ADR005 §5 "coherent read snapshot") | `theOwnerReadIsOneSnapshotEvenWhenAWriterCommitsBetweenItsStatements` fails with `IllegalStateException` without the fix; `SkillGraphTest` transaction-definition check |
+| P2 | The recursive cycle check overflowed the stack on a long dependency path (`StackOverflowError` at 50 000 skills), contrary to "arbitrarily long path" (B1-O02) | Iterative depth-first search with a visited set; same order and result | `anArbitrarilyLongPathStillRejectsTheClosingEdgeWithoutExhaustingTheStack` fails on the previous code |
+| P2 | Text passing `@NotBlank` but blank under Unicode whitespace, or containing NUL, reached an `IllegalArgumentException` or the V003 CHECK and returned 500 | The service rejects such text as 400 before the guard | `textBlankUnderAnyWhitespaceRuleOrHoldingNulIsBadRequestBeforeTheGuard`; HTTP bodies in `malformedRequestsAreBadRequests…` |
+| P3 | A repeated body member was silently accepted (last value wins); the strict mapper in `SkillRequests` was unused | A streaming reader rejects repeated, unknown and non-string members of the closed object as 400 | `aRepeatedBodyMemberIsAMalformedClosedObjectAndWritesNothing` returned 201 before the fix |
+
+| Oracle (ADR005 §8.2) | Covered by |
+| --- | --- |
+| B1-O01 mapping, idempotence, foreign 404, Learner/Admin 403 before lookup, anonymous 401 | `SkillGraphTest$Commands`; `AdaptiveLearningFlowIntegrationTest.everyGraphOperationAdmits…`, `theOwnerAuthorsTheGraphOverHttp…`, `crossCourseReferencesAreConcealedAndWriteNothing` |
+| B1-O02 direct/transitive cycle 409 without edge, self-edge 400, duplicate unchanged, missing 404, arbitrarily long path | `SkillGraphTest$Representation`, `SkillGraphTest$Commands`; HTTP lifecycle test |
+| B1-O03 A→B / B→A race on real PostgreSQL; waiter observes the committed winner (409) or recomputes after its rollback | `reverseEdgesRaceOnTheCourseRootAndTheWaiterRecomputesAgainstTheCommittedWinner` (both outcomes; barrier on `pg_stat_activity` lock waits, no sleeps) |
+| B1-O04 (AD07 part) independent Courses do not share the guard; a fault inside the unit rolls back every graph effect | `graphWritesOnIndependentCoursesDoNotShareTheGuard`, `aFailureInsideTheUnitRollsBackEveryGraphEffectAndPersistsNothing` |
+| B1-O11 (AD07 part) delete referenced by edge (either end), mapping, Question or mastery → 409, no cascade | `referencedSkillsConflictWithoutCascadeAndAnUnreferencedSkillIsDeleted`; corrupt stored cycle → safe 500 in `aCorruptPersistedGraphFailsClosedWithASafeServerError` |
+| CT40.skill-tag producers with real Course ownership, including inside a consumer's guard | `skillLookupBoundariesAdmitTheOwnerAndWorkInsideTheConsumersGuard` |
+
+Not covered here, because the participant belongs to another Issue: B1-O04's publication,
+Question and enablement races (CO06, AS05, AD08), B1-O11's CT40 structure projection
+(CO06 `CourseStructureService.readStructure`, still empty), and verification that a stored
+mapping's Lesson still belongs to the Course on read, which needs that projection. Writes
+prove Lesson ancestry through `requireLessonOwnership`. The Assessment consumers of
+`requireSkillInCourse`/`readSkillIds` (PR #259, PR #260) still use fail-closed seams.
+
+> **Historical, superseded on 22 November 2026.** The paragraph above records the state of
+> 21 November and is kept as evidence. CO06 (#172, PR #265) has since merged (`75cdb8b`) with
+> `CourseStructureService.readStructure` implemented, and AD07 now proves every persisted mapping
+> against it; see "CT40 structural projection consumption — 22 November 2026" below. The runtime
+> grants are recorded in "CT17-P6 r5 runtime privileges — 22 November 2026". The PR #259/#260
+> seam statement still describes those branches.
+
+Executed locally (macOS 27.2 arm64, OpenJDK 25.0.4.1, Docker 29.8.1) on the PR #264 working
+tree based on `main` `b506500`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw test -Dtest='SkillGraphTest*'` | 39 tests (10 representation, 29 command), 0 failures or errors |
+| `cd backend && ./mvnw verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AdaptiveLearningFlowIntegrationTest` (PostgreSQL Testcontainer) | 61 tests, 0 failures or errors |
+| `cd backend && ./mvnw verify` | BUILD SUCCESS; Surefire 778, Failsafe 307, 0 failures, errors or skips |
+| Disposable stack: the packaged backend on a random loopback port against a private `infrastructure/postgres` container, synthetic accounts, removed afterwards | 401/403/403 for anonymous, Learner and non-owner; owner create/update/read; direct and transitive cycles 409; self-edge 400; hidden owner Lesson mapped; foreign Lesson 404; delete of a skill referenced by an edge or only by a Question 409; repeated member and Unicode-blank name 400; committed rows matched the responses |
+
+These are local developer runs, not independent QA, CI or deployment evidence. The frontend
+client and types (`skillGraphApi.ts`, `useSkillGraph.ts`) remain FE18-owned and empty.
+
+### CT17-P6 r5 runtime privileges — 22 November 2026
+
+The dated record `CT17-P6-PRIVILEGES-2026-11-22-r5` in
+[deployment.md](deployment.md#ct17-p6-privileges-2026-11-22-r5--ad07-skill-graph-within-the-adr012-192-ceiling-22-november-2026)
+grants the runtime role exactly the ADR012 §19.2 ceiling rows for `skills` (SELECT, INSERT,
+DELETE; UPDATE (name, description)), `skill_prerequisites` and `lesson_skills` (SELECT, INSERT,
+DELETE). `RUNTIME_PRIVILEGE_MATRIX`, `verify_role_separation` and the three VM tests change with it.
+Nothing was provisioned on any real database.
+
+| Command | Result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2, r3, r4 and r5 (3 rows) |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` (local Docker) | the AD07 graph SQL succeeds; missing-Lesson mapping and Question-referenced delete 23503; in-place UPDATE and TRUNCATE 42501; containment and upgrade suites pass |
+| `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` (local Docker) | `RUNTIME_CONSUMER_TESTS_PASS` including the eight AD07 operations (create, replace, edge, cycle 409, mapping, owner read, Learner 403, unmap, referenced delete 409, delete); no `permission denied`/42501 in the backend log; `RUNTIME_UPGRADE_TESTS_PASS` |
+
+These local runs are not the required CI evidence; the VM workflow runs on the PR.
+
+### CT40 structural projection consumption — 22 November 2026
+
+With CO06 on `main` (`75cdb8b`), every assembled skill graph (the owner read and the guarded edge
+and delete commands) now proves each persisted `lesson_skills` row against
+`CourseStructureService.readStructure` (ADR005 §§3.1, 4.1). The projection joins the caller's
+transaction: the owner read sees Course and Adaptive state in one REPEATABLE READ snapshot, and
+commands read it under the held Course root. A mapping whose Lesson is not one of the Course's own
+Lessons, or an inconsistent projection, is a safe 500 with nothing repaired and no partial graph.
+`mapLesson`/`unmapLesson` keep the CT03 `requireLessonOwnership` assertion that ADR005 §3.1 selects.
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='SkillGraphTest*,AdaptiveLearningFlowIntegrationTest'` | 44 unit and 66 PostgreSQL tests, 0 failures (new: ordering, no-mapping fast path, foreign and inconsistent projections, hidden-Lesson mappings, raw-SQL foreign mappings, a Lesson moved out of the Course, a structural change committed mid-read, CO06 Lesson creation racing a mapping, commit and rollback) |
+
+Local developer runs, not independent review, QA or CI evidence.
+
+### R-01 unpaired-surrogate text remediation — 22 November 2026
+
+An independent review of `f83237e` found that `SkillGraphService` rejected NUL but not unpaired
+UTF-16 surrogates. `POST /skills` with `{"name":"\ud800"}` returned 201 echoing U+D800 while the
+PostgreSQL JDBC driver stored `?`, so the response did not match the committed row. Skill text now
+follows the same storability rule as CO06's `CourseManagementService.isStorable`: an unpaired high
+or low surrogate is rejected with 400 before the Course guard, with nothing written. A valid
+surrogate pair is one supplementary code point and is stored unchanged. The whitespace rules are
+unchanged.
+
+| Case | Expected and observed |
+| --- | --- |
+| `SkillGraphTest$Commands` unit: unpaired high, low, reversed and trailing surrogates in `name` and `description` on create and update | 400 before the guard; no repository write |
+| `SkillGraphTest$Commands` unit: valid pairs (U+1F600, U+1D538, U+10FFFF, U+10000), U+180E and a combining sequence | accepted and returned unchanged |
+| `AdaptiveLearningFlowIntegrationTest#unpairedSurrogatesAreBadRequestsWithoutEffectsAndSupplementaryTextRoundTripsUnchanged` (PostgreSQL, HTTP): five unpaired-surrogate values in `name` and in `description`, on POST and PUT | 400 each; graph rows unchanged; Course root released |
+| Same test: supplementary text by JSON escape (POST) and raw UTF-8 (PUT) | 201 and 200; persisted UTF-8 bytes equal the accepted text; the graph read returns it unchanged |
+| The new unit and HTTP tests against the unfixed `f83237e` service | 7 unit cases fail; HTTP returns 201 instead of 400 |
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='SkillGraphTest*'` | 56 tests, 0 failures |
+| `cd backend && ./mvnw -B verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AdaptiveLearningFlowIntegrationTest` | 67 tests, 0 failures |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 808, Failsafe 335, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`, 27 relations, r1–r5 |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | pass |
+| `test-runtime-real-backend-privileges.sh` (run with a locally built image under a private tag) | `RUNTIME_CONSUMER_TESTS_PASS`; no `42501` in the backend log |
+
+Local developer runs, not independent review, QA or CI evidence. Nothing was granted on any real database.
+
+## Phase 4 release pipeline verification — 23 November 2026
+
+Verification of [ADR015](decisions/015-release-pipeline.md) on branch
+`feature/phase4-release-pipeline` ([PR #267](https://github.com/chi-thanh-nguyen/codemastery/pull/267)),
+starting `main` `257a9152e16c8ba4fae467242ccad964e1d899b4`. Results belong to the
+named commits; the final head's checks are reported on the pull request.
+
+### Executed and passed
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, macOS arm64, Python 3.9.6 | `python3 -m unittest discover -s infrastructure/release/tests` (archive identities and refusals, required checks with the merged-PR fallback, findings and rescan, migrations, admission records in real and rehearsal mode with a committed and an uncommitted record, package and release-chain verification through the real `release-manifest` command, CLI refusal exit code) | 21/21 PASS, with `ResourceWarning` as an error |
+| Local | actionlint 1.7.8 on `release.yml`; ShellCheck 0.11.0 (`-S warning`) on `release.sh`, `verify-release.sh` and the changed PostgreSQL test | Clean |
+| Local, Docker 29.8.1, containerd store | Five scratch images saved with `docker save --platform linux/amd64`, removed and reloaded: `release.py archive-identities` equals `docker image inspect .Id` for all five; `release.sh verify-archive` (sourcing `deploy.sh`) accepts the archive for both stores and rejects swapped identities | PASS |
+| Local | `release.sh scan` with the pinned Trivy 0.76.2 image: JSON in both modes, SPDX SBOMs and database metadata (vulnerability database updated 2026-11-22 12:38 UTC) | PASS |
+| Local | `release.sh promote` on a host that already holds `codemastery.invalid/*:release` images | Refused before tagging, as designed; the existing images were not changed |
+| Live GitHub API, read-only | `evaluate-checks` for `main` `257a915`: all ten required contexts successful (nine on the revision; `CodeQL` on merged PR #260's head `cd9d43d`, because GitHub reports that check only on pull requests). For the unchecked branch head it refuses (`Backend` in progress) | PASS |
+| CI run [45049370417](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45049370417), head `3decdc3` (merge `dbf93b1`) | `Release tooling` (18 tests at that head) and `Release rehearsal` on `ubuntu-24.04`, Docker Engine 28.0.4 with the containerd store, 12 minutes: five candidates built; `mc` Corresponding Source `a42400d4…` equal to the suite record and the image's `SOURCE`; reload from the archive with equal identities; Q01 MinIO initializer suite 28/28 against the exact minimal server; Q02 trust store 13/13; Q03 runtime consumers and V008→V009 upgrade; Q04 byte-clean PostgreSQL (3,888 entries); Q05 hardening; Trivy in both modes; `deploy.sh verify_archive` for both stores; smoke on the release-named copy (preflight, refused wrong SHA-256, swapped identities and a missing identity, real `load` and `provision`, three `guard_update()` refusals over the created state, stack removed); ten admission refusals against the real manifest; promotion with a `REHEARSAL-` record; rescan accepted; release package of 23 files verified; `verify_archive` and the smoke again on the release archive | PASS |
+
+| CI run [45050651836](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45050651836), head `fd90609` | The same rehearsal with the merged-PR check fallback and the CRITICAL/HIGH summary table; `Release tooling` 19 tests | PASS (14.5 minutes) |
+
+### Executed and failed, then fixed
+
+CI run [45048852193](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45048852193),
+head `3a4158e`: the build stage passed, Q01 failed at its third check because the
+suite captured Docker's on-demand pull progress for the `mc` test-client image. The
+CI job already pre-pulls those pins; `3decdc3` makes the release stage do the same.
+
+### Findings recorded, not accepted
+
+Trivy 0.76.2 with the 22 November database reports for the rehearsal images built
+from this branch (same Dockerfiles as `main`), in counts of distinct rows:
+
+| Image | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| postgres | 0 | 20 | 13 | 4 | 0 |
+| minio (minimal server) | 0 | 0 | 3 | 0 | 1 |
+| minio-init | 0 | 0 | 4 | 0 | 0 |
+| backend | 0 | 2 | 50 | 5 | 0 |
+| frontend (release target) | 4 | 6 | 10 | 4 | 0 |
+
+The earlier dated records reported zero CRITICAL/HIGH for these images; the new rows
+come from advisories published since. They are recorded and gate promotion: a real
+candidate built today could be promoted only if the Leader's admission accepted every
+row or the images were remediated and rebuilt. Remediation is DP01 security work
+outside this change; nothing was suppressed.
+
+### Not run
+
+- The dispatched `Release candidate` and `Release promotion` jobs: `workflow_dispatch`
+  needs the workflow on the default branch, and both jobs refuse any ref but `main`.
+  Attestation creation and verification for this repository, draft-release creation,
+  read-back and download, and the live required-check step are therefore unexecuted;
+  their logic is covered by the unit tests and the read-only API check above.
+- `verify-release.sh` end to end on a real package (none exists yet); its chain logic
+  is unit-tested.
+- `deploy.sh deploy`, public TLS, and anything on the Azure VM.
+
+### Focused review remediation — 23 November 2026
+
+A focused code and security review of PR #267 at `bc9db20`, by the same Claude Code
+session that wrote the pipeline (**not an independent review**; one review agent with a
+separate context was also used). Confirmed defects were fixed in the same pull request;
+[ADR015](decisions/015-release-pipeline.md#7-supersession-and-amendments) records the
+amended decisions.
+
+| ID | Severity | Defect at `bc9db20` | Fix |
+| --- | --- | --- | --- |
+| R1 | P2 | Promotion accepted any admission record tracked on `main`; `decided_by` was a typed login, so authenticity rested only on repository rules the pipeline did not check | `release.py admission-provenance`: the last commit changing the record must be the squash merge of a pull request into `main` that changed only the record, with the same blob at its head, merged by `decided_by`; recorded in `release.json` and required by `verify-release-chain` |
+| R2 | P2 | Rescan matched `{service, id, package}` only, and the admission could accept findings the candidate never reported: a severity raised after the candidate scan (MEDIUM → CRITICAL) or a newly matched installed version passed promotion | The accepted set must equal the candidate's findings; a rescan row must be an admitted candidate row at the same installed version and no higher severity |
+| R3 | P3 | `verify-release.sh --source` ran the source revision's `release.sh`, absent from revisions older than `infrastructure/release/` | Runs its own `release.sh` with the source revision's `deploy.sh` |
+| R4 | P3 | Attestation policy used the `--signer-workflow` pattern | Exact `--cert-identity …/release.yml@refs/heads/main` plus `--source-digest` of the recorded tooling commit |
+| R5 | P3 | The merged-PR `CodeQL` fallback did not check that the head held the revision's content | Requires equal tree SHAs |
+| R6 | P3 | Checkouts persisted the job token in `.git/config` | `persist-credentials: false`; `pull-requests: read` granted explicitly where pull requests are read |
+| R7 | P3 | Promotion used the admission's tag, revision and version before validating them | Validated first |
+| R8 | P3 | No record of what the scanner analysed (an undetected operating system yields fewer findings silently) | Per-image scan coverage in the manifests and the job summary |
+| R9 | P2 | The newest check run per context decided, so a later success created by any workflow with `checks: write` (same app identity) could override a failed required check; ADR015 D2 said a failure is never overridden | All runs are read (`filter=all`); any completed run of a required context that did not succeed refuses the revision |
+| R10 | P3 | `verify-release.sh --repository` moved the trust anchor (certificate identity and repository check together) | Removed; the repository is fixed |
+| R11 | P3 | `verify-release.sh` could not tell which release the operator meant: a validly attested other release passed | Required `--version`; online, the admission record must still be on `main` with the same blob |
+| R12 | P3 | Draft tag and release probes treated an API error as "absent" | Both fail closed |
+
+R9–R12 came from the separate-context review agent and were reproduced or checked
+before fixing. Its proposal to sign in a separate job was not adopted (that job would
+sign the digests the building job reports); this and its other P3 notes (concurrency
+cancellation by a pull request's own workflow, partial drafts after cancellation,
+re-runs of old runs, publication by writers) are recorded as ADR015 residual risks.
+
+Rejected hypotheses: main has no merge commits (linear history), so "ancestor of
+`main`" equals first-parent membership; `gh` 2.102.0 anchors `--signer-workflow`
+(`…/workflows/deploy` does not match `deployment.yml`); draft asset download through
+`gh api` with `Accept: application/octet-stream` returns the exact bytes (checked on a
+public `cli/cli` asset).
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, Python 3.9.6 | Unit tests (new: admission provenance with 12 refusals, rescan bound to admitted rows and severity, exact acceptance set, scan coverage, release chain without merge evidence, tree-bound fallback through the CLI) | 28/28 PASS; the new R1, R2, R9 and coverage tests fail against `bc9db20`'s `release.py` |
+| Local | actionlint 1.7.8; ShellCheck 0.11.0 on `release.sh` and `verify-release.sh` | Clean |
+| Local, bash 5.2 container | `rehearsal-admission refusals` on a synthetic candidate | 12 refusals, including the new acceptance and severity cases |
+| Live GitHub API, read-only | `evaluate-checks` for `257a915` with `filter=all` and tree binding (every run on the revision and on PR #260's head succeeded; head tree equals the revision's) | 10/10 PASS |
+| Local | `verify-release.sh` on a synthetic package: wrong `--version` refused; unknown `--repository` refused; chain verified, then refused at the attestation gate (no attestation) | PASS |
+| Live GitHub API, read-only | `admission-provenance` on merged single-file PR #252 (`DESIGN.md`, merge `a7883e3`): accepted with the real merger; refused for another `decided_by` and for the parent blob | PASS |
+| `gh` 2.102.0, public `cli/cli` attestation | `--cert-identity` with `--source-ref`, `--source-digest` and `--deny-self-hosted-runners`, online and offline (`--bundle`, `--custom-trusted-root`); wrong ref or digest refused | PASS |
+
+CI run [45058829044](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45058829044)
+on the first remediation commit `4733f10` (R1–R8): `Release tooling` (27 tests) and
+`Release rehearsal` PASS in 15 minutes, including the 12 admission refusals (new:
+acceptance of an unreported finding, severity raised after the candidate scan), the
+candidate's own findings covered by its admission, and the recorded scan coverage
+(postgres alpine 3.24.3, minio none detected, minio-init wolfi, backend ubuntu 24.04,
+frontend alpine 3.24.2), equal between candidate scan and rescan. The rehearsal and
+required checks for the final remediation head are reported on the pull request. The dispatched stages remain unexecuted for the reasons above.
+
+### Independent review remediation — 23 November 2026
+
+A separate-session review of PR #267 at `18d6ec0` (verdict: technically sound with three
+P3 notes, no P0–P2) was followed, at the Leader's request, by these fixes:
+
+| ID | Severity | Defect at `18d6ec0` | Fix |
+| --- | --- | --- | --- |
+| F1 | P3 | A queued or running run of a required context was overridden by a newer completed success, which any workflow with `checks: write` can create (R9 covered completed failures only) | Every run of a required context must be completed and successful; an unfinished run refuses the revision |
+| F2 | P3 | An uncovered promotion-time finding was refused with "a new admission is required", but an admission can accept only its candidate's findings | The refusal, `check_rescan` and ADR015 D6 name the actual remedy: a new candidate, then a new admission; the fail-closed exact-set policy is unchanged |
+| F3 | P3 | The rescan's scan coverage was recorded but not compared with the candidate scan's | `check-rescan --rescan-coverage` (required) refuses a lost or different OS, a newly reported end of support, or a missing candidate target; targets are recorded by content (`os-pkgs/<type>`, `<class>/<type>:<path in image>`), independent of the scanned archive's name |
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, Python 3.9.6 | Unit tests (new: unfinished runs beside a newer success, on the revision and the merged pull request's head; coverage equal under different archive names and paths, more coverage accepted; lost, changed or end-of-support OS, missing or moved target, missing or malformed coverage refused; `check-rescan` CLI names the new-candidate remedy and requires the coverage argument) | 32/32 PASS; the new tests fail against `18d6ec0`'s `release.py` (9 failures, 8 errors) |
+| Local, bash 5.2 container | `rehearsal-admission refusals` on a synthetic candidate | 14 refusals, including the two new coverage-loss cases |
+
+The pull request's `Release rehearsal` compares the real candidate scan's coverage with
+the real rescan's. The dispatched stages remain unexecuted.
+
+## AD06 mastery and history write persistence verification — 23 November 2026
+
+AD06 ([#42](https://github.com/chi-thanh-nguyen/codemastery/issues/42),
+[PR #263](https://github.com/chi-thanh-nguyen/codemastery/pull/263)) implements the Adaptive
+mastery and recommendation-history write adapters. It adds no operation, service, REST endpoint
+or schema change. Mechanism: [`AD06-PERSISTENCE-2026-11-23-r1`](decisions/016-ad06-mastery-history-persistence.md#3-d1--ad06-persistence-2026-11-23-r1-write-mechanism).
+Placement: `CT14-AD06-PLACEMENT-2026-11-23-r1`
+([repository structure](repository-structure.md#ad06-test-placement--23-november-2026)).
+Runtime privileges: `CT17-P6-PRIVILEGES-2026-11-23-r8`
+([deployment](deployment.md#ct17-p6-privileges-2026-11-23-r8--ad06-mastery-and-history-writes-within-the-adr012-192-ceiling-23-november-2026)).
+
+The first PR revision used Spring Data `save()` with an assigned UUID, which takes the JPA merge
+path. The new integration suite was first run against that revision, unchanged: 14 of its 20
+tests failed (11 failures, 3 errors). Appending an existing identifier silently rewrote the
+committed history row. Both writes stayed pending until the commit flush, so same-transaction
+JDBC reads did not see them and they ran after the caller's later writes. `storeState` ran outside
+any transaction. Each write issued an extra `SELECT`. The adapters now issue one upsert and one
+plain `INSERT` at the call, inside a mandatory caller transaction (ADR016 §3).
+
+| Obligation | Covered by |
+| --- | --- |
+| Exact four state and three type codes; field-for-field round trips; other spellings rejected, never defaulted; nulls left to V005 | `AdaptivePersistenceMapperTest` (26 cases) |
+| First write inserts one row for the assessed skill only; no default row for unassessed skills or learners | `firstWriteInsertsOneCategoricalRowForTheAssessedSkillOnly`, `eachLearnerAndSkillPairIsIndependent` |
+| Later writes change only `state`; identifier, learner and skill preserved; one row per pair; explicit Unknown stored | `laterWritesUpdateOnlyTheStateAndKeepTheRowIdentity`, `everyCategoricalStateIsStoredByItsExactV005Code` |
+| One statement per write, no read, no full-row update; history never uses `ON CONFLICT` | `masteryWriteIssuesOneUpsertAndNoReadOrFullRowUpdateOnEitherBranch`, `historyWriteIssuesExactlyOneInsertAndNoReadUpdateOrDelete` (Hibernate statement inspector) |
+| Every supplied history field stored unchanged, including the microsecond instant; identical drafts with distinct identifiers stay separate rows | `appendInsertsEveryCallerSuppliedFieldUnchanged`, `identicalRecommendationsWithDistinctIdsStaySeparateHistoryRows` |
+| A reused history identifier fails with 23505 and never rewrites the committed row | `appendingAnExistingIdFailsAndNeverRewritesTheCommittedRow`, `appendingTheSameIdTwiceInOneTransactionFailsAtTheSecondCall` |
+| V005 foreign keys, checks, key and NOT NULL stay authoritative | `masteryForeignKeysAndTheV005StateCheckAreEnforcedByPostgreSql`, `historyForeignKeysNotNullAndTextChecksAreEnforcedByPostgreSql` |
+| Nulls and sub-microsecond instants rejected before any SQL | `nullMasteryArgumentsAreRejectedBeforeAnySql`, `invalidRecommendationsAreRejectedBeforeAnySql` |
+| Concurrent first writes of one pair converge on one row without 23505 | `concurrentFirstWritesOfOnePairConvergeOnOneRowWithoutAUniqueViolation` (barrier on `pg_stat_activity` lock waits) |
+| Writes join the caller's transaction, are invisible to committed readers until it commits, and roll back with it; outside a transaction they are refused | `writesJoinTheCallerTransactionAndRollBackWithIt`, `writesOutsideACallerTransactionAreRefusedAndLeaveNoRow` |
+| Adapter SQL needs exactly the r8 rows; identity rewrites, reads, deletes, truncation and history mutation are denied; a merge-style rewrite needs a forbidden UPDATE | `adapterSqlRunsUnderExactlyTheR8RuntimePrivileges`, `r8PrivilegesDenyIdentityRewritesDeletesReadsAndHistoryMutations`, `r8PrivilegesRejectTheFullRowUpdateThatAMergeBasedAppendWouldIssue` |
+
+The privilege tests create a `NOLOGIN` role inside the test transaction. The role holds exactly
+INSERT, SELECT (user_id, skill_id, state) and UPDATE (state) on `learner_skill_masteries` and INSERT
+on `path_recommendations`, and the tests run `SET LOCAL ROLE`. The rollback removes the role. The
+provisioned runtime role itself is exercised by `test-postgres-privilege-matrix-containment.sh`.
+
+Executed locally on 23 November 2026, macOS host with Docker Desktop 29.8.1, project PostgreSQL
+image (PostgreSQL 17.11), Hibernate 7.4.5:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -o -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AdaptivePersistenceIntegrationTest verify` with the original adapters | 20 run, 11 failures and 3 errors, as described above |
+| `cd backend && ./mvnw -B -o -Dtest=AdaptivePersistenceMapperTest -Dit.test=AdaptivePersistenceIntegrationTest verify` | 26 unit and 20 PostgreSQL tests, 0 failures or errors |
+| `cd backend && ./mvnw -B -o verify` | BUILD SUCCESS; Surefire 966 and Failsafe 408 tests, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r8 (r8: 2 rows) |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` (local Docker) | the exact AD06 upsert and append succeed as the provisioned runtime role; a reused history identifier fails with 23505; mastery re-key, identifier read and delete and history read, rewrite, erase and TRUNCATE fail with 42501; `verify_role_separation` passes with the four new probes; containment and upgrade suites pass |
+| Privilege requirement of the upsert, measured on the project PostgreSQL image | INSERT and UPDATE (state) alone, or with SELECT (user_id, skill_id), fail with 42501; adding SELECT (state) succeeds on both branches; INSERT alone suffices for the append |
+| `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` (local Docker) | `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS` with the r8 matrix provisioned; 0 backend log entries mentioning `permission denied`/42501 |
+| `test-deploy-syntax-and-authorization-gates.sh`, `test-deploy-offline-compose-guards.sh` | exit 0 |
+
+`test-runtime-real-backend-privileges.sh` has no AD06 case: no HTTP operation reaches these
+adapters yet. AD13 must add the quiz-submission case when it wires them.
+
+These are author-side developer runs, not independent QA or CI evidence; CI runs on the PR. Not
+claimed: calculator, routing, event-flow or end-to-end mastery/progress atomicity (AD13 and
+QA03/QA04), read capabilities (AD16), or provisioning of r8 on any real database.
+## DP01 release image security remediation verification — 23 November 2026
+
+Verification of [DP01 release image security remediation](deployment.md#dp01-release-image-security-remediation--23-november-2026)
+on branch `fix/release-image-security-remediation`, starting `main`
+`cc86c0803aa1ad9428f8511c6ba0f6669829814d`. Local results belong to the working tree
+recorded in the pull request; the checks of its final head, including `Release tooling`
+and `Release rehearsal`, are reported on the pull request.
+
+### Executed and passed
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, macOS arm64, Docker 29.8.1 (containerd store), builds forced to linux/amd64 | Five images built from the branch: postgres `sha256:6edc3700…`, minio `sha256:cb39f9a7…`, minio-init `sha256:d9d08204…`, backend `sha256:324206a1…`, frontend release target (`PUBLIC_ORIGIN=https://codemastery.app`) `sha256:0441fe61…`; local HTTP frontend target `sha256:79293994…` | PASS |
+| Local, inside the images | Installed versions: frontend `nginx` and all four modules 1.30.7-r1 (`njs` 1.30.7.1.0.2-r1), built with OpenSSL 3.5.9, `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4, `libcrypto3`/`libssl3` 3.5.9-r1; HTTP target `nginx` 1.30.7-r1; postgres `krb5-libs` 1.22.3-r0, `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4, `libcrypto3`/`libssl3` 3.5.9-r1, `zlib` 1.4-r0, PostgreSQL 17.11, `gosu` → `/sbin/su-exec`, one layer; backend `apt`/`libapt-pkg6.0t64` 2.8.4ubuntu0.1, Java 25.0.5, user `codemastery` (UID 999) | As targeted; no other base substitution |
+| Local | The changed `test-ingress-release-image-build.sh` in-image assertions on both frontend targets: UID 101, `nginx/1.30.7`, every `nginx*` package on 1.30.7-r1, no `*.apk-new` left, root-owned non-writable `/etc/nginx`, writable cache; the stale-module check also run on a crafted package list holding `nginx-module-xslt-1.30.6-r1` | PASS; the crafted stale module is reported |
+| Local | `test-postgres-foreign-volume-guard.sh` (linux/amd64) | PASS: Bookworm volume refused with exit 78 and unchanged; client tools still run; fresh volume initialized, marked, restarted with its data |
+| Local | `test-postgres-image-layer-equivalence.sh` with `POSTGRES_FLAT_IMAGE` set to the exact amd64 image, and in its default (fresh build) mode | PASS in both: configuration equal except `GOSU_VERSION`/`DOCKER_PG_LLVM_DEPS`; merged filesystem equal (3,890 entries); one layer, no whiteout, no upstream `gosu` bytes |
+| Local | `test-java-truststore.sh` on the exact backend | 13/13 PASS (`TRUSTSTORE_REGRESSIONS_PASS`); the re-pinned published Temurin base still contains the prohibited G1 root and is refused; the final image holds 117 verified entries |
+| Local | Trivy 0.76.2 (the pipeline's digest-pinned image), `--scanners vuln`, default and comprehensive, nothing ignored, vulnerability database updated 2026-11-22T19:00:46Z (the candidate's database) | CRITICAL 4 → 0, HIGH 28 → 0, MEDIUM 80 → 31, LOW 13 → 5, UNKNOWN 1 → 1; none of the 32 original CRITICAL/HIGH rows remains; no new row; scan coverage unchanged for all five images ([details](deployment.md#results)) |
+| Local, Python 3.9.6 and Python 3.12.16 (bash 5.2 container) | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests`, including the new admission mutations (finding moved to another service, modified advisory, modified package) | 32/32 PASS on both |
+| Local, bash 5.2 container | The repository's `release.py` (`findings`, `migrations`, `candidate-manifest`, `verify-package`) and `release.sh rehearsal-admission refusals`/`create` on a synthetic rehearsal candidate whose findings and coverage are the real remediated Trivy reports (identities and archive synthetic): five services in the manifest; postgres and frontend with zero findings | PASS: package verified (21 files); 16 refusals including the two new ones; the synthetic admission accepts exactly the 37 remaining rows and `check-rescan` covers them; lost scan coverage of the zero-finding frontend and a new LOW advisory on the zero-finding postgres image are both refused |
+| Local | `bash -n` on every `infrastructure/vm/tests`, `infrastructure/release`, `infrastructure/minio` script and `deploy.sh`; ShellCheck 0.11.0 (`-S warning`) on `release.sh`, `verify-release.sh`, the changed ingress test, the PostgreSQL equivalence and trust-store suites; `docker build --check` on the three changed Dockerfiles | Clean; no BuildKit lint warning (as on `main`) |
+| Live GitHub API, read-only | `main-quality-gates` now requires 11 contexts (ADR015's ten plus `Release tooling`), strict up-to-date branches, squash only. `release.py evaluate-checks` for `main` `cc86c08`, as the candidate job calls it | PASS: all 11 successful (`CodeQL` on merged PR #267's head `53953fd`, equal tree) |
+
+### Not run locally
+
+- `test-ingress-stub-backend.sh`, `test-ingress-real-backend.sh`,
+  `test-ingress-release-ca-store.sh`, `test-ingress-dp01-preflight.sh` (needs root on the
+  host), `test-runtime-real-backend-privileges.sh`, the containerd round-trip suite and
+  `test-minio-init.sh`: they run in the pull request's required `CI VM` jobs on
+  linux/amd64 runners, and Q01–Q05 and the `deploy.sh` smoke run on the exact rehearsal
+  candidates in `Release rehearsal`.
+- `actionlint`: no workflow file changed.
+- The dispatched `Release candidate` job: it accepts only a `main` revision. Candidate
+  run 45073820127 already exercised dispatch, attestation and draft storage on `main`,
+  and no workflow, attestation or draft logic changed, so no new candidate was dispatched.
+
+### Observation for the Leader
+
+`Release tooling` is a required context, but `release.yml` runs on pull requests only when
+release inputs change (ADR015 D13 described it as not required). A pull request that
+touches none of them gets no `Release tooling` run, so its required check stays expected
+and it cannot satisfy the ruleset (seen on open PRs #263 and #266, both behind `main` and
+touching no release path). Resolving it is a ruleset or workflow decision outside this
+change.
+
+## Release admission redesign verification — 23 November 2026
+
+Scope: [ADR015 Amendment A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)
+(PR #269): authenticated dispatch, protected-environment approval, run-bound and
+attested `admission.json`, the operator verifier. Evidence from an earlier session
+(candidate build, archive and identity verification, Q00–Q05, Trivy recount, the
+original 20 admission mutations) is reused, not repeated, and is listed in
+[deployment.md](deployment.md#current-state-of-the-first-candidate).
+
+| Environment | Check | Result |
+| --- | --- | --- |
+| Local, macOS, Python 3.9.6 | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests` (new: `AdmissionAuthenticationTests`, `AdmissionDecisionTests`, `AttestationAndRunRecordTests`, rewritten `ReleaseChainTests`, `DraftVersionTests` against a stub `gh`) | 37/37 PASS |
+| Container `python:3.12-slim`, bash 5.2 | The same suite; `bash -n` of every release script | 37/37 PASS |
+| Same | Each negative case printed with its refusal message: 19 dispatch refusals (unauthorized actor; the Leader's login on another account ID; wrong repository, repository ID, workflow, branch, event; re-run by another writer and by the Leader; actor/sender/triggering-actor disagreement; bot sender; mismatched or missing run record; missing inputs), 16 environment/approval refusals (missing or other environment, no or other required reviewer, administrator bypass, branch policy not exactly `main`, no approval, approval elsewhere, other approver or account ID, rejection), 13 decision refusals (manifest digest, tag, finding count, CRITICAL/HIGH without acceptance, rehearsal or unverified or foreign candidate, missing coverage, non-authority dispatcher or approver, authority no longer code owner), 34 record tampering/replay refusals (every bound field; other candidate, manifest digest, run ID, attempt, tooling commit; real record used as rehearsal), 12 package-chain refusals (tampered admission or `release.json`, admission of another run, missing seal), 8 certificate and 6 run-record refusals | Each refused for its intended reason |
+| Same, bash 5.2 | `release.sh rehearsal-admission refusals` and `create` on the real candidate manifest of `candidate-1d0658a7215c-45091629955-1` marked as a rehearsal, with its real `findings.json` | 26 refusals verified (new: record of another run, origin, version, tag, `not_granted`, request digest/count/tag, installed version, severity) |
+| Local, real candidate metadata (read-only download of `release-candidate.json`, its bundle, `SHA256SUMS`, `findings.json`) | `admission-request`, `admission-approval`, `admission-preview`, `admission-decide` and `verify-admission` with a **synthetic** GitHub context (fixture, not an admission) on the real manifest; comparison with the earlier prepared record | Accepted; identities, digests, the 37 `{service, id, package}` rows, `not_granted`, revision, origin and version equal the prepared record; `check-rescan` covers the real `findings.json` and refuses an added LOW advisory |
+| Same | `check-attestation-run` on `gh attestation verify --format json` of the real candidate manifest (bundle) | Accepted for run 45091629955 attempt 1; refused for attempt 2 |
+| Container `rhysd/actionlint:1.7.8` (local image, no network) | `actionlint` (with shellcheck) on `release.yml` | No findings |
+
+Not run here: a real admission or promotion (they need this change on `main` and the
+Leader's dispatch and approval); the GitHub API behaviour of the environment and
+approval endpoints under the workflow token was checked against the live response
+shape (`can_admins_bypass`, `deployment_branch_policy`, protection rules) and the REST
+documentation, not in a dispatched run. The CI `Release rehearsal` of the pull request
+is the integration check of the rehearsal path.
+
+### Independent review remediation (F-01 to F-03) — 23 November 2026
+
+An independent review of PR #269 at `b43ab1c` returned two P2 findings and one P3
+finding. Fixed in the same pull request:
+
+| Finding | Defect | Fix | Regression tests |
+| --- | --- | --- | --- |
+| F-01 (P2) | The operator procedure ran `verify-release.sh` from the source revision's checkout; for the first A1 release that is `1d0658a7…`, whose pull-request admission verifier refuses every A1 package | [deployment.md](deployment.md#using-a-release-package-with-deploysh) and ADR015 A1.8: the operator's own `gh` first verifies that `release.json` is attested by `release.yml` on `main` at its `tooling.sha`; the verifier then runs from a clean checkout of `tooling.sha`, with `--source` a separate checkout of `source_revision`. `verify-release.sh` refuses any other tooling commit, a modified or non-git tooling checkout, before running anything else | `VerifyReleaseProcedureTests` (5): a synthetic repository whose source commit carries a historical verifier that refuses A1 packages and whose later tooling commit carries this verifier and a changed `deploy.sh`; the documented script block, extracted from `deployment.md` and run against a stub `gh`, verifies the package from the tooling commit and runs the source commit's `deploy.sh` only; refused: a later main commit as tooling, an untracked file or modified script in the tooling checkout, a copy outside git, the tooling checkout or a later commit as `--source`, a modified source checkout, a tampered `admission.json`, an approval record by another account |
+| F-02 (P2) | The Environment approval comment went through the one-line, 1,000-character validator of the dispatch `note`; a multi-line approval made promotion refuse after approval | `approval_comment()`: GitHub's comment is free text kept verbatim (any lines, Unicode, empty; null or absent recorded as empty); refused only as malformed API data when it is not a string or exceeds 262,144 characters; stored JSON-escaped and never printed; `verify-admission` requires the recorded comment in that form. The `note` keeps its one-line rule; reviewer identity, review state and environment checks are unchanged | `ApprovalCommentTests` (5): single-line, multi-line, CRLF/tab, empty, null, absent, Unicode (including bidirectional controls), an 88,890-character comment and Markdown/shell/workflow-command text accepted verbatim; non-string and over-bound values refused; unauthorized reviewer, the Leader's login on another account, rejected deployment, approval plus rejection, another environment and no approval still refused with a multi-line comment; multi-line approval through decision, JSON round trip, offline and online verification; the CLI chain never echoes the comment |
+| F-03 (P3) | The `Admission request` summary said the package files and source qualification were verified by that job, which downloads only the manifest and its bundle | The summary separates what the job verified (manifest attestation, digest equal to the request, tag, count, CRITICAL/HIGH choice, unused version), what it shows from the attested candidate evidence without re-checking, and what the protected promotion job verifies after approval | `AdmissionPreviewTests` |
+
+Duplicate approval rows and matching approval rows by environment name rather than ID
+were reviewed and left unchanged: the promotion job re-authenticates the dispatch and
+refuses any attempt other than 1, whose single environment job yields one approval
+row, and the environment is read by the same name in the same repository.
+
+| Environment | Check | Result |
+| --- | --- | --- |
+| Local, macOS, Python 3.9.6, bash 3.2.57 | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests` | 48/48 PASS (37 earlier + 11 new) |
+| Container `python:3.12-bookworm` (Python 3.12.16, bash 5.2.15, git 2.39.5, no network) | `bash -n` of every release script; the same suite | Syntax clean; 48/48 PASS |
+| Container `koalaman/shellcheck:v0.11.0` | `-S warning` on `release.sh` and `verify-release.sh`; default severity on `verify-release.sh` and on the documented script block | Clean |
+| Local | Each fix reverted in turn against the new tests: `b43ab1c`'s `release.py` and `verify-release.sh` (13 failures), `b43ab1c`'s `verify-release.sh` alone (3 failures: tooling revision not enforced), the recorded-comment check removed (3 failures) | The tests detect each regression |
+
+Not repeated: the candidate build, archive verification, Q00–Q05, Trivy rescans and
+the 410 MB package checks (unchanged code paths). `release.yml` is unchanged.
+
+### Bootstrap trust-boundary remediation (R-01 and R-02) — 23 November 2026
+
+The delta-focused independent review of PR #269 at `dee517c` found that the
+documented bootstrap could run an existing verifier after a failed clone (R-01,
+P2), and that its standalone SHA condition did not stop Bash 3.2 on failure
+(R-02, P3). The operator procedure now explicitly exits on attestation, clone or
+checkout failure. Occupied destinations are not removed or reused. Both SHAs
+are validated as exactly 40 lowercase hexadecimal characters in their original
+JSON string form before command substitution can discard trailing newlines;
+JSON parsing/type failures and the subsequent Bash SHA condition explicitly exit.
+Offline operators clone from a local repository holding both commits into fresh
+destinations; the attestation policy and exact tooling/source revisions are unchanged.
+
+`VerifyReleaseProcedureTests` extracts the actual Bash block from
+`deployment.md`, preserving its embedded Python indentation and replacing only
+the operator's package, version, store and repository inputs. Real local Git
+operations use a synthetic repository; wrappers log calls, inject selected
+failures and mark verifier invocation. Harmless marker scripts detect execution
+of pre-existing, unattested tooling.
+
+| Regression | Evidence |
+| --- | --- |
+| Occupied destinations | Non-Git tooling with an executable marker, clean Git tooling at another commit with a marker verifier, and an existing source checkout are refused. No verifier marker is created; existing contents and source/tooling HEADs are preserved |
+| Git failures | Tooling clone, tooling checkout, source clone after tooling preparation, and source checkout each refuse with a diagnostic. The Git call count stops at the failed operation; no verifier or application code runs |
+| Invalid manifest inputs | 43 subcases cover both SHAs: empty, truncated, too long, invalid hex, uppercase, embedded newline, leading/trailing whitespace, trailing newline/CRLF, shell-looking text, null, number, boolean, array and object; plus missing fields, invalid structures and malformed JSON. Every case exits nonzero before any `gh` or Git call or verifier invocation |
+| Attestation refusal | Exits before any Git call or repository-code execution |
+| Positive separation | Fresh destinations check out exact tooling and historical source commits and run the A1 verifier with the separate `--source`; package/repository paths containing spaces also pass |
+
+| Environment | Validation | Result |
+| --- | --- | --- |
+| macOS, Python 3.9.6, Bash 3.2.57 | Full release-tooling suite with `-W error::ResourceWarning` | 59/59 PASS, including all 16 procedure tests and the existing F-01/F-02/F-03 regressions |
+| Cached `python:3.12-bookworm`, Python 3.12.16, Bash 5.2.15, network disabled, read-only source mount | Same full suite | 59/59 PASS |
+| Bash 3.2 and Bash 5.2 | `bash -n` of `release.sh`, `verify-release.sh` and the actual documented bootstrap with concrete operator inputs | PASS |
+| Cached `koalaman/shellcheck:v0.11.0`, network disabled, read-only mounts | `-S warning` on the same three shell inputs | No findings |
+
+OpenAI Codex implemented this focused remediation and ran the checks above.
+The GitHub and Sigstore responses in these tests are synthetic: they establish
+bootstrap control flow, not real signature verification or a real admission.
+No workflow, release verifier implementation, admission policy, environment,
+candidate artifact or VM was changed. Candidate builds, Q00–Q05, Trivy scans,
+the 410 MB candidate verification and real admission/promotion were not run.
+
+## Phase 5 SSH deployment verification — 23 November 2026
+
+Verification of [ADR017](decisions/017-ssh-continuous-deployment.md). Every case uses
+disposable containers, synthetic credentials and keys generated for the run; nothing in
+this section ran a deployment, capture, renewal or change on the Azure VM.
+
+### Suites
+
+| Suite | Where | What it proves |
+| --- | --- | --- |
+| `infrastructure/vm/tests/test_phase5_units.py` (stdlib `unittest`, 30 cases) | CI jobs `Deploy tooling` and `VM continuous deployment and recovery`; local | Flyway CRC32 checksums equal the VM's recorded V001–V006 values; schema compatibility (upgrade, r4 exact-predecessor block, checksum/description/failed/gapped/repeatable history, target ahead = image-only rollback refused, drift, fresh, unknown rule); deferral-rule detection; migration substitution; git tree of `git archive HEAD` equals `HEAD^{tree}` and detects a change; unsafe tar members; deployment context round trip; dispatcher authentication (13 refusals: re-run, other workflow/ref/event, non-authority, mixed actors, other path, bad version/operation/recovery inputs, multi-line note); environment gate (10 fail-closed cases); report; retention (3/7/4, holds, never ageing out the only point) and 16 h/24 h age states; manifest validation (14 mutations, duplicate keys); with OpenSSL 3: CMS round trips (empty, binary, 3 MiB), wrong key, wrong passphrase, corruption, truncation, failed producer leaves no file; set verification against corrupt/truncated components, forged manifest, missing/extra/symlinked files, intruder re-signature, substituted trust key and a different named manifest; VM staging list/ack/prune rules; publication to independent custody and a local HTTPS Blob endpoint (conditional create refusal, readback corruption before marker and ledger, replay/substitution, older cut refused) |
+| `infrastructure/vm/tests/test-phase5-ssh-gates.sh` | CI job `VM continuous deployment and recovery`; local | A disposable Ubuntu 24.04 sshd with the real dispatcher, gate and bootstrap sudoers rule: pin mismatch and missing pin (`Host key verification failed`), unauthorized key, world-readable identity, no tooling, wrong git tree, absolute symlink, exact install, transport check; the deploy role refuses recovery-list/send/ack, capture, tls-renew, timers and `sudo id`; shell metacharacters, command substitution and interactive login refused; interrupted, altered and path-traversal uploads refused; a complete upload becomes a root-only 0600 file |
+| `infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh` | CI (helper-container tar, then host GNU tar as root); local | Real PostgreSQL 17 with V001–V009 and 25 rows, the release's minimal MinIO server (UID 65532) with versions, a delete marker, zero-byte and 3 MB objects and an IAM user; scheduled capture with resume; refusals for a PostgreSQL client session, an unknown container on the network, a running initializer, missing custody and a non-pre-update hold, each restoring the application; `ops.py` lock contention; held pre-update capture and `status`; publication with authenticated decryption, an F1 restore with equal Flyway history and row counts, MinIO structure check, independent copy, ledger and VM acknowledgement; substitution and corruption refused; MinIO restored into a fresh volume, booted with the same identity: every version and delete marker equal, the IAM user restored and still denied; the deploy recovery gate accepts the held, acknowledged, restore-tested point and refuses another manifest digest, a missing acknowledgement and a writer that ran after the cut; `resume` |
+| `infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` (extended) | CI job `VM deployment PostgreSQL and containment tests`; local | All r4 cases unchanged; new CT17-P6 r9 V006 → V009 exercise with empty-history, gap and failed-migration refusals |
+
+### Local results (macOS arm64, Docker 29.8.1, Homebrew OpenSSL 3.6.5, Python 3.9)
+
+- `test_phase5_units.py`: 30 passed (6 crypto cases skip without OpenSSL 3; run with `CODEMASTERY_OPENSSL`).
+- `test-phase5-ssh-gates.sh`: `PHASE5_SSH_GATES_PASS`.
+- `test-phase5-recovery-roundtrip.sh` (helper-container tar): `PHASE5_RECOVERY_ROUNDTRIP_PASS`.
+- `test-postgres-privilege-matrix-containment.sh`: `MATRIX_TESTS_PASS`, `UPGRADE_TESTS_PASS`,
+  `MULTIVERSION_TESTS_PASS`, both containment cases.
+
+Observation: with an inherited non-terminal stdin, Homebrew OpenSSL 3.6.5 ignored
+`-passin`/`-passout` sources and fell back to its UI ("unable to get passphrase"),
+reproduced 205/205 times; with stdin from `/dev/null` 216/216 passed. Every OpenSSL child
+in the tooling and tests now has stdin from `/dev/null` (ADR017 D7).
+The CI results on Ubuntu OpenSSL 3.0.13 are the pull request's.
+
+### Read-only evidence on the VM (23 November 2026)
+
+`deploy.sh preflight` of v0.1.0-rc.1's source revision passed with the real env file,
+Compose model and TLS layout; the source tree transferred to a temporary directory equals
+`release.json` `source_tree`; the Phase 5 schema gate reported **BLOCKED** for that
+release's `deploy.sh` (CT17-P6 r4, V006 target) and **UPGRADE** (V007–V009 pending) with
+r9; capacity passed (57.2 GB free, 2.8 GB required); no unknown project volumes. The
+temporary directory was removed; no container, volume, file under `/etc`, `/opt` or
+`/var/lib`, or database row changed.
+
+### Not run
+
+The `Deploy` workflow against GitHub's `production` environment and the VM (no key,
+environment or bootstrap exists); the NSG gate (no Azure identity); Azure Blob (no
+account); acme.sh staging/renewal; systemd timers; real capture duration; RPO/RTO drills.
+
+## PR #274 author-side remediation verification — 23 November 2026
+
+This is the post-remediation record for the Leader-authorized comprehensive review,
+direct fixes and push on `feature/phase5-ssh-deployment`. Initial HEAD was
+`ba2d7dcc9ca894606ceb454fb4031fd095e8db19`; base/merge-base was
+`e9d6da15b3fe4d581765d1c733abb70698dac779` (28 original changed files).
+Read the final commit/CI snapshot from PR #274; this record does not freeze a later
+concurrent head or claim human approval. Earlier counts in the section above are
+historical. Decisions and operational changes are in [ADR017 §11](decisions/017-ssh-continuous-deployment.md#11-pr-274-review-remediation--23-november-2026).
+
+OpenAI Codex both reviewed and modified the code. Verification below is **author-side
+verification of remediation**, not a separate independent second review. A focused
+independent rereview of SSH/root authority, recovery and interruption handling is
+recommended before protected integration. No review approval or merge was submitted.
+
+### Confirmed findings and disposition
+
+All items below were corrected in the same PR. Source references identify the original
+defective paths at the initial HEAD; the named functions retain the corrected paths.
+`FIXED_AND_VERIFIED` is bounded to the local synthetic/disposable evidence below,
+not real VM/GitHub-environment/Azure qualification.
+
+| ID / severity | Original path and defect; impact | Remediation and evidence |
+| --- | --- | --- |
+| F01 / P1 | `host/codemastery-ops` install-tooling and `ops.py` decode_context: caller-selected tree/hash and approval-looking strings established no trusted provenance. A deployment key holder could install arbitrary root-executed tooling or forge deployment context. | Fixed operator-installed OIDC verifier, exact-command audiences, signed workflow/actor/repository/environment/run claims, GitHub commit-tree check and replay barrier. Original disposable container printed `ARBITRARY_TOOLING_EXECUTED`; final SSH suite rejects key-only calls and untrusted trees, accepts real RSA-signed fixture commands. **FIXED_AND_VERIFIED**. |
+| F02 / P1 | `ops.py` safe_extract and shell tooling extraction: individually relative symlinks could form an escaping chain before a subsequent tree check; concurrent receives could also replace verified inputs before use. | Reject all links/special files/`.git` entries before extraction; serialize transfers/install/consumers. The relative-chain test fails on the original source and passes after correction. Archive-of-HEAD tree equality and valid install still pass. **FIXED_AND_VERIFIED**. |
+| F03 / P1 | `recovery.py` pg_other_clients/capture: samples, an exemptible application name and row counts did not enforce continuous writer exclusion; restart could violate capture/hold. Interrupted evidence was deleted. | Persistent intent, HBA network rejection, local bootstrap-only socket, disabled restart policies, private topology/volume checks, MinIO stop before cut, preserved partials and visible cleanup failures. Real direct TCP writer refused throughout hold; producer failure and abrupt exit tested; explicit fixture reconciliation succeeds. **FIXED_AND_VERIFIED**. |
+| F04 / P1 | `recovery.py` publish_set/restore_test: PG PASS alone minted `+RESTORE_TESTED` while MinIO boot was `NOT_RUN`; P9 accepted the suffix. | Full PG + identical-image MinIO boot, version payload/stat/tag/config/IAM readback and application allowed/denied checks; evidence-bound receipt required at both gates. PG-only regression fails against original source; full disposable path passes; PG-only receipt rejected by P9. **FIXED_AND_VERIFIED**. |
+| F05 / P1 | `ops.py` op_resume/op_deploy: unchanged old container IDs could authorize resume after provisioning/migration already modified state. | Persist attempt before mutation; refuse resume/replay after any attempt; retain evidence and independently check containment. Original source returns RESUMED in the new negative test; corrected source refuses before start. **FIXED_AND_VERIFIED**. |
+| F06 / P2 | `ops.py` op_tls_renew: staging returned from inside try before post-finally health/readback; a partial key/chain rename was not considered replaced. | Shared restart/health/Nginx/served-leaf checks for staging, real and failed challenge paths; rollback both files even between renames. Original staging regression fails; staging positive/negative, real-pair replacement and partial-rename rollback pass. No real ACME operation. **FIXED_AND_VERIFIED**. |
+| F07 / P2 | `recovery.py` publication/prune: an interrupted copy/cloud write could make retries permanently conflict; ledger success skipped a lost acknowledgement; workstation publication/pruning lacked mutual exclusion. | Exclusive lock, authenticated byte-identical reuse, deterministic marker last, existing-copy readback and acknowledgement retry. Local HTTPS conflict/corrupt-read/retry tests and lock exclusion pass. **FIXED_AND_VERIFIED**. |
+| F08 / P2 | `ops.py` verify_state/image_store and `cd.py` report: nested component UP could override overall DOWN; wrong host port/restart policy went unchecked; external failures did not fail reporting; failed discovery guessed graphdriver. | Parse top-level health, enforce 443 and restart policy, refuse failed discovery and fail external deploy/verify reports. Original readiness/port tests fail; corrected positive/negative verification tests pass. **FIXED_AND_VERIFIED**. |
+| F09 / P2 | `cd/nsg-gate.sh` close: failed lookup, including authentication/network failure, was reported as rule absence; priority validation admitted >4096. | Successful list plus final absence readback, explicit unknown/removal failure and numeric bounds. Synthetic CLI tests reject failed lookup/invalid priority and accept verified absence. No Azure API mutation. **FIXED_AND_VERIFIED**. |
+| F10 / P2 | Recovery status/retention counted independently copied but untested points as qualified; VM age used capture-start ID rather than signed cut. New unqualified points could displace qualified retention selections. | Qualified-only ages/retention; signed cut; clock-error state; newest eligible independent/cloud readback before prune; retain partial evidence. 3/7/4, holds, age boundaries, incomplete qualification and cloud fault tests pass. **FIXED_AND_VERIFIED**. |
+| F11 / P3 | `cd.py` parse_request and `deploy-release.sh`: workflow advertised verify's version as optional but required one. | Verify without a version delegates to the current deployment; plan/prepare/deploy still require a version. **FIXED_AND_VERIFIED**. |
+
+### Executed local checks
+
+Environment: macOS arm64, Python 3.9, Docker Engine 29.8.1, OpenSSL 3.6.5;
+synthetic keys/credentials only, task-owned disposable containers/networks/volumes.
+SSH binds only loopback; recovery exposes zero ports. The production VM was never
+contacted. MinIO restore uses the identical captured image and a local-driver tmpfs
+volume; credentials are never printed or committed. OIDC uses real RSA signature
+verification against a root-installed synthetic issuer fixture; it is not a token
+issued by an actual approved GitHub deployment job.
+
+```bash
+CODEMASTERY_OPENSSL=/opt/homebrew/opt/openssl@3/bin/openssl \
+  python3 -m unittest -v infrastructure/vm/tests/test_phase5_units.py
+python3 -m unittest -v infrastructure/release/tests/test_release.py
+bash infrastructure/vm/tests/test-phase5-ssh-gates.sh
+CODEMASTERY_OPENSSL=/opt/homebrew/opt/openssl@3/bin/openssl \
+  MINIO_IMAGE=cmtest/minio-server:local \
+  bash infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+bash infrastructure/vm/tests/test-deploy-syntax-and-authorization-gates.sh
+bash infrastructure/vm/tests/test-deploy-offline-compose-guards.sh
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+actionlint .github/workflows/deploy.yml .github/workflows/ci-vm.yml
+git diff --check
+```
+
+The Phase 5 unit suite has **45 tests** (15 added), including cryptography; no crypto
+skip with the selected OpenSSL. SSH prints `PHASE5_SSH_GATES_PASS`. Recovery prints
+`PHASE5_RECOVERY_ROUNDTRIP_PASS`, including producer failure, abrupt-process intent,
+held network-writer rejection, full restore publication, PG-only P9 rejection and
+resume. PostgreSQL exercises the unchanged complete privilege matrix, V006→V009,
+empty/gapped/failed/duplicate/repeatable history refusals, column/privilege drift and
+both containment outcomes. Python compilation, shell syntax and actionlint v1.7.12 pass.
+All **59 release verification tests pass**, covering the existing attestation bootstrap and source/tooling
+separation. The full backend/frontend/E2E builds are delegated to the final PR's CI;
+their application source was not changed by this remediation.
+
+Before/fixed-after evidence: six new tests were run against initial-HEAD modules and
+failed (TLS staging, source link-chain escape, overall readiness, port/restart drift,
+post-attempt resume and PG-only full qualification). The root-tooling bypass was
+separately executed in a network-isolated container using a harmless marker script.
+Original failure logs and subsequent runs are under the task's private temporary
+evidence directory; no exploit ran against the Azure VM.
+
+Final rereview of the first remediation commit also tightened F07/F10: reject a signed
+future cut before publication, preserve manifest-bound full restore evidence when an
+additional destination is populated, and count upgraded ledger records as one point.
+The 45-test suite was rerun successfully with explicit future-cut refusal and
+PG-only → full independent → full Azure publication/deduplicated status assertions.
+The TLS regression also injects an unknown initial `docker stop` outcome: ingress
+restart/health/readback still execute, and the operation reports failure rather than
+leaving a possibly stopped frontend without recovery. It failed before the correction
+and all TLS regression cases passed afterwards.
+
+### Readiness limits and release compatibility
+
+Code and disposable testing do not establish operational configuration or production
+qualification. The actual `production` Environment lookup returned HTTP 404; missing
+configuration or insufficient endpoint access cannot authorize deployment. Real
+GitHub-issued SSH command tokens, VM bootstrap/credentials, Azure Blob/RBAC and NSG
+operation, Keychain/scheduler binding, ACME staging/renewal, actual capture/restore
+capacity, reboot/power-loss behavior, measured RPO/RTO and full-product F2/Q08 remain
+unexecuted. External resources/cost, exposure and actual restore/deployment authority
+remain Leader-reserved. Targets are not guarantees.
+
+The live draft `v0.1.0-rc.1` release manifest was downloaded read-only: source
+`1d0658a7215c2a3d3fed569738d522137989b666`, tooling
+`e9d6da15b3fe4d581765d1c733abb70698dac779`. Its source's deploy.sh lacks r9; a separately
+admitted new release containing r9 is required for the existing V006→V009 update.
+The draft was not repromoted, published or modified. No production secret, protection,
+environment setting, Azure resource or real certificate was changed.

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# CodeMastery - /usr/local/sbin/codemastery-ssh-gate   (ADR017; installed once by bootstrap.sh)
+#
+# Forced command of the restricted deployment identity `cmdeploy`:
+#   restrict,command="/usr/local/sbin/codemastery-ssh-gate" ssh-ed25519 AAAA... codemastery-deploy
+# `restrict` disables forwarding, agent, X11 and PTY allocation. The requested command
+# (SSH_ORIGINAL_COMMAND) is split on whitespace without shell evaluation, every word
+# must match a strict character set, and the result runs only as
+#   sudo -n /usr/local/sbin/codemastery-ops WORDS...
+# whose deploy role permits only the deployment operations.
+set -Eeuo pipefail
+export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
+fail() { printf 'REFUSED: %s\n' "$*" >&2; exit 2; }
+command_line="${SSH_ORIGINAL_COMMAND:-}"
+[[ -n "${command_line}" ]] || fail "an operation is required (interactive login is disabled)."
+(( ${#command_line} <= 8192 )) || fail "command too long."
+[[ "${command_line}" != *$'\n'* && "${command_line}" != *$'\r'* ]] || fail "multi-line command."
+read -r -a words <<< "${command_line}"
+(( ${#words[@]} >= 1 && ${#words[@]} <= 32 )) || fail "unexpected number of words."
+for word in "${words[@]}"; do
+  [[ "${word}" =~ ^[A-Za-z0-9._:/=@+_-]+$ && ${#word} -le 4096 ]] || fail "word contains unsupported characters."
+done
+exec /usr/bin/sudo -n /usr/local/sbin/codemastery-ops "${words[@]}"

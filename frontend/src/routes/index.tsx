@@ -1,21 +1,23 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
+import { Link, matchRoutes, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { Alert, Box, Button, ListItemIcon, MenuItem } from '@mui/material';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
 import { ProfilePage } from '../features/auth/pages/ProfilePage';
+import { ForgotPasswordRoute } from '../features/auth/pages/ForgotPasswordPage';
+import { ResetPasswordRoute } from '../features/auth/pages/ResetPasswordPage';
 import { ProtectedRoute } from './guards/ProtectedRoute';
 import { useAuth } from '../features/auth/hooks/useAuth';
 import { DashboardLayout, Page } from '../layouts/DashboardLayout';
 import { AccountMenu, AccountMenuDivider } from '../shared/components/AppHeader';
 import { PresentationIcon } from '../shared/components/PresentationIcon';
-import { LoadingView, SystemStateView } from '../shared/components/StatusViews';
+import { SystemStateView } from '../shared/components/StatusViews';
 import type { NavItem } from '../shared/components/SidebarNav';
 import { CourseCataloguePage } from '../features/catalogue/pages/CourseCataloguePage';
 import { CourseMembershipActions, MyCoursesPage } from '../features/learning/pages/MyCoursesPage';
 import { CourseDetailPage } from '../features/catalogue/pages/CourseDetailPage';
-import { LandingPage } from '../features/catalogue/pages/LandingPage';
+import { LandingPage, LandingRestoringView } from '../features/catalogue/pages/LandingPage';
 import { LearnerHome } from '../features/learning/pages/LearnerHomePage';
 import type { UserRole } from '../features/auth/types/authTypes';
 
@@ -93,7 +95,8 @@ function Workspace() {
     const brand = auth.isAuthenticated ? startFor(auth.user?.role) : '/';
     return <DashboardLayout navItems={navItems} selectedNavId={currentSection(location.pathname)} onNavSelect={(path) => navigate(path)}
         headerActions={<SessionNavigation />} brandHref={brand} onBrandSelect={() => navigate(brand)}
-        drawerFooter={auth.isAuthenticated ? undefined : <Button component={Link} to="/register" variant="contained" color="onChrome" fullWidth>Create account</Button>}>
+        // Like the header, the drawer shows no sign-in action while the restore runs (F2).
+        drawerFooter={auth.isAuthenticated || auth.restoring ? undefined : <Button component={Link} to="/register" variant="contained" color="onChrome" fullWidth>Create account</Button>}>
         <Outlet />
     </DashboardLayout>;
 }
@@ -117,21 +120,34 @@ function CourseDetail() {
 function Landing() {
     const auth = useAuth();
     if (auth.isAuthenticated) return <Navigate to={startFor(auth.user?.role)} replace />;
-    if (auth.restoring) return <Box sx={{ p: { xs: 2, md: 5 } }}><LoadingView message="Restoring your session…" variant="none" /></Box>;
+    // The landing shell keeps its Theme button while the restore runs (D9-1; FE34 with FE03).
+    if (auth.restoring) return <LandingRestoringView />;
     return <LandingPage exampleMap={<Suspense fallback={<Box role="status" aria-label="Loading the example map" sx={{ minHeight: 360 }} />}><ExampleMasteryMap /></Suspense>} />;
 }
 function NotFound() {
     return <Page><SystemStateView icon="search" title="Page not found" message="Check the address, or continue from the catalogue."
         actions={<Button component={Link} to="/courses" variant="contained">Browse courses</Button>} /></Page>;
 }
+/** The isolated design preview's route (CT14, CT16). */
+export const PREVIEW_PATH = '/preview';
+/**
+ * Whether `<AppRouter>` renders the design preview at `pathname`. It asks React Router itself, with the same
+ * route path, so it accepts exactly what the route does: any letter case, trailing slashes and percent-encoded
+ * characters (the router decodes each segment and keeps a malformed one as typed, which then matches nothing).
+ */
+export const isPreviewPath = (pathname: string) => matchRoutes([{ path: PREVIEW_PATH }], pathname) !== null;
+
 /** Public catalogue routes share the current Auth/Profile workspace. */
 export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; preview?: ReactNode }) {
     const auth = useAuth();
     return <SessionEndProvider><Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/preview" element={preview ?? <Navigate to="/courses" replace />} />
+        <Route path={PREVIEW_PATH} element={preview ?? <Navigate to="/courses" replace />} />
         <Route path="/login" element={<SignIn />} />
         <Route path="/register" element={<RegisterPage />} />
+        {/* FE06 recovery (CT16.routes, anonymous; CT02). Delivery stays inactive until a deployment binds SMTP. */}
+        <Route path="/forgot-password" element={<ForgotPasswordRoute />} />
+        <Route path="/reset-password" element={<ResetPasswordRoute />} />
         <Route path="/courses" element={catalogue ?? <Workspace />}>
             {!catalogue && <Route index element={<Catalogue />} />}
         </Route>
