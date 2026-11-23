@@ -173,6 +173,7 @@ def external_checks(origin, address, ports=PUBLIC_PORTS, timeout=8):
         out["problems"].append("%s does not resolve" % host)
     try:
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         with socket.create_connection((address, 443), timeout=timeout) as raw:
             with context.wrap_socket(raw, server_hostname=host) as conn:
                 der = conn.getpeercert(binary_form=True)

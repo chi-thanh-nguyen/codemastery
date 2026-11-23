@@ -576,9 +576,6 @@ class Crypto(unittest.TestCase):
         shutil.copy(self.p("rcpt.key"), os.path.join(home, "keys", "recipient.encrypted.pem"))
         shutil.copy(self.p("rcpt.crt"), os.path.join(home, "keys", "recipient.crt"))
         shutil.copy(self.p("producer.pub"), os.path.join(home, "trust", "producer.pub.pem"))
-        passfile = self.p("passphrase")
-        open(passfile, "wb").write(self.passphrase)
-        os.environ["CODEMASTERY_RECOVERY_PASSPHRASE_FILE"] = passfile
         cfg = {"vm": {}, "producer_key_sha256": recovery.public_key_fingerprint(self.p("producer.pub"))}
         acks = []
 
@@ -590,6 +587,7 @@ class Crypto(unittest.TestCase):
                 acks.append(args)
                 return b"{}"
         ws = recovery.Workstation(home)
+        ws.passphrase = lambda: self.passphrase      # in memory; the Keychain is not used in tests
         entry = [e for e in recovery.list_staged(vm) if e["set_id"] == set_id][0]
         server = FakeBlobServer(self.dir)
         try:
@@ -644,7 +642,6 @@ class Crypto(unittest.TestCase):
                 recovery.publish_set(ws, cfg, FakeRemote(), entry3, blob=None)
         finally:
             server.stop()
-            os.environ.pop("CODEMASTERY_RECOVERY_PASSPHRASE_FILE", None)
 
 
 class FakeBlobServer(object):
@@ -700,6 +697,7 @@ class FakeBlobServer(object):
 
         self.httpd = http.server.HTTPServer(("127.0.0.1", 0), Handler)
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(self.cert, self.key)
         self.httpd.socket = ctx.wrap_socket(self.httpd.socket, server_side=True)
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
