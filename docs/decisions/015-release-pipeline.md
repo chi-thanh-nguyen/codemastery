@@ -216,6 +216,9 @@ scanned archive's name.
 
 ### D7 — The admission record
 
+> **Superseded by [Amendment A1](#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)
+> (23 November 2026).** Kept as the historical decision; no admission was ever made under it.
+
 A Leader decision committed through the protected review path at
 `docs/decisions/release-admissions/<record_id>.json` (covered by the existing
 `/docs/decisions/` CODEOWNERS rule). `decided_by` is only text that anyone with write
@@ -248,6 +251,9 @@ open; the approval is a click, not a durable record of exact identities; it need
 settings change); a workflow input (self-declared); a key-signed file (key custody).
 
 ### D8 — Promotion
+
+(Admission steps amended by A1: the admission is made, attested and verified inside the
+promote run; there is no merge-record check.)
 
 Download the one workflow-created candidate draft named by the record; verify
 `SHA256SUMS` and the manifest's file map; verify the candidate manifest, archive and
@@ -325,6 +331,9 @@ is declared, not observed: no VM state is inferred. Release qualification is nev
 update or deployment authority.
 
 ### D12 — Operator verification
+
+(Amended by A1: the admission-on-`main` check is replaced by the admission seal check
+offline and GitHub's run and approval records online; see A1.6.)
 
 `infrastructure/release/verify-release.sh PACKAGE [--source CHECKOUT] [--store …]
 [--trusted-root FILE]` (bash 3.2-compatible, no Docker) checks the package files,
@@ -409,6 +418,9 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
   scan-coverage gate. Same delegation and authority; recorded in
   [testing.md](../testing.md#independent-review-remediation--23-november-2026).
 
+- **Amendment A1, 23 November 2026:** PR-free authenticated admission (protected
+  environment approval of a Leader dispatch) replaces D7 and the admission parts of D8,
+  D10 and D12; see §10.
 - **F3:** implemented as a pipeline; the procedure is unchanged.
 - **F6:** the technical selection of signing/attestation and trust policy for project
   release packages is made by D3 and D12 under this delegation; the decision that
@@ -432,3 +444,186 @@ Recorded in [testing.md](../testing.md#phase-4-release-pipeline-verification--23
 | Security admission of that candidate's exact identities and every finding | Leader |
 | Licensing determination before any public conveyance; optional immutable releases | Leader |
 | Transfer to the VM, custody, recovery point, update authorization, deployment (Phase 5, P8, P9) | Leader under separate authorization |
+
+## 10. Amendment A1 — Authenticated admission without a pull request per candidate (23 November 2026)
+
+### A1.1 Authority and status
+
+**DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED**, 23 November 2026
+(Asia/Ho_Chi_Minh). The Project Leader and repository Owner @chi-thanh-nguyen gave the
+explicit instruction **“CodeMastery — Redesign Security Admission, Rewrite PR #269, and
+Complete Pending Admission & Release Promotion”**. It delegates the selection of the
+technical admission architecture and its implementation, asks for an authenticated
+GitHub-native Leader admission that needs no new pull request per candidate, and keeps
+every other D1–D13 guarantee. Claude Code (Anthropic) compared the options and made the
+selection below under that delegation; the Leader did not review the individual
+selection. The instruction reserves, and A1 does not claim: approving or merging the
+pull request; changes to rulesets, branch protection or CODEOWNERS; acceptance of any
+vulnerability beyond the Leader's own admission act; publication; VM deployment; and
+production secrets.
+
+A1 is acted on in [PR #269](https://github.com/chi-thanh-nguyen/codemastery/pull/269)
+(branch `docs/release-admission-1d0658a7`, rebuilt from `main` `b84de03`). It becomes
+effective on `main` only through that PR's integration. A1 replaces D7 and the
+admission parts of D8, D10 and D12; every other decision is unchanged. The history in
+§1–§9 and in A1.2 is kept as it happened.
+
+### A1.2 Why the pull-request admission is replaced
+
+Under D7 every candidate needed a JSON record committed under
+`docs/decisions/release-admissions/` by a pull request that changed only the record
+and that its `decided_by` merged. For the first real candidate
+(`candidate-1d0658a7215c-45091629955-1`, run
+[45091629955](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45091629955),
+source `1d0658a7215c2a3d3fed569738d522137989b666`, manifest SHA-256 `25802cda…4a63`,
+archive SHA-256 `0b3bfef2…f44f0`), an earlier session verified the package, ten
+identities, attestations, Q00–Q05, the 37 findings, and prepared
+`CM-REL-ADMISSION-2026-11-23-1D0658A7.json`. The existing validator accepted it and 20
+deliberate mutations were refused. It was committed to the branch of PR #269 and never
+merged, so under D7 it never became an admission. The recurring cycle (record →
+commit → pull request → review → merge → dispatch) costs a governance pull request
+per candidate and mixes the security decision with repository change control. That
+prepared record is not an admission and is not carried into `main`; A1 removes the
+tracked record and the merge-record check from the active release path.
+
+### A1.3 Options compared
+
+| Option | Assessment |
+| --- | --- |
+| A. `workflow_dispatch` by the Leader only | No configuration. GitHub sets the actor; a pinned login and account ID, `run_attempt == 1` and agreement of the runner environment, event payload and run record identify who started the run. Limits: anyone who can make the Leader's account start a run (for example a writer's branch workflow, triggered by a Leader review, dispatching `release.yml` with `GITHUB_TOKEN`, which GitHub allows for `workflow_dispatch`) produces a run whose actor attribution GitHub's documentation does not state; a dispatch is a form, not an interactive confirmation of the verified candidate |
+| B. Protected environment with a required reviewer only | Approval is an interactive act by an authenticated reviewer that neither `GITHUB_TOKEN` nor another writer can perform; GitHub keeps the review (`GET …/actions/runs/{id}/approvals`); a re-run needs a new approval. Limits: needs an environment (repository setting); an environment that does not exist is created **unprotected** when a job names it, so a typo or deletion fails open unless the workflow checks the rules; administrators may bypass unless disabled; anyone with write access can request an approval |
+| C. A + B in one run (**selected**) | The Leader dispatches the request naming the exact manifest digest; a no-approval job verifies the dispatcher and shows the verified candidate; the Leader approves the pending environment deployment; the promote job reads the environment rules and the approval back and fails closed. Security decision (dispatch + approval) and promotion stay distinct steps of one run, so the decision cannot drift to another run |
+| D1. Pull-request record (D7) | Strong (merge record), but one pull request per candidate; replaced |
+| D2. Signed admission file (cosign / GPG key) | Key custody and rotation for one approver; no GitHub-native audit |
+| D3. Custom in-toto predicate (`actions/attest`) carrying the decision | Equivalent integrity to A1.5's sealed `admission.json` with the already pinned provenance action, but adds a second action and a second verification policy; not adopted |
+| D4. Issue comment / label / `repository_dispatch` | Weaker authentication or extra tokens; rejected |
+
+D7 had rejected an environment approval because it can fail open and is not a durable
+record of identities. A1 keeps the identities in the attested `admission.json` and
+addresses the fail-open risk by verifying the environment's rules and the approval at
+run time (A1.4), which D7's analysis did not consider.
+
+### A1.4 Selected design
+
+`stage=promote` of the **Release** workflow, dispatched from `main` by the admission
+authority with these inputs (untrusted text, read by `release.py` from GitHub's event
+payload, never interpolated into a shell):
+
+| Input | Rule |
+| --- | --- |
+| `candidate` | `candidate-<12 hex>-<run>-<attempt>`; must equal the tag the attested manifest's own revision and run imply |
+| `candidate_manifest_sha256` | The SHA-256 of the `release-candidate.json` the Leader reviewed; must equal the downloaded, attested manifest. The manifest names every identity, the archive digest and every finding with installed version and severity, so this one value commits the decision to all of them |
+| `version` | `v<major>.<minor>.<patch>[-pre]`, not `v0.0.0-rehearsal`, unused as tag, release or draft |
+| `accepted_findings` | Must equal the candidate's number of findings (an explicit acknowledgement) |
+| `accept_critical_or_high` | Default `false`: any CRITICAL/HIGH finding refuses the admission unless set |
+| `note` | Optional one-line risk-acceptance statement, recorded verbatim |
+
+Jobs and gates:
+
+1. **`Admission request`** (`contents: write` only to read drafts, `actions: read`;
+   nothing written). Authenticates the dispatch (`release.py admission-request`): the
+   runner environment, the event payload and GitHub's run record must agree that this
+   is attempt 1 of a `workflow_dispatch` of `release.yml` at `refs/heads/main` in
+   repository ID `1391772534`, and that the actor, triggering actor and sender (login
+   **and** numeric ID, sender of type User) are one account equal to the pinned
+   authority. It checks the version is unused, downloads only the manifest and its
+   bundle, verifies the manifest attestation (D3 policy) and writes the admission
+   preview (identities, digests, counts, every finding) to the job summary.
+2. **`Release admission and promotion`**, `environment: release-admission`. GitHub
+   holds the job until the authority approves it. Its first step re-reads the run
+   record, the environment, its branch policies and the run's approvals and refuses
+   unless: the authority's account ID is a required reviewer, administrators cannot
+   bypass, deployments are limited to the `main` branch policy only, the run has an
+   `approved` review in that environment by the authority's account and no other review
+   (`release.py admission-approval`). It then downloads the candidate, verifies the
+   package and attestations (D3/D8), and **records the admission**
+   (`release.py admission-decide`), self-verifies it, and **attests `admission.json`
+   before any candidate image is loaded or run**. The rest is D8 unchanged, with the
+   release package now carrying `admission.json` and its own bundle
+   `admission.sigstore.json`.
+
+Trust anchors are fixed in `release.py`: repository and repository ID, workflow path and
+ref, environment name, and the authority `chi-thanh-nguyen` → account ID `212181152`.
+In addition the authority must remain a code owner of `/docs/decisions/` at the
+dispatched `main` commit. Changing an anchor is a reviewed change of `release.py`.
+
+### A1.5 Admission evidence (`codemastery.release-admission/v2`)
+
+`admission.json`, no unknown fields: `record_id` (`CM-REL-ADMISSION-<run>-<attempt>`),
+`decision: ADMITTED`, `decided_by` {login, id} (the approver), `decided_at` (UTC),
+generated `scope`, the Leader's `statement`, `source_revision`, `public_origin`,
+`candidate` {release_tag, manifest_sha256, archive_sha256, run}, `images` (five
+services × containerd and graph-driver identity), `accepted_findings` (every candidate
+row: service, id, package, installed version, severity), `accepted_counts`,
+`release.version`, `not_granted` (`deployment`, `existing-vm-update`,
+`licensing-determination`, `production-secrets`, `public-exposure`,
+`public-publication`, all mandatory), and `authorization` {mechanism, repository and
+ID, workflow ref, event, run ID, attempt, run URL, tooling commit, `dispatched_by`,
+`approved_by`, environment rules, approval comment, the normalized request}.
+
+`verify-admission` **re-derives** the whole record from its recorded request, its
+authorization evidence and the candidate manifest, and refuses any difference. It also
+binds the record to the run that uses it (run ID, attempt, tooling commit): promotion
+accepts only the admission its own run made, and a release package only the admission
+of the run that promoted it.
+
+### A1.6 Integrity, replay and online/offline boundaries
+
+| Property | How | Offline? |
+| --- | --- | --- |
+| Artifact integrity | `SHA256SUMS`, manifest file maps, identities recomputed (D3–D8) | Yes |
+| Signing identity | Sigstore: `release.yml@refs/heads/main`, tooling digest, GitHub-hosted (D3) | Yes, with `--bundle` and a trusted root |
+| Admission sealed by its own run | `admission.sigstore.json`: certificate `runInvocationURI` = the admission's run/attempt 1, `buildTrigger` = `workflow_dispatch`, repository ID (`release.py check-attestation-run`) | Yes |
+| Admission content | Re-derived from evidence and the bundled candidate manifest; pinned authority; run binding | Yes, as a statement of the attested workflow |
+| Authenticated authority | GitHub's run record (dispatcher) and approval record (approver) for that run must match (`release.py check-run-record`) | **No**: needs GitHub's API; offline verification proves only that the attested `main` workflow recorded these accounts |
+| Risk acceptance | Exactly the candidate rows; rescan refuses any new, re-versioned or escalated row of any severity and any loss of coverage (D6 unchanged) | — |
+| Promotion, publication, deployment | Unchanged: draft only; publication and deployment are not granted | — |
+
+Replay: a re-run (`run_attempt > 1`) is refused before anything is decided (GitHub
+documents that a re-run uses the original actor's privileges); a record names its run
+and is accepted only by that run; the version is used once (D9); the manifest digest
+binds one candidate; no admission is ever an input to another run.
+
+### A1.7 Remaining threats (not accepted by the Leader)
+
+1. Compromise of the authority's GitHub account or session (dispatch and approval
+   are then both available to the attacker), of GitHub Actions, the OIDC issuer or
+   Sigstore (residual risk 1).
+2. GitHub's documentation does not state the actor of a `workflow_dispatch` created
+   by another workflow's `GITHUB_TOKEN`; A1 therefore does not rely on the dispatch
+   alone: the environment approval is an interactive act `GITHUB_TOKEN` cannot
+   perform. The authority should approve only a run whose `Admission request` summary
+   it asked for.
+3. A repository administrator can change the environment between runs; each run reads
+   the rules back and refuses a weakened environment, but a change made and reverted
+   outside a run is visible only in the audit log.
+4. Approval records and run records live as long as GitHub keeps the run; deleting the
+   run (write access) removes the online authority evidence, while the attested
+   `admission.json` remains. `verify-release.sh` reports that as a failure online.
+5. Writers can request approvals (spam) and cancel runs; both fail closed.
+
+### A1.8 Operator procedure (future candidates)
+
+1. Read the candidate draft's summary; note `release-candidate.json`'s SHA-256 (its
+   `SHA256SUMS` line, or the asset digest GitHub shows) and its number of findings.
+2. Actions → **Release** → *Run workflow* on `main`: `stage=promote`, `candidate`,
+   `candidate_manifest_sha256`, `version`, `accepted_findings`, optional `note`
+   (`accept_critical_or_high` only if you accept such findings). CLI:
+   `gh workflow run release.yml --ref main -f stage=promote -f candidate=<tag> -f candidate_manifest_sha256=<sha> -f version=<vX.Y.Z> -f accepted_findings=<n> -f note='<statement>'`.
+3. Read the `Admission request` job summary; if it is what you reviewed, approve the
+   pending `release-admission` deployment (run page → *Review deployments*, or
+   `gh api -X POST repos/chi-thanh-nguyen/codemastery/actions/runs/<run>/pending_deployments -F 'environment_ids[]=<id>' -f state=approved -f comment='<text>'`).
+4. Everything else is automatic; the result is the draft `v<x.y.z>`, verified with
+   `verify-release.sh` (D12, amended).
+
+### A1.9 Required configuration
+
+One environment, `release-admission`: required reviewer `chi-thanh-nguyen`, self-review
+allowed (the authority dispatches and approves), administrator bypass disabled,
+deployment branches limited to the custom policy `main`. No secret, ruleset, branch
+protection or CODEOWNERS change. If the environment is missing or weaker, promotion
+fails closed at its first step.
+
+### A1.10 Verification
+
+Recorded in [testing.md](../testing.md#release-admission-redesign-verification--23-november-2026).

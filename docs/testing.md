@@ -727,11 +727,13 @@ suite against the minimal server, `test-java-truststore.sh`,
 with `POSTGRES_FLAT_IMAGE`, image hardening), scans with Trivy, packages, runs a
 `deploy.sh` preflight/load/provision smoke with refusal cases on a release-named copy,
 checks admission refusals against the real candidate manifest, then promotes with a
-synthetic `REHEARSAL-` admission, rescans, verifies the release archive with
+synthetic `REHEARSAL-` admission (made by the same `admission-request`/`admission-decide`
+code as a real one, authenticating nobody), rescans, verifies the release archive with
 `deploy.sh` for both image stores and repeats the smoke on it. It attests, uploads and
-publishes nothing. `Release candidate` and `Release promotion` run only by manual
-dispatch from `main` with the permissions ADR015 lists; they store attested packages in
-draft releases and never publish. The smoke creates `/etc/codemastery` and a Compose
+publishes nothing. `Release candidate`, `Admission request` and `Release admission and
+promotion` run only by manual dispatch from `main` with the permissions ADR015 lists
+(the last one only after approval in the protected `release-admission` environment,
+ADR015 A1); they store attested packages in draft releases and never publish. The smoke creates `/etc/codemastery` and a Compose
 project named `codemastery` and therefore refuses to run anywhere but a fresh
 GitHub-hosted runner.
 
@@ -5960,3 +5962,29 @@ touches none of them gets no `Release tooling` run, so its required check stays 
 and it cannot satisfy the ruleset (seen on open PRs #263 and #266, both behind `main` and
 touching no release path). Resolving it is a ruleset or workflow decision outside this
 change.
+
+## Release admission redesign verification — 23 November 2026
+
+Scope: [ADR015 Amendment A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)
+(PR #269): authenticated dispatch, protected-environment approval, run-bound and
+attested `admission.json`, the operator verifier. Evidence from an earlier session
+(candidate build, archive and identity verification, Q00–Q05, Trivy recount, the
+original 20 admission mutations) is reused, not repeated, and is listed in
+[deployment.md](deployment.md#current-state-of-the-first-candidate).
+
+| Environment | Check | Result |
+| --- | --- | --- |
+| Local, macOS, Python 3.9.6 | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests` (new: `AdmissionAuthenticationTests`, `AdmissionDecisionTests`, `AttestationAndRunRecordTests`, rewritten `ReleaseChainTests`, `DraftVersionTests` against a stub `gh`) | 37/37 PASS |
+| Container `python:3.12-slim`, bash 5.2 | The same suite; `bash -n` of every release script | 37/37 PASS |
+| Same | Each negative case printed with its refusal message: 19 dispatch refusals (unauthorized actor; the Leader's login on another account ID; wrong repository, repository ID, workflow, branch, event; re-run by another writer and by the Leader; actor/sender/triggering-actor disagreement; bot sender; mismatched or missing run record; missing inputs), 16 environment/approval refusals (missing or other environment, no or other required reviewer, administrator bypass, branch policy not exactly `main`, no approval, approval elsewhere, other approver or account ID, rejection), 13 decision refusals (manifest digest, tag, finding count, CRITICAL/HIGH without acceptance, rehearsal or unverified or foreign candidate, missing coverage, non-authority dispatcher or approver, authority no longer code owner), 34 record tampering/replay refusals (every bound field; other candidate, manifest digest, run ID, attempt, tooling commit; real record used as rehearsal), 12 package-chain refusals (tampered admission or `release.json`, admission of another run, missing seal), 8 certificate and 6 run-record refusals | Each refused for its intended reason |
+| Same, bash 5.2 | `release.sh rehearsal-admission refusals` and `create` on the real candidate manifest of `candidate-1d0658a7215c-45091629955-1` marked as a rehearsal, with its real `findings.json` | 26 refusals verified (new: record of another run, origin, version, tag, `not_granted`, request digest/count/tag, installed version, severity) |
+| Local, real candidate metadata (read-only download of `release-candidate.json`, its bundle, `SHA256SUMS`, `findings.json`) | `admission-request`, `admission-approval`, `admission-preview`, `admission-decide` and `verify-admission` with a **synthetic** GitHub context (fixture, not an admission) on the real manifest; comparison with the earlier prepared record | Accepted; identities, digests, the 37 `{service, id, package}` rows, `not_granted`, revision, origin and version equal the prepared record; `check-rescan` covers the real `findings.json` and refuses an added LOW advisory |
+| Same | `check-attestation-run` on `gh attestation verify --format json` of the real candidate manifest (bundle) | Accepted for run 45091629955 attempt 1; refused for attempt 2 |
+| Container `rhysd/actionlint:1.7.8` (local image, no network) | `actionlint` (with shellcheck) on `release.yml` | No findings |
+
+Not run here: a real admission or promotion (they need this change on `main` and the
+Leader's dispatch and approval); the GitHub API behaviour of the environment and
+approval endpoints under the workflow token was checked against the live response
+shape (`can_admins_bypass`, `deployment_branch_policy`, protection rules) and the REST
+documentation, not in a dispatched run. The CI `Release rehearsal` of the pull request
+is the integration check of the rehearsal path.
