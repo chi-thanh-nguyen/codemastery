@@ -442,7 +442,8 @@ remain unchanged.
 ### 11.4 TLS, verification and network cleanup
 
 **Refinement of D11:** staging returns only after frontend restart, health, `nginx -t`
-and served-leaf readback. The same checks run after challenge failure. Mark replacement
+and served-leaf readback. The same checks run after challenge failure or an unknown
+initial stop outcome (a failed Docker CLI call may already have stopped ingress). Mark replacement
 before the first pair rename so an interruption between key/chain renames restores both;
 verify recovery and report recovery failure separately. SAN comparison is exact.
 

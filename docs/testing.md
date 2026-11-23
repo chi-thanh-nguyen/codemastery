@@ -6187,6 +6187,10 @@ future cut before publication, preserve manifest-bound full restore evidence whe
 additional destination is populated, and count upgraded ledger records as one point.
 The 45-test suite was rerun successfully with explicit future-cut refusal and
 PG-only → full independent → full Azure publication/deduplicated status assertions.
+The TLS regression also injects an unknown initial `docker stop` outcome: ingress
+restart/health/readback still execute, and the operation reports failure rather than
+leaving a possibly stopped frontend without recovery. It failed before the correction
+and all TLS regression cases passed afterwards.
 
 ### Readiness limits and release compatibility
 

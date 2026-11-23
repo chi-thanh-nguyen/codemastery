@@ -320,6 +320,14 @@ class TLSRenewalRegression(unittest.TestCase):
                 with self.assertRaises(recovery.RecoveryError):
                     ops.op_tls_renew(SimpleNamespace(staging=True, force=False))
                 self.assertEqual(health.call_count, 2)  # challenge failure still restores/verifies ingress
+                def stop_unknown(argv, **kw):
+                    if argv[1] == "stop":
+                        raise recovery.RecoveryError("stop outcome unknown")
+                    return SimpleNamespace(returncode=0)
+                ops.run.side_effect = stop_unknown
+                with self.assertRaises(recovery.RecoveryError):
+                    ops.op_tls_renew(SimpleNamespace(staging=True, force=False))
+                self.assertEqual(health.call_count, 3)  # even a failed stop may have stopped the ingress
 
 
 class VerificationRegression(unittest.TestCase):

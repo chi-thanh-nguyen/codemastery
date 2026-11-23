@@ -1062,7 +1062,6 @@ def op_tls_renew(args):
         live_chain, live_key = os.path.join(cfg["tls_dir"], "fullchain.pem"), os.path.join(cfg["tls_dir"], "privkey.pem")
         result = {"operation": "tls-renew", "staging": bool(args.staging)}
         log("stopping only the frontend to free TCP 443 for the TLS-ALPN-01 challenge")
-        run(["docker", "stop", "--time", str(cfg["stop_timeout"]), fe])
         replaced = False
         failure = None
 
@@ -1086,6 +1085,7 @@ def op_tls_renew(args):
             return served
 
         try:
+            run(["docker", "stop", "--time", str(cfg["stop_timeout"]), fe])
             r = subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
             if r.returncode != 0:
                 refuse("acme.sh renewal failed (exit %d)" % r.returncode)
