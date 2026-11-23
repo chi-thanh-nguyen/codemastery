@@ -432,7 +432,9 @@ codemastery/
 
     │   ├── ci-frontend.yml
 
-    │   └── ci-vm.yml
+    │   ├── ci-vm.yml
+
+    │   └── release.yml
 
     ├── ISSUE_TEMPLATE/
 
@@ -1964,6 +1966,18 @@ codemastery/
 
 │   │   └── test-minio-init.sh
 
+│   ├── release/
+
+│   │   ├── release.py
+
+│   │   ├── release.sh
+
+│   │   ├── verify-release.sh
+
+│   │   └── tests/
+
+│   │       └── test_release.py
+
 │   └── vm/
 
 │       ├── deploy.sh
@@ -2086,6 +2100,34 @@ codemastery/
 
 └── CONTRIBUTING.md
 ```
+
+## Bounded Phase 4 release pipeline additions — 23 November 2026
+
+On 2026-11-23 (Asia/Ho_Chi_Minh), Project Leader and repository Owner
+@chi-thanh-nguyen authorized, in the instruction “CodeMastery — Phase 4: Full Release
+Pipeline Implementation with Delegated Technical Decisions”, the bounded repository
+additions Phase 4 needs. [ADR015](decisions/015-release-pipeline.md) records the
+decisions. This record adds exactly these files and one reserved directory:
+
+| Path | Responsibility |
+| --- | --- |
+| `.github/workflows/release.yml` | Workflow `Release`: jobs `Release tooling`, `Release rehearsal` (pull requests), `Release candidate` and `Release promotion` (manual dispatch from `main`) |
+| `infrastructure/release/release.sh` | Stage orchestration: candidate build, exact-artifact qualification, Trivy scans, promotion, `deploy.sh` archive verification, the disposable-runner `deploy.sh` smoke, draft-release storage and read-back |
+| `infrastructure/release/release.py` | Standard-library tooling: archive identities, required-check evaluation, findings, migration inventory, manifests, admission verification, package and release-chain verification, summaries |
+| `infrastructure/release/verify-release.sh` | Operator verification of a downloaded release package (attestation, records, `deploy.sh` verifier) before transfer |
+| `infrastructure/release/tests/test_release.py` | Unit tests of `release.py` (stdlib `unittest`) |
+| `docs/decisions/015-release-pipeline.md` | ADR015 |
+| `docs/decisions/release-admissions/` | Reserved for Leader admission records (`<record_id>.json`); not created until the first record. The existing `/docs/decisions/` CODEOWNERS rule (@chi-thanh-nguyen) covers it |
+
+`infrastructure/vm/tests/test-postgres-image-layer-equivalence.sh` gains an optional
+`POSTGRES_FLAT_IMAGE` input; unset, it behaves as before. The existing
+`/.github/workflows/`, `/infrastructure/` and `/docs/decisions/` CODEOWNERS rules cover
+every addition and are unchanged. No existing job, check name, ruleset, application
+dependency, module or directory outside these paths changes. The tree below shows the
+workflow and `infrastructure/release/` entries; its `docs/decisions/` listing predates
+ADR006 and is not reconciled by this record. The immutable canonical tree remains
+unchanged; this is an explicit addition, not a reinterpretation of its original
+inventory.
 
 ## ADR014 hybrid-authentication file additions — 16 November 2026
 
@@ -2223,3 +2265,23 @@ integration test matches no rule, and adding one is outside this record. No prod
 dependency, directory or other test path is approved. `InteractionAdminIntegrationTest.java`
 keeps its §19.3 scope and is not created by this addition. The canonical tree above is
 unchanged; this is an explicit addition.
+
+### AD06 test placement — 23 November 2026
+
+`CT14-AD06-PLACEMENT-2026-11-23-r1` is **DELEGATED_APPROVED** under the Project Leader's
+explicit instruction of 23 November 2026, “CodeMastery — PR #263 Full AD06 Completion,
+Comprehensive Technical Audit, Remediation & Git Attribution”, which delegated the bounded
+AD06 test-placement decision ([ADR016 §4](decisions/016-ad06-mastery-history-persistence.md#4-d2--ct14-ad06-placement-2026-11-23-r1-test-placement)).
+ADR008 §5 lists no standalone Adaptive repository placement, and the two existing Adaptive
+integration suites cover the AD13 flow and atomicity, not isolated repository behaviour.
+Exactly these two test files are added inside existing directories:
+
+| File | Responsibility |
+| --- | --- |
+| `backend/src/test/java/com/codemastery/modules/adaptive/AdaptivePersistenceMapperTest.java` | Unit tests of `MasteryMapper` and `RecommendationMapper`: exact V005 state and type codes, field-for-field round trips, rejection of other spellings |
+| `backend/src/test/java/com/codemastery/integration/repository/AdaptivePersistenceIntegrationTest.java` | Real-PostgreSQL AD06.database-verification: mastery upsert branches and row identity, append-only history, exact SQL issued, V005 constraints, concurrent first write, caller-transaction participation and rollback, and execution under a transaction-scoped role holding exactly the CT17-P6 r8 rows; extends `AbstractIntegrationTest` |
+
+CODEOWNERS is unchanged: the existing Adaptive test rule (@thanhtran0311, @chi-thanh-nguyen)
+covers the unit test; like the other `integration/repository/` suites, the integration test
+matches no rule. No production file, dependency, directory or other test path is approved.
+The canonical tree above is unchanged; this is an explicit addition.

@@ -710,6 +710,33 @@ material. Raw reports are not uploaded. `E2E` is a required check of the `main-q
 (see above). A green run is infrastructure evidence, not CT19/CT35/CT20.F Final coverage
 acceptance.
 
+A fifth workflow, `Release` ([release.yml](../.github/workflows/release.yml)), is the
+Phase 4 release pipeline ([ADR015](decisions/015-release-pipeline.md),
+[operator view](deployment.md#phase-4-release-pipeline--23-november-2026)). It is not a
+required check and changes no job above. `Release tooling` runs `bash -n` on
+`infrastructure/release/*.sh` and the `release.py` unit tests
+(`python3 -m unittest discover -s infrastructure/release/tests -v`; standard library
+only). On pull requests that change release inputs (the workflow,
+`infrastructure/release/`, `infrastructure/vm/`, `infrastructure/minio/`,
+`infrastructure/postgres/`, the base Compose file, `backend/Dockerfile` or
+`frontend/Dockerfile`), `Release rehearsal` runs both stages with `contents: read`: it
+enables the containerd image store, builds the five linux/amd64 candidates, reloads
+them from their archive, runs the exact-candidate qualification (the MinIO initializer
+suite against the minimal server, `test-java-truststore.sh`,
+`test-runtime-real-backend-privileges.sh`, `test-postgres-image-layer-equivalence.sh`
+with `POSTGRES_FLAT_IMAGE`, image hardening), scans with Trivy, packages, runs a
+`deploy.sh` preflight/load/provision smoke with refusal cases on a release-named copy,
+checks admission refusals against the real candidate manifest, then promotes with a
+synthetic `REHEARSAL-` admission (made by the same `admission-request`/`admission-decide`
+code as a real one, authenticating nobody), rescans, verifies the release archive with
+`deploy.sh` for both image stores and repeats the smoke on it. It attests, uploads and
+publishes nothing. `Release candidate`, `Admission request` and `Release admission and
+promotion` run only by manual dispatch from `main` with the permissions ADR015 lists
+(the last one only after approval in the protected `release-admission` environment,
+ADR015 A1); they store attested packages in draft releases and never publish. The smoke creates `/etc/codemastery` and a Compose
+project named `codemastery` and therefore refuses to run anywhere but a fresh
+GitHub-hosted runner.
+
 The Backend and Frontend jobs end with an informational evidence step that writes
 to the run's job summary unless the run was cancelled, including after a failed
 step. Both record the checked-out commit (the tested merge commit on pull
@@ -5700,3 +5727,332 @@ unchanged.
 | `test-runtime-real-backend-privileges.sh` (run with a locally built image under a private tag) | `RUNTIME_CONSUMER_TESTS_PASS`; no `42501` in the backend log |
 
 Local developer runs, not independent review, QA or CI evidence. Nothing was granted on any real database.
+
+## Phase 4 release pipeline verification — 23 November 2026
+
+Verification of [ADR015](decisions/015-release-pipeline.md) on branch
+`feature/phase4-release-pipeline` ([PR #267](https://github.com/chi-thanh-nguyen/codemastery/pull/267)),
+starting `main` `257a9152e16c8ba4fae467242ccad964e1d899b4`. Results belong to the
+named commits; the final head's checks are reported on the pull request.
+
+### Executed and passed
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, macOS arm64, Python 3.9.6 | `python3 -m unittest discover -s infrastructure/release/tests` (archive identities and refusals, required checks with the merged-PR fallback, findings and rescan, migrations, admission records in real and rehearsal mode with a committed and an uncommitted record, package and release-chain verification through the real `release-manifest` command, CLI refusal exit code) | 21/21 PASS, with `ResourceWarning` as an error |
+| Local | actionlint 1.7.8 on `release.yml`; ShellCheck 0.11.0 (`-S warning`) on `release.sh`, `verify-release.sh` and the changed PostgreSQL test | Clean |
+| Local, Docker 29.8.1, containerd store | Five scratch images saved with `docker save --platform linux/amd64`, removed and reloaded: `release.py archive-identities` equals `docker image inspect .Id` for all five; `release.sh verify-archive` (sourcing `deploy.sh`) accepts the archive for both stores and rejects swapped identities | PASS |
+| Local | `release.sh scan` with the pinned Trivy 0.76.2 image: JSON in both modes, SPDX SBOMs and database metadata (vulnerability database updated 2026-11-22 12:38 UTC) | PASS |
+| Local | `release.sh promote` on a host that already holds `codemastery.invalid/*:release` images | Refused before tagging, as designed; the existing images were not changed |
+| Live GitHub API, read-only | `evaluate-checks` for `main` `257a915`: all ten required contexts successful (nine on the revision; `CodeQL` on merged PR #260's head `cd9d43d`, because GitHub reports that check only on pull requests). For the unchecked branch head it refuses (`Backend` in progress) | PASS |
+| CI run [45049370417](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45049370417), head `3decdc3` (merge `dbf93b1`) | `Release tooling` (18 tests at that head) and `Release rehearsal` on `ubuntu-24.04`, Docker Engine 28.0.4 with the containerd store, 12 minutes: five candidates built; `mc` Corresponding Source `a42400d4…` equal to the suite record and the image's `SOURCE`; reload from the archive with equal identities; Q01 MinIO initializer suite 28/28 against the exact minimal server; Q02 trust store 13/13; Q03 runtime consumers and V008→V009 upgrade; Q04 byte-clean PostgreSQL (3,888 entries); Q05 hardening; Trivy in both modes; `deploy.sh verify_archive` for both stores; smoke on the release-named copy (preflight, refused wrong SHA-256, swapped identities and a missing identity, real `load` and `provision`, three `guard_update()` refusals over the created state, stack removed); ten admission refusals against the real manifest; promotion with a `REHEARSAL-` record; rescan accepted; release package of 23 files verified; `verify_archive` and the smoke again on the release archive | PASS |
+
+| CI run [45050651836](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45050651836), head `fd90609` | The same rehearsal with the merged-PR check fallback and the CRITICAL/HIGH summary table; `Release tooling` 19 tests | PASS (14.5 minutes) |
+
+### Executed and failed, then fixed
+
+CI run [45048852193](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45048852193),
+head `3a4158e`: the build stage passed, Q01 failed at its third check because the
+suite captured Docker's on-demand pull progress for the `mc` test-client image. The
+CI job already pre-pulls those pins; `3decdc3` makes the release stage do the same.
+
+### Findings recorded, not accepted
+
+Trivy 0.76.2 with the 22 November database reports for the rehearsal images built
+from this branch (same Dockerfiles as `main`), in counts of distinct rows:
+
+| Image | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| postgres | 0 | 20 | 13 | 4 | 0 |
+| minio (minimal server) | 0 | 0 | 3 | 0 | 1 |
+| minio-init | 0 | 0 | 4 | 0 | 0 |
+| backend | 0 | 2 | 50 | 5 | 0 |
+| frontend (release target) | 4 | 6 | 10 | 4 | 0 |
+
+The earlier dated records reported zero CRITICAL/HIGH for these images; the new rows
+come from advisories published since. They are recorded and gate promotion: a real
+candidate built today could be promoted only if the Leader's admission accepted every
+row or the images were remediated and rebuilt. Remediation is DP01 security work
+outside this change; nothing was suppressed.
+
+### Not run
+
+- The dispatched `Release candidate` and `Release promotion` jobs: `workflow_dispatch`
+  needs the workflow on the default branch, and both jobs refuse any ref but `main`.
+  Attestation creation and verification for this repository, draft-release creation,
+  read-back and download, and the live required-check step are therefore unexecuted;
+  their logic is covered by the unit tests and the read-only API check above.
+- `verify-release.sh` end to end on a real package (none exists yet); its chain logic
+  is unit-tested.
+- `deploy.sh deploy`, public TLS, and anything on the Azure VM.
+
+### Focused review remediation — 23 November 2026
+
+A focused code and security review of PR #267 at `bc9db20`, by the same Claude Code
+session that wrote the pipeline (**not an independent review**; one review agent with a
+separate context was also used). Confirmed defects were fixed in the same pull request;
+[ADR015](decisions/015-release-pipeline.md#7-supersession-and-amendments) records the
+amended decisions.
+
+| ID | Severity | Defect at `bc9db20` | Fix |
+| --- | --- | --- | --- |
+| R1 | P2 | Promotion accepted any admission record tracked on `main`; `decided_by` was a typed login, so authenticity rested only on repository rules the pipeline did not check | `release.py admission-provenance`: the last commit changing the record must be the squash merge of a pull request into `main` that changed only the record, with the same blob at its head, merged by `decided_by`; recorded in `release.json` and required by `verify-release-chain` |
+| R2 | P2 | Rescan matched `{service, id, package}` only, and the admission could accept findings the candidate never reported: a severity raised after the candidate scan (MEDIUM → CRITICAL) or a newly matched installed version passed promotion | The accepted set must equal the candidate's findings; a rescan row must be an admitted candidate row at the same installed version and no higher severity |
+| R3 | P3 | `verify-release.sh --source` ran the source revision's `release.sh`, absent from revisions older than `infrastructure/release/` | Runs its own `release.sh` with the source revision's `deploy.sh` |
+| R4 | P3 | Attestation policy used the `--signer-workflow` pattern | Exact `--cert-identity …/release.yml@refs/heads/main` plus `--source-digest` of the recorded tooling commit |
+| R5 | P3 | The merged-PR `CodeQL` fallback did not check that the head held the revision's content | Requires equal tree SHAs |
+| R6 | P3 | Checkouts persisted the job token in `.git/config` | `persist-credentials: false`; `pull-requests: read` granted explicitly where pull requests are read |
+| R7 | P3 | Promotion used the admission's tag, revision and version before validating them | Validated first |
+| R8 | P3 | No record of what the scanner analysed (an undetected operating system yields fewer findings silently) | Per-image scan coverage in the manifests and the job summary |
+| R9 | P2 | The newest check run per context decided, so a later success created by any workflow with `checks: write` (same app identity) could override a failed required check; ADR015 D2 said a failure is never overridden | All runs are read (`filter=all`); any completed run of a required context that did not succeed refuses the revision |
+| R10 | P3 | `verify-release.sh --repository` moved the trust anchor (certificate identity and repository check together) | Removed; the repository is fixed |
+| R11 | P3 | `verify-release.sh` could not tell which release the operator meant: a validly attested other release passed | Required `--version`; online, the admission record must still be on `main` with the same blob |
+| R12 | P3 | Draft tag and release probes treated an API error as "absent" | Both fail closed |
+
+R9–R12 came from the separate-context review agent and were reproduced or checked
+before fixing. Its proposal to sign in a separate job was not adopted (that job would
+sign the digests the building job reports); this and its other P3 notes (concurrency
+cancellation by a pull request's own workflow, partial drafts after cancellation,
+re-runs of old runs, publication by writers) are recorded as ADR015 residual risks.
+
+Rejected hypotheses: main has no merge commits (linear history), so "ancestor of
+`main`" equals first-parent membership; `gh` 2.102.0 anchors `--signer-workflow`
+(`…/workflows/deploy` does not match `deployment.yml`); draft asset download through
+`gh api` with `Accept: application/octet-stream` returns the exact bytes (checked on a
+public `cli/cli` asset).
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, Python 3.9.6 | Unit tests (new: admission provenance with 12 refusals, rescan bound to admitted rows and severity, exact acceptance set, scan coverage, release chain without merge evidence, tree-bound fallback through the CLI) | 28/28 PASS; the new R1, R2, R9 and coverage tests fail against `bc9db20`'s `release.py` |
+| Local | actionlint 1.7.8; ShellCheck 0.11.0 on `release.sh` and `verify-release.sh` | Clean |
+| Local, bash 5.2 container | `rehearsal-admission refusals` on a synthetic candidate | 12 refusals, including the new acceptance and severity cases |
+| Live GitHub API, read-only | `evaluate-checks` for `257a915` with `filter=all` and tree binding (every run on the revision and on PR #260's head succeeded; head tree equals the revision's) | 10/10 PASS |
+| Local | `verify-release.sh` on a synthetic package: wrong `--version` refused; unknown `--repository` refused; chain verified, then refused at the attestation gate (no attestation) | PASS |
+| Live GitHub API, read-only | `admission-provenance` on merged single-file PR #252 (`DESIGN.md`, merge `a7883e3`): accepted with the real merger; refused for another `decided_by` and for the parent blob | PASS |
+| `gh` 2.102.0, public `cli/cli` attestation | `--cert-identity` with `--source-ref`, `--source-digest` and `--deny-self-hosted-runners`, online and offline (`--bundle`, `--custom-trusted-root`); wrong ref or digest refused | PASS |
+
+CI run [45058829044](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45058829044)
+on the first remediation commit `4733f10` (R1–R8): `Release tooling` (27 tests) and
+`Release rehearsal` PASS in 15 minutes, including the 12 admission refusals (new:
+acceptance of an unreported finding, severity raised after the candidate scan), the
+candidate's own findings covered by its admission, and the recorded scan coverage
+(postgres alpine 3.24.3, minio none detected, minio-init wolfi, backend ubuntu 24.04,
+frontend alpine 3.24.2), equal between candidate scan and rescan. The rehearsal and
+required checks for the final remediation head are reported on the pull request. The dispatched stages remain unexecuted for the reasons above.
+
+### Independent review remediation — 23 November 2026
+
+A separate-session review of PR #267 at `18d6ec0` (verdict: technically sound with three
+P3 notes, no P0–P2) was followed, at the Leader's request, by these fixes:
+
+| ID | Severity | Defect at `18d6ec0` | Fix |
+| --- | --- | --- | --- |
+| F1 | P3 | A queued or running run of a required context was overridden by a newer completed success, which any workflow with `checks: write` can create (R9 covered completed failures only) | Every run of a required context must be completed and successful; an unfinished run refuses the revision |
+| F2 | P3 | An uncovered promotion-time finding was refused with "a new admission is required", but an admission can accept only its candidate's findings | The refusal, `check_rescan` and ADR015 D6 name the actual remedy: a new candidate, then a new admission; the fail-closed exact-set policy is unchanged |
+| F3 | P3 | The rescan's scan coverage was recorded but not compared with the candidate scan's | `check-rescan --rescan-coverage` (required) refuses a lost or different OS, a newly reported end of support, or a missing candidate target; targets are recorded by content (`os-pkgs/<type>`, `<class>/<type>:<path in image>`), independent of the scanned archive's name |
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, Python 3.9.6 | Unit tests (new: unfinished runs beside a newer success, on the revision and the merged pull request's head; coverage equal under different archive names and paths, more coverage accepted; lost, changed or end-of-support OS, missing or moved target, missing or malformed coverage refused; `check-rescan` CLI names the new-candidate remedy and requires the coverage argument) | 32/32 PASS; the new tests fail against `18d6ec0`'s `release.py` (9 failures, 8 errors) |
+| Local, bash 5.2 container | `rehearsal-admission refusals` on a synthetic candidate | 14 refusals, including the two new coverage-loss cases |
+
+The pull request's `Release rehearsal` compares the real candidate scan's coverage with
+the real rescan's. The dispatched stages remain unexecuted.
+
+## AD06 mastery and history write persistence verification — 23 November 2026
+
+AD06 ([#42](https://github.com/chi-thanh-nguyen/codemastery/issues/42),
+[PR #263](https://github.com/chi-thanh-nguyen/codemastery/pull/263)) implements the Adaptive
+mastery and recommendation-history write adapters. It adds no operation, service, REST endpoint
+or schema change. Mechanism: [`AD06-PERSISTENCE-2026-11-23-r1`](decisions/016-ad06-mastery-history-persistence.md#3-d1--ad06-persistence-2026-11-23-r1-write-mechanism).
+Placement: `CT14-AD06-PLACEMENT-2026-11-23-r1`
+([repository structure](repository-structure.md#ad06-test-placement--23-november-2026)).
+Runtime privileges: `CT17-P6-PRIVILEGES-2026-11-23-r8`
+([deployment](deployment.md#ct17-p6-privileges-2026-11-23-r8--ad06-mastery-and-history-writes-within-the-adr012-192-ceiling-23-november-2026)).
+
+The first PR revision used Spring Data `save()` with an assigned UUID, which takes the JPA merge
+path. The new integration suite was first run against that revision, unchanged: 14 of its 20
+tests failed (11 failures, 3 errors). Appending an existing identifier silently rewrote the
+committed history row. Both writes stayed pending until the commit flush, so same-transaction
+JDBC reads did not see them and they ran after the caller's later writes. `storeState` ran outside
+any transaction. Each write issued an extra `SELECT`. The adapters now issue one upsert and one
+plain `INSERT` at the call, inside a mandatory caller transaction (ADR016 §3).
+
+| Obligation | Covered by |
+| --- | --- |
+| Exact four state and three type codes; field-for-field round trips; other spellings rejected, never defaulted; nulls left to V005 | `AdaptivePersistenceMapperTest` (26 cases) |
+| First write inserts one row for the assessed skill only; no default row for unassessed skills or learners | `firstWriteInsertsOneCategoricalRowForTheAssessedSkillOnly`, `eachLearnerAndSkillPairIsIndependent` |
+| Later writes change only `state`; identifier, learner and skill preserved; one row per pair; explicit Unknown stored | `laterWritesUpdateOnlyTheStateAndKeepTheRowIdentity`, `everyCategoricalStateIsStoredByItsExactV005Code` |
+| One statement per write, no read, no full-row update; history never uses `ON CONFLICT` | `masteryWriteIssuesOneUpsertAndNoReadOrFullRowUpdateOnEitherBranch`, `historyWriteIssuesExactlyOneInsertAndNoReadUpdateOrDelete` (Hibernate statement inspector) |
+| Every supplied history field stored unchanged, including the microsecond instant; identical drafts with distinct identifiers stay separate rows | `appendInsertsEveryCallerSuppliedFieldUnchanged`, `identicalRecommendationsWithDistinctIdsStaySeparateHistoryRows` |
+| A reused history identifier fails with 23505 and never rewrites the committed row | `appendingAnExistingIdFailsAndNeverRewritesTheCommittedRow`, `appendingTheSameIdTwiceInOneTransactionFailsAtTheSecondCall` |
+| V005 foreign keys, checks, key and NOT NULL stay authoritative | `masteryForeignKeysAndTheV005StateCheckAreEnforcedByPostgreSql`, `historyForeignKeysNotNullAndTextChecksAreEnforcedByPostgreSql` |
+| Nulls and sub-microsecond instants rejected before any SQL | `nullMasteryArgumentsAreRejectedBeforeAnySql`, `invalidRecommendationsAreRejectedBeforeAnySql` |
+| Concurrent first writes of one pair converge on one row without 23505 | `concurrentFirstWritesOfOnePairConvergeOnOneRowWithoutAUniqueViolation` (barrier on `pg_stat_activity` lock waits) |
+| Writes join the caller's transaction, are invisible to committed readers until it commits, and roll back with it; outside a transaction they are refused | `writesJoinTheCallerTransactionAndRollBackWithIt`, `writesOutsideACallerTransactionAreRefusedAndLeaveNoRow` |
+| Adapter SQL needs exactly the r8 rows; identity rewrites, reads, deletes, truncation and history mutation are denied; a merge-style rewrite needs a forbidden UPDATE | `adapterSqlRunsUnderExactlyTheR8RuntimePrivileges`, `r8PrivilegesDenyIdentityRewritesDeletesReadsAndHistoryMutations`, `r8PrivilegesRejectTheFullRowUpdateThatAMergeBasedAppendWouldIssue` |
+
+The privilege tests create a `NOLOGIN` role inside the test transaction. The role holds exactly
+INSERT, SELECT (user_id, skill_id, state) and UPDATE (state) on `learner_skill_masteries` and INSERT
+on `path_recommendations`, and the tests run `SET LOCAL ROLE`. The rollback removes the role. The
+provisioned runtime role itself is exercised by `test-postgres-privilege-matrix-containment.sh`.
+
+Executed locally on 23 November 2026, macOS host with Docker Desktop 29.8.1, project PostgreSQL
+image (PostgreSQL 17.11), Hibernate 7.4.5:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -B -o -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AdaptivePersistenceIntegrationTest verify` with the original adapters | 20 run, 11 failures and 3 errors, as described above |
+| `cd backend && ./mvnw -B -o -Dtest=AdaptivePersistenceMapperTest -Dit.test=AdaptivePersistenceIntegrationTest verify` | 26 unit and 20 PostgreSQL tests, 0 failures or errors |
+| `cd backend && ./mvnw -B -o verify` | BUILD SUCCESS; Surefire 966 and Failsafe 408 tests, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations; r1 history plus r2–r8 (r8: 2 rows) |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` (local Docker) | the exact AD06 upsert and append succeed as the provisioned runtime role; a reused history identifier fails with 23505; mastery re-key, identifier read and delete and history read, rewrite, erase and TRUNCATE fail with 42501; `verify_role_separation` passes with the four new probes; containment and upgrade suites pass |
+| Privilege requirement of the upsert, measured on the project PostgreSQL image | INSERT and UPDATE (state) alone, or with SELECT (user_id, skill_id), fail with 42501; adding SELECT (state) succeeds on both branches; INSERT alone suffices for the append |
+| `docker build -t codemastery-backend:privilege-test backend` then `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` (local Docker) | `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS` with the r8 matrix provisioned; 0 backend log entries mentioning `permission denied`/42501 |
+| `test-deploy-syntax-and-authorization-gates.sh`, `test-deploy-offline-compose-guards.sh` | exit 0 |
+
+`test-runtime-real-backend-privileges.sh` has no AD06 case: no HTTP operation reaches these
+adapters yet. AD13 must add the quiz-submission case when it wires them.
+
+These are author-side developer runs, not independent QA or CI evidence; CI runs on the PR. Not
+claimed: calculator, routing, event-flow or end-to-end mastery/progress atomicity (AD13 and
+QA03/QA04), read capabilities (AD16), or provisioning of r8 on any real database.
+## DP01 release image security remediation verification — 23 November 2026
+
+Verification of [DP01 release image security remediation](deployment.md#dp01-release-image-security-remediation--23-november-2026)
+on branch `fix/release-image-security-remediation`, starting `main`
+`cc86c0803aa1ad9428f8511c6ba0f6669829814d`. Local results belong to the working tree
+recorded in the pull request; the checks of its final head, including `Release tooling`
+and `Release rehearsal`, are reported on the pull request.
+
+### Executed and passed
+
+| Where | Check | Result |
+| --- | --- | --- |
+| Local, macOS arm64, Docker 29.8.1 (containerd store), builds forced to linux/amd64 | Five images built from the branch: postgres `sha256:6edc3700…`, minio `sha256:cb39f9a7…`, minio-init `sha256:d9d08204…`, backend `sha256:324206a1…`, frontend release target (`PUBLIC_ORIGIN=https://codemastery.app`) `sha256:0441fe61…`; local HTTP frontend target `sha256:79293994…` | PASS |
+| Local, inside the images | Installed versions: frontend `nginx` and all four modules 1.30.7-r1 (`njs` 1.30.7.1.0.2-r1), built with OpenSSL 3.5.9, `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4, `libcrypto3`/`libssl3` 3.5.9-r1; HTTP target `nginx` 1.30.7-r1; postgres `krb5-libs` 1.22.3-r0, `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4, `libcrypto3`/`libssl3` 3.5.9-r1, `zlib` 1.4-r0, PostgreSQL 17.11, `gosu` → `/sbin/su-exec`, one layer; backend `apt`/`libapt-pkg6.0t64` 2.8.4ubuntu0.1, Java 25.0.5, user `codemastery` (UID 999) | As targeted; no other base substitution |
+| Local | The changed `test-ingress-release-image-build.sh` in-image assertions on both frontend targets: UID 101, `nginx/1.30.7`, every `nginx*` package on 1.30.7-r1, no `*.apk-new` left, root-owned non-writable `/etc/nginx`, writable cache; the stale-module check also run on a crafted package list holding `nginx-module-xslt-1.30.6-r1` | PASS; the crafted stale module is reported |
+| Local | `test-postgres-foreign-volume-guard.sh` (linux/amd64) | PASS: Bookworm volume refused with exit 78 and unchanged; client tools still run; fresh volume initialized, marked, restarted with its data |
+| Local | `test-postgres-image-layer-equivalence.sh` with `POSTGRES_FLAT_IMAGE` set to the exact amd64 image, and in its default (fresh build) mode | PASS in both: configuration equal except `GOSU_VERSION`/`DOCKER_PG_LLVM_DEPS`; merged filesystem equal (3,890 entries); one layer, no whiteout, no upstream `gosu` bytes |
+| Local | `test-java-truststore.sh` on the exact backend | 13/13 PASS (`TRUSTSTORE_REGRESSIONS_PASS`); the re-pinned published Temurin base still contains the prohibited G1 root and is refused; the final image holds 117 verified entries |
+| Local | Trivy 0.76.2 (the pipeline's digest-pinned image), `--scanners vuln`, default and comprehensive, nothing ignored, vulnerability database updated 2026-11-22T19:00:46Z (the candidate's database) | CRITICAL 4 → 0, HIGH 28 → 0, MEDIUM 80 → 31, LOW 13 → 5, UNKNOWN 1 → 1; none of the 32 original CRITICAL/HIGH rows remains; no new row; scan coverage unchanged for all five images ([details](deployment.md#results)) |
+| Local, Python 3.9.6 and Python 3.12.16 (bash 5.2 container) | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests`, including the new admission mutations (finding moved to another service, modified advisory, modified package) | 32/32 PASS on both |
+| Local, bash 5.2 container | The repository's `release.py` (`findings`, `migrations`, `candidate-manifest`, `verify-package`) and `release.sh rehearsal-admission refusals`/`create` on a synthetic rehearsal candidate whose findings and coverage are the real remediated Trivy reports (identities and archive synthetic): five services in the manifest; postgres and frontend with zero findings | PASS: package verified (21 files); 16 refusals including the two new ones; the synthetic admission accepts exactly the 37 remaining rows and `check-rescan` covers them; lost scan coverage of the zero-finding frontend and a new LOW advisory on the zero-finding postgres image are both refused |
+| Local | `bash -n` on every `infrastructure/vm/tests`, `infrastructure/release`, `infrastructure/minio` script and `deploy.sh`; ShellCheck 0.11.0 (`-S warning`) on `release.sh`, `verify-release.sh`, the changed ingress test, the PostgreSQL equivalence and trust-store suites; `docker build --check` on the three changed Dockerfiles | Clean; no BuildKit lint warning (as on `main`) |
+| Live GitHub API, read-only | `main-quality-gates` now requires 11 contexts (ADR015's ten plus `Release tooling`), strict up-to-date branches, squash only. `release.py evaluate-checks` for `main` `cc86c08`, as the candidate job calls it | PASS: all 11 successful (`CodeQL` on merged PR #267's head `53953fd`, equal tree) |
+
+### Not run locally
+
+- `test-ingress-stub-backend.sh`, `test-ingress-real-backend.sh`,
+  `test-ingress-release-ca-store.sh`, `test-ingress-dp01-preflight.sh` (needs root on the
+  host), `test-runtime-real-backend-privileges.sh`, the containerd round-trip suite and
+  `test-minio-init.sh`: they run in the pull request's required `CI VM` jobs on
+  linux/amd64 runners, and Q01–Q05 and the `deploy.sh` smoke run on the exact rehearsal
+  candidates in `Release rehearsal`.
+- `actionlint`: no workflow file changed.
+- The dispatched `Release candidate` job: it accepts only a `main` revision. Candidate
+  run 45073820127 already exercised dispatch, attestation and draft storage on `main`,
+  and no workflow, attestation or draft logic changed, so no new candidate was dispatched.
+
+### Observation for the Leader
+
+`Release tooling` is a required context, but `release.yml` runs on pull requests only when
+release inputs change (ADR015 D13 described it as not required). A pull request that
+touches none of them gets no `Release tooling` run, so its required check stays expected
+and it cannot satisfy the ruleset (seen on open PRs #263 and #266, both behind `main` and
+touching no release path). Resolving it is a ruleset or workflow decision outside this
+change.
+
+## Release admission redesign verification — 23 November 2026
+
+Scope: [ADR015 Amendment A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)
+(PR #269): authenticated dispatch, protected-environment approval, run-bound and
+attested `admission.json`, the operator verifier. Evidence from an earlier session
+(candidate build, archive and identity verification, Q00–Q05, Trivy recount, the
+original 20 admission mutations) is reused, not repeated, and is listed in
+[deployment.md](deployment.md#current-state-of-the-first-candidate).
+
+| Environment | Check | Result |
+| --- | --- | --- |
+| Local, macOS, Python 3.9.6 | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests` (new: `AdmissionAuthenticationTests`, `AdmissionDecisionTests`, `AttestationAndRunRecordTests`, rewritten `ReleaseChainTests`, `DraftVersionTests` against a stub `gh`) | 37/37 PASS |
+| Container `python:3.12-slim`, bash 5.2 | The same suite; `bash -n` of every release script | 37/37 PASS |
+| Same | Each negative case printed with its refusal message: 19 dispatch refusals (unauthorized actor; the Leader's login on another account ID; wrong repository, repository ID, workflow, branch, event; re-run by another writer and by the Leader; actor/sender/triggering-actor disagreement; bot sender; mismatched or missing run record; missing inputs), 16 environment/approval refusals (missing or other environment, no or other required reviewer, administrator bypass, branch policy not exactly `main`, no approval, approval elsewhere, other approver or account ID, rejection), 13 decision refusals (manifest digest, tag, finding count, CRITICAL/HIGH without acceptance, rehearsal or unverified or foreign candidate, missing coverage, non-authority dispatcher or approver, authority no longer code owner), 34 record tampering/replay refusals (every bound field; other candidate, manifest digest, run ID, attempt, tooling commit; real record used as rehearsal), 12 package-chain refusals (tampered admission or `release.json`, admission of another run, missing seal), 8 certificate and 6 run-record refusals | Each refused for its intended reason |
+| Same, bash 5.2 | `release.sh rehearsal-admission refusals` and `create` on the real candidate manifest of `candidate-1d0658a7215c-45091629955-1` marked as a rehearsal, with its real `findings.json` | 26 refusals verified (new: record of another run, origin, version, tag, `not_granted`, request digest/count/tag, installed version, severity) |
+| Local, real candidate metadata (read-only download of `release-candidate.json`, its bundle, `SHA256SUMS`, `findings.json`) | `admission-request`, `admission-approval`, `admission-preview`, `admission-decide` and `verify-admission` with a **synthetic** GitHub context (fixture, not an admission) on the real manifest; comparison with the earlier prepared record | Accepted; identities, digests, the 37 `{service, id, package}` rows, `not_granted`, revision, origin and version equal the prepared record; `check-rescan` covers the real `findings.json` and refuses an added LOW advisory |
+| Same | `check-attestation-run` on `gh attestation verify --format json` of the real candidate manifest (bundle) | Accepted for run 45091629955 attempt 1; refused for attempt 2 |
+| Container `rhysd/actionlint:1.7.8` (local image, no network) | `actionlint` (with shellcheck) on `release.yml` | No findings |
+
+Not run here: a real admission or promotion (they need this change on `main` and the
+Leader's dispatch and approval); the GitHub API behaviour of the environment and
+approval endpoints under the workflow token was checked against the live response
+shape (`can_admins_bypass`, `deployment_branch_policy`, protection rules) and the REST
+documentation, not in a dispatched run. The CI `Release rehearsal` of the pull request
+is the integration check of the rehearsal path.
+
+### Independent review remediation (F-01 to F-03) — 23 November 2026
+
+An independent review of PR #269 at `b43ab1c` returned two P2 findings and one P3
+finding. Fixed in the same pull request:
+
+| Finding | Defect | Fix | Regression tests |
+| --- | --- | --- | --- |
+| F-01 (P2) | The operator procedure ran `verify-release.sh` from the source revision's checkout; for the first A1 release that is `1d0658a7…`, whose pull-request admission verifier refuses every A1 package | [deployment.md](deployment.md#using-a-release-package-with-deploysh) and ADR015 A1.8: the operator's own `gh` first verifies that `release.json` is attested by `release.yml` on `main` at its `tooling.sha`; the verifier then runs from a clean checkout of `tooling.sha`, with `--source` a separate checkout of `source_revision`. `verify-release.sh` refuses any other tooling commit, a modified or non-git tooling checkout, before running anything else | `VerifyReleaseProcedureTests` (5): a synthetic repository whose source commit carries a historical verifier that refuses A1 packages and whose later tooling commit carries this verifier and a changed `deploy.sh`; the documented script block, extracted from `deployment.md` and run against a stub `gh`, verifies the package from the tooling commit and runs the source commit's `deploy.sh` only; refused: a later main commit as tooling, an untracked file or modified script in the tooling checkout, a copy outside git, the tooling checkout or a later commit as `--source`, a modified source checkout, a tampered `admission.json`, an approval record by another account |
+| F-02 (P2) | The Environment approval comment went through the one-line, 1,000-character validator of the dispatch `note`; a multi-line approval made promotion refuse after approval | `approval_comment()`: GitHub's comment is free text kept verbatim (any lines, Unicode, empty; null or absent recorded as empty); refused only as malformed API data when it is not a string or exceeds 262,144 characters; stored JSON-escaped and never printed; `verify-admission` requires the recorded comment in that form. The `note` keeps its one-line rule; reviewer identity, review state and environment checks are unchanged | `ApprovalCommentTests` (5): single-line, multi-line, CRLF/tab, empty, null, absent, Unicode (including bidirectional controls), an 88,890-character comment and Markdown/shell/workflow-command text accepted verbatim; non-string and over-bound values refused; unauthorized reviewer, the Leader's login on another account, rejected deployment, approval plus rejection, another environment and no approval still refused with a multi-line comment; multi-line approval through decision, JSON round trip, offline and online verification; the CLI chain never echoes the comment |
+| F-03 (P3) | The `Admission request` summary said the package files and source qualification were verified by that job, which downloads only the manifest and its bundle | The summary separates what the job verified (manifest attestation, digest equal to the request, tag, count, CRITICAL/HIGH choice, unused version), what it shows from the attested candidate evidence without re-checking, and what the protected promotion job verifies after approval | `AdmissionPreviewTests` |
+
+Duplicate approval rows and matching approval rows by environment name rather than ID
+were reviewed and left unchanged: the promotion job re-authenticates the dispatch and
+refuses any attempt other than 1, whose single environment job yields one approval
+row, and the environment is read by the same name in the same repository.
+
+| Environment | Check | Result |
+| --- | --- | --- |
+| Local, macOS, Python 3.9.6, bash 3.2.57 | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests` | 48/48 PASS (37 earlier + 11 new) |
+| Container `python:3.12-bookworm` (Python 3.12.16, bash 5.2.15, git 2.39.5, no network) | `bash -n` of every release script; the same suite | Syntax clean; 48/48 PASS |
+| Container `koalaman/shellcheck:v0.11.0` | `-S warning` on `release.sh` and `verify-release.sh`; default severity on `verify-release.sh` and on the documented script block | Clean |
+| Local | Each fix reverted in turn against the new tests: `b43ab1c`'s `release.py` and `verify-release.sh` (13 failures), `b43ab1c`'s `verify-release.sh` alone (3 failures: tooling revision not enforced), the recorded-comment check removed (3 failures) | The tests detect each regression |
+
+Not repeated: the candidate build, archive verification, Q00–Q05, Trivy rescans and
+the 410 MB package checks (unchanged code paths). `release.yml` is unchanged.
+
+### Bootstrap trust-boundary remediation (R-01 and R-02) — 23 November 2026
+
+The delta-focused independent review of PR #269 at `dee517c` found that the
+documented bootstrap could run an existing verifier after a failed clone (R-01,
+P2), and that its standalone SHA condition did not stop Bash 3.2 on failure
+(R-02, P3). The operator procedure now explicitly exits on attestation, clone or
+checkout failure. Occupied destinations are not removed or reused. Both SHAs
+are validated as exactly 40 lowercase hexadecimal characters in their original
+JSON string form before command substitution can discard trailing newlines;
+JSON parsing/type failures and the subsequent Bash SHA condition explicitly exit.
+Offline operators clone from a local repository holding both commits into fresh
+destinations; the attestation policy and exact tooling/source revisions are unchanged.
+
+`VerifyReleaseProcedureTests` extracts the actual Bash block from
+`deployment.md`, preserving its embedded Python indentation and replacing only
+the operator's package, version, store and repository inputs. Real local Git
+operations use a synthetic repository; wrappers log calls, inject selected
+failures and mark verifier invocation. Harmless marker scripts detect execution
+of pre-existing, unattested tooling.
+
+| Regression | Evidence |
+| --- | --- |
+| Occupied destinations | Non-Git tooling with an executable marker, clean Git tooling at another commit with a marker verifier, and an existing source checkout are refused. No verifier marker is created; existing contents and source/tooling HEADs are preserved |
+| Git failures | Tooling clone, tooling checkout, source clone after tooling preparation, and source checkout each refuse with a diagnostic. The Git call count stops at the failed operation; no verifier or application code runs |
+| Invalid manifest inputs | 43 subcases cover both SHAs: empty, truncated, too long, invalid hex, uppercase, embedded newline, leading/trailing whitespace, trailing newline/CRLF, shell-looking text, null, number, boolean, array and object; plus missing fields, invalid structures and malformed JSON. Every case exits nonzero before any `gh` or Git call or verifier invocation |
+| Attestation refusal | Exits before any Git call or repository-code execution |
+| Positive separation | Fresh destinations check out exact tooling and historical source commits and run the A1 verifier with the separate `--source`; package/repository paths containing spaces also pass |
+
+| Environment | Validation | Result |
+| --- | --- | --- |
+| macOS, Python 3.9.6, Bash 3.2.57 | Full release-tooling suite with `-W error::ResourceWarning` | 59/59 PASS, including all 16 procedure tests and the existing F-01/F-02/F-03 regressions |
+| Cached `python:3.12-bookworm`, Python 3.12.16, Bash 5.2.15, network disabled, read-only source mount | Same full suite | 59/59 PASS |
+| Bash 3.2 and Bash 5.2 | `bash -n` of `release.sh`, `verify-release.sh` and the actual documented bootstrap with concrete operator inputs | PASS |
+| Cached `koalaman/shellcheck:v0.11.0`, network disabled, read-only mounts | `-S warning` on the same three shell inputs | No findings |
+
+OpenAI Codex implemented this focused remediation and ran the checks above.
+The GitHub and Sigstore responses in these tests are synthetic: they establish
+bootstrap control flow, not real signature verification or a real admission.
+No workflow, release verifier implementation, admission policy, environment,
+candidate artifact or VM was changed. Candidate builds, Q00–Q05, Trivy scans,
+the 410 MB candidate verification and real admission/promotion were not run.

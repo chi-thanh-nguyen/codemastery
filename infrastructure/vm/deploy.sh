@@ -1341,7 +1341,8 @@ SQL
 # CT17-P6-PRIVILEGES-2026-11-17-r4 CO08 progress/resume rows and the
 # CT17-P6-PRIVILEGES-2026-11-22-r5 AD07 skill-graph rows and the
 # CT17-P6-PRIVILEGES-2026-11-22-r6 AS05 question-bank rows and the
-# CT17-P6-PRIVILEGES-2026-11-22-r7 AS06 quiz-composition rows (all within the ADR012 §19.2 ceiling):
+# CT17-P6-PRIVILEGES-2026-11-22-r7 AS06 quiz-composition rows and the
+# CT17-P6-PRIVILEGES-2026-11-23-r8 AD06 mastery/history-write rows (all within the ADR012 §19.2 ceiling):
 # the complete runtime privilege matrix for the reviewed V001-V009 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
 # cannot silently widen a table-level grant. Nothing is granted to future objects.
@@ -1366,8 +1367,8 @@ attempts                 -              SELECT(id,quiz_id)                      
 attempt_answers          -              SELECT(id,question_id)                   id,attempt_id,question_id,position,selected_options,is_correct
 assignments              -              -                                        id,course_id,lesson_id,title,instructions,deadline_at,publication_status
 submissions              -              -                                        id,assignment_id,user_id,object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at
-learner_skill_masteries  -              -                                        id,user_id,skill_id,state
-path_recommendations     -              -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
+learner_skill_masteries  INSERT         SELECT(user_id,skill_id,state)+UPDATE(state) id,user_id,skill_id,state
+path_recommendations     INSERT         -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
 discussion_posts         -              -                                        id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden
 notifications            -              -                                        id,user_id,message,is_read,created_at
 content_reports          -              -                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at
@@ -1584,10 +1585,10 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
     || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
   if [[ -n "${violations}" ]]; then
     printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
-    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank and r7 quiz-composition rows); reconcile explicitly. Ingress remains closed."
+    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition and r8 mastery/history-write rows); reconcile explicitly. Ingress remains closed."
   fi
   if [[ "${mode}" == "complete" ]]; then
-    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank and r7 quiz-composition rows) verified (every public relation reviewed)"
+    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition and r8 mastery/history-write rows) verified (every public relation reviewed)"
   fi
   log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
 }
@@ -1634,6 +1635,10 @@ SQL
   expect_denied  "runtime role moving a quiz to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.quizzes SET course_id = course_id WHERE false;'
   expect_denied  "runtime role rewriting quiz membership in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.quiz_questions SET position = position WHERE false;'
   expect_denied  "runtime role reading attempt owners, timing or scores" 42501 "${app}" "${app_pw}" <<<'SELECT user_id, started_at, score_percentage FROM public.attempts WHERE false;'
+  expect_denied  "runtime role re-keying or re-targeting mastery rows" 42501 "${app}" "${app_pw}" <<<'UPDATE public.learner_skill_masteries SET id = id, user_id = user_id, skill_id = skill_id WHERE false;'
+  expect_denied  "runtime role deleting mastery rows" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.learner_skill_masteries WHERE false;'
+  expect_denied  "runtime role rewriting recommendation history" 42501 "${app}" "${app_pw}" <<<'UPDATE public.path_recommendations SET reason = reason WHERE false;'
+  expect_denied  "runtime role erasing recommendation history" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.path_recommendations WHERE false;'
   expect_denied  "runtime role re-keying questions" 42501 "${app}" "${app_pw}" <<<'UPDATE public.questions SET id = id WHERE false;'
   expect_denied  "runtime role reading captured answer selections" 42501 "${app}" "${app_pw}" <<<'SELECT selected_options FROM public.attempt_answers WHERE false;'
   expect_denied  "runtime role reading protected material payloads" 42501 "${app}" "${app_pw}" <<<'SELECT object_key FROM public.learning_materials WHERE false;'

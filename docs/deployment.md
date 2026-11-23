@@ -1847,6 +1847,70 @@ Course itself on a deployed VM also needs CO06's own CT17-P6 revision (`courses`
 `lessons` writes), which is not part of this record. This revision executes no provisioning on any
 real database.
 
+### CT17-P6-PRIVILEGES-2026-11-23-r8 — AD06 mastery and history writes (within the ADR012 §19.2 ceiling, 23 November 2026)
+
+Prepared for AD06 ([#42](https://github.com/chi-thanh-nguyen/codemastery/issues/42),
+[PR #263](https://github.com/chi-thanh-nguyen/codemastery/pull/263)) under the Project Leader's
+explicit instruction of 23 November 2026 to complete AD06 together with the runtime privileges its
+implemented SQL needs, inside the approved ceiling. It follows the extension procedure above and
+stays inside the DELEGATED_APPROVED `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)):
+the implemented consumer (`LearnerSkillMasteryRepositoryImpl`, `LearnerSkillMasteryJpaRepository`,
+`PathRecommendationRepositoryImpl` and `PathRecommendationJpaRepository`, mechanism
+[`AD06-PERSISTENCE-2026-11-23-r1`](decisions/016-ad06-mastery-history-persistence.md)),
+`RUNTIME_PRIVILEGE_MATRIX` and the CI tests change together, and every privilege below is exercised
+by that consumer's SQL. No migration is involved. No approval beyond that ceiling is claimed; this is
+not personal Leader review.
+
+The r1–r7 records above are unchanged history. The effective matrix is r1 plus r2–r7, with the two
+rows below replacing the named relations; no other privilege, role elevation or change is
+introduced. Both rows are narrower than their ceiling rows: the table-level `SELECT` of the ceiling
+is not granted, because AD06 issues no read. AD16's reads add it in their own revision.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `learner_skill_masteries` (adaptive) | INSERT; SELECT (user_id, skill_id, state); UPDATE (state) | `storeState`: insert or state update of one (learner, skill) row | r8 within ceiling (CT08.execution, ADR011 §4 step 5; ADR005 §6.1) |
+| `path_recommendations` (adaptive) | INSERT | `append`: one immutable history row | r8 within ceiling (CT07, ADR011 §9: history is append-only) |
+
+Least privilege exercised by the consumer:
+
+| Operation | SQL | Privilege |
+| --- | --- | --- |
+| Store a mastery state | `INSERT INTO public.learner_skill_masteries (id, user_id, skill_id, state) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, skill_id) DO UPDATE SET state = EXCLUDED.state` | INSERT; UPDATE (state); PostgreSQL also requires SELECT on the conflict-target columns and on the `EXCLUDED` column the update reads, so SELECT (user_id, skill_id, state). Measured on PostgreSQL 17.11: without SELECT (state), or with only SELECT (user_id, skill_id), the statement fails with 42501 |
+| Append history | `INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES (?, ?, ?, ?, ?, ?)` | INSERT; a reused identifier fails with 23505 |
+| Foreign keys to `users`, `skills`, `enrollments` and `lessons` | checked by PostgreSQL with the table owner's rights | none |
+
+The runtime role still cannot do any of the following:
+
+- re-key a mastery row or move it to another learner or skill (no UPDATE on `id`, `user_id` or
+  `skill_id`), or read mastery row identifiers;
+- delete or truncate mastery rows;
+- read, update, delete or truncate recommendation history.
+
+A compromised runtime role could set any learner's state for any skill and append history rows for
+any Enrollment, which the approved writes inherently require; Course scoping, calculation and the
+strictly-later recommendation instant stay application invariants (ADR011 §§4 and 9), and V005's
+foreign keys, check constraints and keys stay authoritative.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009), with
+  `verify_role_separation` probing the mastery re-key and delete and the history rewrite and erase
+  denials;
+- `test-deploy-privilege-matrix-contract.sh`, which pins r1 history and the r2–r8 rows;
+- `test-postgres-privilege-matrix-containment.sh`: the exact AD06 SQL under the provisioned runtime
+  role on the real schema, the reused-identifier refusal (23505) and the denials above;
+- `AdaptivePersistenceIntegrationTest` runs the adapters themselves under a transaction-scoped role
+  holding exactly these rows.
+
+`test-runtime-real-backend-privileges.sh` gains no AD06 case: no HTTP operation reaches these
+adapters yet. Their first HTTP path is the quiz submission orchestrated by AD13 (ADR011 §4), which
+must add its real-backend case when it wires them.
+
+Remaining gates: owning-module (Adaptive @thanhtran0311), `@tihh647-ui` infrastructure and
+independent Leader CODEOWNER review; protected integration of PR #263; these grants on any shared or
+production database (Leader-reserved). This revision executes no provisioning on any real database.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -2024,6 +2088,12 @@ entrypoint/command. Merging alone would not remove them.
   No release-tagged storage artifact exists.
 
 ### Release build outside the VM
+
+**Superseded as the supported path, 23 November 2026:** the
+[Phase 4 release pipeline](#phase-4-release-pipeline--23-november-2026)
+([ADR015](decisions/015-release-pipeline.md)) builds, qualifies, attests and packages
+the five images in GitHub Actions. The manual recipe below is kept as the dated
+historical procedure.
 
 The required tags are fixed by the override. Every image must be linux/amd64 (B1),
 whatever the build host's own architecture. The recipe needs Docker Engine 28 or
@@ -4391,7 +4461,313 @@ ADR014 r3 rows for two new V008 relations outside this ceiling; since 17 Novembe
 the CO08 r4 rows for `enrollments` and `lesson_progress` inside it; since 22 November 2026, the
 AD07 r5 rows for `skills`, `skill_prerequisites` and `lesson_skills` inside it; since 22 November 2026,
 the AS05 r6 rows for `questions`, `quiz_questions` and `attempt_answers` inside it, and the AS06 r7 rows
-for `quizzes`, `quiz_questions` and `attempts` inside it), and the extension procedure above
+for `quizzes`, `quiz_questions` and `attempts` inside it; since 23 November 2026, the AD06 r8 rows for
+`learner_skill_masteries` and `path_recommendations` inside it), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.
+
+## Phase 4 release pipeline — 23 November 2026
+
+[ADR015](decisions/015-release-pipeline.md) records the authority (the Leader's
+Phase 4 delegation), every technical decision and its alternatives. This section is
+the operator's view. It approves nothing beyond ADR015 and changes no earlier record.
+`deploy.sh`, the Compose files and the Dockerfiles are unchanged.
+
+### Stages
+
+| Stage | How | Result |
+| --- | --- | --- |
+| 1. Candidate | Actions → **Release** → *Run workflow* on `main`, `stage=candidate`; optional `revision` (full SHA on `main`, default the dispatched commit), `public_origin` (default `https://codemastery.app`) and `compatibility_baseline` | Every required check of `main` must be green on the revision. Five linux/amd64 candidates are built, reloaded from their archive, qualified (MinIO initializer suite with the minimal server, backend trust store and runtime privileges, byte-clean PostgreSQL, image hardening, `deploy.sh` preflight/load/provision smoke and update-guard refusals), scanned (Trivy default and comprehensive, SPDX SBOMs), packaged, attested and stored as the draft release `candidate-<12-hex>-<run>-<attempt>`, titled “NOT ADMITTED” |
+| 2. Security admission (ADR015 A1; no pull request) | The admission authority (`chi-thanh-nguyen`) dispatches **Release** on `main` with `stage=promote`, `candidate=<tag>`, `candidate_manifest_sha256=<SHA-256 of the reviewed release-candidate.json>`, `version=v<x.y.z>`, `accepted_findings=<n>` and an optional `note`; reads the `Admission request` job summary; approves the run's pending `release-admission` deployment | Only a first-attempt dispatch from `main` by the authority's account (login and ID, three GitHub views agreeing), approved by that account in the protected environment (required reviewer, `main` only, no administrator bypass; rules and approval read back, fail closed), naming the attested manifest digest and the exact finding count (CRITICAL/HIGH refused unless `accept_critical_or_high`), produces `admission.json`, attested before any candidate image runs ([A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)) |
+| 3. Promotion | Automatic in the same run after the admission | Candidate attestation and package verified; the admission re-derived and bound to this run; images retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; every row of a fresh rescan must be an admitted candidate finding at the same installed version and no higher severity, with no loss of scan coverage; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
+| 4. Publication | Not automated | Un-drafting, tagging or making binaries public is a Leader decision that first needs the F1/F5 licensing determination ([D9](decisions/015-release-pipeline.md#d9--storage-retention-and-publication)) |
+
+A failure at any step stops the stage without a draft. Nothing is retried, and no
+draft, tag or release is ever overwritten: a rerun is a new candidate.
+
+### Using a release package with `deploy.sh`
+
+1. Download every asset of the release draft into one directory (write access is
+   needed to see drafts).
+2. On a workstation, verify the package with **two separate checkouts**: the release
+   tooling at `release.json` `tooling.sha` (the `main` commit whose `release.yml`
+   promoted and attested the package, so its verifier understands the package format)
+   and the application source at `release.json` `source_revision` (its `deploy.sh`,
+   Compose files and archive check). Never run the source revision's own
+   `infrastructure/release/verify-release.sh`: it may predate the package format (the
+   first A1 release's source `1d0658a7…` still carries the pull-request admission
+   verifier, which refuses every A1 package). No code from either checkout runs before
+   your own `gh` has verified that `release.json` was attested by `release.yml` on
+   `main` at the tooling commit it names. Run as one bash script (it stops at the first
+   failure):
+
+   ```bash
+   set -euo pipefail
+   pkg=<directory holding the downloaded assets>; version=v<x.y.z>; store=<containerd|graphdriver>
+   repo=https://github.com/chi-thanh-nguyen/codemastery.git
+   # Validate JSON strings before command substitution can strip trailing newlines.
+   revisions="$(python3 -I -c '
+   import json, re, sys
+   with open(sys.argv[1]) as f:
+       manifest = json.load(f)
+   revisions = (manifest["tooling"]["sha"], manifest["source_revision"])
+   if not all(isinstance(value, str) and re.fullmatch("[0-9a-f]{40}", value) for value in revisions):
+       sys.exit("Invalid tooling or source revision SHA.")
+   print(*revisions)
+   ' "$pkg/release.json")" || {
+     printf '%s\n' 'Invalid release manifest or revision SHA.' >&2
+     exit 1
+   }
+   read -r tooling_sha source_revision <<< "$revisions"
+   if ! [[ "$tooling_sha" =~ ^[0-9a-f]{40}$ && "$source_revision" =~ ^[0-9a-f]{40}$ ]]; then
+     printf '%s\n' 'Invalid tooling or source revision SHA.' >&2
+     exit 1
+   fi
+   gh attestation verify "$pkg/release.json" --repo chi-thanh-nguyen/codemastery \
+     --cert-identity https://github.com/chi-thanh-nguyen/codemastery/.github/workflows/release.yml@refs/heads/main \
+     --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners || {
+     printf '%s\n' 'Release manifest attestation verification failed.' >&2
+     exit 1
+   }
+   git clone --quiet "$repo" tooling || {
+     printf '%s\n' 'Failed to clone release tooling; existing directories are not reused.' >&2
+     exit 1
+   }
+   git -C tooling checkout --quiet --detach "$tooling_sha" || {
+     printf '%s\n' 'Failed to check out attested release tooling.' >&2
+     exit 1
+   }
+   git clone --quiet "$repo" source || {
+     printf '%s\n' 'Failed to clone application source; existing directories are not reused.' >&2
+     exit 1
+   }
+   git -C source checkout --quiet --detach "$source_revision" || {
+     printf '%s\n' 'Failed to check out the release source revision.' >&2
+     exit 1
+   }
+   bash tooling/infrastructure/release/verify-release.sh "$pkg" --version "$version" --source source --store "$store"
+   ```
+
+   (`--version` names the release you intend to transfer; another release is refused.)
+   Run in a directory with no `tooling` or `source` destination. A failed clone or
+   checkout stops the procedure; it never removes or reuses an occupied destination.
+   The verifier refuses to run from any commit other than `tooling.sha` or from a
+   modified checkout, and refuses a `--source` checkout that is not exactly
+   `source_revision`; the two are the same directory only when the two commits are
+   equal. Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand,
+   add `--bundle "$pkg/release.sigstore.json" --custom-trusted-root trusted_root.jsonl`
+   to the `gh attestation verify` line and `--trusted-root trusted_root.jsonl` to the
+   verifier, and set `repo` to a local repository already holding both commits; keep
+   fresh `tooling` and `source` destinations. The script verifies the attestation of
+   `release.json`, the archive, `mc-source.tar.gz` and `admission.json` (signer
+   `release.yml` on `refs/heads/main` exactly, at the recorded tooling commit), the
+   agreement of release, admission and candidate records (the admission re-derived from
+   its evidence and bound to the promoting run), that `admission.sigstore.json` was
+   signed by the admission's own dispatch run, and online that GitHub's run and
+   approval records name the same dispatching and approving account (offline: only
+   what the attested workflow recorded; run it online on a connected host), the
+   `deploy.sh`/Compose hashes and `deploy.sh`'s own archive verifier, then prints `--archive`,
+   `--archive-sha256`, the five `--expect-image` values and `--source-revision`.
+   `deploy.sh preflight` reports which image store the VM uses.
+3. Transfer the archive with `mc-source.tar.gz` (the AGPL Corresponding Source of the
+   initializer's `mc`). The channel and custody remain P8 inputs; nothing here selects
+   them.
+4. Use the `deploy.sh` checkout of the same `source_revision` (ADR009 §9.3). On a host
+   with existing containers or volumes, `deploy.sh` still requires the four P9 update
+   attestations (`--recovery-artifact-verified`, `--schema-image-compatibility-verified`,
+   `--persistent-state-preserved`, `--update-authorization`). `release.json` lists the
+   Flyway migration inventory to compare with the target's `flyway_schema_history`,
+   and what the release does not verify.
+
+### What this does not establish
+
+No candidate has been built from `main` by this pipeline, admitted or promoted, and no
+artifact has been published, transferred or loaded on the Azure VM. The deployed
+preview's revision, image identities, volumes and Flyway state are not verified by
+any repository evidence; the GitHub pre-release `v0.1.0-preview.1` (source
+`061102e3…`, no assets) and the local preview package of
+[ADR009 §2.3](decisions/009-ct17-final-runtime-recovery.md#23-exact-local-historical-release-identities)
+remain historical records, not a verified VM state. Release blockers 2–7 above keep
+their status, except that blocker 3's artifact admission review and package custody
+now have an implemented mechanism; the VM transfer channel and custody remain open.
+Pipeline verification is recorded in
+[testing.md](testing.md#phase-4-release-pipeline-verification--23-november-2026).
+
+This record, the pipeline and its tests were produced through AI-assisted development
+(Anthropic Claude Code) under the Leader's task. Trivy, Sigstore (through GitHub
+artifact attestations) and GitHub Actions are used by the pipeline; no AI service or
+runtime technology is added to CodeMastery.
+
+## DP01 release image security remediation — 23 November 2026
+
+**Authority.** The Project Leader's instruction of 23 November 2026 (ICT), “CodeMastery —
+DP01 Full Security Remediation & Release Candidate Pre-Merge Qualification”, authorizes
+remediating the CRITICAL/HIGH findings of the first pipeline candidate in one pull request.
+It does not grant security admission, deployment or publication, and this record grants
+none. No decision record changes: the ADR003 decision (pinned `postgres:17.11-alpine3.24`
+base, `su-exec`, data-volume boundary, byte-clean single layer), the ADR009 runtime
+policies and every ADR015 release decision stay as they are. Package updates inside the
+images follow the existing pinned-update practice of
+[Frontend Alpine package pins refreshed](#frontend-alpine-package-pins-refreshed--7-november-2026).
+
+### Baseline
+
+The first candidate of the [Phase 4 pipeline](#phase-4-release-pipeline--23-november-2026):
+run [45073820127](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45073820127)
+on `main` `cc86c0803aa1ad9428f8511c6ba0f6669829814d`, draft release
+`candidate-cc86c0803aa1-45073820127-1` (ID 454779483, 23 assets, origin
+`https://codemastery.app`), status QUALIFIED and NOT ADMITTED. Its `findings.json` (hash
+checked against the draft's `SHA256SUMS`; Trivy 0.76.2, vulnerability database updated
+2026-11-22T19:00:46Z) holds 126 rows, 32 of them CRITICAL or HIGH:
+
+| Image | CRITICAL | HIGH | Packages (installed → fixed) |
+| --- | ---: | ---: | --- |
+| frontend | 4 | 6 | `nginx` 1.30.6-r1 → 1.30.7-r0 (4 CRITICAL, 2 HIGH); `libxslt` 1.1.43-r3 → 1.1.43-r4 (3 HIGH); `libxml2` 2.13.9-r2 → 2.13.9-r3 (1 HIGH) |
+| postgres | 0 | 20 | `krb5-libs` 1.22.2-r1 → 1.22.3-r0 (16 HIGH); `libxslt` (3 HIGH); `libxml2` (1 HIGH) |
+| backend | 0 | 2 | `apt`, `libapt-pkg6.0t64` 2.8.3 → 2.8.4ubuntu0.1 (CVE-2026-109518) |
+| minio, minio-init | 0 | 0 | — |
+
+### Changes
+
+Each fixed version was confirmed against the live package source on 23 November 2026,
+not taken from the candidate report alone.
+
+| Image | Change | Why this route |
+| --- | --- | --- |
+| frontend, both targets | Same base digests. Nginx and, in the release target, its four dynamic modules (`geoip`, `image-filter`, `njs`, `xslt`) raised together to nginx.org `1.30.7-r1` (`njs` `1.30.7.1.0.2-r1`) from nginx.org's signed Alpine v3.24 repository; Alpine pins added for `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4 (release target) and `libcrypto3`/`libssl3` 3.5.9-r1 (both) | The base installed Nginx from nginx.org, not from Alpine. No `nginx-unprivileged` 1.30.7 image was published (Docker Hub answers 404 for `1.30.7-alpine`, `-alpine-slim` and `-alpine3.24`), while upstream's generator Dockerfiles already install exactly these nginx.org packages. apk verifies them against nginx.org's key, which the base already trusts and whose SHA-512 (`e09fa32f…0655`, upstream's pin) the build checks first; only that repository is consulted for them. apk keeps the base's unprivileged `nginx.conf` and `default.conf` and writes the stock privileged files as `*.apk-new`, which the build removes. The build fails unless `nginx -v` reports 1.30.7 |
+| postgres | Same base digest; one added `RUN` in the `layered` stage pins Alpine v3.24/main `krb5-libs` 1.22.3-r0, `libxml2` 2.13.9-r3, `libxslt` 1.1.43-r4, `libcrypto3`/`libssl3` 3.5.9-r1, `zlib` 1.4-r0 and `alpine-release` 3.24.4-r0 | Same-ABI library updates. PostgreSQL 17.11 binaries, musl 1.2.6-r3, ICU 78.1, `su-exec`, the entrypoint boundary and the data directory are unchanged; the final stage still copies the merged filesystem into one layer |
+| backend | Runtime base re-pinned to the same tag's current index, `eclipse-temurin:25.0.5_8-jre-noble@sha256:23481dc33a759b79d62814ceb1ec27a0d1a84da9d7aab0609577427176fbb1b7` (Docker Hub, updated 20 November 2026); build stage unchanged | Same Temurin 25.0.5+8 (`java -version`); the JRE's `cacerts` file is byte-identical in both bases (SHA-256 `628b436e…a7ef`), so the existing eMudhra removal and the build-time trust-store verification apply unchanged. Refreshed Ubuntu 24.04 packages: `apt`/`libapt-pkg6.0t64` 2.8.4ubuntu0.1, `libc6` 2.39-0ubuntu8.12, `libpcre2-8-0` 10.42-4ubuntu2.2, `perl-base` 5.38.2-3.2ubuntu0.7 |
+| minio, minio-init | None | See "Remaining findings" |
+
+Alternatives not adopted:
+
+- Frontend: the official `nginx:1.30.7-alpine` image (the unprivileged changes would have
+  to be re-derived by hand); Alpine's own `nginx` 1.30.7-r0 (a differently built package
+  that cannot replace nginx.org's modules); removing the unused dynamic modules (would
+  also drop `libxml2`/`libxslt`, but changes image content beyond the fix; a possible
+  later hardening).
+- PostgreSQL: the 11 November rebuild of the same tag (`sha256:e5d2edd2…`) still carries
+  every vulnerable package; `postgres:17.12` (21 November) is a PostgreSQL version
+  change not needed for these findings.
+- Backend: `apt-get` upgrades in the runtime stage (the official rebuild carries the same
+  fixes and more, without adding package-manager operations to the runtime stage).
+
+The release tooling gains two rehearsal refusal cases (a candidate finding accepted under
+another service, and one with a modified package) and three unit-test mutations; no
+release decision, gate or workflow changes.
+
+### Results
+
+Local rescan of the five rebuilt linux/amd64 images with the pipeline's pinned Trivy
+0.76.2 image, `--scanners vuln`, default and comprehensive modes, nothing ignored, and
+the **same vulnerability database** as the candidate (updated 2026-11-22T19:00:46Z), so
+the comparison is like for like. Distinct rows, both modes merged:
+
+| Image | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN |
+| --- | --- | --- | --- | --- | --- |
+| postgres | 0 → 0 | 20 → 0 | 13 → 0 | 4 → 0 | 0 → 0 |
+| minio | 0 → 0 | 0 → 0 | 3 → 3 | 0 → 0 | 1 → 1 |
+| minio-init | 0 → 0 | 0 → 0 | 4 → 4 | 0 → 0 | 0 → 0 |
+| backend | 0 → 0 | 2 → 0 | 50 → 24 | 5 → 5 | 0 → 0 |
+| frontend (release target) | 4 → 0 | 6 → 0 | 10 → 0 | 4 → 0 | 0 → 0 |
+| **Total** | **4 → 0** | **28 → 0** | 80 → 31 | 13 → 5 | 1 → 1 |
+
+None of the 32 original CRITICAL/HIGH rows is reported at any installed version, and no
+row appeared that the candidate did not report. Scan coverage is unchanged for every
+image: the same detected operating system family, no end-of-support flag, and the same
+target classes (frontend `os-pkgs/alpine`; postgres `os-pkgs/alpine`, now detected as
+3.24.4; backend Ubuntu 24.04 and the JAR; minio-init Wolfi and its Go binary; minio its Go
+binary, without an OS, as in the candidate). Trivy still names the multi-layer frontend
+“alpine 3.24.2”, as it did for the candidate, although `/etc/os-release` in the image is
+owned by `alpine-release-3.24.4-r0` and reads 3.24.4.
+
+### Remaining findings
+
+37 rows, none CRITICAL or HIGH. All remain subject to the Leader's admission of a future
+candidate; none is accepted here.
+
+| Image | Rows | Status | Reason not fixed here |
+| --- | --- | --- | --- |
+| backend | 24 MEDIUM, 5 LOW (`libexpat1`, `dash`, `tar`, `libgnutls30t64`, util-linux family, `libsystemd0`/`libudev1`, `login`/`passwd`, `gpgv`) | No fixed version published by Ubuntu for any row | Nothing to install. `libsystemd0`/`libudev1` 255.4-1ubuntu8.19 exist in noble-updates, but Trivy lists no fix for their rows |
+| minio | 3 MEDIUM (`otel/sdk`, `otel/trace` v1.45.0 → 1.47.0; Go stdlib 1.27.3 → 1.27.4), 1 UNKNOWN (GO-2026-5932, `x/crypto` v0.58.0) | Fixed versions exist | Needs a new MinIO server binary (a new Chainguard digest): a server artifact change, which this remediation does not make |
+| minio-init | 3 MEDIUM (`glibc-2.44`, `glibc-2.44-locale-posix`, `ld-linux-2.44` 2.44-r11 → 2.44-r16), 1 MEDIUM (Go stdlib 1.27.3 → 1.27.4 in `mc`) | Fixed versions exist | Needs a new Chainguard `minio-client` base digest, and a Go toolchain change rebuilds the AGPL `mc` and changes its Corresponding Source archive and recorded hash (F1); both are separate changes |
+
+### What this does not establish
+
+The images measured above were built locally (macOS arm64 host, builds forced to
+linux/amd64); image builds are not reproducible, so they are not the images a candidate
+will contain. Their identities are recorded in
+[testing.md](testing.md#dp01-release-image-security-remediation-verification--23-november-2026)
+only to tie the evidence to the bytes that were scanned. No candidate has been built from
+a `main` revision that contains this change, nothing was admitted, promoted, published,
+transferred or deployed, and nothing on the Azure VM was contacted. The pull request's
+`Release rehearsal` uses a synthetic `REHEARSAL-` admission, which is not a security
+admission. After integration, a new `stage=candidate` run from the new `main` revision
+must produce the candidate that the Leader may admit with a separate admission record
+(ADR015 D7).
+
+Anthropic's Claude Code (Claude Opus 5.5) investigated the findings, made the change and
+ran the checks recorded in testing.md.
+
+## Release admission without pull requests — 23 November 2026
+
+[ADR015 Amendment A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)
+records the authority (the Leader's instruction of 23 November 2026), the options
+compared and the design. This section is the operator's view.
+
+### What changed
+
+- The security admission is no longer a JSON record merged through a pull request. It is
+  made inside a `stage=promote` run: the admission authority dispatches the run naming
+  the candidate, the SHA-256 of the `release-candidate.json` it reviewed, the version
+  and the number of findings it accepts; the `Admission request` job shows the verified
+  candidate; the authority approves the run in the protected `release-admission`
+  environment; the run records `admission.json`, attests it and then promotes (stages 2
+  and 3 of the [table above](#stages)).
+- `release.py admission-template` and `admission-provenance` are removed; the promote
+  stage no longer reads `docs/decisions/release-admissions/`.
+- Release packages now contain `admission.sigstore.json` (the admission's own
+  attestation bundle). `verify-release.sh` checks it offline and, online, GitHub's run
+  and approval records of the admitting run.
+- Required configuration: the `release-admission` environment (required reviewer
+  `chi-thanh-nguyen`, administrator bypass disabled, deployments from `main` only). If
+  it is missing or weaker, promotion stops at its first step.
+
+### Approving a future candidate
+
+1. On the candidate draft, take the SHA-256 of `release-candidate.json` (its line in
+   `SHA256SUMS`) and the finding count from the draft summary.
+2. Dispatch, in the Actions UI (**Release** → *Run workflow*, branch `main`) or:
+
+   ```bash
+   gh workflow run release.yml -R chi-thanh-nguyen/codemastery --ref main \
+     -f stage=promote -f candidate=<candidate tag> \
+     -f candidate_manifest_sha256=<sha256> -f version=v<x.y.z> \
+     -f accepted_findings=<n> -f note='<one-line risk acceptance>'
+   ```
+
+3. Open the run, read the `Admission request` summary, then *Review deployments* →
+   `release-admission` → *Approve and deploy*. Only this approval and the dispatch are
+   manual; verification, admission record, attestation, rescan, promotion, smoke and the
+   draft release are automatic. Rejecting, cancelling or not approving admits nothing.
+   The review comment is optional free text (empty, several lines and any characters
+   are accepted); it is recorded verbatim, JSON-escaped, in `admission.json`, is never
+   printed to a log or summary, and authorizes nothing.
+4. A re-run of the run cannot admit (it replays the earlier dispatch); dispatch again.
+
+### Current state of the first candidate
+
+The candidate `candidate-1d0658a7215c-45091629955-1` (draft release ID 454878027, run
+[45091629955](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45091629955),
+source `1d0658a7215c2a3d3fed569738d522137989b666`, 23 assets, `rehearsal: false`) was
+qualified and verified in an earlier session (package, ten identities, attestations,
+Q00–Q05, smoke, 37 findings: 0 CRITICAL, 0 HIGH, 31 MEDIUM, 5 LOW, 1 UNKNOWN). The
+admission record prepared for it under D7 was never merged and is not an admission. As
+of this record the candidate is **not admitted**, nothing has been promoted, no
+`v0.1.0-rc.1` draft exists, nothing was published, and nothing on the Azure VM was
+contacted. Its admission and promotion require this change on `main` and the Leader's
+dispatch and approval as above.
+
+Anthropic's Claude Code (Claude Opus 5.5) selected and implemented the design and ran the
+checks recorded in [testing.md](testing.md#release-admission-redesign-verification--23-november-2026).
