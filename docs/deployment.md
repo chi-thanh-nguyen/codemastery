@@ -1911,6 +1911,26 @@ Remaining gates: owning-module (Adaptive @thanhtran0311), `@tihh647-ui` infrastr
 independent Leader CODEOWNER review; protected integration of PR #263; these grants on any shared or
 production database (Leader-reserved). This revision executes no provisioning on any real database.
 
+### CT17-P6-PRIVILEGES-2026-11-23-r9 — multi-version predecessor deferral (DELEGATED_APPROVED, 23 November 2026)
+
+Recorded under the Leader's Phase 5 delegation ([ADR017 §6.1](decisions/017-ssh-continuous-deployment.md#61-ct17-p6-privileges-2026-11-23-r9--multi-version-predecessor-deferral)).
+r4 let pre-migration provisioning defer a migration-added column only on the exact
+predecessor (history 1..version−1). The deployed preview holds V001–V006, so every
+release that reaches V009 would be refused by provisioning after `deploy.sh all` had
+already quiesced the application. r9 defers the column when the column is absent and the
+Flyway history holds exactly the successful versioned migrations 1..k, each once, for any
+1 ≤ k < version. An empty history, a gap, a failed or repeatable entry, a recorded version
+whose column is missing, or k ≥ version still defer nothing, so provisioning fails closed
+as before. The matrix rows, the column pins and the complete post-migration verification
+are unchanged; nothing is granted earlier than r4 granted it.
+
+Evidence: `test-postgres-privilege-matrix-containment.sh` keeps every r4 case (exact V008
+predecessor, all drift refusals) and adds a fresh V001–V006 database → pre-migration
+provisioning → V007–V009 → hardening → exact matrix, with refusals for an empty history,
+a gap and a failed migration. Read-only evaluation on the VM on 23 November 2026: with
+v0.1.0-rc.1's `deploy.sh` (r4) the update of the deployed V006 database is refused by the
+Phase 5 plan gate before any change; with r9 it is an upgrade with V007–V009 pending.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4771,3 +4791,127 @@ dispatch and approval as above.
 
 Anthropic's Claude Code (Claude Opus 5.5) selected and implemented the design and ran the
 checks recorded in [testing.md](testing.md#release-admission-redesign-verification--23-november-2026).
+
+## Phase 5 SSH continuous deployment — 23 November 2026
+
+[ADR017](decisions/017-ssh-continuous-deployment.md) records the authority (the Leader's
+Phase 5 delegation), the read-only VM discovery, every decision and its alternatives.
+This section is the operator's view. It approves nothing beyond ADR017; `deploy.sh`
+changes only by the CT17-P6 r9 predicate above, the Compose files and Dockerfiles not at all.
+
+### Components
+
+| Path | Where it runs | Responsibility |
+| --- | --- | --- |
+| `.github/workflows/deploy.yml` | GitHub, manual dispatch on `main` | Workflow **Deploy**: `Deployment request` (authenticates the dispatcher), `Deployment operation` (protected `production` environment, approval read back, SSH operation, external checks, job summary); `Deploy tooling` unit tests on pull requests |
+| `infrastructure/vm/cd/vm-transport.sh` | Runner or operator workstation | The only SSH client path: committed host-key pin, batch mode, hash-checked uploads, `codemastery-ops` invocation |
+| `infrastructure/vm/cd/deploy-release.sh` | Runner or operator workstation | Downloads and verifies the release, uploads tooling/source/package, runs the VM operation |
+| `infrastructure/vm/cd/cd.py` | Runner | Dispatch and environment authentication, deployment context, outside checks, report |
+| `infrastructure/vm/cd/bootstrap.sh`, `bootstrap-remote.sh` | Operator workstation → VM (once) | Locations, tooling, `cmdeploy`, sudoers, `ops.conf`, recovery custody, disabled timers |
+| `infrastructure/vm/cd/nsg-gate.sh` | Runner (optional) | Temporary NSG rule for the runner's /32 on TCP 22, always removed |
+| `infrastructure/vm/cd/known_hosts` | Everywhere | The VM's ED25519 host-key pin |
+| `infrastructure/vm/host/codemastery-ops`, `codemastery-ssh-gate` | VM `/usr/local/sbin` | Root entry point with deploy/operator roles; forced command of `cmdeploy` |
+| `infrastructure/vm/host/ops.py` | VM (root) | Staging, gates, `deploy.sh` invocation, verification, hold/resume, status, TLS check/renewal, timers |
+| `infrastructure/vm/host/recovery.py` | VM (capture) and workstation (publish, verify, restore test, status, prune) | ADR009 recovery sets |
+| `infrastructure/vm/host/systemd/*`, `launchd/*.plist` | VM / workstation | Capture and renewal timers (installed disabled); publisher every 15 minutes |
+
+### One-time setup (Leader)
+
+1. Merge the Phase 5 pull request. From a clean checkout of `main`, read the VM state:
+   `bash infrastructure/vm/cd/bootstrap.sh --identity ~/.ssh/vm-codemastery_key.pem --check`.
+2. Recovery keys on the workstation (macOS needs OpenSSL 3, e.g. Homebrew):
+   `CODEMASTERY_OPENSSL=/opt/homebrew/opt/openssl@3/bin/openssl python3 infrastructure/vm/host/recovery.py init-workstation`.
+   Copy `~/CodeMasteryRecovery/keys/recipient.encrypted.pem` and its passphrase (login
+   Keychain, service `codemastery-recovery-recipient`) to separate offline media.
+3. A dedicated deployment key, never your personal key:
+   `ssh-keygen -t ed25519 -N '' -C codemastery-deploy -f cm-deploy`.
+4. Bootstrap (choose the readiness deadline `deploy.sh` waits; no default is approved):
+   `bash infrastructure/vm/cd/bootstrap.sh --identity ~/.ssh/vm-codemastery_key.pem --apply --deploy-public-key cm-deploy.pub --recipient-cert ~/CodeMasteryRecovery/keys/recipient.crt --wait-timeout <seconds>`.
+   It prints the producer public key and its SHA-256. Save the PEM to a file, then
+   `python3 infrastructure/vm/host/recovery.py trust-producer <file> --fingerprint <sha256>`,
+   and write `~/CodeMasteryRecovery/config.json`:
+   `{"vm": {"host": "20.205.56.236", "user": "azureuser", "identity": "~/.ssh/vm-codemastery_key.pem"}, "producer_key_sha256": "<sha256>", "restore_test": {"postgres_image": "<a PostgreSQL 17.11 image>"}}`
+   (add `"azure": {"account": "…", "container": "…"}` once a storage account is authorized).
+5. GitHub → Settings → Environments → `production`: required reviewer
+   `chi-thanh-nguyen`, "Allow administrators to bypass" off, deployment branches = the
+   custom policy `main` only; secret `VM_SSH_PRIVATE_KEY` = the content of `cm-deploy`
+   (then delete the local private key file); variables `PUBLIC_EXPOSURE_AUTHORIZATION` and
+   `PACKET_FILTER_VERIFICATION` = references to your exposure decision and NSG rule-set
+   record. Optionally the NSG gate variables (`nsg-gate.sh` header) with a federated
+   credential whose only role is a custom role over that NSG's security rules.
+6. Load the publisher (`infrastructure/vm/host/launchd/app.codemastery.recovery-publisher.plist`, header).
+7. Qualify, then enable timers: `sudo codemastery-ops tls-renew --staging` (stops the
+   frontend briefly), a manual capture `sudo codemastery-ops capture --kind manual` and its
+   publication, then `sudo codemastery-ops timers enable`.
+
+### Per release (three dispatches, two of them approvals)
+
+1. Actions → **Deploy** → *Run workflow* on `main`: `operation=plan`, `version=v<x.y.z>`;
+   approve `production`. Read the summary: preflight, schema state, capacity, blockers.
+   Nothing changes on the VM except the uploaded tooling/source/manifests.
+2. `operation=prepare`, same version; approve. The package is verified and staged, the
+   gates re-run, then a **pre-update recovery point** is captured and the application is
+   **held stopped** (maintenance window starts). The summary prints the set ID and its
+   manifest SHA-256.
+3. On the workstation the publisher verifies, decrypts, restore-tests, keeps and
+   acknowledges the point within 15 minutes (or run `python3 infrastructure/vm/host/recovery.py publish`
+   now; it prints the ledger entry).
+4. `operation=deploy`, `version`, `recovery_set`, `recovery_manifest_sha256`; approve. The
+   VM proves the hold and the acknowledgement, runs the release's `deploy.sh all` and
+   verifies; the summary separates infrastructure, readiness, TLS, outside checks and
+   (not verified) features.
+
+CLI equivalent: `gh workflow run deploy.yml -R chi-thanh-nguyen/codemastery --ref main -f operation=plan -f version=v<x.y.z>`.
+
+### Failures
+
+- `BLOCKED` (plan/prepare/deploy): nothing changed (prepare before its capture). Fix the
+  named cause; for a schema blocker build a new release (ADR015) rather than forcing.
+- `FAILED_CONTAINED` (deploy): `deploy.sh` stopped and contained the application; the
+  hold and the point stay. Read the VM log
+  (`sudo ls /var/lib/codemastery/deployments/`). `operation=resume` restarts the previous
+  containers only if no deployment attempt replaced them; otherwise restoring the point
+  is a Leader recovery decision (ADR009 §5), never automatic.
+- Cancel a held update: `operation=resume`.
+- Lock contention or timer failures appear in `sudo codemastery-ops status` and the journal.
+
+### Local fallback with the operator key
+
+Same driver, operator role, no GitHub approval (your SSH session is the authority):
+
+```bash
+export VM_SSH_USER=azureuser VM_SSH_IDENTITY=~/.ssh/vm-codemastery_key.pem
+bash infrastructure/vm/cd/vm-transport.sh check
+bash infrastructure/vm/cd/deploy-release.sh --operation plan --version v<x.y.z>
+bash infrastructure/vm/cd/deploy-release.sh --operation prepare --version v<x.y.z>
+python3 infrastructure/vm/host/recovery.py publish
+bash infrastructure/vm/cd/deploy-release.sh --operation deploy --version v<x.y.z> \
+  --recovery-set <set> --recovery-manifest-sha256 <sha256> --context-file context.json
+```
+
+`context.json` is `{"encoded": "<base64url of {\"authorization\": …, \"public_exposure_authorization\": …, \"packet_filter_verification\": …}>"}`
+with single-line references to your own records. Interactive inspection:
+`ssh -i ~/.ssh/vm-codemastery_key.pem azureuser@20.205.56.236` then
+`sudo codemastery-ops status`, `inventory` or `tls-check`.
+
+### State on 23 November 2026 (read-only)
+
+The VM runs the 4 November preview (source `061102e3`, the ADR009 §2.3 image identities)
+from an extracted tree in `/home/azureuser`, Flyway V001–V006, containerd image store,
+trusted `codemastery.app` certificate until 1 February 2027, no recovery timers, acme.sh
+without automation (ADR017 §3). Running the read-only Phase 5 gates there:
+`v0.1.0-rc.1`'s `deploy.sh preflight` passes; its source tree equals `release.json`;
+capacity passes; its schema gate is **BLOCKED** (its `deploy.sh` predates CT17-P6 r9 and
+would refuse V006→V009 during provisioning). Deploying therefore needs a new release
+built from a revision containing this change.
+
+### What this does not establish
+
+Nothing was bootstrapped, staged, captured, deployed, renewed or exposed on the VM; no
+deployment key, environment, NSG rule, storage account or timer exists. Recovery evidence
+is synthetic (CI and local); RPO/RTO, real capture duration, workstation availability and
+Azure publication are not demonstrated. Application feature behavior after a deployment
+remains QA01/QA07/DP03 evidence. This record, the implementation and its tests were
+produced through AI-assisted development (Anthropic Claude Code) under the Leader's task;
+OpenSSH, OpenSSL, GitHub Actions, the Azure CLI (optional gate) and acme.sh (existing)
+are the tools used; no AI service or runtime technology is added to CodeMastery.

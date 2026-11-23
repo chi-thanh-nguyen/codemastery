@@ -1,0 +1,243 @@
+name: Deploy
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('Deploy: {0} {1}', inputs.operation, inputs.version)
+      || format('Deploy tooling: {0}', github.event.pull_request.title) }}
+
+# SSH continuous deployment of a verified release to the Azure VM (ADR017).
+# Implementation: infrastructure/vm/cd/ (runner side) and infrastructure/vm/host/ (VM side).
+#
+# Never triggered by a push or merge. The deployment authority dispatches it on main:
+#   plan     read-only gates on the VM: deploy.sh preflight, schema/Flyway compatibility,
+#            unknown volumes, capacity, current state (uploads tooling and source only)
+#   prepare  stage the whole verified package, re-run every gate, then capture a signed,
+#            encrypted pre-update recovery point and HOLD the application stopped
+#   deploy   after the workstation publisher has verified and acknowledged that point:
+#            prove the hold (no writes since the cut), run the release's deploy.sh `all`
+#            with P9 attestations derived from evidence, verify the result
+#   verify   re-verify the current deployment
+#   resume   cancel a held update by restarting the exact held containers
+# Every VM-contacting job waits for the authority's approval in the protected `production`
+# environment, reads the environment rules and the approval back and fails closed.
+# The repository is public: no artifact is uploaded and nothing secret is printed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'plan, prepare, deploy, verify or resume'
+        type: choice
+        options: [plan, prepare, deploy, verify, resume]
+        required: true
+      version:
+        description: 'release draft to deploy (v<major>.<minor>.<patch>[-pre]); optional for verify/resume'
+        required: false
+        default: ''
+      recovery_set:
+        description: 'deploy: the held pre-update recovery set ID printed by prepare'
+        required: false
+        default: ''
+      recovery_manifest_sha256:
+        description: 'deploy: SHA-256 of that set manifest, as the publisher ledger shows it'
+        required: false
+        default: ''
+      note:
+        description: 'optional one-line note recorded in the job summary'
+        required: false
+        default: ''
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy.yml'
+      - 'infrastructure/vm/cd/**'
+      - 'infrastructure/vm/host/**'
+      - 'infrastructure/vm/tests/test_phase5_units.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  # One state-changing deployment at a time, never cancelled (the VM also holds a lock).
+  group: ${{ github.event_name == 'pull_request' && format('deploy-tooling-{0}', github.event.pull_request.number) || 'production-deployment' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tooling:
+    name: Deploy tooling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check script syntax and run the deployment tooling unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in infrastructure/vm/cd/*.sh infrastructure/vm/host/codemastery-ops infrastructure/vm/host/codemastery-ssh-gate; do
+            bash -n "$script"
+          done
+          python3 -m unittest -v infrastructure/vm/tests/test_phase5_units.py
+
+  request:
+    name: Deployment request
+    if: github.event_name == 'workflow_dispatch'
+    needs: tooling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write        # drafts are readable only with write access; nothing is written
+      actions: read          # GitHub's record of this run
+    steps:
+      - name: Require the main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Deployments run only from main." >&2
+          exit 1
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Authenticate the dispatching account and show the request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/run.json"
+          python3 infrastructure/vm/cd/cd.py authenticate --event "$GITHUB_EVENT_PATH" --run-record "$RUNNER_TEMP/run.json" \
+            --output "$RUNNER_TEMP/dispatch.json"
+          version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["request"]["version"])' "$RUNNER_TEMP/dispatch.json")"
+          {
+            echo "## Deployment request"
+            echo
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d["request"]; print("- Operation: `%s`\n- Version: `%s`\n- Recovery point: `%s` / `%s`\n- Dispatched by: `%s` (%d)\n- Deployment tooling: `%s`\n- Note: %s" % (r["operation"], r["version"] or "-", r["recovery_set"] or "-", r["recovery_manifest_sha256"] or "-", d["dispatched_by"]["login"], d["dispatched_by"]["id"], d["tooling_sha"], r["note"] or "-"))' "$RUNNER_TEMP/dispatch.json"
+            if [[ -n "$version" ]]; then
+              echo
+              gh release view "$version" -R "$GITHUB_REPOSITORY" --json name,isDraft,targetCommitish \
+                --jq '"- Release: \(.name) (draft: \(.isDraft), source \(.targetCommitish))"'
+            fi
+            echo
+            echo "Approve the pending \`production\` deployment only if this is what you asked for."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  operate:
+    name: Deployment operation
+    if: github.event_name == 'workflow_dispatch'
+    needs: [tooling, request]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    # Held until the deployment authority approves it; the rules and the approval are read
+    # back first, so a missing or weakened environment is never an approval.
+    environment: production
+    permissions:
+      contents: write        # read the release draft; nothing is written
+      actions: read          # run record, environment rules and approval record
+      attestations: read     # gh attestation verify
+      id-token: write        # optional Azure NSG gate (federated login); no other use
+    steps:
+      - name: Require the main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Deployments run only from main." >&2
+          exit 1
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate the dispatch and the production approval
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="repos/$GITHUB_REPOSITORY"
+          gh api "$api/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/run.json"
+          gh api "$api/environments/production" > "$RUNNER_TEMP/environment.json"
+          gh api "$api/environments/production/deployment-branch-policies" > "$RUNNER_TEMP/branch-policies.json"
+          gh api "$api/actions/runs/$GITHUB_RUN_ID/approvals" > "$RUNNER_TEMP/approvals.json"
+          python3 infrastructure/vm/cd/cd.py authenticate --event "$GITHUB_EVENT_PATH" --run-record "$RUNNER_TEMP/run.json" \
+            --output "$RUNNER_TEMP/dispatch.json"
+          python3 infrastructure/vm/cd/cd.py approval --environment "$RUNNER_TEMP/environment.json" \
+            --branch-policies "$RUNNER_TEMP/branch-policies.json" --approvals "$RUNNER_TEMP/approvals.json" \
+            --output "$RUNNER_TEMP/approval.json"
+      - name: Install the deployment identity
+        shell: bash
+        env:
+          VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$VM_SSH_PRIVATE_KEY" ]]; then
+            echo "BLOCKED: the production environment has no VM_SSH_PRIVATE_KEY secret (deployment identity not provisioned; see docs/deployment.md, ADR017 one-time setup)." >&2
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$VM_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/cm-deploy-key"
+          ssh-keygen -y -f "$RUNNER_TEMP/cm-deploy-key" | grep -q '^ssh-ed25519 ' \
+            || { echo "VM_SSH_PRIVATE_KEY is not an unencrypted ED25519 key." >&2; exit 1; }
+      - name: Open the temporary SSH network gate (optional)
+        if: vars.NSG_NAME != ''
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          NSG_RESOURCE_GROUP: ${{ vars.NSG_RESOURCE_GROUP }}
+          NSG_NAME: ${{ vars.NSG_NAME }}
+          NSG_RULE_PRIORITY: ${{ vars.NSG_RULE_PRIORITY }}
+        run: bash infrastructure/vm/cd/nsg-gate.sh open
+      - name: Check the VM from outside (before)
+        shell: bash
+        run: python3 infrastructure/vm/cd/cd.py external --output "$RUNNER_TEMP/external-before.json" >/dev/null || true
+      - name: Build the deployment context
+        shell: bash
+        env:
+          PUBLIC_EXPOSURE_AUTHORIZATION: ${{ vars.PUBLIC_EXPOSURE_AUTHORIZATION }}
+          PACKET_FILTER_VERIFICATION: ${{ vars.PACKET_FILTER_VERIFICATION }}
+        run: |
+          set -euo pipefail
+          op="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["request"]["operation"])' "$RUNNER_TEMP/dispatch.json")"
+          if [[ "$op" == deploy ]]; then
+            python3 infrastructure/vm/cd/cd.py context --dispatch "$RUNNER_TEMP/dispatch.json" --approval "$RUNNER_TEMP/approval.json" \
+              --external "$RUNNER_TEMP/external-before.json" --output "$RUNNER_TEMP/context.json"
+          fi
+      - name: Run the operation over SSH
+        id: operate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VM_SSH_IDENTITY: ${{ runner.temp }}/cm-deploy-key
+          VM_SSH_USER: cmdeploy
+        run: |
+          set -euo pipefail
+          read -r op version rset rsha < <(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["request"]; print(r["operation"], r["version"] or "-", r["recovery_set"] or "-", r["recovery_manifest_sha256"] or "-")' "$RUNNER_TEMP/dispatch.json")
+          args=(--operation "$op" --result "$RUNNER_TEMP/result.json")
+          [[ "$version" == - ]] || args+=(--version "$version")
+          [[ "$rset" == - ]] || args+=(--recovery-set "$rset" --recovery-manifest-sha256 "$rsha")
+          [[ "$op" != deploy ]] || args+=(--context-file "$RUNNER_TEMP/context.json")
+          bash infrastructure/vm/cd/vm-transport.sh check
+          bash infrastructure/vm/cd/deploy-release.sh "${args[@]}" > /dev/null
+      - name: Check the VM from outside (after)
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: python3 infrastructure/vm/cd/cd.py external --output "$RUNNER_TEMP/external-after.json" >/dev/null || true
+      - name: Report
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          python3 infrastructure/vm/cd/cd.py report --dispatch "$RUNNER_TEMP/dispatch.json" --result "$RUNNER_TEMP/result.json" \
+            --external "$RUNNER_TEMP/external-after.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Close the temporary SSH network gate
+        if: always() && vars.NSG_NAME != ''
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          NSG_RESOURCE_GROUP: ${{ vars.NSG_RESOURCE_GROUP }}
+          NSG_NAME: ${{ vars.NSG_NAME }}
+          NSG_RULE_PRIORITY: ${{ vars.NSG_RULE_PRIORITY }}
+        run: bash infrastructure/vm/cd/nsg-gate.sh close
+      - name: Remove the deployment identity
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/cm-deploy-key"

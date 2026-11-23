@@ -6056,3 +6056,48 @@ bootstrap control flow, not real signature verification or a real admission.
 No workflow, release verifier implementation, admission policy, environment,
 candidate artifact or VM was changed. Candidate builds, Q00–Q05, Trivy scans,
 the 410 MB candidate verification and real admission/promotion were not run.
+
+## Phase 5 SSH deployment verification — 23 November 2026
+
+Verification of [ADR017](decisions/017-ssh-continuous-deployment.md). Every case uses
+disposable containers, synthetic credentials and keys generated for the run; nothing in
+this section ran a deployment, capture, renewal or change on the Azure VM.
+
+### Suites
+
+| Suite | Where | What it proves |
+| --- | --- | --- |
+| `infrastructure/vm/tests/test_phase5_units.py` (stdlib `unittest`, 30 cases) | CI jobs `Deploy tooling` and `VM continuous deployment and recovery`; local | Flyway CRC32 checksums equal the VM's recorded V001–V006 values; schema compatibility (upgrade, r4 exact-predecessor block, checksum/description/failed/gapped/repeatable history, target ahead = image-only rollback refused, drift, fresh, unknown rule); deferral-rule detection; migration substitution; git tree of `git archive HEAD` equals `HEAD^{tree}` and detects a change; unsafe tar members; deployment context round trip; dispatcher authentication (13 refusals: re-run, other workflow/ref/event, non-authority, mixed actors, other path, bad version/operation/recovery inputs, multi-line note); environment gate (10 fail-closed cases); report; retention (3/7/4, holds, never ageing out the only point) and 16 h/24 h age states; manifest validation (14 mutations, duplicate keys); with OpenSSL 3: CMS round trips (empty, binary, 3 MiB), wrong key, wrong passphrase, corruption, truncation, failed producer leaves no file; set verification against corrupt/truncated components, forged manifest, missing/extra/symlinked files, intruder re-signature, substituted trust key and a different named manifest; VM staging list/ack/prune rules; publication to independent custody and a local HTTPS Blob endpoint (conditional create refusal, readback corruption before marker and ledger, replay/substitution, older cut refused) |
+| `infrastructure/vm/tests/test-phase5-ssh-gates.sh` | CI job `VM continuous deployment and recovery`; local | A disposable Ubuntu 24.04 sshd with the real dispatcher, gate and bootstrap sudoers rule: pin mismatch and missing pin (`Host key verification failed`), unauthorized key, world-readable identity, no tooling, wrong git tree, absolute symlink, exact install, transport check; the deploy role refuses recovery-list/send/ack, capture, tls-renew, timers and `sudo id`; shell metacharacters, command substitution and interactive login refused; interrupted, altered and path-traversal uploads refused; a complete upload becomes a root-only 0600 file |
+| `infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh` | CI (helper-container tar, then host GNU tar as root); local | Real PostgreSQL 17 with V001–V009 and 25 rows, the release's minimal MinIO server (UID 65532) with versions, a delete marker, zero-byte and 3 MB objects and an IAM user; scheduled capture with resume; refusals for a PostgreSQL client session, an unknown container on the network, a running initializer, missing custody and a non-pre-update hold, each restoring the application; `ops.py` lock contention; held pre-update capture and `status`; publication with authenticated decryption, an F1 restore with equal Flyway history and row counts, MinIO structure check, independent copy, ledger and VM acknowledgement; substitution and corruption refused; MinIO restored into a fresh volume, booted with the same identity: every version and delete marker equal, the IAM user restored and still denied; the deploy recovery gate accepts the held, acknowledged, restore-tested point and refuses another manifest digest, a missing acknowledgement and a writer that ran after the cut; `resume` |
+| `infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` (extended) | CI job `VM deployment PostgreSQL and containment tests`; local | All r4 cases unchanged; new CT17-P6 r9 V006 → V009 exercise with empty-history, gap and failed-migration refusals |
+
+### Local results (macOS arm64, Docker 29.8.1, Homebrew OpenSSL 3.6.5, Python 3.9)
+
+- `test_phase5_units.py`: 30 passed (6 crypto cases skip without OpenSSL 3; run with `CODEMASTERY_OPENSSL`).
+- `test-phase5-ssh-gates.sh`: `PHASE5_SSH_GATES_PASS`.
+- `test-phase5-recovery-roundtrip.sh` (helper-container tar): `PHASE5_RECOVERY_ROUNDTRIP_PASS`.
+- `test-postgres-privilege-matrix-containment.sh`: `MATRIX_TESTS_PASS`, `UPGRADE_TESTS_PASS`,
+  `MULTIVERSION_TESTS_PASS`, both containment cases.
+
+Observation: with an inherited non-terminal stdin, Homebrew OpenSSL 3.6.5 ignored
+`-passin`/`-passout` sources and fell back to its UI ("unable to get passphrase"),
+reproduced 205/205 times; with stdin from `/dev/null` 216/216 passed. Every OpenSSL child
+in the tooling and tests now has stdin from `/dev/null` (ADR017 D7).
+The CI results on Ubuntu OpenSSL 3.0.13 are the pull request's.
+
+### Read-only evidence on the VM (23 November 2026)
+
+`deploy.sh preflight` of v0.1.0-rc.1's source revision passed with the real env file,
+Compose model and TLS layout; the source tree transferred to a temporary directory equals
+`release.json` `source_tree`; the Phase 5 schema gate reported **BLOCKED** for that
+release's `deploy.sh` (CT17-P6 r4, V006 target) and **UPGRADE** (V007–V009 pending) with
+r9; capacity passed (57.2 GB free, 2.8 GB required); no unknown project volumes. The
+temporary directory was removed; no container, volume, file under `/etc`, `/opt` or
+`/var/lib`, or database row changed.
+
+### Not run
+
+The `Deploy` workflow against GitHub's `production` environment and the VM (no key,
+environment or bootstrap exists); the NSG gate (no Azure identity); Azure Blob (no
+account); acme.sh staging/renewal; systemd timers; real capture duration; RPO/RTO drills.
