@@ -1,0 +1,16 @@
+# CodeMastery coordinated recovery capture (ADR009 sections 4, 5 and 9.4; ADR017).
+# Quiesces the application writers briefly, captures PostgreSQL and the cold MinIO volume,
+# encrypts and signs the set, then resumes the application. Lock contention, a failure or
+# a missed run is visible in the journal and in `codemastery-ops status`.
+[Unit]
+Description=CodeMastery coordinated recovery capture
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/codemastery-ops capture --kind scheduled
+TimeoutStartSec=3600
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

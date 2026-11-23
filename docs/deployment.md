@@ -1911,6 +1911,26 @@ Remaining gates: owning-module (Adaptive @thanhtran0311), `@tihh647-ui` infrastr
 independent Leader CODEOWNER review; protected integration of PR #263; these grants on any shared or
 production database (Leader-reserved). This revision executes no provisioning on any real database.
 
+### CT17-P6-PRIVILEGES-2026-11-23-r9 — multi-version predecessor deferral (DELEGATED_APPROVED, 23 November 2026)
+
+Recorded under the Leader's Phase 5 delegation ([ADR017 §6.1](decisions/017-ssh-continuous-deployment.md#61-ct17-p6-privileges-2026-11-23-r9--multi-version-predecessor-deferral)).
+r4 let pre-migration provisioning defer a migration-added column only on the exact
+predecessor (history 1..version−1). The deployed preview holds V001–V006, so every
+release that reaches V009 would be refused by provisioning after `deploy.sh all` had
+already quiesced the application. r9 defers the column when the column is absent and the
+Flyway history holds exactly the successful versioned migrations 1..k, each once, for any
+1 ≤ k < version. An empty history, a gap, a failed or repeatable entry, a recorded version
+whose column is missing, or k ≥ version still defer nothing, so provisioning fails closed
+as before. The matrix rows, the column pins and the complete post-migration verification
+are unchanged; nothing is granted earlier than r4 granted it.
+
+Evidence: `test-postgres-privilege-matrix-containment.sh` keeps every r4 case (exact V008
+predecessor, all drift refusals) and adds a fresh V001–V006 database → pre-migration
+provisioning → V007–V009 → hardening → exact matrix, with refusals for an empty history,
+a gap and a failed migration. Read-only evaluation on the VM on 23 November 2026: with
+v0.1.0-rc.1's `deploy.sh` (r4) the update of the deployed V006 database is refused by the
+Phase 5 plan gate before any change; with r9 it is an upgrade with V007–V009 pending.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4479,8 +4499,8 @@ the operator's view. It approves nothing beyond ADR015 and changes no earlier re
 | Stage | How | Result |
 | --- | --- | --- |
 | 1. Candidate | Actions → **Release** → *Run workflow* on `main`, `stage=candidate`; optional `revision` (full SHA on `main`, default the dispatched commit), `public_origin` (default `https://codemastery.app`) and `compatibility_baseline` | Every required check of `main` must be green on the revision. Five linux/amd64 candidates are built, reloaded from their archive, qualified (MinIO initializer suite with the minimal server, backend trust store and runtime privileges, byte-clean PostgreSQL, image hardening, `deploy.sh` preflight/load/provision smoke and update-guard refusals), scanned (Trivy default and comprehensive, SPDX SBOMs), packaged, attested and stored as the draft release `candidate-<12-hex>-<run>-<attempt>`, titled “NOT ADMITTED” |
-| 2. Security admission | The Leader reviews the candidate draft and commits `docs/decisions/release-admissions/<record_id>.json` through a pull request. `python3 infrastructure/release/release.py admission-template --candidate-manifest release-candidate.json --release-tag <candidate tag> --version v<x.y.z>` prints a `PENDING` template with the exact identities and every finding | Only `decision: "ADMITTED"` by a code owner of `/docs/decisions/`, naming that candidate's manifest and archive digests, all ten identities, the origin, the revision and exactly the candidate's findings, permits promotion ([fields](decisions/015-release-pipeline.md#d7--the-admission-record)). The pull request must change **only** the record, and the account named in `decided_by` must **merge** it: the promote job checks GitHub's merge record, not the typed login |
-| 3. Promotion | `stage=promote`, `admission=<record_id>` | Candidate attestation, package, admission and its merge record are verified; images are retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; every row of a fresh rescan must be an admitted candidate finding at the same installed version and no higher severity; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
+| 2. Security admission (ADR015 A1; no pull request) | The admission authority (`chi-thanh-nguyen`) dispatches **Release** on `main` with `stage=promote`, `candidate=<tag>`, `candidate_manifest_sha256=<SHA-256 of the reviewed release-candidate.json>`, `version=v<x.y.z>`, `accepted_findings=<n>` and an optional `note`; reads the `Admission request` job summary; approves the run's pending `release-admission` deployment | Only a first-attempt dispatch from `main` by the authority's account (login and ID, three GitHub views agreeing), approved by that account in the protected environment (required reviewer, `main` only, no administrator bypass; rules and approval read back, fail closed), naming the attested manifest digest and the exact finding count (CRITICAL/HIGH refused unless `accept_critical_or_high`), produces `admission.json`, attested before any candidate image runs ([A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)) |
+| 3. Promotion | Automatic in the same run after the admission | Candidate attestation and package verified; the admission re-derived and bound to this run; images retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; every row of a fresh rescan must be an admitted candidate finding at the same installed version and no higher severity, with no loss of scan coverage; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
 | 4. Publication | Not automated | Un-drafting, tagging or making binaries public is a Leader decision that first needs the F1/F5 licensing determination ([D9](decisions/015-release-pipeline.md#d9--storage-retention-and-publication)) |
 
 A failure at any step stops the stage without a draft. Nothing is retried, and no
@@ -4490,17 +4510,84 @@ draft, tag or release is ever overwritten: a rerun is a new candidate.
 
 1. Download every asset of the release draft into one directory (write access is
    needed to see drafts).
-2. On a workstation, from a clean checkout of the release's `source_revision`:
-   `infrastructure/release/verify-release.sh <dir> --version v<x.y.z> --source . --store <containerd|graphdriver>`
-   (`--version` names the release you intend to transfer; another release is refused).
-   Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand and
-   add `--trusted-root trusted_root.jsonl`. The script verifies the attestation of
+2. On a workstation, verify the package with **two separate checkouts**: the release
+   tooling at `release.json` `tooling.sha` (the `main` commit whose `release.yml`
+   promoted and attested the package, so its verifier understands the package format)
+   and the application source at `release.json` `source_revision` (its `deploy.sh`,
+   Compose files and archive check). Never run the source revision's own
+   `infrastructure/release/verify-release.sh`: it may predate the package format (the
+   first A1 release's source `1d0658a7…` still carries the pull-request admission
+   verifier, which refuses every A1 package). No code from either checkout runs before
+   your own `gh` has verified that `release.json` was attested by `release.yml` on
+   `main` at the tooling commit it names. Run as one bash script (it stops at the first
+   failure):
+
+   ```bash
+   set -euo pipefail
+   pkg=<directory holding the downloaded assets>; version=v<x.y.z>; store=<containerd|graphdriver>
+   repo=https://github.com/chi-thanh-nguyen/codemastery.git
+   # Validate JSON strings before command substitution can strip trailing newlines.
+   revisions="$(python3 -I -c '
+   import json, re, sys
+   with open(sys.argv[1]) as f:
+       manifest = json.load(f)
+   revisions = (manifest["tooling"]["sha"], manifest["source_revision"])
+   if not all(isinstance(value, str) and re.fullmatch("[0-9a-f]{40}", value) for value in revisions):
+       sys.exit("Invalid tooling or source revision SHA.")
+   print(*revisions)
+   ' "$pkg/release.json")" || {
+     printf '%s\n' 'Invalid release manifest or revision SHA.' >&2
+     exit 1
+   }
+   read -r tooling_sha source_revision <<< "$revisions"
+   if ! [[ "$tooling_sha" =~ ^[0-9a-f]{40}$ && "$source_revision" =~ ^[0-9a-f]{40}$ ]]; then
+     printf '%s\n' 'Invalid tooling or source revision SHA.' >&2
+     exit 1
+   fi
+   gh attestation verify "$pkg/release.json" --repo chi-thanh-nguyen/codemastery \
+     --cert-identity https://github.com/chi-thanh-nguyen/codemastery/.github/workflows/release.yml@refs/heads/main \
+     --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners || {
+     printf '%s\n' 'Release manifest attestation verification failed.' >&2
+     exit 1
+   }
+   git clone --quiet "$repo" tooling || {
+     printf '%s\n' 'Failed to clone release tooling; existing directories are not reused.' >&2
+     exit 1
+   }
+   git -C tooling checkout --quiet --detach "$tooling_sha" || {
+     printf '%s\n' 'Failed to check out attested release tooling.' >&2
+     exit 1
+   }
+   git clone --quiet "$repo" source || {
+     printf '%s\n' 'Failed to clone application source; existing directories are not reused.' >&2
+     exit 1
+   }
+   git -C source checkout --quiet --detach "$source_revision" || {
+     printf '%s\n' 'Failed to check out the release source revision.' >&2
+     exit 1
+   }
+   bash tooling/infrastructure/release/verify-release.sh "$pkg" --version "$version" --source source --store "$store"
+   ```
+
+   (`--version` names the release you intend to transfer; another release is refused.)
+   Run in a directory with no `tooling` or `source` destination. A failed clone or
+   checkout stops the procedure; it never removes or reuses an occupied destination.
+   The verifier refuses to run from any commit other than `tooling.sha` or from a
+   modified checkout, and refuses a `--source` checkout that is not exactly
+   `source_revision`; the two are the same directory only when the two commits are
+   equal. Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand,
+   add `--bundle "$pkg/release.sigstore.json" --custom-trusted-root trusted_root.jsonl`
+   to the `gh attestation verify` line and `--trusted-root trusted_root.jsonl` to the
+   verifier, and set `repo` to a local repository already holding both commits; keep
+   fresh `tooling` and `source` destinations. The script verifies the attestation of
    `release.json`, the archive, `mc-source.tar.gz` and `admission.json` (signer
    `release.yml` on `refs/heads/main` exactly, at the recorded tooling commit), the
-   agreement of release, admission and candidate records, the recorded merge of the
-   admission by its decider, online that the admission record is still on `main`
-   unchanged (offline: check it on a connected host), the `deploy.sh`/Compose
-   hashes and `deploy.sh`'s own archive verifier, then prints `--archive`,
+   agreement of release, admission and candidate records (the admission re-derived from
+   its evidence and bound to the promoting run), that `admission.sigstore.json` was
+   signed by the admission's own dispatch run, and online that GitHub's run and
+   approval records name the same dispatching and approving account (offline: only
+   what the attested workflow recorded; run it online on a connected host), the
+   `deploy.sh`/Compose hashes and `deploy.sh`'s own archive verifier, then prints `--archive`,
    `--archive-sha256`, the five `--expect-image` values and `--source-revision`.
    `deploy.sh preflight` reports which image store the VM uses.
 3. Transfer the archive with `mc-source.tar.gz` (the AGPL Corresponding Source of the
@@ -4642,3 +4729,242 @@ must produce the candidate that the Leader may admit with a separate admission r
 
 Anthropic's Claude Code (Claude Opus 5.5) investigated the findings, made the change and
 ran the checks recorded in testing.md.
+
+## Release admission without pull requests — 23 November 2026
+
+[ADR015 Amendment A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)
+records the authority (the Leader's instruction of 23 November 2026), the options
+compared and the design. This section is the operator's view.
+
+### What changed
+
+- The security admission is no longer a JSON record merged through a pull request. It is
+  made inside a `stage=promote` run: the admission authority dispatches the run naming
+  the candidate, the SHA-256 of the `release-candidate.json` it reviewed, the version
+  and the number of findings it accepts; the `Admission request` job shows the verified
+  candidate; the authority approves the run in the protected `release-admission`
+  environment; the run records `admission.json`, attests it and then promotes (stages 2
+  and 3 of the [table above](#stages)).
+- `release.py admission-template` and `admission-provenance` are removed; the promote
+  stage no longer reads `docs/decisions/release-admissions/`.
+- Release packages now contain `admission.sigstore.json` (the admission's own
+  attestation bundle). `verify-release.sh` checks it offline and, online, GitHub's run
+  and approval records of the admitting run.
+- Required configuration: the `release-admission` environment (required reviewer
+  `chi-thanh-nguyen`, administrator bypass disabled, deployments from `main` only). If
+  it is missing or weaker, promotion stops at its first step.
+
+### Approving a future candidate
+
+1. On the candidate draft, take the SHA-256 of `release-candidate.json` (its line in
+   `SHA256SUMS`) and the finding count from the draft summary.
+2. Dispatch, in the Actions UI (**Release** → *Run workflow*, branch `main`) or:
+
+   ```bash
+   gh workflow run release.yml -R chi-thanh-nguyen/codemastery --ref main \
+     -f stage=promote -f candidate=<candidate tag> \
+     -f candidate_manifest_sha256=<sha256> -f version=v<x.y.z> \
+     -f accepted_findings=<n> -f note='<one-line risk acceptance>'
+   ```
+
+3. Open the run, read the `Admission request` summary, then *Review deployments* →
+   `release-admission` → *Approve and deploy*. Only this approval and the dispatch are
+   manual; verification, admission record, attestation, rescan, promotion, smoke and the
+   draft release are automatic. Rejecting, cancelling or not approving admits nothing.
+   The review comment is optional free text (empty, several lines and any characters
+   are accepted); it is recorded verbatim, JSON-escaped, in `admission.json`, is never
+   printed to a log or summary, and authorizes nothing.
+4. A re-run of the run cannot admit (it replays the earlier dispatch); dispatch again.
+
+### Current state of the first candidate
+
+The candidate `candidate-1d0658a7215c-45091629955-1` (draft release ID 454878027, run
+[45091629955](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45091629955),
+source `1d0658a7215c2a3d3fed569738d522137989b666`, 23 assets, `rehearsal: false`) was
+qualified and verified in an earlier session (package, ten identities, attestations,
+Q00–Q05, smoke, 37 findings: 0 CRITICAL, 0 HIGH, 31 MEDIUM, 5 LOW, 1 UNKNOWN). The
+admission record prepared for it under D7 was never merged and is not an admission. As
+of this record the candidate is **not admitted**, nothing has been promoted, no
+`v0.1.0-rc.1` draft exists, nothing was published, and nothing on the Azure VM was
+contacted. Its admission and promotion require this change on `main` and the Leader's
+dispatch and approval as above.
+
+Anthropic's Claude Code (Claude Opus 5.5) selected and implemented the design and ran the
+checks recorded in [testing.md](testing.md#release-admission-redesign-verification--23-november-2026).
+
+## Phase 5 SSH continuous deployment — 23 November 2026
+
+[ADR017](decisions/017-ssh-continuous-deployment.md) records the authority (the Leader's
+Phase 5 delegation), the read-only VM discovery, every decision and its alternatives.
+This section is the operator's view. It approves nothing beyond ADR017; `deploy.sh`
+changes only by the CT17-P6 r9 predicate above, the Compose files and Dockerfiles not at all.
+
+### Components
+
+| Path | Where it runs | Responsibility |
+| --- | --- | --- |
+| `.github/workflows/deploy.yml` | GitHub, manual dispatch on `main` | Workflow **Deploy**: `Deployment request` (authenticates the dispatcher), `Deployment operation` (protected `production` environment, approval read back, SSH operation, external checks, job summary); `Deploy tooling` unit tests on pull requests |
+| `infrastructure/vm/cd/vm-transport.sh` | Runner or operator workstation | The only SSH client path: committed host-key pin, batch mode, hash-checked uploads, `codemastery-ops` invocation |
+| `infrastructure/vm/cd/deploy-release.sh` | Runner or operator workstation | Downloads and verifies the release, uploads tooling/source/package, runs the VM operation |
+| `infrastructure/vm/cd/cd.py` | Runner | Dispatch and environment authentication, deployment context, outside checks, report |
+| `infrastructure/vm/cd/bootstrap.sh`, `bootstrap-remote.sh` | Operator workstation → VM (once) | Locations, tooling, `cmdeploy`, sudoers, `ops.conf`, recovery custody, disabled timers |
+| `infrastructure/vm/cd/nsg-gate.sh` | Runner (optional) | Temporary NSG rule for the runner's /32 on TCP 22, always removed |
+| `infrastructure/vm/cd/known_hosts` | Everywhere | The VM's ED25519 host-key pin |
+| `infrastructure/vm/host/codemastery-ops`, `codemastery-ssh-gate` | VM `/usr/local/sbin` | Root entry point with deploy/operator roles; forced command of `cmdeploy` |
+| `infrastructure/vm/host/ops.py` | VM (root) | Staging, gates, `deploy.sh` invocation, verification, hold/resume, status, TLS check/renewal, timers |
+| `infrastructure/vm/host/recovery.py` | VM (capture) and workstation (publish, verify, restore test, status, prune) | ADR009 recovery sets |
+| `infrastructure/vm/host/systemd/*`, `launchd/*.plist` | VM / workstation | Capture and renewal timers (installed disabled); publisher every 15 minutes |
+
+### One-time setup (Leader)
+
+1. Merge the Phase 5 pull request. From a clean checkout of `main`, read the VM state:
+   `bash infrastructure/vm/cd/bootstrap.sh --identity ~/.ssh/vm-codemastery_key.pem --check`.
+2. Recovery keys on the workstation (macOS needs OpenSSL 3, e.g. Homebrew):
+   `CODEMASTERY_OPENSSL=/opt/homebrew/opt/openssl@3/bin/openssl python3 infrastructure/vm/host/recovery.py init-workstation`.
+   Copy `~/CodeMasteryRecovery/keys/recipient.encrypted.pem` and its passphrase (login
+   Keychain, service `codemastery-recovery-recipient`) to separate offline media.
+3. A dedicated deployment key, never your personal key:
+   `ssh-keygen -t ed25519 -N '' -C codemastery-deploy -f cm-deploy`.
+4. Bootstrap (choose the readiness deadline `deploy.sh` waits; no default is approved):
+   `bash infrastructure/vm/cd/bootstrap.sh --identity ~/.ssh/vm-codemastery_key.pem --apply --deploy-public-key cm-deploy.pub --recipient-cert ~/CodeMasteryRecovery/keys/recipient.crt --wait-timeout <seconds>`.
+   It prints the producer public key and its SHA-256. Save the PEM to a file, then
+   `python3 infrastructure/vm/host/recovery.py trust-producer <file> --fingerprint <sha256>`,
+   and write `~/CodeMasteryRecovery/config.json`:
+   `{"vm": {"host": "20.205.56.236", "user": "azureuser", "identity": "~/.ssh/vm-codemastery_key.pem"}, "producer_key_sha256": "<sha256>", "restore_test": {"postgres_image": "<a PostgreSQL 17.11 image>"}}`
+   (add `"azure": {"account": "…", "container": "…"}` once a storage account is authorized).
+5. GitHub → Settings → Environments → `production`: required reviewer
+   `chi-thanh-nguyen`, "Allow administrators to bypass" off, deployment branches = the
+   custom policy `main` only; secret `VM_SSH_PRIVATE_KEY` = the content of `cm-deploy`
+   (then delete the local private key file); variables `PUBLIC_EXPOSURE_AUTHORIZATION` and
+   `PACKET_FILTER_VERIFICATION` = references to your exposure decision and NSG rule-set
+   record. Optionally the NSG gate variables (`nsg-gate.sh` header) with a federated
+   credential whose only role is a custom role over that NSG's security rules.
+6. Load the publisher (`infrastructure/vm/host/launchd/app.codemastery.recovery-publisher.plist`, header).
+7. Qualify, then enable timers: `sudo codemastery-ops tls-renew --staging` (stops the
+   frontend briefly), a manual capture `sudo codemastery-ops capture --kind manual` and its
+   publication, then `sudo codemastery-ops timers enable`.
+
+### Per release (three dispatches, two of them approvals)
+
+1. Actions → **Deploy** → *Run workflow* on `main`: `operation=plan`, `version=v<x.y.z>`;
+   approve `production`. Read the summary: preflight, schema state, capacity, blockers.
+   Nothing changes on the VM except the uploaded tooling/source/manifests.
+2. `operation=prepare`, same version; approve. The package is verified and staged, the
+   gates re-run, then a **pre-update recovery point** is captured and the application is
+   **held stopped** (maintenance window starts). The summary prints the set ID and its
+   manifest SHA-256.
+3. On the workstation the publisher verifies, decrypts, restore-tests, keeps and
+   acknowledges the point within 15 minutes (or run `python3 infrastructure/vm/host/recovery.py publish`
+   now; it prints the ledger entry).
+4. `operation=deploy`, `version`, `recovery_set`, `recovery_manifest_sha256`; approve. The
+   VM proves the hold and the acknowledgement, runs the release's `deploy.sh all` and
+   verifies; the summary separates infrastructure, readiness, TLS, outside checks and
+   (not verified) features.
+
+CLI equivalent: `gh workflow run deploy.yml -R chi-thanh-nguyen/codemastery --ref main -f operation=plan -f version=v<x.y.z>`.
+
+### Failures
+
+- `BLOCKED` (plan/prepare/deploy): nothing changed (prepare before its capture). Fix the
+  named cause; for a schema blocker build a new release (ADR015) rather than forcing.
+- `FAILED_CONTAINED` (deploy): `deploy.sh` stopped and contained the application; the
+  hold and the point stay. Read the VM log
+  (`sudo ls /var/lib/codemastery/deployments/`). `operation=resume` restarts the previous
+  containers only if no deployment attempt replaced them; otherwise restoring the point
+  is a Leader recovery decision (ADR009 §5), never automatic.
+- Cancel a held update: `operation=resume`.
+- Lock contention or timer failures appear in `sudo codemastery-ops status` and the journal.
+
+### Local fallback with the operator key
+
+Same driver, operator role, no GitHub approval (your SSH session is the authority):
+
+```bash
+export VM_SSH_USER=azureuser VM_SSH_IDENTITY=~/.ssh/vm-codemastery_key.pem
+bash infrastructure/vm/cd/vm-transport.sh check
+bash infrastructure/vm/cd/deploy-release.sh --operation plan --version v<x.y.z>
+bash infrastructure/vm/cd/deploy-release.sh --operation prepare --version v<x.y.z>
+python3 infrastructure/vm/host/recovery.py publish
+bash infrastructure/vm/cd/deploy-release.sh --operation deploy --version v<x.y.z> \
+  --recovery-set <set> --recovery-manifest-sha256 <sha256> --context-file context.json
+```
+
+`context.json` is `{"encoded": "<base64url of {\"authorization\": …, \"public_exposure_authorization\": …, \"packet_filter_verification\": …}>"}`
+with single-line references to your own records. Interactive inspection:
+`ssh -i ~/.ssh/vm-codemastery_key.pem azureuser@20.205.56.236` then
+`sudo codemastery-ops status`, `inventory` or `tls-check`.
+
+### PR #274 remediation: authorization and recovery setup
+
+[ADR017 §11](decisions/017-ssh-continuous-deployment.md#11-pr-274-review-remediation--23-november-2026)
+refines the original Phase 5 implementation. The following applies to the remediated
+revision; earlier test/VM observations retain their historical limits.
+
+- `cmdeploy` requires a short-lived GitHub-signed command token as well as the SSH key.
+  Each command, upload hash/size and deployment context is bound to its audience.
+  Outside the approved `Deploy` job, use the separately privileged operator fallback.
+  Bootstrap installs the verifier under `/usr/local/lib/codemastery`, outside selectable
+  tooling. Updating that verifier requires operator bootstrap. Public GitHub OIDC JWKS
+  and commit-metadata HTTPS endpoints must be reachable; an outage refuses execution.
+- The capture's HBA fence rejects PostgreSQL network writers throughout the cut/hold;
+  container-local bootstrap access remains reserved for trusted maintenance. Restart
+  policies stay disabled during a hold. Root/Docker operators must not write to either
+  store during maintenance. A durable `backup/capture-intent.json` after interruption
+  requires inspection of recorded containers/policies, encrypted partial evidence and
+  the PostgreSQL `pg_hba.conf.cm-recovery-original` file. Do not delete the intent or
+  restart the application blindly. Reconcile the original HBA/restart policies and
+  exact prior running services under operator authority; retain failed-set evidence.
+- `resume` is a cancellation **before** a deployment attempt. After an attempt, old
+  container IDs do not establish schema/data compatibility; inspect containment and
+  obtain the Leader's recovery decision. `FAILED_CONTAINMENT_INCOMPLETE` is distinct
+  from `FAILED_CONTAINED`; post-deployment verification findings keep the hold record.
+- Configure `restore_test.postgres_image` with the **captured server image identity**,
+  not merely any PostgreSQL 17 tag. Make that image, the captured MinIO/server client
+  images and a GNU-tar helper image available on the workstation beforehand. Restore
+  never pulls or builds them. Add `restore_test.minio_escrow` (absolute owner-only JSON
+  file from authorized custody) and optionally `restore_test.helper_image` (default
+  `ubuntu:24.04`). The escrow fields are `root_user`, `root_password`, `app_user`,
+  `app_password`, `bucket`; use the actual deployment identities, never invented
+  credentials. Do not commit the escrow or print it. For example, the non-secret config
+  shape is `"restore_test": {"postgres_image": "<captured image ID>", "minio_escrow": "<absolute escrow path>", "helper_image": "<locally available GNU-tar image>"}`.
+- Full qualification restores into isolated tmpfs, boots the identical captured MinIO
+  image and checks version payloads, metadata/tags, configuration/IAM inventory and
+  authorized bucket versus denied administration. Missing escrow produces at most
+  `+PG_RESTORE_TESTED`, which **cannot** satisfy P9, qualified RPO status or retention
+  advancement. Active external MinIO integrations/replication require separate affected
+  qualification; do not configure them into this bounded recovery topology silently.
+- Publisher retries authenticate existing byte-identical copies and resend a lost
+  acknowledgement. The workstation lock excludes simultaneous publication/pruning.
+  Partial ciphertext and interrupted state stay for inspection. Qualified ages use
+  the signed cut; future cuts are clock errors. Pruning verifies the newest eligible
+  independent/cloud point before deleting older eligible history.
+- TLS staging and failed challenges both verify recovered frontend health, Nginx
+  configuration and served certificate before returning. Timers still require actual
+  VM staging/capture qualification and remain disabled by default. No production
+  bootstrap, capture, restart, renewal, deployment or cloud mutation ran in this review.
+
+OpenAI Codex performed this authorized review/remediation and disposable verification.
+This adds no AI service to the application or deployment runtime. The earlier Claude
+Code disclosure and historical VM/release evidence remain intact.
+
+### Historical VM observation on 23 November 2026 (read-only)
+
+The VM runs the 4 November preview (source `061102e3`, the ADR009 §2.3 image identities)
+from an extracted tree in `/home/azureuser`, Flyway V001–V006, containerd image store,
+trusted `codemastery.app` certificate until 1 February 2027, no recovery timers, acme.sh
+without automation (ADR017 §3). Running the read-only Phase 5 gates there:
+`v0.1.0-rc.1`'s `deploy.sh preflight` passes; its source tree equals `release.json`;
+capacity passes; its schema gate is **BLOCKED** (its `deploy.sh` predates CT17-P6 r9 and
+would refuse V006→V009 during provisioning). Deploying therefore needs a new release
+built from a revision containing this change.
+
+### What this does not establish
+
+Nothing was bootstrapped, staged, captured, deployed, renewed or exposed on the VM; no
+deployment key, environment, NSG rule, storage account or timer exists. Recovery evidence
+is synthetic (CI and local); RPO/RTO, real capture duration, workstation availability and
+Azure publication are not demonstrated. Application feature behavior after a deployment
+remains QA01/QA07/DP03 evidence. This record, the implementation and its tests were
+produced through AI-assisted development (Anthropic Claude Code) under the Leader's task;
+OpenSSH, OpenSSL, GitHub Actions, the Azure CLI (optional gate) and acme.sh (existing)
+are the tools used; no AI service or runtime technology is added to CodeMastery.

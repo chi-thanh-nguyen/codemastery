@@ -1382,8 +1382,10 @@ flyway_schema_history    -              -                                       
 # Reviewed columns that a NEW migration adds to an already reviewed table (CT17-P6 r4:
 # V009 adds enrollments.last_visited_at). The matrix above stays the single exact policy.
 # Only pre-migration provisioning may defer such a column, and only while the database
-# is exactly that migration's predecessor: the column is absent and the Flyway history
-# holds exactly the successful versioned migrations 1..(version-1), each once. Grants on
+# is a predecessor of that migration: the column is absent and the Flyway history holds
+# exactly the successful versioned migrations 1..k, each once, for some k < version
+# (CT17-P6 r9, ADR017; r4 required k = version-1, which refused a multi-version update
+# such as the deployed V006 preview to V009). Grants on
 # the deferred column are then applied by harden_after_migration, and the complete
 # verification requires the whole matrix. Any other state defers nothing, so
 # provisioning fails closed. Fields: relation, column, version of the adding migration.
@@ -1440,15 +1442,19 @@ SQL
     )" || fail "Could not inspect the migration state before provisioning."
     if [[ "${state}" == "history" ]]; then
       # Flyway records V009 as '009'; compare numerically and reject anything else.
+      # CT17-P6 r9 (ADR017): any exact successful prefix 1..k with k < version is a
+      # predecessor of the adding migration (r4 accepted only k = version - 1).
       state="$(psql_admin 2>/dev/null <<SQL
-SELECT CASE WHEN count(*) = ${version} - 1
-             AND count(*) = count(*) FILTER (WHERE success AND version ~ '^[0-9]{1,4}\$')
-             AND count(DISTINCT version) = count(*)
+WITH s AS (SELECT count(*)::int AS n,
+                  count(*) FILTER (WHERE success AND version ~ '^[0-9]{1,4}\$') AS ok,
+                  count(DISTINCT version) AS d
+             FROM public.flyway_schema_history)
+SELECT CASE WHEN s.n BETWEEN 1 AND ${version} - 1 AND s.ok = s.n AND s.d = s.n
              AND ARRAY(SELECT (h.version)::int FROM public.flyway_schema_history h
                        WHERE h.version ~ '^[0-9]{1,4}\$' ORDER BY 1)
-                 = ARRAY(SELECT generate_series(1, ${version} - 1))
+                 = ARRAY(SELECT generate_series(1, s.n))
             THEN 'predecessor' ELSE 'drift' END
-  FROM public.flyway_schema_history;
+  FROM s;
 SQL
       )" || fail "Could not inspect the Flyway history before provisioning."
     fi

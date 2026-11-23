@@ -1,4 +1,10 @@
 name: Release
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && (inputs.stage == 'promote'
+          && format('Release admission and promotion: {0} -> {1}', inputs.candidate, inputs.version)
+          || format('Release candidate: {0}', inputs.revision || github.sha))
+      || format('Release rehearsal: {0}', github.event.pull_request.title) }}
 
 # Phase 4 release pipeline (ADR015): candidate -> qualification -> security
 # admission -> release promotion. Implementation: infrastructure/release/.
@@ -7,14 +13,19 @@ name: Release
 #   from a revision on main whose required checks passed, qualifies the exact
 #   images, scans them, packages the evidence, attests the package (GitHub
 #   artifact attestation, Sigstore) and stores it in a DRAFT release.
-# - stage=promote (manual, from main): requires a Leader admission record
-#   committed under docs/decisions/release-admissions/ by a pull request that
-#   changes only the record and that its decided_by merged. It verifies the
-#   candidate's attestation and every admitted identity, rescans, promotes the
-#   admitted images to the codemastery.invalid/*:release names, runs deploy.sh
-#   on the release archive and stores the attested package in a DRAFT release.
+# - stage=promote (manual, from main; ADR015 A1): the security admission and the
+#   promotion of one candidate. The admission authority dispatches it naming the
+#   candidate draft, the SHA-256 of the release-candidate.json it reviewed, the
+#   release version and the number of findings it accepts; the `admission request`
+#   job authenticates the dispatcher and shows the verified candidate; the
+#   promote job waits for the authority's approval in the protected
+#   `release-admission` environment, records and attests the admission (bound to
+#   this run), then verifies the candidate's attestation and every admitted
+#   identity, rescans, promotes the admitted images to the
+#   codemastery.invalid/*:release names, runs deploy.sh on the release archive and
+#   stores the attested package in a DRAFT release. No admission PR is needed.
 # - pull_request: an unprivileged rehearsal of both stages with a synthetic
-#   REHEARSAL admission; no attestation, upload or release.
+#   REHEARSAL admission that authenticates nobody; no attestation, upload or release.
 #
 # The workflow never publishes a release, creates a tag, pushes an image,
 # uploads a workflow artifact (the repository is public) or contacts a VM.
@@ -39,8 +50,29 @@ on:
         description: 'candidate (optional): full SHA whose Flyway migrations a target may already hold'
         required: false
         default: ''
-      admission:
-        description: 'promote: admission record ID (docs/decisions/release-admissions/<ID>.json)'
+      candidate:
+        description: 'promote: candidate draft tag (candidate-<12 hex>-<run>-<attempt>)'
+        required: false
+        default: ''
+      candidate_manifest_sha256:
+        description: 'promote: SHA-256 of the release-candidate.json you reviewed'
+        required: false
+        default: ''
+      version:
+        description: 'promote: release version to create as a draft (v<major>.<minor>.<patch>[-pre])'
+        required: false
+        default: ''
+      accepted_findings:
+        description: 'promote: number of candidate findings you accept (must equal the candidate count)'
+        required: false
+        default: ''
+      accept_critical_or_high:
+        description: 'promote: also accept CRITICAL/HIGH findings (refused otherwise)'
+        type: boolean
+        required: false
+        default: false
+      note:
+        description: 'promote (optional): your risk-acceptance statement, one line, recorded in the admission'
         required: false
         default: ''
   pull_request:
@@ -107,7 +139,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          admission="$(bash infrastructure/release/release.sh rehearsal-admission create "$RUNNER_TEMP/candidate" "$RUNNER_TEMP")"
+          mkdir -p "$RUNNER_TEMP/admission"
+          admission="$(bash infrastructure/release/release.sh rehearsal-admission create "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/admission")"
           bash infrastructure/release/release.sh release-package "$RUNNER_TEMP/candidate" "$PWD" \
             "$RUNNER_TEMP/release" "$admission" true "$PWD"
       - name: Summarize the rehearsal
@@ -208,15 +241,73 @@ jobs:
         shell: bash
         run: python3 tooling/infrastructure/release/release.py summary "$RUNNER_TEMP" CANDIDATE | tee -a "$GITHUB_STEP_SUMMARY" || true
 
-  promote:
-    name: Release promotion
+  request:
+    name: Admission request
     if: github.event_name == 'workflow_dispatch' && inputs.stage == 'promote'
     needs: tooling
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write        # drafts are readable only with write access; nothing is written
+      actions: read          # GitHub's record of this run
+      attestations: read
+    steps:
+      - name: Require the main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Release stages run only from main." >&2
+          exit 1
+      - uses: actions/checkout@v7
+        with:
+          path: tooling
+          persist-credentials: false
+      - name: Authenticate the dispatching account
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: tooling
+        run: |
+          set -euo pipefail
+          # Inputs are read from GitHub's event payload by release.py, never interpolated here.
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/run.json"
+          python3 infrastructure/release/release.py admission-request --event "$GITHUB_EVENT_PATH" \
+            --run-record "$RUNNER_TEMP/run.json" --output "$RUNNER_TEMP/dispatch.json"
+      - name: Show the verified candidate the approval would admit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: tooling
+        run: |
+          set -euo pipefail
+          read -r tag version < <(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["request"]; print(r["candidate"], r["version"])' "$RUNNER_TEMP/dispatch.json")
+          bash infrastructure/release/release.sh version-unused "$version"
+          # Only the manifest and its bundle: the manifest is an attestation subject and
+          # names every other file's digest. The promote job verifies the whole package.
+          bash infrastructure/release/release.sh draft-download "$tag" "$RUNNER_TEMP/candidate" release-candidate.json release-candidate.sigstore.json
+          cd "$RUNNER_TEMP/candidate"
+          tooling_sha="$(python3 -c 'import json; print(json.load(open("release-candidate.json"))["tooling"]["sha"])')"
+          [[ "$tooling_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "The candidate manifest names no tooling commit." >&2; exit 1; }
+          gh attestation verify release-candidate.json --repo "$GITHUB_REPOSITORY" --bundle release-candidate.sigstore.json \
+            --cert-identity "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/heads/main" \
+            --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners >/dev/null
+          python3 "$GITHUB_WORKSPACE/tooling/infrastructure/release/release.py" admission-preview \
+            --dispatch "$RUNNER_TEMP/dispatch.json" --candidate-manifest release-candidate.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    name: Release admission and promotion
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'promote'
+    needs: [tooling, request]
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
+    # The security admission: this job starts only after the admission authority
+    # approves it in this protected environment (required reviewer, main only, no
+    # administrator bypass). The first step reads the rules and the approval back and
+    # fails closed if either is missing, so an unprotected or absent environment is
+    # never an approval.
+    environment: release-admission
     permissions:
       contents: write        # read the candidate draft; create the release draft
-      pull-requests: read    # merge evidence of the admission record
+      actions: read          # run record, environment rules and the approval record
       id-token: write
       attestations: write
     steps:
@@ -230,41 +321,28 @@ jobs:
           path: tooling
           fetch-depth: 0
           persist-credentials: false   # the token is passed only to the steps that call the API
-      - name: Locate the admission record and download the admitted candidate
+      - name: Authenticate the dispatch and the environment approval
         id: admission
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          INPUT_ADMISSION: ${{ inputs.admission }}
         working-directory: tooling
         run: |
           set -euo pipefail
-          [[ "$INPUT_ADMISSION" =~ ^[A-Z0-9][A-Z0-9-]{7,79}$ && "$INPUT_ADMISSION" != REHEARSAL-* ]] \
-            || { echo "admission must be a record ID." >&2; exit 1; }
-          file="docs/decisions/release-admissions/${INPUT_ADMISSION}.json"
-          git ls-files --error-unmatch -- "$file" >/dev/null || { echo "The admission record is not committed on main." >&2; exit 1; }
-          read -r tag rev version < <(python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); print(a["candidate"]["release_tag"], a["source_revision"], a["release"]["version"])' "$file")
-          [[ "$tag" =~ ^candidate-[0-9a-f]{12}-[0-9]+-[0-9]+$ && "$rev" =~ ^[0-9a-f]{40}$ \
-             && "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] \
-            || { echo "The admission record's candidate tag, revision or version is malformed." >&2; exit 1; }
-          git merge-base --is-ancestor "$rev" origin/main || { echo "The admitted revision is not on main." >&2; exit 1; }
-          # decided_by is only text: require GitHub's record that decided_by merged a
-          # pull request into main that changed only this record (ADR015 D7).
-          commit="$(git log -n 1 --format=%H -- "$file")"
-          blob="$(git rev-parse "$commit:$file")"
-          gh api "repos/$GITHUB_REPOSITORY/commits/$commit/pulls" > "$RUNNER_TEMP/admission-pulls.json"
-          number="$(python3 -c 'import json,sys; p=[x["number"] for x in json.load(open(sys.argv[1])) if x.get("merged_at") and x.get("merge_commit_sha")==sys.argv[2] and x["base"]["ref"]=="main"]; print(p[0] if len(p)==1 else "")' "$RUNNER_TEMP/admission-pulls.json" "$commit")"
-          [[ "$number" =~ ^[0-9]+$ ]] || { echo "The admission record did not reach main through one merged pull request." >&2; exit 1; }
-          gh api "repos/$GITHUB_REPOSITORY/pulls/$number" > "$RUNNER_TEMP/admission-pull.json"
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$number/files?per_page=100" > "$RUNNER_TEMP/admission-files.json"
-          python3 infrastructure/release/release.py admission-provenance --admission "$file" --path "$file" \
-            --commit "$commit" --blob "$blob" --pulls "$RUNNER_TEMP/admission-pulls.json" \
-            --pull "$RUNNER_TEMP/admission-pull.json" --files "$RUNNER_TEMP/admission-files.json" > "$RUNNER_TEMP/admission-provenance.json"
+          api="repos/$GITHUB_REPOSITORY"
+          gh api "$api/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/run.json"
+          gh api "$api/environments/release-admission" > "$RUNNER_TEMP/environment.json"
+          gh api "$api/environments/release-admission/deployment-branch-policies" > "$RUNNER_TEMP/branch-policies.json"
+          gh api "$api/actions/runs/$GITHUB_RUN_ID/approvals" > "$RUNNER_TEMP/approvals.json"
+          python3 infrastructure/release/release.py admission-request --event "$GITHUB_EVENT_PATH" \
+            --run-record "$RUNNER_TEMP/run.json" --output "$RUNNER_TEMP/dispatch.json"
+          python3 infrastructure/release/release.py admission-approval --environment "$RUNNER_TEMP/environment.json" \
+            --branch-policies "$RUNNER_TEMP/branch-policies.json" --approvals "$RUNNER_TEMP/approvals.json" \
+            --output "$RUNNER_TEMP/approval.json"
+          read -r tag version < <(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["request"]; print(r["candidate"], r["version"])' "$RUNNER_TEMP/dispatch.json")
+          bash infrastructure/release/release.sh version-unused "$version"
           bash infrastructure/release/release.sh draft-download "$tag" "$RUNNER_TEMP/candidate"
-          git worktree add --detach "$GITHUB_WORKSPACE/source" "$rev"
-          {
-            echo "file=$file"; echo "version=$version"; echo "revision=$rev"; echo "commit=$commit"
-          } >> "$GITHUB_OUTPUT"
+          { echo "tag=$tag"; echo "version=$version"; } >> "$GITHUB_OUTPUT"
       - name: Verify the candidate attestation
         shell: bash
         env:
@@ -285,19 +363,55 @@ jobs:
             gh attestation verify "$file" "${attest[@]}" --bundle release-candidate.sigstore.json >/dev/null
           done
           echo "Candidate manifest, archive and mc source carry a valid release.yml attestation from main."
+      - name: Record the security admission
+        id: decide
+        shell: bash
+        working-directory: tooling
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/admission"
+          python3 infrastructure/release/release.py admission-decide --dispatch "$RUNNER_TEMP/dispatch.json" \
+            --approval "$RUNNER_TEMP/approval.json" --candidate-manifest "$RUNNER_TEMP/candidate/release-candidate.json" \
+            --codeowners .github/CODEOWNERS --output "$RUNNER_TEMP/admission/admission.json"
+          rev="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_revision"])' "$RUNNER_TEMP/admission/admission.json")"
+          git merge-base --is-ancestor "$rev" origin/main || { echo "The admitted revision is not on main." >&2; exit 1; }
+          echo "revision=$rev" >> "$GITHUB_OUTPUT"
+      - name: Attest the admission before any candidate image runs
+        id: seal
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/admission/admission.json
+      - name: Verify the admission attestation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.seal.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          install -m 0644 "$BUNDLE" "$RUNNER_TEMP/admission/admission.sigstore.json"
+          gh attestation verify "$RUNNER_TEMP/admission/admission.json" --repo "$GITHUB_REPOSITORY" \
+            --bundle "$RUNNER_TEMP/admission/admission.sigstore.json" \
+            --cert-identity "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/heads/main" \
+            --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --deny-self-hosted-runners --format json > "$RUNNER_TEMP/seal-verification.json"
+          python3 "$GITHUB_WORKSPACE/tooling/infrastructure/release/release.py" check-attestation-run \
+            --verification "$RUNNER_TEMP/seal-verification.json" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+      - name: Check out the admitted source revision
+        shell: bash
+        env:
+          REV: ${{ steps.decide.outputs.revision }}
+        working-directory: tooling
+        run: git worktree add --detach "$GITHUB_WORKSPACE/source" "$REV"
       - name: Enable the containerd image store
         shell: bash
         run: bash tooling/infrastructure/release/release.sh enable-containerd-store
       - name: Verify the admission, rescan, promote and run deploy.sh on the release archive
         shell: bash
-        env:
-          ADMISSION_FILE: ${{ steps.admission.outputs.file }}
-          ADMISSION_COMMIT: ${{ steps.admission.outputs.commit }}
         run: |
           set -euo pipefail
           bash tooling/infrastructure/release/release.sh release-package "$RUNNER_TEMP/candidate" "$GITHUB_WORKSPACE/source" \
-            "$RUNNER_TEMP/release" "$GITHUB_WORKSPACE/tooling/$ADMISSION_FILE" false "$GITHUB_WORKSPACE/tooling" "$ADMISSION_COMMIT" \
-            "$RUNNER_TEMP/admission-provenance.json"
+            "$RUNNER_TEMP/release" "$RUNNER_TEMP/admission/admission.json" false "$GITHUB_WORKSPACE/tooling" \
+            "$RUNNER_TEMP/admission/admission.sigstore.json"
       - name: Attest the release package
         id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
@@ -308,7 +422,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.admission.outputs.version }}
-          REV: ${{ steps.admission.outputs.revision }}
+          REV: ${{ steps.decide.outputs.revision }}
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
           set -euo pipefail

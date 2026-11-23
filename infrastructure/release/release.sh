@@ -509,18 +509,26 @@ PY
   log "Candidate package complete: $out"
 }
 
-# release-package CANDIDATE_DIR SOURCE OUT ADMISSION REHEARSAL REPO_ROOT [ADMISSION_COMMIT ADMISSION_PROVENANCE_JSON]
+# release-package CANDIDATE_DIR SOURCE OUT ADMISSION REHEARSAL REPO_ROOT [ADMISSION_SEAL]
+#   ADMISSION is the record this run's admission-decide wrote (ADR015 A1); a real
+#   promotion also needs ADMISSION_SEAL, the admission's own attestation bundle.
 release_package() {
-  local candidate="$1" source="$2" out="$3" admission="$4" rehearsal="$5" repo_root="$6" commit="${7:-}" provenance="${8:-}"
+  local candidate="$1" source="$2" out="$3" admission="$4" rehearsal="$5" repo_root="$6" seal="${7:-}"
   local flag=() version refs=() s archive
   [[ "$rehearsal" == true || "$rehearsal" == false ]] || fail "REHEARSAL must be true or false."
-  [[ "$rehearsal" == false ]] || flag=(--rehearsal)
-  # A real promotion needs the admission's merge evidence (release.py admission-provenance).
-  [[ "$rehearsal" == true || ( -n "$commit" && -s "$provenance" ) ]] || fail "A real promotion needs the admission commit and its provenance."
+  if [[ "$rehearsal" == true ]]; then
+    flag=(--rehearsal)
+  else
+    # The admission must be the one this very run made and sealed: never a record from
+    # another run, candidate or version.
+    [[ -s "$seal" ]] || fail "A real promotion needs the admission's attestation bundle."
+    flag=(--codeowners "$repo_root/.github/CODEOWNERS" --run-id "${GITHUB_RUN_ID:?}" --run-attempt "${GITHUB_RUN_ATTEMPT:?}"
+          --tooling-sha "${GITHUB_SHA:?}")
+  fi
   [[ ! -e "$out" ]] || fail "Output directory already exists."
   python3 "$RELEASE_PY" verify-package "$candidate" --kind candidate --allow-extra release-candidate.sigstore.json
   python3 "$RELEASE_PY" verify-admission --admission "$admission" --candidate-manifest "$candidate/release-candidate.json" \
-    --codeowners "$repo_root/.github/CODEOWNERS" --repo-root "$repo_root" "${flag[@]}" > "$out.admission-check.json"
+    "${flag[@]}" > "$out.admission-check.json"
   version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$out.admission-check.json")"
   [[ "$(git -C "$source" rev-parse HEAD)" == "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_revision"])' "$candidate/release-candidate.json")" ]] \
     || fail "SOURCE is not checked out at the candidate's source revision."
@@ -537,20 +545,21 @@ release_package() {
     --findings "$out.rescan-findings.json" --rescan-coverage "$out.rescan-coverage.json"
 
   install -m 0644 "$admission" "$out/admission.json"
+  [[ -z "$seal" ]] || install -m 0644 "$seal" "$out/admission.sigstore.json"
   install -m 0644 "$candidate/release-candidate.json" "$out/release-candidate.json"
   install -m 0644 "$candidate/mc-source.tar.gz" "$out/mc-source.tar.gz"
   for s in "${SERVICES[@]}"; do install -m 0644 "$candidate/$s.spdx.json" "$out/$s.spdx.json"; done
   install -m 0644 "$out.rescan-findings.json" "$out/rescan-findings.json"
-  python3 - "$(run_context "$rehearsal")" "$commit" "$provenance" > "$out.context.json" <<'PY'
+  python3 - "$(run_context "$rehearsal")" > "$out.context.json" <<'PY'
 import json, sys
 ctx = json.loads(sys.argv[1])
-ctx["admission_commit"] = sys.argv[2] or None
-ctx["admission_provenance"] = json.load(open(sys.argv[3])) if sys.argv[3] else None
 ctx["verification"] = {
     "candidate_package": "SHA256SUMS and release-candidate.json file hashes verified",
     "candidate_attestation": "verified by the promote job before this stage" if not ctx["run"]["rehearsal"] else "REHEARSAL: no attestation",
-    "admission": "schema, identities, candidate manifest/archive digests, accepted findings and code-owner decider verified"
-                 + ("" if ctx["run"]["rehearsal"] else "; merged into main by decided_by in a pull request changing only the record"),
+    "admission": ("REHEARSAL: synthetic admission, authenticates nobody" if ctx["run"]["rehearsal"] else
+                  "made by this run: first-attempt workflow_dispatch of release.yml on main by the admission authority, "
+                  "approved by it in the protected release-admission environment, bound to the candidate manifest digest "
+                  "it named, re-derived from its evidence and attested before any candidate image ran"),
     "deploy_sh_verify_archive": "candidate and release archives accepted for the containerd and graph-driver stores",
     "rescan": "every promotion-time finding is an admitted candidate row (same installed version, severity not raised)",
     "stack_smoke": "deploy.sh preflight, load and provision on the release archive; update guard refuses existing state",
@@ -589,71 +598,81 @@ PY
 
 # rehearsal-admission create CANDIDATE_DIR DEST_DIR   -> prints the record path
 # rehearsal-admission refusals CANDIDATE_DIR REPO_ROOT -> fail-closed checks on the real manifest
+#   The rehearsal admission goes through the same admission-request/admission-decide
+#   code as a real one, with a synthetic request; it authenticates nobody.
 rehearsal_admission() {
-  local mode="$1" candidate="$2" arg="$3" manifest id
+  local mode="$1" candidate="$2" arg="$3" manifest
   manifest="$candidate/release-candidate.json"
-  id="REHEARSAL-${GITHUB_RUN_ID:-LOCAL}-${GITHUB_RUN_ATTEMPT:-1}"
   [[ "$mode" == create || "$mode" == refusals ]] || fail "rehearsal-admission create|refusals"
   local work; work="$(mktemp -d)"
-  python3 "$RELEASE_PY" admission-template --candidate-manifest "$manifest" \
-    --release-tag "candidate-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_revision"][:12])' "$manifest")-${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-1}" \
-    --version v0.0.0-rehearsal > "$work/template.json"
-  python3 - "$work/template.json" "$id" > "$work/$id.json" <<'PY'
-import datetime, json, sys
-a = json.load(open(sys.argv[1]))
-a.update(record_id=sys.argv[2], decision="ADMITTED", decided_by="rehearsal-ci", rehearsal=True,
-         decided_on=datetime.date.today().isoformat(),
-         scope="Pull-request rehearsal of the promotion mechanism. Admits nothing; never published.")
-print(json.dumps(a, indent=2, sort_keys=True))
-PY
+  python3 "$RELEASE_PY" admission-request --rehearsal --candidate-manifest "$manifest" --output "$work/dispatch.json" >/dev/null
+  python3 "$RELEASE_PY" admission-decide --rehearsal --dispatch "$work/dispatch.json" --candidate-manifest "$manifest" \
+    --output "$work/admission.json" >/dev/null
   if [[ "$mode" == create ]]; then
-    install -m 0644 "$work/$id.json" "$arg/$id.json"
+    install -m 0644 "$work/admission.json" "$arg/rehearsal-admission.json"
     rm -rf "$work"
-    printf '%s\n' "$arg/$id.json"
+    printf '%s\n' "$arg/rehearsal-admission.json"
     return
   fi
-  local repo_root="$arg" n=0
-  refused() {  # label json-mutation [--real]
-    local label="$1" mutation="$2" real="${3:-}" file="$work/case/$id.json" flags=(--rehearsal) rc=0
-    mkdir -p "$work/case"
+  local n=0
+  refused() {  # label json-mutation [verify-admission flags...]
+    local label="$1" mutation="$2" file="$work/case.json" rc=0
+    shift 2
+    local flags=("$@"); [[ ${#flags[@]} -gt 0 ]] || flags=(--rehearsal)
     python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); exec(sys.argv[2]); print(json.dumps(a))' \
-      "$work/$id.json" "$mutation" > "$file"
-    [[ "$real" != --real ]] || flags=()
-    python3 "$RELEASE_PY" verify-admission --admission "$file" --candidate-manifest "$manifest" \
-      --codeowners "$repo_root/.github/CODEOWNERS" --repo-root "$repo_root" "${flags[@]}" >/dev/null 2>&1 || rc=$?
+      "$work/admission.json" "$mutation" > "$file"
+    python3 "$RELEASE_PY" verify-admission --admission "$file" --candidate-manifest "$manifest" "${flags[@]}" >/dev/null 2>&1 || rc=$?
     [[ $rc -eq 3 ]] || fail "Admission accepted or crashed (rc=$rc): $label"
     n=$((n + 1)); log "refused as required: $label"
   }
-  python3 "$RELEASE_PY" verify-admission --admission "$work/$id.json" --candidate-manifest "$manifest" \
-    --codeowners "$repo_root/.github/CODEOWNERS" --repo-root "$repo_root" --rehearsal >/dev/null \
+  refused_decision() {  # label request-mutation: the decision itself must refuse the request
+    local label="$1" mutation="$2" rc=0
+    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d["request"]; exec(sys.argv[2]); print(json.dumps(d))' \
+      "$work/dispatch.json" "$mutation" > "$work/dispatch-case.json"
+    python3 "$RELEASE_PY" admission-decide --rehearsal --dispatch "$work/dispatch-case.json" --candidate-manifest "$manifest" \
+      --output "$work/refused.json" >/dev/null 2>&1 || rc=$?
+    [[ $rc -eq 3 && ! -e "$work/refused.json" ]] || fail "Admission decision accepted or crashed (rc=$rc): $label"
+    n=$((n + 1)); log "refused as required: $label"
+  }
+  python3 "$RELEASE_PY" verify-admission --admission "$work/admission.json" --candidate-manifest "$manifest" --rehearsal >/dev/null \
     || fail "The unmodified rehearsal record must verify."
-  refused 'rehearsal record used for a real promotion' 'pass' --real
+  refused 'rehearsal record used for a real promotion' 'pass' --run-id 1 --run-attempt 1 --tooling-sha "$(printf '0%.0s' {1..40})"
+  refused 'record of another run' 'pass' --rehearsal --run-id 999999999 --run-attempt 1 --tooling-sha "$(printf '0%.0s' {1..40})"
   refused 'decision PENDING' 'a["decision"]="PENDING"'
   refused 'swapped backend/frontend identity' 'a["images"]["backend"]["containerd"], a["images"]["frontend"]["containerd"] = a["images"]["frontend"]["containerd"], a["images"]["backend"]["containerd"]'
   refused 'different candidate manifest digest' 'a["candidate"]["manifest_sha256"]="0"*64'
   refused 'different archive digest' 'a["candidate"]["archive_sha256"]="0"*64'
   refused 'different source revision' 'a["source_revision"]="0"*40'
+  refused 'different public origin' 'a["public_origin"]="https://example.org"'
+  refused 'different release version' 'a["release"]["version"]="v9.9.9"'
+  refused 'different candidate tag' 'a["candidate"]["release_tag"]="candidate-%s-1-9" % a["source_revision"][:12]'
   refused 'non-REHEARSAL record ID in a rehearsal' 'a["record_id"]="CM-REL-ADMISSION-NOT-REHEARSAL"'
   refused 'unknown field' 'a["approved_by_ci"]=True'
-  refused 'acceptance of a finding the candidate did not report' 'a["accepted_findings"].append({"service":"backend","id":"CVE-0000-00000","package":"injected"})'
-  if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["accepted_findings"] else 1)' "$work/$id.json"; then
+  refused 'a mandatory restriction removed from not_granted' 'a["not_granted"].remove("public-publication")'
+  refused 'acceptance of a finding the candidate did not report' 'a["accepted_findings"].append({"service":"backend","id":"CVE-0000-00000","package":"injected","installed":"1","severity":"LOW"})'
+  refused_decision 'request naming another candidate manifest digest' 'r["candidate_manifest_sha256"]="0"*64'
+  refused_decision 'request acknowledging a different number of findings' 'r["accepted_findings"]+=1'
+  refused_decision 'request naming another candidate tag' 'r["candidate"]="candidate-000000000000-1-1"'
+  if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["accepted_findings"] else 1)' "$work/admission.json"; then
     refused 'a candidate finding left unaccepted' 'a["accepted_findings"]=a["accepted_findings"][1:]'
     refused 'a candidate finding accepted under another service' 'f=a["accepted_findings"][0]; f["service"]="frontend" if f["service"]!="frontend" else "postgres"'
     refused 'a candidate finding accepted with a modified package' 'a["accepted_findings"][0]["package"]+="-modified"'
+    refused 'a candidate finding accepted at another installed version' 'a["accepted_findings"][0]["installed"]+="-other"'
+    refused 'a candidate finding accepted at another severity' 'f=a["accepted_findings"][0]; f["severity"]="CRITICAL" if f["severity"]!="CRITICAL" else "LOW"'
   else
-    log "The candidate has no findings; the unaccepted-finding case is covered by the unit tests."
+    log "The candidate has no findings; the unaccepted-finding cases are covered by the unit tests."
   fi
   # The candidate's own coverage stands in for a full rescan's coverage.
   python3 -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["security"]["coverage"], open(sys.argv[2], "w"))' \
     "$manifest" "$work/coverage.json"
   local cov=(--rescan-coverage "$work/coverage.json")
   printf '[{"service":"backend","id":"CVE-0000-00000","package":"injected","installed":"1","fixed":"","severity":"CRITICAL","target":"t"}]\n' > "$work/injected.json"
-  if python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
+  if python3 "$RELEASE_PY" check-rescan --admission "$work/admission.json" --candidate-manifest "$manifest" \
        --findings "$work/injected.json" "${cov[@]}" >/dev/null 2>&1; then
     fail "A promotion-time finding outside the admission was accepted."
   fi
   n=$((n + 1)); log "refused as required: promotion-time finding outside the admission"
-  python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
+  python3 "$RELEASE_PY" check-rescan --admission "$work/admission.json" --candidate-manifest "$manifest" \
     --findings "$candidate/findings.json" "${cov[@]}" >/dev/null || fail "The candidate's own findings must be covered by its admission."
   # Promotion-time scan coverage below the candidate scan's (a lost OS, a missing target).
   python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); s=next(s for s in c if c[s]["os"]); c[s]["os"]=None; json.dump(c, open(sys.argv[2], "w"))' \
@@ -662,7 +681,7 @@ PY
     "$work/coverage.json" "$work/coverage-target-lost.json"
   local lost err
   for lost in os-lost target-lost; do
-    if err="$(python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
+    if err="$(python3 "$RELEASE_PY" check-rescan --admission "$work/admission.json" --candidate-manifest "$manifest" \
          --findings "$candidate/findings.json" --rescan-coverage "$work/coverage-$lost.json" 2>&1 >/dev/null)"; then
       fail "A promotion rescan with lower scan coverage ($lost) was accepted."
     fi
@@ -672,7 +691,7 @@ PY
   if python3 -c 'import json,sys; f=json.load(open(sys.argv[1])); sys.exit(0 if any(x["severity"] != "CRITICAL" for x in f) else 1)' "$candidate/findings.json"; then
     python3 -c 'import json,sys; f=json.load(open(sys.argv[1])); x=next(x for x in f if x["severity"] != "CRITICAL"); x["severity"]="CRITICAL"; print(json.dumps([x]))' \
       "$candidate/findings.json" > "$work/raised.json"
-    if python3 "$RELEASE_PY" check-rescan --admission "$work/$id.json" --candidate-manifest "$manifest" \
+    if python3 "$RELEASE_PY" check-rescan --admission "$work/admission.json" --candidate-manifest "$manifest" \
          --findings "$work/raised.json" "${cov[@]}" >/dev/null 2>&1; then
       fail "A promotion-time severity increase was accepted."
     fi
@@ -731,9 +750,25 @@ PY
   log "Draft release $tag holds exactly the ${#files[@]} attested package files; it is not published."
 }
 
-# draft-download TAG DEST: the assets of the one workflow-created draft with that tag.
+# version-unused VERSION: no tag and no release or draft has this name (probes fail closed).
+version_unused() {
+  local tag="$1" repo="${GITHUB_REPOSITORY:?}" tags existing
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] || fail "Malformed release version."
+  tags="$(release_api "repos/$repo/git/matching-refs/tags/$tag" --jq "[.[] | select(.ref == \"refs/tags/$tag\")] | length")" \
+    || fail "Cannot read the repository's tags."
+  [[ "$tags" == 0 ]] || fail "Tag $tag already exists; a release version is used once."
+  existing="$(release_api --paginate "repos/$repo/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | .id")" \
+    || fail "Cannot list the repository's releases."
+  [[ -z "$existing" ]] || fail "A release or draft named $tag already exists; a release version is used once."
+  log "Release version $tag is unused."
+}
+
+# draft-download TAG DEST [ASSET...]: the assets (all, or the named ones) of the one
+# workflow-created draft with that tag.
 draft_download() {
   local tag="$1" dest="$2" repo="${GITHUB_REPOSITORY:?}" id rows aid name size digest
+  shift 2
+  local only=" $* "
   [[ "$tag" =~ ^candidate-[0-9a-f]{12}-[0-9]+-[0-9]+$ ]] || fail "Malformed candidate tag."
   [[ ! -e "$dest" ]] || fail "Download directory already exists."
   rows="$(release_api --paginate "repos/$repo/releases?per_page=100" \
@@ -744,6 +779,7 @@ draft_download() {
   mkdir -p "$dest"
   while IFS=$'\t' read -r aid name size digest; do
     [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || fail "Unexpected asset name."
+    [[ "$only" == "  " || "$only" == *" $name "* ]] || continue
     release_api -H 'Accept: application/octet-stream' "repos/$repo/releases/assets/$aid" > "$dest/$name"
     [[ "$(wc -c < "$dest/$name" | tr -d ' ')" == "$size" ]] || fail "Asset $name is incomplete."
     [[ -z "$digest" || "$digest" == "sha256:$(sha256sum "$dest/$name" | awk '{print $1}')" ]] || fail "Asset $name does not match its digest."
@@ -757,6 +793,7 @@ case "${1:-}" in
   (rehearsal-admission) shift; rehearsal_admission "$@" ;;
   (draft-create)   shift; draft_create "$@" ;;
   (draft-download) shift; draft_download "$@" ;;
+  (version-unused) shift; version_unused "$@" ;;
   (release-package)   shift; release_package "$@" ;;
   (build)          shift; build "$@" ;;
   (qualify)        shift; qualify "$@" ;;

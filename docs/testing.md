@@ -727,11 +727,13 @@ suite against the minimal server, `test-java-truststore.sh`,
 with `POSTGRES_FLAT_IMAGE`, image hardening), scans with Trivy, packages, runs a
 `deploy.sh` preflight/load/provision smoke with refusal cases on a release-named copy,
 checks admission refusals against the real candidate manifest, then promotes with a
-synthetic `REHEARSAL-` admission, rescans, verifies the release archive with
+synthetic `REHEARSAL-` admission (made by the same `admission-request`/`admission-decide`
+code as a real one, authenticating nobody), rescans, verifies the release archive with
 `deploy.sh` for both image stores and repeats the smoke on it. It attests, uploads and
-publishes nothing. `Release candidate` and `Release promotion` run only by manual
-dispatch from `main` with the permissions ADR015 lists; they store attested packages in
-draft releases and never publish. The smoke creates `/etc/codemastery` and a Compose
+publishes nothing. `Release candidate`, `Admission request` and `Release admission and
+promotion` run only by manual dispatch from `main` with the permissions ADR015 lists
+(the last one only after approval in the protected `release-admission` environment,
+ADR015 A1); they store attested packages in draft releases and never publish. The smoke creates `/etc/codemastery` and a Compose
 project named `codemastery` and therefore refuses to run anywhere but a fresh
 GitHub-hosted runner.
 
@@ -5960,3 +5962,250 @@ touches none of them gets no `Release tooling` run, so its required check stays 
 and it cannot satisfy the ruleset (seen on open PRs #263 and #266, both behind `main` and
 touching no release path). Resolving it is a ruleset or workflow decision outside this
 change.
+
+## Release admission redesign verification — 23 November 2026
+
+Scope: [ADR015 Amendment A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)
+(PR #269): authenticated dispatch, protected-environment approval, run-bound and
+attested `admission.json`, the operator verifier. Evidence from an earlier session
+(candidate build, archive and identity verification, Q00–Q05, Trivy recount, the
+original 20 admission mutations) is reused, not repeated, and is listed in
+[deployment.md](deployment.md#current-state-of-the-first-candidate).
+
+| Environment | Check | Result |
+| --- | --- | --- |
+| Local, macOS, Python 3.9.6 | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests` (new: `AdmissionAuthenticationTests`, `AdmissionDecisionTests`, `AttestationAndRunRecordTests`, rewritten `ReleaseChainTests`, `DraftVersionTests` against a stub `gh`) | 37/37 PASS |
+| Container `python:3.12-slim`, bash 5.2 | The same suite; `bash -n` of every release script | 37/37 PASS |
+| Same | Each negative case printed with its refusal message: 19 dispatch refusals (unauthorized actor; the Leader's login on another account ID; wrong repository, repository ID, workflow, branch, event; re-run by another writer and by the Leader; actor/sender/triggering-actor disagreement; bot sender; mismatched or missing run record; missing inputs), 16 environment/approval refusals (missing or other environment, no or other required reviewer, administrator bypass, branch policy not exactly `main`, no approval, approval elsewhere, other approver or account ID, rejection), 13 decision refusals (manifest digest, tag, finding count, CRITICAL/HIGH without acceptance, rehearsal or unverified or foreign candidate, missing coverage, non-authority dispatcher or approver, authority no longer code owner), 34 record tampering/replay refusals (every bound field; other candidate, manifest digest, run ID, attempt, tooling commit; real record used as rehearsal), 12 package-chain refusals (tampered admission or `release.json`, admission of another run, missing seal), 8 certificate and 6 run-record refusals | Each refused for its intended reason |
+| Same, bash 5.2 | `release.sh rehearsal-admission refusals` and `create` on the real candidate manifest of `candidate-1d0658a7215c-45091629955-1` marked as a rehearsal, with its real `findings.json` | 26 refusals verified (new: record of another run, origin, version, tag, `not_granted`, request digest/count/tag, installed version, severity) |
+| Local, real candidate metadata (read-only download of `release-candidate.json`, its bundle, `SHA256SUMS`, `findings.json`) | `admission-request`, `admission-approval`, `admission-preview`, `admission-decide` and `verify-admission` with a **synthetic** GitHub context (fixture, not an admission) on the real manifest; comparison with the earlier prepared record | Accepted; identities, digests, the 37 `{service, id, package}` rows, `not_granted`, revision, origin and version equal the prepared record; `check-rescan` covers the real `findings.json` and refuses an added LOW advisory |
+| Same | `check-attestation-run` on `gh attestation verify --format json` of the real candidate manifest (bundle) | Accepted for run 45091629955 attempt 1; refused for attempt 2 |
+| Container `rhysd/actionlint:1.7.8` (local image, no network) | `actionlint` (with shellcheck) on `release.yml` | No findings |
+
+Not run here: a real admission or promotion (they need this change on `main` and the
+Leader's dispatch and approval); the GitHub API behaviour of the environment and
+approval endpoints under the workflow token was checked against the live response
+shape (`can_admins_bypass`, `deployment_branch_policy`, protection rules) and the REST
+documentation, not in a dispatched run. The CI `Release rehearsal` of the pull request
+is the integration check of the rehearsal path.
+
+### Independent review remediation (F-01 to F-03) — 23 November 2026
+
+An independent review of PR #269 at `b43ab1c` returned two P2 findings and one P3
+finding. Fixed in the same pull request:
+
+| Finding | Defect | Fix | Regression tests |
+| --- | --- | --- | --- |
+| F-01 (P2) | The operator procedure ran `verify-release.sh` from the source revision's checkout; for the first A1 release that is `1d0658a7…`, whose pull-request admission verifier refuses every A1 package | [deployment.md](deployment.md#using-a-release-package-with-deploysh) and ADR015 A1.8: the operator's own `gh` first verifies that `release.json` is attested by `release.yml` on `main` at its `tooling.sha`; the verifier then runs from a clean checkout of `tooling.sha`, with `--source` a separate checkout of `source_revision`. `verify-release.sh` refuses any other tooling commit, a modified or non-git tooling checkout, before running anything else | `VerifyReleaseProcedureTests` (5): a synthetic repository whose source commit carries a historical verifier that refuses A1 packages and whose later tooling commit carries this verifier and a changed `deploy.sh`; the documented script block, extracted from `deployment.md` and run against a stub `gh`, verifies the package from the tooling commit and runs the source commit's `deploy.sh` only; refused: a later main commit as tooling, an untracked file or modified script in the tooling checkout, a copy outside git, the tooling checkout or a later commit as `--source`, a modified source checkout, a tampered `admission.json`, an approval record by another account |
+| F-02 (P2) | The Environment approval comment went through the one-line, 1,000-character validator of the dispatch `note`; a multi-line approval made promotion refuse after approval | `approval_comment()`: GitHub's comment is free text kept verbatim (any lines, Unicode, empty; null or absent recorded as empty); refused only as malformed API data when it is not a string or exceeds 262,144 characters; stored JSON-escaped and never printed; `verify-admission` requires the recorded comment in that form. The `note` keeps its one-line rule; reviewer identity, review state and environment checks are unchanged | `ApprovalCommentTests` (5): single-line, multi-line, CRLF/tab, empty, null, absent, Unicode (including bidirectional controls), an 88,890-character comment and Markdown/shell/workflow-command text accepted verbatim; non-string and over-bound values refused; unauthorized reviewer, the Leader's login on another account, rejected deployment, approval plus rejection, another environment and no approval still refused with a multi-line comment; multi-line approval through decision, JSON round trip, offline and online verification; the CLI chain never echoes the comment |
+| F-03 (P3) | The `Admission request` summary said the package files and source qualification were verified by that job, which downloads only the manifest and its bundle | The summary separates what the job verified (manifest attestation, digest equal to the request, tag, count, CRITICAL/HIGH choice, unused version), what it shows from the attested candidate evidence without re-checking, and what the protected promotion job verifies after approval | `AdmissionPreviewTests` |
+
+Duplicate approval rows and matching approval rows by environment name rather than ID
+were reviewed and left unchanged: the promotion job re-authenticates the dispatch and
+refuses any attempt other than 1, whose single environment job yields one approval
+row, and the environment is read by the same name in the same repository.
+
+| Environment | Check | Result |
+| --- | --- | --- |
+| Local, macOS, Python 3.9.6, bash 3.2.57 | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests` | 48/48 PASS (37 earlier + 11 new) |
+| Container `python:3.12-bookworm` (Python 3.12.16, bash 5.2.15, git 2.39.5, no network) | `bash -n` of every release script; the same suite | Syntax clean; 48/48 PASS |
+| Container `koalaman/shellcheck:v0.11.0` | `-S warning` on `release.sh` and `verify-release.sh`; default severity on `verify-release.sh` and on the documented script block | Clean |
+| Local | Each fix reverted in turn against the new tests: `b43ab1c`'s `release.py` and `verify-release.sh` (13 failures), `b43ab1c`'s `verify-release.sh` alone (3 failures: tooling revision not enforced), the recorded-comment check removed (3 failures) | The tests detect each regression |
+
+Not repeated: the candidate build, archive verification, Q00–Q05, Trivy rescans and
+the 410 MB package checks (unchanged code paths). `release.yml` is unchanged.
+
+### Bootstrap trust-boundary remediation (R-01 and R-02) — 23 November 2026
+
+The delta-focused independent review of PR #269 at `dee517c` found that the
+documented bootstrap could run an existing verifier after a failed clone (R-01,
+P2), and that its standalone SHA condition did not stop Bash 3.2 on failure
+(R-02, P3). The operator procedure now explicitly exits on attestation, clone or
+checkout failure. Occupied destinations are not removed or reused. Both SHAs
+are validated as exactly 40 lowercase hexadecimal characters in their original
+JSON string form before command substitution can discard trailing newlines;
+JSON parsing/type failures and the subsequent Bash SHA condition explicitly exit.
+Offline operators clone from a local repository holding both commits into fresh
+destinations; the attestation policy and exact tooling/source revisions are unchanged.
+
+`VerifyReleaseProcedureTests` extracts the actual Bash block from
+`deployment.md`, preserving its embedded Python indentation and replacing only
+the operator's package, version, store and repository inputs. Real local Git
+operations use a synthetic repository; wrappers log calls, inject selected
+failures and mark verifier invocation. Harmless marker scripts detect execution
+of pre-existing, unattested tooling.
+
+| Regression | Evidence |
+| --- | --- |
+| Occupied destinations | Non-Git tooling with an executable marker, clean Git tooling at another commit with a marker verifier, and an existing source checkout are refused. No verifier marker is created; existing contents and source/tooling HEADs are preserved |
+| Git failures | Tooling clone, tooling checkout, source clone after tooling preparation, and source checkout each refuse with a diagnostic. The Git call count stops at the failed operation; no verifier or application code runs |
+| Invalid manifest inputs | 43 subcases cover both SHAs: empty, truncated, too long, invalid hex, uppercase, embedded newline, leading/trailing whitespace, trailing newline/CRLF, shell-looking text, null, number, boolean, array and object; plus missing fields, invalid structures and malformed JSON. Every case exits nonzero before any `gh` or Git call or verifier invocation |
+| Attestation refusal | Exits before any Git call or repository-code execution |
+| Positive separation | Fresh destinations check out exact tooling and historical source commits and run the A1 verifier with the separate `--source`; package/repository paths containing spaces also pass |
+
+| Environment | Validation | Result |
+| --- | --- | --- |
+| macOS, Python 3.9.6, Bash 3.2.57 | Full release-tooling suite with `-W error::ResourceWarning` | 59/59 PASS, including all 16 procedure tests and the existing F-01/F-02/F-03 regressions |
+| Cached `python:3.12-bookworm`, Python 3.12.16, Bash 5.2.15, network disabled, read-only source mount | Same full suite | 59/59 PASS |
+| Bash 3.2 and Bash 5.2 | `bash -n` of `release.sh`, `verify-release.sh` and the actual documented bootstrap with concrete operator inputs | PASS |
+| Cached `koalaman/shellcheck:v0.11.0`, network disabled, read-only mounts | `-S warning` on the same three shell inputs | No findings |
+
+OpenAI Codex implemented this focused remediation and ran the checks above.
+The GitHub and Sigstore responses in these tests are synthetic: they establish
+bootstrap control flow, not real signature verification or a real admission.
+No workflow, release verifier implementation, admission policy, environment,
+candidate artifact or VM was changed. Candidate builds, Q00–Q05, Trivy scans,
+the 410 MB candidate verification and real admission/promotion were not run.
+
+## Phase 5 SSH deployment verification — 23 November 2026
+
+Verification of [ADR017](decisions/017-ssh-continuous-deployment.md). Every case uses
+disposable containers, synthetic credentials and keys generated for the run; nothing in
+this section ran a deployment, capture, renewal or change on the Azure VM.
+
+### Suites
+
+| Suite | Where | What it proves |
+| --- | --- | --- |
+| `infrastructure/vm/tests/test_phase5_units.py` (stdlib `unittest`, 30 cases) | CI jobs `Deploy tooling` and `VM continuous deployment and recovery`; local | Flyway CRC32 checksums equal the VM's recorded V001–V006 values; schema compatibility (upgrade, r4 exact-predecessor block, checksum/description/failed/gapped/repeatable history, target ahead = image-only rollback refused, drift, fresh, unknown rule); deferral-rule detection; migration substitution; git tree of `git archive HEAD` equals `HEAD^{tree}` and detects a change; unsafe tar members; deployment context round trip; dispatcher authentication (13 refusals: re-run, other workflow/ref/event, non-authority, mixed actors, other path, bad version/operation/recovery inputs, multi-line note); environment gate (10 fail-closed cases); report; retention (3/7/4, holds, never ageing out the only point) and 16 h/24 h age states; manifest validation (14 mutations, duplicate keys); with OpenSSL 3: CMS round trips (empty, binary, 3 MiB), wrong key, wrong passphrase, corruption, truncation, failed producer leaves no file; set verification against corrupt/truncated components, forged manifest, missing/extra/symlinked files, intruder re-signature, substituted trust key and a different named manifest; VM staging list/ack/prune rules; publication to independent custody and a local HTTPS Blob endpoint (conditional create refusal, readback corruption before marker and ledger, replay/substitution, older cut refused) |
+| `infrastructure/vm/tests/test-phase5-ssh-gates.sh` | CI job `VM continuous deployment and recovery`; local | A disposable Ubuntu 24.04 sshd with the real dispatcher, gate and bootstrap sudoers rule: pin mismatch and missing pin (`Host key verification failed`), unauthorized key, world-readable identity, no tooling, wrong git tree, absolute symlink, exact install, transport check; the deploy role refuses recovery-list/send/ack, capture, tls-renew, timers and `sudo id`; shell metacharacters, command substitution and interactive login refused; interrupted, altered and path-traversal uploads refused; a complete upload becomes a root-only 0600 file |
+| `infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh` | CI (helper-container tar, then host GNU tar as root); local | Real PostgreSQL 17 with V001–V009 and 25 rows, the release's minimal MinIO server (UID 65532) with versions, a delete marker, zero-byte and 3 MB objects and an IAM user; scheduled capture with resume; refusals for a PostgreSQL client session, an unknown container on the network, a running initializer, missing custody and a non-pre-update hold, each restoring the application; `ops.py` lock contention; held pre-update capture and `status`; publication with authenticated decryption, an F1 restore with equal Flyway history and row counts, MinIO structure check, independent copy, ledger and VM acknowledgement; substitution and corruption refused; MinIO restored into a fresh volume, booted with the same identity: every version and delete marker equal, the IAM user restored and still denied; the deploy recovery gate accepts the held, acknowledged, restore-tested point and refuses another manifest digest, a missing acknowledgement and a writer that ran after the cut; `resume` |
+| `infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` (extended) | CI job `VM deployment PostgreSQL and containment tests`; local | All r4 cases unchanged; new CT17-P6 r9 V006 → V009 exercise with empty-history, gap and failed-migration refusals |
+
+### Local results (macOS arm64, Docker 29.8.1, Homebrew OpenSSL 3.6.5, Python 3.9)
+
+- `test_phase5_units.py`: 30 passed (6 crypto cases skip without OpenSSL 3; run with `CODEMASTERY_OPENSSL`).
+- `test-phase5-ssh-gates.sh`: `PHASE5_SSH_GATES_PASS`.
+- `test-phase5-recovery-roundtrip.sh` (helper-container tar): `PHASE5_RECOVERY_ROUNDTRIP_PASS`.
+- `test-postgres-privilege-matrix-containment.sh`: `MATRIX_TESTS_PASS`, `UPGRADE_TESTS_PASS`,
+  `MULTIVERSION_TESTS_PASS`, both containment cases.
+
+Observation: with an inherited non-terminal stdin, Homebrew OpenSSL 3.6.5 ignored
+`-passin`/`-passout` sources and fell back to its UI ("unable to get passphrase"),
+reproduced 205/205 times; with stdin from `/dev/null` 216/216 passed. Every OpenSSL child
+in the tooling and tests now has stdin from `/dev/null` (ADR017 D7).
+The CI results on Ubuntu OpenSSL 3.0.13 are the pull request's.
+
+### Read-only evidence on the VM (23 November 2026)
+
+`deploy.sh preflight` of v0.1.0-rc.1's source revision passed with the real env file,
+Compose model and TLS layout; the source tree transferred to a temporary directory equals
+`release.json` `source_tree`; the Phase 5 schema gate reported **BLOCKED** for that
+release's `deploy.sh` (CT17-P6 r4, V006 target) and **UPGRADE** (V007–V009 pending) with
+r9; capacity passed (57.2 GB free, 2.8 GB required); no unknown project volumes. The
+temporary directory was removed; no container, volume, file under `/etc`, `/opt` or
+`/var/lib`, or database row changed.
+
+### Not run
+
+The `Deploy` workflow against GitHub's `production` environment and the VM (no key,
+environment or bootstrap exists); the NSG gate (no Azure identity); Azure Blob (no
+account); acme.sh staging/renewal; systemd timers; real capture duration; RPO/RTO drills.
+
+## PR #274 author-side remediation verification — 23 November 2026
+
+This is the post-remediation record for the Leader-authorized comprehensive review,
+direct fixes and push on `feature/phase5-ssh-deployment`. Initial HEAD was
+`ba2d7dcc9ca894606ceb454fb4031fd095e8db19`; base/merge-base was
+`e9d6da15b3fe4d581765d1c733abb70698dac779` (28 original changed files).
+Read the final commit/CI snapshot from PR #274; this record does not freeze a later
+concurrent head or claim human approval. Earlier counts in the section above are
+historical. Decisions and operational changes are in [ADR017 §11](decisions/017-ssh-continuous-deployment.md#11-pr-274-review-remediation--23-november-2026).
+
+OpenAI Codex both reviewed and modified the code. Verification below is **author-side
+verification of remediation**, not a separate independent second review. A focused
+independent rereview of SSH/root authority, recovery and interruption handling is
+recommended before protected integration. No review approval or merge was submitted.
+
+### Confirmed findings and disposition
+
+All items below were corrected in the same PR. Source references identify the original
+defective paths at the initial HEAD; the named functions retain the corrected paths.
+`FIXED_AND_VERIFIED` is bounded to the local synthetic/disposable evidence below,
+not real VM/GitHub-environment/Azure qualification.
+
+| ID / severity | Original path and defect; impact | Remediation and evidence |
+| --- | --- | --- |
+| F01 / P1 | `host/codemastery-ops` install-tooling and `ops.py` decode_context: caller-selected tree/hash and approval-looking strings established no trusted provenance. A deployment key holder could install arbitrary root-executed tooling or forge deployment context. | Fixed operator-installed OIDC verifier, exact-command audiences, signed workflow/actor/repository/environment/run claims, GitHub commit-tree check and replay barrier. Original disposable container printed `ARBITRARY_TOOLING_EXECUTED`; final SSH suite rejects key-only calls and untrusted trees, accepts real RSA-signed fixture commands. **FIXED_AND_VERIFIED**. |
+| F02 / P1 | `ops.py` safe_extract and shell tooling extraction: individually relative symlinks could form an escaping chain before a subsequent tree check; concurrent receives could also replace verified inputs before use. | Reject all links/special files/`.git` entries before extraction; serialize transfers/install/consumers. The relative-chain test fails on the original source and passes after correction. Archive-of-HEAD tree equality and valid install still pass. **FIXED_AND_VERIFIED**. |
+| F03 / P1 | `recovery.py` pg_other_clients/capture: samples, an exemptible application name and row counts did not enforce continuous writer exclusion; restart could violate capture/hold. Interrupted evidence was deleted. | Persistent intent, HBA network rejection, local bootstrap-only socket, disabled restart policies, private topology/volume checks, MinIO stop before cut, preserved partials and visible cleanup failures. Real direct TCP writer refused throughout hold; producer failure and abrupt exit tested; explicit fixture reconciliation succeeds. **FIXED_AND_VERIFIED**. |
+| F04 / P1 | `recovery.py` publish_set/restore_test: PG PASS alone minted `+RESTORE_TESTED` while MinIO boot was `NOT_RUN`; P9 accepted the suffix. | Full PG + identical-image MinIO boot, version payload/stat/tag/config/IAM readback and application allowed/denied checks; evidence-bound receipt required at both gates. PG-only regression fails against original source; full disposable path passes; PG-only receipt rejected by P9. **FIXED_AND_VERIFIED**. |
+| F05 / P1 | `ops.py` op_resume/op_deploy: unchanged old container IDs could authorize resume after provisioning/migration already modified state. | Persist attempt before mutation; refuse resume/replay after any attempt; retain evidence and independently check containment. Original source returns RESUMED in the new negative test; corrected source refuses before start. **FIXED_AND_VERIFIED**. |
+| F06 / P2 | `ops.py` op_tls_renew: staging returned from inside try before post-finally health/readback; a partial key/chain rename was not considered replaced. | Shared restart/health/Nginx/served-leaf checks for staging, real and failed challenge paths; rollback both files even between renames. Original staging regression fails; staging positive/negative, real-pair replacement and partial-rename rollback pass. No real ACME operation. **FIXED_AND_VERIFIED**. |
+| F07 / P2 | `recovery.py` publication/prune: an interrupted copy/cloud write could make retries permanently conflict; ledger success skipped a lost acknowledgement; workstation publication/pruning lacked mutual exclusion. | Exclusive lock, authenticated byte-identical reuse, deterministic marker last, existing-copy readback and acknowledgement retry. Local HTTPS conflict/corrupt-read/retry tests and lock exclusion pass. **FIXED_AND_VERIFIED**. |
+| F08 / P2 | `ops.py` verify_state/image_store and `cd.py` report: nested component UP could override overall DOWN; wrong host port/restart policy went unchecked; external failures did not fail reporting; failed discovery guessed graphdriver. | Parse top-level health, enforce 443 and restart policy, refuse failed discovery and fail external deploy/verify reports. Original readiness/port tests fail; corrected positive/negative verification tests pass. **FIXED_AND_VERIFIED**. |
+| F09 / P2 | `cd/nsg-gate.sh` close: failed lookup, including authentication/network failure, was reported as rule absence; priority validation admitted >4096. | Successful list plus final absence readback, explicit unknown/removal failure and numeric bounds. Synthetic CLI tests reject failed lookup/invalid priority and accept verified absence. No Azure API mutation. **FIXED_AND_VERIFIED**. |
+| F10 / P2 | Recovery status/retention counted independently copied but untested points as qualified; VM age used capture-start ID rather than signed cut. New unqualified points could displace qualified retention selections. | Qualified-only ages/retention; signed cut; clock-error state; newest eligible independent/cloud readback before prune; retain partial evidence. 3/7/4, holds, age boundaries, incomplete qualification and cloud fault tests pass. **FIXED_AND_VERIFIED**. |
+| F11 / P3 | `cd.py` parse_request and `deploy-release.sh`: workflow advertised verify's version as optional but required one. | Verify without a version delegates to the current deployment; plan/prepare/deploy still require a version. **FIXED_AND_VERIFIED**. |
+
+### Executed local checks
+
+Environment: macOS arm64, Python 3.9, Docker Engine 29.8.1, OpenSSL 3.6.5;
+synthetic keys/credentials only, task-owned disposable containers/networks/volumes.
+SSH binds only loopback; recovery exposes zero ports. The production VM was never
+contacted. MinIO restore uses the identical captured image and a local-driver tmpfs
+volume; credentials are never printed or committed. OIDC uses real RSA signature
+verification against a root-installed synthetic issuer fixture; it is not a token
+issued by an actual approved GitHub deployment job.
+
+```bash
+CODEMASTERY_OPENSSL=/opt/homebrew/opt/openssl@3/bin/openssl \
+  python3 -m unittest -v infrastructure/vm/tests/test_phase5_units.py
+python3 -m unittest -v infrastructure/release/tests/test_release.py
+bash infrastructure/vm/tests/test-phase5-ssh-gates.sh
+CODEMASTERY_OPENSSL=/opt/homebrew/opt/openssl@3/bin/openssl \
+  MINIO_IMAGE=cmtest/minio-server:local \
+  bash infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+bash infrastructure/vm/tests/test-deploy-syntax-and-authorization-gates.sh
+bash infrastructure/vm/tests/test-deploy-offline-compose-guards.sh
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+actionlint .github/workflows/deploy.yml .github/workflows/ci-vm.yml
+git diff --check
+```
+
+The Phase 5 unit suite has **45 tests** (15 added), including cryptography; no crypto
+skip with the selected OpenSSL. SSH prints `PHASE5_SSH_GATES_PASS`. Recovery prints
+`PHASE5_RECOVERY_ROUNDTRIP_PASS`, including producer failure, abrupt-process intent,
+held network-writer rejection, full restore publication, PG-only P9 rejection and
+resume. PostgreSQL exercises the unchanged complete privilege matrix, V006→V009,
+empty/gapped/failed/duplicate/repeatable history refusals, column/privilege drift and
+both containment outcomes. Python compilation, shell syntax and actionlint v1.7.12 pass.
+All **59 release verification tests pass**, covering the existing attestation bootstrap and source/tooling
+separation. The full backend/frontend/E2E builds are delegated to the final PR's CI;
+their application source was not changed by this remediation.
+
+Before/fixed-after evidence: six new tests were run against initial-HEAD modules and
+failed (TLS staging, source link-chain escape, overall readiness, port/restart drift,
+post-attempt resume and PG-only full qualification). The root-tooling bypass was
+separately executed in a network-isolated container using a harmless marker script.
+Original failure logs and subsequent runs are under the task's private temporary
+evidence directory; no exploit ran against the Azure VM.
+
+Final rereview of the first remediation commit also tightened F07/F10: reject a signed
+future cut before publication, preserve manifest-bound full restore evidence when an
+additional destination is populated, and count upgraded ledger records as one point.
+The 45-test suite was rerun successfully with explicit future-cut refusal and
+PG-only → full independent → full Azure publication/deduplicated status assertions.
+The TLS regression also injects an unknown initial `docker stop` outcome: ingress
+restart/health/readback still execute, and the operation reports failure rather than
+leaving a possibly stopped frontend without recovery. It failed before the correction
+and all TLS regression cases passed afterwards.
+
+### Readiness limits and release compatibility
+
+Code and disposable testing do not establish operational configuration or production
+qualification. The actual `production` Environment lookup returned HTTP 404; missing
+configuration or insufficient endpoint access cannot authorize deployment. Real
+GitHub-issued SSH command tokens, VM bootstrap/credentials, Azure Blob/RBAC and NSG
+operation, Keychain/scheduler binding, ACME staging/renewal, actual capture/restore
+capacity, reboot/power-loss behavior, measured RPO/RTO and full-product F2/Q08 remain
+unexecuted. External resources/cost, exposure and actual restore/deployment authority
+remain Leader-reserved. Targets are not guarantees.
+
+The live draft `v0.1.0-rc.1` release manifest was downloaded read-only: source
+`1d0658a7215c2a3d3fed569738d522137989b666`, tooling
+`e9d6da15b3fe4d581765d1c733abb70698dac779`. Its source's deploy.sh lacks r9; a separately
+admitted new release containing r9 is required for the existing V006→V009 update.
+The draft was not repromoted, published or modified. No production secret, protection,
+environment setting, Azure resource or real certificate was changed.

@@ -2129,6 +2129,40 @@ ADR006 and is not reconciled by this record. The immutable canonical tree remain
 unchanged; this is an explicit addition, not a reinterpretation of its original
 inventory.
 
+## Bounded Phase 5 deployment additions — 23 November 2026
+
+On 2026-11-23 (Asia/Ho_Chi_Minh), Project Leader and repository Owner @chi-thanh-nguyen
+authorized, in the instruction “CodeMastery — Full Phase 5 Implementation: Automated
+SSH-Based Azure VM Deployment”, the Phase 5 implementation in one pull request, including
+focused supporting scripts and modules rather than an ever-larger `deploy.sh`.
+[ADR017](decisions/017-ssh-continuous-deployment.md) records the decisions. This record
+adds exactly these files and two directories under the existing `infrastructure/vm/`:
+
+| Path | Responsibility |
+| --- | --- |
+| `.github/workflows/deploy.yml` | Workflow `Deploy`: jobs `Deploy tooling` (pull requests), `Deployment request` and `Deployment operation` (manual dispatch from `main`, protected `production` environment) |
+| `infrastructure/vm/cd/vm-transport.sh` | SSH client path with the committed host-key pin; uploads and remote operations |
+| `infrastructure/vm/cd/deploy-release.sh` | Release download, verification, upload and VM operation driver (workflow and local operator) |
+| `infrastructure/vm/cd/cd.py` | Runner-side dispatch/environment authentication, context, outside checks, report |
+| `infrastructure/vm/cd/bootstrap.sh`, `infrastructure/vm/cd/bootstrap-remote.sh` | One-time VM setup (check mode is read-only) |
+| `infrastructure/vm/cd/nsg-gate.sh` | Optional temporary NSG rule for the runner |
+| `infrastructure/vm/cd/known_hosts` | The VM's ED25519 host-key pin |
+| `infrastructure/vm/host/codemastery-ops`, `infrastructure/vm/host/codemastery-ssh-gate` | Root entry point and forced command installed on the VM |
+| `infrastructure/vm/host/ops.py`, `infrastructure/vm/host/recovery.py` | VM operations; recovery capture and workstation publication (stdlib Python) |
+| `infrastructure/vm/host/authorize.py` | Fixed operator-installed GitHub OIDC command verifier, outside uploaded tooling; added under the Leader's explicit PR #274 review/remediation authorization (ADR017 §11) |
+| `infrastructure/vm/host/systemd/codemastery-capture.service`, `.timer`, `codemastery-tls-renew.service`, `.timer` | Timers installed disabled |
+| `infrastructure/vm/host/launchd/app.codemastery.recovery-publisher.plist` | Workstation publisher template |
+| `infrastructure/vm/tests/test_phase5_units.py`, `test-phase5-ssh-gates.sh`, `test-phase5-recovery-roundtrip.sh` | Tests (one new job in `ci-vm.yml`: `VM continuous deployment and recovery`) |
+| `docs/decisions/017-ssh-continuous-deployment.md` | ADR017 |
+
+`infrastructure/vm/deploy.sh` changes one predicate (CT17-P6 r9) and
+`test-postgres-privilege-matrix-containment.sh` gains its case. The existing
+`/.github/workflows/`, `/infrastructure/` and `/docs/decisions/` CODEOWNERS rules cover
+every addition and are unchanged. No existing job, check name, ruleset, application
+dependency, module or directory outside these paths changes. The tree below is not
+redrawn for these files; this table is the explicit addition. The immutable canonical tree
+remains unchanged.
+
 ## ADR014 hybrid-authentication file additions — 16 November 2026
 
 `STRUCT-AUTH-SESSION-2026-11-16-r1` is **DELEGATED_APPROVED** under the Project
