@@ -859,18 +859,21 @@ class ReleaseChainTests(unittest.TestCase):
 
     REPO = "chi-thanh-nguyen/codemastery"
 
-    def build(self, d, seal=True, run_id=RUN):
+    def build(self, d, seal=True, run_id=RUN, tooling=TOOLING, source=REV, compatibility=None, approval_rows=None):
         pkg = os.path.join(d, "release")
         os.makedirs(pkg)
         cand = candidate_manifest()
-        cand.update(source_tree="t" * 40, mc_source={"name": "mc-source.tar.gz", "sha256": hashlib.sha256(b"src").hexdigest()},
-                    compatibility={"deploy_sh_sha256": "0" * 64})
+        cand.update(source_revision=source, source_tree="t" * 40,
+                    mc_source={"name": "mc-source.tar.gz", "sha256": hashlib.sha256(b"src").hexdigest()},
+                    compatibility=compatibility or {"deploy_sh_sha256": "0" * 64})
         cand["security"]["scanner"] = {"tool": "trivy"}
         dump(cand, os.path.join(pkg, "release-candidate.json"))
         sha = release.sha256_file(os.path.join(pkg, "release-candidate.json"))
-        dispatch = release.authenticate_dispatch(runner_env(), event(inputs=request_inputs(candidate_manifest_sha256=sha)),
-                                                 run_record())
-        approval = release.check_environment(environment(), BRANCH_POLICIES, approvals())
+        inputs = request_inputs(candidate_manifest_sha256=sha, candidate="candidate-%s-45091629955-1" % source[:12])
+        dispatch = release.authenticate_dispatch(runner_env(GITHUB_SHA=tooling), event(inputs=inputs),
+                                                 run_record(head_sha=tooling))
+        approval = release.check_environment(environment(), BRANCH_POLICIES,
+                                             approvals() if approval_rows is None else approval_rows)
         adm = release.decide_admission(cand, sha, dispatch, approval, OWNERS, False, "2026-11-23T10:00:00Z")
         dump(adm, os.path.join(pkg, "admission.json"))
         if seal:
@@ -885,7 +888,7 @@ class ReleaseChainTests(unittest.TestCase):
         dump([], os.path.join(d, "rescan.json"))
         dump({"tool": "trivy"}, os.path.join(d, "scanner.json"))
         dump({s: {"os": None, "os_end_of_support": False, "targets": []} for s in SERVICES}, os.path.join(d, "coverage.json"))
-        dump({"tooling": {"sha": TOOLING, "workflow_ref": release.WORKFLOW_REF},
+        dump({"tooling": {"sha": tooling, "workflow_ref": release.WORKFLOW_REF},
               "run": {"rehearsal": False, "id": run_id, "attempt": "1"}, "verification": {}},
              os.path.join(d, "ctx.json"))
         rc = release.main(["release-manifest", "--package", pkg, "--archive-name", "codemastery-release-v0.1.0-rc.1-linux-amd64.tar",
@@ -960,6 +963,361 @@ class ReleaseChainTests(unittest.TestCase):
             pkg = self.build(d, seal=False)
             with self.assertRaises(release.Refused):
                 release.verify_release_chain(pkg, self.REPO)
+
+
+MULTILINE_COMMENT = "Accept the 37 verified residual findings.\nNo deployment or public publication authorized."
+
+
+class ApprovalCommentTests(unittest.TestCase):
+    """F-02: the Environment approval comment is GitHub's free text, kept verbatim; identity rules are unchanged."""
+
+    def check(self, **row):
+        return release.check_environment(environment(), BRANCH_POLICIES, approvals(**row))
+
+    def test_legitimate_comments_are_kept_verbatim(self):
+        long_text = ("Reviewed line %d of the candidate summary.\n" * 2000) % tuple(range(2000))
+        cases = {
+            "single line": "Admitted after review of the candidate summary.",
+            "multi-line": MULTILINE_COMMENT,
+            "CRLF, tab and blank lines": "Accept.\r\n\r\n\tNo deployment.\r\n",
+            "empty": "",
+            "Unicode": "Chấp nhận 37 phát hiện. ✅ — 承認 \u202eRTL\u202c",
+            "longer than the dispatch note limit": long_text,
+            "markdown and shell metacharacters": "| `$(id)` | <b>x</b> ${HOME} ; rm -rf / |\n::warning::not a command",
+        }
+        self.assertGreater(len(long_text), 65536)
+        for label, comment in cases.items():
+            with self.subTest(label):
+                self.assertEqual(self.check(comment=comment)["approval_comment"], comment)
+        # GitHub's schema makes the comment a required string; null or absent records as empty.
+        self.assertEqual(self.check(comment=None)["approval_comment"], "")
+        absent = approvals()
+        del absent[0]["comment"]
+        self.assertEqual(release.check_environment(environment(), BRANCH_POLICIES, absent)["approval_comment"], "")
+
+    def test_malformed_comment_data_is_refused(self):
+        for label, value in (("number", 7), ("boolean", True), ("list", ["ok"]), ("object", {"body": "ok"}),
+                             ("beyond the bound", "x" * (release.APPROVAL_COMMENT_MAX + 1))):
+            with self.subTest(label), self.assertRaises(release.Refused):
+                self.check(comment=value)
+        self.assertEqual(len(self.check(comment="x" * release.APPROVAL_COMMENT_MAX)["approval_comment"]),
+                         release.APPROVAL_COMMENT_MAX)
+
+    def test_identity_and_state_rules_are_unchanged(self):
+        other = {"login": "contributor", "id": 4242, "type": "User"}
+        cases = {
+            "unauthorized reviewer with a valid comment": approvals(user=other, comment=MULTILINE_COMMENT),
+            "the Leader's login on another account": approvals(user=dict(LEADER, id=999), comment=MULTILINE_COMMENT),
+            "rejected deployment": approvals(state="rejected", comment=MULTILINE_COMMENT),
+            "approval plus a rejection": approvals(comment=MULTILINE_COMMENT) + approvals(state="rejected"),
+            "approval in another environment": approvals(environments=[{"id": 1, "name": "copilot"}],
+                                                         comment=MULTILINE_COMMENT),
+            "no approval": [],
+        }
+        for label, rows in cases.items():
+            with self.subTest(label), self.assertRaises(release.Refused):
+                release.check_environment(environment(), BRANCH_POLICIES, rows)
+
+    def test_multiline_approval_through_admission_and_online_verification(self):
+        cand = candidate_manifest()
+        rows = approvals(comment=MULTILINE_COMMENT)
+        dispatch = release.authenticate_dispatch(runner_env(), event(), run_record())
+        approval = release.check_environment(environment(), BRANCH_POLICIES, rows)
+        record = release.decide_admission(cand, CAND_SHA, dispatch, approval, OWNERS, False, "2026-11-23T10:00:00Z")
+        run = {"run_id": RUN, "run_attempt": "1", "tooling_sha": TOOLING}
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "admission.json")
+            release.write_json(path, record)
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            self.assertNotIn(MULTILINE_COMMENT, text)                       # stored JSON-escaped, one line
+            self.assertIn(json.dumps(MULTILINE_COMMENT), text)
+            stored = release.load_json(path, "admission record")
+        self.assertEqual(stored["authorization"]["approval_comment"], MULTILINE_COMMENT)
+        release.verify_admission(stored, cand, CAND_SHA, OWNERS, False, run)
+        release.verify_admission(stored, cand, CAND_SHA, None, False, None)
+        self.assertEqual(release.check_run_record(stored, run_record(), rows)["approved_by"]["id"], 212181152)
+        other = {"login": "contributor", "id": 4242, "type": "User"}
+        for label, online in (("unauthorized reviewer", approvals(user=other, comment=MULTILINE_COMMENT)),
+                              ("rejected deployment", approvals(state="rejected", comment=MULTILINE_COMMENT)),
+                              ("malformed comment", approvals(comment=["x"]))):
+            with self.subTest("online: " + label), self.assertRaises(release.Refused):
+                release.check_run_record(stored, run_record(), online)
+        for label, value in (("non-text", 7), ("null", None), ("beyond the bound", "x" * (release.APPROVAL_COMMENT_MAX + 1))):
+            with self.subTest("recorded comment " + label), self.assertRaises(release.Refused):
+                tampered = copy.deepcopy(stored)
+                tampered["authorization"]["approval_comment"] = value
+                release.verify_admission(tampered, cand, CAND_SHA, OWNERS, False, run)
+
+    def test_cli_keeps_the_comment_out_of_output(self):
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "release.py")
+        comment = MULTILINE_COMMENT + "\n::error::injected\n| forged | row |"
+        with tempfile.TemporaryDirectory() as d:
+            paths = {n: os.path.join(d, n) for n in ("event.json", "run.json", "env.json", "policies.json", "approvals.json",
+                                                     "cand.json", "dispatch.json", "approval.json", "admission.json",
+                                                     "CODEOWNERS")}
+            dump(candidate_manifest(), paths["cand.json"])
+            sha = release.sha256_file(paths["cand.json"])
+            dump(event(inputs=request_inputs(candidate_manifest_sha256=sha)), paths["event.json"])
+            dump(run_record(), paths["run.json"])
+            dump(environment(), paths["env.json"])
+            dump(BRANCH_POLICIES, paths["policies.json"])
+            dump(approvals(comment=comment), paths["approvals.json"])
+            put(paths["CODEOWNERS"], "/docs/decisions/   @chi-thanh-nguyen\n")
+            env = dict(os.environ, **runner_env())
+            outputs = []
+
+            def run(*args):
+                p = subprocess.run([sys.executable, script] + list(args), capture_output=True, text=True, env=env)
+                outputs.append(p.stdout + p.stderr)
+                self.assertEqual(p.returncode, 0, p.stderr)
+            run("admission-request", "--event", paths["event.json"], "--run-record", paths["run.json"],
+                "--output", paths["dispatch.json"])
+            run("admission-approval", "--environment", paths["env.json"], "--branch-policies", paths["policies.json"],
+                "--approvals", paths["approvals.json"], "--output", paths["approval.json"])
+            run("admission-decide", "--dispatch", paths["dispatch.json"], "--approval", paths["approval.json"],
+                "--candidate-manifest", paths["cand.json"], "--codeowners", paths["CODEOWNERS"],
+                "--output", paths["admission.json"])
+            run("verify-admission", "--admission", paths["admission.json"], "--candidate-manifest", paths["cand.json"],
+                "--codeowners", paths["CODEOWNERS"], "--run-id", RUN, "--run-attempt", "1", "--tooling-sha", TOOLING)
+            run("check-run-record", "--admission", paths["admission.json"], "--run-record", paths["run.json"],
+                "--approvals", paths["approvals.json"])
+            self.assertEqual(read_json(paths["admission.json"])["authorization"]["approval_comment"], comment)
+        for out in outputs:
+            self.assertNotIn("injected", out)
+            self.assertNotIn("Accept the 37", out)
+
+
+class AdmissionPreviewTests(unittest.TestCase):
+    """F-03: the pre-approval summary states only what the request job verified."""
+
+    def test_preview_states_what_was_and_was_not_verified(self):
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "release.py")
+        with tempfile.TemporaryDirectory() as d:
+            cand, disp = os.path.join(d, "cand.json"), os.path.join(d, "dispatch.json")
+            dump(candidate_manifest(), cand)
+            sha = release.sha256_file(cand)
+            dump(release.authenticate_dispatch(runner_env(), event(inputs=request_inputs(candidate_manifest_sha256=sha)),
+                                               run_record()), disp)
+            p = subprocess.run([sys.executable, script, "admission-preview", "--dispatch", disp, "--candidate-manifest", cand],
+                               capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        out = p.stdout
+        self.assertNotIn("package files and source qualification were verified by this job", out)
+        self.assertNotIn("verified by this job. ", out)
+        for expected in ("**Verified by this job:** it downloaded only `release-candidate.json` and its Sigstore bundle",
+                         "verified the manifest's attestation",
+                         "equals `candidate_manifest_sha256` in your request",
+                         "**Not re-checked by this job (prior candidate evidence):**",
+                         "source revision's required checks, the image qualification",
+                         "The archive, SBOMs, scan reports and other package files were not downloaded here.",
+                         "**Deferred to the protected promotion job, after your approval",
+                         "verifies every file against `SHA256SUMS`",
+                         "any loss of scan coverage, stops promotion",
+                         "Not granted: deployment"):
+            self.assertIn(expected, out)
+        self.assertIn("`%s` (verified against the request)" % sha, out)
+
+
+class VerifyReleaseProcedureTests(unittest.TestCase):
+    """F-01: verify-release.sh runs only as the release's own tooling, with a separate source checkout.
+
+    A synthetic repository models the first A1 release: commit S (the candidate's
+    source revision) predates A1 and still carries a historical verifier that refuses
+    every A1 package, as 1d0658a7's does; commit T (the promoting main commit) carries
+    this tooling and a changed deploy.sh; a later commit L carries the same tooling at
+    another revision. The release package is built by the real release-manifest
+    command. gh is a stub that plays GitHub: Sigstore verification succeeds only for the
+    tooling digest that "signed" the package, and the run and approval records carry a
+    multi-line approval comment. No network, Docker or real attestation is involved.
+    """
+
+    HERE = os.path.dirname(os.path.abspath(__file__))
+    HISTORICAL_VERIFIER = ("#!/usr/bin/env bash\n# historical pull-request admission verifier (pre-A1)\n"
+                           "touch \"$HISTORICAL_MARKER\"\n"
+                           "echo 'REFUSED: release.json does not record that decided_by merged the admission record' >&2\n"
+                           "exit 3\n")
+    DEPLOY_SH = ("# synthetic application deploy.sh (%s)\n"
+                 "verify_archive() {\n"
+                 "  [[ ${#EXPECT_IMAGES[@]} -eq 5 && \"$(sha256sum \"$ARCHIVE\" | awk '{print $1}')\" == \"$ARCHIVE_SHA256\" ]] || return 1\n"
+                 "  printf '%%s %%s\\n' \"$IMAGE_STORE\" '%s' >> \"$DEPLOY_MARKER\"\n"
+                 "}\n")
+
+    def git(self, repo, *args):
+        return subprocess.run(["git", "-C", repo, "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"] + list(args),
+                              check=True, capture_output=True, text=True, env=self.genv).stdout.strip()
+
+    def commit(self, repo, files, message):
+        for rel, data in files.items():
+            path = os.path.join(repo, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            put(path, data)
+        self.git(repo, "add", "-A")
+        self.git(repo, "commit", "-q", "-m", message)
+        return self.git(repo, "rev-parse", "HEAD")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = self.d = os.path.realpath(self.tmp.name)
+        self.genv = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_AUTHOR_NAME="fixture",
+                         GIT_AUTHOR_EMAIL="fixture@example.invalid", GIT_COMMITTER_NAME="fixture",
+                         GIT_COMMITTER_EMAIL="fixture@example.invalid")
+        self.repo = os.path.join(d, "upstream")
+        os.makedirs(self.repo)
+        self.git(self.repo, "init", "-q", "-b", "main")
+        app = {"infrastructure/vm/deploy.sh": self.DEPLOY_SH % ("source revision", "source"),
+               "infrastructure/docker-compose.yml": "services: {}\n",
+               "infrastructure/vm/docker-compose.vm.yml": "services: {}\n"}
+        self.source = self.commit(self.repo, dict(app, **{"infrastructure/release/verify-release.sh": self.HISTORICAL_VERIFIER}),
+                                  "historical source revision (pre-A1)")
+        tooling = {}
+        for name in ("release.py", "release.sh", "verify-release.sh"):
+            with open(os.path.join(self.HERE, "..", name)) as f:
+                tooling["infrastructure/release/" + name] = f.read()
+        tooling["infrastructure/vm/deploy.sh"] = self.DEPLOY_SH % ("later main", "tooling")
+        self.tooling = self.commit(self.repo, tooling, "A1 release tooling")
+        self.later = self.commit(self.repo, {"NOTES": "later main commit\n"}, "later main commit")
+        compat = {key: hashlib.sha256(app[path].encode()).hexdigest() for key, path in (
+            ("deploy_sh_sha256", "infrastructure/vm/deploy.sh"), ("compose_base_sha256", "infrastructure/docker-compose.yml"),
+            ("compose_override_sha256", "infrastructure/vm/docker-compose.vm.yml"))}
+        os.makedirs(os.path.join(d, "fixture"))
+        self.pkg = ReleaseChainTests.build(self, os.path.join(d, "fixture"), tooling=self.tooling, source=self.source,
+                                           compatibility=compat, approval_rows=approvals(comment=MULTILINE_COMMENT))
+        self.stub = os.path.join(d, "stub")
+        os.makedirs(self.stub)
+        url = release.run_url(RUN, 1)
+        dump([{"verificationResult": {"signature": {"certificate": {
+            "runInvocationURI": url, "buildTrigger": "workflow_dispatch", "buildSignerURI": "https://github.com/" + release.WORKFLOW_REF,
+            "sourceRepositoryIdentifier": release.REPOSITORY_ID, "runnerEnvironment": "github-hosted"}}}}],
+            os.path.join(self.stub, "seal.json"))
+        dump(run_record(head_sha=self.tooling), os.path.join(self.stub, "run.json"))
+        dump(approvals(comment=MULTILINE_COMMENT), os.path.join(self.stub, "approvals.json"))
+        put(os.path.join(self.stub, "gh"),
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> \"$STUB_DIR/gh.log\"\n"
+            "case \"$*\" in\n"
+            "  'attestation verify '*'--format json'*) cat \"$STUB_DIR/seal.json\" ;;\n"
+            "  'attestation verify '*) case \"$*\" in *\"--source-digest $SIGNED_TOOLING \"*) exit 0 ;; *) exit 1 ;; esac ;;\n"
+            "  'api '*'/attempts/1') cat \"$STUB_DIR/run.json\" ;;\n"
+            "  'api '*'/approvals') cat \"$STUB_DIR/approvals.json\" ;;\n"
+            "  *) exit 1 ;;\n"
+            "esac\n")
+        os.chmod(os.path.join(self.stub, "gh"), 0o755)
+        self.env = dict(self.genv, PATH=self.stub + os.pathsep + os.environ["PATH"], STUB_DIR=self.stub,
+                        SIGNED_TOOLING=self.tooling, DEPLOY_MARKER=os.path.join(d, "deploy.log"),
+                        HISTORICAL_MARKER=os.path.join(d, "historical-verifier-ran"))
+
+    def checkout(self, name, revision):
+        path = os.path.join(self.d, name)
+        self.git(self.d, "clone", "-q", self.repo, path)
+        self.git(path, "checkout", "-q", "--detach", revision)
+        return path
+
+    def verify(self, tooling_dir, source_dir, *extra):
+        return subprocess.run(["bash", os.path.join(tooling_dir, "infrastructure", "release", "verify-release.sh"), self.pkg,
+                               "--version", "v0.1.0-rc.1", "--source", source_dir] + list(extra),
+                              capture_output=True, text=True, env=self.env, cwd=self.d)
+
+    def gh_log(self):
+        path = os.path.join(self.stub, "gh.log")
+        if not os.path.exists(path):
+            return []
+        with open(path) as f:
+            return f.read().splitlines()
+
+    def assert_verified(self, p):
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("Verifier: release tooling commit %s" % self.tooling, p.stdout)
+        self.assertIn("--source-revision %s" % self.source, p.stdout)
+        self.assertIn("VERIFIED.", p.stdout)
+        attest = [line for line in self.gh_log() if line.startswith("attestation verify")]
+        self.assertTrue(attest)
+        self.assertTrue(all("--source-digest %s " % self.tooling in line for line in attest))
+        self.assertFalse(any(self.source in line for line in attest))
+        with open(self.env["DEPLOY_MARKER"]) as f:   # the source revision's deploy.sh, both stores
+            self.assertEqual(f.read().splitlines(), ["containerd source", "graphdriver source"])
+        self.assertFalse(os.path.exists(self.env["HISTORICAL_MARKER"]))
+
+    def test_documented_procedure_uses_the_tooling_and_source_revisions(self):
+        with open(os.path.join(self.HERE, "..", "..", "..", "docs", "deployment.md"), encoding="utf-8") as f:
+            doc = f.read()
+        section = doc.split("### Using a release package with `deploy.sh`", 1)[1].split("\n### ", 1)[0]
+        self.assertNotIn("--source .", section)
+        block = section.split("```bash\n", 1)[1].split("```", 1)[0]
+        lines = [line.strip() for line in block.splitlines()]
+        self.assertIn("bash tooling/infrastructure/release/verify-release.sh \"$pkg\" --version \"$version\" "
+                      "--source source --store \"$store\"", lines)
+        script = "\n".join(line for line in lines if not line.startswith(("pkg=", "repo=")))
+        self.assertIn('--source-digest "$tooling_sha"', script)
+        with open(os.path.join(self.d, "procedure.sh"), "w") as f:
+            f.write('pkg=%s; version=v0.1.0-rc.1; store=containerd\nrepo=%s\n' % (self.pkg, self.repo) + script + "\n")
+        p = subprocess.run(["bash", os.path.join(self.d, "procedure.sh")], capture_output=True, text=True, env=self.env,
+                           cwd=self.d)
+        self.assert_verified(p)
+        self.assertEqual(self.git(os.path.join(self.d, "tooling"), "rev-parse", "HEAD"), self.tooling)
+        self.assertEqual(self.git(os.path.join(self.d, "source"), "rev-parse", "HEAD"), self.source)
+        bootstrap = self.gh_log()[0]   # the operator's own gh runs first, before any checked-out code
+        self.assertTrue(bootstrap.startswith("attestation verify %s/release.json " % self.pkg), bootstrap)
+
+    def test_historical_source_verifier_is_the_failure_the_procedure_avoids(self):
+        source = self.checkout("source", self.source)
+        p = subprocess.run(["bash", os.path.join(source, "infrastructure", "release", "verify-release.sh"), self.pkg,
+                            "--version", "v0.1.0-rc.1", "--source", "."], capture_output=True, text=True, env=self.env,
+                           cwd=source)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("merged the admission record", p.stderr)
+        os.remove(self.env["HISTORICAL_MARKER"])
+        self.assert_verified(self.verify(self.checkout("tooling", self.tooling), source))
+
+    def test_tooling_revision_is_enforced(self):
+        source = self.checkout("source", self.source)
+        later = self.checkout("later", self.later)
+        p = self.verify(later, source)           # A1-capable tooling, but not the commit that attested the package
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("not the release tooling commit %s" % self.tooling, p.stderr)
+        self.assertEqual(self.gh_log(), [])      # refused before anything else ran
+        tooling = self.checkout("tooling", self.tooling)
+        put(os.path.join(tooling, "infrastructure", "release", "json.py"), "raise SystemExit('planted')\n")
+        p = self.verify(tooling, source)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("uncommitted or untracked changes", p.stderr)
+        os.remove(os.path.join(tooling, "infrastructure", "release", "json.py"))
+        put(os.path.join(tooling, "infrastructure", "release", "release.py"), "# modified\n", "a")
+        self.assertIn("uncommitted or untracked changes", self.verify(tooling, source).stderr)
+        exported = os.path.join(self.d, "exported")   # a copy outside any git checkout is refused
+        os.makedirs(os.path.join(exported, "infrastructure", "release"))
+        for name in ("release.py", "release.sh", "verify-release.sh"):
+            with open(os.path.join(self.HERE, "..", name)) as f:
+                put(os.path.join(exported, "infrastructure", "release", name), f.read())
+        p = self.verify(exported, source)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("git checkout", p.stderr)
+
+    def test_source_revision_is_enforced(self):
+        tooling = self.checkout("tooling", self.tooling)
+        for label, source in (("the tooling checkout as source", tooling),
+                              ("a later commit as source", self.checkout("later", self.later))):
+            with self.subTest(label):
+                p = self.verify(tooling, source)
+                self.assertEqual(p.returncode, 1)
+                self.assertIn("--source is not checked out at the release source revision %s" % self.source, p.stderr)
+        source = self.checkout("source", self.source)
+        put(os.path.join(source, "infrastructure", "vm", "deploy.sh"), "# modified\n", "a")
+        self.assertIn("--source has uncommitted changes", self.verify(tooling, source).stderr)
+
+    def test_invalid_admission_chain_or_authority_is_refused(self):
+        tooling, source = self.checkout("tooling", self.tooling), self.checkout("source", self.source)
+        put(os.path.join(self.stub, "approvals.json"),
+            json.dumps(approvals(user={"login": "contributor", "id": 4242, "type": "User"}, comment=MULTILINE_COMMENT)))
+        p = self.verify(tooling, source)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("GitHub's run or approval record contradicts admission.json", p.stderr)
+        ReleaseChainTests.rewrite(self, self.pkg, "admission.json",
+                                  lambda a: a.update(decided_by={"login": "contributor", "id": 4242}))
+        p = self.verify(tooling, source)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("Package records are inconsistent", p.stderr)
 
 
 class DraftVersionTests(unittest.TestCase):

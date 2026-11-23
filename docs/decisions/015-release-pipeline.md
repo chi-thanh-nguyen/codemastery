@@ -614,7 +614,12 @@ binds one candidate; no admission is ever an input to another run.
    pending `release-admission` deployment (run page → *Review deployments*, or
    `gh api -X POST repos/chi-thanh-nguyen/codemastery/actions/runs/<run>/pending_deployments -F 'environment_ids[]=<id>' -f state=approved -f comment='<text>'`).
 4. Everything else is automatic; the result is the draft `v<x.y.z>`, verified with
-   `verify-release.sh` (D12, amended).
+   `verify-release.sh` (D12, amended) run from a clean checkout of the release's tooling
+   commit (`release.json` `tooling.sha`, once `gh attestation verify` of `release.json`
+   names it), with `--source` a separate checkout of its `source_revision` for the
+   `deploy.sh`, Compose and archive checks. A source revision's own verifier may predate
+   A1 and is never used; the verifier refuses any other tooling commit
+   ([deployment.md](../deployment.md#using-a-release-package-with-deploysh)).
 
 ### A1.9 Required configuration
 

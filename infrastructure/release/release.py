@@ -660,6 +660,27 @@ def authenticate_dispatch(env, event, run_record):
             "run_url": run_url(rid, 1)}
 
 
+# GitHub's run approval record (GET /repos/{owner}/{repo}/actions/runs/{run_id}/approvals)
+# defines `comment` as a required string: free text the reviewer typed, which may be
+# empty, span lines and hold any Unicode. It authorizes nothing (account, review state
+# and environment do), so it is kept verbatim, stored only JSON-escaped in
+# admission.json (write_json escapes every non-ASCII and control character) and never
+# printed to a log, job summary, step output or release note. Null or absent is
+# recorded as an empty comment. Any other type, or text longer than this bound (four
+# times the 65,536 characters of a GitHub comment body), is malformed API data.
+APPROVAL_COMMENT_MAX = 262144
+
+
+def approval_comment(value):
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        refuse("GitHub's approval comment is not text (malformed API data)")
+    if len(value) > APPROVAL_COMMENT_MAX:
+        refuse("GitHub's approval comment exceeds %d characters (malformed API data)" % APPROVAL_COMMENT_MAX)
+    return value
+
+
 def authority_approval(approvals):
     """The admission authority's approval of this run in the admission environment."""
     entries = [a for a in (approvals if isinstance(approvals, list) else [])
@@ -672,7 +693,7 @@ def authority_approval(approvals):
         refuse("GitHub records no approval of this run in the %s environment" % ADMISSION_ENVIRONMENT)
     if not all(is_authority(u) for u in approvers):
         refuse("the run was approved by an account that is not the admission authority")
-    return approvers[0], _text(entries[0].get("comment"), "approval comment")
+    return approvers[0], approval_comment(entries[0].get("comment"))
 
 
 def check_environment(environment, branch_policies, approvals):
@@ -894,6 +915,8 @@ def verify_admission(admission, candidate, candidate_sha256, owners=None, rehear
             refuse("admission was not approved through the protected %s environment" % ADMISSION_ENVIRONMENT)
         if not is_authority(auth.get("approved_by")) or admission["decided_by"] != auth.get("approved_by"):
             refuse("admission decided_by is not the admission authority that approved the run")
+        if approval_comment(auth.get("approval_comment")) != auth.get("approval_comment"):
+            refuse("admission approval_comment is not in its recorded form")
         approval = dict(env, approved_by=auth.get("approved_by"), approval_comment=auth.get("approval_comment"))
     if expected_run is not None:
         for key in ("run_id", "run_attempt", "tooling_sha"):
@@ -1151,9 +1174,23 @@ def cmd_admission_preview(a):
         out.append("| %s | %s | `%s` | `%s` | `%s` |" % tuple(str(r[k]).replace("|", "/")[:80]
                                                          for k in ("service", "severity", "id", "package", "installed")))
     out += ["", "</details>", "",
-            "The candidate's attestation, package files and source qualification were verified by this job. "
-            "Promotion re-verifies everything after approval and still fails on any new, re-versioned or "
-            "escalated finding and on any loss of scan coverage. Not granted: %s." % ", ".join(REQUIRED_NOT_GRANTED)]
+            "**Verified by this job:** it downloaded only `release-candidate.json` and its Sigstore bundle, "
+            "verified the manifest's attestation (signer `release.yml` on `refs/heads/main` at the tooling commit "
+            "the manifest names, GitHub-hosted runner), checked that the manifest's SHA-256 equals "
+            "`candidate_manifest_sha256` in your request, that the candidate tag, finding count and CRITICAL/HIGH "
+            "choice match the manifest, and that the version is unused.",
+            "",
+            "**Not re-checked by this job (prior candidate evidence):** the source revision's required checks, the "
+            "image qualification, the scans and the identities, findings and coverage above are shown as the "
+            "attested candidate manifest records them. The archive, SBOMs, scan reports and other package files "
+            "were not downloaded here.",
+            "",
+            "**Deferred to the protected promotion job, after your approval and before anything is promoted:** it "
+            "downloads the whole candidate package, verifies every file against `SHA256SUMS` and the manifest and "
+            "the attestations of the archive and `mc-source.tar.gz`, re-derives the admission, checks the image "
+            "identities, rescans the images (any new, re-versioned or escalated finding of any severity, or any loss "
+            "of scan coverage, stops promotion) and runs `deploy.sh` on the release archive. Not granted: %s."
+            % ", ".join(REQUIRED_NOT_GRANTED)]
     print("\n".join(out))
 
 

@@ -5988,3 +5988,29 @@ approval endpoints under the workflow token was checked against the live respons
 shape (`can_admins_bypass`, `deployment_branch_policy`, protection rules) and the REST
 documentation, not in a dispatched run. The CI `Release rehearsal` of the pull request
 is the integration check of the rehearsal path.
+
+### Independent review remediation (F-01 to F-03) — 23 November 2026
+
+An independent review of PR #269 at `b43ab1c` returned two P2 findings and one P3
+finding. Fixed in the same pull request:
+
+| Finding | Defect | Fix | Regression tests |
+| --- | --- | --- | --- |
+| F-01 (P2) | The operator procedure ran `verify-release.sh` from the source revision's checkout; for the first A1 release that is `1d0658a7…`, whose pull-request admission verifier refuses every A1 package | [deployment.md](deployment.md#using-a-release-package-with-deploysh) and ADR015 A1.8: the operator's own `gh` first verifies that `release.json` is attested by `release.yml` on `main` at its `tooling.sha`; the verifier then runs from a clean checkout of `tooling.sha`, with `--source` a separate checkout of `source_revision`. `verify-release.sh` refuses any other tooling commit, a modified or non-git tooling checkout, before running anything else | `VerifyReleaseProcedureTests` (5): a synthetic repository whose source commit carries a historical verifier that refuses A1 packages and whose later tooling commit carries this verifier and a changed `deploy.sh`; the documented script block, extracted from `deployment.md` and run against a stub `gh`, verifies the package from the tooling commit and runs the source commit's `deploy.sh` only; refused: a later main commit as tooling, an untracked file or modified script in the tooling checkout, a copy outside git, the tooling checkout or a later commit as `--source`, a modified source checkout, a tampered `admission.json`, an approval record by another account |
+| F-02 (P2) | The Environment approval comment went through the one-line, 1,000-character validator of the dispatch `note`; a multi-line approval made promotion refuse after approval | `approval_comment()`: GitHub's comment is free text kept verbatim (any lines, Unicode, empty; null or absent recorded as empty); refused only as malformed API data when it is not a string or exceeds 262,144 characters; stored JSON-escaped and never printed; `verify-admission` requires the recorded comment in that form. The `note` keeps its one-line rule; reviewer identity, review state and environment checks are unchanged | `ApprovalCommentTests` (5): single-line, multi-line, CRLF/tab, empty, null, absent, Unicode (including bidirectional controls), an 88,890-character comment and Markdown/shell/workflow-command text accepted verbatim; non-string and over-bound values refused; unauthorized reviewer, the Leader's login on another account, rejected deployment, approval plus rejection, another environment and no approval still refused with a multi-line comment; multi-line approval through decision, JSON round trip, offline and online verification; the CLI chain never echoes the comment |
+| F-03 (P3) | The `Admission request` summary said the package files and source qualification were verified by that job, which downloads only the manifest and its bundle | The summary separates what the job verified (manifest attestation, digest equal to the request, tag, count, CRITICAL/HIGH choice, unused version), what it shows from the attested candidate evidence without re-checking, and what the protected promotion job verifies after approval | `AdmissionPreviewTests` |
+
+Duplicate approval rows and matching approval rows by environment name rather than ID
+were reviewed and left unchanged: the promotion job re-authenticates the dispatch and
+refuses any attempt other than 1, whose single environment job yields one approval
+row, and the environment is read by the same name in the same repository.
+
+| Environment | Check | Result |
+| --- | --- | --- |
+| Local, macOS, Python 3.9.6, bash 3.2.57 | `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests` | 48/48 PASS (37 earlier + 11 new) |
+| Container `python:3.12-bookworm` (Python 3.12.16, bash 5.2.15, git 2.39.5, no network) | `bash -n` of every release script; the same suite | Syntax clean; 48/48 PASS |
+| Container `koalaman/shellcheck:v0.11.0` | `-S warning` on `release.sh` and `verify-release.sh`; default severity on `verify-release.sh` and on the documented script block | Clean |
+| Local | Each fix reverted in turn against the new tests: `b43ab1c`'s `release.py` and `verify-release.sh` (13 failures), `b43ab1c`'s `verify-release.sh` alone (3 failures: tooling revision not enforced), the recorded-comment check removed (3 failures) | The tests detect each regression |
+
+Not repeated: the candidate build, archive verification, Q00–Q05, Trivy rescans and
+the 410 MB package checks (unchanged code paths). `release.yml` is unchanged.

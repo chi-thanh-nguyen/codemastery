@@ -4490,11 +4490,41 @@ draft, tag or release is ever overwritten: a rerun is a new candidate.
 
 1. Download every asset of the release draft into one directory (write access is
    needed to see drafts).
-2. On a workstation, from a clean checkout of the release's `source_revision`:
-   `infrastructure/release/verify-release.sh <dir> --version v<x.y.z> --source . --store <containerd|graphdriver>`
-   (`--version` names the release you intend to transfer; another release is refused).
-   Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand and
-   add `--trusted-root trusted_root.jsonl`. The script verifies the attestation of
+2. On a workstation, verify the package with **two separate checkouts**: the release
+   tooling at `release.json` `tooling.sha` (the `main` commit whose `release.yml`
+   promoted and attested the package, so its verifier understands the package format)
+   and the application source at `release.json` `source_revision` (its `deploy.sh`,
+   Compose files and archive check). Never run the source revision's own
+   `infrastructure/release/verify-release.sh`: it may predate the package format (the
+   first A1 release's source `1d0658a7…` still carries the pull-request admission
+   verifier, which refuses every A1 package). No code from either checkout runs before
+   your own `gh` has verified that `release.json` was attested by `release.yml` on
+   `main` at the tooling commit it names. Run as one bash script (it stops at the first
+   failure):
+
+   ```bash
+   set -euo pipefail
+   pkg=<directory holding the downloaded assets>; version=v<x.y.z>; store=<containerd|graphdriver>
+   repo=https://github.com/chi-thanh-nguyen/codemastery.git
+   tooling_sha="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["tooling"]["sha"])' "$pkg/release.json")"
+   source_revision="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_revision"])' "$pkg/release.json")"
+   [[ "$tooling_sha" =~ ^[0-9a-f]{40}$ && "$source_revision" =~ ^[0-9a-f]{40}$ ]]
+   gh attestation verify "$pkg/release.json" --repo chi-thanh-nguyen/codemastery \
+     --cert-identity https://github.com/chi-thanh-nguyen/codemastery/.github/workflows/release.yml@refs/heads/main \
+     --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners
+   git clone --quiet "$repo" tooling && git -C tooling checkout --quiet --detach "$tooling_sha"
+   git clone --quiet "$repo" source && git -C source checkout --quiet --detach "$source_revision"
+   bash tooling/infrastructure/release/verify-release.sh "$pkg" --version "$version" --source source --store "$store"
+   ```
+
+   (`--version` names the release you intend to transfer; another release is refused.)
+   The verifier refuses to run from any commit other than `tooling.sha` or from a
+   modified checkout, and refuses a `--source` checkout that is not exactly
+   `source_revision`; the two are the same directory only when the two commits are
+   equal. Offline: fetch `gh attestation trusted-root > trusted_root.jsonl` beforehand,
+   add `--bundle "$pkg/release.sigstore.json" --custom-trusted-root trusted_root.jsonl`
+   to the `gh attestation verify` line and `--trusted-root trusted_root.jsonl` to the
+   verifier, and use clones already holding both commits. The script verifies the attestation of
    `release.json`, the archive, `mc-source.tar.gz` and `admission.json` (signer
    `release.yml` on `refs/heads/main` exactly, at the recorded tooling commit), the
    agreement of release, admission and candidate records (the admission re-derived from
@@ -4686,6 +4716,9 @@ compared and the design. This section is the operator's view.
    `release-admission` → *Approve and deploy*. Only this approval and the dispatch are
    manual; verification, admission record, attestation, rescan, promotion, smoke and the
    draft release are automatic. Rejecting, cancelling or not approving admits nothing.
+   The review comment is optional free text (empty, several lines and any characters
+   are accepted); it is recorded verbatim, JSON-escaped, in `admission.json`, is never
+   printed to a log or summary, and authorizes nothing.
 4. A re-run of the run cannot admit (it replays the earlier dispatch); dispatch again.
 
 ### Current state of the first candidate

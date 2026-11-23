@@ -2,17 +2,24 @@
 # CodeMastery - infrastructure/release/verify-release.sh   (ADR015, operator verification)
 #
 # Verifies a downloaded release package before it is transferred to a VM. It
-# changes nothing and needs no Docker: only bash, python3, sha256sum and gh.
+# changes nothing and needs no Docker: only bash, git, python3, sha256sum and gh.
 #
-#   verify-release.sh PACKAGE_DIR --version vX.Y.Z [--source CHECKOUT]
-#                     [--store containerd|graphdriver] [--trusted-root FILE]
+#   TOOLING/infrastructure/release/verify-release.sh PACKAGE_DIR --version vX.Y.Z
+#       [--source CHECKOUT] [--store containerd|graphdriver] [--trusted-root FILE]
 #
+#   TOOLING        this script's own checkout: it must be a clean checkout of the
+#                  release's tooling commit (release.json tooling.sha, the main
+#                  commit whose release.yml promoted and attested the package);
+#                  any other revision, such as the source revision's older
+#                  verifier, is refused here (docs/deployment.md, ADR015 A1.8)
 #   PACKAGE_DIR    the release draft's assets, downloaded into one directory
 #   --version      the release the operator intends to transfer; the package must
 #                  be exactly that release (a validly attested older or other
 #                  release is refused)
-#   --source       a clean checkout of the release's source revision; enables the
-#                  deploy.sh archive verifier and the deploy.sh/Compose hash checks
+#   --source       a separate clean checkout of the release's source_revision;
+#                  enables the deploy.sh archive verifier and the deploy.sh/Compose
+#                  hash checks (the same directory as TOOLING only when the two
+#                  revisions are equal)
 #   --store        print the --expect-image values for this image store (deploy.sh
 #                  preflight reports which one the VM uses); default containerd
 #   --trusted-root offline mode: verify the bundled attestations against this
@@ -44,7 +51,7 @@ readonly REPOSITORY
 PACKAGE="" SOURCE="" STORE="containerd" TRUSTED_ROOT="" VERSION=""
 fail() { printf 'VERIFY FAILED: %s\n' "$*" >&2; exit 1; }
 
-PACKAGE="${1:-}"; [[ -n "$PACKAGE" && "$PACKAGE" != -* ]] || { sed -n '2,29p' "$0" >&2; exit 2; }
+PACKAGE="${1:-}"; [[ -n "$PACKAGE" && "$PACKAGE" != -* ]] || { sed -n '2,31p' "$0" >&2; exit 2; }
 shift
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,6 +66,23 @@ done
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] || fail "--version vX.Y.Z (the intended release) is required."
 [[ -d "$PACKAGE" ]] || fail "Package directory not found."
 command -v gh >/dev/null 2>&1 || fail "gh (GitHub CLI) is required to verify the attestation."
+[[ -f "$PACKAGE/release.json" ]] || fail "The package has no release.json."
+
+# The verifier must be the release tooling that produced the package, not the
+# source revision's copy (which may predate this package format), and nothing of it
+# runs before that is established. The commit's authenticity is then the signing
+# identity checked below (release.yml on refs/heads/main at that commit).
+tooling_sha="$(python3 -I -c 'import json,sys; print((json.load(open(sys.argv[1])).get("tooling") or {}).get("sha") or "")' "$PACKAGE/release.json")" \
+  || fail "release.json is not readable JSON."
+[[ "$tooling_sha" =~ ^[0-9a-f]{40}$ ]] || fail "release.json names no tooling commit."
+tooling_dir="$(cd "$HERE/../.." && pwd -P)"
+top="$(git -C "$tooling_dir" rev-parse --show-toplevel 2>/dev/null)" && [[ "$(cd "$top" && pwd -P)" == "$tooling_dir" ]] \
+  || fail "Run this verifier from a git checkout of $REPOSITORY at the release tooling commit $tooling_sha."
+here_rev="$(git -C "$tooling_dir" rev-parse HEAD)"
+[[ "$here_rev" == "$tooling_sha" ]] \
+  || fail "This verifier is at commit $here_rev, not the release tooling commit $tooling_sha (release.json tooling.sha). Run infrastructure/release/verify-release.sh from a clean checkout of $tooling_sha and pass the source_revision checkout with --source."
+[[ -z "$(git -C "$tooling_dir" status --porcelain)" ]] || fail "The tooling checkout $tooling_dir has uncommitted or untracked changes."
+echo "Verifier: release tooling commit $tooling_sha (release.json tooling.sha)."
 
 python3 "$HERE/release.py" verify-release-chain "$PACKAGE" --repository "$REPOSITORY" || fail "Package records are inconsistent."
 archive="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"]["name"])' "$PACKAGE/release.json")"
@@ -66,9 +90,7 @@ archive="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["arch
   || fail "The package is not release $VERSION."
 
 # Exact signer: release.yml run for refs/heads/main, at the main commit that
-# release.json names as its tooling.
-tooling_sha="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("tooling") or {}).get("sha") or "")' "$PACKAGE/release.json")"
-[[ "$tooling_sha" =~ ^[0-9a-f]{40}$ ]] || fail "release.json names no tooling commit."
+# release.json names as its tooling (this verifier's own commit, checked above).
 policy=(--repo "$REPOSITORY" --cert-identity "https://github.com/$REPOSITORY/.github/workflows/release.yml@refs/heads/main"
         --source-ref refs/heads/main --source-digest "$tooling_sha" --deny-self-hosted-runners)
 attest=("${policy[@]}")
@@ -109,7 +131,8 @@ fi
 
 if [[ -n "$SOURCE" ]]; then
   rev="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_revision"])' "$PACKAGE/release.json")"
-  [[ "$(git -C "$SOURCE" rev-parse HEAD)" == "$rev" ]] || fail "--source is not checked out at the release source revision $rev."
+  [[ "$(git -C "$SOURCE" rev-parse HEAD)" == "$rev" ]] \
+    || fail "--source is not checked out at the release source revision $rev (application files come from source_revision; the verifier from tooling commit $tooling_sha)."
   [[ -z "$(git -C "$SOURCE" status --porcelain)" ]] || fail "--source has uncommitted changes."
   python3 - "$PACKAGE/release.json" "$SOURCE" <<'PY' || fail "deploy.sh or Compose files differ from the released revision."
 import hashlib, json, os, sys
