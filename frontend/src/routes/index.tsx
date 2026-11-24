@@ -20,6 +20,10 @@ import { CourseDetailPage } from '../features/catalogue/pages/CourseDetailPage';
 import { LandingPage, LandingRestoringView } from '../features/catalogue/pages/LandingPage';
 import { LearnerHome } from '../features/learning/pages/LearnerHomePage';
 import type { UserRole } from '../features/auth/types/authTypes';
+import { AssessmentsPage } from '../features/instructor/course-management/pages/QuestionBankPage';
+import { QuizEditor } from '../features/instructor/course-management/pages/QuizEditorPage';
+import type { SkillSource } from '../features/instructor/course-management/components/QuestionForm';
+import { useOwnedSkillGraph } from '../features/instructor/skill-graph-editor/hooks/useSkillGraph';
 
 // The landing page's example map pulls in the graph library, so it loads on demand.
 const ExampleMasteryMap = lazy(() => import('../features/mastery/components/ExampleMasteryMap'));
@@ -128,6 +132,25 @@ function NotFound() {
     return <Page><SystemStateView icon="search" title="Page not found" message="Check the address, or continue from the catalogue."
         actions={<Button component={Link} to="/courses" variant="contained">Browse courses</Button>} /></Page>;
 }
+/**
+ * FE15 Instructor assessment authoring (CT16.routes: `/teach/courses/:courseId/assessments`, `…/quizzes/:quizId`
+ * with the literal `new`). Routes compose features (CT16.final-state F1): the course's skill graph read
+ * (`getOwnedSkillGraph`, D12-3) is held here and passed to the question bank and quiz editor. The course
+ * editor shell and its header (FE14) and the Teaching navigation item (FE14/FE32) are not delivered yet.
+ */
+function useCourseSkills(courseId: string): SkillSource {
+    const { graph, error, reload } = useOwnedSkillGraph(courseId);
+    return useMemo(() => ({ status: error ? 'error' : graph ? 'ready' : 'loading', skills: graph?.skills ?? [], reload }), [graph, error, reload]);
+}
+function CourseAssessments() {
+    const courseId = useParams().courseId!, skills = useCourseSkills(courseId);
+    return <Page><AssessmentsPage key={courseId} courseId={courseId} skills={skills} /></Page>;
+}
+function CourseQuizEditor() {
+    const { courseId, quizId } = useParams(), skills = useCourseSkills(courseId!);
+    return <Page width="reading"><QuizEditor key={`${courseId}:${quizId}`} courseId={courseId!} quizId={quizId!} skills={skills} /></Page>;
+}
+
 /** The isolated design preview's route (CT14, CT16). */
 export const PREVIEW_PATH = '/preview';
 /**
@@ -156,6 +179,8 @@ export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; previ
             <Route path="/home" element={<ProtectedRoute roles={['Learner']}><LearnerHome key={auth.generation} /></ProtectedRoute>} />
             <Route path="/my-courses" element={<ProtectedRoute roles={['Learner']}><MyCoursesPage key={auth.generation} /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+            <Route path="/teach/courses/:courseId/assessments" element={<ProtectedRoute roles={['Instructor']}><CourseAssessments key={auth.generation} /></ProtectedRoute>} />
+            <Route path="/teach/courses/:courseId/quizzes/:quizId" element={<ProtectedRoute roles={['Instructor']}><CourseQuizEditor key={auth.generation} /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
         </Route>
     </Routes><RouteFocus /></SessionEndProvider>;
