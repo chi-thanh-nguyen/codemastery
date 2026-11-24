@@ -15,7 +15,9 @@ import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.util.JavacTask;
+import com.sun.source.util.TreePathScanner;
 import com.sun.source.util.TreeScanner;
+import com.sun.source.util.Trees;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Method;
@@ -30,6 +32,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.util.ElementFilter;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
 import javax.tools.JavaFileObject;
@@ -340,16 +345,15 @@ class QuestionSelectionServiceTest {
         Path selectorFile = root.resolve("modules/adaptive/application/decision/PracticeDifficultySelector.java");
         Set<Path> allowedPortTypeReferences = Set.of(portFile, selectorFile);
 
-        List<Path> portCallers = new ArrayList<>();
+        Map<URI, String> sources = new HashMap<>();
         List<Path> selectionCallers = new ArrayList<>();
         List<Path> portTypeRefs = new ArrayList<>();
 
         try (var files = Files.walk(root)) {
             for (Path file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
-                SourceFacts facts = analyzeSource(Files.readString(file));
-                if (facts.calledMethods().contains("targetDifficulty")) {
-                    portCallers.add(file);
-                }
+                String source = Files.readString(file);
+                sources.put(file.toUri(), source);
+                SourceFacts facts = analyzeSource(source);
                 if (facts.calledMethods().contains("selectPracticeQuestions")) {
                     selectionCallers.add(file);
                 }
@@ -359,7 +363,8 @@ class QuestionSelectionServiceTest {
             }
         }
 
-        assertEquals(List.of(), portCallers, () -> "Unapproved PracticeDifficultyProvider callers: " + portCallers);
+        Set<URI> portCallers = practiceDifficultyPortCallers(sources);
+        assertEquals(Set.of(), portCallers, () -> "Unapproved PracticeDifficultyProvider callers: " + portCallers);
         assertEquals(List.of(), selectionCallers, () -> "Unapproved AS07.select callers under E02: " + selectionCallers);
         assertTrue(allowedPortTypeReferences.containsAll(portTypeRefs),
                 () -> "Unapproved PracticeDifficultyProvider type references: " + portTypeRefs);
@@ -391,6 +396,161 @@ class QuestionSelectionServiceTest {
                 }
                 """.formatted(method);
         assertFalse(analyzeSource(nonCalls).calledMethods().contains(method));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "port.targetDifficulty(courseId, skillId);",
+            "inherited.targetDifficulty(courseId, skillId);",
+            "implementation.targetDifficulty(courseId, skillId);",
+            "targetDifficulty(courseId, skillId);",
+            "var alias = port; alias.targetDifficulty(courseId, skillId);",
+            "BiFunction<UUID, UUID, DifficultyLevel> call = port::targetDifficulty;",
+            "BiFunction<UUID, UUID, DifficultyLevel> call = inherited::targetDifficulty;",
+            "BiFunction<UUID, UUID, DifficultyLevel> call = implementation::targetDifficulty;",
+            "Unbound call = PracticeDifficultyProvider::targetDifficulty;"
+    })
+    void resolvedPortScannerRejectsInvocationsAndMethodReferencesIncludingOverrides(String statement)
+            throws Exception {
+        URI caller = URI.create("string:///Caller.java");
+        assertEquals(Set.of(caller), practiceDifficultyPortCallers(Map.of(caller, portCallerSource(statement))));
+    }
+
+    @Test
+    void resolvedPortScannerAllowsAd11PureMappingInvocationsAndMethodReferences() throws Exception {
+        URI selector = URI.create("string:///PracticeDifficultySelector.java");
+        URI caller = URI.create("string:///Caller.java");
+        String selectorSource = """
+                package com.codemastery.modules.adaptive.application.decision;
+                import com.codemastery.modules.adaptive.domain.model.MasteryState;
+                import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
+                public class PracticeDifficultySelector {
+                    public static DifficultyLevel targetDifficulty(MasteryState state) {
+                        return DifficultyLevel.EASY;
+                    }
+                    DifficultyLevel recommend(MasteryState state) { return targetDifficulty(state); }
+                }
+                """;
+        String callerSource = """
+                import static com.codemastery.modules.adaptive.application.decision.PracticeDifficultySelector.targetDifficulty;
+                import com.codemastery.modules.adaptive.application.decision.PracticeDifficultySelector;
+                import com.codemastery.modules.adaptive.domain.model.MasteryState;
+                import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
+                import java.util.UUID;
+                import java.util.function.Function;
+                class Caller {
+                    void run(MasteryState state) {
+                        var qualified = PracticeDifficultySelector.targetDifficulty(state);
+                        var imported = targetDifficulty(state);
+                        Function<MasteryState, DifficultyLevel> reference = PracticeDifficultySelector::targetDifficulty;
+                        var unrelated = Other.targetDifficulty(UUID.randomUUID(), UUID.randomUUID());
+                    }
+                    static class Other {
+                        static DifficultyLevel targetDifficulty(UUID courseId, UUID skillId) {
+                            return DifficultyLevel.EASY;
+                        }
+                    }
+                }
+                """;
+        assertEquals(Set.of(), practiceDifficultyPortCallers(Map.of(selector, selectorSource, caller, callerSource)));
+    }
+
+    @Test
+    void resolvedPortScannerIgnoresDeclarationsCommentsAndLiteralsButFailsOnUnresolvedCalls() throws Exception {
+        URI caller = URI.create("string:///Caller.java");
+        assertEquals(Set.of(), practiceDifficultyPortCallers(Map.of(caller, portCallerSource("""
+                // port.targetDifficulty(courseId, skillId); port::targetDifficulty
+                /* targetDifficulty(courseId, skillId); PracticeDifficultyProvider::targetDifficulty */
+                String literal = "port.targetDifficulty(courseId, skillId); port::targetDifficulty";
+                var overload = targetDifficulty("course", "skill");
+                BiFunction<String, String, DifficultyLevel> reference = Caller::targetDifficulty;
+                """))));
+        assertThrows(AssertionError.class, () -> practiceDifficultyPortCallers(Map.of(
+                caller, portCallerSource("missing.targetDifficulty(courseId, skillId);"))));
+    }
+
+    private static String portCallerSource(String statement) {
+        return """
+                import com.codemastery.modules.assessment.application.port.PracticeDifficultyProvider;
+                import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
+                import java.util.UUID;
+                import java.util.function.BiFunction;
+                class Caller implements PracticeDifficultyProvider {
+                    interface Inherited extends PracticeDifficultyProvider {}
+                    interface Unbound {
+                        DifficultyLevel apply(PracticeDifficultyProvider port, UUID courseId, UUID skillId);
+                    }
+                    static class Implementation implements PracticeDifficultyProvider {
+                        public DifficultyLevel targetDifficulty(UUID courseId, UUID skillId) {
+                            return DifficultyLevel.EASY;
+                        }
+                    }
+                    public DifficultyLevel targetDifficulty(UUID courseId, UUID skillId) {
+                        return DifficultyLevel.EASY;
+                    }
+                    public static DifficultyLevel targetDifficulty(String courseId, String skillId) {
+                        return DifficultyLevel.EASY;
+                    }
+                    void run(PracticeDifficultyProvider port, Inherited inherited, Implementation implementation,
+                             UUID courseId, UUID skillId) {
+                        %s
+                    }
+                }
+                """.formatted(statement);
+    }
+
+    /** Resolves the exact port method and overrides, rather than banning unrelated same-named methods. */
+    private static Set<URI> practiceDifficultyPortCallers(Map<URI, String> sources) throws IOException {
+        var compiler = ToolProvider.getSystemJavaCompiler();
+        assertNotNull(compiler, "Caller allowlist tests require the project's JDK");
+        var diagnostics = new DiagnosticCollector<JavaFileObject>();
+        List<JavaFileObject> inputs = sources.entrySet().stream()
+                .<JavaFileObject>map(entry -> new SimpleJavaFileObject(entry.getKey(), JavaFileObject.Kind.SOURCE) {
+                    @Override
+                    public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                        return entry.getValue();
+                    }
+                }).toList();
+        try (var fileManager = compiler.getStandardFileManager(diagnostics, null, null)) {
+            var task = (JavacTask) compiler.getTask(null, fileManager, diagnostics,
+                    List.of("-proc:none", "-classpath", System.getProperty("java.class.path")), null, inputs);
+            List<CompilationUnitTree> units = new ArrayList<>();
+            task.parse().forEach(units::add);
+            task.analyze();
+            assertFalse(diagnostics.getDiagnostics().stream().anyMatch(d -> d.getKind() == Diagnostic.Kind.ERROR),
+                    () -> "Cannot resolve Java source for port allowlist scan: " + diagnostics.getDiagnostics());
+            var elements = task.getElements();
+            TypeElement port = elements.getTypeElement(PracticeDifficultyProvider.class.getCanonicalName());
+            assertNotNull(port, "PracticeDifficultyProvider must resolve");
+            var methods = ElementFilter.methodsIn(port.getEnclosedElements());
+            assertEquals(1, methods.size(), "The port must expose its one approved method");
+            ExecutableElement portMethod = methods.getFirst();
+            Trees trees = Trees.instance(task);
+            Set<URI> callers = new HashSet<>();
+            var scanner = new TreePathScanner<Void, Void>() {
+                private void recordPortCall() {
+                    if (trees.getElement(getCurrentPath()) instanceof ExecutableElement method
+                            && (method.equals(portMethod) || elements.overrides(method, portMethod,
+                                    (TypeElement) method.getEnclosingElement()))) {
+                        callers.add(getCurrentPath().getCompilationUnit().getSourceFile().toUri());
+                    }
+                }
+
+                @Override
+                public Void visitMethodInvocation(MethodInvocationTree node, Void unused) {
+                    recordPortCall();
+                    return super.visitMethodInvocation(node, unused);
+                }
+
+                @Override
+                public Void visitMemberReference(MemberReferenceTree node, Void unused) {
+                    recordPortCall();
+                    return super.visitMemberReference(node, unused);
+                }
+            };
+            units.forEach(unit -> scanner.scan(unit, null));
+            return Set.copyOf(callers);
+        }
     }
 
     private record SourceFacts(Set<String> calledMethods, Set<String> identifiers, Set<String> adaptiveImports) {}
