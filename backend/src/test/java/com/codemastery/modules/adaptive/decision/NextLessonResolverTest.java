@@ -216,6 +216,81 @@ class NextLessonResolverTest {
                 Map.of(S1, MasteryState.UNKNOWN, S2, MasteryState.LEARNING), edges, NAMES)).recommendations().isEmpty());
     }
 
+    // ADR011 §7.2 tie-breaks. Lowercase UUID text and the signed UUID.compareTo disagree on these
+    // two: "1..." < "8..." as text, while 0x8000... is a negative long and compares first when signed.
+    private static final UUID TEXT_FIRST = UUID.fromString("10000000-0000-0000-0000-000000000000");
+    private static final UUID SIGNED_FIRST = UUID.fromString("80000000-0000-0000-0000-000000000000");
+    private static final UUID P1 = new UUID(0, 0xA1), P2 = new UUID(0, 0xA2);
+    private static final UUID LP1 = new UUID(0, 0xB1), LP2 = new UUID(0, 0xB2), LW = new UUID(0, 0xB3);
+
+    @Test
+    void aWeakSkillWithoutAPublishedLessonIsExaminedAfterEveryWeakSkillWithOne() {
+        // The lesson-less Weak skill has the smaller UUID and the earlier remedial target (LP2, index 0); it
+        // still comes last, so ranking Weak skills by their best target would also fail here.
+        UUID lessonless = new UUID(0, 0x01), mapped = new UUID(0, 0x02);
+        var context = new DecisionContext(COURSE, LEARNER,
+                List.of(new LessonInput(LP2, false, Set.of(P2)), new LessonInput(LP1, false, Set.of(P1)),
+                        new LessonInput(LW, false, Set.of(mapped))),
+                Map.of(lessonless, MasteryState.WEAK, mapped, MasteryState.WEAK,
+                        P1, MasteryState.UNKNOWN, P2, MasteryState.UNKNOWN),
+                List.of(new PrerequisiteInput(lessonless, P2), new PrerequisiteInput(mapped, P1)),
+                Map.of(lessonless, "Lessonless", mapped, "Mapped", P1, "First", P2, "Second"));
+
+        assertEquals(List.of(new Recommendation(RecommendationType.REMEDIAL, LP1,
+                        "Review this lesson first: your skill \"Mapped\" is Weak and its prerequisite \"First\" is not yet Mastered.")),
+                new AdaptiveDecisionEngine().decide(context).recommendations());
+    }
+
+    @Test
+    void weakSkillsTiedOnLessonIndexAreExaminedInLowercaseUuidTextOrder() {
+        // TEXT_FIRST's candidate target (LP1, index 1) comes after SIGNED_FIRST's (LP2, index 0), and its
+        // name sorts last, so only the UUID text tie-break selects it. Tied once on "no Lesson", once on LW.
+        var expected = List.of(new Recommendation(RecommendationType.REMEDIAL, LP1,
+                "Review this lesson first: your skill \"Zulu\" is Weak and its prerequisite \"First\" is not yet Mastered."));
+        var names = Map.of(TEXT_FIRST, "Zulu", SIGNED_FIRST, "Alpha", P1, "First", P2, "Second");
+        var mastery = Map.of(TEXT_FIRST, MasteryState.WEAK, SIGNED_FIRST, MasteryState.WEAK,
+                P1, MasteryState.UNKNOWN, P2, MasteryState.LEARNING);
+        var edges = List.of(new PrerequisiteInput(SIGNED_FIRST, P2), new PrerequisiteInput(TEXT_FIRST, P1));
+
+        for (Set<UUID> sharedLessonSkills : List.of(Set.<UUID>of(), Set.of(TEXT_FIRST, SIGNED_FIRST))) {
+            var context = new DecisionContext(COURSE, LEARNER,
+                    List.of(new LessonInput(LP2, false, Set.of(P2)), new LessonInput(LP1, false, Set.of(P1)),
+                            new LessonInput(LW, false, sharedLessonSkills)),
+                    mastery, edges, names);
+
+            assertEquals(expected, new AdaptiveDecisionEngine().decide(context).recommendations(),
+                    sharedLessonSkills.toString());
+        }
+    }
+
+    @Test
+    void candidatesWithTheSameTargetLessonAreOrderedByLowercaseUuidText() {
+        // Both prerequisites map only to LP1; the reason must name TEXT_FIRST's skill, although
+        // SIGNED_FIRST is listed first, sorts first when signed and has the smaller name.
+        UUID weak = new UUID(0, 0x30);
+        var context = new DecisionContext(COURSE, LEARNER,
+                List.of(new LessonInput(LP1, false, Set.of(TEXT_FIRST, SIGNED_FIRST)), new LessonInput(LW, false, Set.of(weak))),
+                Map.of(weak, MasteryState.WEAK, TEXT_FIRST, MasteryState.UNKNOWN, SIGNED_FIRST, MasteryState.LEARNING),
+                List.of(new PrerequisiteInput(weak, SIGNED_FIRST), new PrerequisiteInput(weak, TEXT_FIRST)),
+                Map.of(weak, "Loops", TEXT_FIRST, "Zulu", SIGNED_FIRST, "Alpha"));
+
+        assertEquals(List.of(new Recommendation(RecommendationType.REMEDIAL, LP1,
+                        "Review this lesson first: your skill \"Loops\" is Weak and its prerequisite \"Zulu\" is not yet Mastered.")),
+                new AdaptiveDecisionEngine().decide(context).recommendations());
+    }
+
+    @Test
+    void testOutsFollowCanonicalOrderWhateverTheLessonUuidOrder() {
+        // L1 > L2 > L3 as UUIDs; B6-R01's skips must still come in canonical order.
+        var decision = new AdaptiveDecisionEngine().decide(new DecisionContext(COURSE, LEARNER,
+                standardLessons(false, false, false),
+                Map.of(S1, MasteryState.MASTERED, S2, MasteryState.MASTERED, S3, MasteryState.UNKNOWN),
+                List.of(new PrerequisiteInput(S2, S1), new PrerequisiteInput(S3, S2)), NAMES));
+
+        assertEquals(List.of(L1, L2), decision.testOutLessonIds());
+        assertEquals(List.of(L1, L2, L3), decision.recommendations().stream().map(Recommendation::targetLessonId).toList());
+    }
+
     private static List<LessonInput> standardLessons(boolean c1, boolean c2, boolean c3) {
         return List.of(new LessonInput(L1, c1, Set.of(S1)), new LessonInput(L2, c2, Set.of(S2)),
                 new LessonInput(L3, c3, Set.of(S3)));

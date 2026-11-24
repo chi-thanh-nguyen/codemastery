@@ -9,7 +9,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -34,9 +33,10 @@ public final class PracticeDifficultySelector {
      * @param state the skill's mastery state, with UNKNOWN used for an absent
      *              mastery row
      * @return the target difficulty before quiz availability is considered
+     * @throws IllegalArgumentException if {@code state} is null
      */
     public static DifficultyLevel targetDifficulty(MasteryState state) {
-        Objects.requireNonNull(state, "state");
+        requireArgument(state, "Mastery state");
         return switch (state) {
             case UNKNOWN, WEAK -> DifficultyLevel.EASY;
             case LEARNING -> DifficultyLevel.MEDIUM;
@@ -50,9 +50,10 @@ public final class PracticeDifficultySelector {
      *
      * @param target the difficulty derived from mastery
      * @return the immutable order in which to look for eligible practice quizzes
+     * @throws IllegalArgumentException if {@code target} is null
      */
     public static List<DifficultyLevel> fallbackOrder(DifficultyLevel target) {
-        Objects.requireNonNull(target, "target");
+        requireArgument(target, "Target difficulty");
         return switch (target) {
             case EASY -> List.of(DifficultyLevel.EASY, DifficultyLevel.MEDIUM, DifficultyLevel.HARD);
             case MEDIUM -> List.of(DifficultyLevel.MEDIUM, DifficultyLevel.EASY, DifficultyLevel.HARD);
@@ -66,9 +67,10 @@ public final class PracticeDifficultySelector {
      * @param target    the difficulty derived from mastery
      * @param available the levels that have at least one candidate
      * @return the selected level, or empty when none of the three is available
+     * @throws IllegalArgumentException if an argument is null
      */
     public static Optional<DifficultyLevel> selectLevel(DifficultyLevel target, Set<DifficultyLevel> available) {
-        Objects.requireNonNull(available, "available");
+        requireArgument(available, "Available difficulties");
         return fallbackOrder(target).stream().filter(available::contains).findFirst();
     }
 
@@ -167,6 +169,12 @@ public final class PracticeDifficultySelector {
         };
     }
 
+    private static void requireArgument(Object value, String label) {
+        if (value == null) {
+            throw new IllegalArgumentException(label + " is required");
+        }
+    }
+
     private static <T> List<T> copy(List<T> values, String label) {
         try {
             return List.copyOf(values);
@@ -181,19 +189,27 @@ public final class PracticeDifficultySelector {
         }
     }
 
-    /** One skill of M(L): its ID, stored name and the learner's state (absent row as {@code UNKNOWN}). */
+    /**
+     * One skill of M(L): its ID, stored name and the learner's state (absent row as {@code UNKNOWN}).
+     * The name is non-empty, as V003's {@code ck_skills_text} guarantees and OpenAPI
+     * {@code B8RecommendedPractice.skillName} requires.
+     */
     public record PracticeSkill(UUID skillId, String name, MasteryState state) {
         public PracticeSkill {
-            if (skillId == null || name == null || state == null) {
+            if (skillId == null || name == null || name.isEmpty() || state == null) {
                 throw new IllegalArgumentException("Practice skill fields are required");
             }
         }
     }
 
-    /** A published practice Quiz of the Course whose every Question's skill is in M(L). */
+    /**
+     * A published practice Quiz of the Course whose every Question's skill is in M(L). The title is
+     * non-empty, as V004's {@code ck_quizzes_text} guarantees and OpenAPI
+     * {@code B8RecommendedPractice.quizTitle} requires.
+     */
     public record PracticeQuiz(UUID quizId, String title, Set<DifficultyLevel> difficulties) {
         public PracticeQuiz {
-            if (quizId == null || title == null || difficulties == null) {
+            if (quizId == null || title == null || title.isEmpty() || difficulties == null) {
                 throw new IllegalArgumentException("Practice quiz fields are required");
             }
             try {

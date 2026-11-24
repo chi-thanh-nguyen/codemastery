@@ -759,8 +759,9 @@ test-count or coverage-percentage claim is made for them.
 - **Empty scaffolds.** Assessment `SubmissionServiceTest` (`AttemptServiceTest` holds
   only the AS06 quiz authoring cases; its attempt cases wait for AS08);
   Interaction and Admin unit tests; Adaptive
-  decision, evaluation, listener, settings, mastery-update, placement and skill-graph
-  tests; `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
+  evaluation, listener, settings, mastery-update and placement
+  tests (the decision suites hold the AD11 rule oracles,
+  [record](#ad11-adaptive-decision-rules-verification--25-november-2026)); `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
   `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
   `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
   their features and approved contracts.
@@ -6541,3 +6542,57 @@ case is present. The informational CI XML-attribute summary can therefore show s
 No unrelated test/reporting harness change was made. Frontend/E2E and real VM qualification were
 not run; no changed frontend/public operation exists in this PR. All evidence above is author-side
 verification, not independent QA, CODEOWNER approval or release acceptance.
+
+## AD11 adaptive decision rules verification — 25 November 2026
+
+**Scope and authority.** AD11 (#168), PR #278, on `main` `40db8f5` (after the merges of AD14
+PR #277 and CO15 PR #285). The Project Leader's instruction **“CodeMastery — Complete AD11 on
+Existing PR #278 After PR #277 and PR #285 Merges”** authorizes the AD11-owned code and bounded
+upstream slices below 20% of the owning Issue. Consumed contracts: `CT24-DECISION-2026-11-12-r1`
+(ADR011 §6), `CT07-ROUTING/DIFFICULTY/REASONS/BINDING-ORACLES-2026-11-12-r1` (ADR011 §§7–10) and
+`CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1` (ADR013 §19.4, Leader decision E02 option a). No
+contract, migration, dependency, privilege, OpenAPI operation or frontend type changes.
+
+**Implemented and tested (pure rules, no I/O).** `AdaptiveDecisionEngine.decide` and
+`NextLessonResolver` (test-out, remedial-first, continue), `AdaptiveDecisionEngine.prerequisiteWarnings`
+(US-06 warning, guidance only) and `PracticeDifficultySelector` (mapping, fallback order and the
+§19.4 `recommendPractice` rule with both fixed English reasons). `PracticeDifficultyProvider` keeps
+no production caller.
+
+| Oracle | Evidence |
+| --- | --- |
+| B6-R01–R03, R07, R08, R12 | `AdaptiveDecisionEngineTest.b6R0*`, `b6R12*`, plus the skip-reason name-order case |
+| B6-R04–R06, R14 (decision side) | `NextLessonResolverTest.b6R0*`, `b6R14*` |
+| ADR011 §7.2 tie-breaks: a Weak skill without a published Lesson is examined last; Weak skills tied on Lesson index, and candidates tied on target Lesson, follow lowercase UUID text (not signed `UUID.compareTo`); test-outs follow canonical, not UUID, order | `NextLessonResolverTest.aWeakSkillWithoutAPublishedLesson…`, `weakSkillsTiedOnLessonIndex…`, `candidatesWithTheSameTargetLesson…`, `testOutsFollowCanonicalOrder…` |
+| B6-R11 | `PracticeDifficultySelectorTest.mapsAllFourMasteryStates`, `usesTheContractFallbackOrderForEachTarget`, `selectsTheFirstAvailableLevel…` |
+| B8-P01–P06 (rule level) | `PracticeDifficultySelectorTest.b8P0*`, including the easier target winning against name order, the HARD → MEDIUM → EASY fallback reasons and UUID-text tie-breaks |
+| Contrasting profiles (unit level), reproducibility, immutability, snapshot validation, warnings | `AdaptiveDecisionEngineTest.contrastingProfiles…`, `decisionsAreReproducible…`, `invalidSnapshotsAreRejected`, `prerequisiteWarnings…` |
+
+A local mutation check confirmed that the tie-break oracles fail when a lesson-less Weak skill is
+ranked first, when either UUID tie-break uses signed order, when the governing skill is chosen by
+name only, or when the Quiz tie-break uses signed order.
+
+**Blocked by upstream (not implemented, not claimed).** The REST binding
+`GET /api/courses/{courseId}/lessons/{lessonId}/practice-recommendation` (`RecommendationController`,
+`RecommendationResponse`, `RecommendationService` composition) and oracles B8-P07–P09 need
+Assessment `QuizService.readPracticeQuizProfiles(UUID, Set<UUID>)` (CT23-PRACTICE-PROFILES r1,
+ADR013 §19.3, AS07 #158), which does not exist on `main`. With AS07's port still a 0-byte scaffold
+and AS07.select unused in Final, that read is most of AS07's remaining Final scope, well above the
+20% limit, so it is not absorbed (consistent with the CO15 record above). The endpoint also needs an
+Adaptive learner mastery-state read (AD16 #171); a read limited to `user_id`, `skill_id` and `state`
+stays within CT17-P6 r8 and needs no privilege change, but it is not added without its consumer.
+CO15's `LessonProgressService.readLearnerState` is available. B8-P10, B8-P11, E2E A-4, the SD03
+two-profile evaluation (QA05), orchestration (AD13) and `/adaptive-guidance` (AD16) are other
+Issues' evidence.
+
+**Execution evidence.** macOS arm64, Temurin OpenJDK 25.0.4.1, Docker Desktop 29.8.1,
+Testcontainers PostgreSQL, in an isolated PR #278 worktree; no shared database.
+
+| Command | Observed result |
+| --- | --- |
+| `cd backend && ./mvnw -B -Dtest='AdaptiveDecisionEngineTest,NextLessonResolverTest,PracticeDifficultySelectorTest' test` | 47 tests (24, 13, 10), 0 failures/errors/skips |
+| `cd backend && ./mvnw -B verify` (merged head before the review fixes) | BUILD SUCCESS; 1,059 unit + 485 integration tests, 0 failures/errors/skips |
+| `cd backend && ./mvnw -B verify` (final sources of this change, 25 November 2026) | BUILD SUCCESS in 4 min 25 s; 1,063 unit + 485 integration tests, 0 failures/errors/skips |
+
+AI-assisted review (a separate Claude Code review context) found no P0–P2 issue; its P3 findings
+are fixed in this change or recorded in PR #278. It is not CODEOWNER or human review.

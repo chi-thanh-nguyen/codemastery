@@ -24,6 +24,10 @@ class PracticeDifficultySelectorTest {
 
     private static final UUID LOOPS = new UUID(0, 0x10);
     private static final UUID ARRAYS = new UUID(0, 0x11);
+    // Lowercase UUID text and the signed UUID.compareTo disagree on these two: "1..." < "8..." as
+    // text, while 0x8000... is a negative most-significant long and compares first when signed.
+    private static final UUID TEXT_FIRST = UUID.fromString("10000000-0000-0000-0000-000000000000");
+    private static final UUID SIGNED_FIRST = UUID.fromString("80000000-0000-0000-0000-000000000000");
 
     // B6-R11 (ADR011 §8): mapping and fallback orders.
 
@@ -73,9 +77,11 @@ class PracticeDifficultySelectorTest {
     void b8P02TheEasiestTargetGovernsAndTiesFollowTheNameOrder() {
         List<PracticeQuiz> uniform = List.of(quiz(1, "Easy set", EASY), quiz(2, "Medium set", MEDIUM));
 
-        PracticeChoice weakest = recommend(List.of(new PracticeSkill(LOOPS, "Loops", MasteryState.MASTERED),
-                new PracticeSkill(ARRAYS, "Arrays", MasteryState.LEARNING)), uniform).orElseThrow();
+        // The easier target wins although its skill comes last in name order.
+        PracticeChoice weakest = recommend(List.of(new PracticeSkill(LOOPS, "Arrays", MasteryState.MASTERED),
+                new PracticeSkill(ARRAYS, "Zulu", MasteryState.LEARNING)), uniform).orElseThrow();
         assertEquals(ARRAYS, weakest.skillId());
+        assertEquals("Zulu", weakest.skillName());
         assertEquals(MEDIUM, weakest.targetDifficulty());
 
         UUID upper = new UUID(0, 0x20), lowerSmall = new UUID(0, 0x21), lowerLarge = new UUID(0, 0x22);
@@ -87,6 +93,10 @@ class PracticeDifficultySelectorTest {
         PracticeChoice equalNames = recommend(List.of(new PracticeSkill(lowerLarge, "alpha", MasteryState.WEAK),
                 new PracticeSkill(lowerSmall, "alpha", MasteryState.UNKNOWN)), uniform).orElseThrow();
         assertEquals(lowerSmall, equalNames.skillId());
+
+        PracticeChoice textOrder = recommend(List.of(new PracticeSkill(SIGNED_FIRST, "alpha", MasteryState.WEAK),
+                new PracticeSkill(TEXT_FIRST, "alpha", MasteryState.WEAK)), uniform).orElseThrow();
+        assertEquals(TEXT_FIRST, textOrder.skillId(), "equal names fall back to lowercase UUID text, not signed order");
     }
 
     @Test
@@ -125,10 +135,20 @@ class PracticeDifficultySelectorTest {
         assertEquals("Recommended practice: Medium, because your skill \"Loops\" is Weak and no Easy practice quiz "
                 + "is available for this lesson.", weakToMedium.reason());
 
-        PracticeChoice masteredToEasy = recommend(List.of(new PracticeSkill(LOOPS, "Loops", MasteryState.MASTERED)),
-                List.of(quiz(1, "Easy", EASY))).orElseThrow();
+        PracticeSkill mastered = new PracticeSkill(LOOPS, "Loops", MasteryState.MASTERED);
+        PracticeChoice masteredToMedium = recommend(List.of(mastered),
+                List.of(quiz(1, "Easy", EASY), quiz(3, "Medium", MEDIUM))).orElseThrow();
+        assertEquals(MEDIUM, masteredToMedium.difficulty());
+        assertEquals(HARD, masteredToMedium.targetDifficulty());
+        assertTrue(masteredToMedium.fallback());
+        assertEquals("Recommended practice: Medium, because your skill \"Loops\" is Mastered and no Hard practice "
+                + "quiz is available for this lesson.", masteredToMedium.reason());
+
+        PracticeChoice masteredToEasy = recommend(List.of(mastered), List.of(quiz(1, "Easy", EASY))).orElseThrow();
         assertEquals(EASY, masteredToEasy.difficulty());
         assertTrue(masteredToEasy.fallback());
+        assertEquals("Recommended practice: Easy, because your skill \"Loops\" is Mastered and no Hard practice "
+                + "quiz is available for this lesson.", masteredToEasy.reason());
 
         PracticeChoice exact = recommend(List.of(learning), List.of(quiz(4, "Medium", MEDIUM))).orElseThrow();
         assertFalse(exact.fallback());
@@ -145,6 +165,8 @@ class PracticeDifficultySelectorTest {
                 List.of(quiz(1, "b set", EASY), quiz(9, "B set", EASY), quiz(5, "a set", EASY))).orElseThrow().quizId());
         assertEquals(new UUID(0, 4), recommend(List.of(weak),
                 List.of(quiz(7, "Same", EASY), quiz(4, "Same", EASY))).orElseThrow().quizId());
+        assertEquals(TEXT_FIRST, recommend(List.of(weak), List.of(new PracticeQuiz(SIGNED_FIRST, "Same", Set.of(EASY)),
+                new PracticeQuiz(TEXT_FIRST, "Same", Set.of(EASY)))).orElseThrow().quizId());
     }
 
     @Test
@@ -167,6 +189,12 @@ class PracticeDifficultySelectorTest {
         assertThrows(IllegalArgumentException.class, () -> recommend(Arrays.asList(weak, null), uniform));
         assertThrows(IllegalArgumentException.class, () -> new PracticeSkill(LOOPS, null, MasteryState.WEAK));
         assertThrows(IllegalArgumentException.class, () -> new PracticeQuiz(new UUID(0, 1), "x", null));
+        assertThrows(IllegalArgumentException.class, () -> new PracticeSkill(LOOPS, "", MasteryState.WEAK));
+        assertThrows(IllegalArgumentException.class, () -> new PracticeQuiz(new UUID(0, 1), "", Set.of(EASY)));
+        assertThrows(IllegalArgumentException.class, () -> PracticeDifficultySelector.targetDifficulty(null));
+        assertThrows(IllegalArgumentException.class, () -> PracticeDifficultySelector.fallbackOrder(null));
+        assertThrows(IllegalArgumentException.class, () -> PracticeDifficultySelector.selectLevel(EASY, null));
+        assertThrows(IllegalArgumentException.class, () -> PracticeDifficultySelector.selectLevel(null, Set.of(EASY)));
     }
 
     private static void assertChoice(MasteryState state, List<PracticeQuiz> profiles, UUID quiz,
