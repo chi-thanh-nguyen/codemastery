@@ -162,6 +162,12 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
  * The quiz listener orchestration (AD13) and the history reads (AD16) are not implemented; these
  * cases read committed history with SQL as those callers would.
  *
+ * <p>AD11 practice recommendation (ADR013 §§19.3, 19.4, 19.8 B8-P01–P09): the production
+ * {@code GET /api/courses/{courseId}/lessons/{lessonId}/practice-recommendation} through the security
+ * chain over real Course admission (CT33 {@code readLearnerState}), Adaptive skills, mappings and
+ * stored mastery (AD16 read) and Assessment's practice quiz profiles (AS07), in one read-only
+ * REPEATABLE READ snapshot that writes nothing and needs only runtime-matrix SELECT grants.
+ *
  * <p>The context is closed after this class so its connection pool does not count against
  * PostgreSQL's connection limit while later suites run.
  */
@@ -179,6 +185,10 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     private static final ThreadLocal<Runnable> BEFORE_QUESTION_PAGE = new ThreadLocal<>();
     /** Runs once on the listing thread immediately before its ordered quiz page query is prepared. */
     private static final ThreadLocal<Runnable> BEFORE_QUIZ_PAGE = new ThreadLocal<>();
+    /** Runs once on the request thread immediately before the AD16 mastery state query is prepared. */
+    private static final ThreadLocal<Runnable> BEFORE_MASTERY_READ = new ThreadLocal<>();
+    /** Records Hibernate-prepared SQL on the current thread while set. */
+    private static final ThreadLocal<List<String>> RECORDED_SQL = new ThreadLocal<>();
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Autowired CourseManagementService service;
@@ -227,6 +237,13 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
                 BEFORE_QUESTION_PAGE.remove();
                 pageChange.run();
             }
+            List<String> recorded = RECORDED_SQL.get();
+            if (recorded != null) recorded.add(sql);
+            Runnable masteryChange = BEFORE_MASTERY_READ.get();
+            if (masteryChange != null && sql.contains("FROM public.learner_skill_masteries")) {
+                BEFORE_MASTERY_READ.remove();
+                masteryChange.run();
+            }
             Runnable quizPageChange = BEFORE_QUIZ_PAGE.get();
             if (quizPageChange != null && sql.contains("FROM public.quizzes") && sql.contains("ORDER BY title COLLATE")) {
                 BEFORE_QUIZ_PAGE.remove();
@@ -258,6 +275,8 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         BEFORE_PREREQUISITES.remove();
         BEFORE_QUESTION_PAGE.remove();
         BEFORE_QUIZ_PAGE.remove();
+        BEFORE_MASTERY_READ.remove();
+        RECORDED_SQL.remove();
         for (UUID course : jdbc.queryForList("SELECT id FROM public.courses WHERE instructor_id IN (?,?)", UUID.class, OWNER, OTHER)) {
             purgeAssessmentAndGraph(course);
         }
@@ -2175,6 +2194,304 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
 
         assertTrue(committedHistory(fixture.enrollment()).isEmpty());
         assertTrue(recommendationEvents.received().isEmpty());
+    }
+
+    // AD11: practice recommendation REST (ADR013 §19.4; B8-P01–P09 through the production stack).
+
+    @Test void b8TheRecommendationFollowsStoredMasteryAndTheUniformPublishedPracticeBankOverHttp() throws Exception {
+        PracticeFixture f = practiceFixture();
+        mastery(f.loops(), "mastered");
+        UUID arraysEasy = question(f.arrays(), "easy"), arraysEasy2 = question(f.arrays(), "easy");
+        UUID loopsEasy = question(f.loops(), "easy"), arraysHard = question(f.arrays(), "hard");
+        UUID stringsEasy = question(f.strings(), "easy"), stringsHard = question(f.strings(), "hard");
+        UUID alpha = practiceQuiz(COURSE, "Alpha easy", "practice", "published", loopsEasy, arraysEasy2);
+        practiceQuiz(COURSE, "Bravo easy", "practice", "published", arraysEasy);
+        // B8-P03 exclusions, each ordered before the winner by title.
+        practiceQuiz(COURSE, "Aardvark mixed", "practice", "published", arraysEasy, arraysHard);
+        practiceQuiz(COURSE, "Aaa hidden", "practice", "hidden", arraysEasy);
+        practiceQuiz(COURSE, "Aab test", "test", "published", arraysEasy);
+        practiceQuiz(COURSE, "Aab diagnostic", "diagnostic", "published", arraysEasy);
+        practiceQuiz(COURSE, "Aac other skill", "practice", "published", arraysEasy, stringsEasy);
+        practiceQuiz(COURSE, "Aad empty", "practice", "published");
+        UUID foreignSkill = skillRow(SECOND, "Arrays");
+        practiceQuiz(SECOND, "Aae other course", "practice", "published", question(foreignSkill, "easy"));
+        String learner = bearer(LEARNER);
+
+        // B8-P01/P02: Loops Mastered (Hard) and Arrays without a row (Unknown, Easy); the easier target governs.
+        JsonNode body = practiceJson(practice(COURSE, f.l1(), learner));
+        assertEquals(Set.of("courseId", "lessonId", "adaptiveEnabled", "recommendation"), fieldNames(body));
+        assertEquals(COURSE.toString(), body.get("courseId").asString());
+        assertEquals(f.l1().toString(), body.get("lessonId").asString());
+        assertTrue(body.get("adaptiveEnabled").asBoolean());
+        assertRecommended(body.get("recommendation"), alpha, "Alpha easy", "easy", "easy", false, f.arrays(), "Arrays",
+                "unknown", "Recommended practice: Easy, because your skill \"Arrays\" is not yet assessed.");
+
+        // B8-P04: Learning targets Medium; with only Easy and Hard uniform Quizzes the fallback is Easy.
+        mastery(f.strings(), "learning");
+        UUID stringsEasyQuiz = practiceQuiz(COURSE, "Strings easy", "practice", "published", stringsEasy);
+        practiceQuiz(COURSE, "Strings hard", "practice", "published", stringsHard);
+        assertRecommended(practiceJson(practice(COURSE, f.l2(), learner)).get("recommendation"), stringsEasyQuiz,
+                "Strings easy", "easy", "medium", true, f.strings(), "Strings", "learning",
+                "Recommended practice: Easy, because your skill \"Strings\" is Learning and no Medium practice quiz is "
+                        + "available for this lesson.");
+
+        // Recomputed on read from the stored rows: Arrays Mastered, Loops Learning -> Loops (Medium) governs.
+        mastery(f.arrays(), "mastered");
+        jdbc.update("UPDATE public.learner_skill_masteries SET state = 'learning' WHERE user_id = ? AND skill_id = ?",
+                LEARNER, f.loops());
+        UUID loopsMedium = practiceQuiz(COURSE, "Loops medium", "practice", "published", question(f.loops(), "medium"));
+        assertRecommended(practiceJson(practice(COURSE, f.l1(), learner)).get("recommendation"), loopsMedium,
+                "Loops medium", "medium", "medium", false, f.loops(), "Loops", "learning",
+                "Recommended practice: Medium, because your skill \"Loops\" is Learning.");
+
+        // B8-P06: a Lesson without mapped skills, then a disabled Course, has no recommendation.
+        JsonNode unmapped = practiceJson(practice(COURSE, f.unmapped(), learner));
+        assertTrue(unmapped.get("adaptiveEnabled").asBoolean());
+        assertTrue(unmapped.has("recommendation") && unmapped.get("recommendation").isNull());
+        jdbc.update("UPDATE public.courses SET adaptive_enabled = false WHERE id = ?", COURSE);
+        JsonNode disabled = practiceJson(practice(COURSE, f.l1(), learner));
+        assertFalse(disabled.get("adaptiveEnabled").asBoolean());
+        assertTrue(disabled.has("recommendation") && disabled.get("recommendation").isNull());
+    }
+
+    @Test void b8P07AdmissionAndUnavailableLessonsFollowTheContractOrderWithoutReadingMasteryOrAssessment() throws Exception {
+        PracticeFixture f = practiceFixture();
+        UUID quiz = practiceQuiz(COURSE, "Alpha easy", "practice", "published", question(f.arrays(), "easy"));
+        UUID otherCourseLesson = lesson(chapter(SECOND, 1), 1);
+        UUID hiddenCourseLesson = lesson(chapter(HIDDEN, 1), 1);
+        String learner = bearer(LEARNER), owner = bearer(OWNER), admin = bearer(ADMIN);
+        String path = "/api/courses/" + COURSE + "/lessons/" + f.l1() + "/practice-recommendation";
+
+        // Positive control: an admitted request's recorded SQL does include the mastery and profile reads.
+        List<String> admittedSql = new ArrayList<>();
+        RECORDED_SQL.set(admittedSql);
+        try {
+            practiceJson(practice(COURSE, f.l1(), learner));
+        } finally {
+            RECORDED_SQL.remove();
+        }
+        assertTrue(admittedSql.stream().anyMatch(sql -> sql.contains("learner_skill_masteries")), admittedSql::toString);
+        assertTrue(admittedSql.stream().anyMatch(sql -> sql.contains("quiz_questions")), admittedSql::toString);
+
+        List<Object[]> cases = List.of(
+                new Object[] {null, path, 401},
+                new Object[] {"Bearer not-a-token", path, 401},
+                new Object[] {learner, "/api/courses/not-a-uuid/lessons/" + f.l1() + "/practice-recommendation", 400},
+                new Object[] {learner, "/api/courses/" + COURSE + "/lessons/" + f.l1() + "x/practice-recommendation", 400},
+                new Object[] {owner, "/api/courses/not-a-uuid/lessons/" + f.l1() + "/practice-recommendation", 400},
+                new Object[] {learner, path + "?page=0", 400},
+                new Object[] {owner, path, 403},
+                new Object[] {admin, path, 403},
+                new Object[] {learner, "/api/courses/" + SECOND + "/lessons/" + otherCourseLesson + "/practice-recommendation", 403},
+                new Object[] {learner, "/api/courses/" + HIDDEN + "/lessons/" + hiddenCourseLesson + "/practice-recommendation", 404},
+                new Object[] {learner, "/api/courses/" + UUID.randomUUID() + "/lessons/" + f.l1() + "/practice-recommendation", 404},
+                new Object[] {learner, "/api/courses/" + COURSE + "/lessons/" + f.hidden() + "/practice-recommendation", 404},
+                new Object[] {learner, "/api/courses/" + COURSE + "/lessons/" + otherCourseLesson + "/practice-recommendation", 404},
+                new Object[] {learner, "/api/courses/" + COURSE + "/lessons/" + UUID.randomUUID() + "/practice-recommendation", 404});
+        for (Object[] c : cases) {
+            List<String> statements = new ArrayList<>();
+            RECORDED_SQL.set(statements);
+            MvcResult result;
+            try {
+                result = call(new Operation(HttpMethod.GET, (String) c[1], null), (String) c[0]);
+            } finally {
+                RECORDED_SQL.remove();
+            }
+            assertProblem(result, (int) c[2], null);
+            assertEquals("no-store", result.getResponse().getHeader("Cache-Control"), (String) c[1]);
+            assertFalse(result.getResponse().getContentAsString().contains(quiz.toString()));
+            assertTrue(statements.stream().noneMatch(sql -> sql.contains("learner_skill_masteries") || sql.contains("quiz")),
+                    () -> c[1] + " read mastery or Assessment data: " + statements);
+        }
+
+        // A LEFT membership is CT03 stage 4 (403), exactly as for /adaptive-guidance.
+        jdbc.update("UPDATE public.enrollments SET status = 'left' WHERE user_id = ? AND course_id = ?", LEARNER, COURSE);
+        assertProblem(practice(COURSE, f.l1(), learner), 403, null);
+        jdbc.update("UPDATE public.enrollments SET status = 'completed' WHERE user_id = ? AND course_id = ?", LEARNER, COURSE);
+        assertEquals(quiz.toString(), practiceJson(practice(COURSE, f.l1(), learner)).get("recommendation").get("quizId").asString(),
+                "a COMPLETED membership is admitted");
+    }
+
+    @Test void b8P08TheRecommendationWritesNothingPublishesNothingAndRunsInTheCallersReadOnlySnapshot() throws Exception {
+        PracticeFixture f = practiceFixture();
+        mastery(f.loops(), "weak");
+        practiceQuiz(COURSE, "Alpha easy", "practice", "published", question(f.loops(), "easy"));
+        String before = mutableState();
+
+        practiceJson(practice(COURSE, f.l1(), bearer(LEARNER)));
+        practiceJson(practice(COURSE, f.unmapped(), bearer(LEARNER)));
+        assertEquals(before.replaceAll("refresh_sessions=\\d+", ""), mutableState().replaceAll("refresh_sessions=\\d+", ""));
+        assertTrue(recommendationEvents.received().isEmpty(), "no recommendation event");
+
+        List<String> facts = outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> as(LEARNER, Role.LEARNER, () -> {
+            assertEquals("Alpha easy", recommendationService.readPracticeRecommendation(COURSE, f.l1()).recommendation().quizTitle());
+            return List.of(String.valueOf(jdbc.queryForObject("SELECT pg_current_xact_id_if_assigned()", Object.class)),
+                    jdbc.queryForObject("SHOW transaction_isolation", String.class),
+                    jdbc.queryForObject("SHOW transaction_read_only", String.class));
+        }));
+        assertEquals(List.of("null", "repeatable read", "on"), facts, "no transaction id was assigned: nothing was written");
+
+        // Its own unit is the same kind of snapshot; a read-write or READ COMMITTED caller is refused (500 path).
+        assertThrows(IllegalStateException.class, () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false)
+                .execute(status -> as(LEARNER, Role.LEARNER, () -> recommendationService.readPracticeRecommendation(COURSE, f.l1()))));
+    }
+
+    @Test void b8TheRecommendationIsOneSnapshotEvenWhenAWriterCommitsBetweenItsReads() throws Exception {
+        PracticeFixture f = practiceFixture();
+        mastery(f.loops(), "mastered");
+        UUID arraysEasy = question(f.arrays(), "easy");
+        UUID alpha = practiceQuiz(COURSE, "Alpha easy", "practice", "published", arraysEasy);
+        UUID late = practiceQuiz(COURSE, "Aaa late", "practice", "hidden", arraysEasy);
+        String learner = bearer(LEARNER);
+        AtomicInteger hooks = new AtomicInteger();
+        BEFORE_MASTERY_READ.set(() -> {
+            hooks.incrementAndGet();
+            commitSqlElsewhere("INSERT INTO public.learner_skill_masteries (id,user_id,skill_id,state) VALUES (?,?,?,'mastered')",
+                    UUID.randomUUID(), LEARNER, f.arrays());
+            commitSqlElsewhere("UPDATE public.quizzes SET publication_status = 'published' WHERE id = ?", late);
+        });
+
+        assertRecommended(practiceJson(practice(COURSE, f.l1(), learner)).get("recommendation"), alpha, "Alpha easy", "easy",
+                "easy", false, f.arrays(), "Arrays", "unknown",
+                "Recommended practice: Easy, because your skill \"Arrays\" is not yet assessed.");
+        assertEquals(1, hooks.get(), "the writer committed between the admission and the mastery read");
+
+        assertRecommended(practiceJson(practice(COURSE, f.l1(), learner)).get("recommendation"), late, "Aaa late", "easy",
+                "hard", true, f.arrays(), "Arrays", "mastered",
+                "Recommended practice: Easy, because your skill \"Arrays\" is Mastered and no Hard practice quiz is "
+                        + "available for this lesson.");
+    }
+
+    @Test void b8AProviderFailureIsASafeNoStoreServerError() throws Exception {
+        PracticeFixture f = practiceFixture();
+        BEFORE_MASTERY_READ.set(() -> { throw new IllegalStateException("leaked-diagnostic-" + f.loops()); });
+
+        MvcResult result = practice(COURSE, f.l1(), bearer(LEARNER));
+
+        assertProblem(result, 500, null);
+        assertEquals("no-store", result.getResponse().getHeader("Cache-Control"));
+        assertFalse(result.getResponse().getContentAsString().contains("leaked-diagnostic"));
+        assertFalse(result.getResponse().getContentAsString().contains(f.loops().toString()));
+    }
+
+    @Test void b8TheWholeCompositionNeedsOnlyTheRuntimeMatrixSelectGrants() throws Exception {
+        PracticeFixture f = practiceFixture();
+        mastery(f.arrays(), "learning");
+        UUID medium = practiceQuiz(COURSE, "Arrays medium", "practice", "published", question(f.arrays(), "medium"));
+        String role = "ad11_select_" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.execute("CREATE ROLE " + role + " NOLOGIN");
+        try {
+            jdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+            // CT17-P6 matrix SELECT rows of the relations this read touches (CT03's snapshot included); masteries
+            // (r8) and learning_materials are column-limited exactly as in the matrix.
+            jdbc.execute("GRANT SELECT ON public.users, public.courses, public.chapters, public.lessons, public.enrollments, "
+                    + "public.lesson_progress, public.skills, public.lesson_skills, public.quizzes, public.quiz_questions, "
+                    + "public.questions TO " + role);
+            jdbc.execute("GRANT SELECT (user_id, skill_id, state) ON public.learner_skill_masteries TO " + role);
+            jdbc.execute("GRANT SELECT (id, lesson_id, publication_status) ON public.learning_materials TO " + role);
+
+            String choice = outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> {
+                status.setRollbackOnly(); // the denied probe below aborts the transaction
+                jdbc.execute("SET LOCAL ROLE " + role);
+                String quizId = as(LEARNER, Role.LEARNER,
+                        () -> recommendationService.readPracticeRecommendation(COURSE, f.l1()).recommendation().quizId().toString());
+                assertEquals(role, jdbc.queryForObject("SELECT current_user", String.class));
+                assertThrows(DataAccessException.class, () -> jdbc.queryForList("SELECT id FROM public.learner_skill_masteries"));
+                return quizId;
+            });
+            assertEquals(medium.toString(), choice);
+        } finally {
+            jdbc.execute("DROP OWNED BY " + role);
+            jdbc.execute("DROP ROLE " + role);
+        }
+    }
+
+    /** COURSE adaptive with L1 (Loops, Arrays), L2 (Strings), an unmapped L3 and a hidden mapped Lesson; LEARNER active. */
+    private record PracticeFixture(UUID l1, UUID l2, UUID unmapped, UUID hidden, UUID loops, UUID arrays, UUID strings) { }
+
+    private PracticeFixture practiceFixture() {
+        jdbc.update("UPDATE public.courses SET adaptive_enabled = true, adaptive_settings = '{}'::jsonb WHERE id = ?", COURSE);
+        UUID chapter = chapter(COURSE, 1);
+        UUID l1 = lesson(chapter, 1), l2 = lesson(chapter, 2), unmapped = lesson(chapter, 3), hidden = hiddenLesson(chapter, 4);
+        UUID loops = skillRow(COURSE, "Loops"), arrays = skillRow(COURSE, "Arrays"), strings = skillRow(COURSE, "Strings");
+        for (UUID[] pair : List.of(new UUID[] {l1, loops}, new UUID[] {l1, arrays}, new UUID[] {l2, strings},
+                new UUID[] {hidden, loops})) {
+            jdbc.update("INSERT INTO public.lesson_skills (id,lesson_id,skill_id) VALUES (?,?,?)", UUID.randomUUID(), pair[0], pair[1]);
+        }
+        jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,'active')",
+                UUID.randomUUID(), LEARNER, COURSE);
+        return new PracticeFixture(l1, l2, unmapped, hidden, loops, arrays, strings);
+    }
+
+    private void mastery(UUID skill, String state) {
+        jdbc.update("INSERT INTO public.learner_skill_masteries (id,user_id,skill_id,state) VALUES (?,?,?,?)",
+                UUID.randomUUID(), LEARNER, skill, state);
+    }
+
+    private UUID question(UUID skill, String difficulty) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.questions (id,skill_id,prompt,kind,difficulty,options,correct_options) "
+                + "VALUES (?,?,'Pick one','true_false',?,ARRAY['True','False'],ARRAY[true,false])", id, skill, difficulty);
+        return id;
+    }
+
+    private UUID practiceQuiz(UUID course, String title, String kind, String status, UUID... questions) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.quizzes (id,course_id,title,kind,time_limit_seconds,publication_status) "
+                + "VALUES (?,?,?,?,60,?)", id, course, title, kind, status);
+        for (int i = 0; i < questions.length; i++) {
+            jdbc.update("INSERT INTO public.quiz_questions (id,quiz_id,question_id,position) VALUES (?,?,?,?)",
+                    UUID.randomUUID(), id, questions[i], i + 1);
+        }
+        return id;
+    }
+
+    private MvcResult practice(UUID course, UUID lesson, String authorization) throws Exception {
+        return call(new Operation(HttpMethod.GET, "/api/courses/" + course + "/lessons/" + lesson + "/practice-recommendation",
+                null), authorization);
+    }
+
+    private static JsonNode practiceJson(MvcResult result) throws Exception {
+        JsonNode body = json(result, 200);
+        assertEquals("no-store", result.getResponse().getHeader("Cache-Control"));
+        return body;
+    }
+
+    private static Set<String> fieldNames(JsonNode node) {
+        Set<String> names = new java.util.TreeSet<>();
+        node.propertyNames().forEach(names::add);
+        return names;
+    }
+
+    private static void assertRecommended(JsonNode node, UUID quiz, String title, String difficulty, String target,
+            boolean fallback, UUID skill, String skillName, String state, String reason) {
+        assertEquals(Set.of("quizId", "quizTitle", "difficulty", "targetDifficulty", "fallback", "skillId", "skillName",
+                "skillState", "reason"), fieldNames(node));
+        assertEquals(quiz.toString(), node.get("quizId").asString());
+        assertEquals(title, node.get("quizTitle").asString());
+        assertEquals(difficulty, node.get("difficulty").asString());
+        assertEquals(target, node.get("targetDifficulty").asString());
+        assertEquals(fallback, node.get("fallback").asBoolean());
+        assertEquals(skill.toString(), node.get("skillId").asString());
+        assertEquals(skillName, node.get("skillName").asString());
+        assertEquals(state, node.get("skillState").asString());
+        assertEquals(reason, node.get("reason").asString());
+    }
+
+    /** Every row a write by this read could touch, as one comparable text. */
+    private String mutableState() {
+        return jdbc.queryForObject("SELECT concat_ws(';', "
+                + "(SELECT 'masteries=' || coalesce(string_agg(user_id || ':' || skill_id || ':' || state, ',' ORDER BY skill_id), '') "
+                + "FROM public.learner_skill_masteries), "
+                + "(SELECT 'history=' || count(*) FROM public.path_recommendations), "
+                + "(SELECT 'progress=' || coalesce(string_agg(lesson_id || ':' || completed || ':' || mastery_skipped, ',' ORDER BY lesson_id), '') "
+                + "FROM public.lesson_progress), "
+                + "(SELECT 'enrollments=' || coalesce(string_agg(id || ':' || status || ':' || coalesce(resume_lesson_id::text, '-') "
+                + "|| ':' || coalesce(last_visited_at::text, '-'), ',' ORDER BY id), '') FROM public.enrollments), "
+                + "(SELECT 'attempts=' || count(*) FROM public.attempts), "
+                + "(SELECT 'quizzes=' || coalesce(string_agg(id || ':' || publication_status, ',' ORDER BY id), '') FROM public.quizzes), "
+                + "(SELECT 'members=' || count(*) FROM public.quiz_questions), "
+                + "(SELECT 'refresh_sessions=' || count(*) FROM public.refresh_sessions))", String.class);
     }
 
     /** One published Course with three published Lessons, L1-L3 mapped (in the context only) to S1-S3. */

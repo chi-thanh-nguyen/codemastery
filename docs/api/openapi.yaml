@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157), and the CT31.read audit-log operation (IN10 #184); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157), and the CT31.read audit-log operation (IN10 #184), and the AD11 CT07-PRACTICE-RECOMMENDATION practice-recommendation read (#168); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -6491,7 +6491,7 @@
         "tags": [
           "Batch 8 contracts"
         ],
-        "description": "Self Learner. Mastery-based practice recommendation for one published Lesson (ADR013 §19, CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1; Leader decision E02 option a). Admission as /adaptive-guidance (CT03 learner Course access, ACTIVE/COMPLETED membership); the Lesson must be a currently published Lesson of that Course, else 404. recommendation is null unless the Course's stored adaptiveEnabled is true, the Lesson has mapped skills and at least one published practice Quiz of uniform difficulty covers only those skills. The governing skill is the Lesson skill with the easiest CT07.difficulty target (unknown/weak easy, learning medium, mastered hard; ties by skill name order); the Quiz is chosen at that level, else by the CT07.difficulty fallback order, then by title and id. Advisory only: never blocks or reorders access, writes nothing, and does not change quiz capture, evidence or mastery. ADR013 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner. Mastery-based practice recommendation for one published Lesson (ADR013 §19, CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1; Leader decision E02 option a). Admission as /adaptive-guidance (CT03 learner Course access, ACTIVE/COMPLETED membership); the Lesson must be a currently published Lesson of that Course, else 404. recommendation is null unless the Course's stored adaptiveEnabled is true, the Lesson has mapped skills and at least one published practice Quiz of uniform difficulty covers only those skills. The governing skill is the Lesson skill with the easiest CT07.difficulty target (unknown/weak easy, learning medium, mastered hard; ties by skill name order); the Quiz is chosen at that level, else by the CT07.difficulty fallback order, then by title and id. Advisory only: never blocks or reorders access, writes nothing, and does not change quiz capture, evidence or mastery. Implemented under AD11 (#168) behind an authentication-only route rule (the Learner role is CT03's decision inside CT33 readLearnerState, after the 400 checks): one read-only REPEATABLE READ snapshot over CO15's readLearnerState, Adaptive's skills, mappings and stored mastery, and AS07's readPracticeQuizProfiles. ADR013 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -6519,7 +6519,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only REPEATABLE READ snapshot; implemented under AD11 (#168).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -6549,7 +6549,6 @@
             "$ref": "#/components/responses/B6Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/013-batch-08-contract-approvals.md"
       }
     },

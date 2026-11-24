@@ -14,7 +14,11 @@ import com.codemastery.modules.adaptive.domain.model.AdaptiveDecision.Recommenda
 import com.codemastery.modules.adaptive.domain.model.MasteryState;
 import com.codemastery.modules.adaptive.domain.model.PathRecommendation;
 import com.codemastery.modules.adaptive.domain.model.RecommendationType;
+import com.codemastery.modules.adaptive.application.mastery.MasteryQueryService;
 import com.codemastery.modules.adaptive.domain.repository.PathRecommendationRepository;
+import com.codemastery.modules.adaptive.domain.repository.SkillRepository;
+import com.codemastery.modules.assessment.application.service.QuizService;
+import com.codemastery.modules.course.application.service.LessonProgressService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.BeanUtils;
 import org.springframework.context.ApplicationEventPublisher;
@@ -36,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class AdaptiveDecisionEngineTest {
 
@@ -533,7 +538,8 @@ class AdaptiveDecisionEngineTest {
         try {
             return BeanUtils.instantiateClass(AdaptiveDecisionService.class.getDeclaredConstructor(
                             RecommendationService.class, ApplicationEventPublisher.class, Clock.class),
-                    new RecommendationService(history), publisher, clock);
+                    new RecommendationService(history, mock(LessonProgressService.class), mock(SkillRepository.class),
+                            mock(MasteryQueryService.class), mock(QuizService.class)), publisher, clock);
         } catch (NoSuchMethodException missing) {
             throw new AssertionError(missing);
         }

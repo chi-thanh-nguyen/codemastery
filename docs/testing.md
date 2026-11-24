@@ -761,8 +761,8 @@ test-count or coverage-percentage claim is made for them.
   only the AS06 quiz authoring cases; its attempt cases wait for AS08);
   Interaction and Admin unit tests; Adaptive
   evaluation, listener, settings, mastery-update and placement
-  tests (the decision suites hold the AD11 rule oracles,
-  [record](#ad11-adaptive-decision-rules-verification--25-november-2026)); `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
+  tests (the decision suites hold the AD11 oracles,
+  [record](#ad11-adaptive-decision-rules-verification--25-november-2026));
   `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
   `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
   their features and approved contracts.
@@ -6604,54 +6604,91 @@ These are local author/remediation runs, not independent QA, CODEOWNER review or
 
 ## AD11 adaptive decision rules verification — 25 November 2026
 
-**Scope and authority.** AD11 (#168), PR #278, on `main` `40db8f5` (after the merges of AD14
-PR #277 and CO15 PR #285). The Project Leader's instruction **“CodeMastery — Complete AD11 on
-Existing PR #278 After PR #277 and PR #285 Merges”** authorizes the AD11-owned code and bounded
-upstream slices below 20% of the owning Issue. Consumed contracts: `CT24-DECISION-2026-11-12-r1`
-(ADR011 §6), `CT07-ROUTING/DIFFICULTY/REASONS/BINDING-ORACLES-2026-11-12-r1` (ADR011 §§7–10) and
-`CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1` (ADR013 §19.4, Leader decision E02 option a). No
-contract, migration, dependency, privilege, OpenAPI operation or frontend type changes.
+**Scope and authority.** AD11 (#168), PR #278, on `main` `b954077` (after AD14 PR #277, CO15
+PR #285 and AS07 PR #287). The Project Leader's instructions **“CodeMastery — Complete AD11 on
+Existing PR #278 After PR #277 and PR #285 Merges”** and **“CodeMastery — Complete 100% AD11 on
+Existing PR #278 After AS07 Merge”** authorize the AD11-owned code, every AD16-owned read the
+endpoint needs, and other upstream slices below about 30% of their owning Issue. Consumed contracts:
+`CT24-DECISION-2026-11-12-r1` (ADR011 §6), `CT07-ROUTING/DIFFICULTY/REASONS/BINDING-ORACLES-2026-11-12-r1`
+(ADR011 §§7–10), `CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1` (ADR013 §19.4, Leader decision E02
+option a), CT33 `readLearnerState` (ADR011 §13, CO15), `CT23-PRACTICE-PROFILES-2026-11-15-r1`
+(ADR013 §19.3, AS07) and `CT17-P6-PRIVILEGES-2026-11-23-r8`. No contract, migration, dependency,
+privilege-matrix or frontend change.
 
-**Implemented and tested (pure rules, no I/O).** `AdaptiveDecisionEngine.decide` and
-`NextLessonResolver` (test-out, remedial-first, continue), `AdaptiveDecisionEngine.prerequisiteWarnings`
-(US-06 warning, guidance only) and `PracticeDifficultySelector` (mapping, fallback order and the
-§19.4 `recommendPractice` rule with both fixed English reasons). `PracticeDifficultyProvider` keeps
-no production caller.
+**Pure rules.** `AdaptiveDecisionEngine.decide` and `NextLessonResolver` (test-out, remedial-first,
+continue), `AdaptiveDecisionEngine.prerequisiteWarnings` (US-06 warning, guidance only) and
+`PracticeDifficultySelector` (mapping, fallback order and the §19.4 `recommendPractice` rule with both
+fixed English reasons). `PracticeDifficultyProvider` keeps no production caller.
+
+**REST binding (`b8ReadPracticeRecommendation`).**
+`GET /api/courses/{courseId}/lessons/{lessonId}/practice-recommendation` in `RecommendationController`
+(DTOs in `RecommendationResponse`), composed by `RecommendationService.readPracticeRecommendation` in
+one read-only REPEATABLE READ transaction: CT33 `readLearnerState` (CT03 admission, ACTIVE/COMPLETED)
+first; then the Lesson must be one of that state's published Lessons (else 404); with the stored
+`adaptiveEnabled` false or no Course skill mapped to the Lesson the result is null and nothing else is
+read; otherwise Adaptive's `SkillRepository` skills and mappings, the AD16 state read and Assessment's
+`readPracticeQuizProfiles` for exactly the Lesson's skills feed `recommendPractice`. The route rule in
+`SecurityConfig` requires authentication only, so malformed UUIDs and query parameters are 400 before
+the Learner-role 403 that CT03 decides. Success and MVC errors carry `Cache-Control: no-store`.
+OpenAPI marks only this operation implemented.
+
+**AD16 read slice.** `LearnerSkillMasteryRepository.findStates` (one native
+`SELECT skill_id, state … WHERE user_id = ? AND skill_id IN (…)`, within the r8 column grant, no entity
+load) and `MasteryQueryService.readStates` (joins only a read-only REPEATABLE READ caller transaction;
+every requested skill returned, an absent row as Unknown). The Mastery Map, guidance, insights and
+their REST operations remain AD16's.
 
 | Oracle | Evidence |
 | --- | --- |
 | B6-R01–R03, R07, R08, R12 | `AdaptiveDecisionEngineTest.b6R0*`, `b6R12*`, plus the skip-reason name-order case |
 | B6-R04–R06, R14 (decision side) | `NextLessonResolverTest.b6R0*`, `b6R14*` |
-| ADR011 §7.2 tie-breaks: a Weak skill without a published Lesson is examined last; Weak skills tied on Lesson index, and candidates tied on target Lesson, follow lowercase UUID text (not signed `UUID.compareTo`); test-outs follow canonical, not UUID, order | `NextLessonResolverTest.aWeakSkillWithoutAPublishedLesson…`, `weakSkillsTiedOnLessonIndex…`, `candidatesWithTheSameTargetLesson…`, `testOutsFollowCanonicalOrder…` |
+| ADR011 §7.2 tie-breaks (lesson-less Weak skill last, lowercase-UUID-text ties, canonical test-out order) | `NextLessonResolverTest.aWeakSkillWithoutAPublishedLesson…`, `weakSkillsTiedOnLessonIndex…`, `candidatesWithTheSameTargetLesson…`, `testOutsFollowCanonicalOrder…` |
 | B6-R11 | `PracticeDifficultySelectorTest.mapsAllFourMasteryStates`, `usesTheContractFallbackOrderForEachTarget`, `selectsTheFirstAvailableLevel…` |
-| B8-P01–P06 (rule level) | `PracticeDifficultySelectorTest.b8P0*`, including the easier target winning against name order, the HARD → MEDIUM → EASY fallback reasons and UUID-text tie-breaks |
-| Contrasting profiles (unit level), reproducibility, immutability, snapshot validation, warnings | `AdaptiveDecisionEngineTest.contrastingProfiles…`, `decisionsAreReproducible…`, `invalidSnapshotsAreRejected`, `prerequisiteWarnings…` |
+| B8-P01–P06 (rule) | `PracticeDifficultySelectorTest.b8P0*` |
+| B8-P01–P04, P06 (PostgreSQL, HTTP) | `AdaptiveLearningFlowIntegrationTest.b8TheRecommendationFollowsStoredMasteryAndTheUniformPublishedPracticeBankOverHttp`: absent row as Unknown, easiest target governs, hidden/`test`/`diagnostic`/mixed/empty/other-skill/other-Course Quizzes excluded, a subset-covering Quiz included, fallback template, recomputation from stored rows, unmapped Lesson and disabled Course null; exact field set and lowercase codes |
+| B8-P06–P09 composition order and fail-closed integrity | `PracticeDifficultySelectorTest.ReadPracticeRecommendation` (admission first; 404, disabled and unmapped paths read neither mastery nor Assessment; profiles requested for exactly M(L); invalid provider results are 500s; transaction attributes; no port or publisher) |
+| B8-P07 | `AdaptiveLearningFlowIntegrationTest.b8P07AdmissionAndUnavailableLessonsFollowTheContractOrderWithoutReadingMasteryOrAssessment`: 401 (missing/invalid token), 400 (malformed IDs, also for an Instructor; query), 403 (Instructor, Administrator, absent and LEFT memberships), 404 (hidden/missing Course, hidden/missing/foreign Lesson), COMPLETED admitted; every error `no-store` problem JSON with no mastery or Quiz SQL issued |
+| B8-P08 | `…b8P08TheRecommendationWritesNothingPublishesNothingAndRunsInTheCallersReadOnlySnapshot` (no row changed, no event, no transaction ID assigned, read-only REPEATABLE READ; a read-write READ COMMITTED caller refused) and `…b8TheRecommendationIsOneSnapshotEvenWhenAWriterCommitsBetweenItsReads` (a mastery row and a Quiz publication committed between admission and the mastery read are invisible, then visible) |
+| B8-P09 | AS07's `PracticeQuizProfilesTest.onlyAdaptiveRecommendationServiceMayCallReadPracticeQuizProfiles` now passes with this real caller; `…b8TheWholeCompositionNeedsOnlyTheRuntimeMatrixSelectGrants` runs the whole read under a role holding only matrix SELECT rows (column-limited `learner_skill_masteries` and `learning_materials`) |
+| Safe 500 | `…b8AProviderFailureIsASafeNoStoreServerError` |
+| AD16 state read | `AdaptivePersistenceIntegrationTest.stateRead*`, `queryService*` (one column-projection statement, learner and skill scoping, r8 role, caller snapshot, absent → Unknown, refused contexts) |
 
-A local mutation check confirmed that the tie-break oracles fail when a lesson-less Weak skill is
-ranked first, when either UUID tie-break uses signed order, when the governing skill is chosen by
-name only, or when the Quiz tie-break uses signed order.
+**Not in AD11 (other Issues' evidence, not claimed).** B8-P08's attempt-start/submission half
+(CT04-START/CT08-EVIDENCE capture of a recommended Quiz) needs AS08's attempt runtime; B8-P10 (SD04
+dataset), B8-P11 and the Lesson page entry (FE09), E2E A-4 (FE26), the SD03 two-profile evaluation
+(QA05), orchestration (AD13) and `/adaptive-guidance`, the Mastery Map and insights (AD16).
+**Placement.** All tests extend existing files; no test file is added, so no
+`repository-structure.md` inventory change is needed. ADR013 §19.8 lists `AuthorizationIntegrationTest`
+for the B8-P07 admission oracle; it is implemented in `AdaptiveLearningFlowIntegrationTest`, which
+drives the same production security chain and holds the other B8 PostgreSQL cases.
 
-**Blocked by upstream (not implemented, not claimed).** The REST binding
-`GET /api/courses/{courseId}/lessons/{lessonId}/practice-recommendation` (`RecommendationController`,
-`RecommendationResponse`, `RecommendationService` composition) and oracles B8-P07–P09 need
-Assessment `QuizService.readPracticeQuizProfiles(UUID, Set<UUID>)` (CT23-PRACTICE-PROFILES r1,
-ADR013 §19.3, AS07 #158), which does not exist on `main`. With AS07's port still a 0-byte scaffold
-and AS07.select unused in Final, that read is most of AS07's remaining Final scope, well above the
-20% limit, so it is not absorbed (consistent with the CO15 record above). The endpoint also needs an
-Adaptive learner mastery-state read (AD16 #171); a read limited to `user_id`, `skill_id` and `state`
-stays within CT17-P6 r8 and needs no privilege change, but it is not added without its consumer.
-CO15's `LessonProgressService.readLearnerState` is available. B8-P10, B8-P11, E2E A-4, the SD03
-two-profile evaluation (QA05), orchestration (AD13) and `/adaptive-guidance` (AD16) are other
-Issues' evidence.
+**Port implementation (recorded, not implemented).** ADR011 §8 names `PracticeDifficultySelector`
+as the only implementation of Assessment's `PracticeDifficultyProvider`, for a caller that only the
+Leader-reserved CT04-START/CT08-EVIDENCE amendment (ADR011 §17 option b) would have created. Leader
+decision E02 adopted option a and not option b (ADR013 §19.1); ADR013 §19.2 routes the practice
+difficulty through the selector's pure mapping, “never the port”, and the Leader's AD11 instruction
+keeps the port without a production caller. No class implements the port: an uncalled adapter
+that reads the current learner's mastery would add an unused, security-relevant path. If the
+Leader wants that adapter anyway, it is a small AD11 follow-up under ADR011 §8's admission order.
 
 **Execution evidence.** macOS arm64, Temurin OpenJDK 25.0.4.1, Docker Desktop 29.8.1,
 Testcontainers PostgreSQL, in an isolated PR #278 worktree; no shared database.
 
 | Command | Observed result |
 | --- | --- |
-| `cd backend && ./mvnw -B -Dtest='AdaptiveDecisionEngineTest,NextLessonResolverTest,PracticeDifficultySelectorTest' test` | 47 tests (24, 13, 10), 0 failures/errors/skips |
-| `cd backend && ./mvnw -B verify` (merged head before the review fixes) | BUILD SUCCESS; 1,059 unit + 485 integration tests, 0 failures/errors/skips |
-| `cd backend && ./mvnw -B verify` (final sources of this change, 25 November 2026) | BUILD SUCCESS in 4 min 25 s; 1,063 unit + 485 integration tests, 0 failures/errors/skips |
+| `cd backend && ./mvnw -B -Dtest='AdaptiveDecisionEngineTest,NextLessonResolverTest,PracticeDifficultySelectorTest' test` (pure rules, earlier head `dff6dbb`) | 47 tests (24, 13, 10), 0 failures/errors/skips |
+| `cd backend && ./mvnw -B verify` (earlier head `dff6dbb`, before the REST binding) | BUILD SUCCESS; 1,063 unit + 485 integration tests, 0 failures/errors/skips |
+| `cd backend && ./mvnw -B -Djacoco.skip=true -Dtest='PracticeDifficultySelectorTest,AdaptiveDecisionEngineTest,NextLessonResolverTest,PracticeQuizProfilesTest,QuestionSelectionServiceTest,LessonProgressServiceTest' test` (final sources) | 167 unit tests (20 including 10 in `ReadPracticeRecommendation`, 24, 13, 8, 23, 79), 0 failures/errors/skips; the AS07 profile-caller, CT33 learner-state-caller, port-caller and new AD16 state-caller allowlists all pass |
+| `cd backend && ./mvnw -B -Djacoco.skip=true -Dtest=NoSuch -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='AdaptiveLearningFlowIntegrationTest,AuthorizationIntegrationTest,AdaptivePersistenceIntegrationTest' verify` (before the audit fixes) | BUILD SUCCESS; 110 + 109 (XML root attribute 105, the known discrepancy above) + 24 PostgreSQL integration tests, 0 failures/errors/skips |
+| `cd backend && ./mvnw -B -Djacoco.skip=true -Dtest=NoSuch -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AdaptiveLearningFlowIntegrationTest#b8*,AdaptivePersistenceIntegrationTest' verify` (final sources) | BUILD SUCCESS; 6 + 24 PostgreSQL integration tests, 0 failures/errors/skips |
+| `git diff --check origin/main` | Exit 0 |
 
-AI-assisted review (a separate Claude Code review context) found no P0–P2 issue; its P3 findings
-are fixed in this change or recorded in PR #278. It is not CODEOWNER or human review.
+AI-assisted review (one comprehensive audit in a separate Claude Code review context) found no P0/P1
+issue. Its P2 (no port implementation) is recorded above as an E02 consequence; its P3 findings
+(exception documentation, an AD16 caller allowlist, this record's scaffold list and placement note, a
+positive control for the no-mastery/Assessment-SQL check, a missing final newline) are fixed in this
+change. It is not CODEOWNER or human review.
+
+These are local author runs on the final sources unless stated; they are not independent QA,
+CODEOWNER review or release acceptance. The full backend suite, frontend, E2E and VM checks were not
+rerun for this change.
