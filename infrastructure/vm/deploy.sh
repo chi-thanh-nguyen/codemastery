@@ -1342,7 +1342,9 @@ SQL
 # CT17-P6-PRIVILEGES-2026-11-22-r5 AD07 skill-graph rows and the
 # CT17-P6-PRIVILEGES-2026-11-22-r6 AS05 question-bank rows and the
 # CT17-P6-PRIVILEGES-2026-11-22-r7 AS06 quiz-composition rows and the
-# CT17-P6-PRIVILEGES-2026-11-23-r8 AD06 mastery/history-write rows (all within the ADR012 §19.2 ceiling):
+# CT17-P6-PRIVILEGES-2026-11-23-r8 AD06 mastery/history-write rows and the
+# CT17-P6-PRIVILEGES-2026-11-24-r10 IN10 audit-log rows and the
+# CT17-P6-PRIVILEGES-2026-11-24-r11 CO15 mastery-skip row (all within the ADR012 §19.2 ceiling):
 # the complete runtime privilege matrix for the reviewed V001-V009 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
 # cannot silently widen a table-level grant. Nothing is granted to future objects.
@@ -1356,7 +1358,7 @@ chapters                 SELECT         -                                       
 lessons                  SELECT         -                                        id,chapter_id,title,content_markdown,position,publication_status
 learning_materials       -              SELECT(id,lesson_id,publication_status)  id,lesson_id,title,material_type,publication_status,text_content,object_key,original_filename,external_video_url
 enrollments              SELECT,INSERT  UPDATE(status,resume_lesson_id,last_visited_at) id,user_id,course_id,status,resume_lesson_id,last_visited_at
-lesson_progress          SELECT,INSERT  UPDATE(completed)                        id,enrollment_id,lesson_id,completed,mastery_skipped
+lesson_progress          SELECT,INSERT  UPDATE(completed,mastery_skipped)         id,enrollment_id,lesson_id,completed,mastery_skipped
 skills                   SELECT,INSERT,DELETE UPDATE(name,description)           id,course_id,name,description
 skill_prerequisites      SELECT,INSERT,DELETE -                                  id,course_id,skill_id,prerequisite_skill_id
 lesson_skills            SELECT,INSERT,DELETE -                                  id,lesson_id,skill_id
@@ -1372,7 +1374,7 @@ path_recommendations     INSERT         -                                       
 discussion_posts         -              -                                        id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden
 notifications            -              -                                        id,user_id,message,is_read,created_at
 content_reports          -              -                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at
-audit_logs               -              -                                        id,actor_id,action,target_type,target_reference,occurred_at
+audit_logs               SELECT,INSERT  -                                        id,actor_id,action,target_type,target_reference,occurred_at
 password_reset_tokens    SELECT,INSERT,DELETE -                                  id,user_id,token_digest,issued_at,expires_at
 refresh_sessions         SELECT,INSERT,DELETE UPDATE(revoked_at)                 id,user_id,created_at,expires_at,revoked_at
 refresh_tokens           SELECT,INSERT,DELETE UPDATE(consumed_at)                id,session_id,token_digest,issued_at,expires_at,consumed_at
@@ -1591,10 +1593,10 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
     || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
   if [[ -n "${violations}" ]]; then
     printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
-    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition and r8 mastery/history-write rows); reconcile explicitly. Ingress remains closed."
+    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write and r10 audit-log rows); reconcile explicitly. Ingress remains closed."
   fi
   if [[ "${mode}" == "complete" ]]; then
-    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition and r8 mastery/history-write rows) verified (every public relation reviewed)"
+    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write and r10 audit-log rows) verified (every public relation reviewed)"
   fi
   log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
 }
@@ -1633,7 +1635,7 @@ SQL
   expect_denied  "runtime role changing Course publication" 42501 "${app}" "${app_pw}" <<<'UPDATE public.courses SET publication_status = publication_status WHERE false;'
   expect_denied  "runtime role deleting memberships" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.enrollments WHERE false;'
   expect_denied  "runtime role re-owning memberships" 42501 "${app}" "${app_pw}" <<<'UPDATE public.enrollments SET user_id = user_id, course_id = course_id WHERE false;'
-  expect_denied  "runtime role updating mastery-skip flags" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_progress SET mastery_skipped = mastery_skipped WHERE false;'
+  expect_denied  "runtime role re-keying or re-targeting lesson progress" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_progress SET id = id, enrollment_id = enrollment_id, lesson_id = lesson_id WHERE false;'
   expect_denied  "runtime role erasing lesson progress" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.lesson_progress WHERE false;'
   expect_denied  "runtime role moving a skill to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.skills SET course_id = course_id WHERE false;'
   expect_denied  "runtime role rewriting prerequisite edges in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.skill_prerequisites SET skill_id = skill_id WHERE false;'
@@ -1648,6 +1650,7 @@ SQL
   expect_denied  "runtime role re-keying questions" 42501 "${app}" "${app_pw}" <<<'UPDATE public.questions SET id = id WHERE false;'
   expect_denied  "runtime role reading captured answer selections" 42501 "${app}" "${app_pw}" <<<'SELECT selected_options FROM public.attempt_answers WHERE false;'
   expect_denied  "runtime role reading protected material payloads" 42501 "${app}" "${app_pw}" <<<'SELECT object_key FROM public.learning_materials WHERE false;'
+  expect_denied  "runtime role rewriting audit records" 42501 "${app}" "${app_pw}" <<<'UPDATE public.audit_logs SET action = action, occurred_at = occurred_at WHERE false;'
   expect_denied  "runtime role erasing audit records" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.audit_logs WHERE false;'
   expect_allowed "runtime role locking a published Course root (CT22 membership)" "${app}" "${app_pw}" <<'SQL'
 BEGIN;

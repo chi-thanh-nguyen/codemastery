@@ -1544,6 +1544,101 @@ class AuthServiceTest {
         }
     }
 
+    /** CT01-USER-SUMMARIES-2026-11-15-r2 (ADR012 section 3.4), consumed by IN10's audit read. */
+    @Nested
+    class UserSummaries {
+
+        private UserAccountService summaries() {
+            return new UserAccountService(users, () -> { throw new AssertionError("User summaries must not read identity"); });
+        }
+
+        @Test
+        void returnsStoredNamesAndCurrentRoleLiteralsOmitsUnknownIdsAndExposesNoAccountData() {
+            UUID admin = UUID.fromString("00000000-0000-4000-8000-0000000000a1");
+            UUID lockedInstructor = UUID.fromString("00000000-0000-4000-8000-0000000000a2");
+            UUID missing = UUID.fromString("00000000-0000-4000-8000-0000000000a3");
+            when(users.findById(USER_ID)).thenReturn(Optional.of(account(Role.LEARNER, AccountStatus.ACTIVE)));
+            when(users.findById(admin)).thenReturn(Optional.of(new User(admin, "admin@example.test",
+                    passwordHash, "Ada Admin", Role.ADMIN, AccountStatus.ACTIVE)));
+            when(users.findById(lockedInstructor)).thenReturn(Optional.of(new User(lockedInstructor,
+                    "instructor@example.test", passwordHash, "Locked Instructor", Role.INSTRUCTOR, AccountStatus.LOCKED)));
+            when(users.findById(missing)).thenReturn(Optional.empty());
+
+            Map<UUID, UserAccountService.UserSummary> result =
+                    summaries().userSummaries(Set.of(USER_ID, admin, lockedInstructor, missing));
+
+            assertEquals(Map.of(
+                    USER_ID, new UserAccountService.UserSummary(USER_ID, "Unit Learner", "learner"),
+                    admin, new UserAccountService.UserSummary(admin, "Ada Admin", "admin"),
+                    lockedInstructor, new UserAccountService.UserSummary(lockedInstructor, "Locked Instructor", "instructor")),
+                    result);
+            assertThrows(UnsupportedOperationException.class, () -> result.remove(admin));
+            assertEquals(List.of("userId", "displayName", "role"),
+                    Arrays.stream(UserAccountService.UserSummary.class.getRecordComponents())
+                            .map(java.lang.reflect.RecordComponent::getName).toList(),
+                    "no email, account status or credential data");
+        }
+
+        @Test
+        void emptyInputDoesNotQueryStorage() {
+            assertEquals(Map.of(), summaries().userSummaries(Set.of()));
+            verifyNoInteractions(users);
+        }
+
+        @Test
+        void acceptsAtMostOneHundredIdsPerCall() {
+            Set<UUID> hundred = new java.util.HashSet<>();
+            while (hundred.size() < 100) {
+                hundred.add(UUID.randomUUID());
+            }
+            when(users.findById(any())).thenReturn(Optional.empty());
+            assertEquals(Map.of(), summaries().userSummaries(hundred));
+            verify(users, times(100)).findById(any());
+
+            Set<UUID> tooMany = new java.util.HashSet<>(hundred);
+            tooMany.add(UUID.randomUUID());
+            clearInvocations(users);
+            assertThrows(IllegalArgumentException.class, () -> summaries().userSummaries(tooMany));
+            verifyNoInteractions(users);
+        }
+
+        @Test
+        void propagatesStorageFailuresWithoutInventingNames() {
+            var failure = new DataAccessResourceFailureException("Synthetic unavailable storage");
+            when(users.findById(USER_ID)).thenThrow(failure);
+            assertSame(failure, assertThrows(DataAccessResourceFailureException.class,
+                    () -> summaries().userSummaries(Set.of(USER_ID))));
+        }
+
+        /** Section 3 requires tests to prove the caller allowlist: production callers are exactly these. */
+        @Test
+        void onlyTheAllowlistedServicesCallUserSummaries() throws java.io.IOException {
+            Path sources = Path.of("src", "main", "java");
+            assertTrue(Files.isDirectory(sources), "run from the backend module directory");
+            Set<String> allowed = Set.of(
+                    "com/codemastery/modules/auth/application/service/UserAccountService.java",
+                    "com/codemastery/modules/interaction/application/service/DiscussionService.java",
+                    "com/codemastery/modules/admin/application/service/AuditLogService.java",
+                    "com/codemastery/modules/admin/application/service/ContentModerationService.java",
+                    "com/codemastery/modules/admin/application/service/AdminCourseService.java");
+            List<String> callers;
+            try (Stream<Path> files = Files.walk(sources)) {
+                callers = files.filter(file -> file.toString().endsWith(".java"))
+                        .filter(file -> {
+                            try {
+                                return Files.readString(file).contains("userSummaries");
+                            } catch (java.io.IOException exception) {
+                                throw new java.io.UncheckedIOException(exception);
+                            }
+                        })
+                        .map(file -> sources.relativize(file).toString().replace('\\', '/'))
+                        .sorted().toList();
+            }
+            assertTrue(allowed.containsAll(callers), () -> "unexpected userSummaries callers: " + callers);
+            assertTrue(callers.contains("com/codemastery/modules/admin/application/service/AuditLogService.java"));
+        }
+    }
+
     @Nested
     class CurrentIdentityBinding {
         private AnnotationConfigWebApplicationContext context;

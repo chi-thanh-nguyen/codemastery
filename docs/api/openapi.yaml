@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157), and the CT31.read audit-log operation (IN10 #184); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -7524,7 +7524,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Optional AND filters; occurredFrom inclusive and occurredTo exclusive (RFC 3339, at most microsecond precision, from before to). Ordered occurredAt desc, then id desc. CT31-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Optional AND filters; occurredFrom inclusive and occurredTo exclusive (RFC 3339, at most microsecond precision, from before to). Ordered occurredAt desc, then id desc. CT31-READ-2026-11-15-r1. Implemented under IN10 (#184) in the Admin module: the route rule requires authentication only, malformed query values are 400 before the role 403 (ADR012 §12 stage order), and the Administrator check precedes any lookup; independent review, CI and protected integration remain gated. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7615,7 +7615,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7642,7 +7642,6 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },

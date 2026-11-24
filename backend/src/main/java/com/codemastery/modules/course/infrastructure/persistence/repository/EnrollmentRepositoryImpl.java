@@ -120,6 +120,31 @@ public class EnrollmentRepositoryImpl implements EnrollmentRepository {
                 (rs, row) -> new LessonFlags(rs.getObject("id", UUID.class), rs.getBoolean("completed"), rs.getBoolean("skipped")),
                 enrollmentId, courseId);
     }
+    @Override public List<LessonPlacement> publishedLessonPlacements(UUID courseId, UUID enrollmentId) {
+        return jdbc.query("SELECT l.id, l.chapter_id, ch.position AS chapter_position, l.position AS lesson_position, "
+                + "COALESCE(p.completed,false) AS completed, COALESCE(p.mastery_skipped,false) AS skipped "
+                + "FROM public.lessons l JOIN public.chapters ch ON ch.id=l.chapter_id "
+                + "LEFT JOIN public.lesson_progress p ON p.lesson_id=l.id AND p.enrollment_id=? "
+                + "WHERE ch.course_id=? AND l.publication_status='published' ORDER BY ch.position ASC, l.position ASC",
+                (rs, row) -> new LessonPlacement(rs.getObject("id", UUID.class), rs.getObject("chapter_id", UUID.class),
+                        rs.getInt("chapter_position"), rs.getInt("lesson_position"),
+                        rs.getBoolean("completed"), rs.getBoolean("skipped")),
+                enrollmentId, courseId);
+    }
+    @Override public void lockProgress(UUID enrollmentId) {
+        jdbc.queryForList("SELECT id FROM public.lesson_progress WHERE enrollment_id = ? ORDER BY lesson_id FOR UPDATE",
+                UUID.class, enrollmentId);
+    }
+    @Override public void markMasterySkipped(UUID enrollmentId, UUID lessonId) {
+        // Monotonic: never clears a flag and never relabels a manual completion. Two statements, so an absent
+        // row needs only INSERT; only an existing incomplete row needs UPDATE (completed, mastery_skipped).
+        if (jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) "
+                + "VALUES (?,?,?,true,true) ON CONFLICT (enrollment_id,lesson_id) DO NOTHING",
+                UUID.randomUUID(), enrollmentId, lessonId) == 0) {
+            jdbc.update("UPDATE public.lesson_progress SET completed=true, mastery_skipped=true "
+                    + "WHERE enrollment_id=? AND lesson_id=? AND completed=false", enrollmentId, lessonId);
+        }
+    }
     @Override public void reconcileCompletion(UUID courseId) {
         jdbc.update("WITH required AS (SELECT l.id FROM public.lessons l JOIN public.chapters ch ON ch.id = l.chapter_id "
                 + "WHERE ch.course_id = ? AND l.publication_status = 'published'), "

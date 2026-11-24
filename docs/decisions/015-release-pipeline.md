@@ -81,30 +81,47 @@ never cancelled; GitHub keeps one pending dispatch, which a newer dispatch repla
 
 ### D2 — A valid source revision
 
-A full 40-character SHA that is an ancestor of `origin/main` (default: the
-dispatched `main` commit), on which **every** required status check of the live
-`main` rules (`GET /repos/{owner}/{repo}/rules/branches/main`) has a completed,
-successful check run from the required app. All runs are read (`filter=all`): the
-newest run per context must have succeeded, **every run of that context must have
-completed, and no completed run may have any other conclusion**, because any workflow
-with `checks: write` in the repository can add a run under the required app's identity
-on any commit. A revision whose required check failed once and was re-run is therefore
-refused; pick a later revision. A queued or running run also refuses it, however
-recent a success beside it; dispatch again once it has finished.
-The list is read at run time, never hard-coded, so later ruleset changes apply
-automatically. GitHub reports the `CodeQL` code-scanning check (app 57789) only on
-pull requests; on `main` pushes only the `Analyze (…)` jobs appear (observed on
-`257a915`). So a context with **no run at all** on the revision may be satisfied on
-the head of the single merged pull request whose merge commit is the revision, where
-the ruleset enforced it at merge time, **provided the head's tree equals the
-revision's tree** (squash-only merges of up-to-date branches make them equal; observed
-for PRs #252, #260 and #261); a failed or pending run on the revision is never
-overridden, and without such a pull request there is no fallback. Checked read-only
-against the live API on 23 November 2026: all ten contexts pass for `257a915` (nine
-on the revision, `CodeQL` on PR #260's head `cd9d43d`). The workflow itself always runs from `main`. Release tooling comes
-from the dispatched `main` checkout; images, `deploy.sh`, Compose files and the
-qualification suites come from a worktree of the source revision, as the VM's
-immutable checkout will.
+*Amended by [A2](#11-amendment-a2--latest-authenticated-ci-evaluation-24-november-2026)
+on 24 November 2026. The rule it replaces (every run of a required check must have
+succeeded) is quoted in A2.2; the rest of D2 is unchanged.*
+
+A full 40-character SHA that is an ancestor of `origin/main` (default: the dispatched
+`main` commit) for which the **latest valid evaluation** of **every** required status
+check of the live `main` rules (`GET /repos/{owner}/{repo}/rules/branches/main`) has
+completed and succeeded, with its provenance authenticated against GitHub's own records
+and the evidence recorded in the candidate manifest (A2.4–A2.6). The list is read at
+run time, never hard-coded, so later ruleset changes apply automatically; a required
+check that names no app, or whose app this pipeline cannot authenticate, refuses the
+revision until D2 is extended.
+
+- A check of **GitHub Actions** (app 15368) counts only through GitHub's job record:
+  the newest attempt of the newest trusted run (push or `workflow_dispatch` on `main`,
+  in this repository, of a workflow file of the revision other than `release.yml`) of
+  the single workflow that has a job of that name decides, and the revision's check run
+  with that job's ID must match it. Any workflow with `checks: write` can create check runs under this app's
+  identity; such a run, without a matching job, is ignored and recorded, never evidence.
+- A check of a **GitHub-operated app** whose check runs no workflow, user or other app
+  can create (code scanning, app 57789) counts through its newest check run.
+- An earlier failure no longer refuses the revision once a newer valid evaluation
+  passed; a newer evaluation that failed, was cancelled or skipped, or has not finished
+  always refuses it, whatever passed before. Results of different attempts or runs are
+  never combined. Superseded results stay in the evidence.
+
+GitHub reports the `CodeQL` code-scanning check (app 57789) only on pull requests; on
+`main` pushes only the `Analyze (…)` jobs appear (observed on `257a915`). So a context
+of such an app with **no run of that app at all** on the revision may be satisfied on
+the head of the single merged pull request of this repository whose merge commit is the
+revision, where the ruleset enforced it at merge time, **provided the head's tree
+equals the revision's tree** (squash-only merges of up-to-date branches make them equal;
+observed for PRs #252, #260 and #261); a failed or pending run of that app on the
+revision is never overridden, without such a pull request there is no fallback, and a
+GitHub Actions check never falls back (a pull-request run tests a merge commit, not the
+revision). Checked read-only against the live API on 23 November 2026 under the earlier
+rule: all ten contexts pass for `257a915` (nine on the revision, `CodeQL` on PR #260's
+head `cd9d43d`); for `84d10a3` under A2 see A2.9. The workflow itself always runs from
+`main`. Release tooling comes from the dispatched `main` checkout; images, `deploy.sh`,
+Compose files and the qualification suites come from a worktree of the source revision,
+as the VM's immutable checkout will.
 
 ### D3 — Provenance and signing (resolves the F6 technical selection)
 
@@ -360,7 +377,8 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
 | Threat | Control |
 | --- | --- |
 | Artifact substitution (archive, image, SBOM, report) | Every package file is an attestation subject; manifests hash every file; `deploy.sh` verifies the archive SHA-256 and all identities |
-| Mutable tags or self-declared inputs | Identities are digests recomputed from archive bytes; the admission is a reviewed file on `main`; the source revision must be on `main` with green required checks |
+| Mutable tags or self-declared inputs | Identities are digests recomputed from archive bytes; the admission is a reviewed file on `main`; the source revision must be on `main` whose required checks' latest authenticated evaluation passed (D2, A2) |
+| Forged or cherry-picked check runs | GitHub Actions checks count only through GitHub's job record of a trusted run, the newest attempt decides, all runs are re-read for changes; other apps only if GitHub-operated; untrusted runs are recorded, never evidence (A2) |
 | Promotion before admission | The promote job refuses without an `ADMITTED`, committed, code-owner record matching the attested candidate exactly |
 | Forged admission authority | `decided_by` must be the account that merged a pull request changing only the record (GitHub's `merged_by`), not just a typed login |
 | Security gate bypass | Exactly the candidate's findings must be accepted; promotion rescans and fails on any row not admitted at that installed version and severity, and on any loss of scan coverage |
@@ -377,10 +395,11 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
 2. The admission's authenticity rests on GitHub's account authentication and merge
    record and on protected `main`; the `main-merge-authority` bypass and the
    sole-Leader CODEOWNER paths are governance facts this pipeline cannot change.
-   The required-check evaluation trusts check runs from the required app; any
-   workflow with `checks: write` in this repository can create such runs on any
-   commit, as it can for the ruleset itself. A forged success cannot hide a failed or
-   unfinished run (D2), but it can stand in for a context that has no run at all.
+   Until A2 the required-check evaluation trusted check runs from the required app
+   (any workflow with `checks: write` can create such runs on any commit, as it can
+   for the ruleset itself), so a forged success could stand in for a context with no
+   run at all. A2 binds GitHub Actions checks to GitHub's job records instead; what
+   remains is listed in A2.8.
 3. Scanner false negatives and database lag; the rescan narrows, not closes, the
    window between admission and promotion.
 4. Images are not reproducible; a rebuilt candidate is a new artifact needing new
@@ -421,6 +440,9 @@ commit; `actions/checkout@v7` follows the existing workflows' tag convention.
 - **Amendment A1, 23 November 2026:** PR-free authenticated admission (protected
   environment approval of a Leader dispatch) replaces D7 and the admission parts of D8,
   D10 and D12; see §10.
+- **Amendment A2, 24 November 2026:** the latest authenticated CI evaluation of the
+  source revision replaces D2's rule that every run of a required check must have
+  succeeded; see §11. Remediated after an independent review the same day (A2.11).
 - **F3:** implemented as a pipeline; the procedure is unchanged.
 - **F6:** the technical selection of signing/attestation and trust policy for project
   release packages is made by D3 and D12 under this delegation; the decision that
@@ -632,3 +654,292 @@ fails closed at its first step.
 ### A1.10 Verification
 
 Recorded in [testing.md](../testing.md#release-admission-redesign-verification--23-november-2026).
+
+## 11. Amendment A2 — Latest authenticated CI evaluation (24 November 2026)
+
+### A2.1 Authority and status
+
+**LEADER_APPROVED_IN_PRINCIPLE (policy); DELEGATED_TECHNICAL_APPROVAL (design)**,
+24 November 2026 (Asia/Ho_Chi_Minh). The Project Leader and repository Owner
+@chi-thanh-nguyen gave the explicit instruction **“CodeMastery — Replace PR #275 with
+Authenticated Latest-CI Evaluation”**. It approves in principle replacing D2's rule that
+every run of a required check in the source revision's history must pass with this
+policy: *the latest valid CI evaluation of the exact source revision must have completed
+and passed 100% of the required checks, with its provenance independently authenticated
+and its evidence fully recorded*. It authorizes Claude Code to design and implement that
+policy in [PR #275](https://github.com/chi-thanh-nguyen/codemastery/pull/275) (branch
+`docs/phase5-setup-record`) and keeps every other gate of D1–D13 and A1. Claude Code
+(Anthropic) made the design selections below under that authorization; the Leader did
+not review the individual selections. The instruction reserves, and A2 does not claim:
+approving or merging the pull request; an independent review; ruleset, branch protection
+or environment changes; and any candidate, admission, promotion, publication or
+deployment.
+
+A2 becomes effective on `main` only through that pull request's compliant integration.
+It replaces the check-evaluation rule of D2 and the corresponding sentence of residual
+risk 2; every other decision is unchanged. The history in §1–§10 and in A2.2 is kept as
+it happened.
+
+### A2.2 Why D2 is changed
+
+The rule A2 replaces read, in D2 as merged on 23 November 2026:
+
+> A full 40-character SHA that is an ancestor of `origin/main` (default: the
+> dispatched `main` commit), on which **every** required status check of the live
+> `main` rules (`GET /repos/{owner}/{repo}/rules/branches/main`) has a completed,
+> successful check run from the required app. All runs are read (`filter=all`): the
+> newest run per context must have succeeded, **every run of that context must have
+> completed, and no completed run may have any other conclusion**, because any workflow
+> with `checks: write` in the repository can add a run under the required app's identity
+> on any commit. A revision whose required check failed once and was re-run is therefore
+> refused; pick a later revision. A queued or running run also refuses it, however
+> recent a success beside it; dispatch again once it has finished.
+
+On `84d10a3` (the merge of PR #274), job `137762522469` (`VM runtime privileges with the
+real backend`) failed in attempt 1 of workflow run
+[45194866405](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45194866405)
+(`CI VM`); attempt 2 re-ran all seven jobs of that run and every one passed. The rule
+above refuses the revision forever; its only remedy is a new commit whose sole purpose is
+to pass the gate. The rule existed because check runs of app 15368 can be forged, but
+counting every run is a weak defence both ways: it blocks legitimate re-runs, and a forged
+success could still stand in for a context with no run at all (residual risk 2). A2
+removes the reason for the rule by authenticating each result instead of counting runs.
+
+### A2.3 Options compared
+
+| Option | Assessment |
+| --- | --- |
+| A. Keep D2; a new commit after each transient failure | Safe for the failure case, but forces commits that change nothing, and still trusts any check run of a context that has no other run |
+| B. Newest check run per context by name, app and time | Rejected: any workflow token creates app-15368 check runs with arbitrary `details_url`, `external_id` and timestamps |
+| C. A Leader exception or override record per revision | Rejected: a new approval system that can drift into a CI bypass; provenance answers the question without it |
+| D. Bind each GitHub Actions check to GitHub's job record of a trusted run; the newest attempt decides (**selected**) | Uses only data GitHub Actions writes itself (`actions: read`); handles re-runs, new runs and forgeries with one rule |
+| E. Require every required check to come from one run attempt | Impossible: the required checks come from four workflows (`ci-backend`, `ci-frontend`, `ci-e2e`, `ci-vm`) and code scanning |
+
+### A2.4 Trust model
+
+- **What GitHub writes.** Workflow run records (`GET …/actions/runs?head_sha=`) and job
+  records (`GET …/actions/runs/{id}/attempts/{n}/jobs`, `GET …/actions/runs/{id}/jobs?filter=all`)
+  are written by GitHub Actions; the REST API offers no way to create a job. Check runs
+  can be created by any GitHub App, and a workflow's `GITHUB_TOKEN` with `checks: write`
+  creates them under `github-actions` (app 15368); GitHub's REST documentation states that
+  only GitHub Apps can write checks and that `details_url` and `external_id` are supplied
+  by the caller (read 24 November 2026). An Actions job's ID is the ID of its check run
+  (`check_run_url`).
+- **Trusted run.** Repository and head repository ID `1391772534`; `head_sha` equal to the
+  revision; event `push` or `workflow_dispatch`; `head_branch` `main`; `path` a file under
+  `.github/workflows/` that exists in the revision's tree (`git ls-tree`). For these
+  events GitHub runs the workflow file of the run's own commit, so the executed
+  definition is the revision's reviewed file. `pull_request` runs are excluded (they
+  test a merge commit, not the revision), as are GitHub-managed `dynamic` workflows,
+  every other event, and runs of `release.yml` itself: release stages are not CI
+  evaluations, and the dispatched candidate run is one of them, still running while it
+  evaluates.
+- **Producer.** The single workflow path that has a job named after the context among the
+  trusted runs. Two workflows with such a job make the producer ambiguous: refused.
+- **GitHub-operated apps.** Code scanning (app 57789) check runs can be created only by
+  GitHub's code scanning service, so the app identity authenticates the check run; it
+  must also name the commit (`head_sha`) and this repository (`url`).
+- **Fail closed.** A required check that names no app (`integration_id` absent: any app
+  could satisfy it), or that names any other app, refuses the revision until D2 is
+  extended for that app. Listings whose pages do not add up to GitHub's `total_count`,
+  malformed or repeated IDs, or missing job listings refuse it as well.
+- **Malformed run records (review F1).** A workflow run is set aside as untrusted only on
+  positive evidence: a well-formed `head_sha` of another commit, an event outside the
+  trusted set, another branch, a path that is not a workflow file of the revision, or
+  `release.yml`. Any other run may be a trusted evaluation, so every field the trust
+  decision and the ordering use must be well formed (`head_sha`, `event`, `head_branch`,
+  `path`, repository and head repository IDs, integer `run_attempt` ≥ 1, integer
+  `check_suite_id` and `workflow_id`, a UTC `created_at` timestamp, string `status`,
+  string or null `conclusion`). UTC timestamps must be real calendar dates in the existing
+  canonical `YYYY-MM-DDTHH:MM:SSZ` representation; alternate offsets, fractions, trailing
+  data and invalid ranges are refused. Empty, whitespace-padded, control-containing or
+  syntactically malformed trust fields cannot establish an exclusion; a different,
+  well-formed scope field can still positively establish that a run is unrelated.
+  Repository IDs are positive integers or their canonical decimal strings (not booleans
+  or floats); otherwise the revision is refused. A garbled record of a
+  newer failed run can therefore never drop out of the selection and let an older
+  success decide.
+
+### A2.5 Selection of the latest valid evaluation
+
+For a GitHub Actions context:
+
+1. the newest trusted run (semantically parsed UTC `created_at`, then integer ID) of the
+   producer workflow on the revision, and its newest attempt (`run_attempt`), are the latest evaluation; the
+   run must be `completed`;
+2. GitHub's record of that attempt must hold exactly one job of that name; every job in
+   the listing must belong to that run and attempt, the revision, this repository's
+   check-run and job URLs; the job must be `completed`/`success`;
+3. the revision's check run with that job's ID must match it: name, app 15368,
+   `head_sha`, status, conclusion, the run's check suite, API and web URLs;
+4. the attempt listing and the all-attempt listing must hold the same records for that
+   attempt: the same IDs and, for each ID, the same name, run, attempt, commit, status,
+   conclusion, timestamps and URLs (two records with one ID that disagree refuse);
+5. **evidence snapshot (review F2):** the first reads decide. Afterwards the check runs of
+   the merged pull request's head (when a pull request is read), then the revision's
+   check runs, then — last — the revision's workflow runs are read again. The check runs
+   under every required name (any app) must agree in ID, name, app, commit, status,
+   conclusion, check suite, API URL and web URL, and the workflow runs in ID, attempt, status,
+   conclusion, `created_at`, path, event, commit, branch, workflow, check suite, repository ID
+   and head repository ID; any difference (a newer pending or failed CodeQL analysis, a run or re-run starting or
+   finishing) refuses the revision. The **cutoff** is the end of that last workflow-run
+   read; the evidence records this as `snapshot`. Repository identities use the same
+   canonical representation as the trust decision. Other scalar comparisons preserve
+   types, so integer/boolean/float equality cannot hide malformed changes. Display names,
+   summaries, `updated_at` and other fields unused by acceptance are not compared.
+
+Every other job of that name in the trusted runs (earlier attempts, older runs) is kept
+under `superseded`. Check runs under a required name that are not jobs of a trusted run
+are recorded under `ignored_check_runs`; they neither pass nor fail a revision.
+
+For a code scanning context: the newest check run (by ID) of the app on the revision, or,
+when the app has none there, on the head of the merged pull request (D2 conditions, now
+also requiring the pull request's base repository to be this one); any unfinished run
+refuses; the newest must have succeeded.
+
+| GitHub action | What GitHub records | A2 |
+| --- | --- | --- |
+| Re-run all jobs | A new attempt holding a new job record for every job | Accepted when that attempt's required jobs passed |
+| Re-run failed jobs | A new attempt; the failed jobs and their dependents run again, and every other job is recorded again under the new attempt with its previous result and start time (observed on runs 45137936869, 45118284163 and 44948344999; GitHub's documentation: jobs not re-run “keep their outputs from the previous attempt”) | Accepted: GitHub's own record of the attempt is complete; such a job is flagged `result_kept_from_earlier_attempt` |
+| Re-run one job | The same, for that job and its dependents | Accepted when the attempt's record holds every required job |
+| New run of the workflow on the same commit (`workflow_dispatch` on `main` while `main` is the revision) | A separate run | The newest run decides; the older run's results are `superseded` |
+| An attempt whose record holds no job, or two jobs, of a required context | — | Refused, with the instruction to re-run all jobs or start a new run |
+
+### A2.6 Evidence (`codemastery.source-checks/v2`)
+
+`release.py evaluate-checks` writes one record that the candidate job stores, with
+`verified: true`, as `source_qualification` in `release-candidate.json` (so it is
+hashed, attested and shown in the draft summary):
+
+- `schema`, `policy` (the A2 rule in words), `repository`, `repository_id`,
+  `source_revision`;
+- per required check: `context`, `app_id`, `provenance` (`github-actions-job` or
+  `github-app-check-run (GitHub code scanning)`), `evidence` (`revision` or
+  `merged pull request #N head SHA`), `source_sha`, `evaluated_sha`, `status`,
+  `conclusion`, `check_run_id`, `check_suite_id`, `url`, `started_at`, `completed_at`,
+  `superseded`; for Actions also `workflow` (`path`, `id`, `name`, `event`, `ref`),
+  `run_id`, `run_attempt`, `run_url`, `job_id`, `result_kept_from_earlier_attempt`; for the
+  fallback also `pull_request` (`number`, `head_sha`, `head_tree`, `revision_tree`);
+- `ignored_check_runs` and `untrusted_workflow_runs`, each with its reason;
+- `snapshot`: the cutoff rule of A2.5 step 5.
+
+Every value comes from GitHub's API responses read by the candidate job, none from a
+dispatch input. The candidate schema stays `codemastery.release-candidate/v1`: the change
+is confined to the versioned `source_qualification` object, promotion still requires
+`verified: true`, and `candidate-manifest` refuses evidence of another schema or another
+revision. Candidates made before A2 carry the earlier list and remain verifiable; the
+summary labels them a legacy record. The candidate summary lists, per required check,
+the decisive result and every superseded result, so the admission authority sees a
+re-run before admitting.
+
+### A2.7 What is refused
+
+A newest attempt or run that failed, was cancelled, skipped, timed out or has not
+finished; a forged success with the same name and app (with or without a real job's URL);
+a check run that differs from its job record; a run of another workflow file, event,
+branch, repository or commit; job records of another run, attempt, commit or repository;
+results stitched from different attempts or runs; a missing required check; a context
+two workflows produce; a run record that may be a trusted evaluation but lacks or garbles
+a field the trust decision or the ordering uses; job records with one ID that disagree
+between listings; check runs under required names on the revision or on the merged pull
+request's head, or workflow runs, that differ between the two reads; missing, short or
+changing API listings; a required check without
+an app or from an app A2 cannot authenticate; the pull-request fallback with a different
+tree, without a merged pull request, or over a failed or unfinished run of the app on
+the revision. Regression tests cover each case (A2.9).
+
+### A2.8 Remaining threats (not accepted by the Leader)
+
+1. **Re-run until green.** Anyone allowed to re-run workflows can re-run a
+   nondeterministic test until it passes; the latest attempt decides. The superseded
+   results are recorded and shown in the candidate summary, and admission remains the
+   Leader's act.
+2. Trust in GitHub's records and API, GitHub Actions and the runner image (residual risk
+   1). A change merged to `main` that adds a workflow producing a required job name is
+   protected code; two producers refuse the revision.
+3. The code scanning verdict summarizes analyses that workflows with
+   `security-events: write` can upload; A2 trusts that verdict exactly as the ruleset
+   does.
+4. **After the cutoff.** A run, re-run or analysis that starts after the second read of
+   the workflow runs (A2.5 step 5) is not seen; neither is a change to the merged pull
+   request head's check runs after their second read, which precedes that cutoff by
+   the two later reads. The candidate records the evaluation it relied on (run, attempt,
+   check run) and the cutoff rule; a later failing evaluation does not revoke it, and
+   the admission authority should look at the source revision's current checks before
+   admitting.
+5. A job of `release.yml` (such as `Release tooling`) made a required check would refuse
+   every revision until D2 is extended (fail closed); on 24 November 2026 none is
+   required. An unrelated workflow run of the revision that starts or finishes between
+   the two run listings, a change to any check run under a required name between the two
+   check-run reads (anyone who can create check runs can provoke one), or a garbled
+   record of an unrelated run of a revision workflow also refuses it; dispatch again.
+6. GitHub lists at most 1,000 workflow runs per `head_sha` query and check runs of the
+   1,000 most recent check suites; a listing that exceeds them fails closed.
+7. Not independently reviewed (A2.10).
+
+### A2.9 Verification
+
+Recorded in [testing.md](../testing.md#latest-authenticated-ci-evaluation-verification--24-november-2026):
+39 source-check evaluator tests and 3 offline workflow-shell tests (95 release tooling
+tests in all; 33 and 86 after A2.11, 28 and 81 before it), a mutation check of the
+decisive conditions, and a read-only evaluation of `84d10a3` against the live API on
+24 November 2026. That evaluation accepted the revision: nine GitHub Actions checks bound
+to their job records (the six `CI VM` checks to attempt 2 of run 45194866405, with
+attempt 1's failed job `137762522469` recorded as superseded and the decisive job
+`137775683393`), and `CodeQL` from PR #274's head `cac03de` (check run `137717841069`, tree
+`7c2d462` equal to the revision's). The tooling on `main` before A2 refuses the same data.
+
+### A2.10 Remaining gates
+
+| Gate | Owner |
+| --- | --- |
+| Independent security review, CODEOWNER approval, required checks on the exact head, protected integration of PR #275 | Reviewers and the Leader |
+| A candidate dispatched under A2, its admission, promotion and any deployment | Leader under the existing authorizations |
+
+### A2.11 Independent review remediation (24 November 2026)
+
+An independent Codex security review of head `efda42f` returned CHANGES_REQUIRED with two
+P2 findings, both reproduced before the fix ([testing.md](../testing.md#review-remediation-f1-and-f2--24-november-2026)):
+
+- **F1 — malformed metadata permits a stale success.** A newer failed run of the
+  producing workflow whose record lacked `workflow_id` or `check_suite_id` was set aside
+  as "malformed" and ignored, and one without `created_at` sorted as the oldest; in all
+  three cases the older successful run decided. Fixed by the malformed-record rule of
+  A2.4 and a validated `created_at` ordering key.
+- **F2 — CodeQL fallback snapshot race.** Only the workflow runs were read twice; a newer
+  pending or failed CodeQL analysis on the merged pull request's head appearing during
+  evidence collection went unseen. Fixed by A2.5 step 5: the head's and the revision's
+  check runs are read again before the final workflow-run read, and any change under a
+  required name refuses.
+- **Adjacent:** the attempt and all-attempt job listings were compared by ID only; a
+  record with the same ID but another conclusion or status passed. They are now
+  compared record by record (A2.5 step 4).
+
+Same authority as A2.1; the policy is unchanged. Not yet re-reviewed.
+
+### A2.12 Second independent review remediation (N1 and N2, 24 November 2026)
+
+The focused independent Codex re-review of `a741dc6` returned CHANGES_REQUIRED: original
+F1 examples, F2 and the conflicting-job issue were corrected, but N1 (P2) demonstrated
+stale-success acceptance with impossible dates or empty trust strings. N2 (P3) found
+omitted repository IDs and check-run web URLs in the snapshot comparison.
+
+The Leader's explicit **“CodeMastery — PR #275: Second Independent Review Remediation
+(N1 + N2)”** instruction authorizes this bounded fix, tests, documentation, a follow-up
+commit/push and PR description update. It does not approve the resulting implementation,
+integration or release. A2.1's policy and all other release gates remain unchanged.
+
+- **N1:** A2.4 now requires semantic UTC date/time validation and well-formed positive
+  exclusion evidence; A2.5 orders parsed instants with ID tie-breaking. The fix covers
+  invalid dates/ranges, leap-year boundaries, alternate representations, missing/wrong
+  types, whitespace/control variants and malformed repository records.
+- **N2:** A2.5 now compares both repository IDs and check-run web URLs, canonicalizes
+  repository identities consistently and preserves scalar types in run/check/job
+  comparisons. No volatile display field is added to the acceptance decision.
+- New evaluator tests and the actual source-resolution shell, executed against offline
+  Git/API stubs, reproduce the five N1 and three N2 cases on `a741dc6` and refuse them
+  after correction. Full/partial reruns and existing F1/F2 protections remain covered.
+
+Implementation validation is recorded in [testing.md](../testing.md#second-independent-review-remediation-n1-and-n2--24-november-2026).
+The staggered reads, post-read/post-cutoff limitations and other risks in A2.8 remain.
+Independent re-review of this remediation is outstanding.

@@ -10,6 +10,10 @@
 /AGENTS.md                                                                                           @chi-thanh-nguyen
 /README.md                                                                                           @chi-thanh-nguyen
 /CONTRIBUTING.md                                                                                     @chi-thanh-nguyen
+/SECURITY.md                                                                                         @chi-thanh-nguyen
+/LICENSE                                                                                             @chi-thanh-nguyen
+/.editorconfig                                                                                       @chi-thanh-nguyen
+/.gitattributes                                                                                      @chi-thanh-nguyen
 /.gitignore                                                                                          @chi-thanh-nguyen
 /.env.example                                                                                        @chi-thanh-nguyen
 
