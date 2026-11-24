@@ -105,6 +105,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -123,6 +124,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import java.util.UUID;
 
@@ -2056,13 +2058,16 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
 
         Instant runInstant = Instant.parse("2026-11-24T08:00:00.123456Z");
         List<PathRecommendation> history = committedHistory(fixture.enrollment());
-        assertEquals(List.of(fixture.l3(), fixture.l1(), fixture.l2()), history.stream().map(PathRecommendation::lessonId).toList());
+        // ADR011 §9 order: one instant, continue before skip, then skips by lowercase target UUID (random here).
+        List<UUID> skipOrder = Stream.of(fixture.l1(), fixture.l2()).sorted(Comparator.comparing(UUID::toString)).toList();
+        assertEquals(List.of(fixture.l3(), skipOrder.get(0), skipOrder.get(1)),
+                history.stream().map(PathRecommendation::lessonId).toList());
         assertEquals(List.of(RecommendationType.CONTINUE, RecommendationType.SKIP, RecommendationType.SKIP),
                 history.stream().map(PathRecommendation::recommendationType).toList());
-        assertEquals(List.of(RecommendationReasonBuilder.continueInCourseOrder(),
-                        "Tested out: you have mastered every skill in this lesson (\"Skill one\").",
-                        "Tested out: you have mastered every skill in this lesson (\"Skill two\")."),
-                history.stream().map(PathRecommendation::reason).toList());
+        Map<UUID, String> expectedReasons = Map.of(fixture.l3(), RecommendationReasonBuilder.continueInCourseOrder(),
+                fixture.l1(), "Tested out: you have mastered every skill in this lesson (\"Skill one\").",
+                fixture.l2(), "Tested out: you have mastered every skill in this lesson (\"Skill two\").");
+        history.forEach(row -> assertEquals(expectedReasons.get(row.lessonId()), row.reason()));
         assertTrue(history.stream().allMatch(row -> row.recommendedAt().equals(runInstant)));
 
         RecommendationCreatedEvent event = onlyRecommendationEvent();
