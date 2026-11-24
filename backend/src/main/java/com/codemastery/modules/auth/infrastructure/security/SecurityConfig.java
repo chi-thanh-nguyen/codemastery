@@ -95,6 +95,10 @@ public class SecurityConfig {
                                 "/api/me/course-progress", "/api/me/resume").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/lessons/{lessonId}/completion",
                                 "/api/courses/{courseId}/resume").hasRole("LEARNER")
+                        // CT31.read (ADR012 sections 7.3, 12): Administrator only. The chain decides only
+                        // authentication here: malformed query values are 400 (stage 2) before the role 403
+                        // (stage 3), which AuditLogService decides before any lookup. Other methods stay denied.
+                        .requestMatchers(HttpMethod.GET, "/api/admin/audit-logs").authenticated()
                         // CT21.authoring (ADR006 §5): self Instructor; the Learner Lesson read is self Learner.
                         // Material, file and learner-monitoring routes under the same prefix stay denied.
                         .requestMatchers(HttpMethod.GET, "/api/instructor/courses", "/api/instructor/courses/{courseId}",

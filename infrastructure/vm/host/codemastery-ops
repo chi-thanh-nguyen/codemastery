@@ -135,6 +135,6 @@ case "${op}" in
   (*)
     ops="${TOOLING_ROOT}/current/infrastructure/vm/host/ops.py"
     [[ -f "${ops}" ]] || fail "no tooling is installed; run install-tooling first."
-    exec /usr/bin/python3 -I "${ops}" "${op}" "$@"
+    exec /usr/bin/python3 -I -B "${ops}" "${op}" "$@"
     ;;
 esac

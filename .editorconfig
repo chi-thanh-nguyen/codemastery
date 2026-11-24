@@ -1,0 +1,24 @@
+root = true
+
+# Existing source files use UTF-8; keep new edits portable without a formatter.
+[*.{java,ts,tsx,js,cjs,mjs,json,yml,yaml,xml,sql,py,sh,md,properties,svg}]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{java,ts,tsx,py,xml,sql}]
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# Two trailing spaces can be a deliberate Markdown line break.
+[*.md]
+trim_trailing_whitespace = false
+
+# Shell indentation varies; preserve nearby style. Keep the Windows wrapper CRLF.
+[*.cmd]
+end_of_line = crlf
