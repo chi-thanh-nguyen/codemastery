@@ -4498,7 +4498,7 @@ the operator's view. It approves nothing beyond ADR015 and changes no earlier re
 
 | Stage | How | Result |
 | --- | --- | --- |
-| 1. Candidate | Actions → **Release** → *Run workflow* on `main`, `stage=candidate`; optional `revision` (full SHA on `main`, default the dispatched commit), `public_origin` (default `https://codemastery.app`) and `compatibility_baseline` | Every required check of `main` must be green on the revision. Five linux/amd64 candidates are built, reloaded from their archive, qualified (MinIO initializer suite with the minimal server, backend trust store and runtime privileges, byte-clean PostgreSQL, image hardening, `deploy.sh` preflight/load/provision smoke and update-guard refusals), scanned (Trivy default and comprehensive, SPDX SBOMs), packaged, attested and stored as the draft release `candidate-<12-hex>-<run>-<attempt>`, titled “NOT ADMITTED” |
+| 1. Candidate | Actions → **Release** → *Run workflow* on `main`, `stage=candidate`; optional `revision` (full SHA on `main`, default the dispatched commit), `public_origin` (default `https://codemastery.app`) and `compatibility_baseline` | The latest authenticated evaluation of every required check of `main` must have passed on the revision ([ADR015 D2, amendment A2](decisions/015-release-pipeline.md#11-amendment-a2--latest-authenticated-ci-evaluation-24-november-2026)): a verified re-run replaces an earlier failure, a newer failure or unfinished run refuses, and every superseded result stays in the manifest. Five linux/amd64 candidates are built, reloaded from their archive, qualified (MinIO initializer suite with the minimal server, backend trust store and runtime privileges, byte-clean PostgreSQL, image hardening, `deploy.sh` preflight/load/provision smoke and update-guard refusals), scanned (Trivy default and comprehensive, SPDX SBOMs), packaged, attested and stored as the draft release `candidate-<12-hex>-<run>-<attempt>`, titled “NOT ADMITTED” |
 | 2. Security admission (ADR015 A1; no pull request) | The admission authority (`chi-thanh-nguyen`) dispatches **Release** on `main` with `stage=promote`, `candidate=<tag>`, `candidate_manifest_sha256=<SHA-256 of the reviewed release-candidate.json>`, `version=v<x.y.z>`, `accepted_findings=<n>` and an optional `note`; reads the `Admission request` job summary; approves the run's pending `release-admission` deployment | Only a first-attempt dispatch from `main` by the authority's account (login and ID, three GitHub views agreeing), approved by that account in the protected environment (required reviewer, `main` only, no administrator bypass; rules and approval read back, fail closed), naming the attested manifest digest and the exact finding count (CRITICAL/HIGH refused unless `accept_critical_or_high`), produces `admission.json`, attested before any candidate image runs ([A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)) |
 | 3. Promotion | Automatic in the same run after the admission | Candidate attestation and package verified; the admission re-derived and bound to this run; images retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; every row of a fresh rescan must be an admitted candidate finding at the same installed version and no higher severity, with no loss of scan coverage; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
 | 4. Publication | Not automated | Un-drafting, tagging or making binaries public is a Leader decision that first needs the F1/F5 licensing determination ([D9](decisions/015-release-pipeline.md#d9--storage-retention-and-publication)) |
@@ -4968,3 +4968,44 @@ remains QA01/QA07/DP03 evidence. This record, the implementation and its tests w
 produced through AI-assisted development (Anthropic Claude Code) under the Leader's task;
 OpenSSH, OpenSSL, GitHub Actions, the Azure CLI (optional gate) and acme.sh (existing)
 are the tools used; no AI service or runtime technology is added to CodeMastery.
+
+## Phase 5 one-time setup executed — 23 November 2026
+
+**Authority.** In this session the Project Leader @chi-thanh-nguyen, after merging PR #274
+(main `84d10a3202ef96b0230eff6c22db060a08bcc02d`), explicitly authorized two setup
+steps: **bootstrap of the VM** and **creation of the recovery keys and MinIO escrow**.
+Production deployment and the TLS staging challenge were **not** authorized and did not
+run. This record supersedes the "nothing was bootstrapped" sentence above only for the
+items below; every other statement keeps its date.
+
+### Executed
+
+| Step | Result |
+| --- | --- |
+| Workstation recovery keys (`recovery.py init-workstation`, Homebrew OpenSSL 3.6.5) | `~/CodeMasteryRecovery` (0700); RSA-3072 recipient key, encrypted PKCS#8; passphrase in the login Keychain (service `codemastery-recovery-recipient`); recipient key SHA-256 `21f9b726debb479ed4aee79852b597a4b5b4a6d2e4875d1e3c3a1e88f576c1b6`; an encrypt/decrypt round trip through the Keychain passphrase passed |
+| Deployment identity key | ED25519 `SHA256:aoS/YF4Pm2dWhGb32AP739pN7xGTVlu2kmUuC4PNPDQ`, private key on the Leader's workstation only (not yet a GitHub secret) |
+| `bootstrap.sh --apply --wait-timeout 300` (Leader-chosen readiness deadline) | Tooling `84d10a32…` installed with its verified git tree; `/usr/local/sbin/codemastery-ops`, the forced-command gate and `/usr/local/lib/codemastery/authorize.py`; user `cmdeploy` (locked password, forced command, sudoers rule validated by `visudo`); `/etc/codemastery/deploy/ops.conf`; recipient certificate; producer signing key generated on the VM (root 0400), public key SHA-256 `e0aa1ec505c5446117ee2de5555fe0104b58ed1037a4edfbc6218bda34bfe016`; capture and renewal timers installed **disabled** |
+| Producer key pin | `recovery.py trust-producer` with that fingerprint; the VM key's fingerprint was re-read independently over SSH and matched |
+| MinIO escrow | `~/CodeMasteryRecovery/escrow/minio.json` (0600 in a 0700 directory) built on the VM from the runtime env file and streamed to the file; no value was printed |
+| Restore images | The captured preview images loaded on the workstation from the verified 061102e3 package (`SHA256SUMS` OK) under `codemastery-restore/{postgres,minio,minio-init}:061102e3` with the VM's identities `4cec267a…`, `70a39ea8…`, `85371a3d…`; `codemastery.invalid/*` local images untouched |
+| Workstation `config.json` | Operator transport (`azureuser`, pinned host key), producer fingerprint, restore test with the images above, the escrow and helper `ubuntu:24.04` |
+
+Read back afterwards: the four application containers still running as before;
+`vm-transport.sh check` (operator) OK; `codemastery-ops status` reports no hold, no
+capture and no ADR017 deployment; `tls-check` OK, 69 days left, served equals installed,
+with the documented former-hostname acme.sh finding; both timers `disabled`.
+
+### Still open
+
+- **Release candidate.** On 23 November `release.py evaluate-checks` refused `84d10a32…`
+  under the D2 rule then in force: its required `VM runtime privileges with the real
+  backend` job failed in attempt 1 of run 45194866405 and passed when the run was
+  re-run. [ADR015 amendment A2](decisions/015-release-pipeline.md#11-amendment-a2--latest-authenticated-ci-evaluation-24-november-2026)
+  (PR #275, not yet on `main`) lets the latest authenticated evaluation decide; a
+  read-only evaluation under A2 on 24 November accepts the revision (A2.9). No candidate
+  has been dispatched from it (checked 24 November).
+- Security admission and promotion of that candidate; production deployment
+  (`plan` → `prepare` → publish → `deploy`); TLS staging qualification, a measured capture
+  and timer enablement; the GitHub `production` environment, `VM_SSH_PRIVATE_KEY` and its
+  two reference variables; runner SSH reachability (NSG); an Azure storage account; an
+  offline copy of the recipient key and passphrase.

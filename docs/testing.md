@@ -6232,3 +6232,168 @@ The live draft `v0.1.0-rc.1` release manifest was downloaded read-only: source
 admitted new release containing r9 is required for the existing V006→V009 update.
 The draft was not repromoted, published or modified. No production secret, protection,
 environment setting, Azure resource or real certificate was changed.
+
+## Latest authenticated CI evaluation verification — 24 November 2026
+
+Scope: [ADR015 amendment A2](decisions/015-release-pipeline.md#11-amendment-a2--latest-authenticated-ci-evaluation-24-november-2026)
+in PR #275 (`release.py evaluate-checks`, `candidate-manifest` and `summary`, the
+candidate job of `release.yml`). Run on macOS arm64 with Python 3.9.6 from the PR's
+worktree; the PR's own CI runs the same suite on `ubuntu-24.04`.
+
+### Executed and passed
+
+| Check | Result |
+| --- | --- |
+| `python3 -m unittest discover -s infrastructure/release/tests -v` | 81 tests pass, 28 of them in `CheckTests` (the earlier 6 check tests encoded the superseded rule and were replaced) |
+| Accepted cases | All checks pass on the first attempt; a verified re-run supersedes a failed attempt (failure kept under `superseded`); "re-run failed jobs" with GitHub's re-recorded results of the others; several failed attempts before a passing one; a newer `workflow_dispatch` run on the same commit; `CodeQL` on the revision; the `CodeQL` fallback with equal trees; forged runs ignored and recorded |
+| Refused cases | Newest attempt failed after an earlier success; pending or queued run; `cancelled`, `skipped`, `neutral`, `timed_out`, `action_required`, `stale` or missing conclusion; forged success with the same name and app (also with a real job's URL) over a real failure or a missing job; nine check-run/job mismatches (absent, name, app, commit, status, conclusion, check suite, API URL, web URL); untrusted workflow file, dynamic workflow, a `release.yml` run (the candidate run itself), `pull_request` or `schedule` event, other branch, repository, fork head, commit or malformed attempt; job records of another commit, run or attempt, attempt zero, foreign URLs; an attempt-1 result spliced into attempt 2; attempt and all-attempt listings that disagree; results of different attempts or runs combined; a job name in two workflows; missing required check, job listings or second run listing; runs that change between the two reads; rules without an app, with an unknown app or without a context; fallback over a failed, cancelled or unfinished revision run, a failed or unfinished head run, a head run of another commit or app; a merged pull request of another repository; short or malformed API listings; candidate evidence of another revision or schema, a legacy list, or none for a dispatched candidate |
+| Mutation check (12 mutants of the decisive conditions: check-run binding, newest run, run re-read, trusted events, newest-attempt-only listing, producer ambiguity, newest code scanning run, completed run, no fallback over the revision, workflow file of the revision, listing agreement, `total_count`) | Every mutant fails at least one `CheckTests` test |
+| `bash -n` on `release.sh`, `verify-release.sh`; `py_compile` of `release.py` | Pass |
+| actionlint 1.7.12 (`rhysd/actionlint:1.7.12` image, which runs shellcheck on `run:` scripts) on `release.yml` | No findings |
+
+### Read-only evaluation of `84d10a3` against the live API
+
+The candidate job's reads were replayed with an authenticated `gh` session instead of
+the workflow's `GITHUB_TOKEN`: branch rules (ten required contexts), the
+revision's workflow runs before and after, 21 check runs, the job listings of the newest
+attempt and of all attempts of the five runs, PR #274 and its head's check runs, and both
+trees. Nothing was written to GitHub.
+
+| Required check | Decisive evidence | Superseded |
+| --- | --- | --- |
+| Backend, Frontend, E2E | Jobs `137762520593`, `137762521390`, `137762520438`, attempt 1 of their `push` runs | none |
+| Six `CI VM` checks | Attempt 2 of run 45194866405, e.g. `VM runtime privileges with the real backend` job `137775683393` | attempt-1 jobs, including the failed `137762522469` |
+| CodeQL | Check run `137717841069` (app 57789) on PR #274 head `cac03de`; tree `7c2d462…` equals the revision's | none |
+
+Result: **accepted**, with no ignored check run and the GitHub-managed CodeQL push run
+recorded as untrusted (`dynamic` event). The tooling on `main` before A2 refuses the same
+data (`a later run never overrides it`). On copies of the live data, an added forged
+success (same name, app, check suite and the real job's URL) was ignored and recorded; a
+failed decisive job with that forgery, an attempt 2 without the job, a missing attempt
+listing, a decisive check run missing from the commit's listing, and a re-run starting
+between the two run reads were each refused.
+
+### Not run
+
+- The pull-request rehearsal (`Release rehearsal`) runs only in CI and does not
+  exercise `evaluate-checks` (rehearsals skip source checks); no candidate was
+  dispatched, so the candidate job's API reads have not run on a GitHub runner.
+- No independent review. Produced through AI-assisted development (Anthropic Claude
+  Code) under the Leader's task; GitHub's REST API and documentation, `gh` and actionlint
+  are the tools used; nothing is added to CodeMastery's runtime.
+
+### Review remediation (F1 and F2) — 24 November 2026
+
+An independent Codex security review of `efda42f` returned CHANGES_REQUIRED
+([ADR015 A2.11](decisions/015-release-pipeline.md#a211-independent-review-remediation-24-november-2026)).
+Run on macOS arm64, Python 3.9.6, from the PR's worktree.
+
+**Reproduced before the fix** (on `efda42f`'s `release.py`, synthetic fixtures). In each
+case a newer `workflow_dispatch` run of `ci-vm.yml` had failed `VM B`, and its record was
+garbled:
+
+| Newer run's record | `efda42f` outcome |
+| --- | --- |
+| no `workflow_id` | ACCEPTED, `VM B` taken from the older run 200 (stale success) |
+| no `check_suite_id` | ACCEPTED, stale success |
+| no `created_at` | ACCEPTED, stale success |
+| `workflow_id` `"214"`, `check_suite_id` `true`, `run_attempt` `"1"`, no `path` | ACCEPTED, stale success |
+| `created_at` `"yesterday"`; no `status` | Refused, but only by accident of ordering or status |
+
+F2: `evaluate_checks` had no input for a second read of the PR head. With the first read
+of the head (CodeQL success) the revision was ACCEPTED. A later read showing a newer
+pending or failed CodeQL analysis would have refused it, and the workflow never made that
+read.
+
+Adjacent: an all-attempt job record with the same ID as the decisive job, but conclusion
+`failure` or status `in_progress`, was ACCEPTED (only the ID sets were compared).
+
+**Regression tests.** Five new `CheckTests` tests, plus extended snapshot and CLI tests.
+All of them fail on `efda42f`: 21 failing subtests, run through a shim that passes the
+first reads and ignores the second-read inputs `efda42f` lacked. All pass after the fix:
+
+| Test | Covers |
+| --- | --- |
+| `test_malformed_newer_run_never_lets_an_older_success_decide` | The three confirmed cases (missing `workflow_id`, `check_suite_id`, `created_at`) and six more malformed fields |
+| `test_malformed_record_of_an_unrelated_run_is_still_ignored` | Runs that are positively out of scope (event, branch, path, commit) stay recorded and ignored, even when incomplete |
+| `test_conflicting_job_records_with_the_same_id_are_refused` | Same ID, different conclusion, status, name or commit |
+| `test_codeql_evaluation_appearing_between_the_reads_is_refused` | Newer pending, queued, failed or cancelled CodeQL on the PR head at the second read; decisive run changed or gone; missing second read; unrelated names may change |
+| `test_check_runs_of_the_revision_changing_between_the_reads_are_refused` | New pending or failed CodeQL on the revision, new forged run, a run gone, missing second read |
+| `test_runs_that_change_while_being_read` (extended) | Eight run fields differing between the two reads |
+| `test_cli_with_the_files_the_workflow_writes` (extended) | `--pr-check-runs-after` required; a newer queued CodeQL in it refuses (exit 3) |
+
+**Results:**
+
+- `python3 -m unittest discover -s infrastructure/release/tests -v`: **86 tests OK** (33 in `CheckTests`).
+- Mutation check: 6 new mutants (malformed records ignored, no `created_at` validation, no PR-head re-read, no revision re-read, ID-only job comparison, reduced run-field comparison) and the earlier 12 re-run. All 18 are killed.
+- `bash -n` on both scripts and `py_compile` pass.
+- actionlint 1.7.12 on `release.yml`: no findings.
+
+**Read-only re-evaluation of `84d10a3`** with the fixed tooling and the workflow's new
+read order: rules, workflow files, runs, check runs, job listings, PR #274, head check runs,
+trees, then head check runs again, revision check runs again, and runs again. Result:
+**ACCEPTED**, identical to the first evaluation:
+
+- the six `CI VM` checks come from attempt 2 of run 45194866405, with the failed
+  `137762522469` superseded;
+- `CodeQL` comes from check run `137717841069` on `cac03de`;
+- no check runs are ignored;
+- the GitHub-managed `dynamic` CodeQL run is recorded as untrusted.
+
+On copies of this live data, each of the following was refused:
+
+- a newer failed `CI VM` run without `workflow_id`;
+- the same without `check_suite_id`;
+- the same without `created_at`;
+- a newer pending or failed CodeQL check run on `cac03de` at the second read.
+
+Not run: GitHub Actions CI on the new head, which the task excluded; the pull-request
+rehearsal; an independent re-review.
+
+### Second independent review remediation (N1 and N2) — 24 November 2026
+
+Scope: PR #275 at starting head `a741dc6339f4272a0f01fa9ddd6d19246b220595`, under the
+Leader's explicit N1/N2 remediation instruction ([ADR015 A2.12](decisions/015-release-pipeline.md#a212-second-independent-review-remediation-n1-and-n2-24-november-2026)).
+OpenAI Codex implemented and validated this follow-up; these are developer results,
+not an independent re-review or integration/release approval.
+
+**Before/after evidence.** The new `WorkflowSourceTests` extract and execute the actual
+`Resolve and verify the source revision` shell from `release.yml` with deterministic
+Git/API stubs and the real Python CLI. Running those tests in an isolated archive of
+`a741dc6` produces eight failing subtests: all five N1 inputs and all three N2 mutations
+are incorrectly ACCEPTED (exit 0). With the fix, each returns REFUSED (exit 3).
+
+| Coverage | Results after remediation |
+| --- | --- |
+| N1's five confirmed inputs: month 00, February 30, empty event/branch/path | REFUSED in evaluator and actual workflow shell |
+| Invalid calendar/ranges, non-leap and century leap days, year zero, hour/minute/second overflow, fractions, offsets, lowercase UTC marker, trailing newline, missing/incorrect types | REFUSED; both failed and incomplete newer runs covered |
+| Empty/missing/wrong-type trust fields; whitespace/control text, malformed commit/branch/path; malformed repository shapes and ID types | REFUSED without accidental stale selection |
+| Valid leap days (including 2000), year rollover, chronological order, equal-time ID ties and reversed response order | Correct deterministic latest-run selection |
+| N2 final-snapshot repository/head-repository ID and web-URL mutations/removals; equal-valued float substitutions and malformed nested identity shapes | REFUSED; both source and PR-head check-run web URLs covered |
+| Canonical integer/decimal-string repository IDs; changes to unused display/volatile fields | Accepted; no extra volatility in the gate |
+| Original F1 missing metadata, F2 pending/failed CodeQL race, legitimate full/partial reruns | Actual-shell cases pass; existing evaluator tests also pass |
+| Forged checks, same-ID job conflicts, attempt selection, tree-equality fallback, candidate evidence, admission and release-chain gates | Existing regression tests pass |
+
+Executed locally on macOS arm64, Python 3.9.6:
+
+- `python3 -W error::ResourceWarning -m unittest discover -s infrastructure/release/tests -v`:
+  **95 tests PASS**, including **39 `CheckTests`** and **3 `WorkflowSourceTests`**
+  (15 deterministic shell executions).
+- `python3 -m py_compile infrastructure/release/release.py infrastructure/release/tests/test_release.py`: PASS.
+- `bash -n infrastructure/release/release.sh infrastructure/release/verify-release.sh`:
+  PASS; the extracted source-resolution shell also passes syntax validation.
+- `git diff --check`: PASS. Actionlint is unavailable locally and was not run.
+
+**Authentic read-only source replay.** With the patched evaluator, replayed the actual
+workflow's GET sequence for `84d10a3202ef96b0230eff6c22db060a08bcc02d`: live branch
+rules, workflow files, paginated runs/checks/jobs, merged PR #274 and equal Git trees,
+then PR-head checks, source checks and workflow runs again. Result: **ACCEPTED**, all
+10 required contexts qualified. Backend/Frontend/E2E use attempt 1; all six CI VM
+contexts use attempt 2 of run `45194866405` (runtime job `137775683393`, with failed
+attempt-1 job `137762522469` superseded). CodeQL remains check `137717841069` on
+`cac03de579a9e0a655737dcc573bfd8c6a809d6c`. No check runs are ignored; the dynamic
+workflow remains excluded. No SHA exception is implemented.
+
+The existing snapshot limitations in ADR015 A2.8 remain. PR #275 CI was not queried,
+waited for or rerun. No candidate, admission, promotion or deployment was performed.
+Independent re-review of this follow-up remains outstanding.
