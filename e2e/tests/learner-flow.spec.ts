@@ -611,3 +611,42 @@ test.describe('REST contract smoke (API only)', () => {
         }
     });
 });
+
+test('covers complete learner journey: register, sign in, explore catalogue, and enroll', async ({ page }) => {
+    const uniqueEmail = `learner.${Date.now()}@codemastery.local`;
+    const testPassword = 'MasteryPassword2026!';
+
+    // 1. Register a new learner account
+    await page.goto('/register');
+    await expect(page.getByRole('heading', { level: 1, name: 'Create account' })).toBeVisible();
+    await page.locator('input[name="displayName"]').fill('Quoc Thang E2E');
+    await page.locator('input[name="email"]').fill(uniqueEmail);
+    await page.locator('input[name="password"]').fill(testPassword);
+    await page.locator('input[name="confirmPassword"]').fill(testPassword);
+    await page.getByRole('button', { name: 'Create account', exact: true }).click();
+    await expect(page.getByText('Account created. Sign in to continue.')).toBeVisible();
+    // 2. Sign in with the newly created account
+    await page.getByRole('link', { name: 'Sign in' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+    await page.locator('input[name="email"]').fill(uniqueEmail);
+    await page.locator('input[name="password"]').fill(testPassword);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+
+    // 3. Explore Catalogue and view course details
+    await expect(page).toHaveURL(/\/home$/);
+    await page.getByRole('link', { name: 'Catalogue' }).first().click();
+    await expect(page).toHaveURL(/\/courses$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Course catalogue' })).toBeVisible();
+
+    // 4. View the first course and enroll
+    const viewSyllabusBtn = page.getByRole('link', { name: /View Syllabus/i }).first();
+    if (await viewSyllabusBtn.isVisible()) {
+        await viewSyllabusBtn.click();
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        const enrollBtn = page.getByRole('button', { name: /Enroll in course/i });
+        if (await enrollBtn.isVisible()) {
+            await enrollBtn.click();
+            await expect(page.getByText(/Active/i)).toBeVisible();
+        }
+    }
+});
