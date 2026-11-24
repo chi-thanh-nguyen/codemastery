@@ -49,7 +49,10 @@ HEX64 = re.compile(r"^[0-9a-f]{64}$")
 REVISION = re.compile(r"^[0-9a-f]{40}$")
 FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 MIGRATION = re.compile(r"^V([0-9]+)__([A-Za-z0-9_]+)\.sql$")
-REQUIRED_PACKAGE = ("release.json", "SHA256SUMS", "expected-images.containerd.txt", "expected-images.graphdriver.txt",
+# Every staged file is checked against release.json's file map (whose digest the request
+# names). release.py keeps SHA256SUMS out of that map, so it is checked on the workstation
+# (deploy-release.sh, verify-release.sh) and never staged here.
+REQUIRED_PACKAGE = ("release.json", "expected-images.containerd.txt", "expected-images.graphdriver.txt",
                     "admission.json")
 FULL_PACKAGE = REQUIRED_PACKAGE + ("mc-source.tar.gz",)
 CONF_KEYS = {"origin", "env_file", "wait_timeout", "tls_dir", "tls_backup_root", "acme_home", "acme_domain",
