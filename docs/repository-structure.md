@@ -2319,3 +2319,34 @@ CODEOWNERS is unchanged: the existing Adaptive test rule (@thanhtran0311, @chi-t
 covers the unit test; like the other `integration/repository/` suites, the integration test
 matches no rule. No production file, dependency, directory or other test path is approved.
 The canonical tree above is unchanged; this is an explicit addition.
+
+### IN10 test placement — 24 November 2026
+
+`CT14-IN10-PLACEMENT-2026-11-24-r1` is
+**[LEADER_APPROVED](decisions/README.md#approval-status-labels)**: the Project Leader
+approved it on 24 November 2026 (Asia/Ho_Chi_Minh), in response to the placement question
+raised during the instruction "CodeMastery — PR #276: Complete IN10 Implementation, Resolve
+Bounded Upstream Gaps, and Perform Comprehensive Code Review". ADR008 §5 records the audit unit
+and integration test inventories as a gap, and ADR012 §19.3 approves only the shared
+`InteractionAdminIntegrationTest.java` (audit atomicity among B7-O01–O03 and O06–O11) and
+`AuthorizationIntegrationTest.java` (authorization matrices). Exactly these five test files are
+added; four go into existing directories, and `AuditLogServiceTest.java` adds `application/service/`
+under the existing Admin test package (`modules/admin/`):
+
+| File | Responsibility |
+| --- | --- |
+| `backend/src/test/java/com/codemastery/modules/admin/application/service/AuditLogServiceTest.java` | Unit tests of `AuditLogService` (Mockito, fixed `Clock`): recorded row content, microsecond truncation, Administrator-only recording and reading, ADR012 §12 stage order (invalid values before the role, both before any lookup), filter and paging hand-off, actor names including a missing account |
+| `backend/src/test/java/com/codemastery/modules/admin/AuditActionTest.java` | Unit tests of `AuditAction`: the closed nine-code CT31 catalogue with its target types; exact-match code lookup |
+| `backend/src/test/java/com/codemastery/modules/admin/AuditLogMapperTest.java` | Unit tests of `AuditLogMapper`: field-for-field domain/entity mapping |
+| `backend/src/test/java/com/codemastery/modules/admin/AdminRequestsTest.java` | Unit tests of the CT31.read query parsing in `AdminRequests`: known single-valued parameters, UUID text, RFC 3339 date-time grammar, digit-only paging |
+| `backend/src/test/java/com/codemastery/integration/repository/AuditLogRepositoryIntegrationTest.java` | Real-PostgreSQL IN10 persistence and read: insert and read-back, fixed ordering, AND filters with inclusive/exclusive time bounds, totals beyond the last page, no overwrite of an identifier, execution under a transaction-scoped role holding exactly the CT17-P6 r10 `audit_logs` row, the row `record` writes, and the read over HTTP (filters, paging, actor names); extends `AbstractIntegrationTest` |
+
+The IN10 audit-atomicity cases (B7-O07, recording side) are added to the already approved
+`InteractionAdminIntegrationTest.java`, which this addition creates with only that part of its
+§19.3 scope; IN11, IN20 and IN21 add the remaining B7 cases. The CT31.read authorization,
+precedence and no-store matrix is added to `AuthorizationIntegrationTest.java`, and the
+CT01.user-summaries unit tests to the existing `AuthServiceTest.java`. CODEOWNERS is unchanged:
+the existing Admin test rule (@tihh647-ui, @chi-thanh-nguyen) covers the four unit tests; like
+the other `integration/repository/` suites, the repository suite matches no rule. No production
+file, dependency, directory or other test path is approved. The canonical tree above is unchanged;
+this is an explicit addition.

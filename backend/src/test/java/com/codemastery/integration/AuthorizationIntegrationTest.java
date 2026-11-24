@@ -2323,6 +2323,125 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         assertEquals("[\"liveness\",\"readiness\"]", health.get("groups").toString());
     }
 
+    /**
+     * CT31.read (ADR012 sections 7.3 and 12, B7-O12; IN10 #184) through the production security chain:
+     * 401 authentication, then 400 malformed query values, then the role 403 before any lookup; no-store
+     * on every outcome; only the approved row fields; other methods stay default-denied.
+     */
+    @Nested
+    class AuditLogReadEndpoint {
+
+        private static final String PATH = "/api/admin/audit-logs";
+        private final List<UUID> actors = new ArrayList<>();
+        private UUID admin;
+
+        @BeforeEach
+        void fixtures() {
+            admin = insertUser("admin", "active");
+            actors.add(admin);
+            jdbc.update("INSERT INTO public.audit_logs (id,actor_id,action,target_type,target_reference,occurred_at) "
+                    + "VALUES (?,?,'user_locked','user',?,'2026-11-18T01:00:00.123456Z')",
+                    UUID.randomUUID(), admin, UUID.randomUUID().toString());
+        }
+
+        @AfterEach
+        void removeFixtures() {
+            for (UUID actor : actors) {
+                jdbc.update("DELETE FROM public.audit_logs WHERE actor_id = ?", actor);
+            }
+            actors.clear();
+        }
+
+        @Test
+        void unauthenticatedRequestsAre401BeforeQueryValidation() throws Exception {
+            for (String query : List.of("", "?size=0", "?action=nope")) {
+                mvc.perform(get(PATH + query))
+                        .andExpect(status().isUnauthorized())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+                mvc.perform(get(PATH + query).header("Authorization", "Bearer not-a-jwt"))
+                        .andExpect(status().isUnauthorized())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+            mvc.perform(get(PATH).header("Authorization", "Bearer " + sessionToken(insertUser("admin", "locked"))))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"learner", "instructor"})
+        void otherRolesAre403ButMalformedQueryValuesAre400First(String role) throws Exception {
+            String bearer = "Bearer " + sessionToken(insertUser(role, "active"));
+            for (String query : List.of("", "?actorId=" + admin + "&size=100", "?action=user_locked&targetType=user")) {
+                mvc.perform(get(PATH + query).header("Authorization", bearer))
+                        .andExpect(status().isForbidden())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+            }
+            for (String query : List.of("?size=0", "?action=nope", "?actorId=x", "?occurredFrom=yesterday", "?sort=id")) {
+                mvc.perform(get(PATH + query).header("Authorization", bearer))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"));
+            }
+        }
+
+        @Test
+        void aDemotedAdministratorsTokenIsRejectedByTheCurrentRole() throws Exception {
+            UUID demoted = insertUser("admin", "active");
+            String bearer = "Bearer " + sessionToken(demoted);
+            mvc.perform(get(PATH).header("Authorization", bearer)).andExpect(status().isOk());
+
+            jdbc.update("UPDATE public.users SET role = 'instructor' WHERE id = ?", demoted);
+
+            mvc.perform(get(PATH).header("Authorization", bearer))
+                    .andExpect(status().isForbidden())
+                    .andExpect(header().string("Cache-Control", "no-store"));
+        }
+
+        @Test
+        void administratorsReadOnlyTheApprovedFieldsWithNoStore() throws Exception {
+            String body = mvc.perform(get(PATH).param("actorId", admin.toString())
+                            .header("Authorization", "Bearer " + sessionToken(admin)))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andReturn().getResponse().getContentAsString();
+
+            var page = JSON.readTree(body);
+            assertEquals(Set.of("content", "page", "size", "totalElements", "totalPages"), Set.copyOf(page.propertyNames()));
+            assertEquals(1, page.get("content").size());
+            var row = page.get("content").get(0);
+            assertEquals(Set.of("id", "actorId", "actorDisplayName", "action", "targetType", "targetReference", "occurredAt"),
+                    Set.copyOf(row.propertyNames()));
+            assertEquals("QA01 Role Fixture", row.get("actorDisplayName").asString());
+            assertEquals("2026-11-18T01:00:00.123456Z", row.get("occurredAt").asString());
+            assertFalse(body.contains("@example.test"), "no email");
+            assertFalse(body.contains("active"), "no account status");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "size=0", "size=101", "page=-1", "page=1.5", "page=99999999999", "sort=id", "unknown=1",
+                "action=user_locked&action=user_unlocked", "action=", "actorId=not-a-uuid", "targetReference=12345",
+                "action=nope", "action=USER_LOCKED", "targetType=group", "targetType=User", "occurredFrom=yesterday",
+                "occurredFrom=2026-11-18T01:00Z", "occurredFrom=2026-11-18T01:00:00.1234567Z",
+                "occurredFrom=2026-11-18T02:00:00Z&occurredTo=2026-11-18T01:00:00Z",
+                "occurredFrom=2026-11-18T01:00:00Z&occurredTo=2026-11-18T01:00:00Z"})
+        void administratorsGet400WithNoStoreForInvalidQueries(String query) throws Exception {
+            mvc.perform(get(PATH + "?" + query).header("Authorization", "Bearer " + sessionToken(admin)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"POST", "PUT", "PATCH", "DELETE", "HEAD"})
+        void otherMethodsStayDeniedEvenForAdministrators(String method) throws Exception {
+            mvc.perform(request(HttpMethod.valueOf(method), PATH).header("Authorization", "Bearer " + sessionToken(admin)))
+                    .andExpect(status().isForbidden());
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.audit_logs WHERE actor_id = ?",
+                    Integer.class, admin));
+        }
+    }
+
     private UUID insertUser(String role, String accountStatus) {
         UUID id = UUID.randomUUID();
         String email = newEmail();
