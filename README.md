@@ -1,37 +1,52 @@
 # CodeMastery
 
-Mastery-based programming learning for beginner university students.
+**Mastery-based programming learning for beginner university students.**
 
 CodeMastery is a course-based, self-paced web application for introductory
-programming, developed for CO3103 at HCMUT. Its intended difference is skill-level
-mastery: learners receive explainable guidance to continue, test out, or revisit
-prerequisites, while instructors follow their progress. That adaptive journey is
-still being built; the implemented capabilities are listed below.
+programming, developed for CO3103 at HCMUT. Its Mastery-Based Adaptive Learning
+design tracks individual skills and uses explainable rules to recommend the next
+lesson, test out of mastered content, or revisit prerequisites. The integrated
+adaptive journey is still being built.
 
 [![Backend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml)
 [![Frontend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml)
 [![E2E](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml)
 
-[Setup](docs/setup.md#prerequisites) · [Contributing](CONTRIBUTING.md) ·
-[Documentation](#documentation-index) · [Security](SECURITY.md)
+## Why CodeMastery
 
-## What works today
-
-- Learners can register, sign in, restore a session, browse published courses,
-  join or leave a course, and view their enrolled courses. Password recovery has
-  backend and frontend support; delivery requires the documented SMTP configuration.
-- Backend APIs support Course, Chapter and Lesson authoring/publication, Learner
-  lesson reads, completion/progress and resume, Instructor skill graphs, question
-  banks, and quiz composition/publication. Most of these newer APIs have no
-  production frontend screen yet.
-- Adaptive foundations include deterministic mastery calculation, skill graph
-  validation, categorical mastery persistence and append-only recommendation
-  history. Quiz-driven mastery updates, next-lesson recommendations and the
-  learner Mastery Map are not integrated.
+- **Skill-level mastery foundations.** Deterministic mastery calculation, skill
+  graph validation, categorical mastery persistence and append-only recommendation
+  history are implemented. Quiz-driven mastery updates, next-lesson recommendations
+  and the learner Mastery Map are not integrated.
+- **Course-based programming study.** Learners can register, sign in, restore a
+  session, browse published courses, join or leave a course, and view their enrolled
+  courses. Password recovery has backend and frontend support; delivery requires
+  the documented SMTP configuration.
+- **Progress and resume APIs.** The backend supports Learner lesson reads,
+  completion/progress and resume. Production lesson screens remain to be delivered.
+- **Instructor authoring APIs.** Course, Chapter and Lesson authoring/publication,
+  skill graphs, question banks and quiz composition/publication have backend support.
+  Most of these newer APIs have no production frontend screen yet; Instructor
+  workspaces remain preview-only.
+- **One backend, explicit module boundaries.** A Spring Boot Modular Monolith
+  separates six modules with approved public interfaces, ports and events. The
+  architecture defines ownership without introducing separate backend services.
 
 Adaptive learning is rule-based inside the Java backend. It uses no ML model,
 external AI inference service or separate Python service. Python Fundamentals is
-sample course content, not the backend language.
+sample course content, not the backend language. The status table below separates
+implemented capabilities from remaining work; neither code nor previews establish
+independent application acceptance.
+
+## Quick links
+
+| Resource | Where to start |
+| --- | --- |
+| Getting started | [Local quick start](#quick-start) and [development setup](docs/setup.md#prerequisites) |
+| Documentation | [Documentation index](#documentation-index) and [architecture](docs/architecture.md) |
+| Contributing | [Contributor workflow](CONTRIBUTING.md) |
+| Testing | [Commands and evidence](docs/testing.md) |
+| Policies | [Security reporting](SECURITY.md) and [license scope](#contributing-security-and-license) |
 
 ## Current project status
 
@@ -59,16 +74,33 @@ missing contracts or functionality.
 ### Releases and deployment
 
 The published `v0.1.0-preview.1` is a prerelease. At this snapshot,
-`v0.1.0-rc.2` is a draft, not a published production release. See
-[GitHub Releases](https://github.com/chi-thanh-nguyen/codemastery/releases).
+`v0.1.0-rc.2` remains a **draft GitHub Release**, with no publication time. Its
+artifact was nevertheless deployed to the Azure VM; publication and deployment
+are separate states. See [GitHub Releases](https://github.com/chi-thanh-nguyen/codemastery/releases).
+
+- **Deployment — 24 November 2026, 07:45:19 ICT (UTC+7).** The operator record
+  reports `v0.1.0-rc.2` as `DEPLOYED`, exit code `0`, using operator tooling
+  `b568d18`. Its source is `84d10a3202ef96b0230eff6c22db060a08bcc02d`, distinct
+  from the README baseline `main` at `a40cae6a3c51f8283c80ae09c80c170710f92a18`.
+  There is no evidence here that the latest `main` was deployed.
+- **Release/VM verification.** All five release image IDs matched, Flyway
+  V001–V009 were applied, application readiness was `UP`, and a separate operation
+  returned `VERIFIED`. The deployment's archive digest matches the corresponding
+  release metadata. These are dated operator results, not a fresh VM health check;
+  [deployment verification](docs/decisions/017-ssh-continuous-deployment.md#d8--deploysh-invocation-and-verification)
+  keeps infrastructure/readiness evidence separate from feature acceptance.
+- **Acceptance limits.** The deployment used an empty database; scheduled capture
+  and TLS-renewal timers remained disabled. End-to-end application acceptance was
+  not independently verified. This evidence does not establish complete production
+  readiness, measured recovery or lecturer acceptance. The remaining gates are in
+  the [operational documentation](docs/deployment.md).
 
 The [23 November VM observation](docs/deployment.md#historical-vm-observation-on-23-november-2026-read-only)
 records an older preview running on Azure; the subsequent
 [setup record](docs/deployment.md#phase-5-one-time-setup-executed--23-november-2026)
-records bootstrap and recovery-key preparation, with timers disabled. These dated
-records do not establish deployment or independent acceptance of current `main`.
-Release admission, measured recovery, production deployment and lecturer-accessible
-acceptance retain the gates in the operational documentation.
+records bootstrap and recovery-key preparation, with timers disabled. These remain
+dated historical evidence; their pending-deployment statements predate the rc.2
+operation above.
 
 ## Stack and architecture
 
@@ -245,7 +277,7 @@ Anthropic Claude Code assistance, as recorded in
 [ADR015](docs/decisions/015-release-pipeline.md) and
 [ADR017](docs/decisions/017-ssh-continuous-deployment.md). Their tooling uses GitHub
 Actions, Trivy, Sigstore artifact attestations, OpenSSH, OpenSSL, optional Azure CLI
-integration and acme.sh. The 23 November VM records above supersede older statements
+integration and acme.sh. The 23–24 November VM records above supersede older statements
 about deployment absence; they are dated evidence, not a current runtime check.
 
 </details>
