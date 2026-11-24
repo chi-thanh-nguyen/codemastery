@@ -86,6 +86,8 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
     @Autowired CourseManagementService management;
     @Autowired CourseStructureService structure;
     @Autowired DataSource dataSource;
+    @Autowired com.codemastery.modules.course.application.service.LessonProgressService progress;
+    @Autowired com.codemastery.modules.course.domain.repository.CourseRepository courseRows;
     private MockMvc mvc;
 
     private static UUID id(String name) { return UUID.nameUUIDFromBytes(("fe07/" + name).getBytes(StandardCharsets.UTF_8)); }
@@ -122,6 +124,88 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
     private UUID refreshSession(UUID actor) { UUID session = UUID.randomUUID(); jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) SELECT ?, id, now(), now() + interval '1 hour' FROM public.users WHERE id = ?", session, actor); return session; }
     private String membership(UUID course) { return "/api/courses/" + course + "/membership"; }
     private void row(String status) { jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status,resume_lesson_id) VALUES (?,?,?,?,?)", ENROLLMENT, LEARNER, COURSE, status, LESSON); }
+
+    // CO15 CT22.atomic (ADR011 §3) against real PostgreSQL, the root marker and transaction rollback.
+    private TransactionTemplate heldRootUnit() {
+        var unit = new TransactionTemplate(transactions);
+        unit.setIsolationLevel(TransactionTemplate.ISOLATION_READ_COMMITTED);
+        return unit;
+    }
+    private <T> T underHeldRoot(java.util.function.Supplier<T> work) {
+        return heldRootUnit().execute(status -> {
+            assertTrue(courseRows.lockCourseRoot(COURSE));
+            courseRows.markCourseRootHeld(COURSE);
+            return work.get();
+        });
+    }
+    private List<Boolean> progressFlags() {
+        return jdbc.queryForList("SELECT completed, mastery_skipped FROM public.lesson_progress WHERE enrollment_id=? AND lesson_id=?", ENROLLMENT, LESSON)
+                .stream().flatMap(r -> java.util.stream.Stream.of((Boolean) r.get("completed"), (Boolean) r.get("mastery_skipped"))).toList();
+    }
+    private String enrollmentStatus() { return jdbc.queryForObject("SELECT status FROM public.enrollments WHERE id=?", String.class, ENROLLMENT); }
+
+    @Test void masterySkipInsertsSkippedProgressAndCompletesMembershipUnderTheHeldRoot() {
+        row("active");
+        var before = underHeldRoot(() -> progress.readExecutionState(COURSE, LEARNER));
+        assertEquals("active", before.membershipStatus()); assertEquals(ENROLLMENT, before.enrollmentId());
+        assertFalse(before.adaptiveEnabled()); assertNull(before.adaptiveSettings());
+        // Hidden Lessons never appear.
+        assertEquals(List.of(new com.codemastery.modules.course.application.service.LessonProgressService.LessonState(LESSON, CHAPTER, 1, 1, false, false)), before.lessons());
+
+        var after = underHeldRoot(() -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON)));
+        assertEquals("completed", after.membershipStatus()); assertTrue(after.lessons().get(0).masterySkipped());
+        assertEquals(List.of(true, true), progressFlags()); assertEquals("completed", enrollmentStatus());
+        // Idempotent: a repeat changes nothing.
+        underHeldRoot(() -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON)));
+        assertEquals(List.of(true, true), progressFlags());
+    }
+
+    @Test void masterySkipNeverRelabelsAManualCompletionAndUpgradesAnIncompleteRow() {
+        row("active");
+        jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (?,?,?,true,false)", PROGRESS, ENROLLMENT, LESSON);
+        underHeldRoot(() -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON)));
+        assertEquals(List.of(true, false), progressFlags()); assertEquals("completed", enrollmentStatus());
+
+        jdbc.update("UPDATE public.lesson_progress SET completed=false WHERE id=?", PROGRESS);
+        jdbc.update("UPDATE public.enrollments SET status='active' WHERE id=?", ENROLLMENT);
+        underHeldRoot(() -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON)));
+        assertEquals(List.of(true, true), progressFlags()); assertEquals("completed", enrollmentStatus());
+    }
+
+    @Test void callerFailureRollsBackTheMasterySkipWithTheWholeUnit() {
+        row("active");
+        assertThrows(IllegalStateException.class, () -> underHeldRoot(() -> {
+            progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON));
+            throw new IllegalStateException("caller failure after the participant");
+        }));
+        assertEquals(List.of(), progressFlags()); assertEquals("active", enrollmentStatus());
+    }
+
+    @Test void participantRefusesAUnitWithoutTheSameCoursesHeldRoot() {
+        row("active");
+        // Row lock alone, no marker; another Course's marker; no transaction at all.
+        assertThrows(IllegalStateException.class, () -> heldRootUnit().execute(status -> {
+            assertTrue(courseRows.lockCourseRoot(COURSE));
+            return progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON));
+        }));
+        assertThrows(IllegalStateException.class, () -> heldRootUnit().execute(status -> {
+            assertTrue(courseRows.lockCourseRoot(SECOND));
+            courseRows.markCourseRootHeld(SECOND);
+            return progress.readExecutionState(COURSE, LEARNER);
+        }));
+        assertThrows(IllegalStateException.class, () -> progress.readExecutionState(COURSE, LEARNER));
+        assertEquals(List.of(), progressFlags()); assertEquals("active", enrollmentStatus());
+    }
+
+    @Test void hiddenLessonAndLeftMembershipAreRejectedWithoutWrites() {
+        row("active");
+        assertThrows(IllegalArgumentException.class, () -> underHeldRoot(() -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(HIDDEN_LESSON))));
+        jdbc.update("UPDATE public.enrollments SET status='left' WHERE id=?", ENROLLMENT);
+        assertThrows(IllegalStateException.class, () -> underHeldRoot(() -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON))));
+        assertEquals("left", underHeldRoot(() -> progress.readExecutionState(COURSE, LEARNER)).membershipStatus());
+        assertEquals("none", underHeldRoot(() -> progress.readExecutionState(COURSE, OTHER)).membershipStatus());
+        assertEquals(List.of(), progressFlags());
+    }
 
     // CO06 CT21.authoring (ADR006 §5) through real MVC, security, the ADR005 guard and PostgreSQL.
     @Test void instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion() throws Exception {

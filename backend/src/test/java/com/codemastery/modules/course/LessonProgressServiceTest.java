@@ -12,10 +12,15 @@ import com.codemastery.modules.course.application.service.EnrollmentService;
 import com.codemastery.modules.course.application.service.LessonProgressService;
 import com.codemastery.modules.course.domain.model.Enrollment;
 import com.codemastery.modules.course.domain.model.EnrollmentStatus;
+import com.codemastery.modules.course.domain.repository.CourseRepository;
+import com.codemastery.modules.course.domain.repository.CourseRepository.StoredAdaptiveConfiguration;
+import com.codemastery.modules.course.domain.repository.CourseRepository.TransactionFacts;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository;
+import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonPlacement;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonFlags;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.ProgressSummary;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.VisitPosition;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,11 +37,16 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -52,12 +62,13 @@ class LessonProgressServiceTest {
     @Mock EnrollmentRepository repository;
     @Mock UserAccountService identities;
     @Mock CourseAccessService access;
+    @Mock CourseRepository courses;
     LessonProgressService service;
 
     private final UUID actor = UUID.randomUUID(), course = UUID.randomUUID(), row = UUID.randomUUID();
     private final UUID a = UUID.randomUUID(), b = UUID.randomUUID(), c = UUID.randomUUID();
 
-    @BeforeEach void setup() { service = new LessonProgressService(repository, identities, access); }
+    @BeforeEach void setup() { service = new LessonProgressService(repository, identities, access, courses); }
 
     private void learner() { when(identities.requireCurrentIdentity()).thenReturn(new CurrentIdentity(actor, IdentityRole.LEARNER)); }
     private Enrollment enrollment(EnrollmentStatus status, UUID resume) { return new Enrollment(row, actor, course, status, resume); }
@@ -380,6 +391,171 @@ class LessonProgressServiceTest {
         for (String trailing : List.of(" garbage", "{}", "{\"lessonId\":\"" + a + "\"}", "]", " 0"))
             assertEquals(Optional.empty(), CourseProgressResponse.visitLessonId("{\"lessonId\":\"" + a + "\"}" + trailing), trailing);
         assertTrue(CourseProgressResponse.isCompletionWrite(" {\"completed\":true} \n"));
+    }
+
+    // ---- CT22.atomic (ADR011 §3): actorless participant under the caller's held Course root
+
+    private final UUID chapter = UUID.randomUUID();
+    private final Map<String, Object> settings = Map.of("masteryThreshold", 0.8);
+
+    @AfterEach void clearTransaction() {
+        TransactionSynchronizationManager.setActualTransactionActive(false);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+    }
+    private void heldRoot(String isolation, boolean readOnly, UUID root) {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        when(courses.currentTransactionFacts()).thenReturn(new TransactionFacts(isolation, readOnly, true, root));
+    }
+    private void heldRoot() { heldRoot("read committed", false, course); }
+    private void adaptive() {
+        when(courses.findAdaptiveConfiguration(course)).thenReturn(Optional.of(new StoredAdaptiveConfiguration(course, true, settings)));
+    }
+    private LessonPlacement placed(UUID id, int position, boolean completed, boolean skipped) {
+        return new LessonPlacement(id, chapter, 1, position, completed, skipped);
+    }
+
+    @Test void participantRefusesWithoutAnActiveTransactionBeforeAnyRead() {
+        assertThrows(IllegalStateException.class, () -> service.readExecutionState(course, actor));
+        assertThrows(IllegalStateException.class, () -> service.applyMasterySkips(course, actor, Set.of(a)));
+        verifyNoInteractions(repository, courses, identities, access);
+    }
+
+    @Test void participantRefusesAReadOnlyOuterTransaction() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+        assertThrows(IllegalStateException.class, () -> service.readExecutionState(course, actor));
+        verifyNoInteractions(repository, courses);
+    }
+
+    @Test void participantRefusesWrongIsolationReadOnlyOrAnotherCoursesRoot() {
+        for (var facts : List.of(new Object[]{"repeatable read", false, course}, new Object[]{"read committed", true, course},
+                new Object[]{"read committed", false, UUID.randomUUID()}, new Object[]{"read committed", false, null})) {
+            heldRoot((String) facts[0], (Boolean) facts[1], (UUID) facts[2]);
+            assertThrows(IllegalStateException.class, () -> service.applyMasterySkips(course, actor, Set.of(a)));
+        }
+        verifyNoInteractions(repository, identities, access);
+        verify(courses, never()).findAdaptiveConfiguration(any());
+    }
+
+    @Test void executionStateReportsNoneMembershipWithFalseFlagsSettingsAndCanonicalPlacement() {
+        heldRoot(); adaptive();
+        when(repository.find(actor, course)).thenReturn(Optional.empty());
+        when(repository.publishedLessonPlacements(course, null)).thenReturn(List.of(placed(a, 1, false, false), placed(b, 3, false, false)));
+        var state = service.readExecutionState(course, actor);
+        assertEquals("none", state.membershipStatus()); assertNull(state.enrollmentId());
+        assertTrue(state.adaptiveEnabled()); assertEquals(settings, state.adaptiveSettings());
+        assertEquals(List.of(new LessonProgressService.LessonState(a, chapter, 1, 1, false, false),
+                new LessonProgressService.LessonState(b, chapter, 1, 3, false, false)), state.lessons());
+        verify(repository, never()).lockEnrollment(any(), any());
+        verifyNoInteractions(identities, access);
+    }
+
+    @Test void executionStateReportsLeftMembershipAndNullSettingsOfAnUnconfiguredCourse() {
+        heldRoot();
+        when(courses.findAdaptiveConfiguration(course)).thenReturn(Optional.of(new StoredAdaptiveConfiguration(course, false, null)));
+        when(repository.find(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.LEFT, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of());
+        var state = service.readExecutionState(course, actor);
+        assertEquals("left", state.membershipStatus()); assertEquals(row, state.enrollmentId());
+        assertFalse(state.adaptiveEnabled()); assertNull(state.adaptiveSettings());
+    }
+
+    @Test void enabledCourseWithoutStoredSettingsIsAnIntegrityFailure() {
+        heldRoot();
+        when(courses.findAdaptiveConfiguration(course)).thenReturn(Optional.of(new StoredAdaptiveConfiguration(course, true, null)));
+        when(repository.find(actor, course)).thenReturn(Optional.empty());
+        assertThrows(IllegalStateException.class, () -> service.readExecutionState(course, actor));
+    }
+
+    @Test void masterySkipsLockEnrollmentThenProgressSkipOnlyIncompleteLessonsAndRecalculateMembership() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(
+                List.of(placed(a, 1, true, false), placed(b, 2, false, false), placed(c, 3, false, false)),
+                List.of(placed(a, 1, true, false), placed(b, 2, true, true), placed(c, 3, true, true)));
+        var state = service.applyMasterySkips(course, actor, Set.of(a, b, c));
+        InOrder order = inOrder(courses, repository);
+        order.verify(courses).currentTransactionFacts();
+        order.verify(repository).lockEnrollment(actor, course);
+        order.verify(repository).lockProgress(row);
+        order.verify(repository).markMasterySkipped(row, b);
+        order.verify(repository).markMasterySkipped(row, c);
+        order.verify(repository).updateStatus(row, EnrollmentStatus.COMPLETED);
+        // A manual completion is never relabelled.
+        verify(repository, never()).markMasterySkipped(row, a);
+        verify(repository, never()).markCompleted(any(), any());
+        assertEquals("completed", state.membershipStatus());
+        assertEquals(List.of(false, true, true), state.lessons().stream().map(LessonProgressService.LessonState::masterySkipped).toList());
+        verifyNoInteractions(identities, access);
+    }
+
+    @Test void completedMembershipStaysCompletedWithoutARedundantStatusWrite() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.COMPLETED, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of(placed(a, 1, true, false)));
+        assertEquals("completed", service.applyMasterySkips(course, actor, Set.of(a)).membershipStatus());
+        verify(repository, never()).markMasterySkipped(any(), any());
+        verify(repository, never()).updateStatus(any(), any());
+    }
+
+    @Test void emptySetIsANoOp() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of(placed(a, 1, false, false)));
+        assertEquals("active", service.applyMasterySkips(course, actor, Set.of()).membershipStatus());
+        verify(repository, never()).lockProgress(any());
+        verify(repository, never()).markMasterySkipped(any(), any());
+        verify(repository, never()).updateStatus(any(), any());
+    }
+
+    @Test void absentOrLeftMembershipIsAnInternalErrorWithoutWrites() {
+        heldRoot();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.empty(), Optional.of(enrollment(EnrollmentStatus.LEFT, null)));
+        assertThrows(IllegalStateException.class, () -> service.applyMasterySkips(course, actor, Set.of(a)));
+        assertThrows(IllegalStateException.class, () -> service.applyMasterySkips(course, actor, Set.of(a)));
+        verify(repository, never()).markMasterySkipped(any(), any());
+        verify(repository, never()).updateStatus(any(), any());
+    }
+
+    @Test void hiddenOrForeignLessonIsRejectedBeforeAnyWrite() {
+        heldRoot();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of(placed(a, 1, false, false)));
+        assertThrows(IllegalArgumentException.class, () -> service.applyMasterySkips(course, actor, Set.of(a, b)));
+        verify(repository, never()).lockProgress(any());
+        verify(repository, never()).markMasterySkipped(any(), any());
+    }
+
+    @Test void nullArgumentsAreInternalErrors() {
+        var withNull = new java.util.HashSet<UUID>(); withNull.add(null);
+        assertThrows(IllegalArgumentException.class, () -> service.readExecutionState(null, actor));
+        assertThrows(IllegalArgumentException.class, () -> service.readExecutionState(course, null));
+        assertThrows(IllegalArgumentException.class, () -> service.applyMasterySkips(course, actor, null));
+        assertThrows(IllegalArgumentException.class, () -> service.applyMasterySkips(course, actor, withNull));
+        verifyNoInteractions(repository, courses);
+    }
+
+    /** ADR011 §3 allowlist: only Adaptive's execution orchestration may call the participant; no REST or scheduler. */
+    @Test void participantMethodsHaveOnlyTheApprovedCallers() throws Exception {
+        Path root = Path.of("src", "main", "java", "com", "codemastery");
+        var allowed = Set.of(root.resolve("modules/course/application/service/LessonProgressService.java"),
+                root.resolve("modules/adaptive/application/mastery/MasteryUpdateService.java"),
+                root.resolve("modules/adaptive/application/decision/AdaptiveDecisionService.java"));
+        try (var files = Files.walk(root)) {
+            var callers = files.filter(file -> file.toString().endsWith(".java")).filter(file -> {
+                try {
+                    String source = Files.readString(file);
+                    return source.contains("readExecutionState(") || source.contains("applyMasterySkips(");
+                } catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
+            }).toList();
+            assertFalse(callers.isEmpty());
+            assertTrue(allowed.containsAll(callers), () -> "Unapproved CT22.atomic callers: " + callers);
+        }
+    }
+
+    @Test void participantMethodsDeclareNoOwnTransaction() throws Exception {
+        assertNull(LessonProgressService.class.getMethod("readExecutionState", UUID.class, UUID.class).getAnnotation(Transactional.class));
+        assertNull(LessonProgressService.class.getMethod("applyMasterySkips", UUID.class, UUID.class, Set.class).getAnnotation(Transactional.class));
     }
 
     private static void assertTransaction(String method, boolean readOnly, Isolation isolation, Class<?>... parameters) throws Exception {

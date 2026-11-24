@@ -17,7 +17,7 @@ public class EnrollmentRepositoryImpl implements EnrollmentRepository {
     private final JdbcTemplate jdbc;
     public EnrollmentRepositoryImpl(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
-    // CT13.reads. "scope" selects the Courses; every figure is aggregated once per Course. R is the set of
+    // "scope" selects the Courses; every figure is aggregated once per Course. R is the set of
     // currently published Lessons of the Course; a joined learner completes it when R is nonempty and every
     // R member has a completed=true progress row of that learner's Enrollment (mastery_skipped implies it).
     private static final String METRICS = "WITH scope AS (%s), "
@@ -97,7 +97,7 @@ public class EnrollmentRepositoryImpl implements EnrollmentRepository {
                 userId, status, status, status, page.getPageSize(), page.getOffset());
         return new PageImpl<>(rows, page, total == null ? 0 : total);
     }
-    // CT22.progress / CT22.resume. Canonical order: Chapter.position, then Lesson.position.
+    // Canonical order: Chapter.position, then Lesson.position.
     private static final String PUBLISHED_LESSONS = " FROM public.lessons l JOIN public.chapters ch ON ch.id=l.chapter_id "
             + "WHERE ch.course_id=c.id AND l.publication_status='published'";
 
@@ -119,6 +119,31 @@ public class EnrollmentRepositoryImpl implements EnrollmentRepository {
                 + "WHERE ch.course_id=? AND l.publication_status='published' ORDER BY ch.position ASC, l.position ASC",
                 (rs, row) -> new LessonFlags(rs.getObject("id", UUID.class), rs.getBoolean("completed"), rs.getBoolean("skipped")),
                 enrollmentId, courseId);
+    }
+    @Override public List<LessonPlacement> publishedLessonPlacements(UUID courseId, UUID enrollmentId) {
+        return jdbc.query("SELECT l.id, l.chapter_id, ch.position AS chapter_position, l.position AS lesson_position, "
+                + "COALESCE(p.completed,false) AS completed, COALESCE(p.mastery_skipped,false) AS skipped "
+                + "FROM public.lessons l JOIN public.chapters ch ON ch.id=l.chapter_id "
+                + "LEFT JOIN public.lesson_progress p ON p.lesson_id=l.id AND p.enrollment_id=? "
+                + "WHERE ch.course_id=? AND l.publication_status='published' ORDER BY ch.position ASC, l.position ASC",
+                (rs, row) -> new LessonPlacement(rs.getObject("id", UUID.class), rs.getObject("chapter_id", UUID.class),
+                        rs.getInt("chapter_position"), rs.getInt("lesson_position"),
+                        rs.getBoolean("completed"), rs.getBoolean("skipped")),
+                enrollmentId, courseId);
+    }
+    @Override public void lockProgress(UUID enrollmentId) {
+        jdbc.queryForList("SELECT id FROM public.lesson_progress WHERE enrollment_id = ? ORDER BY lesson_id FOR UPDATE",
+                UUID.class, enrollmentId);
+    }
+    @Override public void markMasterySkipped(UUID enrollmentId, UUID lessonId) {
+        // Monotonic: never clears a flag and never relabels a manual completion. Two statements, so an absent
+        // row needs only INSERT; only an existing incomplete row needs UPDATE (completed, mastery_skipped).
+        if (jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) "
+                + "VALUES (?,?,?,true,true) ON CONFLICT (enrollment_id,lesson_id) DO NOTHING",
+                UUID.randomUUID(), enrollmentId, lessonId) == 0) {
+            jdbc.update("UPDATE public.lesson_progress SET completed=true, mastery_skipped=true "
+                    + "WHERE enrollment_id=? AND lesson_id=? AND completed=false", enrollmentId, lessonId);
+        }
     }
     @Override public void reconcileCompletion(UUID courseId) {
         jdbc.update("WITH required AS (SELECT l.id FROM public.lessons l JOIN public.chapters ch ON ch.id = l.chapter_id "

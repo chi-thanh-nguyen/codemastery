@@ -66,7 +66,7 @@ verification is separate work.
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119; CO03/CO14, PR #262; CO06 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations; CO03.content owner rows, scoped reads, appends, reorders and materials, and CO14 adaptive-field storage ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
-| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)). CO06 additions: Instructor authoring over HTTP, Course and Lesson publication reconciliation, the CT12.course Administrator handoff as a Course-root participant, and authoring, Administrator and Learner races on the Course root ([record](#co06-instructor-authoring-and-administrator-course-handoff-verification--22-november-2026)); after the independent re-review, text the database rejects or cannot store, the JSON-only 415 for empty requests, owner success paths, settings NOWAIT versus authoring, and the CT40 structure projection ([record](#pr-265-independent-re-review-remediation-and-ct40-structure-projection--22-november-2026)) |
+| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06; CO15 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)). CO06 additions: Instructor authoring over HTTP, Course and Lesson publication reconciliation, the CT12.course Administrator handoff as a Course-root participant, and authoring, Administrator and Learner races on the Course root ([record](#co06-instructor-authoring-and-administrator-course-handoff-verification--22-november-2026)); after the independent re-review, text the database rejects or cannot store, the JSON-only 415 for empty requests, owner success paths, settings NOWAIT versus authoring, and the CT40 structure projection ([record](#pr-265-independent-re-review-remediation-and-ct40-structure-projection--22-november-2026)) |
 | `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
 | `SharedRestInfrastructureIntegrationTest` | SH01, PR #78 | Spring MVC ProblemDetail, validation and paging with test-only routes; it does not start PostgreSQL or the security chain |
 
@@ -6374,3 +6374,42 @@ workflow remains excluded. No SHA exception is implemented.
 The existing snapshot limitations in ADR015 A2.8 remain. PR #275 CI was not queried,
 waited for or rerun. No candidate, admission, promotion or deployment was performed.
 Independent re-review of this follow-up remains outstanding.
+
+## CO15 atomic LessonProgress participant verification — 24 November 2026
+
+Implementation of CO15 ([#178](https://github.com/chi-thanh-nguyen/codemastery/issues/178))
+against `CT22-ATOMIC-2026-11-12-r1` ([ADR011 §3](decisions/011-batch-06-contract-approvals.md#3-ct22atomic--course-participation-and-execution-reads)).
+`LessonProgressService` gains the two actorless participant methods
+`readExecutionState` and `applyMasterySkips` with the nested `LearnerCourseState` and
+`LessonState` records. Both join the caller's transaction (no own `@Transactional`), check
+before any other read or write that it is an active, read-write READ COMMITTED transaction
+holding this Course's root marker (`CourseRepository.currentTransactionFacts`), never commit
+and let every failure propagate. `EnrollmentRepository` gains the Course-internal
+`publishedLessonPlacements`, `lockProgress` and `markMasterySkipped`.
+
+| ADR011 §3 obligation | Covered by |
+| --- | --- |
+| Marker check before any read or write: no transaction, read-only, wrong isolation, missing or another Course's root → `IllegalStateException` | `LessonProgressServiceTest.participantRefuses*`; `EnrollmentIntegrationTest.participantRefusesAUnitWithoutTheSameCoursesHeldRoot` (row lock without marker, another Course's marker, no transaction) |
+| State: `active`/`completed`/`left`/`none` (null `enrollmentId`), stored adaptive fields, published Lessons only in canonical order with placement, absent rows false/false | `LessonProgressServiceTest.executionState*`; `EnrollmentIntegrationTest.masterySkipInsertsSkippedProgressAndCompletesMembershipUnderTheHeldRoot`, `hiddenLessonAndLeftMembershipAreRejectedWithoutWrites` |
+| Skips: joined membership required, unpublished/foreign IDs rejected, empty set no-op, Enrollment then progress locks, absent → insert both true, incomplete → both true, completed unchanged, ACTIVE/COMPLETED recalculated as CT22.progress, idempotent | `LessonProgressServiceTest.masterySkips*`, `emptySetIsANoOp`, `absentOrLeftMembership*`, `hiddenOrForeignLesson*`; `EnrollmentIntegrationTest.masterySkipNeverRelabelsAManualCompletionAndUpgradesAnIncompleteRow` |
+| Never commits: a later caller failure rolls the skip and status back with the unit | `EnrollmentIntegrationTest.callerFailureRollsBackTheMasterySkipWithTheWholeUnit` |
+| Caller allowlist (no REST, scheduler or other module) | `LessonProgressServiceTest.participantMethodsHaveOnlyTheApprovedCallers` (source scan: only `LessonProgressService` and Adaptive's `MasteryUpdateService`/`AdaptiveDecisionService` may reference the methods) |
+
+Executed locally (macOS, OpenJDK 25, Docker) on branch `feature/course-atomic-progress`, based on `main` `53e9b1e`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -Dtest=LessonProgressServiceTest test` | 66 tests, 0 failures or errors |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 980, Failsafe 413 (`EnrollmentIntegrationTest` 100), 0 failures, errors or skips |
+
+These are local developer runs, not independent review, QA or CI evidence.
+
+**Not covered and still gated.** No caller exists yet: Adaptive's orchestration (AD13) and
+the `withLearnerAssessmentWrite`/`withAssessmentExpiryWrite` guard entries (ADR007 §3.1) are
+not implemented, so the tests set the root marker directly. Real mastery/progress
+all-or-nothing behavior and `MasteryProgressTransactionIntegrationTest` remain QA04. The
+deployed runtime role (`CT17-P6-PRIVILEGES-2026-11-17-r4`) grants `lesson_progress`
+INSERT and `UPDATE (completed)` only: a skip of a Lesson without a progress row uses
+INSERT alone, but upgrading an existing incomplete row needs `UPDATE (mastery_skipped)`,
+which the deployment record reserves for a separately approved CT17 revision. No REST
+operation is added, so OpenAPI and frontend types are unchanged.

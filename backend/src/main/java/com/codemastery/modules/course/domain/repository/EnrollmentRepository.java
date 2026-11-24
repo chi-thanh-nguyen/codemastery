@@ -9,9 +9,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Course-internal CT22.membership/progress/resume persistence; callers own the transaction. */
+/** Course-internal membership/progress/resume persistence; callers own the transaction. */
 public interface EnrollmentRepository {
-    // CT13.reads (ADR012 §13.1/§13.2): set-based reads over Course-owned tables only.
+    // set-based reads over Course-owned tables only.
 
     /** One row per Course (hidden and published) of the requested page, ordered by title COLLATE "C", then id. */
     Page<EnrollmentMetricsRow> enrollmentMetrics(Pageable page);
@@ -37,7 +37,7 @@ public interface EnrollmentRepository {
 
     record MembershipCourse(UUID id, String title, String description, UUID instructorId, EnrollmentStatus status) {}
 
-    // CT22.progress / CT22.resume (ADR006 §§3, 4, 7.2)
+
 
     /** Locks the Course root row (any publication status); false when the Course does not exist. */
     boolean lockCourse(UUID courseId);
@@ -51,7 +51,7 @@ public interface EnrollmentRepository {
     List<LessonFlags> publishedLessonFlags(UUID courseId, UUID enrollmentId);
 
     /**
-     * CT22.progress reconciliation after a change to the required set R, under the held Course root:
+     * progress reconciliation after a change to the required set R, under the held Course root:
      * every joined (active/completed) Enrollment becomes completed exactly when R is nonempty and
      * fully completed, otherwise active. LEFT rows are untouched.
      */
@@ -72,7 +72,19 @@ public interface EnrollmentRepository {
     /** Latest valid recorded visit: ACTIVE, published Course, published same-Course Lesson, non-null time. */
     Optional<VisitPosition> latestVisit(UUID userId);
 
+
+    /** Like {@link #publishedLessonFlags} with Chapter/Lesson placement; a null enrollmentId gives false/false flags. */
+    List<LessonPlacement> publishedLessonPlacements(UUID courseId, UUID enrollmentId);
+
+    /** Locks the Enrollment's existing progress rows (after its Enrollment row), in lesson-id order. */
+    void lockProgress(UUID enrollmentId);
+
+    /** Absent row → completed and skipped; incomplete row → both true; a completed row is left unchanged. */
+    void markMasterySkipped(UUID enrollmentId, UUID lessonId);
+
     record LessonFlags(UUID lessonId, boolean completed, boolean masterySkipped) {}
+    record LessonPlacement(UUID lessonId, UUID chapterId, int chapterPosition, int lessonPosition,
+            boolean completed, boolean masterySkipped) {}
     record ProgressSummary(UUID courseId, String title, long totalLessons, long completedLessons, UUID nextLessonId) {}
     record VisitPosition(UUID courseId, UUID lessonId, Instant lastVisitedAt) {}
 }
