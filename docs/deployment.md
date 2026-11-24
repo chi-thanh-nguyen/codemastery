@@ -1995,6 +1995,71 @@ Remaining gates: owning-module (Admin @tihh647-ui), `@tihh647-ui` infrastructure
 Leader CODEOWNER review; protected integration of PR #276; these grants on any shared or production
 database (Leader-reserved). This revision executes no provisioning on any real database.
 
+### CT17-P6-PRIVILEGES-2026-11-24-r11 — CO15 atomic progress (within the ADR012 §19.2 ceiling, 24 November 2026)
+
+The Project Leader explicitly authorized this minimal extension in **“CodeMastery — PR #285:
+Complete CO15, Add AD11 Course Read, Remediate Findings”**, 24 November 2026, with Course owner
+@TamiaoNguyen's consent. Scope: CO15 [#178](https://github.com/chi-thanh-nguyen/codemastery/issues/178)
+on [PR #285](https://github.com/chi-thanh-nguyen/codemastery/pull/285), the bounded CT33 Course read
+for AD11 [#168](https://github.com/chi-thanh-nguyen/codemastery/issues/168), supporting tests and
+this runtime revision. This is explicit implementation and matrix-extension authorization within
+the effective `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)),
+not an independent CODEOWNER review, deployment authorization or runtime acceptance.
+
+r10 was the latest recorded revision when this work began. Records r1–r10 remain authentic history;
+the row below replaces only r4's `lesson_progress` row. All other effective rows, migration-column
+deferrals and containment restrictions remain unchanged. No Flyway migration changes.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `lesson_progress` (course) | SELECT, INSERT; UPDATE (completed, mastery_skipped) | `EnrollmentRepositoryImpl.markMasterySkipped`: insert absent progress or upgrade an existing incomplete row; Course participant locks/reads and CT33 learner snapshot | r11, explicitly Leader-authorized within ceiling, CT22-ATOMIC-2026-11-12-r1 (ADR011 §3) |
+
+The sole added privilege is **UPDATE (mastery_skipped)**. Existing SELECT/INSERT and UPDATE
+(completed) remain unchanged. The actual consumer uses:
+
+```sql
+INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped)
+VALUES (?,?,?,true,true) ON CONFLICT (enrollment_id,lesson_id) DO NOTHING;
+-- Only when the INSERT affected zero rows:
+UPDATE public.lesson_progress SET completed=true, mastery_skipped=true
+WHERE enrollment_id=? AND lesson_id=? AND completed=false;
+```
+
+Before those statements, the Course root is already held; the participant locks Enrollment then
+existing progress in Lesson UUID order. It iterates the published set in Chapter/Lesson canonical
+order. An absent row becomes true/true, an incomplete row becomes true/true, a completed row stays
+unchanged, including a manual true/false row. It never clears either flag, and repeats add no row.
+Enrollment reconciliation uses the existing UPDATE (status). No mastery table is read by Course.
+`readLearnerState(UUID courseId)` joins the caller's read-only REPEATABLE READ snapshot, applies
+CT03 before Course business reads, then reads only self Enrollment, published placements/progress
+and stored adaptive fields; it requires no root marker and no additional privileges.
+
+**Least-privilege limits.** No table-wide UPDATE, DELETE, TRUNCATE, DDL, grant option or UPDATE of
+progress identifiers/ancestry is granted. `verify_role_separation` now probes identifier/ancestry
+rewrite and erase denials; the exact ACL comparison still checks every column. Column grants can
+permit a compromised role to alter both flags of arbitrary progress rows: same-Course binding,
+manual-label preservation and monotonicity are application invariants, with V002's
+`mastery_skipped implies completed` check as a database invariant. Narrowing INSERT or UPDATE
+further would prevent the approved SQL; triggers, schema changes and new database role policies
+are excluded. These grants apply to existing V002 columns even on an admitted V006/V008 predecessor;
+only V009's `enrollments.last_visited_at` remains deferred under r9.
+
+**Synchronized evidence surfaces.** `RUNTIME_PRIVILEGE_MATRIX`, the matrix-contract test (r11's
+single row and unchanged r1–r10), the PostgreSQL containment test (absent/incomplete/manual rows,
+repeat, constraint failure and identifier/erase/TRUNCATE denials), and
+`EnrollmentIntegrationTest` (actual Spring participant SQL with exactly the Course subset of
+r11, pre-r11 42501, rollback and read-only snapshot tests) ship together. Execution results and
+commands are recorded in [testing.md](testing.md#co15-atomic-lessonprogress-participant-verification--24-november-2026).
+The containment test provisions only disposable local/CI PostgreSQL containers. No HTTP path
+currently invokes CO15 or this new internal Course read, so the existing real-backend HTTP suite
+establishes regression compatibility only, not full Assessment → Adaptive → Course integration.
+
+**Retained gates.** Independent Course/infrastructure/Leader CODEOWNER review, required CI and
+protected integration; AD13/AS12/QA04 real event/orchestration acceptance. Provisioning this
+revision on any shared database or VM remains a separately authorized Leader operation. This
+change does not provision, deploy, alter credentials or mutate a real VM/database.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4547,7 +4612,7 @@ AD07 r5 rows for `skills`, `skill_prerequisites` and `lesson_skills` inside it; 
 the AS05 r6 rows for `questions`, `quiz_questions` and `attempt_answers` inside it, and the AS06 r7 rows
 for `quizzes`, `quiz_questions` and `attempts` inside it; since 23 November 2026, the AD06 r8 rows for
 `learner_skill_masteries` and `path_recommendations` inside it; since 24 November 2026, the IN10 r10 row
-for `audit_logs` inside it), and the extension procedure above
+for `audit_logs` inside it, followed by CO15 r11's `lesson_progress` replacement), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.
