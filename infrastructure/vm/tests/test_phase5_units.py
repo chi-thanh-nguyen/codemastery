@@ -157,6 +157,50 @@ class FlywayAndCompatibility(unittest.TestCase):
 
 
 class Staging(unittest.TestCase):
+    def test_stage_release_accepts_the_real_release_file_map(self):
+        # release.py maps every package file except release.json and SHA256SUMS; staging
+        # must accept such a package and still refuse a substituted file.
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(ops, "STATE", d):
+            pkg = os.path.join(d, "incoming")
+            os.mkdir(pkg)
+            archive = "codemastery-release-v9.9.9-linux-amd64.tar"
+            for name in ("expected-images.containerd.txt", "expected-images.graphdriver.txt", "admission.json",
+                         "mc-source.tar.gz", archive):
+                with open(os.path.join(pkg, name), "w") as f:
+                    f.write(name)
+            files = rel.file_map(pkg, {"release.json", "SHA256SUMS"})
+            release = {"schema": "codemastery.release/v1", "version": "v9.9.9", "source_revision": "a" * 40,
+                       "source_tree": "b" * 40, "files": files,
+                       "archive": {"name": archive, "sha256": files[archive], "size": len(archive)}}
+            with open(os.path.join(pkg, "release.json"), "w") as f:
+                json.dump(release, f)
+            with open(os.path.join(pkg, "SHA256SUMS"), "w") as f:
+                f.write("0" * 64 + "  release.json\n")
+            release_sha = ops.sha256(os.path.join(pkg, "release.json"))
+            _, target = ops.stage_release("v9.9.9", release_sha, full=True)
+            self.assertNotIn("SHA256SUMS", os.listdir(target))
+            self.assertIn(archive, os.listdir(target))
+            os.chmod(os.path.join(pkg, "admission.json"), 0o600)
+            with open(os.path.join(pkg, "admission.json"), "w") as f:
+                f.write("substituted")
+            shutil.rmtree(target, ignore_errors=True)
+            with self.assertRaises(recovery.RecoveryError):
+                ops.stage_release("v9.9.9", release_sha, full=False)
+
+    def test_running_ops_leaves_the_installed_tooling_tree_unchanged(self):
+        # install-tooling re-verifies the installed tree's git tree ID on every operation.
+        with tempfile.TemporaryDirectory() as d:
+            host = os.path.join(d, "host")
+            shutil.copytree(os.path.join(ROOT, "infrastructure", "vm", "host"), host,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            # Some interpreters (e.g. Apple's) default to not writing bytecode; force the default
+            # of the VM's /usr/bin/python3 before ops.py runs.
+            code = ("import runpy, sys; sys.dont_write_bytecode = False; sys.argv = [sys.argv[1], '--help']; "
+                    "runpy.run_path(sys.argv[0], run_name='__main__')")
+            subprocess.run([sys.executable, "-I", "-c", code, os.path.join(host, "ops.py")],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.assertEqual([], [r for r, dirs, _ in os.walk(host) if "__pycache__" in dirs])
+
     def test_relative_symlink_chain_cannot_escape_before_tree_check(self):
         a, b, c = tarfile.TarInfo("a"), tarfile.TarInfo("b"), tarfile.TarInfo("b/escaped")
         a.type, a.linkname = tarfile.SYMTYPE, "."
