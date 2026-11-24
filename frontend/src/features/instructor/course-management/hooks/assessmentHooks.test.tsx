@@ -1,0 +1,134 @@
+// @vitest-environment jsdom
+import { act, StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import type { Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AuthContext } from '../../../../app/providers/AuthProvider';
+import type { AuthContextValue } from '../../../../app/providers/AuthProvider';
+import { ApiError } from '../../../../shared/types/apiTypes';
+import { createQuiz, listOwnedQuizzes, listQuestions, replaceUnusedQuestion } from '../api/assessmentAuthoringApi';
+import type { B3QuestionPage, B3QuizOwned } from '../api/assessmentAuthoringApi';
+import { failureStatus, isCancelled, outcomeUnknown, useOwnedQuizzes, useQuizEditor } from './useAssessmentEditor';
+import type { OwnerRead, QuizEditorOperations } from './useAssessmentEditor';
+import { useQuestionBank, useQuestionEditor } from './useQuestionBank';
+import type { QuestionEditorOperations } from './useQuestionBank';
+import { getOwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
+import { useOwnedSkillGraph } from '../../skill-graph-editor/hooks/useSkillGraph';
+import type { OwnedSkillGraphRead } from '../../skill-graph-editor/hooks/useSkillGraph';
+
+vi.mock('../api/assessmentAuthoringApi', async (original) => ({ ...await original<object>(), listQuestions: vi.fn(), listOwnedQuizzes: vi.fn(), replaceUnusedQuestion: vi.fn(), createQuiz: vi.fn() }));
+vi.mock('../../skill-graph-editor/api/skillGraphApi', () => ({ getOwnedSkillGraph: vi.fn() }));
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+
+const courseId = '00000000-0000-4000-8000-0000000000c1';
+const userId = '00000000-0000-4000-8000-0000000000e1';
+const questionPage = (marker: string): B3QuestionPage => ({ content: [{ id: '00000000-0000-4000-8000-000000000001', skillId: userId, prompt: marker, kind: 'single_choice', difficulty: 'easy', options: ['a', 'b'], correctOptions: [true, false] }], page: 0, size: 20, totalElements: 1, totalPages: 1 });
+let host: HTMLDivElement, root: Root, auth: AuthContextValue, generation = 1;
+beforeEach(() => {
+    generation = 1;
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    auth = { user: { id: userId, displayName: 'Instructor', role: 'Instructor' }, get generation() { return generation; }, isAuthenticated: true, restoring: false,
+        isCurrent: (value) => value === generation, login: vi.fn(), register: vi.fn(), logout: vi.fn(), rememberProfile: vi.fn(), consumeReturn: () => '/courses' };
+});
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.resetAllMocks(); });
+const deferred = <T,>() => { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; };
+
+function Probe<T>({ use, out }: { use: () => T; out: { current?: T } }) { out.current = use(); return null; }
+async function render<T>(use: () => T, strict = false) {
+    const out: { current?: T } = {};
+    const tree = <AuthContext.Provider value={auth}><Probe use={use} out={out} /></AuthContext.Provider>;
+    await act(async () => root.render(strict ? <StrictMode>{tree}</StrictMode> : tree));
+    return { out, rerender: async (next: () => T) => act(async () => root.render(<AuthContext.Provider value={auth}><Probe use={next} out={out} /></AuthContext.Provider>)) };
+}
+
+describe('owner list reads', () => {
+    it('reads one page with cancellation and session checks, and discards a superseded page', async () => {
+        const first = deferred<B3QuestionPage>();
+        vi.mocked(listQuestions).mockReturnValueOnce(first.promise).mockResolvedValueOnce(questionPage('page two'));
+        const { out, rerender } = await render<OwnerRead<B3QuestionPage>>(() => useQuestionBank(courseId, 0));
+        expect(out.current!.loading).toBe(true);
+        const options = vi.mocked(listQuestions).mock.calls[0][3]!;
+        await rerender(() => useQuestionBank(courseId, 1));
+        expect(options.signal?.aborted).toBe(true); expect(options.isCurrent?.()).toBe(false);
+        await act(async () => first.resolve(questionPage('stale page one')));
+        expect(out.current!.data?.content[0].prompt).toBe('page two');
+        expect(vi.mocked(listQuestions).mock.calls[1].slice(0, 3)).toEqual([courseId, 1, 20]);
+    });
+    it('never shows a body after the session generation changes', async () => {
+        const pending = deferred<B3QuestionPage>();
+        vi.mocked(listQuestions).mockReturnValueOnce(pending.promise);
+        const { out } = await render<OwnerRead<B3QuestionPage>>(() => useQuestionBank(courseId, 0));
+        generation = 2;
+        await act(async () => pending.resolve(questionPage('other session')));
+        expect(out.current!.data).toBeNull();
+    });
+    it('reports a failure, then reloads on request without a mutation', async () => {
+        vi.mocked(listOwnedQuizzes).mockRejectedValueOnce(new ApiError('network', 'Unable to connect. Please try again.'))
+            .mockResolvedValueOnce({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 });
+        const { out } = await render(() => useOwnedQuizzes(courseId, 0));
+        expect(outcomeUnknown(out.current!.error)).toBe(true); expect(out.current!.loading).toBe(false);
+        await act(async () => out.current!.reload());
+        expect(out.current!.error).toBeNull(); expect(out.current!.data?.totalElements).toBe(0);
+        expect(listOwnedQuizzes).toHaveBeenCalledTimes(2);
+    });
+    it('does not read without a session', async () => {
+        auth = { ...auth, isAuthenticated: false, user: null };
+        const { out } = await render(() => useQuestionBank(courseId, 0));
+        expect(listQuestions).not.toHaveBeenCalled(); expect(out.current!.loading).toBe(false);
+    });
+    it('settles under Strict Mode double effects with one visible result', async () => {
+        vi.mocked(listQuestions).mockResolvedValue(questionPage('strict'));
+        const { out } = await render(() => useQuestionBank(courseId, 0), true);
+        expect(out.current!.data?.content[0].prompt).toBe('strict');
+        expect(vi.mocked(listQuestions).mock.calls.filter(([, , , options]) => !options?.signal?.aborted)).toHaveLength(1);
+    });
+});
+
+describe('editor operations', () => {
+    it('runs one operation at a time and resolves only current results', async () => {
+        const pending = deferred<never>();
+        vi.mocked(replaceUnusedQuestion).mockReturnValueOnce(pending.promise);
+        const { out } = await render<QuestionEditorOperations>(() => useQuestionEditor(courseId));
+        let first!: Promise<unknown>, second!: Promise<unknown>;
+        await act(async () => { first = out.current!.replace('q', { skillId: userId, prompt: 'p', kind: 'single_choice', difficulty: 'easy', options: ['a', 'b'], correctOptions: [true, false] }).catch((value: unknown) => value); });
+        expect(out.current!.busy).toBe(true);
+        await act(async () => { second = out.current!.remove('q').catch((value: unknown) => value); });
+        expect(isCancelled(await second)).toBe(true);
+        await act(async () => pending.reject(new ApiError('http', 'The request conflicts with existing information.', 409)));
+        const error = await first;
+        expect(failureStatus(error)).toBe(409); expect(out.current!.busy).toBe(false);
+    });
+    it('discards a late result after unmount and aborts the request', async () => {
+        const pending = deferred<B3QuizOwned>();
+        vi.mocked(createQuiz).mockReturnValueOnce(pending.promise);
+        const { out } = await render<QuizEditorOperations>(() => useQuizEditor(courseId));
+        let result!: Promise<unknown>;
+        await act(async () => { result = out.current!.create({ title: 'T', kind: 'test', timeLimitSeconds: 60, questionIds: [] }).catch((value: unknown) => value); });
+        const options = vi.mocked(createQuiz).mock.calls[0][2]!;
+        await act(async () => root.unmount()); root = createRoot(host);
+        expect(options.signal?.aborted).toBe(true); expect(options.isCurrent?.()).toBe(false);
+        await act(async () => pending.resolve({ id: courseId, courseId, title: 'T', kind: 'test', timeLimitSeconds: 60, published: false, questionCount: 0, questions: [] }));
+        expect(isCancelled(await result)).toBe(true);
+    });
+    it('classifies unknown outcomes', () => {
+        expect(outcomeUnknown(new ApiError('http', 'x', 500))).toBe(true);
+        expect(outcomeUnknown(new ApiError('protocol', 'x'))).toBe(true);
+        expect(outcomeUnknown(new ApiError('http', 'x', 409))).toBe(false);
+        expect(outcomeUnknown(new ApiError('cancelled', 'x'))).toBe(false);
+    });
+});
+
+describe('owned skill graph read', () => {
+    it('reads once per course and session and discards the graph of another course', async () => {
+        const graph = { courseId, skills: [{ id: userId, name: 'Loops', description: null }], prerequisites: [], mappings: [] };
+        const other = deferred<typeof graph>();
+        vi.mocked(getOwnedSkillGraph).mockResolvedValueOnce(graph).mockReturnValueOnce(other.promise);
+        const { out, rerender } = await render<OwnedSkillGraphRead>(() => useOwnedSkillGraph(courseId));
+        expect(out.current!.graph?.skills[0].name).toBe('Loops');
+        await rerender(() => useOwnedSkillGraph(userId));
+        expect(out.current!.graph).toBeNull(); expect(out.current!.loading).toBe(true);
+        await act(async () => other.reject(new ApiError('http', 'The requested resource is unavailable.', 404)));
+        expect(failureStatus(out.current!.error)).toBe(404);
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(2);
+    });
+});
