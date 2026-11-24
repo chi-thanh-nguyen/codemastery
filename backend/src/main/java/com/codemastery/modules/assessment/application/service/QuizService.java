@@ -22,6 +22,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
+import com.codemastery.modules.assessment.domain.repository.QuizRepository.PracticeQuizDifficultyRow;
+import java.util.EnumSet;
+import java.util.LinkedHashMap;
 
 /**
  * CT23.composition, CT23.publication and the QuizService bindings of CT23.bindings
@@ -90,6 +94,15 @@ public class QuizService {
         this.selection = Objects.requireNonNull(selection, "selection");
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
         this.courseConfiguration = Objects.requireNonNull(courseConfiguration, "courseConfiguration");
+    }
+
+    /** CT23-PRACTICE-PROFILES-2026-11-15-r1 (ADR013 §19.3): minimal practice quiz profile for Adaptive. */
+    public record PracticeQuizProfile(UUID quizId, String title, Set<DifficultyLevel> difficulties) {
+        public PracticeQuizProfile {
+            Objects.requireNonNull(quizId, "quizId");
+            Objects.requireNonNull(title, "title");
+            difficulties = Set.copyOf(difficulties);
+        }
     }
 
     /** Creates a hidden quiz with the exact supplied membership (an empty draft is allowed). */
@@ -205,6 +218,60 @@ public class QuizService {
                     quiz.time_limit_seconds(), true, counts.getOrDefault(quiz.id(), 0));
         }).toList();
         return new PageResponse<>(content, page, size, total);
+    }
+
+    /**
+     * CT23-PRACTICE-PROFILES-2026-11-15-r1 (ADR013 §19.3, oracle B8-P09).
+     * Joins the caller's REPEATABLE READ read-only transaction and executes one set-based query.
+     * Caller allowlist: Adaptive RecommendationService after readLearnerState admission.
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public List<PracticeQuizProfile> readPracticeQuizProfiles(UUID courseId, Set<UUID> skillIds) {
+        requireId(courseId);
+        Objects.requireNonNull(skillIds, "skillIds");
+        if (skillIds.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("skillIds must not contain null");
+        }
+        if (skillIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<PracticeQuizDifficultyRow> rows = quizzes.findPublishedPracticeQuizDifficultyRows(courseId, skillIds);
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, String> titlesByQuiz = new LinkedHashMap<>();
+        Map<UUID, Set<DifficultyLevel>> difficultiesByQuiz = new LinkedHashMap<>();
+        for (PracticeQuizDifficultyRow row : rows) {
+            if (row == null || row.quizId() == null || !isText(row.title())) {
+                throw new IllegalStateException("Stored practice quiz profile violates V004");
+            }
+            DifficultyLevel level = parseDifficulty(row.difficulty());
+            titlesByQuiz.putIfAbsent(row.quizId(), row.title());
+            difficultiesByQuiz
+                    .computeIfAbsent(row.quizId(), ignored -> EnumSet.noneOf(DifficultyLevel.class))
+                    .add(level);
+        }
+
+        List<PracticeQuizProfile> profiles = new ArrayList<>(titlesByQuiz.size());
+        for (Map.Entry<UUID, String> entry : titlesByQuiz.entrySet()) {
+            UUID quizId = entry.getKey();
+            profiles.add(new PracticeQuizProfile(quizId, entry.getValue(), difficultiesByQuiz.get(quizId)));
+        }
+        return List.copyOf(profiles);
+    }
+
+    private static DifficultyLevel parseDifficulty(String code) {
+        if (code == null) {
+            throw new IllegalStateException("Stored question difficulty violates V004");
+        }
+        for (DifficultyLevel level : DifficultyLevel.values()) {
+            if (level.getCode().equals(code)) {
+                return level;
+            }
+        }
+        throw new IllegalStateException("Stored question difficulty violates V004: " + code);
     }
 
     /**
