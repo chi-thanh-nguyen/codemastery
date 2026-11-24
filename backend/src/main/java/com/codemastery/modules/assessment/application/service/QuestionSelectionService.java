@@ -15,6 +15,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumSet;
 
 /**
  * CT23 question selection for quiz composition (ADR007 §§5, 7): exact explicit IDs in the supplied
@@ -39,6 +42,98 @@ public class QuestionSelectionService {
     public QuestionSelectionService(QuizRepository quizzes, SkillGraphService skillGraph) {
         this.quizzes = Objects.requireNonNull(quizzes, "quizzes");
         this.skillGraph = Objects.requireNonNull(skillGraph, "skillGraph");
+    }
+
+    /**
+     * Candidate question input for the pure CT07.difficulty selection rule (ADR011 §8).
+     */
+    public record CandidateQuestion(
+            UUID questionId,
+            UUID skillId,
+            DifficultyLevel difficulty,
+            int membershipPosition
+    ) {
+        public CandidateQuestion {
+            Objects.requireNonNull(questionId, "questionId must not be null");
+            Objects.requireNonNull(skillId, "skillId must not be null");
+            Objects.requireNonNull(difficulty, "difficulty must not be null");
+            if (membershipPosition < 0) {
+                throw new IllegalArgumentException("membershipPosition must be non-negative");
+            }
+        }
+    }
+
+
+    /**
+     * Approved CT07.difficulty fallback order (ADR011 §8):
+     * EASY -> MEDIUM -> HARD, MEDIUM -> EASY -> HARD, HARD -> MEDIUM -> EASY.
+     */
+    public static List<DifficultyLevel> fallbackOrder(DifficultyLevel target) {
+        Objects.requireNonNull(target, "target difficulty must not be null");
+        return switch (target) {
+            case EASY -> List.of(DifficultyLevel.EASY, DifficultyLevel.MEDIUM, DifficultyLevel.HARD);
+            case MEDIUM -> List.of(DifficultyLevel.MEDIUM, DifficultyLevel.EASY, DifficultyLevel.HARD);
+            case HARD -> List.of(DifficultyLevel.HARD, DifficultyLevel.MEDIUM, DifficultyLevel.EASY);
+        };
+    }
+
+    /**
+     * Pure CT07.difficulty selection rule (ADR011 §8): per skill, selects candidates at the target
+     * difficulty, falling back in {@link #fallbackOrder(DifficultyLevel)} when none exists.
+     * Preserves membership order with no randomness and no count cap.
+     */
+    public static List<CandidateQuestion> selectPracticeQuestions(
+            List<CandidateQuestion> candidates,
+            Map<UUID, DifficultyLevel> targetDifficultyBySkill
+    ) {
+        Objects.requireNonNull(candidates, "candidates must not be null");
+        Objects.requireNonNull(targetDifficultyBySkill, "targetDifficultyBySkill must not be null");
+
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
+
+        List<CandidateQuestion> orderedCandidates = new ArrayList<>(candidates.size());
+        Map<UUID, Set<DifficultyLevel>> availableBySkill = new HashMap<>();
+
+        for (CandidateQuestion candidate : candidates) {
+            Objects.requireNonNull(candidate, "candidates must not contain null");
+            orderedCandidates.add(candidate);
+            availableBySkill
+                    .computeIfAbsent(candidate.skillId(), ignored -> EnumSet.noneOf(DifficultyLevel.class))
+                    .add(candidate.difficulty());
+        }
+
+        orderedCandidates.sort(Comparator.comparingInt(CandidateQuestion::membershipPosition));
+
+        Map<UUID, DifficultyLevel> resolvedDifficultyBySkill = new HashMap<>(availableBySkill.size());
+        for (Map.Entry<UUID, Set<DifficultyLevel>> entry : availableBySkill.entrySet()) {
+            UUID skillId = entry.getKey();
+            DifficultyLevel target = targetDifficultyBySkill.get(skillId);
+            if (target == null) {
+                throw new IllegalArgumentException("Missing target difficulty for skill: " + skillId);
+            }
+
+            Set<DifficultyLevel> available = entry.getValue();
+            DifficultyLevel chosen = null;
+            for (DifficultyLevel candidateLevel : fallbackOrder(target)) {
+                if (available.contains(candidateLevel)) {
+                    chosen = candidateLevel;
+                    break;
+                }
+            }
+            if (chosen != null) {
+                resolvedDifficultyBySkill.put(skillId, chosen);
+            }
+        }
+
+        List<CandidateQuestion> selected = new ArrayList<>();
+        for (CandidateQuestion candidate : orderedCandidates) {
+            if (candidate.difficulty() == resolvedDifficultyBySkill.get(candidate.skillId())) {
+                selected.add(candidate);
+            }
+        }
+        return List.copyOf(selected);
     }
 
     /**
@@ -141,4 +236,6 @@ public class QuestionSelectionService {
     private static IllegalStateException invalidStoredQuestion() {
         return new IllegalStateException("Stored question definition violates V004");
     }
+   
+
 }
