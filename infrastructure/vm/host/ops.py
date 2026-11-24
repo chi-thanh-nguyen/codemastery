@@ -30,6 +30,9 @@ import tempfile
 import time
 import zlib
 
+# The installed tooling tree is verified by its git tree ID on every install-tooling;
+# writing __pycache__ into it as root would make the next install of the same commit fail.
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import recovery  # noqa: E402  (same directory)
 from recovery import RecoveryError, refuse, utc_now, iso, dump_json, write_private, load_json  # noqa: E402

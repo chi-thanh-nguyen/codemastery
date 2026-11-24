@@ -187,6 +187,20 @@ class Staging(unittest.TestCase):
             with self.assertRaises(recovery.RecoveryError):
                 ops.stage_release("v9.9.9", release_sha, full=False)
 
+    def test_running_ops_leaves_the_installed_tooling_tree_unchanged(self):
+        # install-tooling re-verifies the installed tree's git tree ID on every operation.
+        with tempfile.TemporaryDirectory() as d:
+            host = os.path.join(d, "host")
+            shutil.copytree(os.path.join(ROOT, "infrastructure", "vm", "host"), host,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            # Some interpreters (e.g. Apple's) default to not writing bytecode; force the default
+            # of the VM's /usr/bin/python3 before ops.py runs.
+            code = ("import runpy, sys; sys.dont_write_bytecode = False; sys.argv = [sys.argv[1], '--help']; "
+                    "runpy.run_path(sys.argv[0], run_name='__main__')")
+            subprocess.run([sys.executable, "-I", "-c", code, os.path.join(host, "ops.py")],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.assertEqual([], [r for r, dirs, _ in os.walk(host) if "__pycache__" in dirs])
+
     def test_relative_symlink_chain_cannot_escape_before_tree_check(self):
         a, b, c = tarfile.TarInfo("a"), tarfile.TarInfo("b"), tarfile.TarInfo("b/escaped")
         a.type, a.linkname = tarfile.SYMTYPE, "."
