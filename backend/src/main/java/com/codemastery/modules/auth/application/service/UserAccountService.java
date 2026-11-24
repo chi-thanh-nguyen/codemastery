@@ -16,6 +16,9 @@ import java.util.function.Supplier;
 @Service
 public class UserAccountService {
 
+    /** CT01.user-summaries: callers split larger sets into chunks of at most this size. */
+    private static final int MAX_USER_SUMMARY_IDS = 100;
+
     private final UserRepository users;
     private final Supplier<CurrentIdentity> currentIdentity;
 
@@ -46,4 +49,27 @@ public class UserAccountService {
         }
         return Map.copyOf(names);
     }
+
+    /**
+     * CT01.user-summaries (ADR012 section 3.4): the stored display name and current role literal
+     * ({@code learner}, {@code instructor} or {@code admin}) of existing accounts. Unknown IDs are
+     * omitted. Callers pass only IDs taken from rows they are returning, at most 100 per call; this
+     * is not a user directory. No email, account status or credential data is returned.
+     */
+    @Transactional(readOnly = true)
+    public Map<UUID, UserSummary> userSummaries(Set<UUID> userIds) {
+        Objects.requireNonNull(userIds, "userIds");
+        if (userIds.size() > MAX_USER_SUMMARY_IDS) {
+            throw new IllegalArgumentException("At most " + MAX_USER_SUMMARY_IDS + " user IDs per call");
+        }
+        Map<UUID, UserSummary> summaries = new HashMap<>();
+        for (UUID id : userIds) {
+            Objects.requireNonNull(id, "userId");
+            users.findById(id).ifPresent(user -> summaries.put(id,
+                    new UserSummary(id, user.displayName(), user.role().getCode())));
+        }
+        return Map.copyOf(summaries);
+    }
+
+    public record UserSummary(UUID userId, String displayName, String role) {}
 }

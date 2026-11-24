@@ -1931,6 +1931,70 @@ a gap and a failed migration. Read-only evaluation on the VM on 23 November 2026
 v0.1.0-rc.1's `deploy.sh` (r4) the update of the deployed V006 database is refused by the
 Phase 5 plan gate before any change; with r9 it is an upgrade with V007–V009 pending.
 
+### CT17-P6-PRIVILEGES-2026-11-24-r10 — IN10 audit recording and read (within the ADR012 §19.2 ceiling, 24 November 2026)
+
+Prepared for IN10 ([#184](https://github.com/chi-thanh-nguyen/codemastery/issues/184),
+[PR #276](https://github.com/chi-thanh-nguyen/codemastery/pull/276)) under the Project Leader's
+explicit instruction of 24 November 2026 to complete IN10 on PR #276, including the runtime privileges
+its implemented SQL needs, inside the approved ceiling. It follows the extension procedure above and
+stays inside the DELEGATED_APPROVED `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)):
+the implemented consumer (`AuditLogRepositoryImpl` and `AuditLogJpaRepository`, used by
+`AuditLogService` for CT31.actions/CT31.consistency recording and the CT31.read operation
+`GET /api/admin/audit-logs`), `RUNTIME_PRIVILEGE_MATRIX` and the CI tests change together, and every
+privilege below is exercised by that consumer's SQL. r9 changed no row; this is the next dated
+revision. No migration is involved. No approval beyond that ceiling is claimed; this is not personal
+Leader review.
+
+The r1–r9 records above are unchanged history. The effective matrix is r1 plus r2–r8, with the row
+below replacing the r1 `audit_logs` row (none); no other privilege, role elevation or change is
+introduced. The row equals its ceiling row.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `audit_logs` (admin) | SELECT, INSERT | `append`: one row per audited change, inside the caller's transaction; `search`: the filtered, ordered page and its count | r10 within ceiling (CT31, ADR012 §7) |
+
+Least privilege exercised by the consumer:
+
+| Operation | SQL | Privilege |
+| --- | --- | --- |
+| Record one audited change | `insert into audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) values (?, ?, ?, ?, ?, ?)` (Hibernate `persist` with an assigned identifier, executed by `flush` before `record` returns) | INSERT; a reused identifier fails with 23505 |
+| Read a page | `select … from audit_logs where <optional AND filters> order by occurred_at desc, id desc offset ? rows fetch first ? rows only`, and `select count(…) from audit_logs where …` when the page does not reveal the total | SELECT |
+| Actor display names | CT01.user-summaries reads `users` by identifier | existing `users` SELECT (r1) |
+| Foreign key to `users` (`actor_id`) | checked by PostgreSQL with the table owner's rights | none |
+
+The runtime role still cannot do any of the following (CT31: rows are append-only):
+
+- update any audit column (no UPDATE privilege on `audit_logs`);
+- delete or truncate audit rows.
+
+A compromised runtime role could read the whole audit log and append rows naming any existing user
+as actor, which the approved recording inherently requires; that only Administrators record and read,
+and that `actor_id` is the authenticated Administrator, stay application invariants (ADR012 §§7.1,
+7.3), and V006's primary key, foreign key and text check stay authoritative.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009), with
+  `verify_role_separation` probing the audit rewrite and erase denials;
+- `test-deploy-privilege-matrix-contract.sh`, which pins r1 history and the r2–r8 and r10 rows;
+- `test-postgres-privilege-matrix-containment.sh`: the recording and read SQL under the provisioned
+  runtime role on the real schema, the reused-identifier (23505) and unknown-actor (23503) refusals and
+  the rewrite, erase and truncate denials (42501);
+- `test-runtime-real-backend-privileges.sh`: the real backend's audit read under the runtime role
+  (Administrator page with actor names and both time bounds, Learner 403, malformed query 400, no row
+  written by the read);
+- `AuditLogRepositoryIntegrationTest` runs the adapter's insert and read under a transaction-scoped role
+  holding exactly this row and shows that the role cannot update or delete audit rows.
+
+No HTTP operation records an audit row yet: the audited Administrator mutations are IN11, IN20 and
+IN21, which add their own real-backend cases (and their own `users`, `courses`, `lessons`,
+`discussion_posts` and `content_reports` revisions) when they are implemented.
+
+Remaining gates: owning-module (Admin @tihh647-ui), `@tihh647-ui` infrastructure and independent
+Leader CODEOWNER review; protected integration of PR #276; these grants on any shared or production
+database (Leader-reserved). This revision executes no provisioning on any real database.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4482,7 +4546,8 @@ the CO08 r4 rows for `enrollments` and `lesson_progress` inside it; since 22 Nov
 AD07 r5 rows for `skills`, `skill_prerequisites` and `lesson_skills` inside it; since 22 November 2026,
 the AS05 r6 rows for `questions`, `quiz_questions` and `attempt_answers` inside it, and the AS06 r7 rows
 for `quizzes`, `quiz_questions` and `attempts` inside it; since 23 November 2026, the AD06 r8 rows for
-`learner_skill_masteries` and `path_recommendations` inside it), and the extension procedure above
+`learner_skill_masteries` and `path_recommendations` inside it; since 24 November 2026, the IN10 r10 row
+for `audit_logs` inside it), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.
