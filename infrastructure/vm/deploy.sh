@@ -1343,7 +1343,8 @@ SQL
 # CT17-P6-PRIVILEGES-2026-11-22-r6 AS05 question-bank rows and the
 # CT17-P6-PRIVILEGES-2026-11-22-r7 AS06 quiz-composition rows and the
 # CT17-P6-PRIVILEGES-2026-11-23-r8 AD06 mastery/history-write rows and the
-# CT17-P6-PRIVILEGES-2026-11-24-r10 IN10 audit-log rows (all within the ADR012 §19.2 ceiling):
+# CT17-P6-PRIVILEGES-2026-11-24-r10 IN10 audit-log rows and the
+# CT17-P6-PRIVILEGES-2026-11-24-r11 CO15 mastery-skip row (all within the ADR012 §19.2 ceiling):
 # the complete runtime privilege matrix for the reviewed V001-V009 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
 # cannot silently widen a table-level grant. Nothing is granted to future objects.
@@ -1357,7 +1358,7 @@ chapters                 SELECT         -                                       
 lessons                  SELECT         -                                        id,chapter_id,title,content_markdown,position,publication_status
 learning_materials       -              SELECT(id,lesson_id,publication_status)  id,lesson_id,title,material_type,publication_status,text_content,object_key,original_filename,external_video_url
 enrollments              SELECT,INSERT  UPDATE(status,resume_lesson_id,last_visited_at) id,user_id,course_id,status,resume_lesson_id,last_visited_at
-lesson_progress          SELECT,INSERT  UPDATE(completed)                        id,enrollment_id,lesson_id,completed,mastery_skipped
+lesson_progress          SELECT,INSERT  UPDATE(completed,mastery_skipped)         id,enrollment_id,lesson_id,completed,mastery_skipped
 skills                   SELECT,INSERT,DELETE UPDATE(name,description)           id,course_id,name,description
 skill_prerequisites      SELECT,INSERT,DELETE -                                  id,course_id,skill_id,prerequisite_skill_id
 lesson_skills            SELECT,INSERT,DELETE -                                  id,lesson_id,skill_id
@@ -1634,7 +1635,7 @@ SQL
   expect_denied  "runtime role changing Course publication" 42501 "${app}" "${app_pw}" <<<'UPDATE public.courses SET publication_status = publication_status WHERE false;'
   expect_denied  "runtime role deleting memberships" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.enrollments WHERE false;'
   expect_denied  "runtime role re-owning memberships" 42501 "${app}" "${app_pw}" <<<'UPDATE public.enrollments SET user_id = user_id, course_id = course_id WHERE false;'
-  expect_denied  "runtime role updating mastery-skip flags" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_progress SET mastery_skipped = mastery_skipped WHERE false;'
+  expect_denied  "runtime role re-keying or re-targeting lesson progress" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_progress SET id = id, enrollment_id = enrollment_id, lesson_id = lesson_id WHERE false;'
   expect_denied  "runtime role erasing lesson progress" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.lesson_progress WHERE false;'
   expect_denied  "runtime role moving a skill to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.skills SET course_id = course_id WHERE false;'
   expect_denied  "runtime role rewriting prerequisite edges in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.skill_prerequisites SET skill_id = skill_id WHERE false;'

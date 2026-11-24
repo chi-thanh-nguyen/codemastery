@@ -124,6 +124,25 @@ probe "enrollments/lesson_progress: CO08 r4 completion and visit" ok "INSERT INT
 # initializes mastery_skipped; the V002 check still forbids a skip without completion.
 probe "lesson_progress: INSERT may set completed+skipped (accepted)" ok "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c2','active',NULL,NULL); INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000e1',true,true);"
 probe "lesson_progress: skip without completion (check constraint)" 23514 "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c2','active',NULL,NULL); INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000e1',false,true);"
+# r11: the same two statements as EnrollmentRepositoryImpl.markMasterySkipped, including a repeated
+# conflict and the completed=false predicate. Every probe rolls back; no shared database is targeted.
+for initial in absent incomplete manual; do
+  co15_sql="INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000011b1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c1','active',NULL,NULL);"
+  if [[ "$initial" != absent ]]; then
+    completed=false; [[ "$initial" != manual ]] || completed=true
+    co15_sql+="INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000011b1','00000000-0000-0000-0000-0000000000e1',$completed,false);"
+  fi
+  co15_sql+="SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE;
+SELECT id FROM public.enrollments WHERE id='00000000-0000-0000-0000-0000000011b1' FOR UPDATE;
+SELECT id FROM public.lesson_progress WHERE enrollment_id='00000000-0000-0000-0000-0000000011b1' ORDER BY lesson_id FOR UPDATE;"
+  for repeat in 1 2; do
+    co15_sql+="INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000011b1','00000000-0000-0000-0000-0000000000e1',true,true) ON CONFLICT (enrollment_id,lesson_id) DO NOTHING;
+UPDATE public.lesson_progress SET completed=true, mastery_skipped=true WHERE enrollment_id='00000000-0000-0000-0000-0000000011b1' AND lesson_id='00000000-0000-0000-0000-0000000000e1' AND completed=false;"
+  done
+  want_skipped=true; [[ "$initial" != manual ]] || want_skipped=false
+  co15_sql+="DO \$\$ BEGIN IF (SELECT count(*)=1 AND bool_and(completed AND mastery_skipped=$want_skipped) FROM public.lesson_progress WHERE enrollment_id='00000000-0000-0000-0000-0000000011b1') IS NOT TRUE THEN RAISE EXCEPTION 'CO15 flags or idempotency failed'; END IF; END \$\$;"
+  probe "lesson_progress: CO15 r11 $initial and idempotency" ok "$co15_sql"
+done
 probe "skills/skill_prerequisites/lesson_skills: AD07 r5 graph commands" ok "SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE; INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000000c1','A',NULL),('00000000-0000-0000-0000-0000000005a2','00000000-0000-0000-0000-0000000000c1','B','d'); UPDATE public.skills SET name='A2', description=NULL WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id='00000000-0000-0000-0000-0000000005a1'; INSERT INTO public.skill_prerequisites VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000005a2'); INSERT INTO public.lesson_skills VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000005a1'); SELECT id, course_id, name, description FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1'; SELECT id, skill_id, prerequisite_skill_id FROM public.skill_prerequisites WHERE course_id='00000000-0000-0000-0000-0000000000c1'; SELECT id, lesson_id, skill_id FROM public.lesson_skills WHERE skill_id IN ('00000000-0000-0000-0000-0000000005a1'); DELETE FROM public.lesson_skills WHERE lesson_id='00000000-0000-0000-0000-0000000000e1' AND skill_id='00000000-0000-0000-0000-0000000005a1'; DELETE FROM public.skill_prerequisites WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND skill_id='00000000-0000-0000-0000-0000000005a1' AND prerequisite_skill_id='00000000-0000-0000-0000-0000000005a2'; DELETE FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id IN ('00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000005a2');"
 probe "lesson_skills: mapping a missing Lesson (FK)"           23503 "INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005a3','00000000-0000-0000-0000-0000000000c1','C',NULL); INSERT INTO public.lesson_skills VALUES (gen_random_uuid(),gen_random_uuid(),'00000000-0000-0000-0000-0000000005a3');"
 admin <<'SQL'
@@ -168,7 +187,7 @@ probe "learning_materials: SELECT *"                         42501 "SELECT * FRO
 probe "enrollments: reassign learner/Course"                 42501 "UPDATE public.enrollments SET user_id=user_id;"
 probe "enrollments: reassign Course or re-key"                42501 "UPDATE public.enrollments SET course_id=course_id, id=id;"
 probe "enrollments: delete history"                          42501 "DELETE FROM public.enrollments;"
-probe "lesson_progress: update mastery-skip flag (CT22.atomic)" 42501 "UPDATE public.lesson_progress SET mastery_skipped=true;"
+probe "lesson_progress: re-key a progress row"               42501 "UPDATE public.lesson_progress SET id=id;"
 probe "lesson_progress: re-target a progress row"            42501 "UPDATE public.lesson_progress SET enrollment_id=enrollment_id, lesson_id=lesson_id;"
 probe "lesson_progress: delete history"                      42501 "DELETE FROM public.lesson_progress;"
 probe "lesson_progress: TRUNCATE"                            42501 "TRUNCATE public.lesson_progress;"
@@ -379,7 +398,7 @@ provision_db_roles >/dev/null
 verify_runtime_privileges present >/dev/null
 probe "r4 before V009: Enrollment lock and resume pointer"      ok "SELECT id FROM public.enrollments WHERE false FOR UPDATE; UPDATE public.enrollments SET resume_lesson_id=NULL WHERE false;"
 probe "r4 before V009: progress read, insert and completion"    ok "SELECT 1 FROM public.lesson_progress; INSERT INTO public.lesson_progress SELECT * FROM public.lesson_progress WHERE false; UPDATE public.lesson_progress SET completed=true WHERE false;"
-probe "r4 before V009: mastery-skip flag stays denied"          42501 "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
+probe "r11 before V009: mastery-skip column exists in V002"    ok "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
 expect_failure "complete verification before V009" "columns differ from the reviewed matrix on public.enrollments" verify_runtime_privileges complete
 before="$(acl_snapshot)"
 provision_db_roles >/dev/null
@@ -459,7 +478,7 @@ admin <<<"SET client_min_messages = warning; INSERT INTO public.flyway_schema_hi
 provision_db_roles >/dev/null
 verify_runtime_privileges present >/dev/null
 probe "r9 on V006: Enrollment resume pointer before V007-V009"   ok "SELECT id FROM public.enrollments WHERE false FOR UPDATE; UPDATE public.enrollments SET resume_lesson_id=NULL WHERE false;"
-probe "r9 on V006: mastery-skip flag stays denied"               42501 "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
+probe "r11 on V006: mastery-skip column exists in V002"         ok "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
 expect_failure "complete verification on V006" "missing reviewed table public.password_reset_tokens" verify_runtime_privileges complete
 admin <<<"DELETE FROM public.flyway_schema_history WHERE version='004';"
 expect_failure "V006 history with a gap (no 004)" "PostgreSQL role provisioning failed" provision_db_roles
