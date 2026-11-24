@@ -150,107 +150,866 @@ class ArchiveIdentityTests(unittest.TestCase):
                          ("codemastery.invalid/backend", "release", ""))
 
 
+class SourceChecks:
+    """A synthetic GitHub world for one source revision, shaped like the REST responses
+    the candidate job reads (check runs, workflow runs, job records, branch rules)."""
+
+    API = "https://api.github.com/repos/chi-thanh-nguyen/codemastery"
+    WEB = "https://github.com/chi-thanh-nguyen/codemastery"
+    REPO = {"id": 1391772534, "full_name": "chi-thanh-nguyen/codemastery"}
+    HEAD = "b" * 40
+    FILES = [".github/workflows/ci-backend.yml", ".github/workflows/ci-vm.yml", ".github/workflows/ci-extra.yml",
+             ".github/workflows/release.yml"]
+    RULES = [{"type": "pull_request"}, {"type": "required_status_checks", "parameters": {"required_status_checks": [
+        {"context": "Backend", "integration_id": 15368}, {"context": "VM A", "integration_id": 15368},
+        {"context": "VM B", "integration_id": 15368}, {"context": "CodeQL", "integration_id": 57789}]}}]
+
+    def __init__(self):
+        self.runs, self.jobs, self.extra, self.pr_runs = {}, [], [], []
+        self.next_id = 1000
+        self.add_run(100, ".github/workflows/ci-backend.yml", ["Backend"])
+        self.add_run(200, ".github/workflows/ci-vm.yml", ["VM A", "VM B"])
+        self.pr_runs.append(self.app_run("CodeQL", "success", sha=self.HEAD))
+
+    def new_id(self):
+        self.next_id += 1
+        return self.next_id
+
+    def add_run(self, rid, path, names, conclusions=None, event="push", branch="main", created="2026-11-23T14:30:06Z"):
+        self.runs[rid] = {"id": rid, "name": path.rsplit("/", 1)[1], "path": path, "event": event, "head_branch": branch,
+                          "head_sha": REV, "run_attempt": 1, "status": "completed", "conclusion": "success",
+                          "repository": dict(self.REPO), "head_repository": dict(self.REPO), "workflow_id": 7 + rid,
+                          "check_suite_id": 9000 + rid, "created_at": created, "run_started_at": created}
+        for name in names:
+            self.add_job(rid, name, 1, (conclusions or {}).get(name, "success"))
+
+    def add_job(self, rid, name, attempt, conclusion="success", status="completed", started=None):
+        jid = self.new_id()
+        job = {"id": jid, "run_id": rid, "run_attempt": attempt, "name": name, "head_sha": REV, "status": status,
+               "conclusion": conclusion, "head_branch": "main", "started_at": started or self.runs[rid]["run_started_at"],
+               "completed_at": "2026-11-23T15:00:00Z", "check_run_url": "%s/check-runs/%d" % (self.API, jid),
+               "html_url": "%s/actions/runs/%d/job/%d" % (self.WEB, rid, jid)}
+        self.jobs.append(job)
+        return job
+
+    def rerun(self, rid, results, started="2026-11-23T15:10:00Z", status="completed", kept=()):
+        """A new attempt; `results` maps each job to its conclusion, `kept` jobs keep their earlier start (re-run failed jobs)."""
+        run = self.runs[rid]
+        run["run_attempt"] += 1
+        old_start = run["run_started_at"]
+        run.update(run_started_at=started, status=status, conclusion=None if status != "completed" else "success")
+        for name, conclusion in results.items():
+            done = conclusion is not None
+            self.add_job(rid, name, run["run_attempt"], conclusion, "completed" if done else "in_progress",
+                         started=old_start if name in kept else started)
+
+    def check_run(self, job):
+        rid = job["run_id"]
+        return {"id": job["id"], "name": job["name"], "app": {"id": 15368, "slug": "github-actions"}, "head_sha": job["head_sha"],
+                "status": job["status"], "conclusion": job["conclusion"], "check_suite": {"id": self.runs[rid].get("check_suite_id")},
+                "url": job["check_run_url"], "html_url": job["html_url"], "details_url": job["html_url"],
+                "started_at": job["started_at"]}
+
+    def app_run(self, name, conclusion, sha=REV, status="completed", app=57789):
+        cid = self.new_id()
+        return {"id": cid, "name": name, "app": {"id": app}, "head_sha": sha, "status": status, "conclusion": conclusion,
+                "check_suite": {"id": 5}, "url": "%s/check-runs/%d" % (self.API, cid),
+                "html_url": "%s/runs/%d" % (self.WEB, cid), "started_at": "2026-11-23T13:00:00Z"}
+
+    def forged(self, name, conclusion="success", like=None):
+        """A check run a workflow with checks: write could create: same name and app, any URL it likes."""
+        cid = self.new_id()
+        return {"id": cid, "name": name, "app": {"id": 15368, "slug": "github-actions"}, "head_sha": REV,
+                "status": "completed", "conclusion": conclusion, "check_suite": {"id": 1},
+                "url": "%s/check-runs/%d" % (self.API, cid), "html_url": (like or {}).get("html_url", "https://example.invalid"),
+                "details_url": (like or {}).get("html_url", "https://example.invalid"), "started_at": "2099-01-01T00:00:00Z"}
+
+    def pr(self):
+        return {"number": 274, "merged_at": "x", "merge_commit_sha": REV, "head": {"sha": self.HEAD},
+                "base": {"ref": "main", "repo": dict(self.REPO)}}
+
+    def actions(self):
+        runs = list(self.runs.values())
+        return {"workflow_files": list(self.FILES), "runs": copy.deepcopy(runs), "runs_after": copy.deepcopy(runs),
+                "attempt_jobs": {rid: [j for j in self.jobs if j["run_id"] == rid and j["run_attempt"] == r["run_attempt"]]
+                                 for rid, r in self.runs.items()},
+                "all_jobs": {rid: [j for j in self.jobs if j["run_id"] == rid] for rid in self.runs}}
+
+    def check_runs(self):
+        return [self.check_run(j) for j in self.jobs] + list(self.extra)
+
+    def evaluate(self, rules=None, check_runs=None, actions=None, pr="default", pr_runs=None, check_runs_after="same",
+                 pr_runs_after="same"):
+        """check_runs_after / pr_runs_after: the second reads; by default identical to the first."""
+        check_runs = self.check_runs() if check_runs is None else check_runs
+        pr_runs = self.pr_runs if pr_runs is None else pr_runs
+        return release.evaluate_checks(REV, self.RULES if rules is None else rules, check_runs,
+                                       self.actions() if actions is None else actions,
+                                       self.pr() if pr == "default" else pr, pr_runs,
+                                       copy.deepcopy(check_runs) if check_runs_after == "same" else check_runs_after,
+                                       copy.deepcopy(pr_runs) if pr_runs_after == "same" else pr_runs_after)
+
+    def by_context(self, **kw):
+        return {c["context"]: c for c in self.evaluate(**kw)["required_checks"]}
+
+
+def pages(key, items, total=None):
+    return [{"total_count": len(items) if total is None else total, key: items}]
+
+
 class CheckTests(unittest.TestCase):
-    rules = [{"type": "pull_request"}, {"type": "required_status_checks", "parameters": {"required_status_checks": [
-        {"context": "Backend", "integration_id": 15368}, {"context": "CodeQL", "integration_id": 57789}]}}]
+    """ADR015 D2 (A2): the latest authenticated evaluation of each required check decides."""
 
-    def run_(self, name, app, conclusion, started="2026-11-22T00:00:00Z", status="completed", rid=1):
-        return {"name": name, "app": {"id": app}, "status": status, "conclusion": conclusion, "started_at": started, "id": rid}
+    def refused(self, world, text=None, **kw):
+        with self.assertRaises(release.Refused) as raised:
+            world.evaluate(**kw)
+        if text:
+            self.assertIn(text, str(raised.exception))
+        return str(raised.exception)
 
-    def test_all_success(self):
-        runs = [self.run_("Backend", 15368, "success"), self.run_("CodeQL", 57789, "success")]
-        self.assertEqual(len(release.evaluate_checks(self.rules, runs)), 2)
+    # --- revisions that qualify ---------------------------------------------------
 
-    def test_refusals(self):
-        ok = self.run_("CodeQL", 57789, "success")
+    def test_all_required_checks_pass_on_the_first_attempt(self):
+        w = SourceChecks()
+        result = w.evaluate()
+        self.assertEqual(result["schema"], release.SOURCE_CHECKS_SCHEMA)
+        self.assertIn("latest valid evaluation", result["policy"])
+        self.assertEqual(result["source_revision"], REV)
+        self.assertEqual(result["repository_id"], "1391772534")
+        checks = {c["context"]: c for c in result["required_checks"]}
+        self.assertEqual(sorted(checks), ["Backend", "CodeQL", "VM A", "VM B"])
+        vm = checks["VM A"]
+        job = [j for j in w.jobs if j["name"] == "VM A"][0]
+        self.assertEqual((vm["provenance"], vm["evidence"], vm["run_id"], vm["run_attempt"], vm["job_id"], vm["check_run_id"]),
+                         ("github-actions-job", "revision", 200, 1, job["id"], job["id"]))
+        self.assertEqual(vm["workflow"]["path"], ".github/workflows/ci-vm.yml")
+        self.assertEqual((vm["workflow"]["event"], vm["workflow"]["ref"], vm["source_sha"]), ("push", "refs/heads/main", REV))
+        self.assertEqual(vm["run_url"], SourceChecks.WEB + "/actions/runs/200/attempts/1")
+        self.assertEqual((vm["url"], vm["superseded"], vm["result_kept_from_earlier_attempt"]), (job["html_url"], [], False))
+        codeql = checks["CodeQL"]
+        self.assertEqual((codeql["evaluated_sha"], codeql["source_sha"], codeql["pull_request"]["number"]),
+                         (SourceChecks.HEAD, REV, 274))
+        self.assertTrue(codeql["evidence"].startswith("merged pull request #274"))
+        self.assertEqual(result["ignored_check_runs"], [])
+
+    def test_a_verified_rerun_supersedes_a_failed_attempt(self):
+        w = SourceChecks()
+        w.runs[200]["conclusion"] = "failure"
+        failed = [j for j in w.jobs if j["name"] == "VM A"][0]
+        failed["conclusion"] = "failure"
+        w.rerun(200, {"VM A": "success", "VM B": "success"})        # re-run all jobs
+        vm = w.by_context()["VM A"]
+        self.assertEqual((vm["run_attempt"], vm["run_url"]), (2, SourceChecks.WEB + "/actions/runs/200/attempts/2"))
+        self.assertNotEqual(vm["job_id"], failed["id"])
+        # The failure stays in the evidence.
+        self.assertEqual([(h["run_attempt"], h["job_id"], h["conclusion"]) for h in vm["superseded"]],
+                         [(1, failed["id"], "failure")])
+
+    def test_rerun_of_failed_jobs_keeps_github_s_record_of_the_others(self):
+        # "Re-run failed jobs": GitHub records every job again under the new attempt;
+        # the ones not re-run keep their earlier result (and start time).
+        w = SourceChecks()
+        [j for j in w.jobs if j["name"] == "VM A"][0]["conclusion"] = "failure"
+        w.rerun(200, {"VM A": "success", "VM B": "success"}, kept=("VM B",))
+        checks = w.by_context()
+        self.assertEqual((checks["VM A"]["run_attempt"], checks["VM B"]["run_attempt"]), (2, 2))
+        self.assertEqual((checks["VM A"]["result_kept_from_earlier_attempt"], checks["VM B"]["result_kept_from_earlier_attempt"]),
+                         (False, True))
+
+    def test_several_failed_attempts_no_longer_count_once_the_latest_passes(self):
+        w = SourceChecks()
+        [j for j in w.jobs if j["name"] == "VM A"][0]["conclusion"] = "failure"
+        w.rerun(200, {"VM A": "cancelled", "VM B": "failure"})
+        w.rerun(200, {"VM A": "success", "VM B": "success"}, started="2026-11-23T16:00:00Z")
+        checks = w.by_context()
+        self.assertEqual(checks["VM A"]["run_attempt"], 3)
+        self.assertEqual([h["conclusion"] for h in checks["VM A"]["superseded"]], ["failure", "cancelled"])
+        self.assertEqual([h["conclusion"] for h in checks["VM B"]["superseded"]], ["success", "failure"])
+
+    def test_a_newer_workflow_run_on_the_same_commit_decides(self):
+        w = SourceChecks()
+        w.runs[100]["conclusion"] = "failure"
+        [j for j in w.jobs if j["name"] == "Backend"][0]["conclusion"] = "failure"
+        w.add_run(101, ".github/workflows/ci-backend.yml", ["Backend"], event="workflow_dispatch",
+                  created="2026-11-23T16:00:00Z")
+        backend = w.by_context()["Backend"]
+        self.assertEqual((backend["run_id"], backend["workflow"]["event"]), (101, "workflow_dispatch"))
+        self.assertEqual([(h["run_id"], h["conclusion"]) for h in backend["superseded"]], [(100, "failure")])
+
+    def test_codeql_on_the_revision_is_used_without_the_fallback(self):
+        w = SourceChecks()
+        w.extra.append(w.app_run("CodeQL", "failure"))
+        w.extra.append(w.app_run("CodeQL", "success"))                  # newer analysis of the same commit
+        codeql = w.by_context()["CodeQL"]
+        self.assertEqual((codeql["evidence"], codeql["evaluated_sha"]), ("the revision", REV))
+        self.assertNotIn("pull_request", codeql)
+        self.assertEqual([h["conclusion"] for h in codeql["superseded"]], ["failure"])
+
+    def test_forged_check_runs_are_ignored_and_recorded(self):
+        w = SourceChecks()
+        real = [j for j in w.jobs if j["name"] == "VM A"][0]
+        w.extra += [w.forged("VM A", "failure"), w.forged("VM A", "success", like=real),
+                    dict(w.forged("CodeQL", "failure"))]               # same name, github-actions app
+        result = w.evaluate()
+        self.assertEqual(sorted((i["name"], i["conclusion"]) for i in result["ignored_check_runs"]),
+                         [("CodeQL", "failure"), ("VM A", "failure"), ("VM A", "success")])
+        self.assertEqual({c["context"]: c["job_id"] for c in result["required_checks"] if "job_id" in c}["VM A"], real["id"])
+
+    # --- revisions that are refused -----------------------------------------------
+
+    def test_latest_attempt_failed_after_an_earlier_success(self):
+        w = SourceChecks()
+        w.rerun(200, {"VM A": "failure", "VM B": "success"})
+        self.refused(w, "an earlier success never overrides it")
+
+    def test_latest_attempt_pending(self):
+        w = SourceChecks()
+        w.rerun(200, {"VM A": None, "VM B": None}, status="in_progress")
+        self.refused(w, "has not completed")
+        w = SourceChecks()
+        w.runs[100]["status"] = "queued"                                 # the run itself still running
+        self.refused(w, "has not completed")
+
+    def test_latest_attempt_cancelled_skipped_or_otherwise_unsuccessful(self):
+        for conclusion in ("cancelled", "skipped", "neutral", "timed_out", "action_required", "stale", None):
+            w = SourceChecks()
+            w.rerun(200, {"VM A": "success", "VM B": "success"})
+            [j for j in w.jobs if j["name"] == "VM B" and j["run_attempt"] == 2][0]["conclusion"] = conclusion
+            with self.subTest(conclusion=conclusion):
+                self.refused(w, "VM B")
+
+    def test_forged_success_cannot_replace_a_real_failure_or_a_missing_job(self):
+        w = SourceChecks()
+        real = [j for j in w.jobs if j["name"] == "VM A"][0]
+        real["conclusion"] = "failure"
+        w.extra.append(w.forged("VM A", "success", like=real))
+        self.refused(w, "an earlier success never overrides it")
+        # A context no trusted workflow has a job for: a forged success is no evidence.
+        w = SourceChecks()
+        rules = copy.deepcopy(SourceChecks.RULES)
+        rules[1]["parameters"]["required_status_checks"].append({"context": "Lint", "integration_id": 15368})
+        w.extra.append(w.forged("Lint", "success"))
+        self.refused(w, "has no job in a trusted workflow run", rules=rules)
+
+    def test_check_run_that_does_not_match_the_real_job(self):
+        def tamper(field, value):
+            w = SourceChecks()
+            target = [j for j in w.jobs if j["name"] == "VM A"][0]
+            runs = w.check_runs()
+            cr = [c for c in runs if c["id"] == target["id"]][0]
+            if field == "remove":
+                runs.remove(cr)
+            elif field == "app":
+                cr["app"] = {"id": 1}
+            elif field == "check_suite":
+                cr["check_suite"] = {"id": 1}
+            else:
+                cr[field] = value
+            return w, runs
+        for field, value in (("remove", None), ("name", "VM B"), ("app", None), ("head_sha", "c" * 40),
+                             ("conclusion", "failure"), ("status", "in_progress"), ("check_suite", None),
+                             ("url", "https://api.github.com/repos/someone/else/check-runs/1"),
+                             ("html_url", "https://example.invalid/job")):
+            w, runs = tamper(field, value)
+            with self.subTest(field=field):
+                self.refused(w, "does not match GitHub's job record", check_runs=runs)
+
+    def test_untrusted_workflow_identity_trigger_ref_repository_or_commit(self):
         cases = {
-            "missing": [ok],
-            "failed": [self.run_("Backend", 15368, "failure"), ok],
-            "wrong app": [self.run_("Backend", 1, "success"), ok],
-            "in progress": [self.run_("Backend", 15368, None, status="in_progress"), ok],
-            "newest failed": [self.run_("Backend", 15368, "success", "2026-11-22T00:00:00Z", rid=1),
-                              self.run_("Backend", 15368, "failure", "2026-11-22T01:00:00Z", rid=2), ok],
+            "workflow file not in the revision": {"path": ".github/workflows/evil.yml"},
+            "dynamic workflow": {"path": "dynamic/github-code-scanning/codeql"},
+            "pull_request event": {"event": "pull_request"},
+            "schedule event": {"event": "schedule"},
+            "another branch": {"head_branch": "feature/x"},
+            "another repository": {"repository": {"id": 1, "full_name": "someone/codemastery"}},
+            "fork head": {"head_repository": {"id": 2}},
+            "another commit": {"head_sha": "c" * 40},
+            "malformed attempt": {"run_attempt": "2"},
         }
-        for label, runs in cases.items():
-            with self.subTest(label), self.assertRaises(release.Refused):
-                release.evaluate_checks(self.rules, runs)
-        with self.assertRaises(release.Refused):
-            release.evaluate_checks([{"type": "pull_request"}], [ok])
+        for label, change in cases.items():
+            w = SourceChecks()
+            w.runs[200].update(change)
+            with self.subTest(label):
+                result = self.refused(w)
+                self.assertTrue("has no job in a trusted workflow run" in result or "does not belong" in result
+                                or "malformed" in result, result)
 
-    def test_merged_pull_request_fallback(self):
-        pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
+    def test_malformed_newer_run_never_lets_an_older_success_decide(self):
+        # Review F1: a newer failed run of the producing workflow whose record lacks
+        # (or garbles) metadata must refuse the revision, not drop out of the selection.
+        cases = {"missing workflow_id": ("workflow_id", None), "missing check_suite_id": ("check_suite_id", None),
+                 "missing created_at": ("created_at", None), "malformed created_at": ("created_at", "yesterday"),
+                 "string workflow_id": ("workflow_id", "214"), "boolean check_suite_id": ("check_suite_id", True),
+                 "string attempt": ("run_attempt", "1"), "missing status": ("status", None),
+                 "missing path": ("path", None)}
+        for label, (field, value) in cases.items():
+            w = SourceChecks()
+            w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                      event="workflow_dispatch", created="2026-11-23T17:00:00Z")
+            w.runs[201]["conclusion"] = "failure"
+            if value is None:
+                del w.runs[201][field]
+            else:
+                w.runs[201][field] = value
+            with self.subTest(label):
+                self.refused(w, "malformed")
+
+    def test_invalid_calendar_and_noncanonical_run_timestamps_are_refused(self):
+        # N1: regex-shaped dates must not sort a newer failure before an older success.
+        invalid = ["2026-00-23T17:00:00Z", "2026-13-23T17:00:00Z", "2026-02-30T17:00:00Z",
+                   "2026-02-29T17:00:00Z", "2100-02-29T17:00:00Z", "2026-04-31T17:00:00Z",
+                   "2026-11-00T17:00:00Z", "0000-11-23T17:00:00Z", "2026-11-23T24:00:00Z",
+                   "2026-11-23T17:60:00Z", "2026-11-23T17:00:60Z", "2026-11-23T17:00:00Z\n",
+                   "2026-11-23T17:00:00+00:00", "2026-11-23T17:00:00-01:00", "2026-11-23T17:00:00.0Z",
+                   "2026-11-23T17:00:00z", "2026-11-23 17:00:00Z", "2026-1-23T17:00:00Z",
+                   "2026-11-23T17:00Z", "", " ", None, 0, True, [], {}]
+        for value in invalid:
+            for status in ("completed", "in_progress"):
+                w = SourceChecks()
+                w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                          event="workflow_dispatch", created="2026-11-23T17:00:00Z")
+                w.runs[201].update(created_at=value, status=status, conclusion="failure" if status == "completed" else None)
+                with self.subTest(value=value, status=status):
+                    self.refused(w, "malformed")
+
+    def test_empty_missing_and_malformed_trust_fields_cannot_exclude_a_newer_failure(self):
+        for field in ("head_sha", "event", "head_branch", "path"):
+            values = ["", " ", "\t", "\n", None, False, 0, [], {}, "main\n"]
+            values += {"head_sha": ["a" * 39, REV + "\n", "A" * 40],
+                       "event": ["push ", "workflow-dispatch", "PUSH"],
+                       "head_branch": ["main ", "/main", "main/", "main..x", "main@{x", "main~1", "main.lock"],
+                       "path": [" .github/workflows/ci-vm.yml", ".github/workflows/ci-vm.yml ",
+                                ".github/workflows/../ci-vm.yml", "/.github/workflows/ci-vm.yml"]}[field]
+            for value in values + ["MISSING"]:
+                w = SourceChecks()
+                w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                          created="2026-11-23T17:00:00Z")
+                if value == "MISSING":
+                    del w.runs[201][field]
+                else:
+                    w.runs[201][field] = value
+                with self.subTest(field=field, value=value):
+                    self.refused(w, "malformed")
+
+    def test_valid_run_dates_order_chronologically_with_deterministic_id_ties(self):
+        for older, newer in (("2024-02-28T23:59:59Z", "2024-02-29T00:00:00Z"),
+                             ("2000-02-29T23:59:59Z", "2000-03-01T00:00:00Z"),
+                             ("2026-12-31T23:59:59Z", "2027-01-01T00:00:00Z"),
+                             ("2026-11-23T17:00:00Z", "2026-11-23T17:00:00Z")):
+            w = SourceChecks()
+            w.runs[200]["created_at"] = older
+            for j in w.jobs:
+                if j["run_id"] == 200:
+                    j["conclusion"] = "failure"
+            w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], created=newer)
+            for reverse in (False, True):
+                actions = w.actions()
+                if reverse:
+                    actions["runs"].reverse()
+                    actions["runs_after"].reverse()
+                with self.subTest(older=older, newer=newer, reverse=reverse):
+                    self.assertEqual(w.by_context(actions=actions)["VM B"]["run_id"], 201)
+        # A larger ID never outranks a later valid creation time.
+        w = SourceChecks()
+        w.add_run(199, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], created="2026-11-23T17:00:00Z")
+        self.assertEqual(w.by_context()["VM B"]["run_id"], 199)
+
+    def test_malformed_repository_records_refuse_without_attribute_errors(self):
+        for field in ("repository", "head_repository"):
+            for value in (None, [], [1], "repo", True, {"id": True}, {"id": 1391772534.0}, {"id": "01391772534"}):
+                w = SourceChecks()
+                w.runs[200][field] = value
+                with self.subTest(field=field, value=value):
+                    self.refused(w, "malformed")
+
+    def test_decision_relevant_provenance_changes_between_snapshots_are_refused(self):
+        # Equal-valued floats/bools are still malformed changes, not integer identities.
+        for field in ("run_attempt", "workflow_id", "check_suite_id"):
+            w = SourceChecks()
+            actions = w.actions()
+            actions["runs_after"][0][field] = float(actions["runs_after"][0][field])
+            with self.subTest(field=field):
+                self.refused(w, "changed while the evidence was read", actions=actions)
+        for field in ("app", "check_suite"):
+            w = SourceChecks()
+            changed = w.check_runs()
+            changed[0][field]["id"] = float(changed[0][field]["id"])
+            with self.subTest(field=field):
+                self.refused(w, "changed while the evidence was read", check_runs_after=changed)
+            changed = w.check_runs()
+            changed[0][field] = changed[0][field]["id"]
+            with self.subTest(field=field, shape="scalar"):
+                self.refused(w, "changed while the evidence was read", check_runs_after=changed)
+        for field in ("repository", "head_repository"):
+            for value in ({"id": 1}, None, {}, [], "repo", {"id": True}, {"id": 1391772534.0}):
+                w = SourceChecks()
+                actions = w.actions()
+                actions["runs_after"][0][field] = value
+                with self.subTest(field=field, value=value):
+                    self.refused(w, "changed while the evidence was read", actions=actions)
+        for where in ("revision", "head"):
+            w = SourceChecks()
+            checks = copy.deepcopy(w.check_runs() if where == "revision" else w.pr_runs)
+            for value in (None, "", "https://example.invalid/changed"):
+                changed = copy.deepcopy(checks)
+                changed[0]["html_url"] = value
+                with self.subTest(where=where, value=value):
+                    self.refused(w, "changed while the evidence was read",
+                                 **({"check_runs_after": changed} if where == "revision" else {"pr_runs_after": changed}))
+
+    def test_snapshot_canonical_ids_and_unrelated_volatile_fields(self):
+        w = SourceChecks()
+        actions = w.actions()
+        for run in actions["runs_after"]:
+            for field in ("repository", "head_repository"):
+                run[field]["id"] = str(run[field]["id"])
+                run[field]["full_name"] = "display/name"
+            run["updated_at"] = "later"
+            run["display_title"] = "another display title"
+        checks = copy.deepcopy(w.check_runs())
+        checks[0]["details_url"] = "https://example.invalid/display"
+        checks[0]["output"] = {"summary": "another summary"}
+        self.assertEqual(len(w.evaluate(actions=actions, check_runs_after=checks)["required_checks"]), 4)
+
+    def test_malformed_record_of_an_unrelated_run_is_still_ignored(self):
+        # A run that is positively outside the trust scope stays a recorded, ignored run
+        # even when its record is incomplete.
+        for change in ({"event": "pull_request"}, {"head_branch": "feature/x"}, {"head_branch": "@"},
+                       {"path": "dynamic/github-code-scanning/codeql"}, {"head_sha": "c" * 40}):
+            w = SourceChecks()
+            w.add_run(300, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                      created="2026-11-23T17:00:00Z")
+            w.runs[300].update(change)
+            for field in ("workflow_id", "check_suite_id", "created_at"):
+                del w.runs[300][field]
+            with self.subTest(change=change):
+                self.assertEqual([r["run_id"] for r in w.evaluate()["untrusted_workflow_runs"]], [300])
+
+    def test_conflicting_job_records_with_the_same_id_are_refused(self):
+        # The attempt listing and the all-attempt listing must agree on each job's record,
+        # not only on the set of IDs.
+        for field, value in (("conclusion", "failure"), ("status", "in_progress"), ("name", "VM B"),
+                             ("head_sha", "c" * 40), ("run_id", 999), ("run_attempt", 2),
+                             ("started_at", "2026-11-23T12:00:00Z"), ("completed_at", "2026-11-23T16:00:00Z"),
+                             ("check_run_url", "https://example.invalid/check"), ("html_url", "https://example.invalid/job")):
+            w = SourceChecks()
+            actions = w.actions()
+            actions["all_jobs"] = copy.deepcopy(actions["all_jobs"])
+            [j for j in actions["all_jobs"][200] if j["name"] == "VM A"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(release.Refused):
+                w.evaluate(actions=actions)
+
+    def test_untrusted_runs_are_recorded(self):
+        w = SourceChecks()
+        w.add_run(300, ".github/workflows/ci-vm.yml", ["VM A"], event="pull_request")
+        self.assertEqual(w.evaluate()["untrusted_workflow_runs"], [{"run_id": 300, "reason": "event 'pull_request'"}])
+
+    def test_job_records_inconsistent_with_their_run(self):
+        for label, change in {"another commit": {"head_sha": "c" * 40}, "another run": {"run_id": 999},
+                              "future attempt": {"run_attempt": 2}, "attempt zero": {"run_attempt": 0},
+                              "foreign check run URL": {"check_run_url": "https://api.github.com/repos/x/y/check-runs/1"},
+                              "foreign job URL": {"html_url": "https://github.com/x/y/actions/runs/200/job/1"}}.items():
+            w = SourceChecks()
+            runs, actions = w.check_runs(), w.actions()
+            [j for j in w.jobs if j["name"] == "VM A"][0].update(change)   # the listings share the record
+            with self.subTest(label):
+                self.refused(w, "does not belong to that run", check_runs=runs, actions=actions)
+
+    def test_attempt_listing_must_hold_only_the_newest_attempt_and_agree(self):
+        w = SourceChecks()
+        w.rerun(200, {"VM A": "success", "VM B": "success"})
+        actions = w.actions()
+        old = [j for j in actions["all_jobs"][200] if j["run_attempt"] == 1]
+        actions["attempt_jobs"][200] = [j for j in actions["attempt_jobs"][200] if j["name"] == "VM A"] + \
+            [j for j in old if j["name"] == "VM B"]                     # splice an attempt-1 result into attempt 2
+        self.refused(w, "does not belong to that run and attempt", actions=actions)
+        actions = w.actions()
+        actions["attempt_jobs"][200] = [j for j in actions["attempt_jobs"][200] if j["name"] == "VM A"]
+        self.refused(w, "disagree", actions=actions)
+
+    def test_results_of_different_attempts_are_never_combined(self):
+        # Attempt 2 passed VM A but failed VM B; attempt 1 had passed VM B.
+        w = SourceChecks()
+        [j for j in w.jobs if j["name"] == "VM A"][0]["conclusion"] = "failure"
+        w.rerun(200, {"VM A": "success", "VM B": "failure"})
+        self.refused(w, "VM B")
+        # A newest attempt that holds no record of a job: no stitching from attempt 1.
+        w = SourceChecks()
+        [j for j in w.jobs if j["name"] == "VM A"][0]["conclusion"] = "failure"
+        w.rerun(200, {"VM A": "success"})
+        self.refused(w, "re-run all jobs")
+        # Two runs of one workflow: only the newest counts, even if an older one passed.
+        w = SourceChecks()
+        w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                  event="workflow_dispatch", created="2026-11-23T17:00:00Z")
+        self.refused(w, "run 201 attempt 1")
+
+    def test_a_job_name_in_two_workflows_is_ambiguous(self):
+        w = SourceChecks()
+        w.add_run(300, ".github/workflows/ci-extra.yml", ["Backend"])
+        self.refused(w, "more than one workflow")
+
+    def test_release_workflow_runs_are_never_ci_evidence(self):
+        # The dispatched candidate run is itself a workflow_dispatch run of release.yml on
+        # main at the revision, still running while it evaluates the checks.
+        w = SourceChecks()
+        w.add_run(300, ".github/workflows/release.yml", ["Release tooling", "Backend"])
+        w.runs[300].update(event="workflow_dispatch", status="in_progress", conclusion=None)
+        result = w.evaluate()
+        self.assertEqual(result["untrusted_workflow_runs"][0]["run_id"], 300)
+        self.assertEqual({c["context"]: c.get("run_id") for c in result["required_checks"]}["Backend"], 100)
+        rules = copy.deepcopy(SourceChecks.RULES)
+        rules[1]["parameters"]["required_status_checks"].append({"context": "Release tooling", "integration_id": 15368})
+        self.refused(w, "has no job in a trusted workflow run", rules=rules)
+
+    def test_missing_required_check_or_api_data(self):
+        w = SourceChecks()
+        rules = copy.deepcopy(SourceChecks.RULES)
+        rules[1]["parameters"]["required_status_checks"].append({"context": "Frontend", "integration_id": 15368})
+        self.refused(w, "has no job in a trusted workflow run", rules=rules)
+        for key in ("attempt_jobs", "all_jobs"):
+            actions = w.actions()
+            del actions[key][200]
+            with self.subTest(key):
+                self.refused(w, "were not read", actions=actions)
+        actions = w.actions()
+        actions["runs_after"] = None
+        self.refused(w, "changed while the evidence was read", actions=actions)
+        self.refused(w, "no check run on the revision or on its merged pull request", pr_runs=[w.app_run("Other", "success")])
+        self.refused(w, "no merged pull request can stand in", pr=None)
+
+    def test_runs_that_change_while_being_read(self):
+        w = SourceChecks()
+        actions = w.actions()
+        actions["runs_after"][1]["run_attempt"] = 2                     # a re-run started meanwhile
+        self.refused(w, "changed while the evidence was read", actions=actions)
+        actions = w.actions()
+        actions["runs_after"].append(dict(actions["runs"][0], id=555))   # a new run appeared
+        self.refused(w, "changed while the evidence was read", actions=actions)
+        # Any decision-relevant field of a run record differing between the two reads.
+        for field, value in (("conclusion", "failure"), ("created_at", "2026-11-23T18:00:00Z"), ("path", None),
+                             ("event", "workflow_dispatch"), ("head_sha", "c" * 40), ("head_branch", "x"),
+                             ("workflow_id", 1), ("check_suite_id", 1)):
+            actions = w.actions()
+            actions["runs_after"][1][field] = value
+            with self.subTest(field=field):
+                self.refused(w, "changed while the evidence was read", actions=actions)
+
+    def test_rules_that_cannot_be_authenticated(self):
+        w = SourceChecks()
+        for item, text in (({"context": "X", "integration_id": None}, "names no app"),
+                           ({"context": "X"}, "names no app"),
+                           ({"context": "X", "integration_id": 42}, "cannot authenticate"),
+                           ({"integration_id": 15368}, "has no context")):
+            rules = copy.deepcopy(SourceChecks.RULES)
+            rules[1]["parameters"]["required_status_checks"].append(item)
+            with self.subTest(item=item):
+                self.refused(w, text, rules=rules)
+        self.refused(w, "no required status checks", rules=[{"type": "pull_request"}])
+
+    def test_pull_request_fallback_never_overrides_the_revision(self):
+        for conclusion, status in (("failure", "completed"), ("cancelled", "completed"), (None, "in_progress")):
+            w = SourceChecks()
+            w.extra.append(w.app_run("CodeQL", conclusion, status=status))
+            with self.subTest(conclusion=conclusion):
+                self.refused(w, "the revision")
+        # The fallback's own latest evaluation rules.
+        w = SourceChecks()
+        w.pr_runs.append(w.app_run("CodeQL", "failure", sha=SourceChecks.HEAD))
+        self.refused(w, "merged pull request #274")
+        w = SourceChecks()
+        w.pr_runs.append(w.app_run("CodeQL", None, sha=SourceChecks.HEAD, status="queued"))
+        self.refused(w, "has not completed")
+        w = SourceChecks()
+        self.refused(w, "does not belong to commit", pr_runs=[w.app_run("CodeQL", "success", sha="c" * 40)])
+        # Only the required app counts, on the head too.
+        w = SourceChecks()
+        self.refused(w, "no check run", pr_runs=[w.app_run("CodeQL", "success", sha=SourceChecks.HEAD, app=15368)])
+
+    def test_codeql_evaluation_appearing_between_the_reads_is_refused(self):
+        # Review F2: the fallback's PR-head listing is read again before the cutoff; a newer
+        # pending or failed analysis seen there refuses, whatever the first read showed.
+        for label, conclusion, status in (("newer pending", None, "in_progress"), ("newer queued", None, "queued"),
+                                          ("newer failed", "failure", "completed"),
+                                          ("newer cancelled", "cancelled", "completed")):
+            w = SourceChecks()
+            later = w.pr_runs + [w.app_run("CodeQL", conclusion, sha=SourceChecks.HEAD, status=status)]
+            with self.subTest(label):
+                self.refused(w, "merged pull request #274's head changed while the evidence was read", pr_runs_after=later)
+        # The decisive run itself changing state, or disappearing, between the reads.
+        w = SourceChecks()
+        changed = copy.deepcopy(w.pr_runs)
+        changed[0]["conclusion"] = "failure"
+        self.refused(w, "changed while the evidence was read", pr_runs_after=changed)
+        self.refused(w, "changed while the evidence was read", pr_runs_after=[])
+        self.refused(w, "changed while the evidence was read", pr_runs_after=None)
+        # Unrelated check runs on the head may change; required names may not.
+        w = SourceChecks()
+        self.assertEqual(w.evaluate(pr_runs_after=w.pr_runs + [w.app_run("Analyze (python)", None, sha=SourceChecks.HEAD,
+                                                                        status="in_progress", app=15368)])["snapshot"],
+                         release.SNAPSHOT_CUTOFF)
+
+    def test_check_runs_of_the_revision_changing_between_the_reads_are_refused(self):
+        w = SourceChecks()
+        w.extra.append(w.app_run("CodeQL", "success"))                   # CodeQL on the revision, no fallback
+        runs = w.check_runs()
+        for later in (runs + [w.app_run("CodeQL", None, status="in_progress")], runs + [w.app_run("CodeQL", "failure")],
+                      runs + [w.forged("VM A", "failure")], runs[1:], None):
+            with self.subTest(n=None if later is None else len(later)):
+                self.refused(w, "check runs under required names changed", check_runs=runs, check_runs_after=later)
+
+    def test_merged_pull_request(self):
+        pr = SourceChecks().pr()
         self.assertIs(release.merged_pull_request([pr, dict(pr, merge_commit_sha="c" * 40)], REV), pr)
         self.assertIsNone(release.merged_pull_request([dict(pr, merged_at=None)], REV))
         self.assertIsNone(release.merged_pull_request([dict(pr, base={"ref": "other"})], REV))
         with self.assertRaises(release.Refused):
             release.merged_pull_request([pr, dict(pr, number=8)], REV)
-        backend = self.run_("Backend", 15368, "success")
-        codeql_on_pr = self.run_("CodeQL", 57789, "success")
-        result = release.evaluate_checks(self.rules, [backend], [codeql_on_pr], pr)
-        self.assertEqual([r["evidence"].split()[0] for r in result], ["revision", "merged"])
-        # The pull request never overrides a run that exists on the revision.
         with self.assertRaises(release.Refused):
-            release.evaluate_checks(self.rules, [backend, self.run_("CodeQL", 57789, "failure")], [codeql_on_pr], pr)
-        with self.assertRaises(release.Refused):  # no merged PR: no fallback
-            release.evaluate_checks(self.rules, [backend], [codeql_on_pr], None)
-        with self.assertRaises(release.Refused):
-            release.evaluate_checks(self.rules, [backend], [self.run_("CodeQL", 57789, "neutral")], pr)
+            release.merged_pull_request([dict(pr, base={"ref": "main", "repo": {"id": 1}})], REV)
 
-    def test_a_later_success_never_overrides_a_failure(self):
-        failed = self.run_("Backend", 15368, "failure", started="2026-11-22T00:00:00Z", rid=1)
-        forged = self.run_("Backend", 15368, "success", started="2099-01-01T00:00:00Z", rid=2)
-        codeql = self.run_("CodeQL", 57789, "success")
-        with self.assertRaises(release.Refused):
-            release.evaluate_checks(self.rules, [failed, forged, codeql])
-        rerun_cancelled = self.run_("Backend", 15368, "cancelled", rid=3)
-        with self.assertRaises(release.Refused):
-            release.evaluate_checks(self.rules, [rerun_cancelled, forged, codeql])
-        pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
-        with self.assertRaises(release.Refused):  # the same rule on the merged pull request's head
-            release.evaluate_checks(self.rules, [forged], [self.run_("CodeQL", 57789, "failure"), codeql], pr)
+    def test_api_listings_must_be_complete(self):
+        items = [{"id": 1}, {"id": 2}]
+        self.assertEqual(release.api_items(pages("jobs", items), "jobs", "x"), items)
+        for bad in (pages("jobs", items, total=3), [], [{"jobs": items}], pages("jobs", [{"id": 1}, {"id": 1}]),
+                    pages("jobs", [{"id": "1"}]), pages("jobs", [{"id": True}]), [{"total_count": 1, "jobs": None}],
+                    pages("jobs", items) + pages("jobs", [{"id": 3}], total=4)):
+            with self.subTest(bad=bad), self.assertRaises(release.Refused):
+                release.api_items(bad, "jobs", "x")
 
-    def test_an_unfinished_run_is_never_overridden(self):
-        # F1: a queued or running real run, with a newer success beside it (for example a
-        # run forged by a workflow with checks: write), still refuses the revision.
-        codeql = self.run_("CodeQL", 57789, "success")
-        forged = self.run_("Backend", 15368, "success", started="2099-01-01T00:00:00Z", rid=9)
-        for status in ("queued", "in_progress", "waiting", "requested", "pending", None):
-            real = self.run_("Backend", 15368, None, started=None if status in ("queued", None) else "2026-11-22T00:00:00Z",
-                             status=status, rid=1)
-            with self.subTest(status=status):
-                with self.assertRaises(release.Refused) as raised:
-                    release.evaluate_checks(self.rules, [real, forged, codeql])
-                self.assertIn("has not completed", str(raised.exception))
-                with self.assertRaises(release.Refused):   # order of the API listing does not matter
-                    release.evaluate_checks(self.rules, [forged, real, codeql])
-        # The same rule on the merged pull request's head.
-        pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
-        backend = self.run_("Backend", 15368, "success")
-        with self.assertRaises(release.Refused):
-            release.evaluate_checks(self.rules, [backend],
-                                    [self.run_("CodeQL", 57789, None, status="in_progress", rid=3), codeql], pr)
-        # Several completed successful runs (re-runs that all passed) still qualify.
-        again = self.run_("Backend", 15368, "success", started="2026-11-22T02:00:00Z", rid=4)
-        self.assertEqual(release.evaluate_checks(self.rules, [backend, again, codeql])[0]["check_run_id"], 4)
-
-    def test_fallback_requires_the_same_tree(self):
-        pr = {"number": 7, "merged_at": "x", "merge_commit_sha": REV, "base": {"ref": "main"}, "head": {"sha": "b" * 40}}
+    def test_cli_with_the_files_the_workflow_writes(self):
+        w = SourceChecks()
+        [j for j in w.jobs if j["name"] == "VM A"][0]["conclusion"] = "failure"
+        w.rerun(200, {"VM A": "success", "VM B": "success"})
+        w.extra.append(w.forged("VM B", "success"))
+        actions = w.actions()
         with tempfile.TemporaryDirectory() as d:
-            paths = {n: os.path.join(d, n + ".json") for n in ("rules", "runs", "pulls", "pr_runs")}
-            dump(self.rules, paths["rules"])
-            dump([{"check_runs": [self.run_("Backend", 15368, "success")]}], paths["runs"])
-            dump([pr], paths["pulls"])
-            dump([{"check_runs": [self.run_("CodeQL", 57789, "success")]}], paths["pr_runs"])
-            base = ["evaluate-checks", "--revision", REV, "--rules", paths["rules"], "--check-runs", paths["runs"],
-                    "--pulls", paths["pulls"], "--pr-head", "b" * 40, "--pr-check-runs", paths["pr_runs"]]
-            self.assertEqual(release.main(base + ["--revision-tree", "1" * 40, "--pr-head-tree", "1" * 40]), 0)
+            p = {n: os.path.join(d, n) for n in ("rules", "runs", "after", "files", "checks", "checks_after", "pulls",
+                                                 "pr_runs", "pr_runs_after")}
+            jobs = os.path.join(d, "jobs")
+            os.mkdir(jobs)
+            dump(w.RULES, p["rules"])
+            dump(pages("workflow_runs", actions["runs"]), p["runs"])
+            dump(pages("workflow_runs", actions["runs_after"]), p["after"])
+            put(p["files"], "\n".join(w.FILES) + "\n")
+            dump(pages("check_runs", w.check_runs()), p["checks"])
+            dump([w.pr()], p["pulls"])
+            dump(pages("check_runs", w.pr_runs), p["pr_runs"])
+            dump(pages("check_runs", w.check_runs()), p["checks_after"])
+            dump(pages("check_runs", w.pr_runs), p["pr_runs_after"])
+            for rid in w.runs:
+                dump(pages("jobs", actions["attempt_jobs"][rid]), os.path.join(jobs, "%d.attempt.json" % rid))
+                dump(pages("jobs", actions["all_jobs"][rid]), os.path.join(jobs, "%d.all.json" % rid))
+            base = ["evaluate-checks", "--revision", REV, "--rules", p["rules"], "--check-runs", p["checks"],
+                    "--workflow-files", p["files"], "--workflow-runs", p["runs"], "--workflow-runs-after", p["after"],
+                    "--jobs-dir", jobs, "--check-runs-after", p["checks_after"], "--pulls", p["pulls"],
+                    "--pr-head", SourceChecks.HEAD, "--pr-check-runs", p["pr_runs"], "--pr-check-runs-after", p["pr_runs_after"]]
+            out = io.StringIO()
+            sys_stdout, sys.stdout = sys.stdout, out
+            try:
+                code = release.main(base + ["--revision-tree", "1" * 40, "--pr-head-tree", "1" * 40])
+            finally:
+                sys.stdout = sys_stdout
+            self.assertEqual(code, 0)
+            result = json.loads(out.getvalue())
+            self.assertEqual({c["context"]: c.get("run_attempt") for c in result["required_checks"]},
+                             {"Backend": 1, "VM A": 2, "VM B": 2, "CodeQL": None})
+            codeql = [c for c in result["required_checks"] if c["context"] == "CodeQL"][0]
+            self.assertEqual(codeql["pull_request"]["head_tree"], "1" * 40)
+            self.assertEqual(len(result["ignored_check_runs"]), 1)
+            # CodeQL fallback with a different tree, or without trees, is refused.
             self.assertEqual(release.main(base + ["--revision-tree", "1" * 40, "--pr-head-tree", "2" * 40]), 3)
             self.assertEqual(release.main(base), 3)
+            trees = ["--revision-tree", "1" * 40, "--pr-head-tree", "1" * 40]
+            # A newer CodeQL analysis on the head between the two reads refuses (review F2).
+            dump(pages("check_runs", w.pr_runs + [w.app_run("CodeQL", None, sha=SourceChecks.HEAD, status="queued")]),
+                 p["pr_runs_after"])
+            self.assertEqual(release.main(base + trees), 3)
+            no_reread = [x for x in base if x not in ("--pr-check-runs-after", p["pr_runs_after"])]
+            self.assertEqual(release.main(no_reread + trees), 3)
+            dump(pages("check_runs", w.pr_runs), p["pr_runs_after"])
+            self.assertEqual(release.main(base + trees), 0)
+            # A missing job file is missing evidence.
+            os.remove(os.path.join(jobs, "200.attempt.json"))
+            self.assertEqual(release.main(base + ["--revision-tree", "1" * 40, "--pr-head-tree", "1" * 40]), 3)
+            # A short listing is refused.
+            dump(pages("check_runs", w.check_runs(), total=99), p["checks"])
+            self.assertEqual(release.main(base + ["--revision-tree", "1" * 40, "--pr-head-tree", "1" * 40]), 3)
+
+    def test_candidate_manifest_records_only_evidence_of_its_own_revision(self):
+        w = SourceChecks()
+        [j for j in w.jobs if j["name"] == "VM A"][0]["conclusion"] = "failure"
+        w.rerun(200, {"VM A": "success", "VM B": "success"})
+        evidence = w.evaluate()
+
+        def build(checks, rehearsal=False):
+            d = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, d)
+            pkg = os.path.join(d, "pkg")
+            os.mkdir(pkg)
+            put(os.path.join(pkg, "a.tar"), "archive")
+            refs = {s: "codemastery-candidate/%s:%s" % (s, REV[:12]) for s in SERVICES}
+            ctx = {"candidate_refs": refs, "repository": release.REPOSITORY, "source_revision": REV, "source_tree": "1" * 40,
+                   "public_origin": "https://codemastery.app", "tooling": {}, "run": {"rehearsal": rehearsal},
+                   "builder": {}, "mc_source": {}, "compatibility": {}}
+            files = {"context": ctx, "identities": {refs[s]: {"containerd": digest(b"c"), "graphdriver": digest(b"g")} for s in SERVICES},
+                     "findings": [], "migrations": [], "qualification": [{"id": "Q00", "result": "PASS"}], "scanner": {},
+                     "coverage": {}}
+            args = ["candidate-manifest", "--package", pkg, "--archive-name", "a.tar"]
+            for name, value in files.items():
+                dump(value, os.path.join(d, name + ".json"))
+                args += ["--" + name, os.path.join(d, name + ".json")]
+            if checks is not None:
+                dump(checks, os.path.join(d, "checks.json"))
+                args += ["--source-checks", os.path.join(d, "checks.json")]
+            code = release.main(args)
+            path = os.path.join(pkg, "release-candidate.json")
+            return code, (release.load_json(path, "m") if code == 0 else None)
+
+        code, manifest = build(evidence)
+        self.assertEqual(code, 0)
+        sq = manifest["source_qualification"]
+        self.assertEqual((sq["verified"], sq["schema"], sq["source_revision"]), (True, release.SOURCE_CHECKS_SCHEMA, REV))
+        self.assertEqual({c["context"]: c.get("run_attempt") for c in sq["required_checks"]}["VM A"], 2)
+        self.assertEqual(build(None, rehearsal=True)[1]["source_qualification"], {"verified": False, "required_checks": []})
+        for label, bad in (("another revision", dict(evidence, source_revision="c" * 40)),
+                           ("legacy list", evidence["required_checks"]), ("no checks", dict(evidence, required_checks=[])),
+                           ("other schema", dict(evidence, schema="codemastery.source-checks/v1"))):
+            with self.subTest(label):
+                self.assertEqual(build(bad)[0], 3)
+        self.assertEqual(build(None)[0], 3)            # a dispatched candidate needs the evidence
+
+    def test_summary_shows_superseded_results(self):
+        w = SourceChecks()
+        [j for j in w.jobs if j["name"] == "VM A"][0]["conclusion"] = "failure"
+        w.rerun(200, {"VM A": "success", "VM B": "success"})
+        rows = "\n".join(release._source_check_rows(dict(w.evaluate(), verified=True)))
+        self.assertIn("latest authenticated evaluation", rows)
+        self.assertRegex(rows, r"\| VM A \| revision \| \[job \d+\]\(.*\), run 200 attempt 2 of `.github/workflows/ci-vm.yml` \| failure \|")
+        self.assertIn("legacy record", "\n".join(release._source_check_rows({"verified": True, "required_checks": [{}]})))
+        self.assertEqual(release._source_check_rows({"verified": False, "required_checks": []}), [])
 
 
 def trivy_report(rows):
     return {"SchemaVersion": 2, "Results": [{"Target": "t", "Vulnerabilities": [
         {"VulnerabilityID": i, "PkgName": p, "InstalledVersion": "1", "Severity": s} for i, p, s in rows]}]}
+
+
+class WorkflowSourceTests(unittest.TestCase):
+    """Execute the candidate's actual source-resolution shell; every Git/API call is offline."""
+
+    def run_source(self, w, actions=None, checks_after=None, pr_after=None):
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        with open(os.path.join(root, ".github/workflows/release.yml")) as f:
+            workflow = f.read()
+        shell = textwrap.dedent(workflow.split("      - name: Resolve and verify the source revision\n", 1)[1]
+                                .split("        run: |\n", 1)[1].split("\n      - ", 1)[0])
+        actions = w.actions() if actions is None else actions
+        checks = w.check_runs()
+        responses = {
+            "rules/branches/main": [w.RULES],
+            "actions/runs?head_sha=%s&per_page=100" % REV:
+                [pages("workflow_runs", actions["runs"]), pages("workflow_runs", actions["runs_after"])],
+            "commits/%s/check-runs?per_page=100&filter=all" % REV:
+                [pages("check_runs", checks), pages("check_runs", checks if checks_after is None else checks_after)],
+            "commits/%s/pulls" % REV: [[w.pr()]],
+            "commits/%s/check-runs?per_page=100&filter=all" % w.HEAD:
+                [pages("check_runs", w.pr_runs), pages("check_runs", w.pr_runs if pr_after is None else pr_after)],
+            "commits/%s" % w.HEAD: ["1" * 40],
+        }
+        for rid, run in w.runs.items():
+            responses["actions/runs/%d/attempts/%s/jobs?per_page=100" % (rid, run["run_attempt"])] = [
+                pages("jobs", actions["attempt_jobs"][rid])]
+            responses["actions/runs/%d/jobs?filter=all&per_page=100" % rid] = [pages("jobs", actions["all_jobs"][rid])]
+        with tempfile.TemporaryDirectory() as d:
+            bindir = os.path.join(d, "bin")
+            os.mkdir(bindir)
+            dump(responses, os.path.join(d, "responses.json"))
+            dump(w.FILES, os.path.join(d, "files.json"))
+            stub = "#!%s\n" % sys.executable + textwrap.dedent("""\
+                import json, os, sys
+                from pathlib import Path
+                p = Path(os.environ['RUNNER_TEMP'])
+                args = sys.argv[1:]
+                if Path(sys.argv[0]).name == 'git':
+                    if args[0] == 'ls-tree':
+                        print('\\n'.join(json.loads((p / 'files.json').read_text())))
+                    elif args[0] == 'rev-parse':
+                        print('1' * 40)
+                    elif args[0] not in ('merge-base', 'worktree'):
+                        sys.exit('unexpected git call: ' + repr(args))
+                else:
+                    endpoint = next(x for x in args if x.startswith('repos/')).split('codemastery/', 1)[1]
+                    counts = json.loads((p / 'counts.json').read_text()) if (p / 'counts.json').exists() else {}
+                    n = counts.get(endpoint, 0)
+                    counts[endpoint] = n + 1
+                    (p / 'counts.json').write_text(json.dumps(counts))
+                    replies = json.loads((p / 'responses.json').read_text())[endpoint]
+                    if n >= len(replies):
+                        sys.exit('unexpected extra API read: ' + endpoint)
+                    print(replies[n] if '--jq' in args else json.dumps(replies[n]))
+                """)
+            for name in ("git", "gh"):
+                path = os.path.join(bindir, name)
+                put(path, stub)
+                os.chmod(path, 0o755)
+            env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"], RUNNER_TEMP=d,
+                       INPUT_REVISION=REV, INPUT_BASELINE="", INPUT_ORIGIN="https://example.invalid",
+                       GITHUB_REPOSITORY=release.REPOSITORY, GITHUB_SHA=REV, GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="1",
+                       GITHUB_OUTPUT=os.path.join(d, "outputs"), GITHUB_WORKSPACE=d)
+            proc = subprocess.run(["bash", "-c", shell], cwd=root, env=env, capture_output=True, text=True)
+            evidence = read_json(os.path.join(d, "source-checks.json")) if proc.returncode == 0 else None
+            counts = read_json(os.path.join(d, "counts.json"))
+        return proc, evidence, counts
+
+    def test_n1_and_original_f1_refuse_through_the_workflow_shell(self):
+        cases = [("created_at", "2026-00-23T17:00:00Z"), ("created_at", "2026-02-30T17:00:00Z"),
+                 ("event", ""), ("head_branch", ""), ("path", ""),
+                 ("workflow_id", None), ("check_suite_id", None), ("created_at", None)]
+        for field, value in cases:
+            w = SourceChecks()
+            w.add_run(201, ".github/workflows/ci-vm.yml", ["VM A", "VM B"], {"VM B": "failure"},
+                      created="2026-11-23T17:00:00Z")
+            if value is None:
+                del w.runs[201][field]
+            else:
+                w.runs[201][field] = value
+            with self.subTest(field=field, value=value):
+                proc, _, _ = self.run_source(w)
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                self.assertIn("REFUSED:", proc.stderr)
+
+    def test_n2_and_original_f2_refuse_through_the_workflow_shell(self):
+        for field in ("repository", "head_repository", "html_url", "CodeQL pending", "CodeQL failed"):
+            w = SourceChecks()
+            actions = w.actions()
+            checks, head = w.check_runs(), copy.deepcopy(w.pr_runs)
+            if field in ("repository", "head_repository"):
+                actions["runs_after"][0][field]["id"] = 1
+            elif field == "html_url":
+                checks[0][field] = "https://example.invalid/changed"
+            else:
+                head.append(w.app_run("CodeQL", None if field.endswith("pending") else "failure", sha=w.HEAD,
+                                      status="in_progress" if field.endswith("pending") else "completed"))
+            with self.subTest(field=field):
+                proc, _, counts = self.run_source(w, actions=actions, checks_after=checks, pr_after=head)
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                self.assertIn("changed while the evidence was read", proc.stderr)
+                self.assertEqual(counts["commits/%s/check-runs?per_page=100&filter=all" % w.HEAD], 2)
+
+    def test_complete_and_partial_reruns_remain_accepted_by_the_workflow_shell(self):
+        for kept in ((), ("VM A",)):
+            w = SourceChecks()
+            [j for j in w.jobs if j["name"] == "VM B"][0]["conclusion"] = "failure"
+            w.rerun(200, {"VM A": "success", "VM B": "success"}, kept=kept)
+            with self.subTest(kept=kept):
+                proc, evidence, counts = self.run_source(w)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                checks = {c["context"]: c for c in evidence["required_checks"]}
+                self.assertEqual(checks["VM B"]["run_attempt"], 2)
+                self.assertEqual(checks["VM A"]["result_kept_from_earlier_attempt"], bool(kept))
+                self.assertEqual(counts["actions/runs?head_sha=%s&per_page=100" % REV], 2)
+                self.assertEqual(counts["commits/%s/check-runs?per_page=100&filter=all" % REV], 2)
 
 
 class FindingsAndMigrationTests(unittest.TestCase):
