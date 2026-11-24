@@ -84,6 +84,33 @@ public class AdaptiveDecisionService {
     }
 
     /**
+     * Rejects history inputs that cannot come from one enrollment's history read under the lock:
+     * the current guidance must be that enrollment's {@code continue} or {@code remedial} row, and
+     * the latest instant across all rows can be neither absent nor earlier than it.
+     */
+    private static void requireConsistentHistory(
+            UUID enrollmentId,
+            Optional<PathRecommendation> currentGuidance,
+            Optional<Instant> latestHistoryInstant) {
+        Objects.requireNonNull(currentGuidance, "currentGuidance");
+        Objects.requireNonNull(latestHistoryInstant, "latestHistoryInstant");
+        if (currentGuidance.isEmpty()) {
+            return;
+        }
+        PathRecommendation current = currentGuidance.get();
+        if (!enrollmentId.equals(current.enrollmentId())) {
+            throw new IllegalArgumentException("Current guidance belongs to another enrollment");
+        }
+        if (current.recommendationType() == RecommendationType.SKIP) {
+            throw new IllegalArgumentException("Current guidance is a continue or remedial row");
+        }
+        if (latestHistoryInstant.isEmpty()
+                || latestHistoryInstant.get().isBefore(current.recommendedAt())) {
+            throw new IllegalArgumentException("Latest history instant precedes the current guidance");
+        }
+    }
+
+    /**
      * Records new recommendations and publishes one CT29 event for the inserted
      * rows.
      *
@@ -109,6 +136,11 @@ public class AdaptiveDecisionService {
             AdaptiveDecision decision,
             Optional<PathRecommendation> currentGuidance,
             Optional<Instant> latestHistoryInstant) {
+
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(enrollmentId, "enrollmentId");
+        Objects.requireNonNull(decision, "decision");
+        requireConsistentHistory(enrollmentId, currentGuidance, latestHistoryInstant);
 
         List<Recommendation> selectedDrafts = decision.recommendations().stream()
                 .filter(draft -> shouldAppend(draft, currentGuidance))
